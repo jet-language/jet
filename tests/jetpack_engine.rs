@@ -7664,7 +7664,7 @@ fn typed_core_source_inferred_from_pack_jet() {
     .unwrap();
 
     let output = jetpack()
-        .args(["run", "--no-color", "--", "hello"])
+        .args(["env", "--trust", "--yes", "--no-color", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
@@ -8867,6 +8867,7 @@ fn independent_root_runner_promotes_only_agreed_source_output() {
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     let result = jetpack::Store::certify_independent_root_build(
         &roots,
@@ -8912,6 +8913,7 @@ fn independent_root_runner_rejects_divergence_before_registration() {
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     let checks = std::cell::Cell::new(0);
     let source = repo.join("pkgs/hello/bin/hello");
@@ -8970,6 +8972,7 @@ fn independent_root_runner_cancellation_leaves_no_store_result() {
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     let cancelled = || true;
     let error = jetpack::Store::certify_independent_root_build(

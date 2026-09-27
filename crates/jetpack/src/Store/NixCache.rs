@@ -175,16 +175,20 @@ pub(crate) fn admit_nix_closure(
     outputs: &[NixOutputRequest],
     offline: bool,
 ) -> Result<AdmittedNixClosure, StoreError> {
-    admit_nix_closure_with_progress(roots, outputs, offline, None)
+    admit_nix_closure_with_progress(roots, outputs, offline, None, None)
 }
 
+/// Use the same signature/NAR admission transaction for discovery and repair.
+/// A repair pins the original complete receipt before any object or package is
+/// published; a valid replacement signature is not replacement authority.
 pub(crate) fn admit_nix_closure_with_progress(
     roots: &Roots,
     outputs: &[NixOutputRequest],
     offline: bool,
+    expected_closure_receipt: Option<&str>,
     progress: Option<ProgressHandle>,
 ) -> Result<AdmittedNixClosure, StoreError> {
-    let mut transaction = NixAdmission::new(roots)?;
+    let mut transaction = NixAdmission::new(roots, expected_closure_receipt)?;
     let result = transaction.admit(outputs, offline, progress);
     if result.is_err() {
         transaction.rollback();
@@ -443,12 +447,13 @@ pub(crate) fn encode_zstd_deterministic(input: &[u8]) -> Result<Vec<u8>, NixCach
 
 struct NixAdmission<'a> {
     roots: &'a Roots,
+    expected_closure_receipt: Option<&'a str>,
     stage: PathBuf,
     committed: bool,
 }
 
 impl<'a> NixAdmission<'a> {
-    fn new(roots: &'a Roots) -> Result<Self, NixCacheError> {
+    fn new(roots: &'a Roots, expected_closure_receipt: Option<&'a str>) -> Result<Self, NixCacheError> {
         ensure_dir(&roots.hangar_dir(), NixCacheErrorKind::Admission)?;
         let stage_parent = roots.hangar_dir().join("stage");
         ensure_dir(&stage_parent, NixCacheErrorKind::Admission)?;
@@ -458,6 +463,7 @@ impl<'a> NixAdmission<'a> {
         sweep_dead_admission_stages(&stage_parent);
         Ok(Self {
             roots,
+            expected_closure_receipt,
             stage,
             committed: false,
         })
@@ -906,28 +912,6 @@ impl<'a> NixAdmission<'a> {
             .iter()
             .map(|(store_path, object)| (store_path.clone(), object.hangar_digest.clone()))
             .collect::<BTreeMap<_, _>>();
-
-        super::AdmissionTransaction::recover_unlocked(self.roots)
-            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-        let mut transaction = super::AdmissionTransaction::new(self.roots)
-            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-        for object in fetched.values_mut() {
-            let source = object
-                .stage
-                .clone()
-                .unwrap_or_else(|| objects_dir.join(&object.hangar_digest));
-            let repair_corrupt = object.stage.is_some();
-            object.hangar_path = transaction
-                .stage_object(super::AdmissionObject {
-                    source,
-                    digest: object.hangar_digest.clone(),
-                    bytes: object.unpacked_bytes,
-                    allow_semantic_xattrs: false,
-                    repair_corrupt,
-                })
-                .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-        }
-
         let total_objects = fetched.len();
         let mut admitted_objects = 0usize;
         for (store_path, object) in fetched.iter_mut() {
@@ -951,6 +935,37 @@ impl<'a> NixAdmission<'a> {
         }
 
         let closure_receipt = closure_receipt_digest(fetched, requests);
+        if self.expected_closure_receipt
+            .is_some_and(|expected| expected != closure_receipt.0.as_str())
+        {
+            return Err(NixCacheError::new(
+                NixCacheErrorKind::Admission,
+                "repaired Nix cache closure disagrees with its original admission receipt",
+            ));
+        }
+
+
+        super::AdmissionTransaction::recover_unlocked(self.roots)
+            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+        let mut transaction = super::AdmissionTransaction::new(self.roots)
+            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+        for object in fetched.values_mut() {
+            let source = object
+                .stage
+                .clone()
+                .unwrap_or_else(|| objects_dir.join(&object.hangar_digest));
+            let repair_corrupt = object.stage.is_some();
+            object.hangar_path = transaction
+                .stage_object(super::AdmissionObject {
+                    source,
+                    digest: object.hangar_digest.clone(),
+                    bytes: object.unpacked_bytes,
+                    allow_semantic_xattrs: false,
+                    repair_corrupt,
+                })
+                .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+        }
+
 
         let mut entries = Vec::new();
         let now = now_secs();

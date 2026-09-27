@@ -812,11 +812,15 @@ function evaluateGate(inputs, options = {}) {
           else if (!awaitableExists(inputs, sourceFile)) add("missing-evidence", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile, cause: "exact evidence file does not exist" });
           const stamp = checkFresh(`gauntlet ${cellId}/${peer}/${tier}/${metric}`, tierValue, null, sourceFile ?? evidence, true, { cell: cellId, entry: expectedEntry, peer, tier, metric });
           tierResult.measured_iso = tierResult.measured_iso ?? (stamp === null ? null : new Date(stamp.value).toISOString());
-          const verification = firstValue(tierValue.output_verification, tierValue.verification, tierValue.output_verified, tierValue.output_ok, record.output_verification, record.output_verified);
-          const verificationState = isObject(verification) ? firstValue(verification.status, verification.kind, verification.verdict) : verification;
-          const outputVerified = isObject(verification) ? firstValue(verification.byte_identical, verification.byte_exact, verification.verified) : verification;
-          if (outputVerified === false || verificationState === false || (typeof verificationState === "string" && !["ok", "pass", "verified", "byte_exact_stdout", "service_probe_sequence"].includes(verificationState))) {
-            add("wrong-output", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: "tier output verification is absent, failed, or not byte-exact" });
+          const verification = tierValue.verification;
+          const expectedVerificationKind = mode === "service" ? "service_probe_sequence" : "byte_exact_stdout";
+          const outputVerified = isObject(verification) &&
+            verification.status === "passed" &&
+            verification.kind === expectedVerificationKind;
+          const outputVerificationCause = `tier output verification must be passed ${expectedVerificationKind} proof`;
+          if (!outputVerified) {
+            add("wrong-output", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: outputVerificationCause });
+            if (metricWorstVerdict !== "loss") metricWorstVerdict = "unmeasured";
           }
           const statusValue = normalizedStatus(tierValue);
           if (!resultStatuses.has(statusValue)) {
@@ -834,18 +838,24 @@ function evaluateGate(inputs, options = {}) {
           }
           const calculated = tierValue.jet / tierValue.peer;
           if (Math.abs(calculated - tierValue.ratio) > Math.max(1e-9, Math.abs(calculated) * 1e-9)) add("wrong-ratio", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: `reported ratio ${tierValue.ratio} does not equal Jet/peer ${calculated}` });
-          const verdict = expectedPairVerdict(peer, tierValue.ratio, policy);
+          const comparatorVerdict = expectedPairVerdict(peer, tierValue.ratio, policy);
+          const verdict = !outputVerified && comparatorVerdict !== "loss" && comparatorVerdict !== "unmeasured"
+            ? "unmeasured"
+            : comparatorVerdict;
           tierResult.verdict = verdict;
-          if (tierValue.verdict !== undefined && tierValue.verdict !== verdict) add("wrong-verdict", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: `reported verdict ${tierValue.verdict} does not satisfy the canonical ${verdict} comparator` });
-          if (verdict === "loss") {
+          if (tierValue.verdict !== undefined && tierValue.verdict !== comparatorVerdict) add("wrong-verdict", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: `reported verdict ${tierValue.verdict} does not satisfy the canonical ${comparatorVerdict} comparator` });
+          if (comparatorVerdict === "loss") {
             tierResult.cause = `Jet/peer ratio ${tierValue.ratio} violates ${isRustPeer(peer) ? "Rust <=1.05 parity" : "non-Rust <1.00 win"}`;
             add("loss", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: tierResult.cause });
             metricWorstVerdict = "loss";
-          } else if (verdict === "unmeasured") {
+          } else if (comparatorVerdict === "unmeasured") {
             tierResult.cause = "comparator policy is unavailable or invalid";
             add("policy-mismatch", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: tierResult.cause });
             metricWorstVerdict = "unmeasured";
-          } else if (verdict === "parity" && metricWorstVerdict === "win") metricWorstVerdict = "parity";
+          } else if (!outputVerified) {
+            tierResult.cause = outputVerificationCause;
+            if (metricWorstVerdict !== "loss") metricWorstVerdict = "unmeasured";
+          } else if (comparatorVerdict === "parity" && metricWorstVerdict === "win") metricWorstVerdict = "parity";
         }
         metricResult.verdict = metricWorstVerdict;
         rows.push(metricResult);

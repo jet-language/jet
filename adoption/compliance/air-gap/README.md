@@ -2,16 +2,24 @@
 
 [`fixture.json`](../../fixtures/air-gap/fixture.json) is deterministic,
 fixture-only state. It contains no production key, signing secret, network
-endpoint, or release claim. It exercises the state transitions an operator
-must prove before claiming an air-gapped workflow:
+endpoint, or release claim. Its hashes, byte counts, trust-root labels, and
+expected transitions are the executable fixture contract.
 
-1. install a verified release from local bytes with network denied;
-2. import a newer verified release from local bytes and use it offline;
-3. revoke the newer builder and deny later use of that release;
-4. retain the failed receipt and require a rebuild or reviewed replacement.
+The scenarios model four transitions with network denied:
 
-The fixture records expected outcomes and content digests. It does not pretend
-to be a Hangar archive. Production verification uses the existing commands:
+1. install `jet-1.0.0` from local bytes when its digest and builder are valid;
+2. replace it with `jet-1.1.0` from local bytes before revocation;
+3. revoke `builder-fixture-v2` and deny use of that release; and
+4. deny a later replacement with the revoked builder while retaining the
+   receipt and requiring a rebuild from a reviewed release.
+
+The fixture checker validates path safety, content digests, revocation reason,
+secret absence, and the allow/deny sequence. It checks structure and state; it
+does not perform production cryptography and is not a Hangar archive.
+
+## Production command boundary
+
+For an actual air-gapped archive, use the existing Jetpack operations:
 
 ```sh
 jetpack hangar verify <release.hangar>
@@ -20,9 +28,7 @@ jetpack env --prep --offline
 ```
 
 `jetpack update --offline` remains a network-class refusal unless a local
-catalog is explicitly supplied. The runbook therefore treats an offline
-release replacement as a verified local archive import followed by offline
-environment preparation, not as a silent network update.
-
-The fixture checker validates the allow/deny sequence, hashes, revocation
-reason, path safety, and secret absence. It does not perform cryptography.
+catalog is explicitly supplied. A release replacement therefore consists of a
+verified local archive import followed by offline environment preparation, not
+a silent network update. Retain the verification receipt and the deny result
+when a builder or release is revoked.

@@ -1056,6 +1056,7 @@ pub(crate) fn reuse_verified_environment(
     definition_fingerprint: &str,
     inherited_loader_path: Option<&str>,
     selections: &[EnvironmentSelection],
+    allow_local_nix_catalog: bool,
 ) -> std::io::Result<Option<Vec<VerifiedRealization>>> {
     if selections.is_empty() {
         return Ok(None);
@@ -1079,6 +1080,7 @@ pub(crate) fn reuse_verified_environment(
             let Some(entry) = index.get(selection) else {
                 return Ok(None);
             };
+            require_entry_catalog_permission(entry, allow_local_nix_catalog)?;
             selected.push(entry.clone());
         }
         for path in external_output_paths(roots, selected.iter()) {
@@ -1471,7 +1473,7 @@ fn record_realized_mode_unlocked(
     Ok(entry)
 }
 
-/// Recreate a Nix package record from lock-declared CAS objects.
+/// Recreate an explicitly unverified local Nix record from lock-declared CAS objects.
 ///
 /// The logical `/nix/store` names are deterministic projections derived from
 /// the locked object digest. They are not host store paths and are never
@@ -1487,6 +1489,13 @@ pub(crate) fn record_locked_nix(
     lock_digest: &str,
 ) -> std::io::Result<StoreEntry> {
     closure.validate().map_err(std::io::Error::other)?;
+    lock_envelope.validate_nix_catalog().map_err(std::io::Error::other)?;
+    if lock_envelope.catalog_tier != "local-unofficial" {
+        return Err(std::io::Error::other(
+            "cold Nix bytes cannot establish signed index authority",
+        ));
+    }
+    let authority_fact = "nix.index.target.sha256";
     if lock_envelope.output_hash != closure.output {
         return Err(std::io::Error::other(
             "locked Nix envelope output disagrees with its closure record",
@@ -1558,10 +1567,11 @@ pub(crate) fn record_locked_nix(
         facts.insert("nix.index.channel".into(), closure.channel.clone());
         facts.insert("nix.index.revision".into(), closure.revision.clone());
         facts.insert("nix.index.system".into(), closure.system.clone());
-        facts.insert(
-            "nix.index.manifest.sha256".into(),
-            closure.signed_index_manifest.clone(),
-        );
+        facts.insert("nix.index.tier".into(), lock_envelope.catalog_tier.clone());
+        facts.insert("nix.index.trust".into(), lock_envelope.catalog_trust.clone());
+        facts.insert(authority_fact.into(), closure.index_authority.clone());
+        facts.insert("nix.proof".into(), closure.upstream_proof.clone());
+        facts.insert("nix.project-cas-bundle".into(), closure.project_cas_bundle.clone());
         facts.insert("nix.derivation.sha256".into(), closure.derivation.clone());
         facts.insert("nix.cache.key".into(), closure.cache_key.clone());
         facts.insert("nix.lock.digest".into(), lock_digest.to_string());
@@ -1938,7 +1948,9 @@ fn pin_nix_gc_root(_entry_dir: &Path, out: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Reconstruct one fully locked Nix package from its project CAS bundle.
+/// Reuse original Nix admission, repair its exact signed-cache closure online,
+/// or import explicitly unverified local bytes. Portable bytes alone cannot
+/// establish signed index authority.
 fn replay_locked_nix_package(
     roots: &Roots,
     ctx: &super::Provider::Ctx<'_>,
@@ -1957,6 +1969,122 @@ fn replay_locked_nix_package(
         };
     let lock_digest =
         super::Provider::project_lock_digest(Some(project)).map_err(RealizeError::Provider)?;
+    // A lock is editable intent, not evidence of index signing. Reuse the
+    // original self-verified admission and its canonical Nix paths before
+    // considering portable byte replay.
+    if let Some(candidate) = find_by_reference_read_only(roots, &spec.raw) {
+        let producer = ProducerRecord::decode(&candidate.producer_record)
+            .map_err(|error| RealizeError::LockedNix(std::io::Error::other(error)))?;
+        let bundle = producer.facts.get("nix.project-cas-bundle").ok_or_else(|| {
+            RealizeError::LockedNix(std::io::Error::other(
+                "locked Nix admission lacks its original portable identity",
+            ))
+        })?;
+        let admitted = super::Provider::nix_closure_record(
+            &candidate, &producer, bundle.clone(),
+        ).map_err(RealizeError::Provider)?;
+        let admitted_envelope = crate::Lock::LockEnvelope {
+            output_hash: candidate.envelope.output_hash.clone(),
+            platform: candidate.envelope.platform.clone(),
+            signature: candidate.envelope.signature.clone(),
+            provenance: candidate.envelope.provenance.clone(),
+            catalog_tier: producer.facts.get("nix.index.tier").cloned().unwrap_or_default(),
+            catalog_trust: producer.facts.get("nix.index.trust").cloned().unwrap_or_default(),
+        };
+        admitted_envelope.validate_nix_catalog().map_err(|error| {
+            RealizeError::LockedNix(std::io::Error::other(error))
+        })?;
+        if producer.provider != "nix"
+            || candidate.name != name
+            || candidate.version != version
+            || candidate.reference != spec.raw
+            || candidate.cache_identity.source_fingerprint != closure.output
+            || candidate.cache_identity.policy_fingerprint != closure.cache_key
+            || admitted != closure
+            || admitted_envelope != envelope
+        {
+            return Err(RealizeError::LockedNix(std::io::Error::other(
+                "locked Nix identity or catalog trust disagrees with recorded Hangar admission",
+            )));
+        }
+        let mut checked = find_verified_user_profile_by_reference(roots, &spec.raw)
+            .map_err(RealizeError::Store)?;
+        if checked.is_none() && !ctx.offline {
+            let expectation = CacheExpectation {
+                identity: candidate.cache_identity.clone(),
+                owned_output: None,
+                allow_unsigned_local: true,
+            };
+            // Only closure damage is repairable here. Neither an editable lock
+            // nor a failed producer/output proof authorizes cache acquisition.
+            if verify_cache_entry(roots, &candidate, &spec.raw, &expectation).admission_trusted() {
+                require_catalog_permission(
+                    producer.facts.get("nix.index.tier").map(String::as_str),
+                    ctx.allow_local_nix_catalog,
+                ).map_err(RealizeError::LockedNix)?;
+                let receipt = producer.facts.get("nix.cache.closure.receipt.sha256")
+                    .filter(|receipt| !receipt.is_empty())
+                    .ok_or_else(|| RealizeError::LockedNix(std::io::Error::other(
+                        "locked Nix admission lacks its original signed-cache closure receipt",
+                    )))?;
+                let requests = candidate.named_outputs.iter().map(|(name, digest)| {
+                    let store_path = producer.facts.get(&format!("nix.output.{name}"))
+                        .filter(|_| producer.facts.get(&format!("nix.output.{name}.digest"))
+                            == Some(digest))
+                        .ok_or_else(|| RealizeError::LockedNix(std::io::Error::other(
+                            "locked Nix named output disagrees with its original admission",
+                        )))?;
+                    Ok(NixOutputRequest { name: name.clone(), store_path: store_path.clone() })
+                }).collect::<Result<Vec<_>, RealizeError>>()?;
+                // The canonical admission transaction checks this original
+                // receipt before publishing any repaired object or proof.
+                admit_nix_closure_with_progress(
+                    roots, &requests, false, Some(receipt), current_progress(),
+                ).map_err(|error| RealizeError::LockedNix(std::io::Error::other(error)))?;
+                checked = find_verified_user_profile_by_reference(roots, &spec.raw)
+                    .map_err(RealizeError::Store)?;
+            }
+        }
+        let mut checked = checked.ok_or_else(|| RealizeError::LockedNix(std::io::Error::other(
+            "locked Nix Hangar admission failed integrity or complete closure verification",
+        )))?;
+        if checked.entry != candidate {
+            return Err(RealizeError::LockedNix(std::io::Error::other(
+                "locked Nix admission changed during verified reuse or repair",
+            )));
+        }
+        require_catalog_permission(
+            producer.facts.get("nix.index.tier").map(String::as_str),
+            ctx.allow_local_nix_catalog,
+        ).map_err(RealizeError::LockedNix)?;
+        checked.entry = RuntimePolicy::with_project_lock(project, "nix-verified-reuse", || {
+            let current = super::Provider::project_lock_digest(Some(project))
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            let current_package = crate::Lock::locked_nix_package_strict(project, &spec.raw)
+                .map_err(std::io::Error::other)?;
+            let identity_unchanged = current_package.as_ref().is_some_and(
+                |(current_name, current_version, current_closure, current_envelope)| {
+                    current_name == &name && current_version == &version
+                        && current_closure == &closure && current_envelope == &envelope
+                },
+            );
+            if current != lock_digest || !identity_unchanged {
+                return Err(std::io::Error::other(
+                    "locked Nix identity changed during verified reuse",
+                ));
+            }
+            refresh_lock_digest(roots, &checked.entry, &lock_digest)
+        }).map_err(RealizeError::Store)?;
+        authorize_and_project_realization(ctx, &checked.entry)?;
+        return Ok(Some(checked));
+    }
+    if envelope.catalog_tier == "official-signed" {
+        return Err(RealizeError::LockedNix(std::io::Error::other(
+            "locked Nix signed authority is unavailable; cold bytes cannot establish index signing",
+        )));
+    }
+    require_catalog_permission(Some(&envelope.catalog_tier), ctx.allow_local_nix_catalog)
+        .map_err(RealizeError::LockedNix)?;
     let (_, object_digests) = import_nix_cas_bundle_checked(
         project,
         roots,
@@ -1976,7 +2104,7 @@ fn replay_locked_nix_package(
         &lock_digest,
     )
     .map_err(RealizeError::LockedNix)?;
-    project_receipt_projection(ctx, &entry)?;
+    authorize_and_project_realization(ctx, &entry)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(Some(VerifiedRealization {
         entry,
@@ -2035,9 +2163,9 @@ pub fn realize_verified(
         RealizeRequest::Adapter { .. } => false,
     };
 
-    // A complete Nix lock is authoritative for both warm and cold paths.
-    // Validate/import its project CAS before considering any shared cache
-    // candidate, so a stale cache cannot turn a locked replay into discovery.
+    // A complete Nix lock binds reuse and repair to the original admission.
+    // Check it before considering shared candidates; neither damaged closure
+    // bytes nor portable archives authorize replacement index discovery.
     if locked_nix {
         if let RealizeRequest::Package { spec, .. } = &request {
             if let Some(replayed) = replay_locked_nix_package(roots, ctx, spec)? {
@@ -2056,7 +2184,7 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
-                project_receipt_projection(ctx, &hit.entry)?;
+                authorize_and_project_realization(ctx, &hit.entry)?;
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -2081,7 +2209,7 @@ pub fn realize_verified(
                             validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                                 .map_err(RealizeError::Store)?;
                         }
-                        project_receipt_projection(ctx, &hit.entry)?;
+                        authorize_and_project_realization(ctx, &hit.entry)?;
                         return Ok(VerifiedRealization {
                             entry: hit.entry,
                             source_state: super::Provider::SourceState::Substituted,
@@ -2119,7 +2247,7 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
-                project_receipt_projection(ctx, &hit.entry)?;
+                authorize_and_project_realization(ctx, &hit.entry)?;
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -2156,6 +2284,10 @@ pub fn realize_verified(
     // that is about to become reusable.
     super::Provider::validate_nix_lock_before_store(ctx, &realized)
         .map_err(RealizeError::Provider)?;
+    require_catalog_permission(
+        realized.producer.facts.get("nix.index.tier").map(String::as_str),
+        ctx.allow_local_nix_catalog,
+    ).map_err(RealizeError::LockedNix)?;
     if let Some(progress) = current_progress() {
         progress.phase("Registering");
     }
@@ -2170,7 +2302,7 @@ pub fn realize_verified(
     .map_err(RealizeError::Store)?;
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
-    project_receipt_projection(ctx, &entry)?;
+    authorize_and_project_realization(ctx, &entry)?;
     if !is_private_untrusted_build(&realized.producer) {
         promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
         if matches!(
@@ -2241,11 +2373,15 @@ pub fn certify_independent_root_build(
         .insert("cache.reproducibility".into(), attestation.clone());
     super::Provider::validate_nix_lock_before_store(ctx, &realized)
         .map_err(RealizeError::Provider)?;
+    require_catalog_permission(
+        realized.producer.facts.get("nix.index.tier").map(String::as_str),
+        ctx.allow_local_nix_catalog,
+    ).map_err(RealizeError::LockedNix)?;
     let mut entry = record_realized_mode_with_fresh_agreement(roots, &action_key, &realized)
         .map_err(RealizeError::Store)?;
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
-    project_receipt_projection(ctx, &entry)?;
+    authorize_and_project_realization(ctx, &entry)?;
     if !is_private_untrusted_build(&realized.producer) {
         promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
         publish_realized_to_bound_caches(roots, &entry);
@@ -2259,10 +2395,44 @@ pub fn certify_independent_root_build(
     })
 }
 
-fn project_receipt_projection(
+/// Catalog approval belongs to this invocation, not to a persisted admission
+/// or environment receipt. Call only after verifying the authority supplying
+/// the tier; explicit local-byte replay can only supply an unverified tier.
+pub(crate) fn require_catalog_permission(
+    tier: Option<&str>,
+    allow_local_nix_catalog: bool,
+) -> std::io::Result<()> {
+    if tier == Some("local-unofficial") && !allow_local_nix_catalog {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "local-unofficial catalog admission requires --local-nix-catalog for this invocation",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn require_entry_catalog_permission(
+    entry: &StoreEntry,
+    allow_local_nix_catalog: bool,
+) -> std::io::Result<()> {
+    let producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    require_catalog_permission(
+        producer.facts.get("nix.index.tier").map(String::as_str),
+        allow_local_nix_catalog,
+    )
+}
+
+fn authorize_and_project_realization(
     ctx: &super::Provider::Ctx<'_>,
     entry: &StoreEntry,
 ) -> Result<(), RealizeError> {
+    let producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(|error| RealizeError::Store(std::io::Error::other(error)))?;
+    require_catalog_permission(
+        producer.facts.get("nix.index.tier").map(String::as_str),
+        ctx.allow_local_nix_catalog,
+    ).map_err(RealizeError::LockedNix)?;
     let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
         return Ok(());
     };
@@ -2277,19 +2447,17 @@ fn project_receipt_projection(
         return Ok(());
     }
     super::RuntimePolicy::with_project_lock(project, "receipt-projection", || {
-        if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
-            if producer.provider == "nix" {
-                if let Some(expected) = producer.facts.get("nix.lock.digest") {
-                    let current = super::Provider::project_lock_digest(ctx.project_dir)
-                        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-                    if &current != expected {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "Nix project lock changed before receipt projection: prepared `{expected}`, current `{current}`"
-                            ),
-                        ));
-                    }
+        if producer.provider == "nix" {
+            if let Some(expected) = producer.facts.get("nix.lock.digest") {
+                let current = super::Provider::project_lock_digest(ctx.project_dir)
+                    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+                if &current != expected {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Nix project lock changed before receipt projection: prepared `{expected}`, current `{current}`"
+                        ),
+                    ));
                 }
             }
         }
@@ -2638,8 +2806,20 @@ fn realize_adapter_tools(
                     )))
                 })?
             };
-        let realized =
-            realize_verified(roots, ctx, RealizeRequest::Package { spec: &spec, table })?;
+        // Native Nix admission remains in the caller's Hangar even while an
+        // adapter is built in a private certification root. Its verified lease
+        // owns the closure snapshot until the recipe finishes; other tools keep
+        // their independent-root isolation.
+        let dependency_roots = if super::Provider::uses_nix_provider_for_project(
+            &spec, table, ctx.offline, ctx.store_dir, ctx.project_dir,
+        ) {
+            ctx.nix_roots.unwrap_or(roots)
+        } else {
+            roots
+        };
+        let realized = realize_verified(
+            dependency_roots, ctx, RealizeRequest::Package { spec: &spec, table },
+        )?;
         let (_entry, _state, lease) = realized.into_parts();
         let receipt = lease.profile_install_receipt().map_err(|error| {
             RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(

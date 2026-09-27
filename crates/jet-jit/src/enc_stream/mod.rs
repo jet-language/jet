@@ -18,6 +18,62 @@ mod fs_ops_kernel {
     use crate::Collections::authority_semantics::JetFileScope;
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
+/// FileStream uses the same checked Prelude IOError carrier as process and
+/// terminal adapters.  Keeping this alias canonical prevents a file read from
+/// becoming an adapter-only string before it reaches the Source cursor.
+pub(crate) type SourceIoError =
+    crate::ProcessPrelude::process_prelude::jet_std::IOError;
+
+mod stdin_reader {
+    use crate::fault_injection::jet_fault_should_fail;
+
+    mod jet_std {
+        pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
+            io_error_at, IOError, IOOperation,
+        };
+    }
+
+    include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
+}
+
+pub(crate) use stdin_reader::JetStdinReader as SourceStdinReader;
+
+pub(crate) fn source_stdin_reader() -> SourceStdinReader {
+    stdin_reader::jet_std_io_stdin()
+}
+
+pub(crate) fn source_stdin_next_line(
+    reader: &mut SourceStdinReader,
+) -> Result<Option<String>, SourceIoError> {
+    stdin_reader::jet_std_io_stdin_read_line(reader)
+}
+
+mod file_stream {
+    use super::runtime::{JetFileReader, JetFileWriter};
+    use crate::fault_injection::jet_fault_should_fail;
+
+    mod jet_std {
+        pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
+            io_error_at, IOError, IOOperation,
+        };
+
+        pub(super) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
+            crate::CoreHost::os_rt::jet_mapped_writer_refusal(path).map(|refusal| {
+                IOError::other(
+                    IOOperation::Write,
+                    Some(refusal.path),
+                    refusal.reason,
+                )
+            })
+        }
+    }
+
+    fn jet_fs_open(path: &String) -> std::io::Result<std::fs::File> {
+        super::fs_ops_kernel::jet_fs_open(path)
+    }
+
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+}
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
@@ -117,75 +173,7 @@ pub(crate) mod runtime {
         // this local name keeps the shared EncodingStream call sites stable.
         pub use jet_foundation::Numeric::CtBigInt as JetBigInt;
 
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct XMLLimits {
-            pub max_depth: i64,
-            pub max_nodes: i64,
-            pub max_attributes_per_element: i64,
-            pub max_name_bytes: i64,
-            pub max_text_bytes: i64,
-            pub max_entity_declarations: i64,
-            pub max_entity_depth: i64,
-            pub max_entity_replacement_bytes: i64,
-        }
-        impl XMLLimits {
-            pub fn safe() -> Self {
-                Self {
-                    max_depth: 256,
-                    max_nodes: 1_000_000,
-                    max_attributes_per_element: 1024,
-                    max_name_bytes: 4096,
-                    max_text_bytes: 16_777_216,
-                    max_entity_declarations: 1024,
-                    max_entity_depth: 32,
-                    max_entity_replacement_bytes: 8_388_608,
-                }
-            }
-        }
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub enum XMLEntityPolicy {
-            Preserve,
-            Reject,
-            Resolve(std::collections::BTreeMap<String, String>),
-        }
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct XMLParseOptions {
-            pub entities: XMLEntityPolicy,
-            pub limits: XMLLimits,
-        }
-        impl XMLParseOptions {
-            pub fn safe() -> Self {
-                Self {
-                    entities: XMLEntityPolicy::Preserve,
-                    limits: XMLLimits::safe(),
-                }
-            }
-        }
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub enum XMLEncoding {
-            UTF8,
-            UTF8BOM,
-            UTF16LE,
-            UTF16BE,
-        }
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub enum XMLLexicalPolicy {
-            PreserveValid,
-            Deterministic,
-        }
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct XMLRenderOptions {
-            pub encoding: XMLEncoding,
-            pub lexical: XMLLexicalPolicy,
-        }
-        impl XMLRenderOptions {
-            pub fn safe() -> Self {
-                Self {
-                    encoding: XMLEncoding::UTF8,
-                    lexical: XMLLexicalPolicy::PreserveValid,
-                }
-            }
-        }
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs");
 
         pub struct JSONReader {
             pub(crate) input: super::JetFileReader,
@@ -506,6 +494,7 @@ pub(crate) mod runtime {
         input: JetFileReader,
         limits: jet_std::EncodingLimits,
     ) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
+
         jet_enc_cbor_reader(input, limits)
     }
     pub(crate) fn enc_cbor_writer_write(
@@ -565,7 +554,50 @@ pub(crate) mod runtime {
         jet_enc_xml_reader_next(reader).map(|found| found.ok())
     }
 }
+/// Source resource acquisition and iteration use the same FileStream leaf as
+/// generated Prelude code.  The returned error is the canonical Prelude
+/// `IOError`; SourceResources projects it without rendering or changing its
+/// enum/context shape.
+pub(crate) fn source_file_open(
+    path: &str,
+) -> Result<runtime::JetFileReader, SourceIoError> {
+    file_stream::jet_std_files_open(&path.to_string())
+}
 
+pub(crate) fn source_file_create(
+    path: &str,
+) -> Result<runtime::JetFileWriter, SourceIoError> {
+    file_stream::jet_std_files_create(&path.to_string())
+}
+
+pub(crate) fn source_file_append(
+    path: &str,
+) -> Result<runtime::JetFileWriter, SourceIoError> {
+    file_stream::jet_std_files_append(&path.to_string())
+}
+
+pub(crate) fn source_file_next_line(
+    reader: &mut runtime::JetFileReader,
+) -> Result<Option<String>, SourceIoError> {
+    file_stream::jet_std_file_reader_read_line(reader)
+}
+
+pub(crate) fn source_file_writer_write_line(
+    writer: &mut runtime::JetFileWriter,
+    line: &String,
+) -> Result<(), SourceIoError> {
+    file_stream::jet_std_file_writer_write_line(writer, line)
+}
+
+pub(crate) fn source_file_writer_flush(
+    writer: &mut runtime::JetFileWriter,
+) -> Result<(), SourceIoError> {
+    file_stream::jet_std_file_writer_flush(writer)
+}
+
+pub(crate) fn source_file_writer_path(writer: &runtime::JetFileWriter) -> String {
+    file_stream::jet_std_file_writer_path(writer)
+}
 
 // ── Handle tables (1-based) ──────────────────────────────────────────────────
 
@@ -653,6 +685,91 @@ pub(crate) fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, St
     });
     out.unwrap_or_else(|| Err("no active JIT runtime".into()))
 }
+
+/// Typed adoption boundary for Source: the legacy slot is consumed exactly
+/// once and the concrete writer owner, rather than its integer slot, crosses
+/// into the invocation arena.
+pub(crate) fn source_take_file_writer(
+    handle: i64,
+) -> Result<runtime::JetFileWriter, String> {
+    take_file_writer(handle)
+}
+
+/// Typed adoption boundary for Source: the legacy slot is consumed exactly
+/// once and the concrete reader owner, rather than its integer slot, crosses
+/// into the invocation arena.
+pub(crate) fn source_take_file_reader(
+    handle: i64,
+) -> Result<runtime::JetFileReader, String> {
+    take_file_reader(handle)
+}
+
+macro_rules! source_take_codec_reader {
+    ($name:ident, $field:ident, $slot:ident, $ty:ty, $label:literal) => {
+        pub(crate) fn $name(handle: i64) -> Result<$ty, String> {
+            let mut out: Option<Result<$ty, String>> = None;
+            Concurrency::with_runtime_mut(|rt| {
+                let idx = match (handle as usize).checked_sub(1) {
+                    Some(index) => index,
+                    None => {
+                        out = Some(Err(concat!("bad ", $label).to_string()));
+                        return;
+                    }
+                };
+                out = Some(match rt.$field.get_mut(idx) {
+                    Some($slot::Live(_)) => {
+                        let slot =
+                            std::mem::replace(&mut rt.$field[idx], $slot::Taken);
+                        match slot {
+                            $slot::Live(reader) => Ok(reader),
+                            $slot::Taken => {
+                                Err(concat!($label, " already moved").to_string())
+                            }
+                        }
+                    }
+                    _ => Err(concat!("bad ", $label).to_string()),
+                });
+            });
+            out.unwrap_or_else(|| Err("no active JIT runtime".to_string()))
+        }
+    };
+}
+
+source_take_codec_reader!(
+    source_take_json_reader,
+    json_readers,
+    JSONReaderSlot,
+    runtime::jet_std::JSONReader,
+    "JSONReader"
+);
+source_take_codec_reader!(
+    source_take_jsonl_reader,
+    jsonl_readers,
+    JsonlReaderSlot,
+    runtime::jet_std::JSONLReader,
+    "JSONLReader"
+);
+source_take_codec_reader!(
+    source_take_csv_reader,
+    csv_readers,
+    CSVReaderSlot,
+    runtime::jet_std::CSVReader,
+    "CSVReader"
+);
+source_take_codec_reader!(
+    source_take_xml_reader,
+    xml_readers,
+    XmlReaderSlot,
+    runtime::jet_std::XMLReader,
+    "XMLReader"
+);
+source_take_codec_reader!(
+    source_take_cbor_reader,
+    cbor_readers,
+    CBORReaderSlot,
+    runtime::jet_std::CBORReader,
+    "CBORReader"
+);
 
 /// Drop a FileWriter handle (BufWriter Drop flushes). Used by `close` / resource cleanup.
 pub(crate) fn jet_jit_file_writer_close(handle: i64) {
@@ -1032,22 +1149,15 @@ pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
 
 pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
     let p = crate::CoreHost::clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    match fs_ops_kernel::jet_fs_open(&p) {
-        Ok(f) => {
-            let r = runtime::JetFileReader {
-                inner: std::io::BufReader::new(f),
-                path: p,
-            };
+    match file_stream::jet_std_files_open(&p) {
+        Ok(r) => {
             let h = Concurrency::with_runtime_mut(|rt| {
                 rt.file_readers.push(FileReaderSlot::Live(r));
                 rt.file_readers.len() as i64
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&format!("open {p}: {e}")),
+        Err(error) => result_err_msg(&format!("{error:?}")),
     }
 }
 
@@ -1631,4 +1741,74 @@ host_fns! {
     xml_writer_flush: "jet_jit_xml_writer_flush" => jet_jit_xml_writer_flush: sig_unary;
     xml_writer_finish: "jet_jit_xml_writer_finish" => jet_jit_xml_writer_finish: sig_unary;
     xml_reader_next: "jet_jit_xml_reader_next" => jet_jit_xml_reader_next: sig_unary;
+}
+
+#[cfg(test)]
+mod tests {
+    struct ErrorReader;
+
+    impl std::io::Read for ErrorReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "stdin denied",
+            ))
+        }
+    }
+
+    impl std::io::BufRead for ErrorReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "stdin denied",
+            ))
+        }
+
+        fn consume(&mut self, _amount: usize) {}
+    }
+
+    #[test]
+    fn shared_stdin_reader_trims_crlf_and_preserves_eof() {
+        let mut reader = std::io::Cursor::new(b"first\r\nsecond\n".to_vec());
+        assert_eq!(
+            super::stdin_reader::jet_std_io_read_line(&mut reader).expect("first line"),
+            Some("first".to_string())
+        );
+        assert_eq!(
+            super::stdin_reader::jet_std_io_read_line(&mut reader).expect("second line"),
+            Some("second".to_string())
+        );
+        assert_eq!(
+            super::stdin_reader::jet_std_io_read_line(&mut reader).expect("eof"),
+            None
+        );
+    }
+
+    #[test]
+    fn shared_stdin_kernel_preserves_following_line_after_sentinel_drop() {
+        let mut reader = std::io::Cursor::new(b"stop\nfollow-up\n".to_vec());
+        {
+            let mut lines = std::iter::from_fn(|| {
+                super::stdin_reader::jet_std_io_read_line(&mut reader)
+                    .expect("sentinel line")
+            });
+            assert_eq!(lines.next(), Some("stop".to_string()));
+            drop(lines);
+        }
+        assert_eq!(
+            super::stdin_reader::jet_std_io_read_line(&mut reader).expect("follow-up line"),
+            Some("follow-up".to_string())
+        );
+    }
+
+    #[test]
+    fn shared_stdin_reader_maps_permission_errors_canonically() {
+        let mut reader = ErrorReader;
+        let error = super::stdin_reader::jet_std_io_read_line(&mut reader)
+            .expect_err("reader must fail");
+        assert!(matches!(
+            error,
+            crate::ProcessPrelude::process_prelude::jet_std::IOError::PermissionDenied(_)
+        ));
+    }
 }

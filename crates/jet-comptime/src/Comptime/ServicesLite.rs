@@ -3217,6 +3217,8 @@ pub fn runtime_to_ct_value(value: &MirRuntimeValue) -> Result<CtValue, Diagnosti
         )))),
         MirRuntimeValue::Unit => Ok(CtValue::Unit),
         MirRuntimeValue::Moved => Err(legacy_conversion_error("internal moved service value")),
+        MirRuntimeValue::NativeCursor(_) => Err(legacy_conversion_error("native cursor service value")),
+        MirRuntimeValue::NativeOwned(_) => Err(legacy_conversion_error("native-owned service value")),
         MirRuntimeValue::Closure(_) => Err(legacy_conversion_error("runtime closure service value")),
     }
 }

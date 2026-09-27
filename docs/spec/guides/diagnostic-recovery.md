@@ -1,7 +1,14 @@
 # Diagnostic recovery exercises
 
-Use these exercises after the first successful `jet run`. Each exercise uses
-the same source, the same `run.jet` entry, and the same recovery loop:
+This guide is for a Jet user whose project no longer checks or resolves its
+entry. Each exercise uses the real CLI and keeps one source of truth:
+`run.jet`, the diagnostic registry in
+[`docs/spec/diagnostics.md`](../diagnostics.md), and the recovery cases in
+[`tests/onboarding_recovery.rs`](../../../tests/onboarding_recovery.rs). Start
+after one successful `jet run` from the
+[first-hour guide](first-hour.md).
+
+Use this loop for a source error:
 
 ```text
 jet check run.jet
@@ -11,102 +18,106 @@ jet test run.jet
 jet run
 ```
 
-`jet check` finds source problems without running the program. The diagnostic
-code is stable. `jet explain` shows the full What, Why, and Fix row.
+`jet check` diagnoses source without running the program. The compiler prints a
+stable diagnostic code with its source location and fix. `jet explain` looks up
+the registered explanation for that code.
 
-## 1. Fix invalid code
+## 1. Fix an unknown function
 
 Create a project and enter it:
 
-```bash
+```sh
 jet new recovery
 cd recovery
 ```
 
-Change `print` to `pirnt` in `run.jet`. Check the file:
+Open `run.jet` and change the call `print` to the misspelled `pirnt`. Check the
+file:
 
-```bash
+```sh
 jet check run.jet
 ```
 
-Read `E0102`. Then read its full page:
+The diagnostic is E0102. Ask for the registered explanation:
 
-```bash
+```sh
 jet explain E0102
 ```
 
-Change `pirnt` back to `print`. Run the test and the program:
+Change `pirnt` back to `print`, then test and run the repaired source:
 
-```bash
+```sh
 jet test run.jet
 jet run
 ```
 
-The same diagnostic is pinned in
-[`tests/ui/unknown_function.jet`](../../../tests/ui/unknown_function.jet) and its
-snapshot. The first-hour source example is
+The same diagnostic has an executable fixture in
+[`tests/ui/unknown_function.jet`](../../../tests/ui/unknown_function.jet) and a
+matching UI snapshot. The small first-contact program is
 [`examples/features/basics/hello.jet`](../../../examples/features/basics/hello.jet).
 
 ## 2. Recover a missing entry
 
-Move the default entry for one check:
+Move the default entry aside so that the resolver cannot find it:
 
-```bash
+```sh
 mv run.jet saved.jet
 jet run
 ```
 
-The error names `run.jet` and gives the recovery. Run the saved file with an
-explicit target, then restore the default entry:
+Read the diagnostic. It names `run.jet` and gives the recovery. An explicit
+file target lets you run the saved source while the default entry is absent:
 
-```bash
+```sh
 jet run saved.jet
 mv saved.jet run.jet
 jet run
 ```
 
-Bare `jet run` is the beginner path. `jet run <file.jet>` is the explicit
-target when a project is incomplete or the source location is unclear.
+Bare `jet run` is the beginner path. `jet run <file.jet>` names the source
+when a project is incomplete or its location is unclear.
 
 ## 3. Select an ambiguous project
 
-When a workspace has more than one runnable member, bare `jet run` stops and
-names the member choices. Select one member:
+A workspace with more than one runnable member cannot choose for you. Read the
+member names in the diagnostic, then select one by name:
 
-```bash
+```sh
 jet run -p <member>
 ```
 
-You can also run its entry file directly:
+You can also name the entry file directly:
 
-```bash
+```sh
 jet run path/to/member/run.jet
 ```
 
 Do not guess. A named member or an explicit `run.jet` keeps the source choice
-visible.
+visible and makes the recovery repeatable.
 
-## 4. Recover old layouts
+## 4. Migrate an old layout
 
-The current package manifest name is `package.jet`. If an old project has
-`pkg.jet`, `pack.jet`, `payload.jet`, or `jet.toml`, rename the file:
+The current package manifest is `package.jet`. If an old project uses
+`pkg.jet`, `pack.jet`, `payload.jet`, or `jet.toml`, rename that file and run
+again:
 
-```bash
+```sh
 mv pkg.jet package.jet
 jet run
 ```
 
-Jet reports `E1226` when it finds a retired manifest name. If the old project
-has one retired `main.jet`, bare `jet run` renames it to `run.jet` and prints a
-notice. If both `main.jet` and `run.jet` exist, remove or move one, then run
-again. Jet does not choose between two project entries.
+Jet reports E1226 when it finds a retired manifest name and points to
+`package.jet`. A project with one retired `main.jet` is migrated to `run.jet`
+by bare `jet run`, with a notice. If both `main.jet` and `run.jet` exist, move
+one aside or remove the duplicate before running again; Jet must not choose
+between two project entries.
 
 ## 5. Recover install and host failures
 
 The release install path supports x86_64 Linux and x86_64 macOS with Nix
 flakes. Check the host and installer before creating a project:
 
-```bash
+```sh
 uname -s
 uname -m
 nix --version
@@ -122,20 +133,24 @@ If the install fails because the network is offline, reconnect and repeat the
 install command. If the install succeeds but `jet` is not found, start a new
 shell and run `jet version`. Do not run a partial install.
 
-The generated project has no registry dependency. The first install still
-needs its package source. Finish the install before the first project run.
+The generated project has no registry dependency, but Jet itself must be
+installed before the first project run. Finish the install before creating a
+project or diagnosing its source.
 
 ## Recovery rule
 
-Keep one source of truth:
+Keep one source of truth for each kind of action:
 
-- `run.jet` is the default project entry.
-- `jet check` is the source diagnosis command.
-- `jet explain <code>` is the diagnostic lesson.
-- `jet test` checks the repaired source.
-- `jet run` proves the repaired source.
-- An explicit file or `-p <member>` is the recovery target when resolution is
-  not unique.
+| Need | Command or target |
+|---|---|
+| Default project entry | `run.jet` |
+| Source diagnosis | `jet check run.jet` |
+| Diagnostic lesson | `jet explain <code>` |
+| Repaired-source test | `jet test run.jet` |
+| Repaired-source run | `jet run` |
+| Non-unique resolution | An explicit file or `jet run -p <member>` |
 
-Read [diagnostic law](../diagnostics.md) for the stable error contract and
-the [first-hour guide](first-hour.md) for the install and scaffold path.
+If a recovery changes a file name, return to the canonical layout before
+continuing. Read the [diagnostic contract](../diagnostics.md) for the stable
+error rules and the [first-hour guide](first-hour.md) for installation and
+scaffolding.

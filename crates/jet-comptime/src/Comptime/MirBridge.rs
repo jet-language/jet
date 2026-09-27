@@ -1026,6 +1026,10 @@ pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Di
             "internal moved value cannot cross the comptime boundary",
             span,
         )),
+        MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => Err(conversion_error(
+            "native-owned runtime resources cannot cross the comptime boundary",
+            span,
+        )),
         MirRuntimeValue::Closure(_) => Err(conversion_error(
             "MIR Core call cannot marshal a closure through the comptime boundary",
             span,

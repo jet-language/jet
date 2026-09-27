@@ -35,16 +35,16 @@ fn loose_top_level_statements_require_explicit_run() {
 #[test]
 fn module_globals_and_explicit_run_keep_statement_order() {
     let source = r#"
-limit :: 2
-label :: "start"
+LIMIT :: 2
+LABEL :: "start"
 my_var := 3
 
 fn run() {
-    print(label)
-    print(limit)
-    my_var += limit
+    print(LABEL)
+    print(LIMIT)
+    my_var += LIMIT
     print(my_var)
-    print(even(limit + 2))
+    print(even(LIMIT + 2))
     print("end")
 }
 
@@ -126,11 +126,11 @@ fn odd(n: Int) -> Bool {
 #[test]
 fn module_globals_are_file_wide_declarations() {
     let source = r#"
-limit :: 2
+LIMIT :: 2
 my_var := 3
 
 fn helper() Int {
-    return my_var + limit
+    return my_var + LIMIT
 }
 
 fn run() {

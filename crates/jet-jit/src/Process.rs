@@ -523,6 +523,18 @@ fn with_ambient_child<R>(
     let index = usize::try_from(handle).ok()?.checked_sub(1)?;
     Concurrency::with_runtime_mut(|rt| rt.process_children.get(index).map(f))
 }
+/// Adopt one checked child output reader into the Source resource arena.  The
+/// process table remains the owner of the child; only the selected reader
+/// lease moves into the send-safe ProcessPrelude adapter.
+pub(crate) fn source_take_process_stream(
+    handle: i64,
+    stream: process_prelude::SourceProcessStreamKind,
+) -> Result<process_prelude::SourceProcessReader, String> {
+    let child = with_ambient_child(handle, Clone::clone)
+        .ok_or_else(|| "unavailable process child handle".to_string())?;
+    process_prelude::source_take_process_stream(&child, stream)
+}
+
 fn push_ambient_stdin(child_handle: i64) -> Option<i64> {
     let child = with_ambient_child(child_handle, Clone::clone)?;
     INTERPRETER_PROCESS_STATE.with(|slot| {
@@ -720,7 +732,7 @@ fn mir_io_context(context: process_prelude::IOContext) -> MirRuntimeValue {
     }
 }
 
-fn mir_io_error(error: process_prelude::IOError) -> MirRuntimeValue {
+pub(crate) fn mir_io_error(error: process_prelude::IOError) -> MirRuntimeValue {
     let (variant, args) = match error {
         process_prelude::IOError::InvalidInput(context) => {
             ("InvalidInput", vec![(None, mir_io_context(context))])

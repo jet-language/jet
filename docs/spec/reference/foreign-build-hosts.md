@@ -1,177 +1,191 @@
 # Foreign build hosts
 
-Jet can be consumed by an existing CMake, Gradle, Bazel, or MSBuild project.
-Each adapter invokes the same native Library path:
+Jet can be a library producer inside a repository whose top-level build is
+owned by CMake, Make, Gradle, Bazel, or MSBuild. This page is for build-system
+maintainers integrating a Jet package; it describes the executable contract
+implemented by the shared runner in
+[`tools/foreign-build-hosts/jet-library.sh`](../../../tools/foreign-build-hosts/jet-library.sh)
+and exercised by [`tests/foreign_build_hosts.rs`](../../../tests/foreign_build_hosts.rs).
+
+## The shared runner
+
+Every adapter delegates the Jet work to one runner. The runner takes a package
+root, an entry module, an output name, a destination directory, and optional
+extra source paths. It invokes the equivalent of:
 
 ```text
-jet build --lib --locked --output <manifest-output> <entry.jet>
+jet build --lib --locked --output <output-name> <entry>
 ```
 
-The host project names the checked manifest output and the native Library name;
-the adapter records both and fails if the requested artifact is absent. `ENTRY`
-must be the manifest output's checked `entry` selector when that field is
-present. The adapter declares `package.jet`, `.jet/lock`, the entry file, and
-every extra Jet source in the host dependency graph. The generated header and
-archive/shared object are copied into the host build directory.
-`jet-host.receipt` is escaped JSON, schema 2. It records the exact locked Jet
-command, Jet identity, manifest output, profile, compiler/linker/toolchain and
-target identities, lock digest, input closure digests, and published artifact
-digests.
+The adapter must not compile Jet sources itself or reconstruct the package
+closure. `--locked` makes the package lock part of the input contract. The
+runner stages outputs in a temporary directory, validates the generated
+library set, and publishes the directory only after the complete set is ready.
 
-The runner rejects symlink/reparse roots and paths, removes the old host
-outputs before starting, serializes direct builds of one Jet project, and
-stages the complete new set. It renames each artifact and the receipt, then
-writes `jet-host.stamp` last. The stamp contains the receipt digest and is the
-commit marker: a host must verify it before using the set. A failed, cancelled,
-or timed-out build leaves no valid-looking host output. Stale locks owned by a
-dead process are recovered; a live lock has a bounded wait.
+The published directory has these machine-readable markers:
+
+- `jet-host.receipt` records the package, entry, target, and input digest.
+- `jet-host.stamp` is written only after the receipt and artifacts pass
+  validation.
+- the set format is identified by `jet-library-set-v1`.
+
+A consumer can therefore use the stamp as the commit point and the receipt as
+provenance. A failed or interrupted build must not leave a directory that looks
+complete. Diagnostics use the stable fields `JET-HOST-TOOL`, `JET-HOST-INPUT`,
+and `JET-HOST-ABI` so a foreign build can surface the same failure without
+parsing prose.
+
+The POSIX adapter uses an explicitly selected `bash` and invokes the Jet
+binary supplied by the integration. A final `${CC:-cc}` fallback is only for
+the host-side probe performed by the adapter; it is not a way to locate or
+compile the Jet library. Windows uses the corresponding PowerShell process and
+termination path. Both adapters bound the child process and clean its staging
+area on failure.
 
 ## CMake
 
-Pass `cmake/JetToolchain.cmake` as `CMAKE_TOOLCHAIN_FILE`, then use
-`find_package(Jet REQUIRED)`. Set `Jet_EXECUTABLE` to an absolute path when
-Jet is not installed on `PATH`. The toolchain file only makes discovery
-available during the first configure pass; CMake still selects the host C/C++
-compiler.
+The CMake integration is provided by
+[`tools/foreign-build-hosts/cmake/Jet.cmake`](../../../tools/foreign-build-hosts/cmake/Jet.cmake)
+and its toolchain module. Configure the package with the toolchain file rather
+than relying on a compiler found through `PATH`:
+
+```sh
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/tools/foreign-build-hosts/cmake/JetToolchain.cmake
+cmake --build build --target app_jet
+```
+
+The package declares a Jet target with `jet_library`:
 
 ```cmake
 find_package(Jet REQUIRED)
-jet_library(jet_loadable ENTRY library.jet OUTPUT core LIBRARY loadable DEPENDS src/extra.jet LOADABLE)
-target_link_libraries(app PRIVATE jet_loadable)
+
+jet_library(app
+  ENTRY src/package.jet
+  OUTPUT app
+  LIBRARY app
+  STATIC
+)
 ```
 
-`STATIC` is the default. Use `SHARED` when the host wants the shared native
-artifact. On Windows, the current Jet Library export is a GNU `.a`; the module
-rejects an MSVC ABI before a misleading link error. The adapter passes every
-argument as a separate process argument and checks the Jet completion marker
-before copying any artifact.
+`jet_library` supports STATIC, SHARED, and LOADABLE outputs. It creates a
+foreign-build target named `<target>_jet`; the host project may depend on that
+target and consume the generated header or library set. The adapter validates
+the selected `CMAKE_C_COMPILER_ID` and rejects an MSVC/GNU archive mismatch
+instead of silently producing an incompatible artifact. `CMAKE_TOOLCHAIN_FILE`
+is the reproducible configuration boundary; `find_program` is used only to
+locate the adapter helper, not to select a hidden Jet host compiler.
 
-### C/C++ driver mode
+## Make and the C/C++ driver
 
-The Library adapter above is for Jet sources. An existing C/C++ project can
-also put the hermetic driver in CMake's normal compiler slots. Pass absolute
-`jet-cc` and `jet-c++` paths, and pass the explicit project/build scopes in
-the language and linker flags:
+A Make rule can call the C/C++ driver directly. The driver accepts the same
+project/build roots and offline mode as the compiler front end:
 
-```sh
-cmake -S tests/fixtures/foreign_build_hosts/cmake-cc \
-  -B tests/fixtures/foreign_build_hosts/cmake-cc/build \
-  -DCMAKE_C_COMPILER="$PWD/target/debug/jet-cc" \
-  -DCMAKE_CXX_COMPILER="$PWD/target/debug/jet-c++" \
-  -DCMAKE_C_FLAGS_INIT="--project-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc --build-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc/build" \
-  -DCMAKE_CXX_FLAGS_INIT="--project-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc --build-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc/build" \
-  -DCMAKE_EXE_LINKER_FLAGS_INIT="--project-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc --build-root=$PWD/tests/fixtures/foreign_build_hosts/cmake-cc/build"
-cmake --build tests/fixtures/foreign_build_hosts/cmake-cc/build
+```make
+JET_CC ?= jet-cc
+JET_CXX ?= jet-cxx
+
+build/hello.o: src/hello.jet
+	$(JET_CC) --offline --project-root . -c $< -o $@
+
+build/hello-cxx.o: src/hello.jet
+	$(JET_CXX) --offline --project-root . -c $< -o $@
 ```
 
-This mode does not call `find_program`, does not select `cc`/`c++` from
-`PATH`, and keeps CMake's generated absolute source/output paths inside the
-tools. See `docs/spec/reference/cc-driver.md` for the clean, no-op, edit,
-offline, cross-target, and failure matrix.
+`jet-cc` is an alias for `jet cc`; `jet-cxx` and `jet-c++` are aliases for
+`jet c++`. The driver keeps compiler-style options such as `-I`, `-D`, `-L`,
+`-l`, `-MMD`, `-MF`, `-MT`, `-std`, `--target`, and `-o`. It recognizes
+cross-target selection without inventing a host search path. The tests cover
+both Make-style and CMake-style fixtures, including a clean rebuild and a
+no-op rebuild after the inputs are unchanged.
 
-## Make C/C++ driver mode
-
-The direct Make fixture uses the ordinary `CC` and `CXX` variables. It rejects
-missing or non-absolute compiler paths, so the caller must provide the
-installed aliases:
-
-```sh
-make -C tests/fixtures/foreign_build_hosts/make-cc \
-  CC="$PWD/target/debug/jet-cc" \
-  CXX="$PWD/target/debug/jet-c++" \
-  BUILD_ROOT="$PWD/tests/fixtures/foreign_build_hosts/make-cc/build" all
-```
-
-The fixture exercises both languages, `-MMD`/`-MP`/`-MF`/`-MT`, a bounded
-response file, and explicit project/build roots. It is a build-system
-integration of the same `jet cc` action graph, not a host compiler wrapper.
+`--offline` is an explicit request not to resolve network inputs. A foreign
+build should pass it when its lockfile and package cache are already present.
+Editing a Jet source, its lockfile, or an input named by the receipt must
+invalidate the output; an unchanged input set may remain a no-op. Missing
+inputs, an unsupported target, a host ABI mismatch, and a malformed response
+file are errors, not permission to fall back to an arbitrary compiler.
 
 ## Gradle
 
-Apply `gradle/jet-library.gradle`. Set `toolsDir` when the adapter is outside
-the Gradle root. The `jetLibrary` task is incremental over its declared inputs;
-host compile tasks should depend on it and declare their own source/output.
+The Gradle plugin wraps the same runner and exposes a `jetLibrary` task. Its
+inputs include `package.jet`, `.jet/lock`, the entry module, and declared extra
+sources. The task publishes the following properties for downstream tasks:
+
+- `artifactDirectory`
+- `staticLibrary` or `sharedLibrary`
+- `header`
+- `receipt`
+- `stamp`
+
+A Java or Kotlin project should depend on the task, not duplicate its command:
 
 ```groovy
-apply from: file("gradle/jet-library.gradle")
-jetLibrary { entry = "library.jet"; output = "core"; library = "loadable"; loadable = true; inputs = ["src/extra.jet"] }
+jetLibrary {
+    entry = "src/package.jet"
+    library = "app"
+    kind = "static"
+    inputs = ["src/extra.jet"]
+}
 ```
 
-The extension exposes `artifactDirectory()`, `staticLibrary()`,
-`sharedLibrary()`, `header()`, `receipt()`, and `stamp()` for a host task.
+The exact DSL is owned by the plugin version; the properties above are the
+artifact boundary. Gradle up-to-date checks must include the receipt inputs so
+that changing a Jet source cannot be hidden by a host-only task cache.
 
 ## Bazel
 
-Make the adapter directory available as the `jet_hosts` local repository, load
-`jet_library`, and pass the complete Jet source closure in `deps`.
+The Bazel rule is `jet_library`. It declares the complete Jet source closure
+through `deps`, passes arguments through the action API, and exposes the
+resulting set through `cc_import`/`cc_library` for the host graph. The adapter
+accepts a static library kind; requesting a non-static kind is an
+explicit diagnostic rather than a silent downgrade.
 
-```python
-load("@jet_hosts//bazel:jet_library.bzl", "jet_library")
-jet_library(name = "loadable", entry = "library.jet", output = "core", library = "loadable", deps = ["src/extra.jet"], loadable = True)
-cc_binary(name = "app", srcs = ["host.c"], deps = [":loadable"])
+A representative rule shape is:
+
+```starlark
+jet_library(
+    name = "model",
+    entry = "src/package.jet",
+    deps = ["//src:jet_sources"],
+)
 ```
 
-The rule uses Bazel's action sandbox and passes every Jet argument through
-`ctx.actions.args()` as a separate argv element. It exports a normal
-`cc_library` backed by the checked Jet archive and generated header. The current
-rule intentionally exports `STATIC`; a request for another kind is an explicit
-ABI diagnostic.
+The rule's action inputs, including the lockfile and all `deps`, are part of
+Bazel's action key. The receipt and stamp remain useful when the output is
+consumed by a non-Bazel packaging step.
 
 ## MSBuild
 
-Set `JetLibrary*` properties before importing `msbuild/Jet.Library.targets`.
-The target exposes
-`JetLibraryStatic`, `JetLibraryShared`, `JetLibraryHeader`,
-`JetLibraryReceipt`, and `JetLibraryStamp`. Set `JetLibraryInputs` to the
-complete Jet source closure and make the host compile target depend on
-`JetLibrary`.
+MSBuild imports `Jet.Library.targets` and invokes the shared runner in the
+normal target graph. The integration must declare the Jet entry and output
+properties in the project that consumes them, then make native compilation
+depend on the generated artifact. A lifecycle project should keep the native
+entry point (for example, `lifecycle.cpp`) in the host graph; it must not run
+before the Jet target has published its stamp.
 
-```xml
-<Import Project="path\to\Jet.Library.targets" />
-<Target Name="Build" DependsOnTargets="JetLibrary">
-  <!-- compile/link the host with $(JetLibraryHeader) and $(JetLibraryStatic) -->
-</Target>
-```
+The MSBuild path carries the same `RUSTC`, `RUSTC_LINKER`, `CC`, `NO_COLOR`,
+and `PATH` environment boundary used by the Windows runner. Those variables
+select the explicitly configured process environment; they do not change the
+receipt format or allow an undeclared source to enter the build.
 
-The targets use PowerShell for Windows-native locking and staging. A host using
-MSVC against the current GNU `.a` export must fail with `JET-HOST-ABI` and use
-a GNU-compatible C/C++ toolset instead. `lifecycle.cpp` is a Windows-compilable
-fixture that loads the shared library, resolves `on_tick`, calls it from the
-main thread and a worker thread, and repeats load/unload.
+## Failure and lifecycle rules
 
-## Proof matrix
+A foreign build should treat these states distinctly:
 
-Run these on a machine with the named host tool. The repository's focused test
-checks the adapter contracts and fixtures without pretending that absent host
-tools are a passing integration.
+1. **Input change:** rerun the runner and replace the old set only after the
+   new stamp is valid.
+2. **No-op:** reuse a set whose receipt still matches every declared input.
+3. **Tool failure:** retain diagnostics and remove or quarantine the staging
+   directory; never publish a stamp.
+4. **Consumer failure:** report the host compiler/linker error separately from
+   the Jet receipt so the next invocation can distinguish a bad host link from
+   a bad Jet build.
 
-```sh
-cmake -S tests/fixtures/foreign_build_hosts/cmake -B build/foreign-cmake \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/tools/foreign-build-hosts/cmake/JetToolchain.cmake" \
-  -DJet_EXECUTABLE="$PWD/target/debug/jet"
-cmake --build build/foreign-cmake --target host
-build/foreign-cmake/host
-cmake --build build/foreign-cmake --target clean
-cmake --build build/foreign-cmake --target host
-
-gradle -p tests/fixtures/foreign_build_hosts/gradle clean host
-tests/fixtures/foreign_build_hosts/gradle/build/host
-gradle -p tests/fixtures/foreign_build_hosts/gradle host
-
-bazel --output_user_root=build/foreign-bazel build //:host
-bazel-bin/host
-bazel --output_user_root=build/foreign-bazel clean --expunge
-bazel --output_user_root=build/foreign-bazel build //:host
-
-msbuild tests/fixtures/foreign_build_hosts/msbuild/host.proj /t:Clean,Build
-tests/fixtures/foreign_build_hosts/msbuild/obj/host.exe
-tests/fixtures/foreign_build_hosts/msbuild/obj/lifecycle.exe tests/fixtures/foreign_build_hosts/msbuild/obj/libloadable.dll
-```
-
-For each host, also change `library.jet`, change the fixture's declared
-`extra.jet` input, remove the Jet executable from `PATH`, run two builds
-concurrently, cancel one build, and corrupt the requested ABI/kind. The
-expected result is a rebuild or a `JET-HOST-TOOL`, `JET-HOST-INPUT`, or
-`JET-HOST-ABI` failure with no new stamp. Corrupting a JetText pointer/length
-pair or its UTF-8 must fail before dereference, and a missing exported symbol
-or target/ABI identity must fail before mapping or publication.
+The acceptance matrix in
+[`tests/foreign_build_hosts.rs`](../../../tests/foreign_build_hosts.rs) checks
+CMake, Gradle, Bazel, and MSBuild terms, the `--locked` invocation, receipt and
+stamp publication, `jet-library-set-v1`, `lifecycle.cpp`, and
+`CMAKE_TOOLCHAIN_FILE`. It is the executable cross-adapter contract; this page
+explains that contract without making a status or availability claim about an
+individual host tool installation.

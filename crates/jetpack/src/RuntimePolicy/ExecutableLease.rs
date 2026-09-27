@@ -97,6 +97,7 @@ pub(crate) struct LeaseReceipt {
     pub(crate) owner_pid: u32,
     pub(crate) owner_scope: String,
     pub(crate) package: String,
+    /// Empty for unversioned artifacts; output_digest still pins their identity.
     pub(crate) version: String,
     pub(crate) reference: String,
     pub(crate) output_digest: String,
@@ -726,6 +727,7 @@ impl ExecutableLeaseProtocol {
             validate_digest(previous_output_digest, "previous output digest")?;
         }
         validate_members(members)?;
+        validate_version(version)?;
         let request = LeaseRequest {
             operation,
             key_id: self.key.key_id.clone(),
@@ -735,7 +737,7 @@ impl ExecutableLeaseProtocol {
             owner_pid: std::process::id(),
             owner_scope: owner_scope_text.to_string(),
             package: bounded_text(package, "package")?,
-            version: bounded_text(version, "version")?,
+            version: version.to_string(),
             reference: bounded_text(reference, "reference")?,
             output_digest: output_digest.to_string(),
             previous_output_digest: previous_output_digest.to_string(),
@@ -822,7 +824,7 @@ impl ExecutableLeaseProtocol {
                 .map_err(|_| invalid("executable lease owner id is not numeric"))?,
             owner_scope: decode_text(get("owner")?, "owner scope")?,
             package: decode_text(get("package")?, "package")?,
-            version: decode_text(get("version")?, "version")?,
+            version: decode_optional_text(get("version")?, "version")?,
             reference: decode_text(get("reference")?, "reference")?,
             output_digest: decode_text(get("output")?, "output digest")?,
             previous_output_digest: decode_optional_text(
@@ -1217,7 +1219,7 @@ fn parse_receipt(text: &str) -> io::Result<LeaseReceipt> {
             .map_err(|_| invalid("executable lease owner id is not numeric"))?,
         owner_scope: decode_text(get("owner")?, "owner scope")?,
         package: decode_text(get("package")?, "package")?,
-        version: decode_text(get("version")?, "version")?,
+        version: decode_optional_text(get("version")?, "version")?,
         reference: decode_text(get("reference")?, "reference")?,
         output_digest: decode_text(get("output")?, "output digest")?,
         snapshot_rel: decode_text(get("snapshot")?, "snapshot path")?,
@@ -1229,6 +1231,7 @@ fn parse_receipt(text: &str) -> io::Result<LeaseReceipt> {
     validate_digest(&receipt.output_digest, "output digest")?;
     validate_relative_path(&receipt.snapshot_rel)?;
     validate_members(&receipt.members)?;
+    validate_version(&receipt.version)?;
     Ok(receipt)
 }
 
@@ -1252,9 +1255,10 @@ fn validate_request(request: &LeaseRequest) -> io::Result<()> {
     if request.mac.len() != 64 || !is_lower_hex(&request.mac) {
         return Err(invalid("executable lease authentication tag is not canonical"));
     }
-    for value in [&request.package, &request.version, &request.reference] {
+    for value in [&request.package, &request.reference] {
         bounded_text(value, "lease identity")?;
     }
+    validate_version(&request.version)?;
     Ok(())
 }
 
@@ -1348,6 +1352,15 @@ fn bounded_text(value: &str, field: &str) -> io::Result<String> {
         return Err(invalid(field));
     }
     Ok(value.to_string())
+}
+
+fn validate_version(value: &str) -> io::Result<()> {
+    // Store identities may be unversioned, but the required wire field keeps
+    // the same bounds and text protection as every other package identity.
+    if value.len() > MAX_FIELD_BYTES || value.contains('\n') {
+        return Err(invalid("version"));
+    }
+    Ok(())
 }
 
 fn encode_text(value: &str) -> String {
@@ -1724,6 +1737,72 @@ mod tests {
             name: "program".into(),
             digest: format!("sha256-{}", SHA256::sha256_hex(bytes.as_bytes())),
         }
+    }
+
+    #[test]
+    fn unversioned_snapshot_authenticates_and_preserves_content_identity() {
+        let root = scratch("unversioned");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let scope = owner_scope(&lease_id).unwrap();
+        let (snapshot, digest) = snapshot(&root, "unversioned", "one");
+        let reference = "adapt:demo:local-source";
+        let members = [member("one")];
+        let (request, owner) = protocol.prepare_snapshot(
+            &lease_id, &scope, &snapshot, "demo", "", reference, &digest, &members,
+        ).unwrap();
+        let frame = protocol.encode_request(&request).unwrap();
+        let text = std::str::from_utf8(&frame).unwrap();
+        // Absence is not an empty authenticated version. Changing even the
+        // empty version without a new MAC must also fail before publication.
+        for malformed in [
+            text.replacen("\nversion=\n", "\n", 1),
+            text.replacen("\nversion=\n", "\nversion=31\n", 1),
+        ] {
+            assert!(protocol.accept_snapshot(malformed.as_bytes(), &digest, &snapshot).is_err());
+        }
+        let oversized = "v".repeat(MAX_FIELD_BYTES + 1);
+        for (package, version, reference, output) in [
+            ("", "", reference, digest.as_str()),
+            ("demo", "", "", digest.as_str()),
+            ("demo", "", reference, ""),
+            ("demo", "1\nforged", reference, digest.as_str()),
+            ("demo", oversized.as_str(), reference, digest.as_str()),
+        ] {
+            assert!(protocol.request(
+                Operation::Acquire, &lease_id, 1, &scope, &snapshot,
+                package, version, reference, output, "", &members,
+            ).is_err());
+            // A correctly authenticated sender still cannot publish malformed
+            // identity fields by bypassing the local request constructor.
+            let malformed = LeaseRequest {
+                package: package.into(),
+                version: version.into(),
+                reference: reference.into(),
+                output_digest: output.into(),
+                ..request.clone()
+            };
+            let signed = protocol.encode_request(&malformed).unwrap();
+            assert!(protocol.accept_snapshot(&signed, &digest, &snapshot).is_err());
+        }
+        assert!(protocol.current_receipt(&lease_id).unwrap().is_none());
+        let receipt = protocol.accept_snapshot(&frame, &digest, &snapshot).unwrap();
+        assert_eq!(receipt.version, "");
+        assert_eq!(receipt.reference, reference);
+        assert_eq!(receipt.output_digest, digest);
+        let reopened = ExecutableLeaseProtocol::open(&root).unwrap();
+        assert_eq!(reopened.current_receipt(&lease_id).unwrap(), Some(receipt.clone()));
+        reopened.validate_snapshot(
+            &lease_id, receipt.generation, &scope, &snapshot, &digest,
+        ).unwrap();
+        let other_digest = format!("sha256-{}", SHA256::sha256_hex(b"different output"));
+        assert!(reopened.validate_snapshot(
+            &lease_id, receipt.generation, &scope, &snapshot, &other_digest,
+        ).is_err());
+        drop(owner);
+        drop(reopened);
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

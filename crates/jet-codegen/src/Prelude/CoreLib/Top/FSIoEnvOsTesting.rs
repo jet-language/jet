@@ -248,44 +248,9 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
     .map_err(jet_std_io_secret_error)
 }
 
-// D-STDIN1=A: streaming line-by-line stdin.
-// Stdin owns the shared buffer. A loop-local BufReader would discard unread
-// bytes when a sentinel breaks the loop before a subsequent readline call.
-struct JetStdinReader {
-    inner: std::io::Stdin,
-}
-fn jet_std_io_stdin() -> JetStdinReader {
-    JetStdinReader {
-        inner: std::io::stdin(),
-    }
-}
-fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IOError> {
-    if jet_fault_should_fail("IO.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            "fault injected: IO.Read",
-        ));
-    }
-    let mut line = String::new();
-    match r.inner.read_line(&mut line) {
-        Ok(0) => Ok(None),
-        Ok(_) => {
-            while line.ends_with('\n') || line.ends_with('\r') {
-                line.pop();
-            }
-            Ok(Some(line))
-        }
-        Err(e) => Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            e,
-        )),
-    }
-}
 
-// #1480: readline / read_until / take moved to
-// IoLineStream.rs so the JIT host can `include!` the same Prelude source.
+// #1480 / D-STDIN1: line-stream ownership moved to the shared
+// Core/StdinReader.rs fragment so AOT, JIT, and Source use one reader kernel.
 
 fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
     jet_std_fs_read_bytes(path)

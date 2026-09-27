@@ -62,7 +62,7 @@ fn aot_jit_and_interpreter_agree() {
 
 #[test]
 fn comptime_keeps_task_facts_in_the_front_end() {
-    let source = format!("{SOURCE}\n@folded :: 40 + 2\n\nfn show() {{\n    print(@folded)\n}}\n");
+    let source = format!("{SOURCE}\n@FOLDED :: 40 + 2\n\nfn show() {{\n    print(@FOLDED)\n}}\n");
     jet::compile(&source).expect("comptime and runtime task code must share the front end");
 }
 

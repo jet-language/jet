@@ -1,0 +1,56 @@
+// State declarations and owner-context state sections.
+// These identifier-led forms are selected by the declaration dispatcher.
+
+fn parser_state_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "state" && parser_kind_at(&state, 1) == TOKEN_IDENT
+}
+
+fn parser_state_section_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "state" && parser_kind_at(&state, 1) == TOKEN_LBRACE
+}
+
+
+fn parser_parse_state_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> StateDecl {
+    start :: parser_bump(&state)
+    type_name := parser_state_dotted_name(&state, "for a state owner type")
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before state names")
+    states := parser_state_names(&state)
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after state names")
+    StateDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_name: type_name.name, type_name_span: type_name.span, states: states, span: parser_cover(start.span, close.span)}
+}
+
+fn parser_parse_state_section(state: &JetParserState, type_name: String, type_name_span: Span) -> StateDecl {
+    start :: parser_bump(&state)
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a struct state section")
+    states := parser_state_names(&state)
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a struct state section")
+    StateDecl{is_pub: false, is_package_pub: false, type_name: type_name, type_name_span: type_name_span, states: states, span: parser_cover(start.span, close.span)}
+}
+
+fn parser_state_names(state: &JetParserState) -> [NamedSpan] {
+    states := [NamedSpan]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI {
+            parser_bump(&state)
+            next
+        }
+        name :: parser_expect_name(&state, "for a state name")
+        states.push(NamedSpan{name: name.payload.decoded, span: name.span})
+        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+    }
+    states
+}
+
+fn parser_state_dotted_name(state: &JetParserState, context: String) -> NamedSpan {
+    first :: parser_expect_name(&state, context)
+    name := first.payload.decoded
+    end := first.span
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        part :: parser_expect_name(&state, "after `.` in a declaration type name")
+        name = "{name}.{part.payload.decoded}"
+        end = part.span
+    }
+    NamedSpan{name: name, span: parser_cover(first.span, end)}
+}
+

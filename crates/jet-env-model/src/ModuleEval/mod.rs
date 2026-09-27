@@ -407,10 +407,10 @@ module dev {
     #[test]
     fn computed_module_fields_consume_top_level_known_values() {
         let src = r#"
-@base :: 8000
+@BASE :: 8000
 module dev {
     env.dev: Env{
-        port: base + 1,
+        port: BASE + 1,
     }
 }
 "#;
@@ -1151,10 +1151,10 @@ module installer {
     #[test]
     fn computed_system_service_fields_consume_top_level_known_values() {
         let src = r#"
-@enabled :: true
+@ENABLED :: true
 module system.host {
     target: linux.x64,
-    services: { ssh: { enable: enabled } },
+    services: { ssh: { enable: ENABLED } },
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -1415,10 +1415,10 @@ module image.server {
     fn computed_image_fields_consume_top_level_known_values() {
         let dir = oci_base_dir("computed-fields");
         let src = r#"
-@port :: 8080
+@PORT :: 8080
 module image.server {
     from: packages.app,
-    expose: [port],
+    expose: [PORT],
 }
 "#;
         let plan = evaluate_env(src, &dir).unwrap();

@@ -1,0 +1,940 @@
+// Source-backed payload construction and lexical diagnostics. `Scan.jet` owns
+// token boundaries; this layer keeps exact spelling and turns literal bytes
+// into parser-ready values without consulting the Rust lexer.
+MAX_INTERPOLATION_DEPTH :: 256
+
+fn empty_payload(text: String) -> TokenPayload {
+    TokenPayload{
+        text: text,
+        decoded: "",
+        integer: None,
+        decimal: None,
+        suffix: "",
+        interpolations: 0,
+        string_parts: [StringPart]{},
+    }
+}
+
+fn add_diagnostic(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
+    diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
+}
+
+fn bytes_text(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop i < end && i < raw.len() {
+        out.push(raw[i])
+        i += 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop i < end && i < raw.len() {
+        out.push(raw[i])
+        i += 1
+    }
+    out
+}
+
+fn append_byte(text: String, value: Int) -> String {
+    byte :: U8{value & 255}
+    "{text}{String.from_bytes([U8]{byte}) ?? ""}"
+}
+
+fn strip_underscores(text: String) -> String !Never {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) != 95 -> out.push(byte)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn digit_value(value: Int) -> Int !Never {
+    if value >= 48 && value <= 57 -> return value - 48
+    if value >= 65 && value <= 90 -> return value - 55
+    if value >= 97 && value <= 122 -> return value - 87
+    return -1
+}
+
+fn parse_integer_literal(text: String) -> ?Int {
+    clean :: strip_underscores(text)
+    raw := clean.bytes()
+    if raw.len() == 0 -> return None
+    radix := 10
+    i := 0
+    if raw.len() > 1 && Int.from_u8(raw[0]) == 48 {
+        marker :: Int.from_u8(raw[1])
+        if marker == {
+            120 | 88 -> {
+                radix = 16
+                i = 2
+            }
+            111 | 79 -> {
+                radix = 8
+                i = 2
+            }
+            98 | 66 -> {
+                radix = 2
+                i = 2
+            }
+            else -> {}
+        }
+    }
+    if i >= raw.len() -> return None
+    value := 0
+    loop i < raw.len() {
+        digit :: digit_value(Int.from_u8(raw[i]))
+        if digit < 0 || digit >= radix -> return None
+        if value > (9223372036854775807 - digit) /% radix -> return None
+        value = value * radix + digit
+        i += 1
+    }
+    Val(value)
+}
+
+fn parse_float_literal(text: String) -> ?Float {
+    clean :: strip_underscores(text)
+    value :: Float.parse(clean) ?? return None
+    Val(value)
+}
+
+fn text_ends_with(text: String, suffix: String) -> Bool {
+    raw :: text.bytes()
+    tail :: suffix.bytes()
+    if tail.len() > raw.len() -> return false
+    offset :: raw.len() - tail.len()
+    loop i in 0..<tail.len() {
+        if raw[offset + i] != tail[i] -> return false
+    }
+    true
+}
+
+fn escape_value(value: Int) -> Int {
+    if value == {
+        110 -> 10
+        116 -> 9
+        34 -> 34
+        92 -> 92
+        else -> -1
+    }
+}
+
+fn hex_value(value: Int) -> Int {
+    digit :: digit_value(value)
+    if digit >= 0 && digit < 16 -> digit else -> -1
+}
+
+fn previous_code_index(facts: [Int], index: Int) -> Int {
+    cursor := index - 1
+    loop cursor >= 0 {
+        kind :: kind_at(facts, cursor)
+        if kind != K_LINE_COMMENT && kind != K_BLOCK_COMMENT -> return cursor
+        cursor -= 1
+    }
+    -1
+}
+
+fn fact_text(source: [U8], facts: [Int], index: Int) -> String {
+    if index < 0 || index >= facts.len() /% 4 -> return ""
+    slice_text(source, facts[index * 4 + 1], facts[index * 4 + 2])
+}
+
+fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) {
+    open :: previous_code_index(facts, index)
+    if open < 0 || kind_at(facts, open) != K_LBRACE -> return (raw_head: false, byte_head: false)
+    before_open :: previous_code_index(facts, open)
+    raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
+    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT && facts[before_open * 4 + 3] == 1 -> raw = true
+    byte := false
+    if before_open >= 0 && kind_at(facts, before_open) == K_RBRACKET {
+        before_close :: previous_code_index(facts, before_open)
+        if {
+            before_close >= 0 && kind_at(facts, before_close) == K_IDENT && fact_text(source, facts, before_close) == "U8" -> {
+                before_type :: previous_code_index(facts, before_close)
+                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET
+            }
+            else -> {
+                if before_close >= 0 {
+                    hash :: previous_code_index(facts, before_close)
+                    if hash >= 0 && kind_at(facts, hash) == K_HASH {
+                        u8 :: previous_code_index(facts, hash)
+                        if u8 >= 0 && kind_at(facts, u8) == K_IDENT && fact_text(source, facts, u8) == "U8" {
+                            bracket :: previous_code_index(facts, u8)
+                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (raw_head: raw, byte_head: byte)
+}
+
+fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool {
+    open :: previous_code_index(facts, hash_index + 2)
+    if open < 0 || kind_at(facts, open) != K_LBRACKET -> return false
+    cursor := open + 1
+    depth := 0
+    segment_head := true
+    loop cursor < limit {
+        kind :: kind_at(facts, cursor)
+        if depth == 0 && segment_head && kind == K_IDENT && fact_text(source, facts, cursor) == "FFI" -> return true
+        is_open_delimiter :: if kind == {
+            K_LPAREN -> true
+            K_LBRACKET -> true
+            K_LBRACE -> true
+            else -> false
+        }
+        if is_open_delimiter -> depth += 1 else {
+            is_close_delimiter :: if kind == {
+                K_RPAREN -> true
+                K_RBRACKET -> true
+                K_RBRACE -> true
+                else -> false
+            }
+            if {
+                is_close_delimiter -> {
+                    if depth == 0 -> return false
+                    depth -= 1
+                }
+                kind == K_COMMA && depth == 0 -> {
+                    segment_head = true
+                }
+                depth == 0 -> {
+                    segment_head = false
+                }
+                else -> {}
+            }
+        }
+        cursor += 1
+    }
+    false
+}
+
+fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int {
+    cursor := index
+    depth := 0
+    loop cursor >= 0 {
+        kind :: kind_at(facts, cursor)
+        if kind == close_kind -> depth += 1
+        if kind == open_kind {
+            depth -= 1
+            if depth == 0 -> return cursor
+        }
+        cursor -= 1
+    }
+    -1
+}
+
+fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool {
+    cursor := previous_code_index(facts, function_index)
+    loop cursor >= 0 {
+        kind :: kind_at(facts, cursor)
+        is_pub_or_semi :: if kind == {
+            K_PUB -> true
+            K_SEMI -> true
+            else -> false
+        }
+        if is_pub_or_semi {
+            cursor -= 1
+            next
+        }
+        if kind == K_IDENT {
+            marker :: previous_code_index(facts, cursor)
+            if marker >= 0 && kind_at(facts, marker) == K_HASH {
+                if fact_text(source, facts, cursor) == "FFI" -> return true
+                cursor = marker - 1
+                next
+            }
+        }
+        if kind == K_RPAREN {
+            open :: matching_open(facts, cursor, K_LPAREN, K_RPAREN)
+            marker := if open >= 0 -> previous_code_index(facts, open) else -> -1
+            hash := if marker >= 0 -> previous_code_index(facts, marker) else -> -1
+            if marker >= 0 && hash >= 0 && kind_at(facts, marker) == K_IDENT && kind_at(facts, hash) == K_HASH {
+                if fact_text(source, facts, marker) == "FFI" -> return true
+                cursor = hash - 1
+                next
+            }
+        }
+        if kind == K_RBRACKET {
+            open :: matching_open(facts, cursor, K_LBRACKET, K_RBRACKET)
+            hash := if open >= 0 -> previous_code_index(facts, open) else -> -1
+            if hash >= 0 && kind_at(facts, hash) == K_HASH {
+                if group_has_ffi_marker(source, facts, hash, function_index) -> return true
+                cursor = hash - 1
+                next
+            }
+        }
+        break
+    }
+    false
+}
+
+fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool {
+    open :: previous_code_index(facts, index)
+    if open < 0 || kind_at(facts, open) != K_LBRACE -> return false
+    cursor := open - 1
+    loop cursor >= 0 {
+        if kind_at(facts, cursor) == K_FN -> return has_ffi_marker(source, facts, cursor)
+        cursor -= 1
+    }
+    false
+}
+
+fn shifted_span(span: Span, offset: Int) -> Span {
+    Span{start: span.start + offset, end: span.end + offset}
+}
+
+impl Token {
+    fn shift_spans(&self, offset: Int) {
+        self.span = shifted_span(self.span, offset)
+        index := 0
+        loop index < self.payload.string_parts.len() {
+            self.payload.string_parts[index].shift_spans(offset)
+            index += 1
+        }
+    }
+}
+
+impl StringPart {
+    fn shift_spans(&self, offset: Int) {
+        self.span = shifted_span(self.span, offset)
+        index := 0
+        loop index < self.tokens.len() {
+            self.tokens[index].shift_spans(offset)
+            index += 1
+        }
+    }
+}
+
+fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) {
+    diagnostic.span = if diagnostic.span == {
+        .Val(span) -> Val(shifted_span(span, offset))
+        .None -> None
+    }
+    diagnostic.edit = if diagnostic.edit == {
+        .Val(edit) -> {
+            edit.span = shifted_span(edit.span, offset)
+            Val(edit)
+        }
+        .None -> None
+    }
+}
+
+fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
+    tokens := [Token]{}
+    diagnostics := [Diagnostic]{}
+    cursor := 0
+    index := 0
+    loop index < facts.len() /% 4 {
+        kind :: kind_at(facts, index)
+        start :: facts[index * 4 + 1]
+        end :: facts[index * 4 + 2]
+        gap_diagnostic(source, facts, cursor, start, &diagnostics)
+        text :: slice_text(source, start, end)
+        built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+        if built.keep -> tokens.push(Token{kind: kind, span: Span{start: start, end: end}, payload: built.payload})
+        cursor = end
+        index += 1
+    }
+    gap_diagnostic(source, facts, cursor, source.len(), &diagnostics)
+    Lexed{tokens: tokens, diagnostics: diagnostics}
+}
+
+fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
+    facts :: raw_token_facts(source, config_surface)
+    lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth)
+}
+
+fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, diagnostics: &[Diagnostic]) -> [Token] {
+    if depth >= MAX_INTERPOLATION_DEPTH {
+        add_diagnostic(&diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
+        return [Token]{}
+    }
+    nested_source := bytes_slice(source, start, end)
+    nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1)
+    loop source_diagnostic in nested.diagnostics {
+        diagnostic := ~source_diagnostic
+        shifted_diagnostic(&diagnostic, start)
+        diagnostics.push(diagnostic)
+    }
+    index := 0
+    loop index < nested.tokens.len() {
+        nested.tokens[index].shift_spans(start)
+        index += 1
+    }
+    nested.tokens
+}
+
+fn only_whitespace(source: [U8], start: Int, end: Int) -> Bool {
+    cursor := start
+    loop cursor < end {
+        if !is_whitespace_at(source, cursor) -> return false
+        cursor += utf8_width(source, cursor)
+    }
+    true
+}
+
+fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int {
+    cursor := start + 1
+    depth := 1
+    loop cursor < limit {
+        value :: byte_at(source, cursor)
+        if value == 47 && byte_at(source, cursor + 1) == 47 {
+            cursor += 2
+            loop cursor < limit && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
+            next
+        }
+        if value == 47 && byte_at(source, cursor + 1) == 42 {
+            cursor += 2
+            comment_depth := 1
+            loop cursor < limit && comment_depth > 0 {
+                if {
+                    byte_at(source, cursor) == 47 && byte_at(source, cursor + 1) == 42 -> {
+                        comment_depth += 1
+                        cursor += 2
+                    }
+                    byte_at(source, cursor) == 42 && byte_at(source, cursor + 1) == 47 -> {
+                        comment_depth -= 1
+                        cursor += 2
+                    }
+                    else -> {
+                        cursor += utf8_width(source, cursor)
+                    }
+                }
+            }
+            if comment_depth > 0 -> return -1
+            next
+        }
+        if value == 34 {
+            triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
+            nested :: if triple -> scan_triple_string_end(source, cursor, false) else -> scan_plain_string_end(source, cursor, false)
+            if nested < 0 || nested > limit -> return -1
+            cursor = nested
+            next
+        }
+        if value == 39 {
+            nested :: scan_char_end(source, cursor)
+            if nested < 0 || nested > limit -> return -1
+            cursor = nested
+            next
+        }
+        if value == 96 {
+            fence := 0
+            loop cursor + fence < limit && byte_at(source, cursor + fence) == 96 -> fence += 1
+            fence_end := cursor + fence
+            closed := false
+            loop fence_end < limit {
+                if byte_at(source, fence_end) != 96 {
+                    fence_end += 1
+                    next
+                }
+                run_start := fence_end
+                loop fence_end < limit && byte_at(source, fence_end) == 96 -> fence_end += 1
+                if fence_end - run_start == fence {
+                    closed = true
+                    break
+                }
+            }
+            if !closed -> return -1
+            cursor = fence_end
+            next
+        }
+        if value == 123 -> depth += 1
+        if value == 125 {
+            depth -= 1
+            if depth == 0 -> return cursor
+        }
+        cursor += utf8_width(source, cursor)
+    }
+    -1
+}
+
+fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) {
+    parts.push(StringPart{
+        kind: STRING_PART_TEXT,
+        span: Span{start: start, end: end},
+        text: text,
+        byte: 0,
+        tokens: [Token]{},
+    })
+}
+
+fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+    decoded := ""
+    literal := ""
+    parts := [StringPart]{}
+    interpolations := 0
+    valid := true
+    cursor := start
+    literal_start := start
+    at_line_start := triple
+    loop cursor < end {
+        if at_line_start {
+            stripped := 0
+            loop stripped < indent && cursor < end && (byte_at(source, cursor) == 32 || byte_at(source, cursor) == 9) {
+                cursor += 1
+                stripped += 1
+            }
+            at_line_start = false
+            if literal_start == start && literal == "" -> literal_start = cursor
+        }
+        value :: byte_at(source, cursor)
+        if value == 10 {
+            literal = "{literal}\n"
+            decoded = "{decoded}\n"
+            cursor += 1
+            if triple -> at_line_start = true
+            next
+        }
+        if value == 92 {
+            if raw_head {
+                literal = append_byte(literal, 92)
+                decoded = append_byte(decoded, 92)
+                if {
+                    byte_at(source, cursor + 1) == 34 -> {
+                        literal = append_byte(literal, 34)
+                        decoded = append_byte(decoded, 34)
+                        cursor += 2
+                    }
+                    else -> {
+                        cursor += 1
+                    }
+                }
+                next
+            }
+            next_value :: byte_at(source, cursor + 1)
+            if byte_head && next_value == 120 {
+                high :: hex_value(byte_at(source, cursor + 2))
+                low :: hex_value(byte_at(source, cursor + 3))
+                if high >= 0 && low >= 0 && cursor + 3 < end {
+                    if literal != "" {
+                        append_text_part(&parts, literal_start, cursor, literal)
+                        literal = ""
+                    }
+                    parts.push(StringPart{
+                        kind: STRING_PART_BYTE,
+                        span: Span{start: cursor, end: cursor + 4},
+                        text: "",
+                        byte: high * 16 + low,
+                        tokens: [Token]{},
+                    })
+                    cursor += 4
+                    literal_start = cursor
+                    next
+                }
+                add_diagnostic(&diagnostics, "E0001", cursor, cursor + 4, "`\\x` needs two hexadecimal digits", "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal", "write two hexadecimal digits after `\\x`, for example `\\x00`")
+                cursor += 2
+                next
+            }
+            escaped :: escape_value(next_value)
+            escape_width :: utf8_width(source, cursor + 1)
+            escape_end := cursor + 1 + escape_width
+            if {
+                escaped < 0 -> {
+                    escape_text :: bytes_text(source, cursor + 1, escape_end)
+                    what := "`\\{escape_text}` isn't an escape Jet knows"
+                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+                    add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
+                }
+                else -> {
+                    literal = append_byte(literal, escaped)
+                    decoded = append_byte(decoded, escaped)
+                }
+            }
+            cursor = escape_end
+            next
+        }
+        if value == 123 && byte_at(source, cursor + 1) == 123 {
+            literal = append_byte(literal, 123)
+            decoded = append_byte(decoded, 123)
+            cursor += 2
+            next
+        }
+        if value == 125 && byte_at(source, cursor + 1) == 125 {
+            literal = append_byte(literal, 125)
+            decoded = append_byte(decoded, 125)
+            cursor += 2
+            next
+        }
+        if value == 123 && text_ends_with(literal, "\\$") {
+            literal = append_byte(literal, 123)
+            decoded = append_byte(decoded, 123)
+            cursor += 1
+            nesting := 1
+            loop cursor < end && nesting > 0 {
+                next_byte :: byte_at(source, cursor)
+                literal = append_byte(literal, next_byte)
+                decoded = append_byte(decoded, next_byte)
+                if next_byte == 123 -> nesting += 1
+                if next_byte == 125 -> nesting -= 1
+                cursor += 1
+            }
+            next
+        }
+        if value == 125 {
+            add_diagnostic(&diagnostics, "E0001", cursor, cursor + 1, "a lone `}}` inside quoted text", "inside quoted text, `{{` and `}}` mark an interpolated value, so a literal brace is doubled", "write `}}}}` to print a `}}`")
+            cursor += 1
+            next
+        }
+        if value == 123 {
+            close :: interpolation_end(source, cursor, end)
+            if close < 0 {
+                add_diagnostic(&diagnostics, "E0002", cursor, end, "this `{{` never gets a matching `}}`", "`{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal", "add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text")
+                valid = false
+                cursor = end
+                break
+            }
+            if only_whitespace(source, cursor + 1, close) {
+                add_diagnostic(&diagnostics, "E0003", cursor, close + 1, "there's nothing inside this `{{ }}` to show", "interpolation puts a value into the text, so the braces need a value", "put a value inside, like `{{name}}`, or write `{{{{}}}}` for literal braces")
+                cursor = close + 1
+                literal_start = cursor
+                next
+            }
+            if literal != "" {
+                append_text_part(&parts, literal_start, cursor, literal)
+                literal = ""
+            }
+            expr_start := cursor + 1
+            part_span := Span{start: cursor, end: close + 1}
+            children :: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, &diagnostics)
+            expression_text :: slice_text(source, expr_start, close)
+            parts.push(StringPart{
+                kind: STRING_PART_INTERPOLATION,
+                span: part_span,
+                text: expression_text,
+                byte: 0,
+                tokens: children,
+            })
+            interpolations += 1
+            cursor = close + 1
+            literal_start = cursor
+            next
+        }
+        width :: utf8_width(source, cursor)
+        scalar :: bytes_text(source, cursor, cursor + width)
+        literal = "{literal}{scalar}"
+        decoded = "{decoded}{scalar}"
+        cursor += width
+    }
+    if literal != "" || parts.len() == 0 -> append_text_part(&parts, literal_start, end, literal)
+    (decoded: decoded, interpolations: interpolations, parts: parts, valid: valid)
+}
+
+fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return (decoded: "", parts: [StringPart]{})
+    fence := 0
+    loop fence < raw.len() && Int.from_u8(raw[fence]) == 96 -> fence += 1
+    if fence == 0 || raw.len() < fence * 2 -> return (decoded: "", parts: [StringPart]{})
+    begin := fence
+    finish := raw.len() - fence
+    padded := false
+    if finish > begin + 1 && Int.from_u8(raw[begin]) == 32 && Int.from_u8(raw[finish - 1]) == 32 {
+        cursor := begin
+        loop cursor < finish {
+            if Int.from_u8(raw[cursor]) != 32 {
+                padded = true
+                break
+            }
+            cursor += 1
+        }
+    }
+    if padded {
+        begin += 1
+        finish -= 1
+    }
+    decoded :: bytes_text(raw, begin, finish)
+    parts := [StringPart]{}
+    append_text_part(&parts, source_start + begin, source_start + finish, decoded)
+    (decoded: decoded, parts: parts)
+}
+
+fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+    triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
+    if triple && raw_foreign_body_at(source, facts, index) {
+        body_start := start + 3
+        body_end := end - 3
+        body :: slice_text(source, body_start, body_end)
+        parts := [StringPart]{}
+        append_text_part(&parts, body_start, body_end, body)
+        return (decoded: body, interpolations: 0, parts: parts, valid: true)
+    }
+    modes :: string_head_modes(source, facts, index)
+    content_start := start + 1
+    content_end := end - 1
+    indent := 0
+    if triple {
+        open_end := start + 3
+        close := end - 3
+        close_line_start := close
+        loop close_line_start > open_end && byte_at(source, close_line_start - 1) != 10 -> close_line_start -= 1
+        only_indent := true
+        loop cursor in close_line_start..<close {
+            if byte_at(source, cursor) != 32 && byte_at(source, cursor) != 9 -> only_indent = false
+        }
+        if only_indent -> indent = close - close_line_start
+        content_start = open_end
+        cursor := open_end
+        loop cursor < close && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
+        if cursor < close && byte_at(source, cursor) == 10 -> content_start = cursor + 1
+        content_end = close_line_start
+        if content_end > content_start && byte_at(source, content_end - 1) == 10 -> content_end -= 1
+        if content_end < content_start -> content_end = content_start
+    }
+    decode_string_content(source, content_start, content_end, triple, indent, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+}
+
+fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
+    raw :: text.bytes()
+    if raw.len() < 2 -> return ""
+    closed := Int.from_u8(raw[raw.len() - 1]) == 39
+    finish := raw.len()
+    if closed -> finish -= 1
+    if Int.from_u8(raw[1]) != 92 {
+        if Int.from_u8(raw[1]) == 39 {
+            add_diagnostic(&diagnostics, "E0002", source_start, source_start + raw.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+            return "?"
+        }
+        width :: utf8_width(raw, 1)
+        if 1 + width < finish || !closed {
+            span_end := source_start + 1 + width
+            if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
+            add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+        }
+        return bytes_text(raw, 1, 1 + width)
+    }
+    escape_width := 0
+    if raw.len() > 2 -> escape_width = utf8_width(raw, 2)
+    escape_end := 2 + escape_width
+    escaped := -1
+    if escape_width > 0 -> escaped = escape_value(Int.from_u8(raw[2]))
+    if escaped < 0 {
+        escape_text :: bytes_text(raw, 2, escape_end)
+        what := "`\\{escape_text}` isn't an escape Jet knows"
+        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+        add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
+    }
+    if !closed || byte_at(raw, escape_end) != 39 {
+        span_end := source_start + escape_end
+        if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
+        add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+    }
+    if escaped < 0 -> return "?"
+    String.from_bytes([U8]{U8{escaped}}) ?? ""
+}
+
+fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, text: String, diagnostics: &[Diagnostic]) -> TokenPayload {
+    numeric_end :: scan_numeric_end(source, start)
+    bounded_end := numeric_end
+    if bounded_end < start || bounded_end > end -> bounded_end = end
+    number_text :: slice_text(source, start, bounded_end)
+    suffix := ""
+    if kind == K_UNIT_NUMBER -> suffix = slice_text(source, bounded_end, end)
+    marker :: byte_at(source, start + 1)
+    radix := if marker == {
+        120 | 88 -> 16
+        111 | 79 -> 8
+        98 | 66 -> 2
+        else -> 0
+    }
+    base_prefix := byte_at(source, start) == 48 && radix > 0
+    has_base_digit := false
+    if base_prefix {
+        cursor := start + 2
+        loop cursor < bounded_end {
+            if base_digit(byte_at(source, cursor), radix) -> has_base_digit = true
+            cursor += 1
+        }
+    }
+    if base_prefix && !has_base_digit {
+        add_diagnostic(&diagnostics, "E0001", start, end, "this number prefix has no digits after it", "`0x`, `0o`, and `0b` must be followed by digits, e.g. `0xFF`, `0o17`, `0b1010`", "add digits after the base prefix")
+        payload := empty_payload(text)
+        payload.decoded = number_text
+        payload.integer = Val(0)
+        return payload
+    }
+    is_float := if kind == {
+        K_FLOAT -> true
+        K_UNIT_NUMBER -> numeric_is_float(source, start)
+        else -> false
+    }
+    if is_float {
+        payload := empty_payload(text)
+        payload.decoded = ~number_text
+        payload.decimal = Val(parse_float_literal(number_text) ?? Float{0})
+        payload.suffix = suffix
+        return payload
+    }
+    payload := empty_payload(text)
+    payload.decoded = ~number_text
+    payload.integer = Val(parse_integer_literal(number_text) ?? 0)
+    payload.suffix = suffix
+    payload
+}
+
+fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> TokenPayload {
+    raw :: text.bytes()
+    if !allow_reserved_identifiers && raw.len() >= 2 && Int.from_u8(raw[0]) == 95 && Int.from_u8(raw[1]) == 95 {
+        add_diagnostic(&diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
+    }
+    if (text == "r" || text == "raw") && byte_at(source, end) == 34 {
+        add_diagnostic(&diagnostics, "E0003", start, end, "`{text}\"…\"` is not a Jet raw-string prefix", "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names", "write the text as ``…`` instead")
+    }
+    payload := empty_payload(text)
+    payload.decoded = text
+    payload
+}
+
+fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int {
+    first :: byte_at(source, start)
+    if width == 2 -> return (first - 192) * 64 + (byte_at(source, start + 1) - 128)
+    if width == 3 -> return (first - 224) * 4096 + (byte_at(source, start + 1) - 128) * 64 + (byte_at(source, start + 2) - 128)
+    if width == 4 -> return (first - 240) * 262144 + (byte_at(source, start + 1) - 128) * 4096 + (byte_at(source, start + 2) - 128) * 64 + (byte_at(source, start + 3) - 128)
+    first
+}
+
+fn codepoint_hex(value: Int) -> String {
+    digits := [Int]{}
+    remaining := value
+    loop remaining > 0 {
+        digit :: remaining - remaining /% 16 * 16
+        digits.push(digit)
+        remaining = remaining /% 16
+    }
+    loop digits.len() < 4 -> digits.push(0)
+    out := [U8]{}
+    cursor := digits.len() - 1
+    loop cursor >= 0 {
+        digit :: digits[cursor]
+        byte := 48 + digit
+        if digit >= 10 -> byte = 55 + digit
+        out.push(U8{byte})
+        cursor -= 1
+    }
+    hex :: String.from_bytes(out) ?? "0000"
+    "U+{hex}"
+}
+
+fn printable_character(source: [U8], start: Int, width: Int) -> String {
+    value :: byte_at(source, start)
+    if value == 0 -> return "\\0"
+    if value == 9 -> return "\\t"
+    scalar :: bytes_text(source, start, start + width)
+    if unicode.display_width(scalar) == 0 -> return codepoint_hex(scalar_codepoint(source, start, width))
+    scalar
+}
+
+fn raw_foreign_before_gap(source: [U8], facts: [Int], start: Int) -> Bool {
+    index := 0
+    loop index < facts.len() /% 4 && facts[index * 4 + 1] < start -> index += 1
+    raw_foreign_body_at(source, facts, index)
+}
+
+fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, diagnostics: &[Diagnostic]) {
+    cursor := start
+    loop cursor < end {
+        if cursor == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
+            loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
+            if cursor < end -> cursor += 1
+            next
+        }
+        if is_whitespace_at(source, cursor) {
+            cursor += utf8_width(source, cursor)
+            next
+        }
+        value :: byte_at(source, cursor)
+        if value == 35 && byte_at(source, cursor + 1) == 33 && byte_at(source, cursor + 2) == 47 {
+            add_diagnostic(&diagnostics, "E0042", cursor, cursor + 3, "a shebang is not a Jet token", "launch metadata is owned by the script entrypoint", "remove the shebang from Jet source")
+            loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
+            if cursor < end -> cursor += 1
+            next
+        }
+        if value == 34 {
+            triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
+            if triple {
+                if {
+                    raw_foreign_before_gap(source, facts, cursor) -> {
+                        add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this raw foreign body never gets a closing `\"\"\"`", "a `#FFI` body preserves everything between its opening and closing `\"\"\"`", "add a closing `\"\"\"` after the foreign source")
+                    }
+                    else -> {
+                        add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this multi-line text never gets a closing `\"\"\"`", "a multi-line string starts and ends with `\"\"\"`", "add a closing `\"\"\"` on its own line")
+                    }
+                }
+                return
+            }
+            line_end := cursor
+            loop line_end < source.len() && byte_at(source, line_end) != 10 -> line_end += utf8_width(source, line_end)
+            add_diagnostic(&diagnostics, "E0002", cursor, line_end, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
+            cursor = line_end
+            next
+        }
+        if value == 96 {
+            fence := 0
+            loop byte_at(source, cursor + fence) == 96 -> fence += 1
+            plural := if fence == 1 -> "" else -> "s"
+            add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this raw text never gets a closing backtick fence", "a raw string closes with a backtick run that has the same length as its opening run", "add a closing fence of {fence} backtick{plural}")
+            return
+        }
+        if value == 39 {
+            if cursor + 1 >= source.len() -> return
+            add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+            return
+        }
+        width :: utf8_width(source, cursor)
+        character :: printable_character(source, cursor, width)
+        add_diagnostic(&diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
+        cursor += width
+    }
+}
+
+fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (payload: TokenPayload, keep: Bool) {
+    start :: facts[index * 4 + 1]
+    end :: facts[index * 4 + 2]
+    if kind == K_IDENT -> return (payload: identifier_payload(source, start, end, text, allow_reserved_identifiers, &diagnostics), keep: true)
+    is_numeric_kind :: if kind == {
+        K_INT -> true
+        K_FLOAT -> true
+        K_UNIT_NUMBER -> true
+        else -> false
+    }
+    if is_numeric_kind -> return (payload: numeric_payload(kind, source, start, end, text, &diagnostics), keep: true)
+    if kind == K_STR {
+        decoded :: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+        payload := empty_payload(text)
+        payload.decoded = decoded.decoded
+        payload.interpolations = decoded.interpolations
+        payload.string_parts = decoded.parts
+        return (payload: payload, keep: decoded.valid)
+    }
+    if kind == K_RAW_STR {
+        raw :: decode_raw_string(text, start)
+        payload := empty_payload(text)
+        payload.decoded = raw.decoded
+        payload.string_parts = raw.parts
+        return (payload: payload, keep: true)
+    }
+    if kind == K_CHAR {
+        payload := empty_payload(text)
+        payload.decoded = decode_char(text, start, &diagnostics)
+        return (payload: payload, keep: true)
+    }
+    if kind == K_BLOCK_COMMENT && !text_ends_with(text, "*/") {
+        add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
+    }
+    payload := empty_payload(text)
+    payload.decoded = text
+    (payload: payload, keep: true)
+}
+
+pub fn lex_payload(source: [U8], config_surface: Bool) -> Lexed {
+    lex_payload_at_depth(source, config_surface, false, 0)
+}
+
+pub fn lex_generated_payload(source: [U8]) -> Lexed {
+    lex_payload_at_depth(source, false, true, 0)
+}

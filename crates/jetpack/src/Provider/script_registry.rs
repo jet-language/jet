@@ -2042,6 +2042,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2129,6 +2130,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let table = SourceTable::empty();
         let spec = crate::RefSpec::classify_in("demo@ruby#version=1.0", &table).unwrap();
@@ -2548,6 +2550,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = Store::realize_verified(
             &roots,
@@ -2619,6 +2622,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let replay = Store::realize_verified(
             &roots,
@@ -2663,6 +2667,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2693,6 +2698,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2720,6 +2726,7 @@ authority: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], de
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,

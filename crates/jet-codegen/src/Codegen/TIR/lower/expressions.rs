@@ -83,6 +83,7 @@ use jet_foundation::CanonicalPass;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::collections::{HashMap, VecDeque};
+
 /// Run one branch body in its own stack frame.
 ///
 /// At `opt-level=0` rustc emits no `llvm.lifetime` markers, so LLVM's
@@ -5878,7 +5879,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             let lowered = TExpr {
                                 ty: return_type,
                                 kind: TExprKind::ExternCall {
-                                    symbol: wrapper,
+                                    symbol: cx
+                                        .foreign_call_keys
+                                        .get(&call.name)
+                                        .cloned()
+                                        .unwrap_or(wrapper),
                                     c_abi,
                                     args: eargs,
                                 },
@@ -5899,6 +5904,47 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 cx,
                                 env,
                             );
+                        });
+                    }
+                    if let Some(foreign_key) = cx.foreign_call_keys.get(&call.name).cloned() {
+                        return in_own_frame(|| {
+                            let sig = cx.sigs.get(&call.name).cloned();
+                            let eargs = call
+                                .args
+                                .iter()
+                                .enumerate()
+                                .map(|(i, a)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|ps| ps.get(i))
+                                        .map(|(c, t)| (*c, t.clone()));
+                                    lower_extern_call_arg(a, conv, env, cx)
+                                })
+                                .collect();
+                            let lowered = TExpr {
+                                ty: extern_call_return_type(cx, &call.name),
+                                kind: TExprKind::ExternCall {
+                                    symbol: foreign_key,
+                                    c_abi: true,
+                                    args: eargs,
+                                },
+                            };
+                            let lowered = match source_arg_order(&call.args) {
+                                Some(order) => preserve_source_arg_order(
+                                    lowered,
+                                    &order,
+                                    call.args.len(),
+                                    call.name_span.start as u32,
+                                ),
+                                None => lowered,
+                            };
+                            wrap_foreign_undo(
+                                lowered,
+                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                call.name_span.start as u32,
+                                cx,
+                                env,
+                            )
                         });
                     }
                     // c109 Phase 14: unqualified inline-module import (`emit_call`'s

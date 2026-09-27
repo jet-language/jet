@@ -1685,6 +1685,7 @@ impl<'a> Checker<'a> {
     /// A nested call's frame ends when it returns, but a returned View keeps
     /// the source loan alive as an argument of the enclosing call.
     pub(crate) fn record_call_result_views(&mut self, expr: &Expr) {
+        let direct_place = self.place_from_expr(expr);
         let mut loans: Vec<(ViewPlace, ViewAccess)> = Vec::new();
         for (_, place, _, access) in self.view_call_sources(expr) {
             if let Some((_, seen_access)) = loans.iter_mut().find(|(seen, _)| {
@@ -1698,6 +1699,26 @@ impl<'a> Checker<'a> {
             }
         }
         for (place, access) in loans {
+            // A direct named-window argument has already been recorded by
+            // `check_call_argument_access`. Re-recording its source fact would
+            // make the call alias itself and report E0204. Nested call results
+            // have no direct place, so their source loan still goes through
+            // the normal active-frame check below.
+            // The source fact may be exclusive while this call only reads
+            // through the named carrier. The current argument's place, not
+            // its source fact access, identifies the already-recorded loan.
+            let same_direct_argument = direct_place.as_ref().is_some_and(|direct| {
+                direct.owner == place.owner && direct.projections == place.projections
+            }) && self.call_access_frames.last().is_some_and(|frame| {
+                frame.accesses.last().is_some_and(|active| {
+                    !active.reserved
+                        && active.place.owner == place.owner
+                        && active.place.projections == place.projections
+                })
+            });
+            if same_direct_argument {
+                continue;
+            }
             self.check_call_place_access(&place, access, expr.span());
             self.record_call_place_access(place, access);
         }
@@ -2279,6 +2300,16 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
+        self.check_expr_change_with_view_exemption(expr, action, span, None);
+    }
+
+    fn check_expr_change_with_view_exemption(
+        &mut self,
+        expr: &Expr,
+        action: &str,
+        span: Span,
+        ignored_view: Option<(&str, Span, usize)>,
+    ) {
         if let Some(freeze_site) = self.frozen_expr_site(expr) {
             let name = expr_root_ident(expr).unwrap_or("the frozen value");
             self.report_frozen_write(name, freeze_site, action, span);
@@ -2293,7 +2324,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(place) = self.place_from_expr(expr) {
-            self.check_place_change(&place, action, span);
+            self.check_place_change_with_view_exemption(&place, action, span, ignored_view);
         }
     }
 
@@ -2375,7 +2406,24 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_write_arg_change(&mut self, arg: &crate::AST::CallArg) {
         if arg.convention == AccessConvention::Write {
-            self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
+            // Passing a named write window with `&` reborrows its own
+            // exclusive fact. The normal change checks still run so frozen
+            // owners, scoped task loans, and other live views remain strict.
+            let write_view = expr_root_ident(&arg.expr).and_then(|root| {
+                self.view_fact(root)
+                    .filter(|fact| fact.access == ViewAccess::Write)
+                    .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
+            });
+            if let Some((root, binding_span, seq)) = write_view {
+                self.check_expr_change_with_view_exemption(
+                    &arg.expr,
+                    "be passed with write access",
+                    arg.span,
+                    Some((&root, binding_span, seq)),
+                );
+            } else {
+                self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
+            }
             if let Some(root) = expr_root_ident(&arg.expr) {
                 self.clear_origin(root);
             }
@@ -2505,6 +2553,16 @@ impl<'a> Checker<'a> {
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
+        self.check_place_change_with_view_exemption(changed, action, span, None);
+    }
+
+    fn check_place_change_with_view_exemption(
+        &mut self,
+        changed: &ViewPlace,
+        action: &str,
+        span: Span,
+        ignored_view: Option<(&str, Span, usize)>,
+    ) {
         // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
         // may mutate its root or any projected place.
         if action != "be moved" && !action.contains("moved") {
@@ -2519,11 +2577,21 @@ impl<'a> Checker<'a> {
         if self.report_scoped_loan_conflict(changed, action, span) {
             return;
         }
+        // A write call through a named carrier reborrows that carrier's own
+        // fact. Exempt only that exact binding fact; every other live view
+        // remains visible to the change check.
         let Some((view, access, place, kind)) =
             crate::Sema::view_facts_newest_first(&self.flow.views)
                 .into_iter()
-                .find(|(name, fact)| {
+                .find(|&(name, fact)| {
                     self.view_is_live_now(name)
+                        && !ignored_view.is_some_and(
+                            |(ignored_name, binding_span, seq)| {
+                                name == ignored_name
+                                    && fact.binding_span == binding_span
+                                    && fact.seq == seq
+                            },
+                        )
                         && fact.place.overlaps(changed)
                         && fact.invalidated.is_none()
                 })

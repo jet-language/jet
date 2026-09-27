@@ -5,6 +5,279 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Scan::{lex_raw, lex_raw_config, lex_raw_generated};
 use super::Tokens::{is_comment, TokKind, Token};
+use std::cell::RefCell;
+use std::sync::Arc;
+
+/// Source-coupled transport for the staged compiler pass, not a public Jet ABI.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawTokenFact {
+    pub kind: u16,
+    pub span: Span,
+    pub uppercase: bool,
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminatorEvent {
+    InsertSemi { before: usize, at: usize },
+    SplitHeader { before: usize, at: usize },
+}
+
+#[doc(hidden)]
+pub type TerminatorDriver =
+    Arc<dyn Fn(&[u8], &[RawTokenFact]) -> Result<Vec<TerminatorEvent>, String> + Send + Sync>;
+
+thread_local! {
+    static DRIVER: RefCell<Option<TerminatorDriver>> = const { RefCell::new(None) };
+}
+
+struct DriverGuard(Option<TerminatorDriver>);
+
+impl Drop for DriverGuard {
+    fn drop(&mut self) {
+        DRIVER.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
+}
+
+#[doc(hidden)]
+pub fn terminator_driver() -> Option<TerminatorDriver> {
+    DRIVER.with(|slot| slot.borrow().clone())
+}
+
+#[doc(hidden)]
+pub fn with_terminator_driver<R>(driver: Option<TerminatorDriver>, work: impl FnOnce() -> R) -> R {
+    let _restore = DriverGuard(DRIVER.with(|slot| slot.replace(driver)));
+    work()
+}
+
+#[doc(hidden)]
+pub const TERMINATOR_PASS_SOURCE: &str = concat!(
+    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Scan.jet"),
+    "\n",
+    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Terminators.jet"),
+    "\n",
+    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Tokens.jet"),
+    "\n",
+    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Payload.jet"),
+);
+
+/// Every raw kind has a distinct tag. No statement/continuation decision is
+/// encoded here, and adding a token kind must update this exhaustive match.
+#[doc(hidden)]
+pub fn raw_token_fact(token: &Token) -> RawTokenFact {
+    let kind = match &token.kind {
+        TokKind::Ident(_) => 1,
+        TokKind::RawStr(_) => 2,
+        TokKind::Str(_) => 3,
+        TokKind::Int(..) => 4,
+        TokKind::Float(..) => 5,
+        TokKind::UnitNumber { .. } => 6,
+        TokKind::Char(_) => 7,
+        TokKind::KwTrue => 8,
+        TokKind::KwFalse => 9,
+        TokKind::KwSelf => 10,
+        TokKind::KwNull => 11,
+        TokKind::KwBreak => 12,
+        TokKind::KwReturn => 13,
+        TokKind::RParen => 14,
+        TokKind::RBracket => 15,
+        TokKind::RBrace => 16,
+        TokKind::Question => 17,
+        TokKind::PlusPlus => 18,
+        TokKind::MinusMinus => 19,
+        TokKind::Gt => 20,
+        TokKind::Shr => 21,
+        TokKind::FenceClose => 22,
+        TokKind::Dot => 23,
+        TokKind::QuestionDot => 24,
+        TokKind::AndAnd => 25,
+        TokKind::OrOr => 26,
+        TokKind::Plus => 27,
+        TokKind::Minus => 28,
+        TokKind::Star => 29,
+        TokKind::Slash => 30,
+        TokKind::SlashPercent => 31,
+        TokKind::Percent => 32,
+        TokKind::PercentPercent => 33,
+        TokKind::EqEq => 34,
+        TokKind::NotEq => 35,
+        TokKind::Lt => 36,
+        TokKind::Le => 37,
+        TokKind::Ge => 38,
+        TokKind::Compare => 39,
+        TokKind::Amp => 40,
+        TokKind::Pipe => 41,
+        TokKind::Caret => 42,
+        TokKind::TildePipe => 43,
+        TokKind::Shl => 44,
+        TokKind::QuestionQuestion => 45,
+        TokKind::LBrace => 46,
+        TokKind::LParen => 47,
+        TokKind::LBracket => 48,
+        TokKind::Eof => 49,
+        TokKind::Bang => 50,
+        TokKind::UnifiedArrow => 51,
+        TokKind::Arrow => 52,
+        TokKind::LambdaArrow => 53,
+        TokKind::Eq => 54,
+        TokKind::LineComment(_) => 55,
+        TokKind::BlockComment(_) => 56,
+        TokKind::KwFn => 57,
+        TokKind::KwPub => 58,
+        TokKind::KwPriv => 59,
+        TokKind::KwIf => 60,
+        TokKind::KwElse => 61,
+        TokKind::KwIn => 62,
+        TokKind::KwMutate => 63,
+        TokKind::KwMove => 64,
+        TokKind::KwCopy => 65,
+        TokKind::KwStruct => 66,
+        TokKind::KwEnum => 67,
+        TokKind::KwImpl => 68,
+        TokKind::KwTrait => 69,
+        TokKind::KwTag => 70,
+        TokKind::KwEffect => 71,
+        TokKind::KwDerive => 72,
+        TokKind::KwIt => 73,
+        TokKind::KwConst => 74,
+        TokKind::KwComptime => 75,
+        TokKind::KwLoop => 76,
+        TokKind::KwYield => 77,
+        TokKind::KwUse => 78,
+        TokKind::KwExtern => 79,
+        TokKind::KwModule => 80,
+        TokKind::FenceOpen => 81,
+        TokKind::Colon => 82,
+        TokKind::ColonColon => 83,
+        TokKind::ColonEq => 84,
+        TokKind::Comma => 85,
+        TokKind::Semi => 86,
+        TokKind::DotDot => 87,
+        TokKind::DotDotLt => 88,
+        TokKind::DotDotDot => 89,
+        TokKind::At => 90,
+        TokKind::Tilde => 91,
+        TokKind::TildePipeEq => 92,
+        TokKind::TildeTilde => 93,
+        TokKind::PlusEq => 94,
+        TokKind::MinusEq => 95,
+        TokKind::StarEq => 96,
+        TokKind::SlashEq => 97,
+        TokKind::SlashPercentEq => 98,
+        TokKind::PercentEq => 99,
+        TokKind::PercentPercentEq => 100,
+        TokKind::AmpEq => 101,
+        TokKind::PipeEq => 102,
+        TokKind::CaretEq => 103,
+        TokKind::ShlEq => 104,
+        TokKind::ShrEq => 105,
+        TokKind::Hash => 106,
+        TokKind::Dollar => 107,
+    };
+    RawTokenFact {
+        kind,
+        span: token.span,
+        uppercase: matches!(&token.kind, TokKind::Ident(name)
+            if name.chars().next().is_some_and(char::is_uppercase)),
+    }
+}
+
+fn split_header_spelling(kind: &TokKind) -> Option<&'static str> {
+    Some(match kind {
+        TokKind::UnifiedArrow => "->",
+        TokKind::Arrow => ":>",
+        TokKind::LambdaArrow => "=>",
+        TokKind::Eq | TokKind::MinusMinus => "-[…]>",
+        TokKind::LBrace => "{",
+        _ => return None,
+    })
+}
+
+fn split_header_diagnostic(token: &Token) -> Option<Diagnostic> {
+    let spelling = split_header_spelling(&token.kind)?;
+    Some(Diagnostic::error(
+        "E0986",
+        format!("`{spelling}` must stay on the same line as the closing `)`"),
+        "an arrow, effect row, or opening block continues the header on its line".to_string(),
+        format!("move `{spelling}` up to the `)` line"),
+        Some(token.span),
+    ))
+}
+
+fn apply_events(
+    src: &str,
+    toks: &mut Vec<Token>,
+    diags: &mut Vec<Diagnostic>,
+    events: Vec<TerminatorEvent>,
+) -> Result<(), String> {
+    let mut previous = None;
+    let mut insertions = 0;
+    for event in &events {
+        let (before, at) = match *event {
+            TerminatorEvent::InsertSemi { before, at }
+            | TerminatorEvent::SplitHeader { before, at } => (before, at),
+        };
+        let token = toks.get(before).ok_or("terminator event has an invalid raw-token index")?;
+        if previous.is_some_and(|previous| before <= previous)
+            || at > token.span.start
+            || !src.is_char_boundary(at)
+        {
+            return Err("terminator event order or byte position is invalid".to_string());
+        }
+        if matches!(event, TerminatorEvent::SplitHeader { .. })
+            && (at != token.span.start || split_header_spelling(&token.kind).is_none())
+        {
+            return Err("split-header event does not identify a diagnostic-bearing token".to_string());
+        }
+        insertions += usize::from(matches!(event, TerminatorEvent::InsertSemi { .. }));
+        previous = Some(before);
+    }
+    if insertions == 0 {
+        for event in events {
+            if let TerminatorEvent::SplitHeader { before, .. } = event {
+                diags.push(split_header_diagnostic(&toks[before]).expect("validated diagnostic"));
+            }
+        }
+        return Ok(());
+    }
+    let mut output = Vec::with_capacity(toks.len() + insertions);
+    let mut events = events.into_iter().peekable();
+    for (index, token) in std::mem::take(toks).into_iter().enumerate() {
+        if let Some(event) = events.peek() {
+            let before = match event {
+                TerminatorEvent::InsertSemi { before, .. }
+                | TerminatorEvent::SplitHeader { before, .. } => *before,
+            };
+            if before == index {
+                match events.next().expect("peeked event") {
+                    TerminatorEvent::InsertSemi { at, .. } => output.push(Token {
+                        kind: TokKind::Semi,
+                        span: Span::new(at, at),
+                    }),
+                    TerminatorEvent::SplitHeader { .. } => {
+                        diags.push(split_header_diagnostic(&token).expect("validated diagnostic"));
+                    }
+                }
+            }
+        }
+        output.push(token);
+    }
+    *toks = output;
+    Ok(())
+}
+
+fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnostic>) {
+    let Some(driver) = terminator_driver() else {
+        insert_terminators_reference(src, toks, diags);
+        return;
+    };
+    let facts = toks.iter().map(raw_token_fact).collect::<Vec<_>>();
+    let events = driver(src.as_bytes(), &facts)
+        .unwrap_or_else(|error| jet_foundation::ice!(None, "Jet terminator pass failed: {error}"));
+    apply_events(src, toks, diags, events)
+        .unwrap_or_else(|error| jet_foundation::ice!(None, "Jet terminator event ABI failed: {error}"));
+}
 
 /// Lex the whole file. Always returns a token stream (ending in Eof) plus
 /// every problem found along the way — M1 error recovery.
@@ -149,6 +422,16 @@ fn leading_dot_variant_token(kind: &TokKind) -> bool {
     }
 }
 
+fn skip_comment_tokens(toks: &[Token], mut index: usize) -> usize {
+    while toks
+        .get(index)
+        .is_some_and(|token| is_comment(&token.kind))
+    {
+        index += 1;
+    }
+    index
+}
+
 /// D-IF3 / D-ENUMDOT1: does the token at `i` (a `.`) begin a dispatch arm head
 /// — `.Variant ->`, `.Variant(payload) ->`, `.Group.Leaf ->`, or
 /// `.{ … } ->` — rather than a fluent chain step? Without a terminator, a
@@ -158,7 +441,7 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
     if !matches!(toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
         return false;
     }
-    let mut j = i + 1;
+    let mut j = skip_comment_tokens(toks, i + 1);
     // D-DESTRUCT1: `.{ … } -> …` — `expr\n.{` is never a legal chain.
     if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LBrace)) {
         let mut depth = 0usize;
@@ -177,6 +460,7 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
             }
             j += 1;
         }
+        j = skip_comment_tokens(toks, j);
         return matches!(
             toks.get(j).map(|t| &t.kind),
             Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
@@ -190,37 +474,69 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
         return false;
     }
     j += 1;
-    // D-TAG1: `.Fire.Burn` leaf path.
-    while matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Dot))
-        && toks
-            .get(j + 1)
+    // D-PATO: each structural or-pattern alternative has the same leading-dot
+    // variant/path/payload shape. Keep consuming alternatives before looking
+    // for a guard or arrow; otherwise a following arm's leading `.` is
+    // mistaken for a fluent chain continuation.
+    loop {
+        j = skip_comment_tokens(toks, j);
+        loop {
+            if !matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Dot)) {
+                break;
+            }
+            let variant = skip_comment_tokens(toks, j + 1);
+            if !toks
+                .get(variant)
+                .map(|t| leading_dot_variant_token(&t.kind))
+                .unwrap_or(false)
+            {
+                break;
+            }
+            j = variant + 1;
+            j = skip_comment_tokens(toks, j);
+        }
+        if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LParen)) {
+            let mut depth = 0usize;
+            while j < toks.len() {
+                match &toks[j].kind {
+                    TokKind::LParen => depth += 1,
+                    TokKind::RParen => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j += 1;
+                            break;
+                        }
+                    }
+                    TokKind::Eof => return false,
+                    _ => {}
+                }
+                j += 1;
+            }
+        }
+        j = skip_comment_tokens(toks, j);
+        if !matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Pipe)) {
+            break;
+        }
+        j += 1;
+        j = skip_comment_tokens(toks, j);
+        if !matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Dot)) {
+            return false;
+        }
+        j = skip_comment_tokens(toks, j + 1);
+        if !toks
+            .get(j)
             .map(|t| leading_dot_variant_token(&t.kind))
             .unwrap_or(false)
-    {
-        j += 2;
-    }
-    if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LParen)) {
-        let mut depth = 0usize;
-        while j < toks.len() {
-            match &toks[j].kind {
-                TokKind::LParen => depth += 1,
-                TokKind::RParen => {
-                    depth -= 1;
-                    if depth == 0 {
-                        j += 1;
-                        break;
-                    }
-                }
-                TokKind::Eof => return false,
-                _ => {}
-            }
-            j += 1;
+        {
+            return false;
         }
+        j += 1;
     }
-    // D-IFDIST1: a braceless arm may add a Boolean guard after its variant
-    // payload (`.Key(key) && key == "b" -> ...`). Scan that guard only on its
-    // source line; an unrelated arrow on a later line must not turn a fluent
-    // chain into a new arm.
+    j = skip_comment_tokens(toks, j);
+    // D-IFDIST1: a braceless arm may add a Boolean guard after its complete
+    // structural head (`.Key(key) | .Other(key) && key == "b" -> ...`).
+    // Scan that guard only on its source line; an unrelated arrow on a later
+    // line must not turn a fluent chain into a new arm.
     if matches!(
         toks.get(j).map(|t| &t.kind),
         Some(TokKind::AndAnd | TokKind::OrOr)
@@ -270,7 +586,7 @@ fn result_handler_failure_starts_at(toks: &[Token], i: usize) -> bool {
 /// token is followed — across a line break — by a token that does not continue
 /// the line. `->` and `{` never trigger insertion (they must stay on the
 /// closing `)` line, S44); a split `-> Type` / `{` is E0986.
-fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnostic>) {
+fn insert_terminators_reference(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnostic>) {
     let bytes = src.as_bytes();
     let has_newline_between = |a: usize, b: usize| -> bool {
         a <= b && a <= bytes.len() && b <= bytes.len() && bytes[a..b].contains(&b'\n')
@@ -328,22 +644,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                         | TokKind::LBrace
                 ) && matches!(prev.kind, TokKind::RParen)
                 {
-                    let spelling = match &cur.kind {
-                        TokKind::UnifiedArrow => "->",
-                        TokKind::Arrow => ":>",
-                        TokKind::LambdaArrow => "=>",
-                        TokKind::Eq => "-[…]>",
-                        TokKind::MinusMinus => "-[…]>",
-                        _ => "{",
-                    };
-                    diags.push(Diagnostic::error(
-                        "E0986",
-                        format!("`{spelling}` must stay on the same line as the closing `)`"),
-                        "an arrow, effect row, or opening block continues the header on its line"
-                            .to_string(),
-                        format!("move `{spelling}` up to the `)` line"),
-                        Some(cur.span),
-                    ));
+                    diags.push(split_header_diagnostic(cur).expect("checked split-header kind"));
                     // Do not insert a terminator; let the parser keep going.
                 } else if (!suppresses_terminator(&cur.kind)
                     // D-DOTSCOPE1: a leading `.` normally continues a fluent chain

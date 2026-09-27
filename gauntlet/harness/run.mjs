@@ -2211,6 +2211,11 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     }
     const stagedSource = path.join(entryStage, language);
     await fs.cp(sourceDir, stagedSource, { recursive: true });
+    const fixtureState = path.join(stagedSource, "fixture-state");
+    if (await exists(fixtureState)) {
+      await fs.cp(fixtureState, path.join(stagedSource, ".jet"), { recursive: true });
+      await fs.rm(fixtureState, { recursive: true, force: true });
+    }
     if (fixture) await fs.cp(commonFixtures, path.join(stagedSource, "fixtures"), { recursive: true });
     for (const item of await fs.readdir(entryDir, { withFileTypes: true })) {
       if (!item.isFile() || item.name === "entry.json" || item.name === path.basename(expectedPath)) continue;

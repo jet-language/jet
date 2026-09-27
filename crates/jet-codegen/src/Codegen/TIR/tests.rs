@@ -1636,6 +1636,7 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items_with_boxed_edges(
         &[],
         "",
+        &jet_foundation::Layout::TargetLayout::host(),
         &HashSet::new(),
         &HashSet::new(),
         &HashSet::new(),
@@ -1677,7 +1678,11 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
 
 #[test]
 fn compiler_owned_default_err_is_a_struct_row() {
-    let declarations = super::tir_to_mir_types::lower_declarations_from_items(&[], "");
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[],
+        "",
+        &jet_foundation::Layout::TargetLayout::host(),
+    );
     let err = declarations
         .type_defs
         .iter()
@@ -1697,7 +1702,11 @@ fn compiler_owned_default_err_is_a_struct_row() {
 }
 #[test]
 fn compiler_owned_core_ui_registry_has_nominal_rows() {
-    let declarations = super::tir_to_mir_types::lower_declarations_from_items(&[], "");
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[],
+        "",
+        &jet_foundation::Layout::TargetLayout::host(),
+    );
     for entry in jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
@@ -2042,6 +2051,72 @@ fn mir_lowers_user_struct_and_instance_method() {
         );
     });
 }
+
+#[test]
+fn mir_resolves_same_named_methods_on_indexed_receivers() {
+    // The receiver place must select the checked owner, not the method leaf:
+    // both methods are named `mark`, and each call projects through a list
+    // element. Reverse the method declaration order so registry insertion
+    // order cannot choose the first matching leaf.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "\
+struct First { value: Int }
+struct Second { value: Int }
+fn Second.mark(&self, delta: Int) Int -> self.value + delta * 10
+fn First.mark(&self, delta: Int) Int -> self.value + delta
+fn run() {
+    firsts := [First]{ First{ value: 1 } }
+    seconds := [Second]{ Second{ value: 2 } }
+    first_value :: firsts[0].mark(3)
+    second_value :: seconds[0].mark(4)
+    print(\"{first_value}:{second_value}\")
+}
+";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("indexed same-name methods failed: {err:?}"));
+        mir.validate()
+            .unwrap_or_else(|err| panic!("indexed same-name MIR failed validate: {err}"));
+
+        let called_method_names = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "run" || function.name.ends_with("::run"))
+            .expect("run function")
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| match &instruction.operation {
+                jet_foundation::MIR::MirOperation::Call {
+                    callee: jet_foundation::MIR::MirCallee::Method { function, .. },
+                    ..
+                } => mir.functions.iter().find(|candidate| candidate.id == *function),
+                _ => None,
+            })
+            .map(|function| {
+                if function.name == "First::mark" || function.name.ends_with("::First::mark") {
+                    "First::mark".to_string()
+                } else if function.name == "Second::mark"
+                    || function.name.ends_with("::Second::mark")
+                {
+                    "Second::mark".to_string()
+                } else {
+                    function.name.clone()
+                }
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            called_method_names,
+            HashSet::from(["First::mark".to_string(), "Second::mark".to_string()])
+        );
+    });
+}
+
 
 #[test]
 fn mir_lowers_computed_field_getter_onto_inherent_impl() {
@@ -2875,9 +2950,9 @@ fn covers_comptime_const_in_interpolation() {
     // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
     // value into the interpolation operand, so this needs the full sema pass.
     let src = "\
-@header :: \"<html>\"
+@HEADER :: \"<html>\"
 fn wrap(s: String) String -> {
-    return \"{@header}: {s}\"
+    return \"{@HEADER}: {s}\"
 }
 fn run() {
     wrap(\"body\")
@@ -3224,9 +3299,9 @@ fn run() {
 
 #[test]
 fn covers_field_read_and_eq_on_inlined_comptime_values() {
-    // c109: a FIELD READ off a comptime-const struct value (`@pair_value ::
-    // Pair{…}`; then `@pair_value.left`) and an `==` against a comptime-const enum value
-    // (`@light_value :: Light.Green`; then `@light_value == Light.Green`). The const inlines to
+    // c109: a FIELD READ off a comptime-const struct value (`@PAIR_VALUE ::
+    // Pair{…}`; then `@PAIR_VALUE.left`) and an `==` against a comptime-const enum value
+    // (`@LIGHT_VALUE :: Light.Green`; then `@LIGHT_VALUE == Light.Green`). The const inlines to
     // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
     // inlined struct / comparing the inlined enum is byte-identical to the AST path.
     // The Field gate now admits a non-local comptime-const receiver.
@@ -3242,13 +3317,13 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair{left: 7, right: "seven"}
-@light_value :: Light.Green
+@PAIR_VALUE :: Pair{left: 7, right: "seven"}
+@LIGHT_VALUE :: Light.Green
 
 fn run() {
-    print("{@pair_value.left}")
-    print("{@pair_value.right}")
-    print("{@light_value == Light.Green}")
+    print("{@PAIR_VALUE.left}")
+    print("{@PAIR_VALUE.right}")
+    print("{@LIGHT_VALUE == Light.Green}")
 }
 "#;
     assert!(

@@ -162,6 +162,10 @@ pub mod Plugin;
 mod Statement;
 pub mod TIR;
 pub mod MIREval;
+#[doc(hidden)]
+pub mod NativeLoopCursor;
+#[doc(hidden)]
+pub mod NativePreludeBridge;
 mod Receipt;
 pub mod MIRRust;
 pub mod MIRWeb;
@@ -190,6 +194,7 @@ pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
 pub use Web::build_wasm_jet_source_map;
+pub(crate) use Web::canonical_web_raw_assets;
 
 /// Build the interpreter's bundle-wide Core alias map from the same import
 /// resolver used by AOT and JIT lowering. In particular, member-list imports
@@ -414,6 +419,9 @@ const PRELUDE_PARTS: &[&str] = &[
     // marshal pattern parts and project its values.
     include_str!("../../../jet-foundation/src/Prelude/MatchScan.rs"),
 ];
+const COLLECTIONS_PRELUDE_SOURCE: &str = include_str!("../Prelude/Core/Collections.rs");
+const LOOP_CURSOR_PRELUDE_SOURCE: &str = include_str!("../Prelude/Core/LoopCursor.rs");
+const LOOP_CURSOR_INCLUDE_MARKER: &str = "include!(\"LoopCursor.rs\");";
 
 const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
@@ -668,6 +676,26 @@ fn push_numeric_runtime(out: &mut String) {
     out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_numeric\n");
 }
 
+fn push_shared_numeric_kernels(out: &mut String) {
+    out.push_str(
+        "\n#[allow(non_snake_case, unused_imports, dead_code)]\n\
+         mod jet_exact_numeric {\n\
+         use crate::jet_foundation_numeric::CtBigInt as ExactBigInt;\n",
+    );
+    out.push_str(EXACT_NUMERIC_PRELUDE);
+    out.push_str("\n}\n");
+    out.push_str(
+        "\n#[allow(non_snake_case, unused_imports, dead_code)]\n\
+         mod jet_precise_numeric {\n\
+         use crate::jet_foundation_numeric::{\
+             CtBigInt as ExactBigInt, \
+             CtDecimal as ExactDecimal, \
+             CtFraction as ExactFraction};\n",
+    );
+    out.push_str(PRECISE_NUMERIC_PRELUDE);
+    out.push_str("\n}\n");
+}
+
 /// Native builders split this exact block into the content-addressed runtime
 /// rlib. Keep the markers stable: emitted Rust remains a complete standalone
 /// program, while the AOT link seam can replace the block with one `--extern`.
@@ -675,6 +703,29 @@ pub const CACHED_RUNTIME_BEGIN: &str = "// jet:cached-runtime-begin\n";
 pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
 pub const CACHED_CORE_BEGIN: &str = "// jet:cached-core-begin\n";
 pub const CACHED_CORE_END: &str = "// jet:cached-core-end\n";
+
+/// Collections.rs is also included directly by resident hosts. Expand its
+/// sibling kernel only while assembling a flat generated crate; leaving a
+/// filesystem-relative `include!` in emitted source would make AOT depend on
+/// the compiler checkout.
+fn push_collections_prelude(out: &mut String) {
+    let mut pieces = COLLECTIONS_PRELUDE_SOURCE.split(LOOP_CURSOR_INCLUDE_MARKER);
+    out.push_str(
+        pieces
+            .next()
+            .expect("Collections Prelude source split has a leading segment"),
+    );
+    if let Some(tail) = pieces.next() {
+        out.push_str(LOOP_CURSOR_PRELUDE_SOURCE);
+        out.push_str(tail);
+    } else {
+        panic!("Collections Prelude source is missing its cursor-kernel marker");
+    }
+    assert!(
+        pieces.next().is_none(),
+        "Collections Prelude source has duplicate cursor-kernel markers"
+    );
+}
 
 fn push_prelude(out: &mut String, devtools_enabled: bool, local_rail_enabled: bool) {
     // The typed MIR execution policy is lowered once into these constants.
@@ -690,9 +741,12 @@ fn jet_web_runtime_devtools_enabled() -> bool {{ JET_DEVTOOLS_RUNTIME_ENABLED }}
 fn jet_web_runtime_history_enabled() -> bool {{ JET_DEVTOOLS_LOCAL_RAIL_ENABLED }}\n"
     ));
     push_numeric_runtime(out);
+    push_shared_numeric_kernels(out);
     for part in PRELUDE_PARTS {
         if *part == DEVTOOLS_SOURCE {
             push_embedded_devtools(out);
+        } else if *part == COLLECTIONS_PRELUDE_SOURCE {
+            push_collections_prelude(out);
         } else {
             out.push_str(part);
         }
@@ -1790,6 +1844,10 @@ const RESOURCE_FACTS_PRELUDE: &str = concat!(
 
 const NUMERIC_FOUNDATION_SOURCE: &str =
     include_str!("../../../jet-foundation/src/Numeric.rs");
+const EXACT_NUMERIC_PRELUDE: &str =
+    include_str!("../Prelude/Core/ExactNumeric.rs");
+const PRECISE_NUMERIC_PRELUDE: &str =
+    include_str!("../Prelude/Core/PreciseNumeric.rs");
 
 
 
@@ -1810,6 +1868,12 @@ const JETSTD_COMMON_TYPES_PRELUDE: &str = concat!(
      // platform terminal handle seam inside this compiler-owned source.\n",
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_common_types\n",
+);
+const JETSTD_XML_OPTIONS_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_xml_options\n\
+     // AUDIT: D-ENC-XML-SURFACE1 keeps XML stream limits and policies shared\n+     // between the AOT Prelude and the resident JIT stream host.\n",
+    include_str!("../Prelude/CoreLib/JetStd/XmlOptions.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_std_xml_options\n",
 );
 const JETSTD_REACTIVE_EVENT_WATCH_PRELUDE: &str = concat!(
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_reactive_event_watch\n\
@@ -1837,7 +1901,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
-    MAPPED_FILE_PRELUDE,
+    JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
     // below and `Top/Sync.rs` both read it instead of re-deriving the rule (I9).
@@ -3120,6 +3184,7 @@ fn push_typed_core_optional_parts(
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
+        out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         out.push_str(include_str!("../Prelude/Core/CollectionIoSources.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));
@@ -3835,6 +3900,7 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
+        out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         out.push_str(include_str!("../Prelude/Core/CollectionIoSources.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));

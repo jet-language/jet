@@ -51,7 +51,7 @@ The named checks remain the owner-run work after the external blockers are repai
 - `docs/audits/mine-for-jet-2026-09-09.md:289-293` distinguishes SQLite regression, fault injection, crash/reopen simulation, fuzzing, semantic oracles, and coverage; it names #3000 as the storage crash/reopen owner.
 - The retained claim ledger records the gap and stop line: `docs/audits/mine-for-jet-2026-09-09.md:16181-16277` (fault seam, transaction/crash model, deterministic snapshot/reorder/drop model), and `:17218-17253` (no evidenced one-command crash/reopen path and the requirement to measure whether existing fixtures can express the smallest scenario).
 - `tests/effects.rs:78-116` is the existing deterministic `#Test(faults: [Fs.Write])` compile/effect harness. It proves deterministic selector propagation and fail-Nth enumeration for the existing effect/allocation rail; it does not model DB sync, crash snapshots, reopen, or power-loss ordering.
-- `Core/testing/testing.jet:79-90` retains bounded deterministic history enumeration. It is a reusable evidence primitive, not storage atomicity proof.
+- `Core/testing.jet:79-90` retains bounded deterministic history enumeration. It is a reusable evidence primitive, not storage atomicity proof.
 - Tower source refs remain the SQLite testing, VFS, and atomic-commit pages named on #3000. Their external semantics must not be silently converted into a Jet guarantee.
 
 ### Handoff and exact unknowns
@@ -76,7 +76,7 @@ The blocker is the absent, source-identified storage crash/reopen model and the 
 
 - Tower #3001 requires valid SQL/database generators, semantics-preserving transformations, corruption cases, and deterministic shrinkers through existing `core.testing.compare` and `ObservationRelation`; it forbids a second comparison engine and new public oracle API.
 - `docs/audits/mine-for-jet-2026-09-09.md:289-293` names semantic SQL fuzzing as distinct from crash-only fuzzing. The retained ledger rows `:16669-16711` require DB/data and SQL transformations through the existing comparison/oracle path and preserve semantic first differences.
-- `Core/testing/testing.jet:33-41` is the existing Core comparison surface. It returns a `TestComparison` for typed values; it is not an SQL executor.
+- `Core/testing.jet:33-41` is the existing Core comparison surface. It returns a `TestComparison` for typed values; it is not an SQL executor.
 - `Source/CmdTest.rs:261-301` parses the existing comparison record and relation; `:412-484` requires each case's `case_id`, `input_id`, `reference`, and `candidate`, with optional replay observations, mutation, seed, and declared equality. `:399-409` maps mismatch, invalid oracle, contaminated, empty, timeout, unsupported, and unavailable outcomes without turning them into passes.
 - `crates/jet-codegen/src/Prelude/CoreLib/Top/TestingComparison.rs:1-121` is the generated Prelude carrier for the same comparison machinery; it preserves typed failure/unavailable behavior rather than adding an SQL path.
 

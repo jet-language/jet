@@ -8,7 +8,8 @@
 #![allow(dead_code)]
 use super::{TirErasure, TirErasureReason};
 use crate::AST::{
-    AccessConvention, CLICommandBinding, ConstDef, CtValue, Dimension, DistinctDef, EnumDef, Expr,
+    AccessConvention, CLICommandBinding, ConstDef, CtValue, CEnumTag, Dimension, DistinctDef, EnumDef,
+    Expr,
     Field, Func, FunctionCallMetadata, ImplDef, InternalTag, Item, Marker, Measure, MeasureRule,
     Param, ParamZone, ProgramBundle, StructDef, StructLayout, TagMarker, TraitDef, TraitImplBlock,
     Type, TypeAliasDef, UnitFamilyDef, Variant, VariantPayload, ViewProvenanceMap, ViewSource,
@@ -16,12 +17,13 @@ use crate::AST::{
 };
 use crate::Diagnostics::Span;
 use jet_foundation::CanonicalPass;
-use jet_foundation::Layout::{LayoutAlignmentFact, TargetLayoutEngine};
+use jet_foundation::Layout::{LayoutAlignmentFact, LayoutFacts, TargetLayout, TargetLayoutEngine};
 use jet_foundation::MIR::{
     MirAccess, MirCallContractRow, MirCallMetadata, MirCallablePolicy, MirCallablePolicyChain,
-    MirCliBinding, MirCliCommand, MirCliEntry, MirDimension, MirDropKind, MirErasureReason,
-    MirField, MirFieldId, MirFunctionId, MirFunctionSignature, MirGenericParam, MirInternalTag,
-    MirMeasure, MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership, MirOwnershipMode,
+    MirCliBinding, MirCliCommand, MirCliEntry, MirCompilerBuiltin, MirCoreOwner, MirDimension,
+    MirErasureReason, MirField, MirFieldId, MirFunctionId, MirFunctionSignature, MirGenericParam,
+    MirInternalTag, MirMeasure, MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership,
+    MirOwnershipMode,
     MirParam, MirParamZone, MirSerdeAttribute, MirSerdeAttributeKind, MirStructLayout,
     MirTagMarker, MirTraitId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId,
     MirVariant, MirVariantPayload, MirViewProjection, MirViewProvenance, MirViewSource,
@@ -201,6 +203,10 @@ pub(super) struct TirTypeDef {
     pub must_use: bool,
     pub layout: Option<StructLayout>,
     pub layout_alignment: Option<LayoutAlignmentFact>,
+    /// Exact checked C enum tag representation; absent for non-C enums.
+    pub c_layout_tag: Option<CEnumTag>,
+    /// Exact target-layout facts for a checked C enum, including payload offsets.
+    pub enum_layout: Option<LayoutFacts>,
     pub serde: Vec<TirSerdeAttribute>,
     pub cli_bindings: Vec<TirCliBinding>,
     /// D-SHAPE-PROJECT1: `#CLI` input rows derived by the same entry schema
@@ -211,8 +217,24 @@ pub(super) struct TirTypeDef {
     /// producer is `Cx.boxed_edges`; declaration lowering carries the exact
     /// owner-local keys to MIR without recomputing them.
     pub boxed_edges: Vec<String>,
+    /// Exact compiler-owned marker carried from native registration.
+    pub compiler_builtin: Option<MirCompilerBuiltin>,
     pub kind: TirTypeDefKind,
 }
+fn lower_c_enum_tag(tag: CEnumTag) -> MirCEnumTag {
+    match tag {
+        CEnumTag::CInt => MirCEnumTag::CInt,
+        CEnumTag::U8 => MirCEnumTag::U8,
+        CEnumTag::I8 => MirCEnumTag::I8,
+        CEnumTag::U16 => MirCEnumTag::U16,
+        CEnumTag::I16 => MirCEnumTag::I16,
+        CEnumTag::U32 => MirCEnumTag::U32,
+        CEnumTag::I32 => MirCEnumTag::I32,
+        CEnumTag::U64 => MirCEnumTag::U64,
+        CEnumTag::I64 => MirCEnumTag::I64,
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub(super) struct TirSerdeAttribute {
@@ -394,6 +416,16 @@ pub(super) struct TirParam {
     pub default_present: bool,
 }
 
+/// Native TIR nominal references use the registered `mir-type` identity. Keep
+/// this constructor shared by ordinary Apply lowering and metadata rows that
+/// link to those exact emitted references.
+fn lower_nominal_ref(name: &str) -> MirNominalRef {
+    MirNominalRef {
+        id: MirTypeId(stable_id("mir-type", name)),
+        name: name.to_string(),
+    }
+}
+
 /// Project one checked source type into the canonical ABI-bearing type carrier.
 /// The semantic type key is deterministic and remains present on every MIR
 pub(super) fn lower_type(ty: &Type) -> MirType {
@@ -467,19 +499,12 @@ fn lower_type_kind(ty: &Type) -> jet_foundation::MIR::MirTypeKind {
         }),
         Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => lower_type_kind(
             &crate::AST::numeric_type_from_name(name).expect("numeric type name was checked"),
-        ),
         Type::Named(name) => MirTypeKind::Apply {
-            name: MirNominalRef {
-                id: MirTypeId(stable_id("mir-type", name)),
-                name: name.clone(),
-            },
+            name: lower_nominal_ref(name),
             args: Vec::new(),
         },
         Type::Apply { name, args } => MirTypeKind::Apply {
-            name: MirNominalRef {
-                id: MirTypeId(stable_id("mir-type", name)),
-                name: name.clone(),
-            },
+            name: lower_nominal_ref(name),
             args: args.iter().map(lower_type).collect(),
         },
         Type::TraitObject(bounds) => MirTypeKind::TraitObject(
@@ -1011,6 +1036,30 @@ fn lower_type_cli_entry(
     })
 }
 
+/// Project the native checker’s canonical Core owner registry into MIR.
+///
+/// The three names are registered by the native Syntax/Collections checking
+/// surface (and match Source `BuiltinOwners.jet`). `id` is the registered
+/// `mir-type` row identity; `nominal_id` is taken from the same native nominal
+/// constructor used by ordinary Apply lowering and is intentionally separate.
+pub(super) fn lower_core_builtin_owners() -> Vec<MirCoreOwner> {
+    [
+        crate::Syntax::TYPE_TASK,
+        crate::Syntax::TYPE_RECEIVER,
+        crate::Syntax::TYPE_SENDER,
+    ]
+    .into_iter()
+    .map(|name| MirCoreOwner {
+        id: MirTypeId(stable_id("mir-type", name)),
+        nominal_id: lower_nominal_ref(name).id,
+        module_id: None,
+        key: name.to_string(),
+        name: name.to_string(),
+        ownership: MirOwnershipMode::Owned,
+    })
+    .collect()
+}
+
 pub(super) fn lower_type_defs(
     definitions: &[TirTypeDef],
     registry: &super::mir::FunctionRegistry,
@@ -1142,6 +1191,7 @@ impl TirTypeDef {
             published_schema: self.published_schema,
             single_use: self.single_use,
             must_use: self.must_use,
+            compiler_builtin: self.compiler_builtin,
             layout: self.layout.as_ref().map(|layout| match layout {
                 StructLayout::C => MirStructLayout::C,
                 StructLayout::CAligned { alignment, target } => MirStructLayout::CAligned {
@@ -1150,6 +1200,8 @@ impl TirTypeDef {
                 },
                 StructLayout::Columnar => MirStructLayout::Columnar,
             }),
+            c_layout_tag: self.c_layout_tag.map(lower_c_enum_tag),
+            enum_layout: self.enum_layout.clone(),
             layout_alignment: self.layout_alignment.clone(),
             serde: self
                 .serde
@@ -1248,6 +1300,7 @@ pub(super) fn lower_tir_declarations(
     auto_debug_by_module: &BTreeMap<String, HashSet<String>>,
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
+    let target_layout = TargetLayout::from_build_facts(&bundle.build_facts);
     let empty_boxed_edges = HashSet::new();
     let empty_auto_printable = HashSet::new();
     let empty_auto_debug = HashSet::new();
@@ -1264,10 +1317,12 @@ pub(super) fn lower_tir_declarations(
             .unwrap_or(&empty_auto_debug);
         let seed_parse_error =
             !super::module_owned_type_names(&module.items).contains("ParseError");
+        let layout_engine = TargetLayoutEngine::new(&module.items, target_layout.clone());
         collect_items(
             &mut out,
             &module.items,
             &module_name,
+            &layout_engine,
             boxed_edges,
             auto_printable,
             auto_debug,
@@ -1280,11 +1335,15 @@ pub(super) fn lower_tir_declarations(
     ensure_builtin_debug_trait(&mut out);
     out
 }
-
-pub(super) fn lower_declarations_from_items(items: &[Item], module: &str) -> TirDeclarations {
+pub(super) fn lower_declarations_from_items(
+    items: &[Item],
+    module: &str,
+    target_layout: &TargetLayout,
+) -> TirDeclarations {
     lower_declarations_from_items_with_boxed_edges(
         items,
         module,
+        target_layout,
         &HashSet::new(),
         &HashSet::new(),
         &HashSet::new(),
@@ -1295,16 +1354,19 @@ pub(super) fn lower_declarations_from_items(items: &[Item], module: &str) -> Tir
 pub(super) fn lower_declarations_from_items_with_boxed_edges(
     items: &[Item],
     module: &str,
+    target_layout: &TargetLayout,
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
+    let layout_engine = TargetLayoutEngine::new(items, target_layout.clone());
     collect_items(
         &mut out,
         items,
         module,
+        &layout_engine,
         boxed_edges,
         auto_printable,
         auto_debug,
@@ -1342,6 +1404,7 @@ fn collect_items(
     out: &mut TirDeclarations,
     items: &[Item],
     module: &str,
+    layout_engine: &TargetLayoutEngine<'_>,
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
@@ -1349,7 +1412,6 @@ fn collect_items(
     seed_parse_error: bool,
     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) {
-    let layout_engine = TargetLayoutEngine::host(items);
     for item in items {
         match item {
             Item::Struct(definition) => {
@@ -1357,7 +1419,7 @@ fn collect_items(
                     definition,
                     module,
                     qualify_type,
-                    &layout_engine,
+                    layout_engine,
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
                     is_auto_debug(auto_debug, module, &definition.name),
@@ -1369,6 +1431,7 @@ fn collect_items(
                     definition,
                     module,
                     qualify_type,
+                    definition.c_layout_tag().map(|_| layout_engine.enum_facts(definition)),
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
                     is_auto_debug(auto_debug, module, &definition.name),
@@ -1527,11 +1590,13 @@ fn lower_struct(
         must_use: definition.is_must_use,
         layout: definition.layout.clone(),
         layout_alignment,
-        serde: lower_serde_markers(&definition.serde_markers),
+        c_layout_tag: None,
+        enum_layout: None,
         cli_bindings: lower_cli_bindings(&definition.cli_bindings, module),
         cli: None,
         ownership: ownership_for_definition(definition.is_single_use),
         boxed_edges: owner_boxed_edges(&definition.name, boxed_edges),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Struct {
             fields: definition
                 .fields
@@ -1583,6 +1648,7 @@ fn lower_enum(
     definition: &EnumDef,
     module: &str,
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+    enum_layout: Option<LayoutFacts>,
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: bool,
     auto_debug: bool,
@@ -1607,13 +1673,18 @@ fn lower_enum(
         published_schema: false,
         single_use: definition.is_single_use,
         must_use: definition.is_must_use,
-        layout: None,
+        layout: definition
+            .c_layout_tag()
+            .map(|_| StructLayout::C),
+        c_layout_tag: definition.c_layout_tag(),
+        enum_layout,
         layout_alignment: None,
         serde: lower_serde_markers(&definition.serde_markers),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: ownership_for_definition(definition.is_single_use),
         boxed_edges: owner_boxed_edges(&definition.name, boxed_edges),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Enum {
             variants: definition
                 .variants
@@ -1647,11 +1718,14 @@ fn lower_distinct(
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Distinct {
             base: qualify_type(&definition.base, &[]),
             range: definition.range.map(|(lo, hi, _)| (lo, hi)),
@@ -1686,11 +1760,14 @@ fn lower_alias(
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Alias {
             target: qualify_type(&definition.target, &binders),
         },
@@ -1714,11 +1791,14 @@ fn lower_unit_family(definition: &UnitFamilyDef, module: &str, auto_printable: b
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: None,
         kind: TirTypeDefKind::UnitFamily {
             members: definition
                 .distinct_defs()
@@ -2861,6 +2941,7 @@ fn compiler_owned_core_enums(
                     &definition,
                     module,
                     &identity,
+                    None,
                     &HashSet::new(),
                     false,
                     false,
@@ -2887,11 +2968,14 @@ fn compiler_owned_core_enums(
                 must_use: false,
                 layout: None,
                 layout_alignment: None,
+                c_layout_tag: None,
+                enum_layout: None,
                 serde: Vec::new(),
                 cli_bindings: Vec::new(),
                 cli: None,
                 ownership: TirOwnership::Owned,
                 boxed_edges: Vec::new(),
+                compiler_builtin: None,
                 kind: TirTypeDefKind::Enum {
                     variants: variants
                         .iter()
@@ -2972,11 +3056,14 @@ fn compiler_owned_default_err(module: &str) -> TirTypeDef {
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: Some(MirCompilerBuiltin::DefaultErr),
         kind: TirTypeDefKind::Struct {
             fields: vec![
                 field("message", Type::String),
@@ -3013,11 +3100,14 @@ fn compiler_owned_record(
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Struct {
             fields: fields
                 .into_iter()
@@ -3105,11 +3195,14 @@ fn compiler_owned_vjp_run(module: &str) -> TirTypeDef {
         must_use: false,
         layout: None,
         layout_alignment: None,
+        c_layout_tag: None,
+        enum_layout: None,
         serde: Vec::new(),
         cli_bindings: Vec::new(),
         cli: None,
         ownership: TirOwnership::Owned,
         boxed_edges: Vec::new(),
+        compiler_builtin: None,
         kind: TirTypeDefKind::Struct {
             fields: vec![
                 field("value", Type::Named("Tensor".to_string())),
@@ -3225,11 +3318,14 @@ fn compiler_owned_type_defs<'a>(
             must_use: false,
             layout: None,
             layout_alignment: None,
+            c_layout_tag: None,
+            enum_layout: None,
             serde: Vec::new(),
             cli_bindings: Vec::new(),
             cli: None,
             ownership: TirOwnership::Owned,
             boxed_edges: Vec::new(),
+            compiler_builtin: None,
             kind: TirTypeDefKind::Enum {
                 variants: variants
                     .iter()

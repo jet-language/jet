@@ -66,16 +66,16 @@ pub struct VjpRun {
     pub gradient: Tensor
 }
 
-c_max_tensor_elements :: 16777216
-f32_max_limit :: 3.4028234663852886e38
-pivot_tolerance :: 0.000000000000001
-two_pi :: 6.283185307179586
-profile_f64_value :: "F64Strict+Reproducible"
-profile_f32_value :: "F32Strict+Reproducible"
-profile_f32_receipt_value :: "backend=cpu-oracle;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;dispatch=scalar;vector_width=1;tail=scalar;cache=none"
-abilities_f64_json :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"reproducible-reduction\", \"differential-oracle\"]"
-abilities_f32_json :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
-c_mask64 :: 18446744073709551615
+C_MAX_TENSOR_ELEMENTS :: 16777216
+F32_MAX_LIMIT :: 3.4028234663852886e38
+PIVOT_TOLERANCE :: 0.000000000000001
+TWO_PI :: 6.283185307179586
+PROFILE_F64_VALUE :: "F64Strict+Reproducible"
+PROFILE_F32_VALUE :: "F32Strict+Reproducible"
+PROFILE_F32_RECEIPT_VALUE :: "backend=cpu-oracle;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;dispatch=scalar;vector_width=1;tail=scalar;cache=none"
+ABILITIES_F64_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"reproducible-reduction\", \"differential-oracle\"]"
+ABILITIES_F32_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
+C_MASK64 :: 18446744073709551615
 
 pub fn device_cpu() -> ComputeDevice { ComputeDevice{kind: "CPU", index: 0} }
 pub fn device_auto() -> ComputeDevice { ComputeDevice{kind: "Auto", index: 0} }
@@ -756,15 +756,15 @@ pub fn stream_sync(stream: ComputeStream) !ComputeError {
     return
 }
 
-fn c_profile_f64() -> String !Never { profile_f64_value }
-fn c_profile_f32() -> String !Never { profile_f32_value }
-fn c_profile_f32_receipt() -> String { profile_f32_receipt_value }
-fn c_abilities_f64() -> String { abilities_f64_json }
-fn c_abilities_f32() -> String { abilities_f32_json }
-fn c_max_elements() -> Int !Never { c_max_tensor_elements }
-fn c_f32_max() -> Float !Never { f32_max_limit }
-fn c_pivot_tolerance() -> Float !Never { pivot_tolerance }
-fn c_two_pi() -> Float !Never { two_pi }
+fn c_profile_f64() -> String !Never { PROFILE_F64_VALUE }
+fn c_profile_f32() -> String !Never { PROFILE_F32_VALUE }
+fn c_profile_f32_receipt() -> String { PROFILE_F32_RECEIPT_VALUE }
+fn c_abilities_f64() -> String { ABILITIES_F64_JSON }
+fn c_abilities_f32() -> String { ABILITIES_F32_JSON }
+fn c_max_elements() -> Int !Never { C_MAX_TENSOR_ELEMENTS }
+fn c_f32_max() -> Float !Never { F32_MAX_LIMIT }
+fn c_pivot_tolerance() -> Float !Never { PIVOT_TOLERANCE }
+fn c_two_pi() -> Float !Never { TWO_PI }
 
 fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor !Never {
     Tensor{shape: shape, data: data, device: tensor_device_name(device), numeric_profile: profile}
@@ -1223,7 +1223,7 @@ fn c_min_int() -> Int !Never { -9223372036854775807 - 1 }
 fn wire_checksum(body: String) -> String !ComputeError {
     hash := 14695981039346656037
     loop byte in body.bytes() {
-        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & c_mask64
+        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & C_MASK64
     }
     fmt.hex(hash, 16) ?? return Err(ComputeError.Serialization)
 }

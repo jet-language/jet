@@ -1,9 +1,9 @@
 // core.web.query — typed live-query state and mutation transitions.
-c_max_query_key :: 256
+C_MAX_QUERY_KEY :: 256
 
-c_max_query_payload :: 1048576
+C_MAX_QUERY_PAYLOAD :: 1048576
 
-c_max_query_subscribers :: 1000000
+C_MAX_QUERY_SUBSCRIBERS :: 1000000
 
 
 #Error
@@ -69,10 +69,10 @@ pub fn new(key: String, initial: WebQuerySeed) -> WebQuery {
     if generation < 1 -> generation = 1
     subscribers := initial.subscribers
     if subscribers < 0 -> subscribers = 0
-    if subscribers > c_max_query_subscribers -> subscribers = c_max_query_subscribers
+    if subscribers > C_MAX_QUERY_SUBSCRIBERS -> subscribers = C_MAX_QUERY_SUBSCRIBERS
     status := WebQueryStatus.Fresh
     error := ""
-    if !valid_key(key) || initial.data.len() > c_max_query_payload {
+    if !valid_key(key) || initial.data.len() > C_MAX_QUERY_PAYLOAD {
         status = WebQueryStatus.Error
         error = "invalid"
     }
@@ -84,7 +84,7 @@ pub fn live(key: String, data: String, url: String, loader: fn() -> String) -> W
     if url.len() > 0 -> loaded = loader()
     status := WebQueryStatus.Fresh
     error := ""
-    if !valid_key(key) || loaded.len() > c_max_query_payload {
+    if !valid_key(key) || loaded.len() > C_MAX_QUERY_PAYLOAD {
         status = WebQueryStatus.Error
         error = "invalid"
     }
@@ -151,7 +151,7 @@ pub fn cancel(q: &WebQuery) -> Bool {
 }
 
 pub fn queue(q: &WebQuery, data: String) -> Int !WebQueryError {
-    if data.len() > c_max_query_payload -> return Err(WebQueryError.Invalid)
+    if data.len() > C_MAX_QUERY_PAYLOAD -> return Err(WebQueryError.Invalid)
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     q.data = ~data
     q.status = WebQueryStatus.Pending
@@ -179,7 +179,7 @@ pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String)
     }
     if expected != None {
         actual :: expected
-        if actual.len() > c_max_query_payload || actual != q.data {
+        if actual.len() > C_MAX_QUERY_PAYLOAD || actual != q.data {
             q.status = WebQueryStatus.Error
             q.error = "conflict"
             q.generation = q.generation + 1
@@ -195,7 +195,7 @@ pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String)
     q.status = WebQueryStatus.Pending
     q.error = ""
     next := mutation(q.data)
-    if next.len() > c_max_query_payload {
+    if next.len() > C_MAX_QUERY_PAYLOAD {
         q.status = WebQueryStatus.Error
         q.error = "payload"
         q.generation = q.generation + 1
@@ -212,7 +212,7 @@ pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String)
 }
 
 pub fn mutate_with_invalidations(q: &WebQuery, key: String, expected: ?String, invalidations: [String], mutation: fn(String) -> String) -> WebMutationState {
-    if invalidations.len() > c_max_query_subscribers {
+    if invalidations.len() > C_MAX_QUERY_SUBSCRIBERS {
         q.status = WebQueryStatus.Error
         q.error = "invalidations"
         q.generation = q.generation + 1
@@ -263,7 +263,7 @@ pub fn facts(q: WebQuery) -> String {
 }
 
 fn valid_key(key: String) -> Bool {
-    if key.len() == 0 || key.len() > c_max_query_key -> return false
+    if key.len() == 0 || key.len() > C_MAX_QUERY_KEY -> return false
     loop b in key.bytes() {
         n :: Int.from_u8(b)
         if n < 33 || n == 127 -> return false

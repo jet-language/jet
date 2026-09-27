@@ -18,6 +18,9 @@ myConst :: Task{create_task(2, closed)}
 ```
 I want a jet-native tool that functions like convexdb as an excellent, world class sync engine https://youtu.be/pRf8_40EDtM?si=f809dRgc4BAv-gfj
 
+-> FastAPI Video
+> I like the potential idea of nested namespaces for markers like python decorators, where to make a rest api app, you can use @app.get(...), @app.post(...), etc. which is imported, then you can create the api with something like FastAPI(app, ...). Seems like overall very nice ux. 
+
 Building A Programming Language Playlist -> Mine entire playlist
 https://youtube.com/playlist?list=PLET80Nvdg3mg&si=we8LZwmFSPfQnOkA
 > What can we learn from this playlist & apply to jet? What strengths, weaknesses, opportunities, and threats do we have. What can we adopt from these videos at a strategic, operational, and tactical level? What features,functions/methods, ideas, structures, components, libraries, keywords, facets, etc. can we learn from this playlist & the experience of building a language from scratch?

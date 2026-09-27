@@ -1,19 +1,19 @@
-@limit :: 1000
+@LIMIT :: 1000
 
-@base :: 10
+@BASE :: 10
 
 fn run() {
     // D-META-STAGE1=B: `@ { … }` runs in the comptime interpreter and emits
     // no runtime Rust (I3). Its local known bindings can be spliced afterward.
     // Build-time assertion: verify constants are valid before compiling.
     @ {
-        @ratio :: @limit /% @base
+        @ratio :: @LIMIT /% @BASE
         if @ratio < 1 -> panic("limit must be >= base")
     }
     // The block ran at build time and produced no runtime code. Its comptime
     // binding leaks into the surrounding comptime scope, so `@ratio` splices a
     // runtime literal.
-    print("limit: {@limit}")
-    print("base: {@base}")
+    print("limit: {@LIMIT}")
+    print("base: {@BASE}")
     print("ratio: {@ratio}")
 }

@@ -1,3 +1,59 @@
+// Mapped-file authority is shared by every filesystem adapter.  A writer must
+// consult this registry before truncating or replacing a path while a mapped
+// read owner is live.
+static JET_MAPPED_PATHS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+
+pub(crate) fn jet_mapped_path_key(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| std::path::PathBuf::from(path))
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub(crate) fn jet_mapped_register(key: &str) {
+    let mut paths = JET_MAPPED_PATHS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *paths.entry(key.to_owned()).or_insert(0) += 1;
+}
+
+pub(crate) fn jet_mapped_unregister(key: &str) {
+    let mut paths = JET_MAPPED_PATHS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match paths.get_mut(key) {
+        Some(count) if *count > 1 => *count -= 1,
+        Some(_) => {
+            paths.remove(key);
+        }
+        None => {}
+    }
+}
+
+pub(crate) fn jet_mapped_path_is_live(path: &str) -> bool {
+    let key = jet_mapped_path_key(path);
+    let paths = JET_MAPPED_PATHS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    paths.get(&key).copied().unwrap_or(0) != 0
+}
+
+/// Shared writer-policy fact returned before any adapter constructs its
+/// tier-specific IOError carrier.
+pub(crate) struct JetMappedWriterRefusal {
+    pub(crate) path: String,
+    pub(crate) reason: &'static str,
+}
+
+pub(crate) fn jet_mapped_writer_refusal(path: &str) -> Option<JetMappedWriterRefusal> {
+    jet_mapped_path_is_live(path).then(|| JetMappedWriterRefusal {
+        path: path.to_owned(),
+        reason: "file is mapped read-only",
+    })
+}
+
 /// D-ABILITY-NAME2=A: the one named Authority value that crosses boundaries.
 /// Authority remains ordinary data; every engine calls
 /// the helpers below instead of keeping a second policy implementation.

@@ -817,9 +817,9 @@ fn comptime_if_selected_branch() {
         return;
     }
     let src = "\
-@debug :: false
+@DEBUG :: false
 fn pick(x: Int) Int -> {
-    @if @debug {
+    @if @DEBUG {
         return x + 100
     } else {
         return x + 1

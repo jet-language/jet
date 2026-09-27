@@ -1,44 +1,61 @@
 # Core API ergonomic laws (D-STDRUBRIC1=A)
 
-This rubric governs Core API additions. Every new function, method, or type must
-pass each law before landing. Existing drift does not become an exception.
+This specification is for Core API authors and reviewers. It defines the
+naming, failure, ownership, effects, allocation, diagnostics, and evidence
+rules for a public function, method, or type. The executable surface lives in
+[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet) and the Jet source
+under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
+[`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). The
+[Core surface ledger test](../../tests/core_surface_ledger.rs) and its
+[checker](../../scripts/agent/check-core-surface-ledger.mjs) provide focused
+machine checks; runnable examples live under
+[`examples/features/`](../../examples/features/). API names follow the
+[Jet vocabulary](vocabulary.md) for streams, readers, and events.
 
-The talks add two review questions: is this function honest—does its projected
-effect row plus signature tell the complete story? Does its body stay at one
-level of abstraction—if it zooms into character codes or hand-rolls a search,
-that work belongs in a named brick? These are review prompts, not new
-mechanisms; I8 is unchanged. The [2026-08-21 function-design canon mining
-report](reference/prior-art.md#function-design-canon) records the Logan
-Smith video and its three linked sources.
+These are review laws, not a second API catalog. A new declaration must pass
+the laws even when an older declaration does not; existing drift is not an
+exception.
 
----
+At function review, ask two questions. Does the projected effect row plus the
+signature tell the complete story? Does the body stay at one abstraction
+level? Character-code work or a hand-written search inside a higher-level
+helper belongs in a named lower-level brick. These prompts align the contract
+with the implementation; they do not add a second mechanism.
 
 ## Law 1 — Naming
 
-- Names are plain English words, not abbreviations (`remove`, not `rm`).
-  Blessed exceptions (closed list, D-API-LEN1=A; ballot to extend): `len`,
-  and the module names `fmt`, `args`, and `mem`.
-- Membership predicates are `has(value)` / `has_key(key)` (D-API-CONTAINS1=B).
-- Storage uses `add`: keyed `add(key, value)` returns the displaced value, keyed
-  `add_new(key, value)` never overwrites and returns whether it stored, and element
-  `add(value)` returns whether it added a new element (D-API-STORE1=A).
-- `List.remove(value)` removes the first equal value by default; pass `.Slot` for
-  positional removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or
-  `remove_at` spellings.
-- Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, and
-  `contains` when the job is content search.
-- Failure-returning variants add no suffix; the `?` return type signals failure.
-- Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's
-  components; `Type.new(…)` for fresh stateful containers; `Type.over(x)` for non-owning
-  views over existing data; `Type.from_*(x)` for conversions. `Type{ }` stays the
-  literal for plain data records (D-DOTCTOR1). New construction shapes need a ballot.
-- Standard acronyms stay fully capitalized per S66 (`JSONDecoder`, `HTTPClient`,
-  `IOError`, `UTF8Error`). Do not add PascalCase aliases.
+Use plain English words rather than abbreviations (`remove`, not `rm`). The
+closed exception list is `len`, plus the module names `fmt`, `args`, and `mem`
+(D-API-LEN1=A; a ballot is required to extend it).
+
+Use `has(value)` and `has_key(key)` for membership predicates
+(D-API-CONTAINS1=B). Use `add` for storage: keyed `add(key, value)` returns the
+displaced value, keyed `add_new(key, value)` never overwrites and reports
+whether it stored, and element `add(value)` reports whether it added a new
+element (D-API-STORE1=A).
+
+`List.remove(value)` removes the first equal value. Pass `.Slot` for positional
+removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or `remove_at`
+spellings. Prefix Boolean predicates (`is_empty`, `has_prefix`); use
+`contains` when the job is content search. A failure-returning variant adds no
+name suffix: its `!Error` contract signals failure.
+
+Use these constructor forms (D-API-CTOR1=A):
+
+- `Type(args)` when the arguments are the value's components;
+- `Type.new(...)` for a fresh stateful container;
+- `Type.over(x)` for a non-owning view over existing data;
+- `Type.from_*(x)` for a conversion;
+- `Type{ ... }` for a plain-data record (D-DOTCTOR1).
+
+A new construction shape requires a ballot. Keep standard acronyms fully
+capitalized under S66 (`JSONDecoder`, `HTTPClient`, `IOError`, `UTF8Error`);
+do not add PascalCase aliases.
 
 ### Collection verb table (D-ONCE-VERB1=A)
 
-This table is the one review truth row for collection verbs. Reference docs and
-API reviews render this row; they do not create a second verb list.
+This is the single review table for collection verbs. Reference pages and API
+reviews may render it, but they must not create another verb list.
 
 | Job | List | Map | Set | Queue | PriorityQueue |
 | --- | --- | --- | --- | --- | --- |
@@ -48,226 +65,233 @@ API reviews render this row; they do not create a second verb list.
 | membership | — | `has_key(key)` | `has(value)` | — | — |
 | content search | — | `contains_value(value)` | — | `contains(value)` | — |
 
-Text and Bytes also use `contains` for content search.
-
-Conversion naming follows the same law: bare `.from(source)` is the generic
-conversion form; a source-qualified conversion names its source, such as
-`.from_keys(keys, default)` or `.from_bytes(bytes)`. Do not add a second bare
-or source-qualified spelling for the same conversion.
+Text and Bytes also use `contains` for content search. Conversion naming uses
+the same rule: bare `.from(source)` is the generic form; a source-qualified
+conversion names its source, such as `.from_keys(keys, default)` or
+`.from_bytes(bytes)`. Do not add a second bare or source-qualified spelling for
+the same conversion.
 
 ## Law 2 — Fallibility
 
-- A function that can legitimately fail returns `T !E`; never panics on expected failure.
-- Panics are reserved for programmer error (index out of bounds on a known-size slice).
-- The error type must carry enough context to write a helpful error message without
-  inspecting source code (no opaque integer codes).
-- Use the most specific error type available; `Err` (the default error) is a
-  last resort for heterogeneous error paths.
+Return `T !E` when an operation can legitimately fail; do not panic for an
+expected failure. For example, a parser returns a typed error rather than
+using a sentinel or terminating the process. Reserve panics for programmer
+errors such as indexing outside a known-size slice.
 
-## Law 3 — Ownership / allocation
+An error carries enough context for a useful diagnostic without source-code
+inspection. Prefer the most specific error type available; use `Err` only as
+the last resort for a heterogeneous set of failure paths.
 
-- Functions that only read a value take bare `T`; unmarked read access is enforced
-  and never elevates.
-- Functions that return a new allocation return by value; they do not write into a
-  caller-supplied buffer unless the API is explicitly a low-allocation path.
-- Mutation is visible: a function that mutates a value takes `&T`; ownership
-  transfer takes `^T`.
-- `#SingleUse` types must be documented with the invariant they enforce.
+## Law 3 — Ownership and allocation
+
+A read-only function takes bare `T`; an unmarked read access never elevates.
+Return a new allocation by value. Do not write into a caller-supplied buffer
+unless the API is explicitly a low-allocation path.
+
+Make mutation visible: a mutating function takes `&T`, while ownership
+transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
+type.
 
 ## Law 4 — Effects
 
-- I/O effects are declared with the right effect row (`-[FS]>`, `-[Net]>`,
-  `-[Exec]>`, etc.).
-- Pure functions carry no effect markers; the compiler enforces this.
-- A function that performs multiple effects lists all of them; no hidden IO.
-- Comptime eligibility follows the shared effect fact: an empty effect set is
-  Tier 0, and recorded Tier-1 inputs are locked for reproducibility.
+Declare I/O with the corresponding effect row, such as `-[FS]>`, `-[Net]>`, or
+`-[Exec]>`. A pure function has no effect marker, and the compiler enforces
+that boundary. A function that performs several effects lists all of them;
+none may be hidden in an apparently pure signature.
+
+Comptime eligibility uses the shared effect fact: an empty effect set is Tier 0,
+and recorded Tier-1 inputs are locked for reproducibility.
 
 ## Law 5 — Allocation budget
 
-- Hot-path functions note their allocation profile in a doc comment when non-obvious
-  (e.g. "allocates one Vec per call; prefer the iterator form for large inputs").
-- Streaming/iterator APIs are provided alongside any collect-to-list shorthand.
-- No function silently allocates unboundedly without the caller being able to observe
-  or bound it (no hidden `collect()` inside an apparently O(1) function).
+When a hot-path allocation profile is not obvious, state it in a doc comment
+(for example, “allocates one collection per call; prefer the iterator form for
+large inputs”). Provide a streaming or iterator API beside a collect-to-list
+shorthand.
+
+Do not hide an unbounded allocation in a function that looks O(1). The caller
+must be able to observe or bound the allocation.
 
 ## Law 6 — Diagnostics and fix hints
 
-- Every fallible function uses a prefix contract (`?T !E`, `!E`, or the omitted implicit `Err` contract) and has at least one corresponding UI snapshot
-  showing the error message a user sees when misusing it (I4).
-- Error messages follow the voice and format in `docs/spec/diagnostics.md`:
-  what happened, why it happened, how to fix it.
-- When a type or method is `#MustUse`, the diagnostic names the missed call.
+Every fallible API writes an explicit success/error contract (`T !E`, or `!E`
+for a no-value success path) or deliberately uses the language's implicit
+`Err` contract. Contextual propagation uses `?(text)` where a call-site reason
+is needed. Each expected misuse has a corresponding UI snapshot showing the
+message a user sees (I4).
+
+Messages follow the voice and format in
+[`diagnostics.md`](diagnostics.md): state what happened, why it happened, and
+how to fix it. When a type or method is `#MustUse`, name the missed call in the
+diagnostic.
 
 ## Law 7 — Examples
 
-- Every new type has at least one runnable example in `examples/features/` with
-  golden-tested expected output (I5).
-- Examples use real-world plausible names (not `foo`, `bar`, `x`).
-- Examples show the happy path first, error handling second.
+Give every new type a runnable example under `examples/features/` with
+golden-tested expected output (I5). Use plausible domain names rather than
+`foo`, `bar`, or opaque placeholders. Show the successful path first and
+failure handling second.
 
 ## Law 8 — One way to mean it (I8)
 
-- Before adding a new API, search for an existing one that covers the same semantic
-  job. If one exists, extend or document it; do not add a second spelling.
-- Convenience shorthand methods are acceptable if they compose existing primitives
-  without adding new behavior (e.g. `slice.first()` over an optional `slice[0]` result).
+Before adding an API, search for an existing API that covers the same semantic
+job. Extend or document that API instead of adding a second spelling. A
+convenience shorthand is acceptable when it only composes existing primitives
+and adds no behavior, such as `slice.first()` over an optional `slice[0]`
+result.
 
 ## Law 9 — Sibling methods stay the house style (D-STDLIB-OPTPARAM1=A)
 
-Use named sibling methods when variants make a different semantic choice.
-Keep each method's parameter list honest and make the common operation the
-short, canonical spelling. Do not add a mode parameter or preserve an alias
-for the same operation.
+Use named sibling methods when variants make different semantic choices. Keep
+each parameter list honest and make the common operation the short canonical
+spelling. Do not add a mode parameter or preserve an alias for the same
+operation.
 
 ```jet
-text.replace("a", "b")                         // every match
-text.replace_first("a", "b")                   // at most one match
+text.replace("a", "b")
+text.replace_first("a", "b")
 ```
 
-The full codec matrix keeps genuinely different signatures visible in names such
-as `read_i16_le` and `read_f64_be`. A callback replacement remains a separate
-method because its parameter and control shape differ.
+The codec matrix keeps genuinely different signatures visible in names such as
+`read_i16_le` and `read_f64_be`. A callback replacement is a separate method
+because its parameter and control shape differ.
 
 ## Signature-honesty review rows
 
 | Row | Core API rule |
 | --- | --- |
-| Weakest-guarantee parameters | Ask only for the guarantee the function uses: unmarked read access for reading, `Iterable` for iteration, and a view for a window. Never require a concrete container when iteration is enough. If a strong guarantee is needed, require its proof type, such as a proven range, typestate, or unit, instead of a prose precondition. |
-| Calculate/do split | Separate calculation from effects. Expose an effect-free sibling that returns data, takes a callback, or returns an `Iter` when materializing costs too much. The effectful convenience wraps that sibling and uses the same Prelude operation. |
+| Weakest-guarantee parameters | Ask only for the guarantee used: unmarked read access for reading, `Iterable` for iteration, and a view for a window. Do not require a concrete container when iteration is sufficient. If a strong guarantee is needed, require its proof type, such as a proven range, typestate, or unit, rather than a prose precondition. |
+| Calculate/do split | Separate calculation from effects. Expose an effect-free sibling that returns data, accepts a callback, or returns an `Iter` when materialization is too expensive. The effectful convenience wraps that sibling and uses the same Prelude operation. |
 | No hidden-lookup APIs | Take the value, not a name plus an ambient registry. Resolve a name at the caller, where the registry is explicit. |
 
 ### Print family (D-ONCE-PRINT1=A)
 
-The family has one job per spelling. Beginners learn ambient `print` first.
+Give each spelling one job. Beginners learn ambient `print` first.
 
 | Spelling | Job | Default or disposition |
 | --- | --- | --- |
 | `print(value, ...)` | Display each value and end each line. | Beginner default; no import. |
-| `term.print(value, ...)` | The same one-line-per-value print through `core.term`. | Qualified twin for `#NoPrelude` files. |
-| `term.println(value)` | No distinct job from `term.print`. | Retired; `jet fmt` and `jet fix` rewrite it to `term.print`. |
-| `term.sprint(value)` | No distinct job from interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value}"`. |
-| `term.repr(value)` | No distinct job from debug interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value:Debug}"`. |
+| `term.print(value, ...)` | The same one-line-per-value operation through `core.term`. | Qualified twin for `#NoPrelude` files. |
 
-Interpolation is the string-building mechanism. `:Debug` selects the existing
-debug representation selector; it is not a second print API.
+Interpolation builds a string. `:Debug` selects the existing debug
+representation selector; it is not another print API.
 
----
+## Review record
 
-When reviewing a new or changed Core API, use this checklist. Record the real
-call sites, defaults, options audit, and required evidence in the review
-system; this page supplies the laws.
+Record the real call sites, defaults, options audit, and required evidence in
+the review system. This page supplies the laws; it does not replace a call-site
+review.
 
-```
-## Core API review
+| Field | Required record |
+| --- | --- |
+| Function/type | The declaration under review. |
+| Ratified decision(s) | The applicable `D-...` or `S-...` citations. |
+| Changed call sites | File, line, and the call read aloud. |
+| Defaults rows | The matching rows below, or `none`. |
+| D4 audit | Scope, result, and every exception. |
+| Exception disposition | A ratified policy, or `none`. |
+| Required evidence | Example, diagnostic snapshot, and focused proof. |
 
-Function/type: `<name>`
-Ratified decision(s): <D-XXX / S-YYY>
-Changed call sites: <file:line and the call read aloud>
-Defaults rows: <table rows or `none`>
-D4 audit: <scope, result, and every exception>
-Exception disposition: <ratified policy or `none`>
-Required evidence: <example, diagnostic snapshot, and focused proof>
+Use the following review questions. Their IDs are stable citations for review
+receipts.
 
-- [ ] `L1` Naming is plain English, predicate-prefixed, and uses S66 acronyms.
-- [ ] `L2` Fallibility is in the return type; panic is only for programmer error.
-- [ ] `L3` View, ownership, and mutation are explicit.
-- [ ] `L4` All access markers and effects are declared.
-- [ ] `L5` Non-obvious allocation is budgeted and the streaming form is present.
-- [ ] `L6` Every error path has the required diagnostic copy and UI snapshot.
-- [ ] `L7` A golden-tested example exists under `examples/features/`.
-- [ ] `L8` No duplicate API or overload family remains.
-- [ ] `L9` Same-subject variants with the same result and safety shape use one
-      root method with a safe default and a label-only option enum. Keep a
-      sibling only when the parameter list, result shape, fallibility, or
-      safety differs; name that distinct job plainly.
-- [ ] `Weakest-guarantee parameters` pass.
-- [ ] `Calculate/do split` passes.
-- [ ] `No hidden-lookup APIs` pass.
-- [ ] `C1` The actual call site is useful and was judged before the declaration.
-- [ ] `C2` Required values are positional; ambiguous or uncommon options are labeled.
-- [ ] `C3` The common dataflow reads left to right through methods and `?`.
-- [ ] `D1` The bare call performs the safest common operation with no setup ceremony.
-- [ ] `D2` Every magic default has one row here and an explicit override.
-- [ ] `D3` Defaulted labeled options replace option-only overloads.
-- [ ] `D4` Every policy option is a dedicated enum; no Boolean or bare-string flag remains.
-- [ ] `F1` Expected failure is `T !E`, and propagation is contextual `?(text)`.
-- [ ] `F2` Every lookup returns `?T`; no sentinel, empty-status, or follow-up status check remains.
-- [ ] `F3` Every failure says what happened, why, and how to fix it.
-- [ ] `T1` Domain values use domain types while obvious beginner literals work at the boundary.
-- [ ] `T2` Core values are immutable; mutation belongs to containers.
-- [ ] `T3` Distinct concepts have distinct types and one simple entry door.
-- [ ] `N1` The name follows the one subject-first grammar.
-- [ ] `N2` Pure and mutating operations use their systematic noun/past-participle and imperative pairs.
-- [ ] `L-A` The I/O domain has both a whole-value call and its streaming seam.
-- [ ] `L-B` Concrete containers are eager; `.lazy` uses the same adapter vocabulary.
-- [ ] `L-C` A new container implements the one iteration protocol and inherits its adapters.
-- [ ] `L-D` Beginner presets compose expert primitives instead of forking them.
-- [ ] `E1` Superseded spellings and implementations are deleted in this change.
-- [ ] `E2` A measured gap-filler is absorbed with the useful wrapper defaults.
-```
+| ID | Review question |
+| --- | --- |
+| L1 | Naming is plain English, predicate-prefixed, and uses S66 acronyms. |
+| L2 | Fallibility is in the return contract; panic is only for programmer error. |
+| L3 | View, ownership, and mutation are explicit. |
+| L4 | All access markers and effects are declared. |
+| L5 | Non-obvious allocation is budgeted and the streaming form is present. |
+| L6 | Every error path has the required diagnostic copy and UI snapshot. |
+| L7 | A golden-tested example exists under `examples/features/`. |
+| L8 | No duplicate API or overload family remains. |
+| L9 | Same-subject variants with the same result and safety shape use one root method with a safe default and a label-only option enum. Keep a sibling only when the parameter list, result shape, fallibility, or safety differs; name that distinct job plainly. |
+| Weakest-guarantee parameters | The declaration asks for the weakest sufficient guarantee. |
+| Calculate/do split | Pure calculation is separate from effectful convenience. |
+| No hidden-lookup APIs | Registry lookup is explicit at the call site. |
+| C1 | The actual call site is useful and was judged before the declaration. |
+| C2 | Required values are positional; ambiguous or uncommon options are labeled. |
+| C3 | Common dataflow reads left to right through methods and `?`. |
+| D1 | The bare call performs the safest common operation without setup ceremony. |
+| D2 | Every magic default has one row here and an explicit override. |
+| D3 | Defaulted labeled options replace option-only overloads. |
+| D4 | Every policy option is a dedicated enum; no Boolean or bare-string flag remains. |
+| F1 | Expected failure is `T !E`, and contextual propagation is `?(text)`. |
+| F2 | Every lookup returns `?T`; no sentinel, empty-status, or follow-up status check remains. |
+| F3 | Every failure says what happened, why, and how to fix it. |
+| T1 | Domain values use domain types while obvious beginner literals work at the boundary. |
+| T2 | Core values are immutable; mutation belongs to containers. |
+| T3 | Distinct concepts have distinct types and one simple entry door. |
+| N1 | The name follows one subject-first grammar, including acronyms. |
+| N2 | Pure and mutating operations use their systematic noun/past-participle and imperative pairs. |
+| L-A | The I/O domain has both a whole-value call and its streaming seam. |
+| L-B | Concrete containers are eager; `.lazy` uses the same adapter vocabulary. |
+| L-C | A new container implements the one iteration protocol and inherits its adapters. |
+| L-D | Beginner presets compose expert primitives instead of forking them. |
+| E1 | Superseded spellings and implementations are deleted in the same greenfield cutover. |
+| E2 | A measured gap-filler is absorbed with the useful wrapper defaults. |
 
 The constructor and collection-verb rows remain governed by D-ONCE-VERB1; this
-checklist does not reopen that reconciliation.
+record does not reopen that reconciliation.
 
----
-
-### Core rung splits
+## Core rung splits
 
 `D-ONCE-LAYER1=B` ratifies two taught rungs when one Core subject has a safe
 default and an explicit control surface. `core.crypto` is the typed rung;
 `core.crypto.expert` is the raw-byte rung. `core.http` is the one-shot rung;
-`core.http.client` is the configurable rung. Each pair keeps a cross-reference
-in the compiler surface and a golden example that shows the same operation
-through both doors.
+`core.http.client` is the configurable rung. The compiler surface and a golden
+example must cross-reference both doors and show the same operation through each
+one.
 
-The core-library slate ratifies the following durable rules:
+## Core doctrine
 
-- **D-CORE-DOCTRINE1=A** — all Part A rules become law. Every new or changed
-  Core API must pass them in review. Call sites are judged by reading them
-  aloud, options are enums, and one docs table lists each magic default and its
-  override.
-- **D-CORE-EAGER1=A** — helpers on a real list, map, or set run at once and
-  return a plain collection. `.lazy` gives the same vocabulary as a deferred
-  view. Streams and file lines stay naturally lazy because they arrive over
-  time.
-- **D-CORE-PATH1=A** — `Path` is a real prelude type with `join`, `parent`,
-  `extension`, `stem`, `normalize`, `walk`, and the other path methods. Every
-  Core function that takes a path accepts a plain `String` or a `Path`. Expert
-  APIs may require `Path` alone. The methods replace the `core.path` free
-  functions; no path-join operator exists.
-- **D-CORE-PRELUDE1=A** — the seven criteria become law: measured frequency,
-  total and safe, names never semantics, no better home, first-hour coverage,
-  one fixed set, and collision-conscious names. User shadowing wins with a
-  compiler warning. New names land only at epoch boundaries and use the L2001
-  migration lint for older packages. Every entry is total or returns a result;
-  no implicit conversion enters the prelude. `Duration` and `Instant` are the
-  Time-family quantities from D-TYPE2-TIME1.
-- **D-CORE-PRELUDE2=B** — `read_file`, `write_file`, and `file_exists` join the
-  prelude. Random stays in `core.math.random`.
-- **D-CORE-TREE1=A** — Core uses a consistent nested tree. It keeps
-  `core.files`, nests random under `core.math.random` and `fmt` under
-  `core.text.fmt`, merges env and os into `core.sys`, and splits terminal,
-  process, and encoding surfaces into their canonical homes. JSON stays under
-  `core.encoding.json`; retired free namespaces have no aliases or re-exports.
-- **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as`
-  gives a shorter local name; without `as`, the local name is the last part
-  after the final dot. Existing brace item imports move to the same list.
+The core-library slate ratifies these durable rules:
+
+- **D-CORE-DOCTRINE1=A** — every new or changed Core API passes the Part A rules
+  in review. Read call sites aloud, use enums for options, and keep one table
+  of each magic default and its override.
+- **D-CORE-EAGER1=A** — helpers on a real list, map, or set run immediately and
+  return a plain collection. `.lazy` supplies the same vocabulary on a
+  deferred view. Streams and file lines remain naturally lazy because they
+  arrive over time.
+- **D-CORE-PATH1=A** — `Path` is a prelude type with `join`, `parent`,
+  `extension`, `stem`, `normalize`, `walk`, and the other path methods. Core
+  functions that take a path accept a plain `String` or a `Path`; expert APIs
+  may require `Path`. Path methods replace free `core.path` functions, and no
+  path-join operator exists.
+- **D-CORE-PRELUDE1=A** — the seven criteria are law: measured frequency, total
+  and safe behavior, names that never change semantics, no better home,
+  first-hour coverage, one fixed set, and collision-conscious names. User
+  shadowing wins with a compiler warning. New names land only at epoch
+  boundaries and use the L2001 migration lint for older packages. Every entry
+  is total or returns a result; no implicit conversion enters the prelude.
+  `Duration` and `Instant` are the Time-family quantities from
+  D-TYPE2-TIME1.
+- **D-CORE-PRELUDE2=B** — `read_file`, `write_file`, and `file_exists` belong to
+  the prelude; random operations remain in `core.math.random`.
+- **D-CORE-TREE1=A** — Core uses one nested tree. It keeps `core.files`, nests
+  random under `core.math.random` and `fmt` under `core.text.fmt`, merges env
+  and os into `core.sys`, and places terminal, process, and encoding surfaces
+  in their canonical homes. JSON stays under `core.encoding.json`; a
+  non-canonical free namespace has no alias or re-export.
+- **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as` gives
+  a shorter local name; without `as`, the local name is the final component
+  after the last dot. Existing brace item imports use the same list form.
 
 ## Extended Core API doctrine
 
-The short form below is the review checklist for the Part A rules. The examples
-and evidence remain in the laws above.
+Use this short table as the review index; examples and evidence remain in the
+laws above.
 
 | Rule | Test |
-|---|---|
+| --- | --- |
 | C1 | Judge the call site, not the declaration. |
 | C2 | Required values are positional; labels make uncommon or ambiguous options readable. Do not force `*` zones on simple APIs; reserve them for load-bearing names. |
-| C3 | The common dataflow reads left to right through methods and `?`. |
-| D1 | The bare call performs the safest common operation with no setup ceremony. |
+| C3 | Common dataflow reads left to right through methods and `?`. |
+| D1 | The bare call performs the safest common operation without setup ceremony. |
 | D2 | Every magic default appears in the defaults table and has an explicit override. |
 | D3 | Defaulted options replace overload families. |
-| D4 | Options use dedicated enums; Core does not use boolean or bare-string policy flags. |
+| D4 | Options use dedicated enums; Core does not use Boolean or bare-string policy flags. |
 | F1 | Expected failure is `T !E`; contextual propagation uses `?(text)`. |
 | F2 | A lookup returns `?T`; sentinel values are not an API contract. |
 | F3 | Every failure message states what happened, why, and how to fix it. |
@@ -275,34 +299,32 @@ and evidence remain in the laws above.
 | T2 | Core values are immutable; mutation belongs to containers. |
 | T3 | Distinct concepts have distinct types and one simple entry door. |
 | N1 | Names follow one subject-first grammar, including acronyms. |
-| N2 | Pure operations use noun/past-participle names; mutating operations use imperative names. |
+| N2 | Pure operations use noun or past-participle names; mutating operations use imperative names. |
 | L-A | Each I/O domain has a whole-value call over a streaming seam. |
 | L-B | Concrete containers are eager; `.lazy` opts into the same deferred vocabulary. |
 | L-C | New containers implement the one iteration protocol and inherit its adapters. |
-| L-D | Beginner presets compose the small expert primitives; they do not fork them. |
-| E1 | A retired spelling is deleted in the same greenfield cutover. |
+| L-D | Beginner presets compose small expert primitives; they do not fork them. |
+| E1 | A superseded spelling is deleted in the same greenfield cutover. |
 | E2 | A measured gap-filler is absorbed with the wrapper's useful defaults. |
 
 ### Part A relation map
 
-This mapping shows how the existing laws relate to the Part A extension.
-
 | Existing law | Part A rule(s) | Effect |
-|---|---|---|
-| L1 naming | N1, N2 | extends: grammar test, side-effect pairs |
-| L2 fallibility | F1, F2 | extends: one-character test, sentinel ban |
-| L3 ownership | T2 | unchanged; values immutable |
-| L4 effects | — | unchanged |
-| L5 allocation | L-A, L-B | extends: whole-value layer, eager default |
-| L6 diagnostics | F3 | unchanged, restated |
-| L7 examples | — | unchanged |
-| L8 one way | D3, L-D, E1 | extends: defaults not overloads, presets not forks |
-| new ground | C1–C3, D1, D2, D4, T1, T3, E2 | new laws |
+| --- | --- | --- |
+| L1 naming | N1, N2 | Extends naming with a grammar test and side-effect pairs. |
+| L2 fallibility | F1, F2 | Extends fallibility with a one-character test and sentinel ban. |
+| L3 ownership | T2 | Unchanged: values remain immutable. |
+| L4 effects | — | Unchanged. |
+| L5 allocation | L-A, L-B | Adds the whole-value layer and eager default. |
+| L6 diagnostics | F3 | Unchanged, restated. |
+| L7 examples | — | Unchanged. |
+| L8 one way | D3, L-D, E1 | Adds defaults instead of overloads and presets instead of forks. |
+| New ground | C1–C3, D1, D2, D4, T1, T3, E2 | Adds these laws. |
 
 ### Worked review failures
 
-These examples show the rejection, the reason, and the reviewable replacement.
-They are doctrine examples, not additional API declarations.
+These are doctrine examples: each shows a rejection, its reason, and a
+reviewable replacement. They do not declare additional APIs.
 
 #### D4: Boolean policy option
 
@@ -311,16 +333,15 @@ They are doctrine examples, not additional API declarations.
 parse(text, true)
 ```
 
-The option is a policy choice, so the call names the choice with a dedicated
-enum and a label:
+A policy choice names its choice with a dedicated enum and a label:
 
 ```jet
 parse(text, on_error: .Lenient)
 ```
 
-Returning a Boolean fact, accepting a Boolean data value, or storing a Boolean
-inside an enum payload is not this D4 failure. The audit below covers only
-user-facing policy and configuration choices.
+A Boolean result, a Boolean data value, a Boolean enum payload, an
+implementation parameter, and a compiler-only handle are not D4 policy
+options. The audit covers user-facing policy and configuration choices only.
 
 #### F2: Sentinel lookup result
 
@@ -329,67 +350,62 @@ user-facing policy and configuration choices.
 find_or_minus_one(items, needle) // returns Int; -1 means absent
 ```
 
-The lookup result carries absence in its type instead:
+Carry absence in the type instead:
 
 ```jet
 items.find(needle) // illustrative result: ?Item
 ```
 
-The caller handles `None` as absence or propagates it with the ordinary
+The caller handles `None` as absence or propagates it through the ordinary
 optional path. It does not compare a valid value with a sentinel or inspect a
 second status result.
 
-The D4 law applies to every user-facing policy and configuration choice. Policy
-options use dedicated enums; Boolean results, predicates, data fields, enum
-payload data, implementation parameters, and compiler-only handles are not D4
-options.
-
 ### Magic defaults and expert overrides
 
-Use this defaults table for the Part A worked doors and option-bearing Core
-surfaces. APIs with no magic default do not need a row. New entries must extend
-this table or reuse an existing option.
+Use this table for the worked doors and option-bearing Core surfaces. APIs with
+no magic default need no row. New entries extend this table or reuse an
+existing option.
+
 | Door | Bare default | Explicit control |
-|---|---|---|
-| `files.read(path)` / `files.write(path, text)` | Whole-value UTF-8 file operation; write is safe for the normal path. | `open`, `create`, `append_all`, or labeled write mode. |
-| `http.get(url)` | One-shot HTTPS request with the safe client defaults: bounded redirects, safe stale-connection retry, environment proxy use, and no HTTPS-to-HTTP downgrade. | `http.client` for timeout, redirect, retry, proxy, and transport policy. |
-| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`. |
-| `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links`. |
-| `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`. |
-| `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`. |
+| --- | --- | --- |
+| `files.read(path)` / `files.write(path, text)` | Whole-value file operations; normal writes use the safe path. | `open`, `create`, `append_all`, and labeled write modes. |
+| `http.get(url)` | One-shot request through the safe HTTP door; HTTPS-to-HTTP downgrade is refused. | `core.http.client.session()` with `session_timeout`, `session_redirects`, `session_retries`, `session_proxy`, and opt-in `session_cookie`. |
+| `http.client.session()` | 30,000 ms timeout, no retries, at most 10 redirects, no proxy, and an empty cookie jar. | The corresponding `session_*` methods. |
+| `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links` policy. |
+| `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; unsafe origin/credential combinations are rejected. | `methods`, `headers`, `credentials`, and `max_age`. |
+| `encoding.*.reader` / `encoding.*.writer` | Use bounded codec limits; JSON writing is non-canonical unless requested. | A `limits` value and JSON `canonical` choice. |
 | `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
-| `time.now` | Current Unix time in milliseconds from the ambient standard clock. | `time.clock(seed)` or an injected `Clock` for deterministic/reproducible code. |
-| `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |
+| `time.now` | Current Unix time from the ambient standard clock. | Inject a `Clock`, including `core.testing.fake_clock(unix_ms)`, for deterministic code. |
+| `crypto` | Typed safe values and fail-closed defaults. | `core.crypto.expert` inside the audited raw-byte boundary. |
 
 ## Competitive Core API gate (D-STDRUBRIC1=A, card #1398)
 
-This is the one Core API superiority gate. Python is the calibration arm. The
-release claim covers every language recorded in the Core surface ledger, not
-Python alone.
+This is the Core API superiority gate. Python is the calibration arm, but the
+comparison covers every language recorded in the Core surface ledger.
 
 The workflow inventory is generated on demand by
-[`scripts/agent/check-core-surface-ledger.mjs`](../../scripts/agent/check-core-surface-ledger.mjs).
-Its `--check` rebuilds `.jet/reports/core-surface-ledger.json` from the
-compiler/source tables and never reads the report; every generated row requires
-one `coreApiGate.workflowManifest` entry.
+[`check-core-surface-ledger.mjs`](../../scripts/agent/check-core-surface-ledger.mjs).
+`--check` rebuilds `.jet/reports/core-surface-ledger.json` from compiler and
+source tables and never reads that report. Every generated row requires one
+`coreApiGate.workflowManifest` entry.
 
 ### Frozen task record
 
-Before comparison, each workflow records these fields:
+Before comparison, record these fields for every workflow:
 
 | Field | Required content |
-|---|---|
+| --- | --- |
 | `task` | Stable task identity and ledger-row link. |
-| `input` | Same input for every language arm, with the fixture status frozen before the run. |
-| `outcome` | Same semantic result, exit behavior, and normal language contract. |
-| `allowedDependency` | Standard-library or shipped-Core boundary. Required imports count. |
+| `input` | The same input for every language arm, with fixture status frozen before the run. |
+| `outcome` | The same semantic result, exit behavior, and normal-language contract. |
+| `allowedDependency` | The standard-library or shipped-Core boundary; required imports count. |
 | `toolVersions` | Pinned competitor and runner versions. |
-| `sourceBoundary` | User-authored source paths. Generated output, expected output, and reference source are excluded. |
+| `sourceBoundary` | User-authored source paths; generated output, expected output, and reference source are excluded. |
 | `competingCoreWorkflow` | The exact workflow named by the ledger row. |
 | `cases` | Applicable `beginner`, `expert-policy`, `failure`, and `lifecycle` arms. |
 
-A design decline stays in the manifest as a scored loss. Only a ratified
-product-scope decision can set `scope.excluded` to true.
+Keep a design decline in the manifest as a scored loss. Only a ratified
+product-scope decision may set `scope.excluded` to true.
 
 ### Score record
 
@@ -398,17 +414,18 @@ Each matched task reports:
 - raw source counts for every arm, including imports, required policy, and
   required error handling;
 - mandatory concept IDs, hidden facts, and nonlocal lookups;
-- every extra Jet construct, classified as `task-essential`, `clarity-bearing`,
-  `guarantee-bearing`, `expert-control`, or `incidental-ceremony`;
+- every extra Jet construct, classified as `task-essential`,
+  `clarity-bearing`, `guarantee-bearing`, `expert-control`, or
+  `incidental-ceremony`;
 - the extra construct's span and source cost, one or more claimed
-  `claimedClarity`, `reasoningBenefit`, `localFactBenefit`, `guaranteeBenefit`,
-  or `expertControlBenefit` fields, the rejected shorter form, lost value, and
-  reviewer verdict;
+  `claimedClarity`, `reasoningBenefit`, `localFactBenefit`,
+  `guaranteeBenefit`, or `expertControlBenefit` fields, the rejected shorter
+  form, lost value, and reviewer verdict;
 - the measured reasoning burden; a worse burden needs a compensating product
   win in the same evidence record;
 - at least one measured or independently reviewed Jet win;
 - independent acceptance that each competing fixture is idiomatic and minimal
-  for the same task, input, outcome, and normal language contract.
+  for the same task, input, outcome, and normal-language contract.
 
 A measured record is not a bag of placeholders. `rawSourceCounts` has
 `unit: "lexical-token"`, `includes: ["imports", "required-policy",
@@ -428,24 +445,23 @@ improves clarity, local reasoning, a named guarantee, or expert control.
 Incidental ceremony fails. A worse reasoning burden needs a compensating
 product win. Python does not imitate a Jet-only guarantee.
 
-Readability and reasonability use the structured evidence record plus an
-independent review. Runtime, memory, artifact, safety, diagnosis, bounds, and
-audit properties use machine measurements. The gate fails on stale fixtures,
-unexplained ceremony, missing evidence, a missing Jet win, or an unowned loss.
-Every failure names card `#1398` as the release-gate owner.
+Use structured evidence and an independent review for readability and
+reasonability. Use machine measurements for runtime, memory, artifact, safety,
+diagnostic, bounds, and audit properties. The gate fails on stale fixtures,
+unexplained ceremony, missing evidence, a missing Jet win, or an unowned loss;
+every failure names card `#1398` as the release-gate owner.
 
-The gate reuses the existing agent corpus manifest, receipt, runner, and
-`#769` scoring contract. It adds no benchmark runner and no second scoring
-model. Independent fixture acceptance is recorded in
-`tests/agent_workloads/core_api_fixture_reviews.tsv`, with one row for each
-frozen task. The checker binds each row to the adapter-source, input, and
-expected-output digests. A Python row must say `not-emulated` for Jet-only
-guarantees. The release check reuses the runner's pinned tool versions,
-cold/warm executions, exact stdout, unchanged-input, and clean-scratch checks;
-it also verifies the stored stdout/stderr artifacts and checksum closure. A
-fresh-context review records closure, construct classifications, reasoning
-evidence, syntax coverage, and fixture selection. A drift in any of these
-bindings fails the gate under card `#1398`.
+The gate reuses the existing agent corpus manifest, receipt, runner, and `#769`
+scoring contract. It adds no benchmark runner and no second scoring model.
+Record independent fixture acceptance in
+[`core_api_fixture_reviews.tsv`](../../tests/agent_workloads/core_api_fixture_reviews.tsv),
+with one row for each frozen task. Bind each row to the adapter-source, input,
+and expected-output digests. A Python row says `not-emulated` for Jet-only
+guarantees. Reuse the runner's pinned tool versions, cold and warm executions,
+exact stdout, unchanged-input, and clean-scratch checks; also verify stored
+stdout/stderr artifacts and checksum closure. A fresh-context review records
+closure, construct classifications, reasoning evidence, syntax coverage, and
+fixture selection. A drift in any binding fails the gate under card `#1398`.
 
 ~~~sh
 node scripts/agent/check-core-surface-ledger.mjs --check
@@ -453,5 +469,5 @@ node scripts/agent/check-core-surface-ledger.mjs --core-api-release-check
 ~~~
 
 `--check` proves the source-derived inventory and frozen record shape. The
-release check stays blocked until every manifest entry has complete measured
-evidence and an accepted Jet win.
+release check requires complete measured evidence and an accepted Jet win for
+every manifest entry.

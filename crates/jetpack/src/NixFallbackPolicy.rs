@@ -286,9 +286,11 @@ fn authorize(
         Mode::NonInteractive
     };
     let valid_allow = policy == ALLOW_VALUE;
-    let allowed = !offline && ((!ci && interactive) || valid_allow);
+    let allowed = !offline && (valid_allow || (!explicit && !ci && interactive));
     let reason = if offline {
         "--offline forbids local Nix fallback; no executable was inspected or invoked".into()
+    } else if policy == "deny" {
+        format!("{POLICY_ENV}=deny forbids local Nix fallback")
     } else if (ci || !interactive) && !valid_allow {
         format!(
             "CI and non-interactive local Nix fallback require {POLICY_ENV}={ALLOW_VALUE}"
@@ -372,9 +374,14 @@ mod tests {
     }
 
     #[test]
-    fn invalid_policy_is_not_treated_as_allow() {
-        let error = authorize(false, false, false, "yes").unwrap_err();
-        assert_eq!(error.receipt.policy_value, "yes");
-        assert_eq!(error.receipt.invocations, 0);
+    fn explicit_refusal_is_not_overridden_by_interactive_mode() {
+        for policy in ["deny", "yes"] {
+            for (ci, interactive) in [(false, true), (false, false), (true, true)] {
+                let error = authorize(false, ci, interactive, policy).unwrap_err();
+                assert_eq!(error.receipt.policy_value, policy);
+                assert!(!error.receipt.allowed);
+                assert_eq!(error.receipt.invocations, 0);
+            }
+        }
     }
 }

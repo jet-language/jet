@@ -440,6 +440,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         realize_one(
             &roots,

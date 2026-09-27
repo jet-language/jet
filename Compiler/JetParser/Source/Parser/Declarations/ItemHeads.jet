@@ -1,0 +1,34 @@
+// Pure dispatcher lookahead for contextual and marker-led declarations.
+// `offset` is relative to the current token, so marker stacks can be inspected
+// without consuming them.
+fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool {
+    if parser_kind_at(&state, offset) != TOKEN_HASH || parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
+    marker := parser_lookahead(&state, offset + 1)
+    (marker.payload.decoded == "Import" || marker.payload.decoded == "Bindgen") && parser_kind_at(&state, offset + 2) == TOKEN_KW_MODULE
+}
+
+fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool {
+    kind := parser_kind_at(&state, offset)
+    if kind == TOKEN_KW_MODULE {
+        if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
+        next_kind := parser_kind_at(&state, offset + 2)
+        return next_kind == TOKEN_DOT || next_kind == TOKEN_MINUS || next_kind == TOKEN_LBRACE || next_kind == TOKEN_SEMI || next_kind == TOKEN_LT || next_kind == TOKEN_LPAREN || next_kind == TOKEN_COLON_COLON
+    }
+    if kind == TOKEN_KW_EXTERN -> return parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_lookahead(&state, offset + 1).payload.decoded == "rust"
+    if kind == TOKEN_KW_TAG -> return true
+    if kind == TOKEN_HASH {
+        if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
+        marker_name := parser_lookahead(&state, offset + 1).payload.decoded
+        if parser_c_module_ahead_at(&state, offset) -> return true
+        if marker_name == "UnitFamily" -> return parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
+        return marker_name == "Test"
+    } else if kind == TOKEN_IDENT {
+        name := parser_lookahead(&state, offset).payload.decoded
+        if parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_lookahead(&state, offset + 2).payload.decoded == "distinct" -> return true
+        if name == "state" -> return parser_kind_at(&state, offset + 1) == TOKEN_IDENT || parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
+        if name == "protocol" -> return parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
+        if name == "marker" -> return parser_kind_at(&state, offset + 1) == TOKEN_IDENT && (parser_kind_at(&state, offset + 2) == TOKEN_LPAREN || parser_kind_at(&state, offset + 2) == TOKEN_IDENT)
+        if name == "fact" -> return parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
+    }
+    false
+}

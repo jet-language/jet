@@ -107,6 +107,7 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::Verified
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     Store::realize_verified(
         roots,

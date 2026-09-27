@@ -79,6 +79,24 @@ use jet_codegen::interrupt_runtime;
 pub(crate) mod os_rt {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
 
+    pub(crate) fn jet_mapped_path_key(path: &str) -> String {
+        crate::Collections::authority_semantics::jet_mapped_path_key(path)
+    }
+
+    pub(crate) fn jet_mapped_register(key: &str) {
+        crate::Collections::authority_semantics::jet_mapped_register(key)
+    }
+
+    pub(crate) fn jet_mapped_unregister(key: &str) {
+        crate::Collections::authority_semantics::jet_mapped_unregister(key)
+    }
+
+    pub(crate) fn jet_mapped_writer_refusal(
+        path: &str,
+    ) -> Option<crate::Collections::authority_semantics::JetMappedWriterRefusal> {
+        crate::Collections::authority_semantics::jet_mapped_writer_refusal(path)
+    }
+
     pub(crate) mod jet_std {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(crate) enum IOOperation {
@@ -298,16 +316,7 @@ mod fs_write_prelude {
     use super::os_rt::jet_std;
     use crate::fault_injection::jet_fault_should_fail;
 
-    pub(crate) struct JetStdinReader {
-        inner: std::io::BufReader<std::io::Stdin>,
-    }
-
-    fn jet_std_io_stdin() -> JetStdinReader {
-        JetStdinReader {
-            inner: std::io::BufReader::new(std::io::stdin()),
-        }
-    }
-
+    include!("../../jet-codegen/src/Prelude/Core/StdinReader.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
 }
 

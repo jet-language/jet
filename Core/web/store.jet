@@ -1,5 +1,5 @@
-c_max_store_name :: 256
-c_max_store_subscribers :: 1000000
+C_MAX_STORE_NAME :: 256
+C_MAX_STORE_SUBSCRIBERS :: 1000000
 
 
 // core.web.store — typed state history, transactions, and patches.
@@ -199,7 +199,7 @@ pub fn cursor<T>(store: WebStore<T>) -> Int { store.cursor }
 pub fn current_generation<T>(store: WebStore<T>) -> Int { store.generation }
 
 pub fn subscribe<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription {
-    if store.subs >= c_max_store_subscribers -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
+    if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     callback(store.value)
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: ""}
@@ -209,7 +209,7 @@ pub fn subscription_unsubscribe(subscription: &WebStoreSubscription) { subscript
 pub fn subscription_active(subscription: WebStoreSubscription) -> Bool { subscription.active }
 
 pub fn subscribe_selector<T, U>(store: &WebStore<T>, project: fn(T) -> U, callback: fn(U)) -> WebStoreSubscription {
-    if store.subs >= c_max_store_subscribers -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
+    if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     callback(project(store.value))
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: "derived"}

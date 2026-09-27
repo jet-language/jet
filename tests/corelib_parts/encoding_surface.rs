@@ -702,10 +702,10 @@ fn summarize() String {
     return "unreachable"
 }
 
-@expected :: summarize()
+@EXPECTED :: summarize()
 
 fn run() {
-    print(@expected)
+    print(@EXPECTED)
     print(summarize())
 }
 "#;
@@ -752,17 +752,17 @@ fn show(result: DataTree !XMLError) String {
     return "unreachable"
 }
 
-@numeric :: show(xml.parse("<r>&#0;</r>"))
-@attribute :: show(xml.parse("<r a='&#0;'/>"))
-@namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+@NUMERIC :: show(xml.parse("<r>&#0;</r>"))
+@ATTRIBUTE :: show(xml.parse("<r a='&#0;'/>"))
+@NAMESPACE :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{@numeric}|{runtime_numeric}")
-    print("{@attribute}|{runtime_attribute}")
-    print("{@namespace}|{runtime_namespace}")
+    print("{@NUMERIC}|{runtime_numeric}")
+    print("{@ATTRIBUTE}|{runtime_attribute}")
+    print("{@NAMESPACE}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -815,14 +815,14 @@ fn summarize(source: String) String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-@cr :: String.from_bytes([13]) ?? panic("CR")
-@close :: "/>"
-@source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@cr}\nD{@cr}E' b='&#xD;&#xA;&#x9;'{@close}"
-@normalized :: summarize(@source)
+@CR :: String.from_bytes([13]) ?? panic("CR")
+@CLOSE :: "/>"
+@SOURCE :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@CR}\nD{@CR}E' b='&#xD;&#xA;&#x9;'{@CLOSE}"
+@NORMALIZED :: summarize(@SOURCE)
 
 fn run() {
-    runtime := summarize(@source)
-    print("{@normalized}|{runtime}")
+    runtime := summarize(@SOURCE)
+    print("{@NORMALIZED}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -895,24 +895,24 @@ fn show32(text: String) String {
     return "unreachable"
 }
 
-@standard_ws :: show64("Z g = =\n")
-@standard_unpadded :: show64("Zg")
-@standard_interior :: show64("Zg=A")
-@standard_excess :: show64("Zg====")
-@standard_bits :: show64("Zh==")
-@standard_padding :: show64("=AAA")
-@standard_alphabet :: show64("Zg-=")
-@standard_size :: show64("A")
-@url_outer_ws :: show64url(" \tZg==\n")
-@url_interior :: show64url("Zg=A")
-@url_standard_alphabet :: show64url("+w")
-@url_bits :: show64url("Zh")
-@url_padding :: show64url("=AAA")
-@url_size :: show64url("A")
-@base32_loose :: show32("m=y======\n")
-@base32_bits :: show32("MZ======")
-@base32_short :: show32("A")
-@base32_alphabet :: show32("M0======")
+@STANDARD_WS :: show64("Z g = =\n")
+@STANDARD_UNPADDED :: show64("Zg")
+@STANDARD_INTERIOR :: show64("Zg=A")
+@STANDARD_EXCESS :: show64("Zg====")
+@STANDARD_BITS :: show64("Zh==")
+@STANDARD_PADDING :: show64("=AAA")
+@STANDARD_ALPHABET :: show64("Zg-=")
+@STANDARD_SIZE :: show64("A")
+@URL_OUTER_WS :: show64url(" \tZg==\n")
+@URL_INTERIOR :: show64url("Zg=A")
+@URL_STANDARD_ALPHABET :: show64url("+w")
+@URL_BITS :: show64url("Zh")
+@URL_PADDING :: show64url("=AAA")
+@URL_SIZE :: show64url("A")
+@BASE32_LOOSE :: show32("m=y======\n")
+@BASE32_BITS :: show32("MZ======")
+@BASE32_SHORT :: show32("A")
+@BASE32_ALPHABET :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -933,24 +933,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{@standard_ws}|{r_standard_ws}")
-    print("{@standard_unpadded}|{r_standard_unpadded}")
-    print("{@standard_interior}|{r_standard_interior}")
-    print("{@standard_excess}|{r_standard_excess}")
-    print("{@standard_bits}|{r_standard_bits}")
-    print("{@standard_padding}|{r_standard_padding}")
-    print("{@standard_alphabet}|{r_standard_alphabet}")
-    print("{@standard_size}|{r_standard_size}")
-    print("{@url_outer_ws}|{r_url_outer_ws}")
-    print("{@url_interior}|{r_url_interior}")
-    print("{@url_standard_alphabet}|{r_url_standard_alphabet}")
-    print("{@url_bits}|{r_url_bits}")
-    print("{@url_padding}|{r_url_padding}")
-    print("{@url_size}|{r_url_size}")
-    print("{@base32_loose}|{r_base32_loose}")
-    print("{@base32_bits}|{r_base32_bits}")
-    print("{@base32_short}|{r_base32_short}")
-    print("{@base32_alphabet}|{r_base32_alphabet}")
+    print("{@STANDARD_WS}|{r_standard_ws}")
+    print("{@STANDARD_UNPADDED}|{r_standard_unpadded}")
+    print("{@STANDARD_INTERIOR}|{r_standard_interior}")
+    print("{@STANDARD_EXCESS}|{r_standard_excess}")
+    print("{@STANDARD_BITS}|{r_standard_bits}")
+    print("{@STANDARD_PADDING}|{r_standard_padding}")
+    print("{@STANDARD_ALPHABET}|{r_standard_alphabet}")
+    print("{@STANDARD_SIZE}|{r_standard_size}")
+    print("{@URL_OUTER_WS}|{r_url_outer_ws}")
+    print("{@URL_INTERIOR}|{r_url_interior}")
+    print("{@URL_STANDARD_ALPHABET}|{r_url_standard_alphabet}")
+    print("{@URL_BITS}|{r_url_bits}")
+    print("{@URL_PADDING}|{r_url_padding}")
+    print("{@URL_SIZE}|{r_url_size}")
+    print("{@BASE32_LOOSE}|{r_base32_loose}")
+    print("{@BASE32_BITS}|{r_base32_bits}")
+    print("{@BASE32_SHORT}|{r_base32_short}")
+    print("{@BASE32_ALPHABET}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);

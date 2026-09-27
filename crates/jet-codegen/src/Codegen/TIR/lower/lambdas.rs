@@ -22,8 +22,8 @@ use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::view_copy_kind;
 use crate::Codegen::TIR::view_copy_owned_type;
-use crate::Codegen::TIR::view_copy_symbol;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use std::collections::HashSet;
@@ -74,20 +74,20 @@ fn reactive_capture_name(name: &str) -> String {
 }
 
 /// D-MEM-COPYSEM1=A: resolve the owning capture type and shared Prelude
-/// operation for a read-only view. Sema records the names; lowering only
-/// marshals that fact into the target tier, reading the same
-/// `view_copy_symbol` / `view_copy_owned_type` tables every emitter reads so a
-/// captured window and a stored window can never pick different kernels.
+/// operation for a read-only view. TIR classifies the checked source shape;
+/// the shared `MirViewCopyKind::symbol` table names the kernel for every tier.
 pub(super) fn materialized_capture_kind(
     name: &str,
     env: &LowerEnv,
 ) -> Option<(&'static str, Type)> {
     if env.is_string_view_local(name) {
-        return Some((view_copy_symbol(&Type::String), Type::String));
+        let kind = view_copy_kind(&Type::String)?;
+        return Some((kind.symbol(), Type::String));
     }
     let source = env.split_view_handle(name).or_else(|| env.ty_of(name))?;
     let owned = view_copy_owned_type(&source)?;
-    Some((view_copy_symbol(&source), owned))
+    let kind = view_copy_kind(&source)?;
+    Some((kind.symbol(), owned))
 }
 
 fn is_write_split_view(name: &str, env: &LowerEnv) -> bool {

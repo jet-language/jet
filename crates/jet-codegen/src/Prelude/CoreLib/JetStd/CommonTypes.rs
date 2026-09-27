@@ -312,75 +312,6 @@ impl CBOROptions {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct XMLLimits {
-    pub max_depth: i64,
-    pub max_nodes: i64,
-    pub max_attributes_per_element: i64,
-    pub max_name_bytes: i64,
-    pub max_text_bytes: i64,
-    pub max_entity_declarations: i64,
-    pub max_entity_depth: i64,
-    pub max_entity_replacement_bytes: i64,
-}
-impl XMLLimits {
-    pub fn safe() -> Self {
-        Self {
-            max_depth: 256,
-            max_nodes: 1_000_000,
-            max_attributes_per_element: 1024,
-            max_name_bytes: 4096,
-            max_text_bytes: 16_777_216,
-            max_entity_declarations: 1024,
-            max_entity_depth: 32,
-            max_entity_replacement_bytes: 8_388_608,
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum XMLEntityPolicy {
-    Preserve,
-    Reject,
-    Resolve(std::collections::BTreeMap<String, String>),
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct XMLParseOptions {
-    pub entities: XMLEntityPolicy,
-    pub limits: XMLLimits,
-}
-impl XMLParseOptions {
-    pub fn safe() -> Self {
-        Self {
-            entities: XMLEntityPolicy::Preserve,
-            limits: XMLLimits::safe(),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum XMLEncoding {
-    UTF8,
-    UTF8BOM,
-    UTF16LE,
-    UTF16BE,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum XMLLexicalPolicy {
-    PreserveValid,
-    Deterministic,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct XMLRenderOptions {
-    pub encoding: XMLEncoding,
-    pub lexical: XMLLexicalPolicy,
-}
-impl XMLRenderOptions {
-    pub fn safe() -> Self {
-        Self {
-            encoding: XMLEncoding::UTF8,
-            lexical: XMLLexicalPolicy::PreserveValid,
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum XMLCanonicalMode {
     Inclusive11,
     Exclusive10,
@@ -4225,397 +4156,148 @@ pub fn jet_int_bit_count(value: i64, width: u32, method: &str) -> i64 {
     jet_int_value(value).bit_count(width, method).unwrap_or(0)
 }
 
-// Keep the small-value branch in the shared Prelude, but expose it as a
-// macro so AOT can place the branch and machine operation in a hot loop.
-// The slow functions remain the sole promotion/overflow implementation;
-// the macro only selects that shared rail after the same representation
-// checks as the resident helpers below.
+// Exact-Int operation macros all enter the shared ExactNumeric source kernel.
+// The carrier adapter owns only raw JetInt marshaling and source locations.
 #[macro_export]
 macro_rules! jet_int_compare_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            match __jet_left.cmp(&__jet_right) {
-                std::cmp::Ordering::Less => -1,
-                std::cmp::Ordering::Equal => 0,
-                std::cmp::Ordering::Greater => 1,
-            }
-        } else {
-            $crate::jet_std::jet_int_compare_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_compare($left, $right)
+    };
 }
 pub use crate::jet_int_compare_hot;
 
 #[macro_export]
 macro_rules! jet_int_add_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            let (__jet_value, __jet_overflowed) = __jet_left.overflowing_add(__jet_right);
-            if !__jet_overflowed
-                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                    .contains(&__jet_value)
-            {
-                __jet_value
-            } else {
-                $crate::jet_std::jet_int_add_slow(__jet_left, __jet_right)
-            }
-        } else {
-            $crate::jet_std::jet_int_add_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_add($left, $right)
+    };
 }
 pub use crate::jet_int_add_hot;
 
 #[macro_export]
 macro_rules! jet_int_sub_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            let (__jet_value, __jet_overflowed) = __jet_left.overflowing_sub(__jet_right);
-            if !__jet_overflowed
-                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                    .contains(&__jet_value)
-            {
-                __jet_value
-            } else {
-                $crate::jet_std::jet_int_sub_slow(__jet_left, __jet_right)
-            }
-        } else {
-            $crate::jet_std::jet_int_sub_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_sub($left, $right)
+    };
 }
 pub use crate::jet_int_sub_hot;
 
 #[macro_export]
 macro_rules! jet_int_mul_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            let (__jet_value, __jet_overflowed) = __jet_left.overflowing_mul(__jet_right);
-            if !__jet_overflowed
-                && ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                    .contains(&__jet_value)
-            {
-                __jet_value
-            } else {
-                $crate::jet_std::jet_int_mul_slow(__jet_left, __jet_right)
-            }
-        } else {
-            $crate::jet_std::jet_int_mul_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_mul($left, $right)
+    };
 }
 pub use crate::jet_int_mul_hot;
 #[macro_export]
 macro_rules! jet_int_div_hot {
-    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-            && __jet_right != 0
-        {
-            if let Some(__jet_quotient) = __jet_left.checked_div(__jet_right) {
-                __jet_quotient
-            } else {
-                $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).0
-            }
-        } else {
-            $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).0
-        }
-    }};
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_div_rem($left, $right, $file, $line).0
+    };
 }
 pub use crate::jet_int_div_hot;
 
 #[macro_export]
 macro_rules! jet_int_rem_hot {
-    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-            && __jet_right != 0
-        {
-            if let Some(__jet_remainder) = __jet_left.checked_rem(__jet_right) {
-                __jet_remainder
-            } else {
-                $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).1
-            }
-        } else {
-            $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).1
-        }
-    }};
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_div_rem($left, $right, $file, $line).1
+    };
 }
 pub use crate::jet_int_rem_hot;
-
 #[macro_export]
 macro_rules! jet_int_floor_div_hot {
-    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-            && __jet_right != 0
-        {
-            match (
-                __jet_left.checked_div(__jet_right),
-                __jet_left.checked_rem(__jet_right),
-            ) {
-                (Some(__jet_quotient), Some(__jet_remainder)) => {
-                    let __jet_value =
-                        if __jet_remainder != 0 && (__jet_left < 0) != (__jet_right < 0) {
-                            __jet_quotient.checked_sub(1)
-                        } else {
-                            Some(__jet_quotient)
-                        };
-                    if let Some(__jet_value) = __jet_value.filter(|value| {
-                        ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                            .contains(value)
-                    }) {
-                        __jet_value
-                    } else {
-                        $crate::jet_std::jet_int_floor_div_slow(
-                            __jet_left,
-                            __jet_right,
-                            $file,
-                            $line,
-                        )
-                    }
-                }
-                _ => $crate::jet_std::jet_int_floor_div_slow(
-                    __jet_left,
-                    __jet_right,
-                    $file,
-                    $line,
-                ),
-            }
-        } else {
-            $crate::jet_std::jet_int_floor_div_slow(__jet_left, __jet_right, $file, $line)
-        }
-    }};
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_floor_div($left, $right, $file, $line)
+    };
 }
 pub use crate::jet_int_floor_div_hot;
 
 #[macro_export]
 macro_rules! jet_int_mod_hot {
-    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-            && __jet_right != 0
-        {
-            match __jet_left.checked_rem(__jet_right) {
-                Some(__jet_remainder) => {
-                    let __jet_value =
-                        if __jet_remainder != 0 && (__jet_left < 0) != (__jet_right < 0) {
-                            __jet_remainder.checked_add(__jet_right)
-                        } else {
-                            Some(__jet_remainder)
-                        };
-                    if let Some(__jet_value) = __jet_value.filter(|value| {
-                        ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                            .contains(value)
-                    }) {
-                        __jet_value
-                    } else {
-                        $crate::jet_std::jet_int_mod_slow(
-                            __jet_left,
-                            __jet_right,
-                            $file,
-                            $line,
-                        )
-                    }
-                }
-                None => $crate::jet_std::jet_int_mod_slow(
-                    __jet_left,
-                    __jet_right,
-                    $file,
-                    $line,
-                ),
-            }
-        } else {
-            $crate::jet_std::jet_int_mod_slow(__jet_left, __jet_right, $file, $line)
-        }
-    }};
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_mod($left, $right, $file, $line)
+    };
 }
 pub use crate::jet_int_mod_hot;
 
 #[macro_export]
 macro_rules! jet_int_shl_hot {
-    ($value:expr, $count:expr, $file:expr, $line:expr) => {{
-        let __jet_value = $value;
-        let __jet_count = $count;
-        if $crate::jet_std::jet_int_is_small(__jet_value)
-            && $crate::jet_std::jet_int_is_small(__jet_count)
-        {
-            if let Some(__jet_result) = u32::try_from(__jet_count)
-                .ok()
-                .and_then(|count| __jet_value.checked_shl(count))
-                .filter(|value| {
-                    ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                        .contains(value)
-                })
-            {
-                __jet_result
-            } else {
-                $crate::jet_std::jet_int_shl_slow(__jet_value, __jet_count, $file, $line)
-            }
-        } else {
-            $crate::jet_std::jet_int_shl_slow(__jet_value, __jet_count, $file, $line)
-        }
-    }};
+    ($value:expr, $count:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_shl($value, $count, $file, $line)
+    };
 }
 pub use crate::jet_int_shl_hot;
 
 #[macro_export]
 macro_rules! jet_int_shr_hot {
-    ($value:expr, $count:expr, $file:expr, $line:expr) => {{
-        let __jet_value = $value;
-        let __jet_count = $count;
-        if $crate::jet_std::jet_int_is_small(__jet_value)
-            && $crate::jet_std::jet_int_is_small(__jet_count)
-        {
-            if let Some(__jet_result) = u32::try_from(__jet_count)
-                .ok()
-                .and_then(|count| __jet_value.checked_shr(count))
-                .filter(|value| {
-                    ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
-                        .contains(value)
-                })
-            {
-                __jet_result
-            } else {
-                $crate::jet_std::jet_int_shr_slow(__jet_value, __jet_count, $file, $line)
-            }
-        } else {
-            $crate::jet_std::jet_int_shr_slow(__jet_value, __jet_count, $file, $line)
-        }
-    }};
+    ($value:expr, $count:expr, $file:expr, $line:expr) => {
+        $crate::jet_std::jet_int_exact_shr($value, $count, $file, $line)
+    };
 }
 pub use crate::jet_int_shr_hot;
 
 
-// These macros have no fallback by design. The TIR emitter may select them
-// only after its interval/cost fact proves both operands and the result stay
-// on the signed-63-bit rail. Every unproved operation remains on the hot
-// macro above, which preserves bigint promotion and checked arithmetic.
+// Inline forms use the same ExactNumeric kernel as checked/default routes.
 #[macro_export]
 macro_rules! jet_int_add_inline {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        __jet_left + __jet_right
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_add($left, $right)
+    };
 }
 pub use crate::jet_int_add_inline;
 
 #[macro_export]
 macro_rules! jet_int_sub_inline {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        __jet_left - __jet_right
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_sub($left, $right)
+    };
 }
 pub use crate::jet_int_sub_inline;
-
 #[macro_export]
 macro_rules! jet_int_mul_inline {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        __jet_left * __jet_right
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_mul($left, $right)
+    };
 }
 pub use crate::jet_int_mul_inline;
 
 #[macro_export]
 macro_rules! jet_int_compare_inline {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        match __jet_left.cmp(&__jet_right) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_compare($left, $right)
+    };
 }
 pub use crate::jet_int_compare_inline;
 
 #[macro_export]
 macro_rules! jet_int_neg_inline {
-    ($value:expr) => {{
-        let __jet_value = $value;
-        -__jet_value
-    }};
+    ($value:expr) => {
+        $crate::jet_std::jet_int_exact_neg($value)
+    };
 }
 pub use crate::jet_int_neg_inline;
 
-// Bitwise operations cannot overflow a valid packed value. Keep their
-// representation check in the shared Prelude so the cold bigint rail is
-// still selected for every tagged or otherwise non-packed input.
+// Bitwise operation adapters marshal both raw carriers into ExactNumeric.
 #[macro_export]
 macro_rules! jet_int_bit_and_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            __jet_left & __jet_right
-        } else {
-            $crate::jet_std::jet_int_bit_and_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_bit_and($left, $right)
+    };
 }
 pub use crate::jet_int_bit_and_hot;
 
 #[macro_export]
 macro_rules! jet_int_bit_or_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            __jet_left | __jet_right
-        } else {
-            $crate::jet_std::jet_int_bit_or_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_bit_or($left, $right)
+    };
 }
 pub use crate::jet_int_bit_or_hot;
-
 #[macro_export]
 macro_rules! jet_int_bit_xor_hot {
-    ($left:expr, $right:expr) => {{
-        let __jet_left = $left;
-        let __jet_right = $right;
-        if $crate::jet_std::jet_int_is_small(__jet_left)
-            && $crate::jet_std::jet_int_is_small(__jet_right)
-        {
-            __jet_left ^ __jet_right
-        } else {
-            $crate::jet_std::jet_int_bit_xor_slow(__jet_left, __jet_right)
-        }
-    }};
+    ($left:expr, $right:expr) => {
+        $crate::jet_std::jet_int_exact_bit_xor($left, $right)
+    };
 }
 pub use crate::jet_int_bit_xor_hot;
 
@@ -4627,15 +4309,10 @@ pub fn jet_int_compare(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_compare_slow(left: i64, right: i64) -> i64 {
-    match jet_int_value(left).compare(&jet_int_value(right)) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    jet_int_exact_compare(left, right)
 }
 
-/// Hot default-Int path. Keep promotion/overflow handling in a cold
-/// helper so tight loops see two tag tests and one checked machine op.
+/// Default-Int routes enter the shared ExactNumeric carrier kernel.
 #[inline(always)]
 pub fn jet_int_add(left: i64, right: i64) -> i64 {
     jet_int_add_hot!(left, right)
@@ -4644,8 +4321,9 @@ pub fn jet_int_add(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_add_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).add(&jet_int_value(right)))
+    jet_int_exact_add(left, right)
 }
+
 
 #[inline(always)]
 pub fn jet_int_sub(left: i64, right: i64) -> i64 {
@@ -4655,7 +4333,7 @@ pub fn jet_int_sub(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_sub_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).sub(&jet_int_value(right)))
+    jet_int_exact_sub(left, right)
 }
 
 #[inline(always)]
@@ -4666,7 +4344,7 @@ pub fn jet_int_mul(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_mul_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).mul(&jet_int_value(right)))
+    jet_int_exact_mul(left, right)
 }
 
 #[inline(always)]
@@ -4677,7 +4355,7 @@ pub fn jet_int_bit_and(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_bit_and_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).bit_and(&jet_int_value(right)))
+    jet_int_exact_bit_and(left, right)
 }
 
 #[inline(always)]
@@ -4688,7 +4366,7 @@ pub fn jet_int_bit_or(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_bit_or_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).bit_or(&jet_int_value(right)))
+    jet_int_exact_bit_or(left, right)
 }
 
 #[inline(always)]
@@ -4699,24 +4377,17 @@ pub fn jet_int_bit_xor(left: i64, right: i64) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_bit_xor_slow(left: i64, right: i64) -> i64 {
-    jet_int_pack(jet_int_value(left).bit_xor(&jet_int_value(right)))
+    jet_int_exact_bit_xor(left, right)
 }
 
 #[inline(always)]
 pub fn jet_int_neg(value: i64) -> i64 {
-    if jet_int_is_small(value) {
-        let (value, overflowed) = value.overflowing_neg();
-        if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-            return value;
-        }
-    }
-    jet_int_neg_slow(value)
+    jet_int_exact_neg(value)
 }
-
 #[cold]
 #[inline(never)]
 fn jet_int_neg_slow(value: i64) -> i64 {
-    jet_int_pack(jet_int_value(value).neg())
+    jet_int_exact_neg(value)
 }
 
 pub fn jet_int_abs(value: i64) -> i64 {
@@ -4749,19 +4420,13 @@ pub fn jet_int_checked_fixed(value: i64, kind: i64, file: &str, line: u32) -> i1
 
 
 pub fn jet_int_not(value: i64) -> i64 {
-    // `!x` is `-x - 1` for an exact signed integer. Reuse the same
-    // packed arithmetic helpers so the small and spilled representations
-    // stay one semantic path.
-    jet_int_sub(jet_int_neg(value), jet_int_from_i64(1))
+    jet_int_exact_not(value)
 }
 
 #[cold]
 #[inline(never)]
 pub fn jet_int_shl_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
-    jet_int_value(value)
-        .shl(&jet_int_value(count))
-        .map(jet_int_pack)
-        .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
+    jet_int_exact_shl(value, count, file, line)
 }
 
 #[inline(always)]
@@ -4772,10 +4437,7 @@ pub fn jet_int_shl(value: i64, count: i64, file: &str, line: u32) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_shr_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
-    jet_int_value(value)
-        .shr(&jet_int_value(count))
-        .map(jet_int_pack)
-        .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
+    jet_int_exact_shr(value, count, file, line)
 }
 
 #[inline(always)]
@@ -4786,32 +4448,12 @@ pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
 #[cold]
 #[inline(never)]
 pub fn jet_int_div_rem_slow(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-    // D-FLOORDIV1: plain `Int` `/`, `%` and `/%` stop with THE
-    // canonical arithmetic wording, never a second copy typed here. This site
-    // carried the invented "division by zero" while `Core.rs`'s fixed-width
-    // remainder, the TIR evaluator and the Cranelift host all raised
-    // `JET_ARITHMETIC_DIVIDE_ZERO`, so one operator reported two sentences and
-    // only the plain-`Int` AOT tier drifted (the same shape `jet-jit`'s
-    // `Numeric.rs` records for the E3001/E3010 split it already closed).
-    if jet_int_is_zero(divisor) {
-        crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
-    }
-    let (quotient, remainder) = jet_int_value(value)
-        .div_rem(&jet_int_value(divisor))
-        .expect("checked division by zero");
-    (jet_int_pack(quotient), jet_int_pack(remainder))
+    jet_int_exact_div_rem(value, divisor, file, line)
 }
 
 #[inline(always)]
 pub fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-    if jet_int_is_small(value) && jet_int_is_small(divisor) && divisor != 0 {
-        if let (Some(quotient), Some(remainder)) =
-            (value.checked_div(divisor), value.checked_rem(divisor))
-        {
-            return (quotient, remainder);
-        }
-    }
-    jet_int_div_rem_slow(value, divisor, file, line)
+    jet_int_exact_div_rem(value, divisor, file, line)
 }
 
 #[inline(always)]
@@ -4825,22 +4467,8 @@ pub fn jet_int_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
 }
 
 fn jet_int_div_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-    if jet_int_is_zero(divisor) {
-        crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
-    }
-    if jet_int_is_small(value) && jet_int_is_small(divisor) {
-        if let (Some(quotient), Some(remainder)) =
-            (value.checked_div_euclid(divisor), value.checked_rem_euclid(divisor))
-        {
-            return (quotient, remainder);
-        }
-    }
-    let (quotient, remainder) = jet_int_value(value)
-        .div_rem_euclid(&jet_int_value(divisor))
-        .expect("checked Euclidean division by zero");
-    (jet_int_pack(quotient), jet_int_pack(remainder))
+    jet_int_exact_div_rem_euclid(value, divisor, file, line)
 }
-
 pub fn jet_int_div_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
     jet_int_div_rem_euclid(value, divisor, file, line).0
 }
@@ -4852,12 +4480,7 @@ pub fn jet_int_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i6
 #[cold]
 #[inline(never)]
 pub fn jet_int_floor_div_slow(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    let (quotient, remainder) = jet_int_div_rem_slow(value, divisor, file, line);
-    if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
-        jet_int_sub(quotient, jet_int_from_i64(1))
-    } else {
-        quotient
-    }
+    jet_int_exact_floor_div(value, divisor, file, line)
 }
 
 #[inline(always)]
@@ -4868,13 +4491,7 @@ pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64
 #[cold]
 #[inline(never)]
 pub fn jet_int_mod_slow(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    let (quotient, remainder) = jet_int_div_rem_slow(value, divisor, file, line);
-    if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
-        jet_int_add(remainder, divisor)
-    } else {
-        let _ = quotient;
-        remainder
-    }
+    jet_int_exact_mod(value, divisor, file, line)
 }
 
 #[inline(always)]
@@ -4883,15 +4500,7 @@ pub fn jet_int_mod(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
 }
 
 pub fn jet_int_pow(value: i64, exponent: i64, file: &str, line: u32) -> i64 {
-    let base = jet_int_value(value);
-    let exponent_value = jet_int_value(exponent);
-    if exponent_value.negative {
-        crate::jet_arithmetic_stop(file, line, "Negative default Int exponent");
-    }
-    jet_int_pack(
-        base.pow(&exponent_value)
-            .expect("checked default Int exponent is nonnegative"),
-    )
+    jet_int_exact_pow(value, exponent, file, line)
 }
 
 pub fn jet_int_factorial(value: i64) -> Option<i64> {
@@ -4972,9 +4581,7 @@ pub fn jet_int_checked_rem(left: i64, right: i64, file: &str, line: u32) -> Opti
 }
 
 pub fn jet_int_checked_pow(left: i64, right: i64) -> Option<i64> {
-    let left = jet_int_value(left);
-    let right = jet_int_value(right);
-    left.pow(&right).map(jet_int_pack)
+    jet_int_exact_checked_pow(left, right)
 }
 
 pub fn jet_int_saturating_add(left: i64, right: i64) -> i64 {
@@ -4999,22 +4606,9 @@ pub fn jet_int_gcd(left: i64, right: i64) -> i64 {
     jet_int_pack(JetBigInt::gcd(&left, &right))
 }
 
-pub fn jet_int_lcm(left: i64, right: i64) -> i64 {
-    let left = jet_int_value(left);
-    let right = jet_int_value(right);
-    jet_int_pack(JetBigInt::lcm(&left, &right))
-}
 
 pub fn jet_int_div_mod(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-    let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
-    if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
-        (
-            jet_int_sub(quotient, jet_int_from_i64(1)),
-            jet_int_add(remainder, divisor),
-        )
-    } else {
-        (quotient, remainder)
-    }
+    jet_int_exact_div_mod(value, divisor, file, line)
 }
 
 pub fn jet_int_div_rem_pair(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
@@ -5474,6 +5068,301 @@ impl JetFraction {
 
     pub fn denominator_value(&self) -> i64 {
         jet_int_pack(self.denominator.clone())
+    }
+}
+
+pub(crate) fn jet_int_exact_compare(left: i64, right: i64) -> i64 {
+    match crate::jet_exact_numeric::compare(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+pub(crate) fn jet_int_exact_add(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::add(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_sub(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::sub(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_mul(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::mul(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_bit_and(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::bit_and(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_bit_or(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::bit_or(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_bit_xor(left: i64, right: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::bit_xor(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    ))
+}
+
+pub(crate) fn jet_int_exact_neg(value: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::neg(&jet_std_raw_to_exact(value)))
+}
+
+pub(crate) fn jet_int_exact_not(value: i64) -> i64 {
+    jet_std_exact_to_raw(crate::jet_exact_numeric::bit_not(&jet_std_raw_to_exact(value)))
+}
+
+pub(crate) fn jet_int_exact_div_rem(
+    value: i64,
+    divisor: i64,
+    file: &str,
+    line: u32,
+) -> (i64, i64) {
+    match crate::jet_exact_numeric::div_rem(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(divisor),
+    ) {
+        Some((quotient, remainder)) => (
+            jet_std_exact_to_raw(quotient),
+            jet_std_exact_to_raw(remainder),
+        ),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("div"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_div_rem_euclid(
+    value: i64,
+    divisor: i64,
+    file: &str,
+    line: u32,
+) -> (i64, i64) {
+    match crate::jet_exact_numeric::div_rem_euclid(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(divisor),
+    ) {
+        Some((quotient, remainder)) => (
+            jet_std_exact_to_raw(quotient),
+            jet_std_exact_to_raw(remainder),
+        ),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("div_euclid"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_floor_div(
+    value: i64,
+    divisor: i64,
+    file: &str,
+    line: u32,
+) -> i64 {
+    match crate::jet_exact_numeric::floor_div(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(divisor),
+    ) {
+        Some(value) => jet_std_exact_to_raw(value),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("floor_div"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_mod(
+    value: i64,
+    divisor: i64,
+    file: &str,
+    line: u32,
+) -> i64 {
+    match crate::jet_exact_numeric::modulo(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(divisor),
+    ) {
+        Some(value) => jet_std_exact_to_raw(value),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("mod"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_pow(
+    value: i64,
+    exponent: i64,
+    file: &str,
+    line: u32,
+) -> i64 {
+    match crate::jet_exact_numeric::pow(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(exponent),
+    ) {
+        Some(value) => jet_std_exact_to_raw(value),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("pow"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_checked_pow(left: i64, right: i64) -> Option<i64> {
+    crate::jet_exact_numeric::pow(
+        &jet_std_raw_to_exact(left),
+        &jet_std_raw_to_exact(right),
+    )
+    .map(jet_std_exact_to_raw)
+}
+
+pub(crate) fn jet_int_exact_div_mod(
+    value: i64,
+    divisor: i64,
+    file: &str,
+    line: u32,
+) -> (i64, i64) {
+    let left = jet_std_raw_to_exact(value);
+    let right = jet_std_raw_to_exact(divisor);
+    let quotient = crate::jet_exact_numeric::floor_div(&left, &right)
+        .map(jet_std_exact_to_raw)
+        .unwrap_or_else(|| {
+            crate::jet_arithmetic_stop(
+                file,
+                line,
+                crate::jet_exact_numeric::failure_message("floor_div"),
+            )
+        });
+    let remainder = crate::jet_exact_numeric::modulo(&left, &right)
+        .map(jet_std_exact_to_raw)
+        .unwrap_or_else(|| {
+            crate::jet_arithmetic_stop(
+                file,
+                line,
+                crate::jet_exact_numeric::failure_message("mod"),
+            )
+        });
+    (quotient, remainder)
+}
+
+pub(crate) fn jet_int_exact_shl(
+    value: i64,
+    count: i64,
+    file: &str,
+    line: u32,
+) -> i64 {
+    match crate::jet_exact_numeric::shl(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(count),
+    ) {
+        Some(value) => jet_std_exact_to_raw(value),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("shl"),
+        ),
+    }
+}
+
+pub(crate) fn jet_int_exact_shr(
+    value: i64,
+    count: i64,
+    file: &str,
+    line: u32,
+) -> i64 {
+    match crate::jet_exact_numeric::shr(
+        &jet_std_raw_to_exact(value),
+        &jet_std_raw_to_exact(count),
+    ) {
+        Some(value) => jet_std_exact_to_raw(value),
+        None => crate::jet_arithmetic_stop(
+            file,
+            line,
+            crate::jet_exact_numeric::failure_message("shr"),
+        ),
+    }
+}
+
+pub(crate) fn jet_std_raw_to_exact(value: i64) -> jet_foundation::Numeric::CtBigInt {
+    let value = jet_int_value(value);
+    jet_foundation::Numeric::CtBigInt {
+        negative: value.negative,
+        limbs: value.limbs,
+    }
+}
+
+pub(crate) fn jet_std_exact_to_raw(
+    value: jet_foundation::Numeric::CtBigInt,
+) -> i64 {
+    jet_foundation::Numeric::JetInt::from_big(value).into_raw()
+}
+
+pub(crate) fn jet_std_decimal_to_exact(
+    value: &JetDecimal,
+) -> jet_foundation::Numeric::CtDecimal {
+    jet_foundation::Numeric::CtDecimal::from_str(&value.to_string_rep())
+        .expect("canonical Decimal carrier must parse")
+}
+
+pub(crate) fn jet_std_decimal_from_exact(
+    value: jet_foundation::Numeric::CtDecimal,
+) -> JetDecimal {
+    JetDecimal::from_str(&value.to_string_rep())
+        .expect("canonical Decimal carrier must parse")
+}
+
+pub(crate) fn jet_std_fraction_to_exact(
+    value: &JetFraction,
+) -> jet_foundation::Numeric::CtFraction {
+    let numerator = jet_foundation::Numeric::CtBigInt {
+        negative: value.numerator.negative,
+        limbs: value.numerator.limbs.clone(),
+    };
+    let denominator = jet_foundation::Numeric::CtBigInt {
+        negative: value.denominator.negative,
+        limbs: value.denominator.limbs.clone(),
+    };
+    jet_foundation::Numeric::CtFraction::from_bigints(numerator, denominator)
+        .expect("canonical Fraction carrier must have a nonzero denominator")
+}
+
+pub(crate) fn jet_std_fraction_from_exact(
+    value: jet_foundation::Numeric::CtFraction,
+) -> JetFraction {
+    JetFraction {
+        numerator: JetBigInt {
+            negative: value.numerator.negative,
+            limbs: value.numerator.limbs,
+        },
+        denominator: JetBigInt {
+            negative: value.denominator.negative,
+            limbs: value.denominator.limbs,
+        },
     }
 }
 

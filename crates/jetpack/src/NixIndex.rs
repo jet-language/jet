@@ -823,9 +823,9 @@ impl<'a> NixIndexClient<'a> {
         })
     }
 
-    /// Resolve the current revision for a local catalog channel. Update needs
-    /// the channel manifest before it can mint the exact project lock; keep
-    /// that read on the same validated catalog path used by realization.
+    /// Resolve a local channel from its explicit manifest, or from a single
+    /// immutable index target. A one-revision project catalog needs no invented
+    /// signing metadata; more than one matching revision requires a manifest.
     pub(crate) fn local_channel_revision(
         &self,
         channel: &str,
@@ -843,6 +843,43 @@ impl<'a> NixIndexClient<'a> {
             .join("v1")
             .join(channel)
             .join("manifest.json");
+        if !path_exists(&path)? {
+            let index_root = self.root.join(LOCAL_INDEX_ROOT);
+            ensure_real_directory(&index_root)?;
+            let mut revision = None;
+            for (count, entry) in fs::read_dir(&index_root)
+                .map_err(|error| NixIndexError::Transport(format!("read local index: {error}")))?
+                .enumerate()
+            {
+                if count >= 128 {
+                    return Err(NixIndexError::invalid("local catalog has too many revisions"));
+                }
+                let entry = entry.map_err(|error| {
+                    NixIndexError::Transport(format!("read local index revision: {error}"))
+                })?;
+                let candidate = entry.file_name().to_string_lossy().into_owned();
+                validate_revision(&candidate)?;
+                ensure_real_directory(&entry.path())?;
+                if !path_exists(&entry.path().join(system))? {
+                    continue;
+                }
+                let key = IndexKey {
+                    channel: channel.to_string(),
+                    revision: candidate.clone(),
+                    system: system.to_string(),
+                    attrpath: Vec::new(),
+                };
+                self.load_local_index(&key)?;
+                if revision.replace(candidate).is_some() {
+                    return Err(NixIndexError::invalid(
+                        "local catalog has multiple revisions; provide an explicit channel manifest",
+                    ));
+                }
+            }
+            return revision.ok_or_else(|| NixIndexError::invalid(format!(
+                "local catalog has no index for {channel} on {system}"
+            )));
+        }
         let bytes = read_regular(&path, MAX_MANIFEST_BYTES)?;
         let manifest = parse_manifest_strict(&bytes)?;
         if manifest.channel != channel {
@@ -905,10 +942,10 @@ impl<'a> NixIndexClient<'a> {
         }
     }
 
-    fn resolve_local_catalog(
+    fn load_local_index(
         &self,
         key: &IndexKey,
-    ) -> Result<VerifiedIndexRecord, NixIndexError> {
+    ) -> Result<(String, IndexDocument), NixIndexError> {
         let target_dir = self
             .root
             .join(LOCAL_INDEX_ROOT)
@@ -980,12 +1017,19 @@ impl<'a> NixIndexClient<'a> {
                 ));
             }
         }
-        let (index_sha256, document) = target.ok_or_else(|| {
+        target.ok_or_else(|| {
             NixIndexError::invalid(format!(
                 "local unofficial nixpkgs catalog has no target file in {}",
                 target_dir.display()
             ))
-        })?;
+        })
+    }
+
+    fn resolve_local_catalog(
+        &self,
+        key: &IndexKey,
+    ) -> Result<VerifiedIndexRecord, NixIndexError> {
+        let (index_sha256, document) = self.load_local_index(key)?;
         let record = document
             .records
             .iter()
@@ -3281,6 +3325,91 @@ mod tests {
             outputs: [("out".to_string(), RIPGREP_OUT.to_string())]
                 .into_iter()
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn local_channel_without_manifest_requires_one_intact_index_revision() {
+        let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "jet-local-index-pin-{}-{serial}", std::process::id()
+        ));
+        let install = |revision: &str| {
+            let (_, compressed) = canonical_test_index(
+                "nixos-unstable", revision, "x86_64-linux", 1,
+                vec![ripgrep_record()], Vec::new(),
+            ).unwrap();
+            let directory = root.join(LOCAL_INDEX_ROOT).join(revision).join("x86_64-linux");
+            fs::create_dir_all(&directory).unwrap();
+            let path = directory.join(format!("{}.json.zst", sha256_hex(&compressed)));
+            fs::write(&path, &compressed).unwrap();
+            (path, compressed)
+        };
+        let (path, original) = install(REVISION);
+        let client = NixIndexClient::from_local_catalog(&root, true).unwrap();
+        assert_eq!(
+            client.local_channel_revision("nixos-unstable", "x86_64-linux").unwrap(),
+            REVISION
+        );
+        let resolved = client.resolve(&IndexKey {
+            channel: "nixos-unstable".into(),
+            revision: REVISION.into(),
+            system: "x86_64-linux".into(),
+            attrpath: vec!["ripgrep".into()],
+        }).unwrap();
+        assert_eq!(resolved.record, ripgrep_record());
+        assert_eq!(resolved.trust, IndexTrustTier::LocalUnofficial);
+        fs::write(&path, b"corrupt").unwrap();
+        assert!(matches!(
+            client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+            Err(NixIndexError::Invalid(_))
+        ));
+        fs::write(&path, &original).unwrap();
+        install("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert!(matches!(
+            client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+            Err(NixIndexError::Invalid(_))
+        ));
+        let decoded = zstd_decode_bounded(&original, MAX_DECODED_BYTES).unwrap();
+        let target = index_target_for_test(
+            REVISION, "x86_64-linux", "https://catalog.invalid",
+            &original, &decoded, &[], 1,
+        ).unwrap();
+        let manifest = canonical_manifest_for_test(
+            "nixos-unstable", 1, 1, 1000, vec![target],
+        ).unwrap();
+        let manifest_dir = root.join("v1/nixos-unstable");
+        fs::create_dir_all(&manifest_dir).unwrap();
+        fs::write(manifest_dir.join("manifest.json"), manifest).unwrap();
+        assert_eq!(
+            client.local_channel_revision("nixos-unstable", "x86_64-linux").unwrap(),
+            REVISION
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_channel_rejects_index_identity_mismatches() {
+        for (channel, system) in [
+            ("nixpkgs-unstable", "x86_64-linux"),
+            ("nixos-unstable", "aarch64-linux"),
+        ] {
+            let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "jet-local-index-identity-{}-{serial}", std::process::id()
+            ));
+            let (_, bytes) = canonical_test_index(
+                channel, REVISION, system, 1, vec![ripgrep_record()], Vec::new(),
+            ).unwrap();
+            let directory = root.join(LOCAL_INDEX_ROOT).join(REVISION).join("x86_64-linux");
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join(format!("{}.json.zst", sha256_hex(&bytes))), bytes).unwrap();
+            let client = NixIndexClient::from_local_catalog(&root, true).unwrap();
+            assert!(matches!(
+                client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+                Err(NixIndexError::Invalid(_))
+            ));
+            fs::remove_dir_all(root).unwrap();
         }
     }
 

@@ -1,0 +1,73 @@
+// Contract carrier binding across explicit and implicit return forms.
+// The executable entry below prints deterministic success/failure assertions.
+// Direct-mode posts inspect the returned carrier; ResultPayload posts skip Err.
+
+#Error
+enum CarrierFixtureError {
+    Rejected
+}
+
+// Explicit Option: result is the declared Option carrier (Direct mode).
+// Post checks the returned carrier for both Val and None.
+#[Post(result == .Val(value) || result == None, "explicit option carrier")]
+fn explicit_option(value: Int) -> ?Int {
+    if value < 0 -> return None
+    return Val(value)
+}
+
+// Explicit Result: result is the declared Result carrier (Direct mode).
+// Post checks the returned carrier for both Ok and Err.
+#[Post(result == Ok(value) || result == Err(CarrierFixtureError.Rejected), "explicit result carrier")]
+fn explicit_result(value: Int) -> Int !CarrierFixtureError {
+    if value < 0 -> return Err(CarrierFixtureError.Rejected)
+    return Ok(value)
+}
+
+// Implicit carrier: the declared Int is wrapped in Result(Int, Err), so Post
+// binds the successful Int payload (ResultPayload mode) and skips Err.
+#[Post(result > value, "implicit payload success")]
+fn implicit_result(value: Int) -> Int {
+    if value < 0 -> return Err("negative")
+    return value + 1
+}
+
+// A read precondition borrows the caller's collection once; the owner remains
+// usable after the call.
+#[Pre(values.len() > 0, "borrowed owner remains live")]
+fn borrowed_precondition(values: [Int]) -> Int {
+    return values[0]
+}
+
+fn carrier_binding_fixture() {
+    values := [1]
+    implicit_success :: implicit_result(1)
+    if implicit_success != 2 -> panic("implicit payload assertion failed")
+    if explicit_result(1) == {
+        .Ok(value) -> if value != 1 -> panic("explicit result success assertion failed")
+        .Err(_) -> panic("explicit result success route failed")
+    }
+    if explicit_result(-1) == {
+        .Ok(_) -> panic("explicit result failure route missing")
+        .Err(error) -> if error != CarrierFixtureError.Rejected -> panic("explicit result failure value failed")
+    }
+    if explicit_option(1) == {
+        .Val(value) -> if value != 1 -> panic("explicit option success assertion failed")
+        .None -> panic("explicit option success route failed")
+    }
+    if explicit_option(-1) == {
+        .Val(_) -> panic("explicit option failure route missing")
+        .None -> {}
+    }
+    if implicit_result(-1) == {
+        .Ok(_) -> panic("implicit result failure route missing")
+        .Err(_) -> {}
+    }
+    borrowed_value :: borrowed_precondition(values)
+    owner_len :: values.len()
+    if borrowed_value != 1 || owner_len != 1 -> panic("borrowed owner assertion failed")
+    print("carrier-binding: implicit=2 option=Val option_failure=None result=Ok result_failure=Err implicit_failure=Err borrowed=1 owner_len=1")
+}
+
+fn run() {
+    carrier_binding_fixture()
+}

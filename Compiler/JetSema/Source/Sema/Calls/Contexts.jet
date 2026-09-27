@@ -1,0 +1,51 @@
+// Shared call-context helpers. These helpers keep temporary knowledge gates and
+// callback ABI facts explicit at the call boundary; callers must close every
+// entered scope before returning, including error paths.
+
+pub struct SemaCallKnowledgeScope {
+    pub previous: ?SemaKnowledgeGate
+}
+
+pub fn sema_call_gate_for_name(name: String) -> ?SemaKnowledgeGate {
+    if name == "wrapping" || name == "saturating" || name == "checked" -> return Val(SemaKnowledgeGate.BoundedArithmetic)
+    if name == "approx" -> return Val(SemaKnowledgeGate.Approximation)
+    None
+}
+
+pub fn sema_call_method_gate(method: String) -> ?SemaKnowledgeGate {
+    if method.starts_with("from_") && method.ends_with("_rounded") -> return Val(SemaKnowledgeGate.RoundedConversion)
+    None
+}
+
+pub fn sema_call_gate_is_unshadowed(name: String, scopes: SemaScopeTable) -> Bool {
+    sema_scope_resolve_index(scopes, name) == None
+}
+
+pub fn sema_call_enter_gate(scopes: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaCallKnowledgeScope {
+    SemaCallKnowledgeScope{previous: sema_scope_push_knowledge_gate(&scopes, gate)}
+}
+
+pub fn sema_call_leave_gate(scopes: &SemaScopeTable, scope: SemaCallKnowledgeScope) {
+    sema_scope_pop_knowledge_gate(&scopes, scope.previous)
+}
+
+pub fn sema_call_direct_gate(name: String, scopes: SemaScopeTable) -> ?SemaKnowledgeGate {
+    if !sema_call_gate_is_unshadowed(name, scopes) -> return None
+    sema_call_gate_for_name(name)
+}
+
+pub fn sema_call_is_overflow_operation(op: BinOp) -> Bool {
+    op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div
+}
+
+pub fn sema_call_overflow_operation_name(op: BinOp) -> String {
+    if op == BinOp.Add -> return "add"
+    if op == BinOp.Sub -> return "sub"
+    if op == BinOp.Mul -> return "mul"
+    if op == BinOp.Div -> return "div"
+    "add"
+}
+
+pub fn sema_call_host_callback_type(inner: Type, result: ?Type, shared: Bool) -> Type {
+    sema_shared_access_host_callback_type(inner, result, shared)
+}

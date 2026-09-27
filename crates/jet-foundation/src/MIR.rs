@@ -6,7 +6,7 @@
 
 use crate::Diagnostics::Span;
 use crate::JSON::json_escape;
-use crate::Layout::LayoutAlignmentFact;
+use crate::Layout::{LayoutAlignmentFact, LayoutFacts};
 use crate::Effects::Effect;
 use crate::Shape::ShapeFieldNames;
 use crate::Syntax::{
@@ -16,11 +16,12 @@ use crate::Syntax::{
 use crate::Facts::{
     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationRecord, DerivationRef,
 };
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub const MIR_SCHEMA_VERSION: u16 = 3;
+pub const MIR_SCHEMA_VERSION: u16 = 6;
 
 macro_rules! mir_id {
     ($name:ident) => {
@@ -1218,6 +1219,81 @@ impl MirType {
         self.layout == layout_for_kind(&self.kind)
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirViewCopyKind {
+    String,
+    List,
+}
+
+impl MirViewCopyKind {
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::String => "jet_string_view_copy",
+            Self::List => "jet_view_copy",
+        }
+    }
+
+    pub fn target_matches(self, ty: &MirType) -> bool {
+        match ty.kind() {
+            MirTypeKind::Tagged { inner, .. } => self.target_matches(inner),
+            MirTypeKind::String => matches!(self, Self::String),
+            MirTypeKind::List(_) => matches!(self, Self::List),
+            MirTypeKind::Apply { name, args } if args.is_empty() => {
+                matches!(self, Self::String) && name.name == "String"
+            }
+            MirTypeKind::Apply { name, args } if args.len() == 1 => {
+                matches!(self, Self::List) && name.name == "List"
+            }
+            _ => false,
+        }
+    }
+}
+
+pub fn mir_view_copy_kind(source: &MirType) -> Option<MirViewCopyKind> {
+    match source.kind() {
+        MirTypeKind::String => Some(MirViewCopyKind::String),
+        MirTypeKind::List(_) | MirTypeKind::FixedList { .. } => Some(MirViewCopyKind::List),
+        MirTypeKind::Tagged { inner, .. } => mir_view_copy_kind(inner),
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            match args[0].kind() {
+                MirTypeKind::Apply { name, args }
+                    if args.is_empty() && name.name == "str" =>
+                {
+                    Some(MirViewCopyKind::String)
+                }
+                _ => Some(MirViewCopyKind::List),
+            }
+        }
+        _ => None,
+    }
+}
+
+pub fn mir_view_copy_element_type(source: &MirType) -> Option<&MirType> {
+    match source.kind() {
+        MirTypeKind::Tagged { inner, .. } => mir_view_copy_element_type(inner),
+        MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => Some(inner),
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            args.first()
+        }
+        _ => None,
+    }
+}
+pub fn mir_view_element_type(source: &MirType) -> Option<&MirType> {
+    match source.kind() {
+        MirTypeKind::Tagged { inner, .. } => mir_view_element_type(inner),
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            args.first()
+        }
+        _ => None,
+    }
+}
+
 
 impl PartialEq for MirType {
     fn eq(&self, other: &Self) -> bool {
@@ -1573,6 +1649,15 @@ pub enum MirTypeDefKind {
     },
 }
 
+/// Checked compiler-owned nominal builtin marker.
+///
+/// Absence is a real source fact; native adapters must not infer a builtin
+/// from a type name or key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirCompilerBuiltin {
+    DefaultErr,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MirImportKind {
     File { path: String },
@@ -1638,6 +1723,22 @@ pub enum MirStructLayout {
     Columnar,
 }
 
+/// Exact checked tag selection for a C-compatible enum. Consumers must not
+/// infer the tag width or signedness from variants or the target host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirCEnumTag {
+    /// The target C ABI's `int` tag width and signedness.
+    CInt,
+    U8,
+    I8,
+    U16,
+    I16,
+    U32,
+    I32,
+    U64,
+    I64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirSerdeAttributeKind {
     RenameAll,
@@ -1673,12 +1774,18 @@ pub struct MirTypeDef {
     pub generic_params: Vec<MirGenericParam>,
     pub derives: Vec<MirTraitId>,
     pub auto_derive_default: bool,
-    /// Sema proved the automatic Printable capability for this exact nominal type.
-    pub auto_printable: bool,
-    pub published_schema: bool,
+    /// Checked ownership fact for declarations consumed by native and AOT
+    /// adapters; never inferred from the lowered kind.
     pub single_use: bool,
+    /// Checked diagnostic-use fact for declarations consumed by native and AOT
+    /// adapters; never inferred from call sites.
     pub must_use: bool,
     pub layout: Option<MirStructLayout>,
+    /// Exact sema-checked C enum tag representation, when selected.
+    pub c_layout_tag: Option<MirCEnumTag>,
+    /// Exact target layout facts for a C enum, including payload offsets.
+    /// Consumers must not recompute these facts from variants.
+    pub enum_layout: Option<LayoutFacts>,
     /// Exact sema-checked requested/effective alignment and target fact identity.
     pub layout_alignment: Option<LayoutAlignmentFact>,
     pub serde: Vec<MirSerdeAttribute>,
@@ -1691,7 +1798,27 @@ pub struct MirTypeDef {
     /// Sema-checked recursive-layout edge keys owned by this declaration.
     /// Rust emission consumes this fact without re-inferring recursion.
     pub boxed_edges: Vec<String>,
+    /// Checked compiler-owned builtin marker; absence is preserved exactly.
+    pub compiler_builtin: Option<MirCompilerBuiltin>,
     pub kind: MirTypeDefKind,
+}
+
+/// Checked ownership metadata for one Core/builtin nominal owner.
+///
+/// `key` preserves the exact source `SymbolId` spelling (including `type:::`)
+/// while `name` remains the source display leaf. `nominal_id` is the exact
+/// nominal-reference identity used by `MirNominalRef` in applied MIR types;
+/// it is intentionally independent from the registered type-row `id`.
+/// A missing `module_id` is a checked global-builtin fact, not a synthesized
+/// module identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirCoreOwner {
+    pub id: MirTypeId,
+    pub nominal_id: MirTypeId,
+    pub module_id: Option<MirModuleId>,
+    pub key: String,
+    pub name: String,
+    pub ownership: MirOwnershipMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3788,6 +3915,196 @@ pub enum MirConstReport {
     Told(Box<MirConstant>),
 }
 
+/// A private native-owned runtime payload.
+///
+/// This is an identity-preserving capability carrier, not a language value:
+/// the concrete owner remains inside the originating native adapter and is
+/// never serialized, formatted, or represented by a raw integer. Clones alias
+/// the same `Arc`; equality therefore means owner identity only.
+#[derive(Clone)]
+pub struct MirNativeOwned(Arc<dyn Any + Send + Sync>);
+
+impl MirNativeOwned {
+    pub fn new<T>(value: T) -> Self
+    where
+        T: Any + Send + Sync,
+    {
+        Self(Arc::new(value))
+    }
+
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.0) as *const () as usize
+    }
+
+    pub fn downcast_ref<T>(&self) -> Option<&T>
+    where
+        T: Any,
+    {
+        self.0.downcast_ref::<T>()
+    }
+
+    pub fn downcast<T>(self) -> Result<Arc<T>, Self>
+    where
+        T: Any + Send + Sync,
+    {
+        self.0.downcast::<T>().map_err(Self)
+    }
+}
+
+impl fmt::Debug for MirNativeOwned {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<native-owned>")
+    }
+}
+
+impl PartialEq for MirNativeOwned {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for MirNativeOwned {}
+
+/// Typed failure carried by a native Prelude cursor.
+///
+/// Resource adapters put the original checked error carrier into the
+/// `MirRuntimeValue` without rendering it.  Foundation/native transport may
+/// render that value at the final diagnostic boundary, but must not replace
+/// it with a display string while the cursor is crossing tiers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MirNativeCursorError {
+    /// A checked source/resource failure that remains in its original runtime
+    /// value carrier until the final diagnostic boundary.
+    Value(Box<MirRuntimeValue>),
+    /// An adapter/kernel failure, kept distinct from a domain value even when
+    /// its eventual report has a textual message.
+    Internal(String),
+}
+
+impl MirNativeCursorError {
+    pub fn from_runtime_value(value: MirRuntimeValue) -> Self {
+        Self::Value(Box::new(value))
+    }
+
+    pub fn as_runtime_value(&self) -> Option<&MirRuntimeValue> {
+        match self {
+            Self::Value(value) => Some(value.as_ref()),
+            Self::Internal(_) => None,
+        }
+    }
+
+    pub fn into_runtime_value(self) -> Option<MirRuntimeValue> {
+        match self {
+            Self::Value(value) => Some(*value),
+            Self::Internal(_) => None,
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(message.into())
+    }
+
+    pub fn is_internal(&self) -> bool {
+        matches!(self, Self::Internal(_))
+    }
+
+    pub fn internal_message(&self) -> Option<&str> {
+        match self {
+            Self::Internal(message) => Some(message),
+            Self::Value(_) => None,
+        }
+    }
+}
+
+impl From<&'static str> for MirNativeCursorError {
+    fn from(message: &'static str) -> Self {
+        Self::internal(message)
+    }
+}
+
+/// Mutable state retained by a native Prelude iterator cursor.
+///
+/// The state is deliberately a typed capability rather than a wire value:
+/// adapters keep the concrete iterator, host-resource leases, and any current
+/// item private while this trait exposes only the four cursor operations shared
+/// by MIR. `Send` is required so the enclosing mutex preserves the existing
+/// `MirRuntimeValue` thread contract without an unsafe assertion.
+pub trait MirNativeCursorState: Send {
+    fn has_next(&mut self) -> Result<bool, MirNativeCursorError>;
+    fn value(&mut self) -> Result<MirRuntimeValue, MirNativeCursorError>;
+    fn advance(&mut self) -> Result<(), MirNativeCursorError>;
+}
+
+/// One lossless, identity-preserving carrier for a native Prelude cursor.
+///
+/// Cloning this value aliases the same cursor state; it does not copy or
+/// serialize an iterator or any host resource. The mutex serializes aliases
+/// while `Send` preserves the existing runtime-value thread contract.
+pub struct MirNativeCursor {
+    state: Arc<Mutex<Box<dyn MirNativeCursorState>>>,
+}
+
+impl MirNativeCursor {
+    pub fn new<S>(state: S) -> Self
+    where
+        S: MirNativeCursorState + 'static,
+    {
+        Self {
+            state: Arc::new(Mutex::new(Box::new(state))),
+        }
+    }
+
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.state) as usize
+    }
+
+    pub fn has_next(&self) -> Result<bool, MirNativeCursorError> {
+        self.state
+            .lock()
+            .map_err(|_| MirNativeCursorError::internal("native Prelude cursor state was poisoned"))?
+            .has_next()
+    }
+
+    pub fn value(&self) -> Result<MirRuntimeValue, MirNativeCursorError> {
+        self.state
+            .lock()
+            .map_err(|_| MirNativeCursorError::internal("native Prelude cursor state was poisoned"))?
+            .value()
+    }
+
+    pub fn advance(&self) -> Result<(), MirNativeCursorError> {
+        self.state
+            .lock()
+            .map_err(|_| MirNativeCursorError::internal("native Prelude cursor state was poisoned"))?
+            .advance()
+    }
+}
+
+impl Clone for MirNativeCursor {
+    fn clone(&self) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
+impl fmt::Debug for MirNativeCursor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MirNativeCursor")
+            .field("identity", &self.identity())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for MirNativeCursor {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+}
+
+impl Eq for MirNativeCursor {}
+
 /// Public, target-neutral runtime data carried between MIR execution adapters
 /// and shared Prelude kernels. Host resources remain private adapter handles.
 #[derive(Debug, Clone, PartialEq)]
@@ -3817,6 +4134,10 @@ pub enum MirRuntimeValue {
     FailedTold(Box<MirRuntimeValue>),
     Absent { element: MirType },
     Unit,
+    /// Private native Prelude cursor state; never a serializable data carrier.
+    NativeCursor(MirNativeCursor),
+    /// Private native-owned payload; never a serializable language value.
+    NativeOwned(MirNativeOwned),
     Closure(MirRuntimeClosure),
 }
 
@@ -5171,9 +5492,15 @@ pub enum MirOperation {
     /// reinitializing a moved slot has no displaced value.
     ReplacePlace { place: MirPlaceId, value: MirValueId },
     InitializeUninit { place: MirPlaceId },
-    Copy { value: MirValueId },
+    Copy {
+        value: MirValueId,
+        materialize_view: bool,
+    },
+    /// Checked concrete-to-single-trait coercion. The source value is moved
+    /// into the target trait object; `target` is the canonical `MirTypeId`
+    /// already used by call/list trait-boxing facts.
+    TraitBox { value: MirValueId, target: MirTypeId },
     Move { value: MirValueId },
-    Constant(MirConstant),
     Unary {
         op: MirUnaryOp,
         value: MirValueId,
@@ -5340,8 +5667,9 @@ impl MirOperation {
             Self::ReadPlace(_) | Self::MovePlace { .. } | Self::InitializeUninit { .. } => {}
             Self::WritePlace { value, .. }
             | Self::ReplacePlace { value, .. }
-            | Self::Copy { value }
+            | Self::Copy { value, .. }
             | Self::Move { value }
+            | Self::TraitBox { value, .. }
             | Self::Unary { value, .. }
             | Self::Deref { value }
             | Self::AttachTag { value, .. }
@@ -6307,6 +6635,9 @@ pub struct MirForeign {
     pub symbol: String,
     pub path: String,
     pub params: Vec<MirParam>,
+    /// Checked transport fact: when true, the native MIR bridge may consume
+    /// this row; C-module publication facts remain present for typed AOT.
+    pub bridge_eligible: bool,
     /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
     pub raw_scalar_abi: bool,
     pub return_type: Option<MirType>,
@@ -6413,6 +6744,7 @@ pub struct MirDropAction {
 pub struct MirFunction {
     pub id: MirFunctionId,
     pub module_id: MirModuleId,
+    pub source_file: MirSourceFileId,
     pub key: String,
     pub module: String,
     pub name: String,
@@ -6693,6 +7025,9 @@ pub struct MirProgram {
     pub imports: Vec<MirImport>,
     pub types: Vec<MirTypeDef>,
     pub traits: Vec<MirTraitDef>,
+    /// Checked Core/builtin nominal owners; native hosts consume these facts
+    /// instead of rebuilding ownership from names or runtime defaults.
+    pub core_owners: Vec<MirCoreOwner>,
     pub impls: Vec<MirImplDef>,
     pub constants: Vec<MirConstantDef>,
     pub fields: Vec<MirFieldRow>,
@@ -6810,8 +7145,9 @@ fn canonical_instruction(instruction: &MirInstruction) -> String {
         .map(|value| format!("\"{}\"", value.0))
         .collect::<Vec<_>>()
         .join(",");
+    let copy_materialization = operation_copy_materialization(&instruction.operation);
     format!(
-        "{{\"id\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"source_line\":{},\"result\":{},\"type\":{},\"operation\":{{\"kind\":\"{}\",\"value_uses\":[{}]}}}}",
+        "{{\"id\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"source_line\":{},\"result\":{},\"type\":{},\"operation\":{{\"kind\":\"{}\",\"value_uses\":[{}]{}}}}}",
         instruction.id.0,
         instruction.span.start,
         instruction.span.end,
@@ -6822,9 +7158,22 @@ fn canonical_instruction(instruction: &MirInstruction) -> String {
         result,
         ty,
         operation_kind(&instruction.operation),
-        uses
+        uses,
+        copy_materialization
     )
 }
+fn operation_copy_materialization(operation: &MirOperation) -> String {
+    match operation {
+        MirOperation::Copy {
+            materialize_view, ..
+        } => format!(",\"materialize_view\":{}", materialize_view),
+        MirOperation::TraitBox { target, .. } => {
+            format!(",\"trait_box_target\":\"{}\"", target.0)
+        }
+        _ => String::new(),
+    }
+}
+
 
 fn canonical_type(ty: &MirType) -> String {
     let identity = ty
@@ -6874,9 +7223,8 @@ fn operation_kind(operation: &MirOperation) -> &'static str {
         MirOperation::InitializeUninit { .. } => "InitializeUninit",
         MirOperation::Copy { .. } => "Copy",
         MirOperation::Move { .. } => "Move",
+        MirOperation::TraitBox { .. } => "TraitBox",
         MirOperation::Constant(_) => "Constant",
-        MirOperation::Unary { .. } => "Unary",
-        MirOperation::Binary { .. } => "Binary",
         MirOperation::BuildString { .. } => "BuildString",
         MirOperation::BuildList { .. } => "BuildList",
         MirOperation::BuildMap { .. } => "BuildMap",
@@ -6934,20 +7282,25 @@ pub fn canonical_operation_payload(operation: &MirOperation) -> String {
         .map(|value| format!("\"{}\"", value.0))
         .collect::<Vec<_>>()
         .join(",");
+    let copy_materialization = operation_copy_materialization(operation);
     format!(
-        "{{\"representation\":\"mir\",\"operation_kind\":\"{}\",\"value_uses\":[{}]}}",
+        "{{\"representation\":\"mir\",\"operation_kind\":\"{}\",\"value_uses\":[{}]{}}}",
         operation_kind(operation),
-        uses
+        uses,
+        copy_materialization
     )
 }
 
 pub fn canonical_operation_identity(operation: &MirOperation) -> String {
+    let copy_materialization = operation_copy_materialization(operation);
     format!(
-        "{{\"representation\":\"mir\",\"operation_kind\":\"{}\",\"value_use_count\":{}}}",
+        "{{\"representation\":\"mir\",\"operation_kind\":\"{}\",\"value_use_count\":{}{}}}",
         operation_kind(operation),
-        operation.value_uses().len()
+        operation.value_uses().len(),
+        copy_materialization
     )
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MirValidationError {
     SchemaVersion(u16),
@@ -7306,6 +7659,43 @@ impl MirProgram {
                     kind: "type definition",
                     key: ty.key.clone(),
                 });
+            }
+        }
+        let mut core_owner_ids = HashSet::new();
+        let mut core_owner_nominal_ids = HashSet::new();
+        let mut core_owner_keys = HashSet::new();
+        for owner in &self.core_owners {
+            if owner.id.0 == 0 || owner.nominal_id.0 == 0 {
+                return Err(MirValidationError::ZeroId {
+                    kind: "Core owner",
+                    span: None,
+                });
+            }
+            if !core_owner_ids.insert(owner.id) {
+                return Err(MirValidationError::DuplicateId {
+                    kind: "Core owner",
+                    id: owner.id.0,
+                });
+            }
+            if !core_owner_nominal_ids.insert(owner.nominal_id) {
+                return Err(MirValidationError::DuplicateId {
+                    kind: "Core owner nominal",
+                    id: owner.nominal_id.0,
+                });
+            }
+            if !core_owner_keys.insert(owner.key.clone()) {
+                return Err(MirValidationError::DuplicateKey {
+                    kind: "Core owner",
+                    key: owner.key.clone(),
+                });
+            }
+            if let Some(module_id) = owner.module_id {
+                if !module_ids.contains(&module_id) {
+                    return Err(MirValidationError::MissingReference {
+                        kind: "Core owner module",
+                        id: module_id.0,
+                    });
+                }
             }
         }
         let mut type_ids = HashSet::new();
@@ -7831,6 +8221,12 @@ fn validate_function(
     field_ids: &HashSet<MirFieldId>,
     source_file_ids: &HashSet<MirSourceFileId>,
 ) -> Result<(), MirValidationError> {
+    if !source_file_ids.contains(&function.source_file) {
+        return Err(MirValidationError::MissingSourceFile {
+            function: function.id,
+            source_file: function.source_file,
+        });
+    }
     let mut declared_values = HashMap::new();
     for (value, ty, span, _) in &function.values {
         if value.0 == 0 {

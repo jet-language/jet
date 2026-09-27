@@ -233,9 +233,9 @@ fn generic_module_comptime_bindings_survive_item_registration() {
     let (bundle, diagnostics) = check(
         r#"
 module cache<K>(capacity: Int) {
-    @base :: capacity
-    @computed_size :: @base + 1
-    fn size() Int -> @computed_size
+    @BASE :: capacity
+    @COMPUTED_SIZE :: @BASE + 1
+    fn size() Int -> @COMPUTED_SIZE
 }
 module instance :: cache<Int>(3)
 fn run() {}

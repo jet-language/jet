@@ -12,10 +12,10 @@ fn run() -[!Mem.Alloc]> {
 "#;
 
 const MEMORY_COMPTIME_SOURCE: &str = r#"
-@answer :: "memory denial"
+@ANSWER :: "memory denial"
 
 fn run() -[!Mem.Alloc]> {
-    print(@answer)
+    print(@ANSWER)
 }
 "#;
 
@@ -228,15 +228,15 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     );
 }
 
-/// D-MEM-COPYSEM1=A + I8/I9: the read-view materialization symbol has ONE home,
-/// `jet::Codegen::TIR::view_copy_symbol`. Before this guard the same four-arm
-/// type ladder was written out three times — the AOT emitter, the wasm emitter,
-/// and the JS emitter — so a rename or a new window shape could give one tier a
-/// different kernel than the others while every golden still passed.
+/// D-MEM-COPYSEM1=A + I8/I9: the read-view materialization kind has ONE
+/// kernel-name table, `jet_foundation::MIR::MirViewCopyKind::symbol`. The
+/// checked AST/TIR producer and canonical MIR consumers may classify their
+/// own representation, but no tier may duplicate the kind-to-kernel mapping.
 #[test]
 fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
-    use jet::Codegen::TIR::{view_copy_owned_type, view_copy_symbol};
-    use jet::AST::Type;
+    use jet::AST::{TagMarker, Type};
+    use jet::Codegen::TIR::{view_copy_kind, view_copy_owned_type};
+    use jet_foundation::MIR::MirViewCopyKind;
 
     let view_of = |element: Type| Type::Apply {
         name: "View".to_string(),
@@ -244,32 +244,66 @@ fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
     };
     let str_view = view_of(Type::Named("str".to_string()));
     let int_view = view_of(Type::Int);
+    let tagged_str_view = Type::Tagged {
+        marker: TagMarker::User("ReadAlias".to_string()),
+        inner: Box::new(str_view.clone()),
+    };
+    let fake_string_view = Type::Apply {
+        name: "foo.View".to_string(),
+        args: vec![Type::Named("str".to_string())],
+    };
+    let fake_list_view = Type::Apply {
+        name: "foo.ViewMut".to_string(),
+        args: vec![Type::Int],
+    };
+    let malformed_view_placeholder = Type::Apply {
+        name: "View<>".to_string(),
+        args: vec![Type::Named("str".to_string())],
+    };
 
-    // A string window and a list window are the only two shapes, and the
-    // symbol travels with the owned destination type sema chose.
-    assert_eq!(view_copy_symbol(&str_view), "jet_string_view_copy");
+    assert_eq!(view_copy_kind(&str_view), Some(MirViewCopyKind::String));
+    assert_eq!(
+        view_copy_kind(&str_view).expect("string kind").symbol(),
+        "jet_string_view_copy"
+    );
     assert_eq!(view_copy_owned_type(&str_view), Some(Type::String));
-    assert_eq!(view_copy_symbol(&int_view), "jet_view_copy");
+    assert_eq!(view_copy_kind(&int_view), Some(MirViewCopyKind::List));
+    assert_eq!(
+        view_copy_kind(&int_view).expect("list kind").symbol(),
+        "jet_view_copy"
+    );
     assert_eq!(
         view_copy_owned_type(&int_view),
         Some(Type::List(Box::new(Type::Int)))
     );
+    assert_eq!(
+        view_copy_kind(&tagged_str_view),
+        Some(MirViewCopyKind::String)
+    );
+    assert_eq!(
+        view_copy_owned_type(&tagged_str_view),
+        Some(Type::String)
+    );
+    assert_eq!(view_copy_kind(&fake_string_view), None);
+    assert_eq!(view_copy_kind(&fake_list_view), None);
+    assert_eq!(view_copy_kind(&malformed_view_placeholder), None);
     // A range place keeps `[T]` at the Jet surface; a `string_view` local keeps
     // `String`. Both still reach the same two kernels.
     assert_eq!(
-        view_copy_symbol(&Type::List(Box::new(Type::Int))),
-        "jet_view_copy"
+        view_copy_kind(&Type::List(Box::new(Type::Int))),
+        Some(MirViewCopyKind::List)
     );
-    assert_eq!(view_copy_symbol(&Type::String), "jet_string_view_copy");
+    assert_eq!(
+        view_copy_kind(&Type::String),
+        Some(MirViewCopyKind::String)
+    );
     // Not a declared window: the caller keeps its own type.
     assert_eq!(view_copy_owned_type(&Type::String), None);
 
-    // Both Prelude kernels declare exactly the symbols the table names, so the
-    // native/wasm and web tiers cannot drift apart from each other either.
     let crate_root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src/Prelude/Core");
-    let rust_kernel = std::fs::read_to_string(crate_root.join("ViewCopy.rs")).unwrap();
-    let js_kernel = std::fs::read_to_string(crate_root.join("ViewCopy.js")).unwrap();
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src");
+    let rust_kernel = std::fs::read_to_string(crate_root.join("Prelude/Core/ViewCopy.rs")).unwrap();
+    let js_kernel = std::fs::read_to_string(crate_root.join("Prelude/Core/ViewCopy.js")).unwrap();
     for symbol in ["jet_view_copy", "jet_string_view_copy"] {
         assert!(
             rust_kernel.contains(&format!("fn {symbol}")),
@@ -281,18 +315,30 @@ fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
         );
     }
 
-    // No engine may re-derive the choice. Every tier reads the table above, so
-    // a copy-symbol literal outside the table and the Prelude is I8 drift.
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src");
+    // The checked producer uses the shared kind table, while every actual
+    // canonical MIR engine consumes the Foundation classifier. The Web symbol
+    // registry may list linkage names, but it must not classify source shapes.
+    let producer = std::fs::read_to_string(crate_root.join("Codegen/TIR/mod.rs")).unwrap();
+    assert!(producer.contains("MirViewCopyKind"));
+    assert!(!producer.contains("\"jet_string_view_copy\""));
+    assert!(!producer.contains("\"jet_view_copy\""));
+    let lambda_producer =
+        std::fs::read_to_string(crate_root.join("Codegen/TIR/lower/lambdas.rs")).unwrap();
+    assert!(lambda_producer.contains("view_copy_kind"));
+    assert!(lambda_producer.contains(".symbol()"));
+    assert!(!lambda_producer.contains("\"jet_string_view_copy\""));
+    assert!(!lambda_producer.contains("\"jet_view_copy\""));
     for engine in [
-        src.join("Codegen/TIR/emit/expressions.rs"),
-        src.join("Codegen/Web.rs"),
-        src.join("Codegen/TIR/lower/lambdas.rs"),
+        crate_root.join("Codegen/MIRRust.rs"),
+        crate_root.join("Codegen/MIRWeb.rs"),
+        crate_root.join("Codegen/MIREval.rs"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/jet-jit/src/jit/functions_compile.rs"),
     ] {
         let text = std::fs::read_to_string(&engine).unwrap();
         assert!(
-            !text.contains("jet_string_view_copy(") && !text.contains("jet_view_copy("),
-            "{} must call view_copy_symbol instead of naming a copy kernel itself",
+            text.contains("mir_view_copy_kind") || text.contains("MirViewCopyKind"),
+            "{} must consume the canonical MIR view-copy classifier",
             engine.display()
         );
     }

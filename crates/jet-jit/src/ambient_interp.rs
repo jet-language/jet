@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use jet_codegen::Comptime::{
     AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall, AmbientHandle,
-    AmbientMirExternCall, AmbientMirHandle, AmbientMirHandleResult, DevSink,
+    AmbientMirExternCall, AmbientMirExternResult, AmbientMirHandle, AmbientMirHandleResult, DevSink,
 };
 use jet_codegen::embedded_hardware::{
     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
@@ -714,6 +714,9 @@ fn http_client_send(request: &MirRuntimeValue) -> Result<MirRuntimeValue, String
     let body = match http_request_field(request, "body") {
         Some(MirRuntimeValue::Bytes(value)) => value.clone(),
         Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+        Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+            return Err("HTTP request body cannot carry a native runtime resource".to_string());
+        }
         _ => Vec::new(),
     };
     let mut wire = format!(
@@ -723,8 +726,16 @@ fn http_client_send(request: &MirRuntimeValue) -> Result<MirRuntimeValue, String
     .into_bytes();
     if let Some(MirRuntimeValue::Map(headers)) = http_request_field(request, "headers") {
         for (name, value) in headers {
-            if let (MirConstKey::String(name), MirRuntimeValue::String(value)) = (name, value) {
-                wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+            match (name, value) {
+                (MirConstKey::String(name), MirRuntimeValue::String(value)) => {
+                    wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+                }
+                (_, MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+                    return Err(
+                        "HTTP request headers cannot carry a native runtime resource".to_string()
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -757,10 +768,16 @@ fn http_response_wire(response: &MirRuntimeValue) -> Result<Vec<u8>, String> {
         Some(MirRuntimeValue::Struct { fields, .. }) => match http_field_runtime(fields, "bytes") {
             Some(MirRuntimeValue::Bytes(value)) => value.clone(),
             Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+            Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+                return Err("HTTP response body cannot carry a native runtime resource".to_string());
+            }
             _ => Vec::new(),
         },
         Some(MirRuntimeValue::Bytes(value)) => value.clone(),
         Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+        Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+            return Err("HTTP response body cannot carry a native runtime resource".to_string());
+        }
         _ => Vec::new(),
     };
     let reason = match status {
@@ -778,8 +795,16 @@ fn http_response_wire(response: &MirRuntimeValue) -> Result<Vec<u8>, String> {
     .into_bytes();
     if let Some(MirRuntimeValue::Struct { fields, .. }) = http_request_field(response, "headers") {
         for (name, value) in fields {
-            if let MirRuntimeValue::String(value) = value {
-                wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+            match value {
+                MirRuntimeValue::String(value) => {
+                    wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+                }
+                MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+                    return Err(
+                        "HTTP response headers cannot carry a native runtime resource".to_string()
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -2218,7 +2243,7 @@ fn dispatch_mir_extern(
     foreign: &MirForeign,
     args: Vec<MirRuntimeValue>,
     span: Span,
-) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
     let mut index = 0;
     loop {
         let callback = active_context().and_then(|context| context.mir_extern_call(index));

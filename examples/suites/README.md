@@ -1,21 +1,37 @@
-# User-story suites
+# Example suites
 
-`examples/features/` remains the feature-by-feature language reference. This
-directory adds complete small programs that start with a user story, model
-data, perform a useful operation, and print a result.
+The files in this directory are small end-to-end suite fixtures. Each fixture
+is a top-level `.jet` source file with a same-stem `.out` file under
+[`expected/`](expected/) containing its intended stdout:
 
-Every program has a matching file in `expected/`. The golden test runs each
-program through `jet run` and compares stdout byte-for-byte.
+| Source | Output fixture |
+| --- | --- |
+| [`expense_report.jet`](expense_report.jet) | [`expense_report.out`](expected/expense_report.out) |
+| [`support_queue.jet`](support_queue.jet) | [`support_queue.out`](expected/support_queue.out) |
+| [`inventory_reorder.jet`](inventory_reorder.jet) | [`inventory_reorder.out`](expected/inventory_reorder.out) |
+| [`dispatch.jet`](dispatch.jet) | [`dispatch.out`](expected/dispatch.out) |
+| [`failure.jet`](failure.jet) | [`failure.out`](expected/failure.out) |
+| [`finite_state.jet`](finite_state.jet) | [`finite_state.out`](expected/finite_state.out) |
+| [`ownership.jet`](ownership.jet) | [`ownership.out`](expected/ownership.out) |
+| [`wire_output.jet`](wire_output.jet) | [`wire_output.out`](expected/wire_output.out) |
 
-| Program | User story | End-to-end result |
-| --- | --- | --- |
-| `expense_report.jet` | A shop owner wants a daily total from line items. | Counts items and totals their cents. |
-| `support_queue.jet` | A support lead wants the open tickets that need attention. | Filters open tickets and prints their priority. |
-| `inventory_reorder.jet` | A stock clerk wants a quick reorder list. | Compares stock against reorder points. |
-| `dispatch.jet` | A parser routes aliases and field keys. | Uses one ordered dispatch table. |
-| `failure.jet` | A command reports typed and implicit failures. | Propagates and converts one failure rail. |
-| `finite_state.jet` | A build job follows legal state transitions. | Uses enum variant groups, tags, and typestate. |
-| `ownership.jet` | A report reuses views and copies at one boundary. | Makes ownership and materialization visible. |
-| `wire_output.jet` | A command emits and reads a typed JSON record. | Writes canonical bytes and round-trips `#Codable`. |
+## Run one fixture
 
-Run any suite directly with `jet run examples/suites/<name>.jet`.
+From the repository root, exercise an individual source with the checked-out
+compiler:
+
+```sh
+target/debug/jet run examples/suites/expense_report.jet
+```
+
+The suite checker in [`tests/suite_goldens.rs`](../../tests/suite_goldens.rs)
+defines the accepted layout: it enumerates the top-level `.jet` files (apart
+from `package.jet`), requires the matching `.out`, runs each source with
+`jet run`, and compares stdout byte for byte. The table above mirrors that
+source-level contract; it does not replace the checker.
+
+A fixture can be useful as a design example before it is accepted by the
+current compiler. If a direct run reports a source or library diagnostic,
+fix the source and its fixture together rather than treating this README or an
+old output file as proof of compiler support. The feature examples in
+[`../features/`](../features/) are the shorter current-syntax starting point.

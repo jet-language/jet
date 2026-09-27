@@ -861,10 +861,10 @@ fn comptime_const_inline() {
         return;
     }
     let src = "\
-@version :: \"1.0\"
-@banner :: \"logbook {@version}\"
+@VERSION :: \"1.0\"
+@BANNER :: \"logbook {@VERSION}\"
 fn wrap(s: String) String {
-    return \"{@banner}: {s}\"
+    return \"{@BANNER}: {s}\"
 }
 fn run() {
     print(wrap(\"hi\"))

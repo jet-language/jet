@@ -217,6 +217,7 @@ pub(super) fn realize_ref(
         project_dir: Some(project_dir),
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     let trust_store = Trust::store_path();
     match authorize_core_build(
@@ -314,6 +315,7 @@ pub(super) fn try_realize_ref(
         project_dir: Some(project_dir),
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
     let trust_store = Trust::store_path();
     match authorize_core_build(

@@ -1,0 +1,1286 @@
+// Declaration grammar. AST nodes are assembled directly from Jet tokens; no
+// Rust parser or semantic compiler is involved.
+
+pub struct ParsedItemOrImport {
+    pub item: ?Item
+    pub import: ?ImportDecl
+    pub handled: Bool
+}
+
+pub struct ParsedItemModifiers {
+    pub is_pub: Bool
+    pub is_package_pub: Bool
+    pub is_comptime: Bool
+    pub markers: [Marker]
+    pub start_span: Span
+}
+pub struct ParsedFunction {
+    pub value: Func
+    pub has_body: Bool
+}
+pub struct ParsedUserPolicy {
+    pub value: UserPolicyDecl
+    pub valid: Bool
+}
+
+fn parser_user_policy_ahead(state: &JetParserState) -> Bool {
+    if parser_current_kind(&state) == TOKEN_KW_PUB {
+        token := parser_lookahead(&state, 1)
+        return token.kind == TOKEN_IDENT && token.payload.decoded == "policy"
+    }
+    token := parser_current(&state)
+    token.kind == TOKEN_IDENT && token.payload.decoded == "policy"
+}
+
+fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
+    is_pub := false
+    if parser_current_kind(&state) == TOKEN_KW_PUB {
+        parser_bump(&state)
+        is_pub = true
+    }
+    start :: parser_expect_name(&state, "to start a policy declaration")
+    name :: parser_expect_name(&state, "as the policy setting name")
+    params := parser_parse_param_list(&state)
+    parser_expect(&state, TOKEN_LBRACE, "before the policy wrapper")
+    wrap :: parser_expect_name(&state, "`wrap` in a policy declaration")
+    valid := true
+    if wrap.payload.decoded != "wrap" {
+        parser_add_error(&state, wrap.span, "expected `wrap` in a policy declaration", "a user policy has one checked wrapper boundary around the supplied callable", "write `wrap(call)` around the policy body")
+        valid = false
+    }
+    parser_expect(&state, TOKEN_LPAREN, "after `wrap`")
+    call :: parser_expect_name(&state, "as the callable parameter in `wrap(call)`")
+    if call.payload.decoded != "call" {
+        parser_add_error(&state, call.span, "a policy wrapper must receive `call`", "policy wrappers receive one callable value and cannot edit its signature", "write `wrap(call)`")
+        valid = false
+    }
+    parser_expect(&state, TOKEN_RPAREN, "after the policy callable parameter")
+    body := parser_parse_block(&state)
+    close :: parser_expect(&state, TOKEN_RBRACE, "after the policy wrapper body")
+    parser_finish_statement(&state)
+    if !is_pub {
+        parser_add_error(&state, start.span, "a user policy setting must be public", "policy settings are package vocabulary and their users resolve a package-owned name", "make this a public policy declaration with a `wrap(call)` body")
+        valid = false
+    }
+    value := UserPolicyDecl{is_pub: is_pub, name: name.payload.decoded, name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
+    ParsedUserPolicy{value: value, valid: valid}
+}
+
+
+
+fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
+    modifiers :: parser_parse_item_modifiers(&state)
+    if parser_c_module_ahead_at(&state, 0) {
+        value := parser_parse_c_module(&state)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_module_ahead(&state) {
+        value :: parser_parse_module(&state, modifiers)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_test_ahead(&state) {
+        value :: parser_parse_test(&state)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_unit_family_ahead(&state) {
+        value :: parser_parse_unit_family(&state, modifiers)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_distinct_ahead(&state) {
+        value :: parser_parse_distinct(&state, modifiers)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_state_section_ahead(&state) {
+        section := parser_parse_state_section(&state, "", parser_current(&state).span)
+        parser_report_ineligible_state_section(&state, section, "module")
+        return ParsedItemOrImport{item: None, import: None, handled: true}
+    }
+    if parser_state_ahead(&state) {
+        declaration := parser_parse_state_decl(&state, modifiers)
+        parser_report_top_level_state_decl(&state, declaration)
+        return ParsedItemOrImport{item: None, import: None, handled: true}
+    }
+    if parser_protocol_ahead(&state) {
+        value :: parser_parse_protocol(&state, modifiers)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_marker_decl_ahead(&state) {
+        value :: parser_parse_marker_decl(&state)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_fact_decl_ahead(&state) {
+        value :: parser_parse_fact_decl(&state)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_tag_decl_ahead(&state) {
+        value :: parser_parse_tag_policy(&state, modifiers)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_item_declaration_ahead_at(&state, 0) && parser_extern_ahead(&state) {
+        value :: parser_parse_extern_rust(&state)
+        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+    }
+    if parser_current_kind(&state) == TOKEN_KW_USE {
+        import :: parser_parse_import(&state)
+        import.is_pub = modifiers.is_pub
+        import.is_package_pub = modifiers.is_package_pub
+        return ParsedItemOrImport{item: None, import: Val(import), handled: true}
+    }
+    token :: parser_current(&state)
+    if parser_comptime_const_ahead(&state, 0) {
+        value :: parser_parse_const(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_FN {
+        parsed :: parser_parse_function(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Func(value: parsed.value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_STRUCT {
+        value :: parser_parse_struct(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Struct(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_ENUM {
+        value :: parser_parse_enum(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Enum(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_CONST || token.kind == TOKEN_KW_COMPTIME || (modifiers.is_comptime && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ) {
+        value :: parser_parse_const(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_TRAIT {
+        value :: parser_parse_trait(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Trait(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_IMPL {
+        value :: parser_parse_impl(&state)
+        return ParsedItemOrImport{item: Val(Item.Impl(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_MODULE {
+        value :: parser_parse_code_module(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.CodeModule(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_EFFECT {
+        value :: parser_parse_effect_decl(&state)
+        return ParsedItemOrImport{item: Val(Item.EffectDecl(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_TAG {
+        value :: parser_parse_tag_decl(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.Tag(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_EXTERN {
+        value :: parser_parse_extern_rust(&state)
+        return ParsedItemOrImport{item: Val(Item.ExternRust(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_KW_DERIVE {
+        value :: parser_parse_user_derive(&state)
+        return ParsedItemOrImport{item: Val(Item.UserDerive(value: value)), import: None, handled: true}
+    }
+    if token.kind == TOKEN_IDENT && token.payload.decoded == "alias" {
+        value :: parser_parse_type_alias(&state, modifiers)
+        return ParsedItemOrImport{item: Val(Item.TypeAlias(value: value)), import: None, handled: true}
+    }
+    ParsedItemOrImport{item: None, import: None, handled: false}
+}
+fn parser_report_top_level_state_decl(state: &JetParserState, declaration: StateDecl) {
+    state_names := ""
+    index := 0
+    loop index < declaration.states.len() {
+        if index > 0 -> state_names = "{state_names}, "
+        state_name :: declaration.states[index]
+        state_names = "{state_names}{state_name.name}"
+        index += 1
+    }
+    states := "{{ {state_names} }}"
+    parser_add_error_code(&state, "E0157", declaration.span, "`state {declaration.type_name} {{ … }}` is not a type declaration", "Typestate facts belong to the struct that owns them; a sibling declaration repeats the type name and creates a false namespace boundary", "move the states into the owner: write `struct {declaration.type_name}` with `state {states}` inside its body")
+}
+
+fn parser_report_ineligible_state_section(state: &JetParserState, section: StateDecl, owner: String) {
+    parser_add_error_code(&state, "E0158", section.span, "`state {{ … }}` is not valid inside a {owner}", "state sections attach only to named struct bodies; enums, traits, aliases, impls, modules, and anonymous shapes have no state-set owner", "Move `state {{ … }}` into the named struct body")
+}
+fn parser_report_repeated_state_section(state: &JetParserState, section: StateDecl, type_name: String) {
+    parser_add_error_code(&state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "The state set is one erased fact row owned by the struct", "Merge the state names into one `state {{ … }}` section")
+}
+
+fn parser_parse_item_modifiers(state: &JetParserState) -> ParsedItemModifiers {
+    start := parser_current(&state).span
+    is_pub := false
+    is_package_pub := false
+    is_comptime := false
+    markers := [Marker]{}
+    loop {
+        kind := parser_current_kind(&state)
+        if kind == TOKEN_KW_PUB {
+            parser_bump(&state)
+            is_pub = true
+            is_package_pub = false
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                parser_bump(&state)
+                qualifier :: parser_expect_name(&state, "in a visibility qualifier")
+                if qualifier.payload.decoded == {
+                    "package" -> {
+                        is_pub = false
+                        is_package_pub = true
+                    }
+                    else -> parser_add_error(&state, qualifier.span, "unknown visibility qualifier `{qualifier.payload.decoded}`", "visibility qualifiers determine whether a declaration is exported from the package", "write `pub(package)` or remove the qualifier")
+                }
+            }
+            next
+        }
+        if kind == TOKEN_KW_PRIV {
+            parser_bump(&state)
+            is_pub = false
+            is_package_pub = false
+            next
+        }
+        if kind == TOKEN_HASH {
+            if parser_item_declaration_ahead_at(&state, 0) -> break
+            if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+                group := parser_parse_marker_group(&state)
+                index := 0
+                loop index < group.len() {
+                    marker :: group[index]
+                    markers.push(marker)
+                    if marker.name == "Comptime" -> is_comptime = true
+                    index += 1
+                }
+                next
+            }
+            marker :: parser_parse_marker(&state)
+            markers.push(marker)
+            if marker.name == "Comptime" -> is_comptime = true
+            next
+        }
+        break
+    }
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start}
+}
+
+fn parser_parse_marker(state: &JetParserState) -> Marker {
+    hash :: parser_expect(&state, TOKEN_HASH, "`#` before a marker")
+    negated := false
+    if parser_current_kind(&state) == TOKEN_BANG {
+        parser_bump(&state)
+        negated = true
+    }
+    name :: parser_expect_name(&state, "after `#` in a declaration marker")
+    args := [CallArg]{}
+    end := name.span
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        args = parser_parse_call_args(&state, 1, true)
+        if state.position > 0 -> end = parser_lookahead(&state, -1).span
+    }
+    marker_args := [MarkerCallArg]{}
+    labels := [?CallLabel]{}
+    index := 0
+    loop index < args.len() {
+        marker_args.push(MarkerCallArg.Expr(value: args[index].expr))
+        labels.push(args[index].label)
+        index += 1
+    }
+    Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: parser_cover(hash.span, end), ct: None}
+}
+fn parser_marker_first_expr(marker: Marker) -> ?Expr {
+    if marker.args.len() == 0 -> return None
+    if marker.args[0] == {
+        .Expr(value) -> return Val(value)
+        else -> return None
+    }
+}
+
+
+fn parser_parse_import(state: &JetParserState) -> ImportDecl {
+    start :: parser_bump(&state)
+    token :: parser_current(&state)
+    if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
+        path :: parser_bump(&state)
+        alias := parser_path_basename(path.payload.decoded)
+        alias_span := start.span
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "as" {
+            parser_bump(&state)
+            alias_token :: parser_expect_name(&state, "after `as` in an import")
+            alias = alias_token.payload.decoded
+            alias_span = alias_token.span
+        }
+        parser_finish_statement(&state)
+        end := path.span
+        if state.position > 0 -> end = parser_lookahead(&state, -1).span
+        return ImportDecl{kind: ImportKind.File(path: path.payload.decoded, span: path.span), alias: alias, alias_span: alias_span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+    }
+    first :: parser_expect_name(&state, "after `use`")
+    path := first.payload.decoded
+    last_span := first.span
+    parts := [Token]{first}
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        next_kind := parser_lookahead(&state, 1).kind
+        if next_kind == TOKEN_LBRACKET || next_kind == TOKEN_LBRACE || next_kind == TOKEN_STAR -> break
+        parser_bump(&state)
+        member :: parser_expect_name(&state, "after `.` in an import path")
+        parts.push(member)
+        path = "{path}.{member.payload.decoded}"
+        last_span = member.span
+    }
+    module_span := parser_cover(first.span, last_span)
+    if parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LBRACKET {
+            return parser_parse_import_member_list(&state, start.span, path, module_span)
+        }
+        if parser_current_kind(&state) == TOKEN_STAR {
+            star :: parser_bump(&state)
+            parser_add_error(&state, star.span, "wildcard imports are not supported", "`use {path}.*` hides where imported names come from", "list each imported name in `use {path}.[name]`")
+            parser_finish_statement(&state)
+            end := parser_lookahead(&state, -1).span
+            return ImportDecl{kind: ImportKind.Module(name: path, span: module_span), alias: parts[parts.len() - 1].payload.decoded, alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+        }
+        if parser_current_kind(&state) == TOKEN_LBRACE {
+            open :: parser_bump(&state)
+            brace_depth := 1
+            loop brace_depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
+                kind := parser_current_kind(&state)
+                if kind == TOKEN_LBRACE -> brace_depth += 1
+                if kind == TOKEN_RBRACE -> brace_depth -= 1
+                parser_bump(&state)
+            }
+            parser_add_error(&state, open.span, "brace import groups are not supported", "the braced grouped-import suffix is retired", "write a bracketed member list instead")
+            parser_finish_statement(&state)
+            end := parser_lookahead(&state, -1).span
+            return ImportDecl{kind: ImportKind.Module(name: path, span: module_span), alias: parts[parts.len() - 1].payload.decoded, alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+        }
+        parser_add_error(&state, parser_current(&state).span, "expected an import member suffix after `.`", "a trailing import dot starts a member list or wildcard suffix", "write `.[member]` after the module path")
+    }
+    alias := parts[parts.len() - 1].payload.decoded
+    alias_span := first.span
+    if parts.len() > 1 -> alias_span = start.span
+    inline_version := None
+    if parts.len() == 1 && parser_current_kind(&state) == TOKEN_HASH {
+        inline_version = Val(parser_parse_inline_version(&state))
+    }
+    explicit_alias := false
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "as" {
+        parser_bump(&state)
+        alias_token :: parser_expect_name(&state, "after `as` in an import")
+        alias = alias_token.payload.decoded
+        alias_span = alias_token.span
+        explicit_alias = true
+    }
+    parser_finish_statement(&state)
+    end := last_span
+    if state.position > 0 -> end = parser_lookahead(&state, -1).span
+    span := parser_cover(start.span, end)
+    if parts.len() == 2 && !explicit_alias {
+        item_span := parts[1].span
+        return ImportDecl{kind: ImportKind.Unqualified(module_alias: first.payload.decoded, module_alias_span: first.span, items: [ImportedItem]{ImportedItem{original: parts[1].payload.decoded, alias: None}}, items_span: item_span, span: span), alias: alias, alias_span: item_span, span: span, item_spans: [Span]{item_span}, local_spans: [Span]{item_span}, is_pub: false, is_package_pub: false, inline_version: None}
+    }
+    ImportDecl{kind: ImportKind.Module(name: path, span: module_span), alias: alias, alias_span: alias_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: inline_version}
+}
+
+fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_alias: String, module_alias_span: Span) -> ImportDecl {
+    open :: parser_bump(&state)
+    items := [ImportedItem]{}
+    item_spans := [Span]{}
+    local_spans := [Span]{}
+    next_kind := parser_current_kind(&state)
+    if next_kind == TOKEN_RBRACKET || next_kind == TOKEN_EOF {
+        parser_add_error(&state, open.span, "an import member list cannot be empty", "the `.[…]` form must name at least one member", "write `use {module_alias}.[member]`")
+    }
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        first :: parser_expect_name(&state, "inside an import member list")
+        name := first.payload.decoded
+        item_end := first.span
+        local_span := first.span
+        loop parser_current_kind(&state) == TOKEN_DOT {
+            parser_bump(&state)
+            part :: parser_expect_name(&state, "after `.` in an imported member")
+            name = "{name}.{part.payload.decoded}"
+            item_end = part.span
+            local_span = part.span
+        }
+        alias := None
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "as" {
+            parser_bump(&state)
+            local :: parser_expect_name(&state, "after `as` in an imported member")
+            alias = Val(local.payload.decoded)
+            local_span = local.span
+        }
+        items.push(ImportedItem{original: name, alias: alias})
+        item_spans.push(parser_cover(first.span, item_end))
+        local_spans.push(local_span)
+        if parser_current_kind(&state) != TOKEN_COMMA -> break
+        parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after imported members")
+    items_span := parser_cover(open.span, close.span)
+    parser_finish_statement(&state)
+    end := parser_lookahead(&state, -1).span
+    span := parser_cover(start, end)
+    ImportDecl{kind: ImportKind.Unqualified(module_alias: module_alias, module_alias_span: module_alias_span, items: items, items_span: items_span, span: span), alias: module_alias, alias_span: module_alias_span, span: span, item_spans: item_spans, local_spans: local_spans, is_pub: false, is_package_pub: false, inline_version: None}
+}
+
+fn parser_parse_inline_version(state: &JetParserState) -> InlineVersion {
+    hash :: parser_bump(&state)
+    first := parser_current(&state)
+    if first.kind != TOKEN_INT && first.kind != TOKEN_FLOAT {
+        parser_add_error(&state, first.span, "expected a version number after `#`", "`use package#version;` pins an inline dependency version", "write numeric version components after `#`")
+        return InlineVersion{text: "", span: hash.span}
+    }
+    text := first.payload.text
+    end := parser_bump(&state).span
+    loop parser_current_kind(&state) == TOKEN_DOT && parser_lookahead(&state, 1).kind == TOKEN_INT {
+        parser_bump(&state)
+        part :: parser_bump(&state)
+        text = "{text}.{part.payload.text}"
+        end = part.span
+    }
+    InlineVersion{text: text, span: parser_cover(hash.span, end)}
+}
+
+fn parser_path_basename(path: String) -> String {
+    segments := path.split("/")
+    if segments.len() == 0 -> return path
+    segments[segments.len() - 1]
+}
+
+fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
+    params := [TypeParam]{}
+    if parser_current_kind(&state) != TOKEN_LT -> return params
+    parser_bump(&state)
+    if {
+        parser_type_close_here(&state) -> parser_add_error(&state, parser_current(&state).span, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
+        else -> {
+            loop {
+                name :: parser_expect_name(&state, "in a generic parameter list")
+                bounds := [String]{}
+                if parser_current_kind(&state) == TOKEN_COLON {
+                    parser_bump(&state)
+                    if {
+                        parser_current_kind(&state) == TOKEN_LBRACKET -> {
+                            parser_bump(&state)
+                            if parser_current_kind(&state) != TOKEN_RBRACKET {
+                                loop {
+                                    bound :: parser_expect_name(&state, "in a generic trait-bound list")
+                                    bounds.push(bound.payload.decoded)
+                                    if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                                    if parser_current_kind(&state) != TOKEN_COMMA -> break
+                                    parser_bump(&state)
+                                }
+                            }
+                            parser_expect(&state, TOKEN_RBRACKET, "`]` after generic bounds")
+                        }
+                        else -> {
+                            loop {
+                                bound :: parser_expect_name(&state, "after `:` in a generic parameter")
+                                bounds.push(bound.payload.decoded)
+                                if parser_current_kind(&state) != TOKEN_PIPE -> break
+                                parser_bump(&state)
+                            }
+                        }
+                    }
+                }
+                params.push(TypeParam{name: name.payload.decoded, name_span: name.span, bounds: bounds})
+                if parser_type_close_here(&state) -> break
+                if parser_current_kind(&state) != TOKEN_COMMA {
+                    parser_add_error(&state, parser_current(&state).span, "expected `,` between generic parameters", "type parameter declarations are comma-separated", "add a comma or close the generic list")
+                    break
+                }
+                parser_bump(&state)
+                if parser_type_close_here(&state) -> break
+            }
+        }
+    }
+    if parser_type_close_here(&state) -> parser_take_type_close(&state) else -> parser_expect(&state, TOKEN_GT, "`>` after generic parameters")
+    params
+}
+
+fn parser_parse_param_list(state: &JetParserState) -> [Param] {
+    parser_expect(&state, TOKEN_LPAREN, "`(` before function parameters")
+    params := [Param]{}
+    zone := ParamZone.Either
+    if parser_current_kind(&state) != TOKEN_RPAREN {
+        loop {
+            if {
+                parser_current_kind(&state) == TOKEN_SLASH -> {
+                    slash :: parser_bump(&state)
+                    index := 0
+                    loop index < params.len() {
+                        params[index].zone = ParamZone.PositionalOnly
+                        index += 1
+                    }
+                    if params.len() == 0 -> parser_add_error(&state, slash.span, "the positional-only parameter zone is empty", "`/` follows positional-only parameters", "add parameters before `/` or remove it")
+                }
+                parser_current_kind(&state) == TOKEN_STAR -> {
+                    parser_bump(&state)
+                    zone = ParamZone.LabelOnly
+                }
+                else -> params.push(parser_parse_param(&state, zone))
+            }
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between parameters", "function parameters are comma-separated", "add a comma or close the parameter list")
+                break
+            }
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        }
+    }
+    parser_expect(&state, TOKEN_RPAREN, "`)` after function parameters")
+    params
+}
+
+fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
+    root := false
+    if parser_current_kind(&state) == TOKEN_HASH {
+        marker :: parser_parse_marker(&state)
+        root = marker.name == "Root"
+    }
+    convention := AccessConvention.Read
+    access_kind :: parser_current_kind(&state)
+    if access_kind == TOKEN_KW_COPY || access_kind == TOKEN_KW_MUTATE || access_kind == TOKEN_KW_MOVE {
+        keyword_token :: parser_bump(&state)
+        parser_add_error(&state, keyword_token.span, "expected a name for a parameter name, found the keyword `{keyword_token.payload.text}`", "names start with a letter or `_`", "write an identifier here")
+    }
+    if access_kind == {
+        .TOKEN_AMP -> {
+            parser_bump(&state)
+            convention = AccessConvention.Write
+        }
+        .TOKEN_CARET -> {
+            parser_bump(&state)
+            convention = AccessConvention.Move
+        }
+        else -> {}
+    }
+    name := if parser_current_kind(&state) == {
+        .TOKEN_SELF -> parser_bump(&state)
+        else -> parser_expect_name(&state, "for a parameter name")
+    }
+    public_label := None
+    if name.kind == TOKEN_IDENT && parser_current_kind(&state) == TOKEN_IDENT {
+        public_label = Val(CallLabel{name: name.payload.decoded, span: name.span})
+        name = parser_bump(&state)
+    }
+    ty := Type.Named("")
+    ty_span := name.span
+    variadic := false
+    variadic_bounds := None
+    if {
+        name.kind == TOKEN_SELF && parser_current_kind(&state) != TOKEN_COLON -> {
+            // Sema supplies the receiver type from its owning declaration.
+        }
+        else -> {
+            parser_expect(&state, TOKEN_COLON, "`:` and a type after the parameter name")
+            cap_kind := parser_current_kind(&state)
+            if cap_kind == TOKEN_AMP || cap_kind == TOKEN_CARET {
+                cap :: parser_bump(&state)
+                type_convention := AccessConvention.Move
+                if cap.kind == TOKEN_AMP -> type_convention = AccessConvention.Write
+                if convention != AccessConvention.Read {
+                    leading_label :: if convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the move marker `^`"
+                    type_label :: if type_convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the move marker `^`"
+                    parser_add_error_code(&state, "E0029", name.span, "`{name.payload.text}` has two access markers", "{leading_label} before the parameter name conflicts with {type_label} on its type; a parameter can declare only one access marker", "keep one access marker on the type or receiver and remove the other")
+                }
+                convention = type_convention
+            }
+            if {
+                parser_current_kind(&state) == TOKEN_DOT_DOT_DOT -> {
+                    parser_bump(&state)
+                    variadic = true
+                    if {
+                        parser_current_kind(&state) == TOKEN_LBRACKET -> {
+                            parser_bump(&state)
+                            bounds := [String]{}
+                            if parser_current_kind(&state) != TOKEN_RBRACKET {
+                                loop {
+                                    bound :: parser_expect_name(&state, "in variadic trait bounds")
+                                    bounds.push(bound.payload.decoded)
+                                    if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                                    if parser_current_kind(&state) != TOKEN_COMMA -> break
+                                    parser_bump(&state)
+                                }
+                            }
+                            close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after variadic bounds")
+                            variadic_bounds = Val(bounds)
+                            ty_span = parser_cover(name.span, close.span)
+                        }
+                        else -> {
+                            parsed_type :: parser_parse_type(&state, 0)
+                            ty = parsed_type.ty
+                            ty_span = parsed_type.span
+                        }
+                    }
+                }
+                else -> {
+                    parsed_type :: parser_parse_type(&state, 0)
+                    ty = parsed_type.ty
+                    ty_span = parsed_type.span
+                }
+            }
+        }
+    }
+    default := None
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        parser_bump(&state)
+        default = Val(parser_parse_expression(&state, 1, 0).expr)
+        parser_expect(&state, TOKEN_RBRACE, "`}}` after the parameter default")
+    }
+    declared_from := None
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "from" {
+        parser_bump(&state)
+        sources := [String]{}
+        loop {
+            source :: parser_expect_name(&state, "after `from` in a parameter view declaration")
+            sources.push(source.payload.decoded)
+            if parser_current_kind(&state) != TOKEN_PIPE -> break
+            parser_bump(&state)
+        }
+        declared_from = Val(sources)
+    }
+    Param{convention: convention, root: root, name: name.payload.decoded, name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from}
+}
+
+fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers) -> ParsedFunction {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `fn`")
+    func_name := name.payload.decoded
+    func_name_span := name.span
+    external_type := None
+    if parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        method :: parser_expect_name(&state, "after `.` in an external method name")
+        external_type = Val(NamedSpan{name: func_name, span: name.span})
+        func_name = method.payload.decoded
+        func_name_span = method.span
+    }
+    type_params := parser_parse_type_params(&state)
+    params := parser_parse_param_list(&state)
+    declared_effects := None
+    if parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+        parser_bump(&state)
+        parser_bump(&state)
+        effects := [EffectRowEntry]{}
+        if parser_current_kind(&state) != TOKEN_RBRACKET {
+            loop {
+                effect_token :: parser_expect_name(&state, "in an effect row")
+                effects.push(EffectRowEntry{name: effect_token.payload.decoded, span: effect_token.span})
+                if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                if parser_current_kind(&state) != TOKEN_COMMA -> break
+                parser_bump(&state)
+            }
+        }
+        parser_expect(&state, TOKEN_RBRACKET, "`]` after the effect row")
+        declared_effects = Val(effects)
+    }
+    return_type := None
+    return_type_span := None
+    return_type_kind := parser_current_kind(&state)
+    if return_type_kind == TOKEN_ARROW || return_type_kind == TOKEN_UNIFIED_ARROW {
+        parser_bump(&state)
+        parsed_return :: parser_parse_type(&state, 0)
+        return_type = Val(parsed_return.ty)
+        return_type_span = Val(parsed_return.span)
+    }
+    signature_end := parser_lookahead(&state, -1).span
+    func := ast_func(func_name, func_name_span, start.span)
+    func.is_pub = modifiers.is_pub
+    func.is_package_pub = modifiers.is_package_pub
+    func.is_comptime = modifiers.is_comptime
+    func.external_type = external_type
+    func.type_params = type_params
+    func.params = params
+    func.return_type = return_type
+    func.return_type_span = return_type_span
+    func.declared_effects = declared_effects
+    func.markers = modifiers.markers
+    parser_apply_function_markers(&func, modifiers.markers)
+    has_body := false
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            body :: parser_parse_block(&state)
+            func.body = body.statements
+            func.span = parser_cover(modifiers.start_span, body.span)
+            has_body = true
+        }
+        else -> {
+            if parser_current_kind(&state) == TOKEN_SEMI -> signature_end = parser_bump(&state).span
+            func.span = parser_cover(modifiers.start_span, signature_end)
+        }
+    }
+    ParsedFunction{value: func, has_body: has_body}
+}
+
+fn parser_apply_function_markers(func: &[Func], markers: [Marker]) {
+    index := 0
+    loop index < markers.len() {
+        marker :: markers[index]
+        if marker.name == "Pure" -> func.is_pure = true
+        if marker.name == "Unsafe" {
+            func.is_unsafe = true
+            func.unsafe_span = Val(marker.span)
+            first := parser_marker_first_expr(marker)
+            if first == { .Val(value) -> func.unsafe_reason = parser_expr_literal_string(value) }
+        }
+        if marker.name == "Reactive" -> func.is_reactive = true
+        if marker.name == "Replayable" {
+            func.is_replayable = true
+            func.replayable_span = Val(marker.span)
+        }
+        if marker.name == "Sanitizer" {
+            func.is_sanitizer = true
+            first := parser_marker_first_expr(marker)
+            if first == { .Val(value) -> func.scrub_tag = parser_expr_literal_string(value) }
+        }
+        if marker.name == "MustUse" {
+            func.is_must_use = true
+            func.must_use_span = Val(marker.span)
+        }
+        if marker.name == "Inline" {
+            func.is_inline = true
+            func.inline_span = Val(marker.span)
+        }
+        if marker.name == "InlineAlways" {
+            func.is_inline = true
+            func.is_inline_always = true
+            func.inline_span = Val(marker.span)
+        }
+        index += 1
+    }
+}
+
+fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -> StructDef {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `struct`")
+    value := ast_struct(name.payload.decoded, name.span, start.span)
+    value.is_pub = modifiers.is_pub
+    value.is_package_pub = modifiers.is_package_pub
+    value.type_params = parser_parse_type_params(&state)
+    value.type_markers = modifiers.markers
+    parser_apply_type_markers(&value, modifiers.markers)
+    if parser_current_kind(&state) != TOKEN_LBRACE {
+        parser_add_error(&state, parser_current(&state).span, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
+        return value
+    }
+    parser_bump(&state)
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        member_modifiers := parser_parse_item_modifiers(&state)
+        if parser_state_section_ahead(&state) {
+            section := parser_parse_state_section(&state, name.payload.decoded, name.span)
+            if value.state == {
+                .None -> value.state = Val(section)
+                else -> parser_report_repeated_state_section(&state, section, name.payload.decoded)
+            }
+            if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+            next
+        }
+        if parser_current_kind(&state) == {
+            .TOKEN_KW_FN -> {
+                method :: parser_parse_function(&state, member_modifiers)
+                value.methods.push(method.value)
+            }
+            else -> {
+                field_markers := member_modifiers.markers
+                field_pub := member_modifiers.is_pub
+                field_package_pub := member_modifiers.is_package_pub
+                field_name :: parser_expect_name(&state, "in a struct field")
+                parser_expect(&state, TOKEN_COLON, "`:` after a struct field name")
+                field_type :: parser_parse_type(&state, 0)
+                computed := None
+                default := None
+                default_kind := parser_current_kind(&state)
+                if {
+                    default_kind == TOKEN_COLON_EQ || default_kind == TOKEN_EQ -> {
+                        parser_bump(&state)
+                        parsed_value :: parser_parse_expression(&state, 1, 0)
+                        default = Val(parsed_value.expr)
+                    }
+                    parser_current_kind(&state) == TOKEN_LBRACE -> {
+                        parser_bump(&state)
+                        parsed_value :: parser_parse_expression(&state, 1, 0)
+                        parser_expect(&state, TOKEN_RBRACE, "`}}` after a struct field default")
+                        default = Val(parsed_value.expr)
+                    }
+                }
+                redact := false
+                marker_index := 0
+                loop marker_index < field_markers.len() {
+                    if field_markers[marker_index].name == "Redact" -> redact = true
+                    if field_markers[marker_index].name == "Computed" {
+                        first := parser_marker_first_expr(field_markers[marker_index])
+                        if first == { .Val(value) -> computed = Val(value) }
+                    }
+                    marker_index += 1
+                }
+                value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: field_name.payload.decoded, name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed, default: default, default_ct: None})
+                separator_kind := parser_current_kind(&state)
+                if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(&state)
+            }
+        }
+        if parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_SEMI {
+            parser_add_error(&state, parser_current(&state).span, "expected a separator between struct members", "struct fields and methods are separated by commas or statement terminators", "add a separator or close the struct")
+            parser_recover_statement(&state)
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct fields")
+    value.span = parser_cover(modifiers.start_span, close.span)
+    value
+}
+
+fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> EnumDef {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `enum`")
+    value := ast_enum(name.payload.decoded, name.span, start.span)
+    value.is_pub = modifiers.is_pub
+    value.is_package_pub = modifiers.is_package_pub
+    value.type_params = parser_parse_type_params(&state)
+    value.type_markers = modifiers.markers
+    index := 0
+    loop index < modifiers.markers.len() {
+        marker :: modifiers.markers[index]
+        if marker.name == "SingleUse" {
+            value.is_single_use = true
+            value.single_use_span = Val(marker.span)
+        }
+        if marker.name == "MustUse" {
+            value.is_must_use = true
+            value.must_use_span = Val(marker.span)
+        }
+        if marker.name == "AutoDeriveDefault" -> value.auto_derive_default = true
+        index += 1
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before enum variants")
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_state_section_ahead(&state) {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "enum")
+            next
+        }
+        variant_markers := [Marker]{}
+        loop parser_current_kind(&state) == TOKEN_HASH -> variant_markers.push(parser_parse_marker(&state))
+        variant_name :: parser_expect_name(&state, "for an enum variant")
+        payload := VariantPayload.Unit
+        if {
+            parser_current_kind(&state) == TOKEN_LPAREN -> {
+                parser_bump(&state)
+                types := [ParsedType]{}
+                if parser_current_kind(&state) != TOKEN_RPAREN {
+                    loop {
+                        types.push(parser_parse_type(&state, 0))
+                        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+                        if parser_current_kind(&state) != TOKEN_COMMA -> break
+                        parser_bump(&state)
+                    }
+                }
+                close :: parser_expect(&state, TOKEN_RPAREN, "`)` after enum tuple fields")
+                if {
+                    types.len() == 1 -> payload = VariantPayload.Single(ty: types[0].ty, span: types[0].span)
+                    types.len() > 1 -> {
+                        fields := [VariantField]{}
+                        type_index := 0
+                        loop type_index < types.len() {
+                            type_value :: types[type_index]
+                            field_name := "{type_index}"
+                            fields.push(VariantField{name: field_name, name_span: type_value.span, ty: type_value.ty, ty_span: type_value.span})
+                            type_index += 1
+                        }
+                        payload = VariantPayload.Named(fields: fields)
+                    }
+                }
+            }
+            parser_current_kind(&state) == TOKEN_LBRACE -> {
+                parser_bump(&state)
+                fields := [VariantField]{}
+                loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+                    field :: parser_expect_name(&state, "in a named enum payload")
+                    parser_expect(&state, TOKEN_COLON, "`:` after an enum payload field")
+                    ty :: parser_parse_type(&state, 0)
+                    fields.push(VariantField{name: field.payload.decoded, name_span: field.span, ty: ty.ty, ty_span: ty.span})
+                    if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                    if parser_current_kind(&state) != TOKEN_COMMA -> break
+                    parser_bump(&state)
+                }
+                close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after named enum payload")
+                payload = VariantPayload.Named(fields: fields)
+            }
+        }
+        discriminant := None
+        discriminant_expr := None
+        if parser_current_kind(&state) == TOKEN_EQ {
+            parser_bump(&state)
+            expression :: parser_parse_expression(&state, 1, 0)
+            discriminant_expr = Val(expression.expr)
+            if expression.expr == { .Int(number, _, _, _) -> discriminant = Val(number) }
+        }
+        value.variants.push(Variant{name: variant_name.payload.decoded, name_span: variant_name.span, payload: payload, discriminant: discriminant, discriminant_expr: discriminant_expr, serde_markers: variant_markers})
+        separator_kind := parser_current_kind(&state)
+        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(&state)
+        if parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_SEMI {
+            parser_add_error(&state, parser_current(&state).span, "expected a separator between enum variants", "enum variants are separated by commas or statement terminators", "add a separator or close the enum")
+            parser_recover_statement(&state)
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after enum variants")
+    value.span = parser_cover(modifiers.start_span, close.span)
+    value
+}
+
+fn parser_report_retired_const(state: &JetParserState, kind: Int, span: Span) {
+    if kind == {
+        .TOKEN_KW_CONST -> parser_add_error_code(&state, "E0146", span, "`const` is retired — write `@`", "explicit compile-time demand is a marker on an immutable binding", "write `@name :: …` (or `#Persist name := …` for hot-reload state)")
+        else -> parser_add_error_code(&state, "E0374", span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build")
+    }
+}
+fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
+    start := parser_current(&state)
+    if modifiers.is_comptime {
+        error_span := modifiers.start_span
+        marker_index := 0
+        loop marker_index < modifiers.markers.len() {
+            marker :: modifiers.markers[marker_index]
+            if marker.name == "Comptime" -> error_span = marker.span
+            marker_index += 1
+        }
+        parser_report_retired_const(&state, TOKEN_KW_COMPTIME, error_span)
+    }
+    name_token := if {
+        start.kind == TOKEN_AT -> {
+            parser_bump(&state)
+            at_name :: parser_expect_name(&state, "after `@` in a compile-time binding")
+            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a compile-time binding name")
+            at_name
+        }
+        else -> {
+            if {
+                start.kind == TOKEN_KW_CONST || start.kind == TOKEN_KW_COMPTIME -> {
+                    parser_bump(&state)
+                    parser_report_retired_const(&state, start.kind, start.span)
+                }
+                !modifiers.is_comptime -> {
+                    parser_add_error(&state, start.span, "expected a compile-time binding", "compile-time constants use `@name :: value`", "write `@name :: value`")
+                    if start.kind != TOKEN_EOF -> parser_bump(&state)
+                }
+            }
+            retired_name :: parser_expect_name(&state, "after a retired constant keyword")
+            parser_expect(&state, TOKEN_EQ, "`=` after a retired constant name")
+            retired_name
+        }
+    }
+    parsed_value :: parser_parse_expression(&state, 1, 0)
+    terminator := parser_current(&state)
+    terminator_span := terminator.span
+    if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF -> terminator_span = parsed_value.span
+    if terminator.kind != TOKEN_SEMI && terminator.kind != TOKEN_RBRACE && terminator.kind != TOKEN_EOF {
+        parser_add_error(&state, terminator.span, "something unexpected appeared after this line, found `{terminator.payload.text}`", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
+    }
+    parser_finish_statement(&state)
+    attrs := [ConstAttr]{}
+    rust_kind := RustConstKind.Const
+    marker_index := 0
+    loop marker_index < modifiers.markers.len() {
+        marker :: modifiers.markers[marker_index]
+        if marker.name == "Static" {
+            attrs.push(ConstAttr.ForceStatic)
+            rust_kind = RustConstKind.Static
+        }
+        if marker.name == "Inline" -> attrs.push(ConstAttr.ForceInline)
+        marker_index += 1
+    }
+    result := ast_const(name_token.payload.decoded, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
+    result.attrs = attrs
+    result.is_comptime = true
+    result.rust_kind = rust_kind
+    result.ty = None
+    result
+}
+
+fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `alias`")
+    type_params := parser_parse_type_params(&state)
+    parser_expect(&state, TOKEN_COLON_COLON, "`::` before the aliased type")
+    target := if {
+        parser_state_section_ahead(&state) -> {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "alias")
+            ParsedType{ty: Type.Named("__jet_error"), span: section.span}
+        }
+        else -> parser_parse_type(&state, 0)
+    }
+    parser_finish_statement(&state)
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, type_params: type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
+}
+
+fn parser_apply_type_markers(value: &[StructDef], markers: [Marker]) {
+    index := 0
+    loop index < markers.len() {
+        marker :: markers[index]
+        if marker.name == "SingleUse" {
+            value.is_single_use = true
+            value.single_use_span = Val(marker.span)
+        }
+        if marker.name == "MustUse" {
+            value.is_must_use = true
+            value.must_use_span = Val(marker.span)
+        }
+        if marker.name == "PublishedSchema" {
+            value.is_published_schema = true
+            value.published_schema_span = Val(marker.span)
+        }
+        if marker.name == "AutoDeriveDefault" -> value.auto_derive_default = true
+        index += 1
+    }
+}
+
+fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `trait`")
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before trait members")
+    methods := [TraitMethodSig]{}
+    assoc_types := [NamedSpan]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_state_section_ahead(&state) {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "trait")
+            next
+        }
+        if {
+            parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "type" -> {
+                kw :: parser_bump(&state)
+                assoc :: parser_expect_name(&state, "after `type` in a trait")
+                assoc_types.push(NamedSpan{name: assoc.payload.decoded, span: parser_cover(kw.span, assoc.span)})
+                parser_finish_statement(&state)
+            }
+            parser_current_kind(&state) == TOKEN_KW_FN -> {
+                method_modifiers := parser_parse_item_modifiers(&state)
+                parsed :: parser_parse_function(&state, method_modifiers)
+                method := parsed.value
+                default_body := None
+                if parsed.has_body -> default_body = Val(method.body)
+                methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
+            }
+            else -> {
+                parser_add_error(&state, parser_current(&state).span, "expected a trait method or associated type", "trait bodies declare callable requirements and associated types", "write `fn name(...)` or `type Name;`")
+                parser_recover_statement(&state)
+            }
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, assoc_types: assoc_types, methods: methods}
+}
+
+fn parser_parse_impl(state: &JetParserState) -> ImplDef {
+    start :: parser_bump(&state)
+    first :: parser_parse_type(&state, 0)
+    trait_name := None
+    trait_span := None
+    target := first
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "for" {
+        parser_bump(&state)
+        trait_name = Val(parser_type_name(first.ty))
+        trait_span = Val(first.span)
+        target = parser_parse_type(&state, 0)
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before implementation methods")
+    methods := [Func]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_state_section_ahead(&state) {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "impl")
+            next
+        }
+        if {
+            parser_current_kind(&state) == TOKEN_KW_FN -> {
+                modifiers := parser_parse_item_modifiers(&state)
+                method :: parser_parse_function(&state, modifiers)
+                methods.push(method.value)
+            }
+            else -> {
+                parser_add_error(&state, parser_current(&state).span, "expected an implementation method", "implementation bodies contain method definitions", "write a method with `fn`")
+                parser_recover_statement(&state)
+            }
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after implementation methods")
+    ImplDef{span: parser_cover(start.span, close.span), type_name: parser_type_name(target.ty), type_span: target.span, trait_name: trait_name, trait_span: trait_span, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}
+}
+
+fn parser_type_name(ty: Type) -> String {
+    if ty == {
+        .Named(name) -> name
+        .Apply(name, _) -> name
+        .Int -> "Int"
+        .Float -> "Float"
+        .Float32 -> "Float32"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .List(_) -> "List"
+        .Map(_, _, _) -> "Map"
+        .Shared(_) -> "Shared"
+        .Option(_) -> "Option"
+        .Result(_, _) -> "Result"
+        .Fn(_, _, _, _, _, _) -> "Fn"
+        .TraitObject(_) -> "TraitObject"
+        .Tuple(_) -> "Tuple"
+        .FixedList(_, _) -> "FixedList"
+        .IntN(_, _) -> "IntN"
+        .InlineRange(base, _, _) -> parser_type_name(base)
+        .Tagged(_, inner) -> parser_type_name(inner)
+        .Union(_) -> "Union"
+        .Quantity(base, _) -> parser_type_name(base)
+        .Measure(_) -> "Measure"
+        else -> "Type"
+    }
+}
+
+fn parser_parse_code_module(state: &JetParserState, modifiers: ParsedItemModifiers) -> CodeModule {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `module`")
+    imports := [ImportDecl]{}
+    body := [Item]{}
+    has_body := false
+    end := name.span
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            parser_bump(&state)
+            has_body = true
+            loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+                parser_skip_semicolons(&state)
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                before := state.position
+                declaration :: parser_parse_item_or_import(&state)
+                if declaration.import == {
+                    .Val(import) -> imports.push(import)
+                    .None -> {
+                        if declaration.item == {
+                            .Val(item) -> body.push(item)
+                            .None -> {
+                                parser_add_error(&state, parser_current(&state).span, "expected a module declaration", "module bodies contain imports and declarations", "write an import or item declaration")
+                                parser_recover_statement(&state)
+                            }
+                        }
+                    }
+                }
+                if state.position == before -> parser_bump(&state)
+            }
+            close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
+            end = close.span
+        }
+        else -> parser_finish_statement(&state)
+    }
+    CodeModule{name: name.payload.decoded, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: if has_body -> Val(body) else -> None, imports: imports, web_target: None, instance_identity: None, span: parser_cover(start.span, end)}
+}
+
+fn parser_parse_effect_decl(state: &JetParserState) -> EffectDecl {
+    start := parser_bump(&state)
+    name :: parser_effect_path_name(&state)
+    irreversible := false
+    declaration_end := name.span.end
+    fact := parser_current(&state)
+    if fact.kind == TOKEN_IDENT && fact.payload.decoded == "@irreversible" {
+        parser_bump(&state)
+        irreversible = true
+        declaration_end = fact.span.end
+    }
+    parser_finish_statement(&state)
+    EffectDecl{name: name.name, name_span: name.span, irreversible: irreversible, span: Span{start: start.span.start, end: declaration_end}}
+}
+
+fn parser_effect_path_name(state: &JetParserState) -> NamedSpan {
+    first :: parser_expect_name(&state, "after the `effect` declaration keyword")
+    name := first.payload.decoded
+    end := first.span
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        segment :: parser_expect_name(&state, "for an effect path segment after `.`")
+        name = "{name}.{segment.payload.decoded}"
+        end = segment.span
+    }
+    NamedSpan{name: name, span: parser_cover(first.span, end)}
+}
+
+fn parser_parse_tag_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> TagDef {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `tag`")
+    deny := [NamedSpan]{}
+    from := [NamedSpan]{}
+    end := name.span
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            parser_bump(&state)
+            loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+                keyword :: parser_expect_name(&state, "in a tag declaration")
+                target :: parser_expect_name(&state, "after a tag declaration clause")
+                item := NamedSpan{name: target.payload.decoded, span: target.span}
+                if keyword.payload.decoded == "deny" -> deny.push(item)
+                if keyword.payload.decoded == "from" -> from.push(item)
+                parser_finish_statement(&state)
+            }
+            close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after tag declaration")
+            end = close.span
+        }
+        else -> parser_finish_statement(&state)
+    }
+    TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
+}
+
+fn parser_parse_extern_rust(state: &JetParserState) -> ExternRustBlock {
+    start :: parser_bump(&state)
+    crate_token := parser_current(&state)
+    if crate_token.kind == {
+        .TOKEN_STRING | .TOKEN_RAW_STRING | .TOKEN_IDENT -> parser_bump(&state)
+        else -> crate_token = parser_expect_name(&state, "after `extern`")
+    }
+    crate_spec := crate_token.payload.decoded
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before foreign function declarations")
+    functions := [ExternFn]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if {
+            parser_current_kind(&state) == TOKEN_KW_FN -> {
+                modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
+                parsed :: parser_parse_function(&state, modifiers)
+                func := parsed.value
+                functions.push(ExternFn{abi: None, name: func.name, name_span: func.name_span, params: func.params, return_type: func.return_type, return_type_span: func.return_type_span, rust_path: func.name, rust_path_span: func.name_span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: None, close: None, span: func.span})
+            }
+            else -> {
+                parser_add_error(&state, parser_current(&state).span, "expected a foreign function declaration", "extern Rust blocks list foreign callable signatures", "write `fn name(...)`")
+                parser_recover_statement(&state)
+            }
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after foreign functions")
+    ExternRustBlock{crate_spec: crate_spec, crate_span: crate_token.span, functions: functions, span: parser_cover(start.span, close.span)}
+}
+
+fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef {
+    start :: parser_bump(&state)
+    type_name :: parser_expect_name(&state, "after `derive`")
+    parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
+    trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before derive methods")
+    body := [DeriveBodyItem]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if {
+            parser_current_kind(&state) == TOKEN_KW_FN -> {
+                modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
+                parsed :: parser_parse_function(&state, modifiers)
+                body.push(DeriveBodyItem.Item(value: Item.Func(value: parsed.value)))
+            }
+            else -> {
+                parser_add_error(&state, parser_current(&state).span, "expected a derive method", "user derive bodies contain method declarations", "write a method with `fn`")
+                parser_recover_statement(&state)
+            }
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after derive methods")
+    DeriveDef{trait_name: trait_token.payload.decoded, trait_span: trait_token.span, type_param: type_name.payload.decoded, body: body, span: parser_cover(start.span, close.span)}
+}

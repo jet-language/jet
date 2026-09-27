@@ -17,8 +17,8 @@ use super::tir_to_mir_core::lower_core_records;
 use super::tir_to_mir_expr::{lower_expr, lower_pattern};
 use super::tir_to_mir_stmt::lower_stmts;
 use super::tir_to_mir_types::{
-    TirAccess, TirDeclarations, TirParam, lower_mir_access, lower_mir_convention, lower_param_zone,
-    lower_type, lower_type_defs, lower_view_provenance,
+    TirAccess, TirDeclarations, TirParam, lower_core_builtin_owners, lower_mir_access,
+    lower_mir_convention, lower_param_zone, lower_type, lower_type_defs, lower_view_provenance,
 };
 use super::{
     TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
@@ -467,6 +467,7 @@ impl FunctionRegistry {
             .collect()
     }
 
+
     fn lookup(&self, name: &str, current_module: &str) -> Option<MirFunctionId> {
         let candidates = self.candidates(name, current_module);
         match candidates.as_slice() {
@@ -807,7 +808,10 @@ fn lower_anonymous_union_type_defs(
             published_schema: false,
             single_use: false,
             must_use: false,
+            compiler_builtin: None,
             layout: None,
+            c_layout_tag: None,
+            enum_layout: None,
             layout_alignment: None,
             serde: Vec::new(),
             cli_bindings: Vec::new(),
@@ -832,7 +836,9 @@ fn lower_anonymous_union_type_defs(
             definition.published_schema = source.published_schema;
             definition.single_use = source.single_use;
             definition.must_use = source.must_use;
-            definition.layout = source.layout;
+            definition.compiler_builtin = source.compiler_builtin;
+            definition.c_layout_tag = source.c_layout_tag;
+            definition.enum_layout = source.enum_layout;
             definition.layout_alignment = source.layout_alignment;
             definition.serde = source.serde;
             definition.cli_bindings = source.cli_bindings;
@@ -977,17 +983,18 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         &program.funcs,
         &function_registry,
     );
-    let mut handles = lower_handle_rows(
-        &program.artifact_facts.handles,
-        &program.funcs,
-        &function_registry,
-    );
-    append_core_process_handle_rows(&mut handles, &prelude_calls);
     let foreign = lower_foreign_rows(
         &program.artifact_facts.foreign,
         &program.funcs,
         &function_registry,
     );
+    let mut handles = lower_handle_rows(
+        &program.artifact_facts.handles,
+        &program.funcs,
+        &foreign,
+        &function_registry,
+    );
+    append_core_process_handle_rows(&mut handles, &prelude_calls);
     for foreign in &foreign {
         for param in &foreign.params {
             let instance =
@@ -1149,6 +1156,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         modules,
         imports,
         types,
+        core_owners: lower_core_builtin_owners(),
         traits,
         impls,
         constants,
@@ -1344,26 +1352,25 @@ fn merge_callback_rows(
 fn lower_handle_rows(
     rows: &[super::artifact_plan::TirHandleFact],
     functions: &[TFunc],
+    foreign: &[MirForeign],
     registry: &FunctionRegistry,
 ) -> Vec<MirHandleLifecycle> {
     let mut result = rows
         .iter()
-        .map(|row| MirHandleLifecycle {
-            id: MirHandleId(stable_id("mir-handle", &row.key)),
-            ty: lower_type(&Type::Named(row.jet_name.clone())),
-            ownership: MirHandleOwnership::Owned,
-            payload: MirHandlePayload {
-                library: row.lib.clone(),
-                typedef_name: row.typedef_name.clone(),
-                close: row.close.clone(),
-            },
-            close_foreign: None,
-            close_source: Some(row.close_source.clone()),
-            thread_safety: Some(row.thread_safety.clone()),
-            close: row
-                .close_function_key
-                .as_deref()
-                .and_then(|key| resolve_function_key(key, "", registry))
+        .map(|row| {
+            let handle_id = MirHandleId(stable_id("mir-handle", &row.key));
+            let close = foreign
+                .iter()
+                .filter(|candidate| {
+                    candidate.handle == Some(handle_id)
+                        && candidate.foreign_language == MirForeignLanguage::C
+                })
+                .find_map(|candidate| candidate.close_function)
+                .or_else(|| {
+                    row.close_function_key
+                        .as_deref()
+                        .and_then(|key| resolve_function_key(key, "", registry))
+                })
                 .or_else(|| {
                     row.close_function_key.as_deref().and_then(|key| {
                         functions
@@ -1371,22 +1378,49 @@ fn lower_handle_rows(
                             .find(|function| function.key == key)
                             .and_then(|function| registry.id_for(function).ok())
                     })
-                }),
-            undo: row
-                .undo_function_key
-                .as_deref()
-                .and_then(|key| resolve_function_key(key, "", registry))
-                .or_else(|| {
-                    row.undo_function_key.as_deref().and_then(|key| {
-                        functions
-                            .iter()
-                            .find(|function| function.key == key)
-                            .and_then(|function| registry.id_for(function).ok())
+                });
+            let close_foreign = if close.is_some() {
+                None
+            } else {
+                foreign
+                    .iter()
+                    .find(|candidate| {
+                        candidate.handle == Some(handle_id)
+                            && candidate.name == row.close
+                            && candidate.foreign_language == MirForeignLanguage::C
                     })
-                }),
-            send: row.send,
-            sync: row.sync,
+                    .map(|candidate| candidate.id)
+            };
+            Some(MirHandleLifecycle {
+                id: handle_id,
+                ty: lower_type(&Type::Named(row.jet_name.clone())),
+                ownership: MirHandleOwnership::Owned,
+                payload: MirHandlePayload {
+                    library: row.lib.clone(),
+                    typedef_name: row.typedef_name.clone(),
+                    close: row.close.clone(),
+                },
+                close_foreign,
+                close_source: Some(row.close_source.clone()),
+                thread_safety: Some(row.thread_safety.clone()),
+                close,
+                undo: row
+                    .undo_function_key
+                    .as_deref()
+                    .and_then(|key| resolve_function_key(key, "", registry))
+                    .or_else(|| {
+                        row.undo_function_key.as_deref().and_then(|key| {
+                            functions
+                                .iter()
+                                .find(|function| function.key == key)
+                                .and_then(|function| registry.id_for(function).ok())
+                        })
+                    }),
+                send: row.send,
+                sync: row.sync,
+            })
         })
+        .flatten()
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
@@ -1464,6 +1498,7 @@ fn lower_foreign_rows(
                 symbol: row.symbol.clone(),
                 path: row.path.clone(),
                 params: row.params.iter().map(lower_artifact_param).collect(),
+                bridge_eligible: row.bridge_eligible,
                 raw_scalar_abi: row.raw_scalar_abi,
                 return_type: row.return_type.as_ref().map(lower_type),
                 foreign_abi: lower_foreign_abi(&row.abi),
@@ -3569,7 +3604,7 @@ fn lower_function(
         source_texts,
         modules,
     );
-    ctx.source_file_id_for(&f.source_file);
+    let source_file = ctx.source_file_id_for(&f.source_file);
 
     if let Some(lambda) = lambda {
         ctx.bind_captures(lambda)?;
@@ -3683,6 +3718,7 @@ fn lower_function(
     let mir_function = MirFunction {
         id: function_id,
         module_id: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &f.module)),
+        source_file,
         key: f.key.clone(),
         module: f.module.clone(),
         name: f.name.clone(),
@@ -4635,7 +4671,7 @@ impl<'a> LowerCtx<'a> {
         };
         match &instruction.operation {
             MirOperation::ReadPlace(place) => cursor_place == Some(*place),
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Convert { value, .. } => {
@@ -4665,7 +4701,7 @@ impl<'a> LowerCtx<'a> {
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
                 MirVectorAccessRoot::Place(*place)
             }
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Field { base: value, .. }
@@ -6077,6 +6113,71 @@ impl<'a> LowerCtx<'a> {
         super::tir_to_mir_expr::lower_expr(self, expr)
     }
 
+    /// Materialize the one checked S48 concrete-to-single-trait coercion.
+    /// Callers provide the already-resolved source and destination slot types;
+    /// this helper only projects that fact to the canonical MIR target ID.
+    pub(super) fn trait_box_value(
+        &mut self,
+        value: MirValueId,
+        source: &Type,
+        target: &Type,
+    ) -> Result<MirValueId, LowerError> {
+        // Only declared TIR traits have a dynamic Rust/JIT object row. Builtin
+        // structural capabilities are checked statically and never become an
+        // S48 single-trait slot here.
+        let target = match target.without_user_tags() {
+            Type::TraitObject(bounds) if bounds.len() == 1 => {
+                let trait_name = bounds.first().expect("single trait bound");
+                if !self.is_trait_name(trait_name) {
+                    return Err(self.error(
+                        self.span(),
+                        "checked trait coercion target is not a declared single-trait object",
+                    ));
+                }
+                Type::TraitObject(bounds.clone())
+            }
+            Type::TraitObject(_) => return Ok(value),
+            Type::Named(name) if self.is_trait_name(name) => {
+                Type::TraitObject(vec![name.clone()])
+            }
+            _ => return Ok(value),
+        };
+        let source = source.without_user_tags();
+        if matches!(source, Type::TraitObject(_))
+            || matches!(source, Type::Named(name) if self.is_trait_name(name))
+        {
+            return Ok(value);
+        }
+        if !matches!(source, Type::Named(_) | Type::Apply { .. }) {
+            return Err(self.error(
+                self.span(),
+                "checked single-trait coercion has no canonical nominal source representation",
+            ));
+        }
+        let target_mir = self.mir_type(&target)?;
+        let Some(target_id) = target_mir.identity else {
+            return Err(self.error(
+                self.span(),
+                "checked trait coercion target has no canonical MIR identity",
+            ));
+        };
+        if !matches!(target_mir.kind(), jet_foundation::MIR::MirTypeKind::TraitObject(bounds) if bounds.len() == 1)
+        {
+            return Err(self.error(
+                self.span(),
+                "checked trait coercion target is not a single-trait object",
+            ));
+        }
+        self.emit(
+            "trait-box",
+            Some(target),
+            MirOperation::TraitBox {
+                value,
+                target: target_id,
+            },
+        )
+    }
+
     pub(super) fn lower_nested_stmts(&mut self, stmts: &[TStmt]) -> Result<(), LowerError> {
         super::tir_to_mir_stmt::lower_stmts(self, stmts)
     }
@@ -7176,6 +7277,28 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    pub(super) fn enum_payload_type_for(
+        &self,
+        ty: &Type,
+        variant: &str,
+        index: usize,
+    ) -> Result<Type, LowerError> {
+        let owner = self.field_owner_id_for_type(ty)?;
+        let payload = self.variant_payload_type(owner, variant, index)?;
+        if let Type::Apply { args, .. } = ty {
+            if let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) {
+                let substitutions = definition
+                    .generic_params
+                    .iter()
+                    .zip(args)
+                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                    .collect();
+                return Ok(crate::Generics::substitute_type(&payload, &substitutions));
+            }
+        }
+        Ok(payload)
+    }
+
     fn variant_payload_type(
         &self,
         owner: MirTypeId,
@@ -7643,7 +7766,10 @@ impl<'a> LowerCtx<'a> {
                     self.emit_owned(
                         &format!("closure.capture.{slot}.clone"),
                         Some(ty.clone()),
-                        MirOperation::Copy { value: read },
+                        MirOperation::Copy {
+                            value: read,
+                            materialize_view: facts.materialized.contains(source),
+                        },
                     )?
                 }
             } else if matches!(access, MirAccess::Move) {
@@ -7910,10 +8036,22 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<MirCallArg, LowerError> {
+        // A source-level box fact is redundant when the checked value already
+        // has the trait-object type (including a preceding canonical TraitBox).
+        // Keep one representation of the coercion so every backend avoids a
+        // second allocation/tagging step.
+        let source_is_trait_object = matches!(
+            arg.value.ty.without_user_tags(),
+            Type::TraitObject(_)
+        ) || matches!(
+            arg.value.ty.without_user_tags(),
+            Type::Named(name) if self.is_trait_name(name)
+        );
+        let box_as_trait = (!source_is_trait_object).then_some(arg.box_as_trait.as_ref()).flatten();
         // A checked concrete-to-trait coercion transfers the concrete value to
         // the box even when the trait parameter's convention is Read. Keep the
         // ordinary borrow path for already-boxed or genuinely borrowed values.
-        let consumes_trait_box = arg.box_as_trait.is_some()
+        let consumes_trait_box = box_as_trait.is_some()
             && arg.borrow
             && !arg.mut_borrow
             && !arg.clone
@@ -7991,7 +8129,7 @@ impl<'a> LowerCtx<'a> {
             implicit_clone: arg.clone,
             shared_auto_clone: arg.arc_clone,
             // Sema consumes the concrete value when it accepts trait boxing.
-            owned_last_use: matches!(access, MirAccess::Move) || arg.box_as_trait.is_some(),
+            owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some(),
             authority_boundary: false,
             fn_coercion: None,
             widen_fixed_to_list: false,
@@ -8007,7 +8145,7 @@ impl<'a> LowerCtx<'a> {
                 }
                 None => None,
             },
-            box_as_trait: match &arg.box_as_trait {
+            box_as_trait: match box_as_trait {
                 Some(ty) => self.mir_type(ty)?.identity,
                 None => None,
             },
@@ -8522,7 +8660,18 @@ impl<'a> LowerCtx<'a> {
 
     pub(super) fn lower_return(&mut self, value: Option<&TExpr>) -> Result<(), LowerError> {
         let value = match value {
-            Some(expr) => Some(self.lower_child(expr)?),
+            Some(expr) => {
+                let value = self.lower_child(expr)?;
+                if self.contract_scopes.is_empty() {
+                    if let Some(expected) = self.function.ret.as_ref() {
+                        Some(self.trait_box_value(value, &expr.ty, expected)?)
+                    } else {
+                        Some(value)
+                    }
+                } else {
+                    Some(value)
+                }
+            }
             None => None,
         };
         if self.contract_scopes.is_empty() {

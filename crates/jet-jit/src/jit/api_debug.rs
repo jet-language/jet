@@ -4,8 +4,8 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use jet_foundation::{
     JitBackend::RunOutcome,
     MIR::{
-        MirArtifactId, MirCoreClosureKind, MirOperation, MirProgram, MirSelectKind,
-        MirSemanticOp, MirTerminator,
+        MirArtifactId, MirCoreClosureKind, MirOperation, MirProgram, MirRuntimeValue, MirSelectKind,
+        MirSemanticOp, MirTerminator, MirType,
     },
 };
 use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
@@ -13,7 +13,8 @@ use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 use super::gap::JitGap;
 use super::resident::{
     ensure_resident_module, fresh_runtime_with_allocator_cap, program_allocator_cap_bytes,
-    publish_runtime_decisions, resident_hot_swap, resident_run_fresh, resident_teardown,
+    publish_runtime_decisions, resident_hot_swap, resident_run_fresh,
+    resident_run_fresh_with_values_and_result, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
 use super::safety::{
@@ -144,6 +145,48 @@ pub(crate) fn try_resident(
     }) {
         Ok(outcome) => {
             let native_fns = plan.rows.iter()
+                .map(|row| (row.function, row.function_name.as_str()))
+                .collect::<Vec<_>>();
+            super::tier_cache::publish_capture(&native_fns, artifact);
+            record_trace(plan.rows.clone());
+            publish_runtime_decisions(program, artifact, &plan.rows);
+            Ok(outcome)
+        }
+        Err(reason) => {
+            let mut plan = plan;
+            plan.gap = entry_gap(program, artifact, reason);
+            Err(plan)
+        }
+    }
+}
+
+pub(crate) fn try_resident_with_values_and_result(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    values: &[MirRuntimeValue],
+    return_type: &MirType,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<(RunOutcome, MirRuntimeValue), super::tiers::MirTierPlan> {
+    if !cranelift_host_supported() {
+        return Err(plan_mir_tiers(program, artifact));
+    }
+    super::types_meta::install_struct_redact(program);
+    let plan = plan_mir_tiers(program, artifact);
+    note_jit_execution();
+    match catch_jit_panic("resident typed value entry", || {
+        resident_run_fresh_with_values_and_result(
+            program,
+            program_allocator_cap_bytes(program),
+            artifact,
+            release_devtools_policy,
+            values,
+            return_type,
+        )
+    }) {
+        Ok(outcome) => {
+            let native_fns = plan
+                .rows
+                .iter()
                 .map(|row| (row.function, row.function_name.as_str()))
                 .collect::<Vec<_>>();
             super::tier_cache::publish_capture(&native_fns, artifact);
@@ -435,6 +478,7 @@ pub fn jit_expr_tag(operation: &MirOperation) -> &'static str {
         MirOperation::ReplacePlace { .. } => "ReplacePlace",
         MirOperation::InitializeUninit { .. } => "InitializeUninit",
         MirOperation::Copy { .. } => "Copy",
+        MirOperation::TraitBox { .. } => "TraitBox",
         MirOperation::Move { .. } => "Move",
         MirOperation::Constant(_) => "Constant",
         MirOperation::Unary { .. } => "Unary",

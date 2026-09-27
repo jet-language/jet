@@ -1,0 +1,868 @@
+// Module, code-module, and role-module declaration grammar.
+// Module names and role payloads use a contextual head contract; nested
+// expressions and types still use the canonical parser.
+
+
+fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSpan {
+    first :: parser_expect_name(&state, context)
+    name := first.payload.decoded
+    end := first.span
+    loop parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_IDENT {
+        parser_bump(&state)
+        part :: parser_bump(&state)
+        name = "{name}-{part.payload.decoded}"
+        end = part.span
+    }
+    NamedSpan{name: name, span: parser_cover(first.span, end)}
+}
+
+fn parser_module_namespace(name: String) -> ?Namespace {
+    normalized := name
+    if name.starts_with("_") && name.len() > 1 -> normalized = name.slice(1, name.len())
+    if normalized == "env" -> return Val(Namespace.Env)
+    if normalized == "system" -> return Val(Namespace.System)
+    if normalized == "image" -> return Val(Namespace.Image)
+    if normalized == "fleet" -> return Val(Namespace.Fleet)
+    if normalized == "vmtest" -> return Val(Namespace.VmTest)
+    if normalized == "profile" -> return Val(Namespace.Profile)
+    if normalized == "perf" -> return Val(Namespace.Perf)
+    None
+}
+
+fn parser_module_is_dashed(name: String) -> Bool {
+    bytes := name.bytes()
+    index := 0
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) == 45 -> return true
+        index += 1
+    }
+    false
+}
+
+fn parser_module_config_body_ahead(state: &JetParserState) -> Bool {
+    if parser_current_kind(&state) != TOKEN_LBRACE -> return false
+    first := parser_lookahead(&state, 1)
+    if first.kind != TOKEN_IDENT -> return false
+    if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
+    if parser_kind_at(&state, 2) != TOKEN_COLON -> return false
+    first.payload.decoded == "sources" || first.payload.decoded == "imports" || first.payload.decoded == "members"
+}
+
+fn parser_module_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+    parser_add_error_code(&state, code, span, what, why, fix)
+}
+
+fn parser_module_ahead(state: &JetParserState) -> Bool {
+    if parser_current_kind(&state) != TOKEN_KW_MODULE -> return false
+    if parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
+    if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
+    parser_kind_at(&state, 2) == TOKEN_MINUS || parser_kind_at(&state, 2) == TOKEN_LBRACE || parser_kind_at(&state, 2) == TOKEN_SEMI || parser_kind_at(&state, 2) == TOKEN_LT || parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_COLON_COLON
+}
+
+
+
+// One entry point for the dispatcher.  `modifiers` has already consumed
+// visibility/comptime markers; this function consumes `module` itself.
+fn parser_parse_module(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+    start :: parser_bump(&state)
+    name_head :: parser_module_dashed_name(&state, "for the module name")
+    if parser_current_kind(&state) == TOKEN_DOT {
+        return parser_parse_role_module(&state, modifiers, start.span, name_head)
+    }
+    if parser_current_kind(&state) == TOKEN_COLON_COLON {
+        return parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
+    }
+    if parser_current_kind(&state) == TOKEN_LT || parser_current_kind(&state) == TOKEN_LPAREN {
+        return parser_parse_generic_module_after_name(&state, modifiers, start.span, name_head)
+    }
+    if parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) {
+        return parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
+    }
+    parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
+}
+fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a module body")
+    sources := [SourceDecl]{}
+    imports := [Expr]{}
+    members := [Expr]{}
+    contributions := [Contribution]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_state_section_ahead(&state) {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "module")
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
+            parsed_sources := parser_module_sources(&state)
+            source_index := 0
+            loop source_index < parsed_sources.len() {
+                sources.push(parsed_sources[source_index])
+                source_index += 1
+            }
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
+            parser_bump(&state)
+            parser_bump(&state)
+            imports.push(parser_parse_expression(&state, 1, 0).expr)
+            if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "members" && parser_kind_at(&state, 1) == TOKEN_COLON {
+            parser_bump(&state)
+            parser_bump(&state)
+            members.push(parser_parse_expression(&state, 1, 0).expr)
+            if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+            next
+        }
+        if parser_current_kind(&state) != TOKEN_IDENT || parser_kind_at(&state, 1) != TOKEN_DOT {
+            parser_add_error(&state, parser_current(&state).span, "expected a module field or namespace contribution", "a module body contains sources, imports, members, or a typed namespace contribution", "write `sources: {{ ... }}`, `members: ...`, or `env.dev: ...`")
+            parser_recover_statement(&state)
+            next
+        }
+        contributions.push(parser_parse_module_contribution(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
+    Item.Module(value: ModuleDecl{name: name_head.name, name_span: name_head.span, auto_discovered: !parser_module_name_starts_with_underscore(name_head.name), sources: sources, imports: imports, members: members, contributions: contributions, span: parser_cover(start, close.span)})
+}
+
+fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
+    namespace_token :: parser_expect_name(&state, "for a namespace contribution")
+    namespace := parser_module_namespace(namespace_token.payload.decoded)
+    if namespace == None {
+        parser_module_error(&state, "E0960", namespace_token.span, "`{namespace_token.payload.decoded}` is not a module namespace", "namespace contributions use env, system, image, fleet, vmtest, or profile", "start the contribution with a supported namespace")
+        namespace = Val(Namespace.Env)
+    }
+    namespace_value :: namespace ?? Namespace.Env
+    parser_expect(&state, TOKEN_DOT, "after the namespace name")
+    path :: parser_module_dashed_name(&state, "for a contribution name")
+    parser_expect(&state, TOKEN_COLON, "after a contribution name")
+    value := if {
+        namespace_value == Namespace.System -> ContribValue.System(value: parser_parse_module_system_lit(&state))
+        namespace_value == Namespace.Image -> ContribValue.Image(value: parser_parse_module_image_lit(&state))
+        namespace_value == Namespace.Fleet -> ContribValue.Fleet(value: parser_parse_module_fleet_lit(&state))
+        namespace_value == Namespace.VmTest -> ContribValue.VmTest(value: parser_parse_module_vmtest_lit(&state))
+        namespace_value == Namespace.Perf -> {
+            parser_module_error(&state, "E2903", namespace_token.span, "performance contributions use a role module", "performance budgets need one typed budgets list and are not ordinary namespace values", "write `module perf.name {{ budgets: [...] }}`")
+            ContribValue.Expr(value: parser_parse_expression(&state, 1, 0).expr)
+        }
+        else -> ContribValue.Expr(value: parser_parse_expression(&state, 1, 0).expr)
+    }
+    end := parser_module_contribution_end(value)
+    Contribution{namespace: namespace ?? Namespace.Env, path: path.name, path_span: path.span, value: value, span: parser_cover(namespace_token.span, end)}
+}
+
+fn parser_module_contribution_end(value: ContribValue) -> Span {
+    if value == {
+        .Expr(expr) -> expr_span(expr)
+        .Env(lit) -> lit.span
+        .System(lit) -> lit.span
+        .Image(lit) -> lit.span
+        .Fleet(lit) -> lit.span
+        .VmTest(lit) -> lit.span
+        .Profile(lit) -> lit.span
+        .Perf(lit) -> lit.span
+    }
+}
+ 
+
+fn parser_parse_module_system_lit(state: &JetParserState) -> SystemLit {
+    explicit_type := None
+    record_start := parser_current(&state).span
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "System" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        explicit :: parser_bump(&state)
+        explicit_type = Val(explicit.span)
+        record_start = explicit.span
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a system record")
+    fields := [SystemField]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        fields.push(parser_module_system_field(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a system record")
+    SystemLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
+}
+
+fn parser_parse_module_image_lit(state: &JetParserState) -> ImageLit {
+    explicit_type := None
+    record_start := parser_current(&state).span
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Image" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        explicit :: parser_bump(&state)
+        explicit_type = Val(explicit.span)
+        record_start = explicit.span
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before an image record")
+    fields := [ImageField]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        fields.push(parser_module_image_field(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after an image record")
+    ImageLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
+}
+
+fn parser_parse_module_fleet_lit(state: &JetParserState) -> FleetLit {
+    explicit_type := None
+    record_start := parser_current(&state).span
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Fleet" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        explicit :: parser_bump(&state)
+        explicit_type = Val(explicit.span)
+        record_start = explicit.span
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a fleet record")
+    fields := [FleetField]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        fields.push(parser_module_fleet_field(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a fleet record")
+    FleetLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
+}
+
+fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VmTestLit {
+    explicit_type := None
+    record_start := parser_current(&state).span
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "VmTest" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        explicit :: parser_bump(&state)
+        explicit_type = Val(explicit.span)
+        record_start = explicit.span
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a VM-test record")
+    fields := [VmTestField]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        fields.push(parser_module_vmtest_field(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a VM-test record")
+    VmTestLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
+}
+
+
+fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
+    if parser_current_kind(&state) == TOKEN_SEMI {
+        close :: parser_bump(&state)
+        return Item.CodeModule(value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, close.span)})
+    }
+    if parser_current_kind(&state) != TOKEN_LBRACE {
+        parser_add_error(&state, parser_current(&state).span, "expected `{{` or `;` after a module name", "a code module is either a file declaration or an inline item body", "write `module name;` or `module name {{ ... }}")
+        parser_recover_statement(&state)
+        return Item.CodeModule(value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, name_head.span)})
+    }
+    open :: parser_bump(&state)
+    body := [Item]{}
+    imports := [ImportDecl]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        before := state.position
+        declaration :: parser_parse_item_or_import(&state)
+        if declaration.import == {
+            .Val(value) -> imports.push(value)
+            .None -> {
+                if declaration.item == { .Val(value) -> body.push(value) }
+            }
+        }
+        if state.position == before {
+            parser_add_error(&state, parser_current(&state).span, "the module body parser could not advance", "one malformed module member must not trap the enclosing parser", "complete the module member or remove it")
+            parser_bump(&state)
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
+    Item.CodeModule(value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(body), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)})
+}
+
+fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
+    params := [GenericModuleParam]{}
+    if parser_current_kind(&state) == TOKEN_LT {
+        parser_bump(&state)
+        loop !parser_type_close_here(&state) && parser_current_kind(&state) != TOKEN_EOF {
+            if parser_current_kind(&state) == TOKEN_COMMA {
+                parser_bump(&state)
+                next
+            }
+            parameter :: parser_expect_name(&state, "for a generic module type parameter")
+            bound := None
+            if parser_current_kind(&state) == TOKEN_COLON {
+                parser_bump(&state)
+                parsed :: parser_parse_type(&state, 0)
+                bound = Val(parsed.ty)
+            }
+            params.push(GenericModuleParam.Type(name: parameter.payload.decoded, name_span: parameter.span, bound: bound))
+            if parser_type_close_here(&state) -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between generic module type parameters", "generic module type parameters are comma-separated", "add a comma or close the type parameter list")
+                break
+            }
+            parser_bump(&state)
+        }
+        if parser_type_close_here(&state) -> parser_take_type_close(&state) else -> parser_expect(&state, TOKEN_GT, "`>` after generic module type parameters")
+    }
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
+            if parser_current_kind(&state) == TOKEN_COMMA {
+                parser_bump(&state)
+                next
+            }
+            parameter :: parser_expect_name(&state, "for a generic module value parameter")
+            parser_expect(&state, TOKEN_COLON, "after a generic module value parameter name")
+            annotation :: parser_parse_type(&state, 0)
+            params.push(GenericModuleParam.Value(name: parameter.payload.decoded, name_span: parameter.span, ty: annotation.ty))
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between generic module value parameters", "generic module value parameters are comma-separated", "add a comma or close the value parameter list")
+                break
+            }
+            parser_bump(&state)
+        }
+        parser_expect(&state, TOKEN_RPAREN, "`)` after generic module value parameters")
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before the generic module body")
+    body := [Item]{}
+    imports := [ImportDecl]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        before := state.position
+        declaration :: parser_parse_item_or_import(&state)
+        if declaration.import == {
+            .Val(value) -> imports.push(value)
+            .None -> { if declaration.item == { .Val(value) -> body.push(value) } }
+        }
+        if state.position == before -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after the generic module body")
+    Item.GenericModule(value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: body, span: parser_cover(start, close.span)})
+}
+
+fn parser_parse_module_alias_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
+    parser_bump(&state)
+    target :: parser_module_dashed_name(&state, "for the target module name")
+    args := [ModuleArg]{}
+    if parser_current_kind(&state) == TOKEN_LT {
+        parser_bump(&state)
+        loop !parser_type_close_here(&state) && parser_current_kind(&state) != TOKEN_EOF {
+            if parser_current_kind(&state) == TOKEN_COMMA {
+                parser_bump(&state)
+                next
+            }
+            begin := parser_current(&state).span
+            value :: parser_parse_type(&state, 0)
+            args.push(ModuleArg.Type(ty: value.ty, span: parser_cover(begin, value.span)))
+            if parser_type_close_here(&state) -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between module alias type arguments", "module alias type arguments are comma-separated", "add a comma or close the type arguments")
+                break
+            }
+            parser_bump(&state)
+        }
+        if parser_type_close_here(&state) { parser_take_type_close(&state) } else { parser_expect(&state, TOKEN_GT, "`>` after module alias type arguments") }
+    }
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
+            if parser_current_kind(&state) == TOKEN_COMMA {
+                parser_bump(&state)
+                next
+            }
+            begin := parser_current(&state).span
+            value :: parser_parse_expression(&state, 1, 0)
+            args.push(ModuleArg.Value(expr: value.expr, span: parser_cover(begin, value.span)))
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between module alias value arguments", "module alias value arguments are comma-separated", "add a comma or close the value arguments")
+                break
+            }
+            parser_bump(&state)
+        }
+        parser_expect(&state, TOKEN_RPAREN, "`)` after module alias value arguments")
+    }
+    end := target.span
+    if state.position > 0 -> end = parser_lookahead(&state, -1).span
+    if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
+    Item.ModuleAlias(value: ModuleAliasDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, target: target.name, target_span: target.span, args: args, span: parser_cover(start, end)})
+}
+
+fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, namespace_head: NamedSpan) -> Item {
+    parser_bump(&state)
+    role :: parser_module_dashed_name(&state, "for the role name")
+    namespace := parser_module_namespace(namespace_head.name)
+    if namespace == None {
+        parser_module_error(&state, "E0960", namespace_head.span, "`{namespace_head.name}` is not a module namespace", "a role module starts with env, system, image, fleet, vmtest, profile, or perf", "write `module env.name {{ ... }}")
+        namespace = Val(Namespace.Env)
+    }
+    namespace_value :: namespace ?? Namespace.Env
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a role-module body")
+    sources := [SourceDecl]{}
+    imports := [Expr]{}
+    env_fields := [NamedExpr]{}
+    env_services := [ServiceEntry]{}
+    system_fields := [SystemField]{}
+    image_fields := [ImageField]{}
+    fleet_fields := [FleetField]{}
+    profile_fields := [NamedExpr]{}
+    perf_budgets := [BudgetDecl]{}
+    perf_budgets_span := namespace_head.span
+    perf_compile_workloads := [CompileWorkloadDecl]{}
+    perf_compile_workloads_span := None
+    perf_list_span := namespace_head.span
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
+            parsed_sources := parser_module_sources(&state)
+            source_index := 0
+            loop source_index < parsed_sources.len() {
+                sources.push(parsed_sources[source_index])
+                source_index += 1
+            }
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
+            parser_bump(&state)
+            parser_bump(&state)
+            imports.push(parser_parse_expression(&state, 1, 0).expr)
+            if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+            next
+        }
+        if {
+            namespace_value == Namespace.Env -> {
+                field :: parser_expect_name(&state, "for an environment field")
+                parser_expect(&state, TOKEN_COLON, "after an environment field")
+                if field.payload.decoded == {
+                    "services" -> {
+                        parsed_services := parser_module_services_map(&state)
+                        service_index := 0
+                        loop service_index < parsed_services.len() {
+                            env_services.push(parsed_services[service_index])
+                            service_index += 1
+                        }
+                    }
+                    else -> env_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+                }
+            }
+            namespace_value == Namespace.System -> system_fields.push(parser_module_system_field(&state))
+            namespace_value == Namespace.Image -> image_fields.push(parser_module_image_field(&state))
+            namespace_value == Namespace.Fleet -> fleet_fields.push(parser_module_fleet_field(&state))
+            namespace_value == Namespace.VmTest -> vmtest_fields.push(parser_module_vmtest_field(&state))
+            namespace_value == Namespace.Profile -> {
+                field :: parser_expect_name(&state, "for a profile field")
+                parser_expect(&state, TOKEN_COLON, "after a profile field")
+                profile_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+            }
+            else -> {
+                field :: parser_expect_name(&state, "for a performance field")
+                parser_expect(&state, TOKEN_COLON, "after a performance field")
+                if field.payload.decoded == {
+                    "budgets" -> {
+                        parsed := parser_module_perf_budgets(&state)
+                        perf_budgets = parsed.budgets
+                        perf_budgets_span = parsed.span
+                        perf_list_span = parsed.span
+                    }
+                    "compile_workloads" -> {
+                        parsed := parser_module_perf_workloads(&state)
+                        perf_compile_workloads = parsed.workloads
+                        perf_compile_workloads_span = Val(field.span)
+                    }
+                    else -> {
+                        parser_module_error(&state, "E2903", field.span, "unknown performance role field", "performance roles contain budgets and compile_workloads", "write `budgets: [...]` or `compile_workloads: {{ ... }}`")
+                        parser_parse_expression(&state, 1, 0)
+                    }
+                }
+            }
+        }
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a role-module body")
+    body_span := parser_cover(namespace_head.span, close.span)
+    if namespace_value == Namespace.Perf && perf_budgets.len() == 0 {
+        parser_module_error(&state, "E2903", namespace_head.span, "a performance role needs a budgets list", "performance policy is typed budget metadata", "write `budgets: [Budget{{ ... }}]`")
+        perf_budgets_span = body_span
+        perf_list_span = body_span
+    }
+    value := if {
+        namespace_value == Namespace.Env -> ContribValue.Env(value: EnvLit{fields: env_fields, services: env_services, span: body_span})
+        namespace_value == Namespace.System -> ContribValue.System(value: SystemLit{explicit_type: None, fields: system_fields, span: body_span})
+        namespace_value == Namespace.Image -> ContribValue.Image(value: ImageLit{explicit_type: None, fields: image_fields, span: body_span})
+        namespace_value == Namespace.Fleet -> ContribValue.Fleet(value: FleetLit{explicit_type: None, fields: fleet_fields, span: body_span})
+        namespace_value == Namespace.VmTest -> ContribValue.VmTest(value: VmTestLit{explicit_type: None, fields: vmtest_fields, span: body_span})
+        namespace_value == Namespace.Profile -> ContribValue.Profile(value: ProfileLit{fields: profile_fields, span: body_span})
+        else -> ContribValue.Perf(value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span})
+    }
+    contribution := Contribution{namespace: namespace ?? Namespace.Env, path: role.name, path_span: role.span, value: value, span: parser_cover(namespace_head.span, close.span)}
+    Item.Module(value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span)})
+}
+pub struct ModulePerfBudgets {
+    pub budgets: [BudgetDecl]
+    pub span: Span
+}
+
+fn parser_module_perf_budgets(state: &JetParserState) -> ModulePerfBudgets {
+    open :: parser_expect(&state, TOKEN_LBRACKET, "`[` before performance budgets")
+    budgets := [BudgetDecl]{}
+    if {
+        parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Budget" && parser_kind_at(&state, 1) == TOKEN_RBRACKET -> {
+            parser_bump(&state)
+            parser_expect(&state, TOKEN_RBRACKET, "`]` after the typed budget list head")
+            parser_expect(&state, TOKEN_LBRACE, "`{{` after the typed budget list head")
+            loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+                parser_skip_semicolons(&state)
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                budgets.push(parser_module_perf_budget_entry(&state, false))
+                if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+            }
+            close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after performance budgets")
+            return ModulePerfBudgets{budgets: budgets, span: parser_cover(open.span, close.span)}
+        }
+    }
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+        budgets.push(parser_module_perf_budget_entry(&state, true))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
+    }
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after performance budgets")
+    ModulePerfBudgets{budgets: budgets, span: parser_cover(open.span, close.span)}
+}
+
+fn parser_module_perf_budget_entry(state: &JetParserState, require_head: Bool) -> BudgetDecl {
+    start := parser_current(&state).span
+    if {
+        parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Budget" -> {
+            head :: parser_bump(&state)
+            start = head.span
+        }
+        require_head -> parser_add_error(&state, parser_current(&state).span, "expected a `Budget` value", "performance budgets are typed records", "write `Budget{{ name: ..., metric: ..., limit: ... }}`")
+        else -> {}
+    }
+    parser_expect(&state, TOKEN_LBRACE, "`{{` after a budget type")
+    fields := [BudgetField]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        field :: parser_expect_name(&state, "for a budget field")
+        parser_expect(&state, TOKEN_COLON, "after a budget field")
+        value := parser_parse_expression(&state, 1, 0)
+        fields.push(BudgetField{name: field.payload.decoded, name_span: field.span, value: value.expr, span: parser_cover(field.span, value.span)})
+        if {
+            parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+            parser_current_kind(&state) != TOKEN_RBRACE -> {
+                parser_add_error(&state, parser_current(&state).span, "expected `,` between budget fields", "budget records are comma-separated", "add a comma or close the budget")
+                parser_recover_statement(&state)
+            }
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a budget")
+    BudgetDecl{fields: fields, span: parser_cover(start, close.span)}
+}
+
+pub struct ModulePerfWorkloads {
+    pub workloads: [CompileWorkloadDecl]
+    pub span: Span
+}
+
+fn parser_module_perf_workloads(state: &JetParserState) -> ModulePerfWorkloads {
+    open :: parser_expect(&state, TOKEN_LBRACE, "`{{` before compile workloads")
+    workloads := [CompileWorkloadDecl]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        name :: parser_expect_name(&state, "for a compile workload name")
+        parser_expect(&state, TOKEN_COLON, "after a compile workload name")
+        workloads.push(parser_module_perf_workload_entry(&state, name))
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after compile workloads")
+    ModulePerfWorkloads{workloads: workloads, span: parser_cover(open.span, close.span)}
+}
+
+fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> CompileWorkloadDecl {
+    head :: parser_expect_name(&state, "for a compiler workload type")
+    parser_expect(&state, TOKEN_DOT, "between the compiler workload type and variant")
+    variant :: parser_expect_name(&state, "for a compiler workload variant")
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before compiler workload fields")
+    target := None
+    patch := None
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        field :: parser_expect_name(&state, "for a compiler workload field")
+        parser_expect(&state, TOKEN_COLON, "after a compiler workload field")
+        value := parser_parse_expression(&state, 1, 0)
+        if field.payload.decoded == {
+            "target" -> {
+                if target != None -> parser_module_error(&state, "E2903", field.span, "a compile workload repeats `target`", "each edit workload has one target", "keep one `target:` field")
+                target = Val(value.expr)
+            }
+            "patch" -> {
+                if patch != None -> parser_module_error(&state, "E2903", field.span, "a compile workload repeats `patch`", "each edit workload has one patch", "keep one `patch:` field")
+                patch = Val(value.expr)
+            }
+            else -> parser_module_error(&state, "E2903", field.span, "unknown compiler workload field", "edit workloads contain target and patch", "write `target:` or `patch:`")
+        }
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after compiler workload fields")
+    if head.payload.decoded != "CompilerWorkload" || variant.payload.decoded != "Edit" {
+        parser_module_error(&state, parser_cover(head.span, variant.span), "unknown compiler workload variant", "performance probes currently use CompilerWorkload.Edit", "write `CompilerWorkload.Edit{{ target: ..., patch: ... }}`")
+    }
+    target_value := target ?? Expr.Unit(span: name.span)
+    patch_value := patch ?? Expr.Unit(span: name.span)
+    if target == None -> parser_module_error(&state, name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
+    if patch == None -> parser_module_error(&state, name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
+    CompileWorkloadDecl{name: name.payload.decoded, name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
+}
+
+
+fn parser_module_name_starts_with_underscore(name: String) -> Bool {
+    bytes := name.bytes()
+    bytes.len() > 0 && Int.from_u8(bytes[0]) == 95
+}
+
+fn parser_module_sources(state: &JetParserState) -> [SourceDecl] {
+    parser_bump(&state)
+    parser_bump(&state)
+    sources := [SourceDecl]{}
+    parser_expect(&state, TOKEN_LBRACE, "`{{` after `sources:`")
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        name :: parser_expect_name(&state, "for a source name")
+        parser_expect(&state, TOKEN_COLON, "after a source name")
+        begin := parser_current(&state).span
+        end := begin
+        loop parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+            end = parser_bump(&state).span
+        }
+        if end.end <= begin.start {
+            parser_add_error(&state, begin, "a source needs a reference", "sources map names to provider references", "write `name: target@provider`")
+        }
+        sources.push(SourceDecl{name: name.payload.decoded, name_span: name.span, ref_span: parser_cover(begin, end), span: parser_cover(name.span, end)})
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    parser_expect(&state, TOKEN_RBRACE, "`}}` after sources")
+    if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    sources
+}
+
+fn parser_module_platform_value(state: &JetParserState) -> (os: String, arch: String, span: Span) {
+    os_token :: parser_expect_name(&state, "for a platform name")
+    parser_expect(&state, TOKEN_DOT, "between a platform and architecture")
+    arch_token :: parser_expect_name(&state, "for an architecture name")
+    (os: os_token.payload.decoded, arch: arch_token.payload.decoded, span: parser_cover(os_token.span, arch_token.span))
+}
+
+fn parser_module_system_field(state: &JetParserState) -> SystemField {
+    name :: parser_expect_name(&state, "for a system field")
+    parser_expect(&state, TOKEN_COLON, "after a system field")
+    value := if {
+        name.payload.decoded == "target" -> {
+            platform := parser_module_platform_value(&state)
+            SystemFieldValue.Platform(os: platform.os, arch: platform.arch, span: platform.span)
+        }
+        name.payload.decoded == "packages" -> SystemFieldValue.Packages(value: parser_parse_expression(&state, 1, 0).expr)
+        name.payload.decoded == "services" -> SystemFieldValue.Services(entries: parser_module_services_map(&state))
+        name.payload.decoded == "options" -> SystemFieldValue.Options(entries: parser_module_options_list(&state))
+        else -> SystemFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
+    }
+    end := parser_module_system_value_end(value, name.span)
+    SystemField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+}
+
+fn parser_module_system_value_end(value: SystemFieldValue, fallback: Span) -> Span {
+    if value == {
+        .Platform(_, _, span) -> span
+        .Packages(value) -> expr_span(value)
+        .Services(entries) -> { if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span }
+        .Options(entries) -> { if entries.len() == 0 -> fallback else -> entries[entries.len() - 1].span }
+        .Other(value) -> expr_span(value)
+    }
+}
+
+fn parser_module_services_map(state: &JetParserState) -> [ServiceEntry] {
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before services")
+    entries := [ServiceEntry]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        name :: parser_module_dashed_name(&state, "for a service name")
+        parser_expect(&state, TOKEN_COLON, "after a service name")
+        explicit_type := None
+        service_start := parser_current(&state).span
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Service" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+            explicit :: parser_bump(&state)
+            explicit_type = Val(explicit.span)
+            service_start = explicit.span
+        }
+        parser_expect(&state, TOKEN_LBRACE, "`{{` before service fields")
+        fields := [NamedExpr]{}
+        loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+            parser_skip_semicolons(&state)
+            if parser_current_kind(&state) == TOKEN_RBRACE -> break
+            field :: parser_expect_name(&state, "for a service field")
+            parser_expect(&state, TOKEN_COLON, "after a service field")
+            fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+            if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        }
+        close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after service fields")
+        entries.push(ServiceEntry{name: name.name, name_span: name.span, explicit_type: explicit_type, fields: fields, span: parser_cover(service_start, close.span)})
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    parser_expect(&state, TOKEN_RBRACE, "`}}` after services")
+    entries
+}
+
+fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
+    parser_expect(&state, TOKEN_LBRACKET, "`[` before options")
+    entries := [OptionEntry]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        key :: parser_expect_name(&state, "for an option key")
+        name := key.payload.decoded
+        end := key.span
+        loop parser_current_kind(&state) == TOKEN_DOT {
+            parser_bump(&state)
+            part :: parser_expect_name(&state, "after `.` in an option key")
+            name = "{name}.{part.payload.decoded}"
+            end = part.span
+        }
+        parser_expect(&state, TOKEN_COLON, "after an option key")
+        value := parser_parse_expression(&state, 1, 0)
+        value_end := value.span
+        entries.push(OptionEntry{key: name, key_span: parser_cover(key.span, end), value: value.expr, value_span: value_end, span: parser_cover(key.span, value_end)})
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
+    }
+    parser_expect(&state, TOKEN_RBRACKET, "`]` after options")
+    entries
+}
+
+fn parser_module_image_field(state: &JetParserState) -> ImageField {
+    name :: parser_expect_name(&state, "for an image field")
+    parser_expect(&state, TOKEN_COLON, "after an image field")
+    value := if {
+        name.payload.decoded == "from" -> {
+            source :: parser_expect_name(&state, "for an image source namespace")
+            parser_expect(&state, TOKEN_DOT, "after an image source namespace")
+            target :: parser_module_dashed_name(&state, "for an image source name")
+            from := if {
+                source.payload.decoded == "system" -> ImageFromRef.System(name: target.name)
+                source.payload.decoded == "packages" -> ImageFromRef.Package(name: target.name)
+                source.payload.decoded == "env" -> ImageFromRef.Environment(name: target.name)
+                else -> {
+                    parser_module_error(&state, "E0960", source.span, "an image source must use system, packages, or env", "image origins name one of the three provider namespaces", "write `from: system.name`, `from: packages.name`, or `from: env.name`")
+                    ImageFromRef.Environment(name: target.name)
+                }
+            }
+            ImageFieldValue.From(source: from, span: parser_cover(source.span, target.span))
+        }
+        name.payload.decoded == "format" -> {
+            word :: parser_expect_name(&state, "for an image format")
+            ImageFieldValue.Format(word: word.payload.decoded, span: word.span)
+        }
+        name.payload.decoded == "target" -> {
+            platform := parser_module_platform_value(&state)
+            ImageFieldValue.Platform(os: platform.os, arch: platform.arch, span: platform.span)
+        }
+        else -> ImageFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
+    }
+    end := if value == {
+        .From(_, span) -> span
+        .Format(_, span) -> span
+        .Platform(_, _, span) -> span
+        .Other(expr) -> expr_span(expr)
+    }
+    ImageField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+}
+
+fn parser_module_fleet_field(state: &JetParserState) -> FleetField {
+    name :: parser_expect_name(&state, "for a fleet field")
+    parser_expect(&state, TOKEN_COLON, "after a fleet field")
+    value := if {
+        name.payload.decoded == "hosts" -> FleetFieldValue.Hosts(entries: parser_module_hosts_map(&state))
+        else -> FleetFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
+    }
+    end := if value == { .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span } .Other(expr) -> expr_span(expr) }
+    FleetField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+}
+
+fn parser_module_vmtest_field(state: &JetParserState) -> VmTestField {
+    name :: parser_expect_name(&state, "for a VM-test field")
+    parser_expect(&state, TOKEN_COLON, "after a VM-test field")
+    value := if {
+        name.payload.decoded == "hosts" -> VmTestFieldValue.Hosts(entries: parser_module_hosts_map(&state))
+        name.payload.decoded == "run" -> {
+            start :: parser_expect_name(&state, "for `test` before a VM-test body")
+            if start.payload.decoded != "test" {
+                parser_module_error(&state, "E0960", start.span, "VM-test run body starts with `test`", "the run field is a checked VM test body", "write `run: test {{ ... }}")
+            }
+            open :: parser_expect(&state, TOKEN_LBRACE, "`{{` after VM-test `run: test`")
+            depth := 1
+            end := open.span
+            loop depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
+                token :: parser_bump(&state)
+                if token.kind == TOKEN_LBRACE -> depth += 1
+                if token.kind == TOKEN_RBRACE {
+                    depth -= 1
+                    end = token.span
+                }
+            }
+            VmTestFieldValue.Run(span: parser_cover(start.span, end))
+        }
+        else -> VmTestFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
+    }
+    end := if value == {
+        .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span }
+        .Run(span) -> span
+        .Other(expr) -> expr_span(expr)
+    }
+    VmTestField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+}
+
+fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before hosts")
+    entries := [HostEntry]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        host :: parser_module_dashed_name(&state, "for a host name")
+        parser_expect(&state, TOKEN_COLON, "after a host name")
+        system :: parser_expect_name(&state, "for `system` in a host entry")
+        if system.payload.decoded != "system" -> parser_module_error(&state, "E0960", system.span, "a host entry must reference a system", "fleet hosts resolve through `system.<name>`", "write `host: system.machine`")
+        parser_expect(&state, TOKEN_DOT, "after `system` in a host entry")
+        target :: parser_module_dashed_name(&state, "for a host system name")
+        overrides := None
+        end := target.span
+        if parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+            parser_bump(&state)
+            open :: parser_bump(&state)
+            depth := 1
+            close := open.span
+            loop depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
+                token :: parser_bump(&state)
+                if token.kind == TOKEN_LBRACE -> depth += 1
+                if token.kind == TOKEN_RBRACE {
+                    depth -= 1
+                    close = token.span
+                }
+            }
+            overrides = Val(parser_cover(open.span, close))
+            end = close
+        }
+        entries.push(HostEntry{name: host.name, name_span: host.span, system: target.name, system_span: parser_cover(system.span, target.span), overrides: overrides, span: parser_cover(host.span, end)})
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+    }
+    parser_expect(&state, TOKEN_RBRACE, "`}}` after hosts")
+    entries
+}

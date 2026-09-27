@@ -35,7 +35,7 @@
 // (`subset`/`lower`/`emit`) reach `Cx`, `mangle`, `rust_*`, etc. via `use super::*`.
 pub(crate) use super::*;
 use jet_foundation::CanonicalPass;
-use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest};
+use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest, MirViewCopyKind};
 use jet_foundation::SchemaMigration::{
     SchemaMigrationOp, SchemaMigrationPlan, SchemaMigrationStep,
 };
@@ -2589,6 +2589,9 @@ pub struct MirFragmentContext<'a> {
     pub distinct_ranges: &'a std::collections::HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a std::collections::HashMap<String, crate::AST::Type>,
     pub unit_families: &'a [crate::AST::UnitFamilyDef],
+    /// Target facts selected by the fragment caller; layout lowering must not
+    /// silently substitute the compiler host profile.
+    pub target_layout: jet_foundation::Layout::TargetLayout,
 }
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum FragmentCallable {
@@ -3405,6 +3408,7 @@ fn lower_mir_fragment(
     let declarations = lower_declarations_from_items_with_boxed_edges(
         &declaration_items,
         &module,
+        &context.target_layout,
         &cx.boxed_edges,
         &cx.auto_printable,
         &cx.auto_debug,
@@ -10545,47 +10549,53 @@ fn validate_tir_method(
     }
 }
 
-/// D-MEM-COPYSEM1=A: the ONE mapping from a `MaterializeView` source type to
-/// the shared Prelude materialization symbol (`Prelude/Core/ViewCopy.rs` for
-/// native/wasm, `Prelude/Core/ViewCopy.js` for the web tier). Per I9 no engine
-/// re-derives it: AOT emit, the wasm and JS web emitters, and lambda-capture
-/// lowering all read this table, so a `String` window and a `[T]` window can
-/// never disagree about which kernel copies them. Mirrors sema's
-/// `owned_type_for_read_view`, which decides the *type* of the same store.
-///
-/// A string window is the fallback because sema only builds `MaterializeView`
-/// for a proven read window: a `View<str>`, a `Type::String` local flagged
-/// `string_view`, or a range place. The first two are strings, so anything
-/// that is not list-shaped here is the string case.
-pub fn view_copy_symbol(source: &Type) -> &'static str {
+/// D-MEM-COPYSEM1=A: classify a checked AST read-window source once and use
+/// Foundation's `MirViewCopyKind::symbol` for the shared Prelude kernel name.
+/// MIR consumers repeat the same classification on canonical `MirType`; no
+/// tier-specific symbol ladder is allowed at this producer boundary.
+
+pub fn view_copy_kind(source: &Type) -> Option<MirViewCopyKind> {
     match source {
-        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
-            if matches!(args.as_slice(), [Type::Named(element)] if element == "str") {
-                "jet_string_view_copy"
+        Type::Tagged { inner, .. } => view_copy_kind(inner),
+        Type::String => Some(MirViewCopyKind::String),
+        Type::List(_) | Type::FixedList { .. } => Some(MirViewCopyKind::List),
+        Type::Apply { name, args }
+            if args.len() == 1 && matches!(name.as_str(), "View" | "ViewMut") =>
+        {
+            if matches!(
+                &args[0],
+                Type::Named(element) if element == "str"
+            ) {
+                Some(MirViewCopyKind::String)
             } else {
-                "jet_view_copy"
+                Some(MirViewCopyKind::List)
             }
         }
-        Type::List(_) | Type::FixedList { .. } => "jet_view_copy",
-        _ => "jet_string_view_copy",
+        _ => None,
+    }
+}
+
+fn view_copy_view_element(source: &Type) -> Option<&Type> {
+    match source {
+        Type::Tagged { inner, .. } => view_copy_view_element(inner),
+        Type::Apply { name, args }
+            if args.len() == 1 && matches!(name.as_str(), "View" | "ViewMut") =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
     }
 }
 
 /// D-MEM-COPYSEM1=A: the owned destination type a `View<T>` window
-/// materializes into, paired with `view_copy_symbol` so a capture store cannot
-/// pick one without the other. `None` means the source is not a declared view
-/// window and the caller keeps its own type.
+/// materializes into. `None` means the source is not a declared view window
+/// and the caller keeps its own type.
 pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
-    let Type::Apply { name, args } = source else {
-        return None;
-    };
-    if !matches!(name.as_str(), "View" | "ViewMut") || args.len() != 1 {
-        return None;
-    }
-    if matches!(&args[0], Type::Named(element) if element == "str") {
+    let element = view_copy_view_element(source)?;
+    if matches!(element, Type::Named(name) if name == "str") {
         Some(Type::String)
     } else {
-        Some(Type::List(Box::new(args[0].clone())))
+        Some(Type::List(Box::new(element.clone())))
     }
 }
 

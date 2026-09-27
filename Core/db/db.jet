@@ -11,7 +11,7 @@ package {
 
 use core as core
 
-c_max_policy_text :: 1048576
+C_MAX_POLICY_TEXT :: 1048576
 
 // core.db keeps the checked SQL and policy model in Jet's core call layer. The
 // provider owns connection state and executes only the typed operations exposed
@@ -32,7 +32,7 @@ pub fn pool(url: String, max: Int) -[DB]> DbPool !DBError {
 pub fn policy(table: String, expression: String) -[DB]> {
     table_value := table.trim()
     table_raw := table_value.bytes()
-    if table_raw.len() == 0 || table_raw.len() > c_max_policy_text || has_policy_control(~table_value) {
+    if table_raw.len() == 0 || table_raw.len() > C_MAX_POLICY_TEXT || has_policy_control(~table_value) {
         return Err("row policy needs a table and expression")
     }
     if !is_policy_identifier_start(Int.from_u8(table_raw[0])) {
@@ -48,7 +48,7 @@ pub fn policy(table: String, expression: String) -[DB]> {
 
     expression_value := expression.trim()
     expression_bytes := expression_value.bytes()
-    if expression_bytes.len() == 0 || expression_bytes.len() > c_max_policy_text || has_policy_control(~expression_value) {
+    if expression_bytes.len() == 0 || expression_bytes.len() > C_MAX_POLICY_TEXT || has_policy_control(~expression_value) {
         return Err("row policy needs a table and expression")
     }
     if expression_value != "true" && expression_value != "owner == user" {

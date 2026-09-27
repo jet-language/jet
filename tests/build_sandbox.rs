@@ -1537,6 +1537,7 @@ fn core_cargo_build_refuses_before_unavailable_sandbox_can_run_build_script() {
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
 
     let previous = std::env::var_os("JETPACK_FAKE_SANDBOX");
@@ -1618,6 +1619,7 @@ fn core_cargo_build_is_private_and_not_published_to_shared_cache() {
         project_dir: None,
         nix_index: None,
         nix_roots: None,
+        allow_local_nix_catalog: false,
     };
 
     let realized = jetpack::Store::realize_verified(

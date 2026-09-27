@@ -426,3 +426,19 @@ fn run() {
         "reading the payload is one branch, not one per fact:\n{run}"
     );
 }
+/// The shared runtime policy keeps omission distinct from an explicit empty
+/// message and formats equality as expected-versus-got without tier-local text.
+#[test]
+fn shared_runtime_require_policy_preserves_empty_and_equality() {
+    use jet::Outcome::{jet_require_eq_message, jet_require_message};
+
+    assert_eq!(jet_require_message(None), "condition failed");
+    assert_eq!(jet_require_message(Some("")), "");
+
+    let left = "actual";
+    let right = "expected";
+    assert_eq!(
+        jet_require_eq_message(&left, &right).to_string(),
+        "expected: expected, got: actual"
+    );
+}

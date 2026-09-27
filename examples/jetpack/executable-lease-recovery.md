@@ -1,30 +1,55 @@
 # Executable lease recovery
 
-An executable package consumer owns one authenticated lease container. Its
-inheritable lifetime lock stays held through the complete child process tree.
-An audit observes that state; it does not clean it up.
+Jetpack records an executable lease while a managed process tree can still
+use an executable or one of its snapshots. `jetpack audit` observes those
+leases; `jetpack hangar recover` is the explicit reclaim operation. The
+implementation is in
+[`ExecutableLease.rs`](../../crates/jetpack/src/RuntimePolicy/ExecutableLease.rs),
+with the audit surface in
+[`package_hangar_vendor.rs`](../../crates/jetpack/src/CLI/package_hangar_vendor.rs).
 
-Read the state first:
+## Inspect before reclaiming
 
-```text
+Audit is read-only. It reports active and stale leases, snapshot protection,
+and the objects that can be reclaimed without changing the hangar:
+
+```sh
 jetpack audit --no-color
 ```
 
-When the report contains a stale lease, the stable lease portion is:
+A representative stale-lease note is:
 
 ```text
-           ▸   Leases:      0 active, 1 stale
-           ▸   Lease Note:  stale executable leases await `jetpack hangar recover`
+             ▸   Leases:      0 active, 1 stale
+             ▸   Lease Note:  stale executable leases await `jetpack hangar recover`
 ```
 
-Repair only at the Hangar recovery boundary:
+The counts are observations from the current store, not fixed output. Use the
+actual audit result to decide whether recovery is appropriate.
 
-```text
+## Recover safely
+
+Recovery is deliberately separate from audit and is available only through the
+Hangar command:
+
+```sh
 jetpack hangar recover --no-color
 jetpack audit --no-color
 ```
 
-Recovery removes a lease only when both its authenticated owner lock and its
-container lifetime lock are idle. It can remove interrupted generations and
-stale snapshots, but it keeps a snapshot protected by a running descendant
-and never replaces the last complete generation with a partial one.
+The recovery path removes a stale executable lease only when both authorities
+agree:
+
+- the authenticated owner lock has been released; and
+- the inheritable container-lifetime lock has no live process-tree descendant.
+
+The owner lock authenticates the handoff. The container-lifetime lock is held
+by the process tree, so a descendant keeps the executable protected even after
+the original owner exits. See
+[`RuntimePolicy.rs`](../../crates/jetpack/src/RuntimePolicy.rs) and
+[`Store.rs`](../../crates/jetpack/src/Store.rs) for those boundaries.
+
+Interrupted generations and stale snapshots are eligible only when they are no
+longer protected. Descendant-protected snapshots remain intact. Recovery also
+avoids replacing a complete executable with a partial generation; temporary
+reclaim names are quarantined until the operation can be completed safely.

@@ -76,6 +76,12 @@ constants. The compiler enforces the law; casing drift is a coded diagnostic,
 not a convention. Foreign names in FFI bindings are exempt inside binding
 modules per D-SHAPE-CASE2=A (FFI section).
 
+**Owner amendment — module-global constant casing** *(September 25 owner
+instruction, card #3584)*: the latest owner instruction changes only the
+constant role above: module-global constants use ALL_CAPS
+(SCREAMING_SNAKE_CASE). It does not change the July rule for type-like or
+other value-like names; local `@` bindings remain snake_case.
+
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
 D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
 PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,

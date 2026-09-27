@@ -21,10 +21,10 @@ fn run() {
 
 const COMPTIME_SOURCE: &str = r#"
 fact Flow(@holds: .Value, @safe: .Gain, @gates: [], @decision: "D-TEST")
-@answer :: "fact declaration"
+@ANSWER :: "fact declaration"
 
 fn run() {
-    print(@answer)
+    print(@ANSWER)
 }
 "#;
 

@@ -12,12 +12,12 @@ package {
 use core as core
 use core.http.client as provider
 use core.net.url as http_url
-c_max_body_bytes :: 1048576
-c_max_header_bytes :: 32768
-c_max_header_line_bytes :: 8192
-c_max_header_count :: 100
-c_max_request_line_bytes :: 8192
-c_max_url_bytes :: 8192
+C_MAX_BODY_BYTES :: 1048576
+C_MAX_HEADER_BYTES :: 32768
+C_MAX_HEADER_LINE_BYTES :: 8192
+C_MAX_HEADER_COUNT :: 100
+C_MAX_REQUEST_LINE_BYTES :: 8192
+C_MAX_URL_BYTES :: 8192
 // core.http — bounded HTTP/1.1 message semantics.
 //
 // The host bridge remains only a typed request/response transport leaf.
@@ -423,20 +423,20 @@ pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
 
 pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_url(url) -> return Err(.InvalidUrl)
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     provider.post(url, body)
 }
 
 pub fn put(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_url(url) -> return Err(.InvalidUrl)
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     req := core.http.client.request("PUT", url)
     send_request(req.body(body))
 }
 
 pub fn patch(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_url(url) -> return Err(.InvalidUrl)
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     req := core.http.client.request("PATCH", url)
     send_request(req.body(body))
 }
@@ -461,7 +461,7 @@ pub fn serve(addr: String, mux: HTTPMux) !HTTPError {
 pub fn exchange(method: String, url: String, body: String, header_lines: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_method_token(method) -> return Err(.InvalidMethod)
     if !valid_url(url) -> return Err(.InvalidUrl)
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     if !headers_lines_bounded(header_lines) || !headers_lines_valid(header_lines) -> return Err(.InvalidHeader)
     parsed :: headers_parse(header_lines)
     send_request(request_with(method_parse(method), url, parsed, body_text(body)))
@@ -476,12 +476,12 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse !HTTPError {
     if split < 0 -> return Err(.InvalidFraming)
     if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end :: header_text_end(raw, split)
-    if head_end > c_max_header_bytes -> return Err(.InvalidHeader)
+    if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
-    if lines.len() == 0 || lines[0].bytes().len() > c_max_request_line_bytes -> return Err(.InvalidStatus)
+    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidStatus)
     parsed :: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
     hdr_lines := [String]{}
     loop i in 1..<lines.len() {
@@ -493,7 +493,7 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse !HTTPError {
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") -> return Err(.InvalidFraming)
     expected :: content_length(h)
-    if parsed.status.code != 304 && (expected > c_max_body_bytes || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
+    if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
     if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
     body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
     response := core.http.server.response(parsed.status.code, body_text)
@@ -511,12 +511,12 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest !HTTPError {
     if split < 0 -> return Err(.InvalidFraming)
     if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end :: header_text_end(raw, split)
-    if head_end > c_max_header_bytes -> return Err(.InvalidHeader)
+    if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
-    if lines.len() == 0 || lines[0].bytes().len() > c_max_request_line_bytes -> return Err(.InvalidMethod)
+    if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidMethod)
     parts :: split_space_line(lines[0])
     if parts.len() != 3 -> return Err(.InvalidMethod)
     if !valid_method(parts[0]) -> return Err(.InvalidMethod)
@@ -546,7 +546,7 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest !HTTPError {
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected :: content_length(h)
-    if expected > c_max_body_bytes || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
+    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
     req := core.http.client.request(method_text(method_parse(parts[0])), parts[1])
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
@@ -719,12 +719,12 @@ pub fn query_encode(q: Query) -> String {
     loop p in q.pairs {
         piece :: "{percent_encode(p.key)}={percent_encode(p.value)}"
         piece_len := piece.bytes().len()
-        if piece_len > c_max_body_bytes -> return ""
+        if piece_len > C_MAX_BODY_BYTES -> return ""
         if first {
             s = piece
             first = false
         } else {
-            if s.bytes().len() + piece_len + 1 > c_max_body_bytes -> return ""
+            if s.bytes().len() + piece_len + 1 > C_MAX_BODY_BYTES -> return ""
             s = "{s}&{piece}"
         }
     }
@@ -734,7 +734,7 @@ pub fn query_encode(q: Query) -> String {
 pub fn query_decode(text: String) -> Query {
     q := query()
     raw :: text.bytes()
-    if raw.len() == 0 || raw.len() > c_max_body_bytes -> return q
+    if raw.len() == 0 || raw.len() > C_MAX_BODY_BYTES -> return q
     start := 0
     if raw[0] == (U8{63}) -> start = 1
     i := start
@@ -787,14 +787,14 @@ pub fn cookie_encode(c: Cookie) -> String {
     if c.http_only -> s = "{s}; HttpOnly"
     if c.secure -> s = "{s}; Secure"
     if c.same_site == "Strict" || c.same_site == "Lax" || c.same_site == "None" -> s = "{s}; SameSite={c.same_site}"
-    if s.bytes().len() > c_max_header_line_bytes -> return ""
+    if s.bytes().len() > C_MAX_HEADER_LINE_BYTES -> return ""
     s
 }
 
 pub fn cookies_parse(header: String) -> [Cookie] {
     out := [Cookie]{}
     raw :: header.bytes()
-    if raw.len() > c_max_header_line_bytes -> return out
+    if raw.len() > C_MAX_HEADER_LINE_BYTES -> return out
     start := 0
     i := 0
     first := true
@@ -881,7 +881,7 @@ pub fn content_length(h: Headers) -> Int {
 
 fn valid_url(url: String) -> Bool {
     raw :: url.bytes()
-    if raw.len() < 8 || raw.len() > c_max_url_bytes || has_url_ctl(raw) -> return false
+    if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
     if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 -> return false
@@ -1021,13 +1021,13 @@ fn valid_header_line(line: String) -> Bool {
 }
 
 fn headers_lines_bounded(lines: [String]) -> Bool {
-    if lines.len() > c_max_header_count -> return false
+    if lines.len() > C_MAX_HEADER_COUNT -> return false
     total := 0
     loop line in lines {
         n := line.bytes().len()
-        if n + 2 > c_max_header_bytes || n > c_max_header_line_bytes -> return false
+        if n + 2 > C_MAX_HEADER_BYTES || n > C_MAX_HEADER_LINE_BYTES -> return false
         total = total + n + 2
-        if total > c_max_header_bytes -> return false
+        if total > C_MAX_HEADER_BYTES -> return false
     }
     true
 }

@@ -1,0 +1,474 @@
+// SSA values and MIR places. Ownership is represented by Option slots so a
+// checked Move consumes exactly one slot; borrowed places remain references.
+
+fn jet_rust_emit_value_slot(value: MirValueId) -> String { "__jet_v_{value.value}" }
+fn jet_rust_emit_local_slot(local: MirLocalId) -> String { "__jet_l_{local.value}" }
+fn jet_rust_emit_previous_slot() -> String { "__jet_mir_dispatch_prev" }
+
+fn jet_rust_emit_find_value_instruction(function: MirFunction, value: MirValueId) -> ?MirInstruction {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result == Val(value) -> return Val(instruction)
+        }
+    }
+    None
+}
+
+fn jet_rust_emit_value_type(function: MirFunction, value: MirValueId) -> MirType {
+    loop row in function.values {
+        if row.id == value -> return row.ty
+    }
+    panic("Jet Rust emitter reached a MIR value without a checked type row")
+}
+
+fn jet_rust_emit_find_parameter(function: MirFunction, index: Int) -> MirParam {
+    loop parameter in function.params {
+        if parameter.index == index -> return parameter
+    }
+    panic("Jet Rust emitter reached a MIR parameter without a checked parameter row")
+}
+
+fn jet_rust_emit_is_receiver(function: MirFunction, index: Int) -> Bool {
+    if index != 0 -> return false
+    if function.form == {
+        .Method(_, access) -> access != None
+        .TraitMethod(_, _, access, _) -> access != None
+        .TopLevel -> false
+    }
+}
+
+fn jet_rust_emit_parameter_name(function: MirFunction, index: Int) -> String {
+    if jet_rust_emit_is_receiver(function, index) -> return "__jet_self"
+    jet_rust_emit_sanitize(jet_rust_emit_find_parameter(function, index).name)
+}
+
+fn jet_rust_emit_capture_name(slot: Int) -> String { "__jet_capture_{slot}" }
+
+fn jet_rust_emit_parameter_expression(function: MirFunction, index: Int, access: MirAccess) -> String {
+    name := jet_rust_emit_parameter_name(function, index)
+    if access == {
+        .Read -> {
+            parameter := jet_rust_emit_find_parameter(function, index)
+            if jet_rust_emit_is_receiver(function, index) || jet_rust_emit_type_is_borrowed(parameter.ty) -> "(*{name}).clone()" else -> name
+        }
+        .Write -> "(*{name}).clone()"
+        .Move -> name
+    }
+}
+
+fn jet_rust_emit_capture_expression(function: MirFunction, slot: Int, access: MirAccess) -> String {
+    name := jet_rust_emit_capture_name(slot)
+    if access == MirAccess.Move -> name else -> "(*{name}).clone()"
+}
+
+fn jet_rust_emit_value_reference(value: MirValueId, mutable: Bool) -> String {
+    if mutable -> "{jet_rust_emit_value_slot(value)}.as_mut().expect(\"MIR value\")" else -> "{jet_rust_emit_value_slot(value)}.as_ref().expect(\"MIR value\")"
+}
+
+fn jet_rust_emit_value_read(value: MirValueId) -> String { "({jet_rust_emit_value_reference(value, false)}).clone()" }
+
+fn jet_rust_emit_value_move(value: MirValueId) -> String { "{jet_rust_emit_value_slot(value)}.take().expect(\"MIR value\")" }
+
+fn jet_rust_emit_place_local(function: MirFunction, local: MirLocalId, mutable: Bool) -> String {
+    if mutable -> "*{jet_rust_emit_local_slot(local)}.as_mut().expect(\"MIR local\")" else -> "*{jet_rust_emit_local_slot(local)}.as_ref().expect(\"MIR local\")"
+}
+
+fn jet_rust_emit_parameter_place(function: MirFunction, value: MirValueId, mutable: Bool) -> String {
+    instruction :: jet_rust_emit_find_value_instruction(function, value) ?? panic("MIR parameter place has no producer")
+    if instruction.operation == {
+        .Parameter(index, _) -> {
+            name := jet_rust_emit_parameter_name(function, index)
+            access := jet_rust_emit_find_parameter(function, index).access
+            if mutable {
+                if access != MirAccess.Write -> panic("MIR parameter place is not writable")
+                return "*{name}"
+            }
+            if access == MirAccess.Move -> return name
+            return "*{name}"
+        }
+        .Capture(slot) -> {
+            if mutable -> return "*{jet_rust_emit_capture_name(slot)}"
+            return "*{jet_rust_emit_capture_name(slot)}"
+        }
+        else -> return panic("MIR place base does not refer to a parameter or capture value")
+    }
+}
+
+fn jet_rust_emit_prelude_symbol(ctx: &JetRustEmitContext, id: MirPreludeCallId) -> String {
+    loop row in ctx.program.prelude_calls {
+        if row.id == id {
+            if row.symbol == {
+                .Prelude(name) -> return "{ctx.config.root_prefix}{name}"
+                .Runtime(name) -> {
+                    if name.starts_with("jet_crypto_") || name.starts_with("jet_vault_") -> return "jet_ffi::{name}"
+                    return name
+                }
+            }
+        }
+    }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing from the program registry", "every checked operation route must carry one canonical Prelude row", None)
+    "__jet_missing_prelude_{id.value}"
+}
+
+fn jet_rust_emit_source_path(ctx: &JetRustEmitContext, id: MirSourceFileId) -> String {
+    loop row in ctx.program.source_files {
+        if row.id == id -> return jet_rust_emit_quote(row.path)
+    }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR panic location names a missing source file", "source spans must resolve to immutable source-file rows before emission", None)
+    "\"<missing-source>\""
+}
+
+fn jet_rust_emit_partial_base_key(base: MirPlaceBase) -> String {
+    if base == {
+        .Local(local) -> return "local_{local.value}"
+        .Parameter(value) -> return "value_{value.value}"
+        .Capture(value) -> return "value_{value.value}"
+        .Temporary(value) -> return "value_{value.value}"
+        .Static(name) -> return "static_{jet_rust_emit_sanitize(name)}"
+    }
+}
+
+fn jet_rust_emit_partial_root_slot(base: MirPlaceBase) -> String {
+    if base == {
+        .Parameter(value) -> return jet_rust_emit_value_slot(value)
+        .Capture(value) -> return jet_rust_emit_value_slot(value)
+        .Temporary(value) -> return jet_rust_emit_value_slot(value)
+        .Static(name) -> return "{name}"
+    }
+}
+
+fn jet_rust_emit_partial_field_slot(base: MirPlaceBase, field: MirFieldId) -> String {
+    "__jet_partial_{jet_rust_emit_partial_base_key(base)}_{field.value}"
+}
+
+fn jet_rust_emit_partial_place_path(function: MirFunction, id: MirPlaceId) -> [MirFieldId] {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .MovePlace(place) -> {
+                    if place == id {
+                        loop row in function.places {
+                            if row.id == id {
+                                fields := [MirFieldId]{}
+                                loop projection in row.projections {
+                                    if projection == {
+                                        .Field(field, _) -> fields.push(field)
+                                        else -> return [MirFieldId]{}
+                                    }
+                                }
+                                return fields
+                            }
+                        }
+                    }
+                }
+                .AddressOf(place, access) -> {
+                    if place == id && access == MirAccess.Move {
+                        loop row in function.places {
+                            if row.id == id {
+                                fields := [MirFieldId]{}
+                                loop projection in row.projections {
+                                    if projection == {
+                                        .Field(field, _) -> fields.push(field)
+                                        else -> return [MirFieldId]{}
+                                    }
+                                }
+                                return fields
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    [MirFieldId]{}
+}
+
+fn jet_rust_emit_place_projection_path(function: MirFunction, id: MirPlaceId) -> [MirFieldId] {
+    loop row in function.places {
+        if row.id == id {
+            fields := [MirFieldId]{}
+            loop projection in row.projections {
+                if projection == {
+                    .Field(field, _) -> fields.push(field)
+                    else -> return [MirFieldId]{}
+                }
+            }
+            return fields
+        }
+    }
+    [MirFieldId]{}
+}
+fn jet_rust_emit_partial_root_has(function: MirFunction, base: MirPlaceBase) -> Bool {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .MovePlace(place) -> {
+                    loop row in function.places {
+                        if row.id == place && row.base == base && row.projections.len() > 0 {
+                            fields := jet_rust_emit_partial_place_path(function, place)
+                            if fields.len() > 0 -> return true
+                        }
+                    }
+                }
+                .AddressOf(place, access) -> {
+                    if access == MirAccess.Move {
+                        loop row in function.places {
+                            if row.id == place && row.base == base && row.projections.len() > 0 {
+                                fields := jet_rust_emit_partial_place_path(function, place)
+                                if fields.len() > 0 -> return true
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_partial_owner(ctx: &JetRustEmitContext, field: MirFieldId) -> ?MirTypeId {
+    loop row in ctx.program.fields { if row.id == field -> return Val(row.owner) }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR partial move field is missing from the program registry", "field projections must retain their owner identity for split storage", None)
+    None
+}
+
+fn jet_rust_emit_partial_field_boxed(ctx: &JetRustEmitContext, owner: MirTypeId, field: MirFieldId) -> Bool {
+    field_name := ""
+    loop row in ctx.program.fields { if row.id == field -> field_name = row.field.name }
+    loop definition in ctx.program.types {
+        if definition.id == owner {
+            loop edge in definition.boxed_edges {
+                if edge == field_name || edge.ends_with(".{field_name}") -> return true
+            }
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_partial_field_expression(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId, mutable: Bool) -> ?String {
+    loop row in function.places {
+        if row.id == place {
+            if !jet_rust_emit_partial_root_has(function, row.base) -> return None
+            fields := jet_rust_emit_place_projection_path(function, place)
+            if fields.len() == 0 || row.projections.len() != fields.len() -> return None
+            if fields.len() != 1 {
+                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "nested partial field projection lacks split storage", "the checked partial-move plan must expose every nested owner before a projected access is emitted", Val(row.span))
+                return None
+            }
+            root := jet_rust_emit_partial_root_slot(row.base)
+            field := fields[0]
+            slot := jet_rust_emit_partial_field_slot(row.base, field)
+            owner := jet_rust_emit_partial_owner(ctx, field) ?? MirTypeId{value: 0}
+            boxed := jet_rust_emit_partial_field_boxed(ctx, owner, field)
+            name := jet_rust_emit_field_name(ctx, field)
+            if mutable {
+                target := if boxed -> "&mut **{slot}.as_mut().expect(\"MIR partial field\")" else -> "&mut *{slot}.as_mut().expect(\"MIR partial field\")"
+                whole := if boxed -> "&mut **__jet_whole.{name}" else -> "&mut __jet_whole.{name}"
+                return "match {root}.as_mut() {{ Some(__jet_whole) => {whole}, None => {target} }}"
+            }
+            target := if boxed -> "&**{slot}.as_ref().expect(\"MIR partial field\")" else -> "{slot}.as_ref().expect(\"MIR partial field\")"
+            whole := if boxed -> "&**__jet_whole.{name}" else -> "&__jet_whole.{name}"
+            return "match {root}.as_ref() {{ Some(__jet_whole) => {whole}, None => {target} }}"
+        }
+    }
+    None
+}
+
+fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, mutable: Bool, projections: [MirProjection]) -> String {
+    expression := if base == {
+        .Local(local) -> jet_rust_emit_place_local(function, local, mutable)
+        .Parameter(value) -> jet_rust_emit_parameter_place(function, value, mutable)
+        .Capture(value) -> jet_rust_emit_parameter_place(function, value, mutable)
+        .Temporary(value) -> "*({jet_rust_emit_value_reference(value, mutable)})"
+        .Static(name) -> "{ctx.config.root_prefix}__jet_static_{jet_rust_emit_sanitize(name)}"
+    }
+    loop projection in projections {
+        if projection == {
+            .Field(field, _) -> expression = "({expression}).{jet_rust_emit_field_name(ctx, field)}"
+            .Deref(_) -> expression = "*({expression})"
+            .Index(kind, index, call, _, location, _, _) -> {
+                index_expression := jet_rust_emit_value_read(index)
+                if kind == MirIndexKind.Map -> index_expression = "&({index_expression})"
+                symbol := jet_rust_emit_prelude_symbol(ctx, call)
+                borrow := if mutable -> "&mut" else -> "&"
+                expression = "*{symbol}({borrow}({expression}), {index_expression}, {jet_rust_emit_source_path(ctx, location.file)}, {location.line}u32)"
+            }
+        }
+    }
+    expression
+}
+
+fn jet_rust_emit_place(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId, mutable: Bool) -> String {
+    loop place in function.places {
+        if place.id == id -> return jet_rust_emit_place_base(ctx, function, place.base, mutable, place.projections)
+    }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place identity is missing from its function", "all read/write/move place operations must resolve to one checked place row", None)
+    "__jet_missing_place_{id.value}"
+}
+
+fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String {
+    partial := jet_rust_emit_partial_field_expression(ctx, function, id, false)
+    if partial != None {
+        fallback := partial ?? "__jet_missing_partial"
+        return "({fallback}).clone()"
+    }
+    place := jet_rust_emit_place(ctx, function, id, false)
+    "({place}).clone()"
+}
+
+fn jet_rust_emit_place_reference(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId, access: MirAccess) -> String {
+    if access == MirAccess.Move -> return jet_rust_emit_place_move(ctx, function, id)
+    partial := jet_rust_emit_partial_field_expression(ctx, function, id, access == MirAccess.Write)
+    if partial != None -> return partial ?? "__jet_missing_partial"
+    place := jet_rust_emit_place(ctx, function, id, access == MirAccess.Write)
+    if access == MirAccess.Write -> "&mut ({place})" else -> "&({place})"
+}
+fn jet_rust_emit_partial_fields(ctx: &JetRustEmitContext, owner: MirTypeId) -> [MirField] {
+    fields := [MirField]{}
+    loop row in ctx.program.fields {
+        if row.owner == owner && !row.field.computed -> fields.push(row.field)
+    }
+    fields
+}
+
+fn jet_rust_emit_partial_split(ctx: &JetRustEmitContext, base: MirPlaceBase, owner: MirTypeId) -> String {
+    root := jet_rust_emit_partial_root_slot(base)
+    out := "if let Some(__jet_whole) = {root}.take() {{ "
+    fields := jet_rust_emit_partial_fields(ctx, owner)
+    loop field in fields {
+        out = "{out}{jet_rust_emit_partial_field_slot(base, field.id)} = Some(__jet_whole.{jet_rust_emit_field_name(ctx, field.id)}); "
+    }
+    "{out}}}"
+}
+
+fn jet_rust_emit_partial_clear(ctx: &JetRustEmitContext, base: MirPlaceBase, owner: MirTypeId) -> String {
+    out := ""
+    fields := jet_rust_emit_partial_fields(ctx, owner)
+    loop field in fields -> out = "{out}drop({jet_rust_emit_partial_field_slot(base, field.id)}.take()); "
+    out
+}
+
+fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId) -> ?String {
+    loop row in function.places {
+        if row.id == place {
+            fields := jet_rust_emit_partial_place_path(function, place)
+            if fields.len() == 0 || row.projections.len() != fields.len() -> return None
+            if fields.len() != 1 {
+                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "nested partial move lacks canonical split storage", "the checked partial-move plan must expose every nested owner before consuming a nested field", Val(row.span))
+                return Val("unreachable!(\"unsupported nested partial MIR move\")")
+            }
+            owner := jet_rust_emit_partial_owner(ctx, fields[0]) ?? MirTypeId{value: 0}
+            slot := jet_rust_emit_partial_field_slot(row.base, fields[0])
+            field := jet_rust_emit_field_name(ctx, fields[0])
+            split := jet_rust_emit_partial_split(ctx, row.base, owner)
+            return Val("{{ {split} {slot}.take().expect(\"MIR partial field {field}\") }}")
+        }
+    }
+    None
+}
+
+fn jet_rust_emit_partial_drop(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId) -> ?String {
+    loop row in function.places {
+        if row.id == place && row.projections.len() == 0 && jet_rust_emit_partial_root_has(function, row.base) {
+            loop block in function.blocks {
+                loop instruction in block.instructions {
+                    if instruction.operation == {
+                        .MovePlace(field_place) -> {
+                            path := jet_rust_emit_partial_place_path(function, field_place)
+                            if path.len() > 0 {
+                                owner := jet_rust_emit_partial_owner(ctx, path[0]) ?? MirTypeId{value: 0}
+                                clear := jet_rust_emit_partial_clear(ctx, row.base, owner)
+                                return Val("{{ if let Some(__jet_whole) = {jet_rust_emit_partial_root_slot(row.base)}.take() {{ drop(__jet_whole); }} else {{ {clear} }} }}")
+                            }
+                        }
+                        .AddressOf(field_place, access) -> {
+                            if access == MirAccess.Move {
+                                path := jet_rust_emit_partial_place_path(function, field_place)
+                                if path.len() > 0 {
+                                    owner := jet_rust_emit_partial_owner(ctx, path[0]) ?? MirTypeId{value: 0}
+                                    clear := jet_rust_emit_partial_clear(ctx, row.base, owner)
+                                    return Val("{{ if let Some(__jet_whole) = {jet_rust_emit_partial_root_slot(row.base)}.take() {{ drop(__jet_whole); }} else {{ {clear} }} }}")
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+
+fn jet_rust_emit_place_lvalue(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String {
+    jet_rust_emit_place(ctx, function, id, true)
+}
+
+fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId, value: String) -> String {
+    loop place in function.places {
+        if place.id == id {
+            if jet_rust_emit_partial_root_has(function, place.base) {
+                if place.projections.len() == 0 {
+                    path := jet_rust_emit_partial_place_path(function, id)
+                    if path.len() > 0 {
+                        owner := jet_rust_emit_partial_owner(ctx, path[0]) ?? MirTypeId{value: 0}
+                        clear := jet_rust_emit_partial_clear(ctx, place.base, owner)
+                        return "{{ {clear} {jet_rust_emit_partial_root_slot(place.base)} = Some({value}); }}"
+                    }
+                } else {
+                    fields := jet_rust_emit_place_projection_path(function, id)
+                    if fields.len() == 1 {
+                        owner := jet_rust_emit_partial_owner(ctx, fields[0]) ?? MirTypeId{value: 0}
+                        boxed := jet_rust_emit_partial_field_boxed(ctx, owner, fields[0])
+                        stored := if boxed -> "Box::new({value})" else -> value
+                        root := jet_rust_emit_partial_root_slot(place.base)
+                        slot := jet_rust_emit_partial_field_slot(place.base, fields[0])
+                        name := jet_rust_emit_field_name(ctx, fields[0])
+                        return "{{ if let Some(__jet_whole) = {root}.as_mut() {{ __jet_whole.{name} = {stored}; }} else {{ {slot} = Some({stored}); }} }}"
+                    }
+                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "nested partial write lacks canonical split storage", "checked nested field writes require every owner level to be represented in the partial-move plan", Val(place.span))
+                }
+            }
+            if place.projections.len() == 0 {
+                if place.base == {
+                    .Local(local) -> return "{jet_rust_emit_local_slot(local)} = Some({value})"
+                    .Temporary(temp) -> return "{jet_rust_emit_value_slot(temp)} = Some({value})"
+                    .Parameter(binding) -> return "{jet_rust_emit_parameter_place(function, binding, true)} = {value}"
+                    .Capture(binding) -> return "{jet_rust_emit_parameter_place(function, binding, true)} = {value}"
+                }
+            }
+            return "{jet_rust_emit_place_lvalue(ctx, function, id)} = {value}"
+        }
+    }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place write identity is missing from its function", "checked place writes require a complete place row", None)
+    "()"
+}
+
+fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String {
+    loop place in function.places {
+        if place.id == id {
+            if place.projections.len() != 0 {
+                partial := jet_rust_emit_partial_move(ctx, function, id)
+                if partial != None -> return partial ?? "unreachable!(\"missing partial move\")"
+                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
+                return "unreachable!(\"unsupported projected MIR move\")"
+            }
+            if jet_rust_emit_partial_root_has(function, place.base) -> return "{jet_rust_emit_partial_root_slot(place.base)}.take().expect(\"MIR whole move\")"
+            if place.base == {
+                .Local(local) -> return "{jet_rust_emit_local_slot(local)}.take().expect(\"MIR local\")"
+                .Temporary(temp) -> return jet_rust_emit_value_move(temp)
+                .Parameter(binding) -> return jet_rust_emit_value_move(binding)
+                .Capture(binding) -> return jet_rust_emit_value_move(binding)
+                .Static(_) -> {
+                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "checked MIR rejected a static move", "static places may only be read or written through their declared storage protocol", Val(place.span))
+                    return "unreachable!(\"unsupported static move\")"
+                }
+            }
+        }
+    }
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR move place identity is missing from its function", "checked move operations require a complete place row", None)
+    "unreachable!(\"missing MIR move place\")"
+}

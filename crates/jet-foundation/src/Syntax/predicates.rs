@@ -499,7 +499,7 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
             }
             previous_lower_or_digit = false;
         } else if ch.is_alphanumeric() {
-            if case == NameCase::Snake
+            if matches!(case, NameCase::Snake | NameCase::Screaming)
                 && ch.is_uppercase()
                 && previous_lower_or_digit
                 && !normalized.ends_with('_')
@@ -508,7 +508,11 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
             }
             normalized.extend(
                 ch.to_lowercase()
-                    .take(if case == NameCase::Snake { 1 } else { 0 }),
+                    .take(if matches!(case, NameCase::Snake | NameCase::Screaming) {
+                        1
+                    } else {
+                        0
+                    }),
             );
             if case == NameCase::Pascal {
                 normalized.push(ch);
@@ -552,12 +556,14 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
         let prefix = match case {
             NameCase::Pascal => "Type",
             NameCase::Snake => "field_",
+            NameCase::Screaming => "FIELD_",
         };
         result.insert_str(0, prefix);
     }
     let suffix = match case {
         NameCase::Pascal => "Type",
         NameCase::Snake => "_field",
+        NameCase::Screaming => "_FIELD",
     };
     while result == "_" || result.starts_with("__") || is_reserved_generated_name(&result) {
         result.push_str(suffix);

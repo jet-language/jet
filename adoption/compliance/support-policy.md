@@ -1,11 +1,21 @@
 # Support-policy handoff
 
-The release policy defines compatibility and edition behavior. D-ADOPT-LTS1 is
-ratified. The first GA date, replacement line, and support matrix remain
-pending, so this pack publishes no dated LTS support claim yet.
+The canonical compatibility and edition rules are in the
+[`release policy`](../../docs/spec/release-policy.md) and
+[`release/calendar.json`](../release/calendar.json). The calendar records the
+ratified `D-ADOPT-LTS1` policy values—annual cadence, 12 active months, 24
+maintenance months, 36 total months, and no more than three overlapping
+lines—while its first-LTS dates, replacement line, and supported editions and
+hosts remain explicit owner-token inputs.
 
-The release pipeline must render `support-policy.json` from
-[`release/calendar.json`](../release/calendar.json), copy the ratified values
-without reinterpretation, and bind its `release_version` to the artifact
-manifest. The validator rejects a publishable bundle with unresolved schedule
-tokens or a support artifact that disagrees with the calendar.
+The release pipeline renders `support-policy.json` from that calendar, copies
+ratified values without reinterpretation, and binds `release_version` to the
+artifact manifest. A preview artifact uses
+`status: "preview-no-lts-claim"` and contains no LTS values. A published
+artifact uses `status: "published"` only after the calendar schedule and
+support matrix have been resolved and ratified.
+
+The validator rejects a publishable bundle with unresolved schedule tokens, a
+support artifact that disagrees with the calendar, or a published artifact that
+lacks the complete cadence, dates, edition, host, notice, and backport fields.
+It also rejects an owner token in a published support artifact.

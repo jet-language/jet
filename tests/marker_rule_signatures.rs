@@ -239,7 +239,7 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
         // at this scope, so this is the only spelling that reaches the row.
         (
             "#Static on a marked constant",
-            "#Static @limit :: 10\nfn run() {}",
+            "#Static @LIMIT :: 10\nfn run() {}",
             jet::Policy::RuleSite::Constant,
         ),
     ];
@@ -542,11 +542,11 @@ fn run() {}
 #[test]
 fn static_string_products_resolve_before_consumers() {
     let source = r#"
-@label :: "shared"
-@page :: "index.html"
-#HTML(@page)
+@LABEL :: "shared"
+@PAGE :: "index.html"
+#HTML(@PAGE)
 Tiny :: distinct Int(0..3)
-#Test(@label) {}
+#Test(@LABEL) {}
 fn run() {}
 "#;
     let (bundle, diagnostics) = checked(source, jet::Sema::CompileMode::Check);
@@ -605,8 +605,8 @@ fn html_marker_uses_typed_path_signature() {
 #[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
-        "@value :: 42\n#HTML(@value)\nfn run() {}",
-        "@value :: 42\n#Test(@value) {}\nfn run() {}",
+        "@VALUE :: 42\n#HTML(@VALUE)\nfn run() {}",
+        "@VALUE :: 42\n#Test(@VALUE) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -624,22 +624,22 @@ fn static_string_products_report_one_shared_type_error_each() {
 fn static_type_and_field_strings_use_the_same_signature_gate() {
     let valid = codes(
         r#"
-@tag_name :: "kind"
-@field_name :: "identifier"
-@variant_name :: "ready"
-#[Codable, Discriminant(@tag_name)]
-enum Event { #Rename(@variant_name) Ready }
+@TAG_NAME :: "kind"
+@FIELD_NAME :: "identifier"
+@VARIANT_NAME :: "ready"
+#[Codable, Discriminant(@TAG_NAME)]
+enum Event { #Rename(@VARIANT_NAME) Ready }
 #Codable
-struct Row { #Rename(@field_name) id: Int }
+struct Row { #Rename(@FIELD_NAME) id: Int }
 fn run() {}
 "#,
     );
     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
 
     for source in [
-        "@value :: 42\n#[Codable, Discriminant(@value)] enum Event { Ready }\nfn run() {}",
-        "@value :: 42\n#Codable struct Row { #Rename(@value) id: Int }\nfn run() {}",
-        "@value :: 42\n#Codable enum Event { #Rename(@value) Ready }\nfn run() {}",
+        "@VALUE :: 42\n#[Codable, Discriminant(@VALUE)] enum Event { Ready }\nfn run() {}",
+        "@VALUE :: 42\n#Codable struct Row { #Rename(@VALUE) id: Int }\nfn run() {}",
+        "@VALUE :: 42\n#Codable enum Event { #Rename(@VALUE) Ready }\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -712,10 +712,10 @@ fn run() {}
 #[test]
 fn duplicate_html_markers_still_fail_before_resolution() {
     let source = r#"
-@first :: "first.html"
-@second :: "second.html"
-#HTML(@first)
-#HTML(@second)
+@FIRST :: "first.html"
+@SECOND :: "second.html"
+#HTML(@FIRST)
+#HTML(@SECOND)
 fn run() {}
 "#;
     let dir = std::env::temp_dir().join(format!(
@@ -772,8 +772,8 @@ fn run() {}
 fn resolved_test_names_keep_duplicate_identity() {
     let diagnostics = codes(
         r#"
-@name :: "same"
-#Test(@name) {}
+@NAME :: "same"
+#Test(@NAME) {}
 #Test("same") {}
 fn run() {}
 "#,
@@ -790,8 +790,8 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "@name :: \"case\"\n#Test(@name) {}\n#HTML(@name)\nfn run() {}\n";
+    let source = "@NAME :: \"case\"\n#Test(@NAME) {}\n#HTML(@NAME)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
-    assert!(formatted.contains("#Test(@name)"), "{formatted}");
-    assert!(formatted.contains("#HTML(@name)"), "{formatted}");
+    assert!(formatted.contains("#Test(@NAME)"), "{formatted}");
+    assert!(formatted.contains("#HTML(@NAME)"), "{formatted}");
 }

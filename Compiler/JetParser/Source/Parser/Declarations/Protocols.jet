@@ -1,0 +1,70 @@
+fn parser_protocol_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "protocol" && parser_kind_at(&state, 1) == TOKEN_IDENT
+}
+
+fn parser_parse_protocol(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "for a protocol name")
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before protocol messages")
+    messages := [ProtocolMessage]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_current_kind(&state) == TOKEN_COMMA {
+            parser_bump(&state)
+            next
+        }
+        messages.push(parser_protocol_message(&state))
+        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after protocol messages")
+    Item.ProtocolDecl(value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)})
+}
+
+fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
+    start :: parser_current(&state)
+    sender :: parser_expect_name(&state, "for a protocol message sender")
+    direction := ProtocolDirection.ClientToServer
+    expected := "server"
+    if sender.payload.decoded == "client" {
+        direction = ProtocolDirection.ClientToServer
+        expected = "server"
+    } else if sender.payload.decoded == "server" {
+        direction = ProtocolDirection.ServerToClient
+        expected = "client"
+    } else {
+        parser_protocol_error(&state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
+    }
+    if parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
+        arrow :: parser_bump(&state)
+        receiver :: parser_expect_name(&state, "for the retired protocol receiver")
+        if receiver.payload.decoded != expected {
+            parser_protocol_error(&state, receiver.span, "the protocol receiver must be the opposite endpoint", "an endpoint-pair spelling still names the receiving endpoint", "write only the sender and remove the receiver arrow")
+        }
+        parser_protocol_error(&state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
+    }
+    parser_expect(&state, TOKEN_COLON, "after a protocol message sender")
+    message :: parser_expect_name(&state, "for a protocol message name")
+    parser_expect(&state, TOKEN_LPAREN, "`(` before a protocol message payload")
+    fields := [TypedNamedField]{}
+    loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
+        field :: parser_expect_name(&state, "for a protocol message field")
+        parser_expect(&state, TOKEN_COLON, "after a protocol message field")
+        ty :: parser_parse_type(&state, 0)
+        fields.push(TypedNamedField{name: field.payload.decoded, ty: ty.ty})
+        if parser_current_kind(&state) == TOKEN_COMMA {
+            parser_bump(&state)
+            next
+        }
+        if parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_COMMA {
+            parser_add_error(&state, parser_current(&state).span, "expected `,` between protocol message fields", "protocol payload fields are comma-separated", "add a comma or close the payload")
+            break
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a protocol message payload")
+    ProtocolMessage{direction: direction, name: message.payload.decoded, name_span: message.span, fields: fields, span: parser_cover(start.span, close.span)}
+}
+
+fn parser_protocol_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+    parser_add_error_code(&state, "E0154", span, what, why, fix)
+}

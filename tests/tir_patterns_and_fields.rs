@@ -1181,7 +1181,7 @@ fn run() {
 #[test]
 fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
     let src = r#"
-@tower :: 99
+@TOWER :: 99
 fn choose(tower: Int) Int -> tower
 fn run() {
     print(choose(7))
@@ -1394,9 +1394,9 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`@pair_value :: Pair{…}`;
-/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`@light_value ::
-/// Light.Green`; `light_value == Light.Green`). The struct field read folds to the
+/// c109: a field read off a comptime-const STRUCT value (`@PAIR_VALUE :: Pair{…}`;
+/// `PAIR_VALUE.left`) and an `==` against a comptime-const ENUM value (`@LIGHT_VALUE ::
+/// Light.Green`; `LIGHT_VALUE == Light.Green`). The struct field read folds to the
 /// projected comptime value; the comparison uses the canonical ordering hook.
 /// `main` routes through the TIR; runs to the round-trip output.
 #[test]
@@ -1415,17 +1415,17 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair{left: 7, right: \"seven\"}
-@light_value :: Light.Green
+@PAIR_VALUE :: Pair{left: 7, right: \"seven\"}
+@LIGHT_VALUE :: Light.Green
 
 fn run() {
     p :: Pair{left: 7, right: \"seven\"}
     l :: Light.Green
-    print(\"{@pair_value.left}\")
+    print(\"{@PAIR_VALUE.left}\")
     print(\"{p.left}\")
-    print(\"{@pair_value.right}\")
+    print(\"{@PAIR_VALUE.right}\")
     print(\"{p.right}\")
-    print(\"{@light_value == Light.Green}\")
+    print(\"{@LIGHT_VALUE == Light.Green}\")
     print(\"{l == Light.Green}\")
 }
 ";

@@ -8,9 +8,9 @@ package {
         app: .Library{ entry: app }
     }
 }
-live_max_payload :: 4194304
-live_max_subscribers :: 1024
-auth_max_providers :: 64
+LIVE_MAX_PAYLOAD :: 4194304
+LIVE_MAX_SUBSCRIBERS :: 1024
+AUTH_MAX_PROVIDERS :: 64
 // app is the headless application boundary.  The compiler/runtime dispatcher
 // owns the shared live registry, sync session registry, and authentication
 // policy; these source bodies own pure value validation and fail closed for
@@ -50,7 +50,7 @@ pub fn auth_oauth(auth: Auth, providers: String) -> Auth {
     loop comma_group in providers.split(",") {
         loop raw in comma_group.split(" ") {
             provider :: raw.trim()
-            if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < auth_max_providers {
+            if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
                 configured.push(~provider)
             }
         }
@@ -87,7 +87,7 @@ fn canonical_table(value: String) -> String {
 fn canonical_providers(values: [String]) -> [String] {
     providers := [String]{}
     loop provider in values {
-        if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < auth_max_providers {
+        if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
             providers.push(~provider)
         }
     }
@@ -96,7 +96,7 @@ fn canonical_providers(values: [String]) -> [String] {
 
 pub fn live(key: String, data: String) -> LiveQuery {
     if !valid_footprint(key) -> return live_error("invalid live footprint")
-    if data.bytes().len() > live_max_payload -> return live_error("live query payload is too large")
+    if data.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")
     LiveQuery{key: canonical_footprint(key), data: data, generation: 1, subscribers: 0}
 }
 
@@ -138,7 +138,7 @@ pub fn transact_invalidate(write_set: String) -> Int !AppError {
 pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery {
     if valid_live_error(q) -> return live_error(q.data)
     if !valid_live_query(q) -> return live_error("live query is invalid")
-    if payload.bytes().len() > live_max_payload -> return live_error("live query payload is too large")
+    if payload.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")
     if q.generation >= 9223372036854775807 -> return live_error("live query generation exhausted")
     LiveQuery{key: q.key, data: payload, generation: q.generation + 1, subscribers: q.subscribers}
 }
@@ -230,8 +230,8 @@ fn valid_live_error(q: LiveQuery) -> Bool {
 }
 
 fn valid_live_query(q: LiveQuery) -> Bool {
-    if q.generation <= 0 || q.subscribers < 0 || q.subscribers > live_max_subscribers -> return false
-    if q.data.bytes().len() > live_max_payload || !valid_footprint(q.key) -> return false
+    if q.generation <= 0 || q.subscribers < 0 || q.subscribers > LIVE_MAX_SUBSCRIBERS -> return false
+    if q.data.bytes().len() > LIVE_MAX_PAYLOAD || !valid_footprint(q.key) -> return false
     canonical_footprint(q.key) == q.key
 }
 
@@ -261,7 +261,7 @@ fn valid_footprint_atom(value: String) -> Bool {
 }
 
 fn canonical_document(value: String) -> Bool {
-    if value.len() == 0 || value.len() > live_max_payload || value != value.trim() || has_control(value) || !value.ends_with(")") -> return false
+    if value.len() == 0 || value.len() > LIVE_MAX_PAYLOAD || value != value.trim() || has_control(value) || !value.ends_with(")") -> return false
     if value.starts_with("SyncText(") -> return true
     if value.starts_with("SyncMap(") -> return true
     if value.starts_with("SyncList(") -> return true

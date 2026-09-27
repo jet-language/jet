@@ -9,10 +9,10 @@ use core.http as http
 use core.http.[HTTPError, HTTPRequest, HTTPResponse]
 use core.http.client as provider
 use core.net.url as http_url
-c_max_body_bytes :: 1048576
-c_max_url_bytes :: 8192
-c_max_redirects :: 10
-c_max_retries :: 1
+C_MAX_BODY_BYTES :: 1048576
+C_MAX_URL_BYTES :: 8192
+C_MAX_REDIRECTS :: 10
+C_MAX_RETRIES :: 1
 
 pub struct Client {
     pub method: String
@@ -84,7 +84,7 @@ pub fn with_proxy(client: Client, proxy: Proxy) -> Client {
 pub fn timeout_redirects(client: Client, n: Int) -> Client {
     limit := n
     if limit < 0 -> limit = 0
-    if limit > c_max_redirects -> limit = c_max_redirects
+    if limit > C_MAX_REDIRECTS -> limit = C_MAX_REDIRECTS
     Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: limit, proxy: ~client.proxy}
 }
 
@@ -94,7 +94,7 @@ pub fn session() -> Session {
         cookies: [String]{},
         timeout_ms: 30000,
         retries: 0,
-        redirects: c_max_redirects,
+        redirects: C_MAX_REDIRECTS,
         user: "",
         password: "",
         proxy: "",
@@ -123,14 +123,14 @@ pub fn session_timeout(s: Session, ms: Int) -> Session {
 pub fn session_retries(s: Session, n: Int) -> Session {
     r := n
     if r < 0 -> r = 0
-    if r > c_max_retries -> r = c_max_retries
+    if r > C_MAX_RETRIES -> r = C_MAX_RETRIES
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
 pub fn session_redirects(s: Session, n: Int) -> Session {
     r := n
     if r < 0 -> r = 0
-    if r > c_max_redirects -> r = c_max_redirects
+    if r > C_MAX_REDIRECTS -> r = C_MAX_REDIRECTS
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
@@ -178,7 +178,7 @@ pub fn cookie_header(cookies: [String]) -> String {
 pub fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_method(method) -> return Err(.InvalidMethod)
     if !valid_url(url) -> return Err(.InvalidUrl)
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     if s.proxy.bytes().len() > 0 && !valid_url(s.proxy) -> return Err(.Proxy{stage: "invalid proxy"})
     h := session_headers(s)
     resp :: request_with_retries(s, method, url, body, h)
@@ -244,11 +244,11 @@ fn retryable_error(error: HTTPError) -> Bool {
 pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
     if policy == {
         RedirectPolicy.Disabled -> return 0
-        RedirectPolicy.All -> return c_max_redirects
+        RedirectPolicy.All -> return C_MAX_REDIRECTS
         else -> { _ := 0 }
     }
     if fallback < 0 -> return 0
-    if fallback > c_max_redirects -> return c_max_redirects
+    if fallback > C_MAX_REDIRECTS -> return C_MAX_REDIRECTS
     fallback
 }
 pub fn session_get(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "GET", url, "") }
@@ -279,7 +279,7 @@ fn request_once(s: Session, method: String, url: String, body: String, headers: 
         value :: header_value(line) ?? return Err(.InvalidHeader)
         req = req.header(name, value)
     }
-    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     if body.bytes().len() > 0 -> req = req.body(body)
     req.send()
 }
@@ -491,7 +491,7 @@ fn has_ctl(raw: [U8]) -> Bool {
 
 fn valid_url(url: String) -> Bool {
     raw :: url.bytes()
-    if raw.len() < 8 || raw.len() > c_max_url_bytes || has_url_ctl(raw) -> return false
+    if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
     if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 -> return false

@@ -1338,24 +1338,43 @@ fn jet_mime_extension(mime: &String) -> Option<String> {
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
 #[inline(always)]
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
-    jet_std::JetDecimal::from_str(s)
-        .unwrap_or_else(|_| jet_panic("", 0, "invalid Decimal string"))
+    crate::jet_precise_numeric::decimal_from_str(s)
+        .map(crate::jet_std::jet_std_decimal_from_exact)
+        .unwrap_or_else(|_| {
+            jet_panic(
+                "",
+                0,
+                crate::jet_precise_numeric::failure_message("Decimal", "from_str"),
+            )
+        })
 }
 
 impl __jet_Comparable for jet_std::JetDecimal {
     #[inline(always)]
     fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        jet_time_ordering(self.cmp(rhs))
+        jet_time_ordering(crate::jet_precise_numeric::decimal_compare(
+            &crate::jet_std::jet_std_decimal_to_exact(self),
+            &crate::jet_std::jet_std_decimal_to_exact(rhs),
+        ))
     }
 }
+
 // D-NUMTYPE1=A: exact ratios. Every answer is optional, because a zero bottom
 // has no value and a product can leave the range.
 fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFraction> {
-    jet_std::JetFraction::new(numerator, denominator)
+    crate::jet_precise_numeric::fraction_new(
+        crate::jet_std::jet_std_raw_to_exact(numerator),
+        crate::jet_std::jet_std_raw_to_exact(denominator),
+    )
+    .map(crate::jet_std::jet_std_fraction_from_exact)
 }
 fn jet_fraction_from_parts(numerator: i64, denominator: i64) -> jet_std::JetFraction {
-    jet_std::JetFraction::new(numerator, denominator)
-        .unwrap_or_else(|| jet_panic("", 0, "invalid exact quotient"))
+    jet_fraction_new(numerator, denominator).unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "from_parts")
+        )
+    })
 }
 fn jet_fraction_from_owned_parts(
     numerator: &jet_foundation::Numeric::JetInt,
@@ -1364,109 +1383,274 @@ fn jet_fraction_from_owned_parts(
     jet_fraction_from_parts(numerator.to_raw(), denominator.to_raw())
 }
 fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
-    a.add(b).expect("this sum of ratios overflows the value type")
+    let value = crate::jet_precise_numeric::fraction_add(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+        &crate::jet_std::jet_std_fraction_to_exact(b),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "add")
+        )
+    });
+    crate::jet_std::jet_std_fraction_from_exact(value)
 }
 fn jet_fraction_sub(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
-    a.sub(b).expect("this difference of ratios overflows the value type")
+    let value = crate::jet_precise_numeric::fraction_sub(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+        &crate::jet_std::jet_std_fraction_to_exact(b),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "sub")
+        )
+    });
+    crate::jet_std::jet_std_fraction_from_exact(value)
 }
 fn jet_fraction_mul(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
-    a.mul(b).expect("this product of ratios overflows the value type")
+    let value = crate::jet_precise_numeric::fraction_mul(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+        &crate::jet_std::jet_std_fraction_to_exact(b),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "mul")
+        )
+    });
+    crate::jet_std::jet_std_fraction_from_exact(value)
 }
 fn jet_fraction_div(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
-    a.div(b).expect("divided by zero")
+    let value = crate::jet_precise_numeric::fraction_div(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+        &crate::jet_std::jet_std_fraction_to_exact(b),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "div")
+        )
+    });
+    crate::jet_std::jet_std_fraction_from_exact(value)
 }
 fn jet_fraction_from_int(value: i64) -> jet_std::JetFraction {
-    jet_std::JetFraction::from_int(value).expect("exact Int does not fit Fraction")
+    crate::jet_precise_numeric::fraction_from_int(crate::jet_std::jet_std_raw_to_exact(value))
+        .map(crate::jet_std::jet_std_fraction_from_exact)
+        .unwrap_or_else(|| {
+            panic!(
+                "{}",
+                crate::jet_precise_numeric::failure_message("Fraction", "from_int")
+            )
+        })
 }
 fn jet_fraction_from_float(value: f64) -> jet_std::JetFraction {
-    jet_std::JetFraction::from_float(value).expect("Float has no word-sized exact Fraction")
+    crate::jet_precise_numeric::fraction_from_float(value)
+        .map(crate::jet_std::jet_std_fraction_from_exact)
+        .unwrap_or_else(|| {
+            panic!(
+                "{}",
+                crate::jet_precise_numeric::failure_message("Fraction", "from_float")
+            )
+        })
 }
 fn jet_fraction_from_decimal(value: jet_std::JetDecimal) -> jet_std::JetFraction {
-    jet_std::JetFraction::from_decimal(&value).expect("Decimal does not fit Fraction")
+    crate::jet_precise_numeric::fraction_from_decimal(
+        &crate::jet_std::jet_std_decimal_to_exact(&value),
+    )
+    .map(crate::jet_std::jet_std_fraction_from_exact)
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "from_decimal")
+        )
+    })
 }
 fn jet_fraction_equal(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> bool {
-    a == b
+    crate::jet_precise_numeric::fraction_equal(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+        &crate::jet_std::jet_std_fraction_to_exact(b),
+    )
 }
 fn jet_fraction_numerator(a: &jet_std::JetFraction) -> i64 {
-    a.numerator_value()
+    crate::jet_std::jet_std_exact_to_raw(crate::jet_precise_numeric::fraction_numerator(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    ))
 }
 fn jet_fraction_denominator(a: &jet_std::JetFraction) -> i64 {
-    a.denominator_value()
+    crate::jet_std::jet_std_exact_to_raw(crate::jet_precise_numeric::fraction_denominator(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    ))
 }
 fn jet_fraction_to_string(a: &jet_std::JetFraction) -> String {
-    a.to_string_rep()
+    crate::jet_precise_numeric::fraction_to_string(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    )
 }
 fn jet_fraction_to_float(a: &jet_std::JetFraction) -> f64 {
-    a.to_float()
+    crate::jet_precise_numeric::fraction_to_float(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    )
 }
 fn jet_fraction_is_zero(a: &jet_std::JetFraction) -> bool {
-    a.is_zero()
+    crate::jet_precise_numeric::fraction_is_zero(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    )
 }
 fn jet_fraction_to_int(a: &jet_std::JetFraction) -> i64 {
-    a.to_int_exact().expect("Fraction is not an integer")
+    let value = crate::jet_precise_numeric::fraction_to_int(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "to_int")
+        )
+    });
+    crate::jet_std::jet_std_exact_to_raw(value)
 }
 fn jet_fraction_to_decimal(a: &jet_std::JetFraction) -> jet_std::JetDecimal {
-    a.to_decimal().expect("Fraction has a repeating expansion")
+    crate::jet_precise_numeric::fraction_to_decimal(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    )
+    .map(crate::jet_std::jet_std_decimal_from_exact)
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Fraction", "to_decimal")
+        )
+    })
 }
 fn jet_decimal_from_int(value: i64) -> jet_std::JetDecimal {
-    jet_std::JetDecimal::from_int(value).expect("invalid exact Int")
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_from_int(
+        crate::jet_std::jet_std_raw_to_exact(value),
+    ))
 }
 fn jet_decimal_from_float(value: f64) -> jet_std::JetDecimal {
-    jet_std::JetDecimal::from_float(value).expect("Float is not finite")
+    crate::jet_precise_numeric::decimal_from_float(value)
+        .map(crate::jet_std::jet_std_decimal_from_exact)
+        .unwrap_or_else(|| {
+            panic!(
+                "{}",
+                crate::jet_precise_numeric::failure_message("Decimal", "from_float")
+            )
+        })
 }
 fn jet_decimal_from_fraction(value: jet_std::JetFraction) -> jet_std::JetDecimal {
-    jet_std::JetDecimal::from_fraction(&value).expect("Fraction has a repeating expansion")
+    crate::jet_precise_numeric::decimal_from_fraction(
+        &crate::jet_std::jet_std_fraction_to_exact(&value),
+    )
+    .map(crate::jet_std::jet_std_decimal_from_exact)
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Decimal", "from_fraction")
+        )
+    })
 }
 fn jet_decimal_div(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetFraction {
-    a.div(b).expect("Decimal quotient does not fit Fraction, or divided by zero")
+    crate::jet_precise_numeric::decimal_div(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    )
+    .map(crate::jet_std::jet_std_fraction_from_exact)
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Decimal", "div")
+        )
+    })
 }
 fn jet_decimal_round(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.round()
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_round(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    ))
 }
 fn jet_decimal_floor(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.floor()
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_floor(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    ))
 }
 fn jet_decimal_ceil(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.ceil()
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_ceil(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    ))
 }
 fn jet_decimal_to_int(a: &jet_std::JetDecimal) -> i64 {
-    a.to_int_exact().expect("Decimal is not an integer")
+    let value = crate::jet_precise_numeric::decimal_to_int(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    )
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Decimal", "to_int")
+        )
+    });
+    crate::jet_std::jet_std_exact_to_raw(value)
 }
 fn jet_decimal_to_fraction(a: &jet_std::JetDecimal) -> jet_std::JetFraction {
-    a.to_fraction().expect("Decimal does not fit Fraction")
+    crate::jet_precise_numeric::decimal_to_fraction(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    )
+    .map(crate::jet_std::jet_std_fraction_from_exact)
+    .unwrap_or_else(|| {
+        panic!(
+            "{}",
+            crate::jet_precise_numeric::failure_message("Decimal", "to_fraction")
+        )
+    })
 }
 #[inline(always)]
 fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.add(b)
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_add(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    ))
 }
 #[inline(always)]
 fn jet_decimal_sub(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.sub(b)
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_sub(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    ))
 }
 fn jet_decimal_mul(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
-    a.mul(b)
+    crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_mul(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    ))
 }
 fn jet_decimal_equal(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> bool {
-    a == b
+    crate::jet_precise_numeric::decimal_equal(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    )
 }
 #[inline(always)]
 fn jet_decimal_compare(
     a: &jet_std::JetDecimal,
     b: &jet_std::JetDecimal,
 ) -> __jet_Ordering {
-    <jet_std::JetDecimal as __jet_Comparable>::compare(a, b)
+    jet_time_ordering(crate::jet_precise_numeric::decimal_compare(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+        &crate::jet_std::jet_std_decimal_to_exact(b),
+    ))
 }
 #[inline(always)]
 fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
-    a.to_string_rep()
+    crate::jet_precise_numeric::decimal_to_string(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    )
 }
-// D-TYPE2-DEFAULT1: the AOT half of the exact-to-approximate crossing. The
+// D-TYPE2-DEFAULT1=A: the AOT half of the exact-to-approximate crossing. The
 // checker admits an exact Decimal at the irrational-result math functions
 // exactly as it admits a Fraction, so every tier needs this conversion, not
 // only the evaluator.
 #[inline(always)]
 fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
-    a.to_float()
+    crate::jet_precise_numeric::decimal_to_float(
+        &crate::jet_std::jet_std_decimal_to_exact(a),
+    )
 }
 
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the

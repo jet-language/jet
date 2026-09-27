@@ -1,259 +1,274 @@
 # Native Jet CoreLib contract
 
-This document records the owner-confirmed contract for making Jet CoreLibs
-complete, native, comprehensive, reliable, and competitive with first-class
-standard libraries. It defines durable architecture and completion law. Tower
-owns execution order, current status, blockers, and evidence logs.
+This specification is for Core maintainers, provider authors, and reviewers. It
+defines where Core owns semantics, where a host may provide a typed leaf, how
+capabilities and effects are exposed, and what evidence makes an export
+complete. The declaration registry is
+[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet); Jet source bodies
+are under [`Core/`](../../Core/). Generated call and module views are derived
+from those inputs by the [Core table generator](../../scripts/agent/gen-core-tables.mjs).
+The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
+identity rows; runnable provider examples live under
+[`examples/features/`](../../examples/features/).
 
-## Goal
+The Rust-hosted compiler under `Source/` and `crates/` remains the production
+and reference compiler. The default CLI continues to use that reference path.
+The staged Jet-authored compiler under `Compiler/` may implement the same
+contracts in bootstrap scopes, but this document does not claim that Jet is
+self-hosted. Rust emission, rustc/LLVM, and Cranelift remain supported target
+and execution seams. No Core contract is defined as permanently owned by a
+particular compiler implementation.
 
-Jet CoreLibs are Jet modules that own public behavior. They must be useful for
-real programs, safe by default, explicit about effects and capabilities, and
-complete enough to compete with the strongest relevant parts of C, Rust,
-Python, Bash, and other peer ecosystems.
+## Purpose and scope
 
-There are no transitional placeholders. No exported operation may silently
-return an empty value, false success, discarded data, fake deterministic
-entropy, or an unimplemented fallback.
+Core modules own public behavior. A Core API must be useful for real programs,
+safe by default, explicit about effects and authority, and complete enough to
+serve its intended domain. The contract applies to every module row, exported
+function, exported type, root type, format row, namespace-only row, and
+explicit dispatcher row declared in `Core.jet`.
 
-## Priorities
+Each declaration has a meaningful role. A metadata-only declaration identifies a
+compiler or runtime fact and has a generated consistency check; it cannot hide
+missing callable behavior. An exported operation must not silently return an
+empty value, report false success, discard data, manufacture deterministic
+entropy in place of required entropy, or use an unimplemented fallback.
 
-1. Correctness.
-2. Performance.
-3. Friction proportional to real usage frequency.
-4. Beginner-friendly defaults with explicit expert control.
+Core expands through a dependency graph and a usage mission, not a blind union
+of peer libraries. High-value capabilities follow the graph and the real jobs
+that need them. A scope may state explicit non-goals, but a declared export
+still needs a contract, an error meaning, and evidence appropriate to its role.
 
-Correctness closes before comparative optimization. A performance result never
-justifies changed semantics, weaker diagnostics, weaker safety, or tier drift.
+## Source authority and generated projections
 
-## Scope
-
-Horizon 1 covers every declaration currently present in `Core.jet`:
-
-- all current module rows;
-- all root types;
-- all format declarations;
-- all namespace-only declarations.
-
-Each declaration needs a meaningful contract. Metadata declarations must have a
-clear compiler or runtime role and a generated consistency proof. They cannot
-hide missing callable behavior.
-
-Horizon 1 exits only when every declaration has a real implementation and
-scaled complete evidence, with no known gap left unresolved. Horizon 2 then
-expands the surface using a mission and usage matrix. It adds high-value
-missing capabilities across real Jet jobs and domains instead of attempting a
-blind union of every peer library.
-
-## Source authority
-
-Jet module source is authoritative for Core exports and behavior. `Core.jet`
-retains bootstrap, dependency, format, capability, and explicit native-dispatch
-metadata. Generated registries and tier views derive from those declarations.
+`Core.jet` is the authority for Core's bootstrap dependencies, module rows,
+exports, root types, namespace-only declarations, format rows, and explicit
+native-dispatch metadata. A `source_module` row names the canonical Jet source
+path and the members that it owns. The corresponding `Core/**/*.jet` file owns
+public algorithms, validation, defaults, policy, effects, authority, typed
+errors, and composition.
 
 The generator must verify that:
 
-- every declared export has one canonical Jet source;
-- generated views match the declaration source;
-- obsolete exports, aliases, shims, and duplicate mechanisms are absent;
-- capability, effect, authority, and fallback metadata remain consistent.
+- every declared export has one canonical Jet source or an explicit registered
+  provider/leaf role;
+- generated module and call views agree with the declaration source;
+- duplicate mechanisms, unapproved aliases, shims, and obsolete projections do
+  not create a second public identity;
+- effect, authority, capability, fallback, signature, and tier metadata remain
+  consistent.
 
-Generated Rust is a projection, not a second API catalog. Generated files are
-never hand-edited.
- 
-## Source links
+The generated Rust tables are projections, not a second API catalog. Never
+hand-edit them. The main generated views are
+[`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
+[`core_calls.rs`](../../crates/jet-foundation/src/Syntax/core_calls.rs), and the
+corresponding generated projections in the Prelude. Rust implementation files
+such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
+[`PortableCore.rs`](../../crates/jet-codegen/src/Prelude/PortableCore.rs), and
+[`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
+leaves and adapters; they do not become an independent public API registry.
 
-- [Jet Core modules](../../Core/) own public exports and semantic bodies.
-- [`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet) owns bootstrap,
-  dependency, format, capability, and explicit dispatch metadata.
-- [Core table generator](../../scripts/agent/gen-core-tables.mjs) writes the
-  generated projections.
-- [Generated Core call projections](../../crates/jet-foundation/src/Syntax/core_calls.rs)
-  and [module exports](../../crates/jet-foundation/src/CoreModuleExports.rs)
-  are derived artifacts, never independent sources.
+## Jet semantics and native leaves
 
-## Jet and Rust boundary
-
-Jet owns:
+Jet owns the parts that give an operation its meaning:
 
 - algorithms and composition;
-- parsing and validation;
-- defaults and policy;
-- authority and effects;
+- parsing, validation, bounds, and normalization;
+- safe defaults and user-facing policy;
+- effects and authority requirements;
 - typed error meaning and diagnostics;
 - data transformation and public API behavior.
 
-Rust may provide only typed, policy-free leaf primitives. A leaf has a narrow
-ABI, no user-facing policy or default selection, no multi-step application
-semantics, and no backend-specific interpretation of Jet errors. Examples
-include OS access, unsafe platform operations, vetted cryptographic primitives,
-and hardware interfaces.
+A native provider may supply a typed, policy-free leaf. Such a leaf has a narrow
+ABI, no user-facing default selection, no multi-step application semantics, and
+no backend-specific interpretation of a Jet error. It may expose an operating
+system service, an unsafe platform operation, a vetted cryptographic primitive,
+a database or network transport, a font shaper, or a hardware interface.
 
-High-level Rust implementations are removed after the shared proof and route
-audit for their wave. They are not retained as runtime fallbacks.
+The surrounding Jet function remains the semantic boundary. For example,
+`core.files` keeps path composition, walking, limits, and error mapping in Jet
+while its typed provider performs the OS file operation. `core.http` keeps
+method, header, framing, limits, and deterministic convenience behavior in Jet
+while the host supplies a typed transport leaf. `core.crypto` keeps typed
+values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
+algorithm controls in `core.crypto.expert` remain an explicit audited door, not
+a hidden provider policy.
 
-## One meaning across tiers
+A high-level native implementation must not be retained as an invisible runtime
+fallback for a Jet implementation. If an API changes identity or semantics,
+make the change at the contract boundary and migrate its users in one cutover.
 
-AOT, JIT, interpreter/comptime, and web are points on one continuum:
+## One meaning across execution tiers
 
-- interpreter: fastest preparation, slowest execution;
-- JIT: middle preparation and execution cost;
-- AOT: slowest preparation, fastest execution;
-- web: the same semantic contract through its provider boundary.
+AOT, resident JIT, interpreter/comptime evaluation, and web execution are
+points on one semantic continuum. Preparation and runtime cost may differ, but
+the following observable contract does not:
 
-Only preparation and runtime cost may differ. Validation, defaults, policy,
-effects, authority, errors, limits, cancellation, and observable values must
-not differ.
+- validation and bounds;
+- defaults and policy;
+- effects and authority;
+- typed errors and diagnostics;
+- resource limits and cancellation;
+- deterministic behavior and observable values.
 
-Every applicable tier uses one semantic Core path and one shared provider
-contract. Tier adapters provide representation and execution mechanics; they do
-not reimplement Core policy.
+Every applicable tier consumes one semantic Core call record and one provider
+contract. The tier adapter supplies representation and execution mechanics; it
+does not reimplement Core policy. The shared call record names the signature,
+fallibility, effect, capability, provider route, pure/interpreter route, and
+AOT/JIT adapter facts so that a tier cannot quietly invent a second meaning.
 
-## Capabilities and fallbacks
+A portable fallback is valid only when it preserves the same contract. A web or
+test provider is explicit when it changes the host resource, and its typed
+availability or policy error remains visible to the caller. Cross-tier evidence
+compares semantic values and typed errors, not merely whether each adapter
+returned.
 
-Every host-sensitive operation declares one capability kind:
+## Provider classification and policy
 
-- `Pure`: universally executable without ambient resources.
-- `NativeRequired`: needs a real host or security capability; no fallback is
-  semantically valid.
-- `PortableFallback`: has a canonical Jet fallback plus optional native
-  acceleration.
-- `ExplicitSimulation`: has a named virtual or test provider selected
-  explicitly by the caller or tool.
+The canonical call record classifies each host-sensitive operation with one
+capability kind:
 
-Capability policy is generated metadata. It records the required effect and
-authority, fallback identity where applicable, and canonical failure.
+| Kind | Contract |
+| --- | --- |
+| `Pure` | The operation needs no ambient provider, fallback, or capability failure. |
+| `NativeRequired` | A named provider is required; no semantic fallback is valid, and absence has a typed failure. |
+| `PortableFallback` | A named provider has a canonical portable implementation and an optional native acceleration; the failure identity is shared. |
+| `ExplicitSimulation` | A named virtual or test provider is selected explicitly; it is not an ambient production substitution. |
 
-Safe defaults and `auto` may select a semantics-preserving portable fallback.
-An explicit backend request never silently downgrades. A missing capability
-returns the same typed, deterministic capability error on every tier.
+The `CoreCapabilityContract` records the provider, fallback identity when one
+exists, and typed failure identity. `Effect` and its precise effect leaf remain
+the authority for effect checking; capability metadata does not create a second
+effect vocabulary or permission system.
 
-Examples:
+Safe defaults and an `auto` selector may choose a semantics-preserving portable
+fallback. An explicit provider request never silently downgrades. When a
+required capability is missing, every tier returns the same typed,
+deterministic capability error.
 
-- automatic compute may use CPU when no GPU exists;
-- explicit CUDA selection returns `DeviceUnavailable` instead of using CPU;
-- a web filesystem needs a real virtual or host capability, otherwise it
-  returns `FSUnavailable`;
-- OS entropy is native-required and never falls back to deterministic bytes;
-- a portable regex implementation may be accelerated by a native backend;
-- virtual filesystems, fake clocks, in-memory databases, and test networks are
-  explicit named providers, not hidden production substitutions.
+Examples establish the intended distinction:
 
-Effects and authority remain the canonical user-visible access boundary.
-Capability objects exist for explicit expert control and provider machinery,
-not as a second permission system.
+- `core.compute` uses its checked CPU oracle for `auto`; an explicit CUDA,
+  Metal, Vulkan, or WebGPU request reports a typed device or unsupported error
+  rather than silently using the CPU.
+- `core.font.shape` requests the font-shaping provider, while
+  `core.font.shape_with` is an explicit deterministic approximate fallback.
+- `core.crypto.random` uses the operating-system CSPRNG. A missing or rejected
+  provider returns `CryptoError.Unavailable`; it never falls back to a weak or
+  deterministic generator.
+- Virtual filesystems, fake clocks, in-memory databases, and test networks are
+  named providers selected by the caller or test tool, not hidden production
+  substitutions.
 
-## API design
+Effects and authority are the user-visible access boundary. Provider objects
+and capability metadata exist for explicit expert control and provider
+machinery, not as a second permission system.
 
-The first pass preserves valid semantics and coherent identity closely enough
-for direct comparison. It does not preserve poor or misleading API shape.
+## API identity and migration
 
-An incoherent export is replaced at the contract boundary. Every caller,
-example, test, registry, generated use, document, and environment variable is
-migrated in one clean cutover. Runtime compatibility wrappers, aliases,
-parallel parsers, and fallback paths are deleted.
+A first comparison pass preserves valid semantics and a coherent identity closely
+enough for direct semantic comparison. It does not preserve a misleading API
+shape merely because another language has one.
 
-The second pass may change any contract when the new Jet design has proof. It
-may improve names, types, defaults, diagnostics, algorithms, allocation, and
-performance. Public changes that are material owner decisions are gated before
-implementation.
+When an export is incoherent, replace it at the contract boundary. Migrate every
+caller, example, test, registry row, generated consumer, document, and affected
+environment variable in one clean cutover. Delete runtime compatibility
+wrappers, aliases, parallel parsers, duplicate implementations, and hidden
+fallback paths.
 
-Peer languages provide semantic and edge-case evidence. Jet uses its own types,
-effects, authority, diagnostics, and ergonomic surface. Common operations have
-low-friction safe defaults. Expert control is explicit rather than hidden.
+A later design pass may improve names, types, defaults, diagnostics, algorithms,
+allocation, or performance when the new Jet contract has proof. Material public
+choices are owner-gated before implementation. Peer languages supply semantic
+and edge-case evidence; Jet still uses its own types, effects, authority,
+diagnostics, and ergonomic surface. Common operations have low-friction safe
+defaults, while expert control is explicit rather than hidden.
 
-## Capability and API evidence
+## Contract and evidence
 
-Every module or coherent module cluster receives a contract card before code.
-The card freezes:
+Before code, give every module or coherent module cluster a contract record that
+freezes:
 
-- API and types;
-- semantics and edge cases;
+- public API and types;
+- semantics, bounds, and edge cases;
 - effects and authority;
 - capability kind and fallback policy;
 - error and diagnostic codes;
-- peer references;
-- valid baseline receipts;
+- peer references and valid baseline receipts;
 - examples and goldens;
 - hostile and failure cases;
-- tier matrix;
+- the applicable tier matrix;
 - frequency and hot-path cells;
 - explicit non-goals.
 
-Every export receives scaled but complete evidence for normal behavior,
-boundaries, hostile inputs, typed errors, diagnostics, authority/effects,
-resource limits, determinism, concurrency or reentrancy where relevant, and
-cross-tier parity.
+Every export receives evidence scaled to its role but complete for its declared
+surface. Cover normal behavior, boundaries, hostile inputs, typed errors,
+diagnostics, authority and effects, resource limits, determinism, concurrency or
+reentrancy where relevant, and cross-tier parity.
 
-First-pass comparison uses semantic fixtures. Coherent surfaces may compare
-directly with valid Rust behavior. Redesigned surfaces map valid Rust inputs to
-the new Jet contract and compare semantic values and errors. No runtime
-compatibility layer is kept for this purpose.
+Use semantic fixtures for first-pass comparison. A coherent surface may compare
+directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
+to the new Jet contract and compares semantic values and errors. Do not keep a
+runtime compatibility layer merely to make that comparison.
 
-## Implementation waves
+## Dependency order
 
-Waves are dependency-ordered and cannot hand off partially.
+Core work follows the dependency graph. These categories describe dependency
+order, not a progress ledger:
 
 1. **Foundations:** root carriers, text, collections, math, units, time,
-   encoding, regex, args, files/path contracts, memory/IO foundations, and
-   portable crypto primitives.
-2. **System:** archives, networking, process, tasks, events, watchers,
-   terminal, logging, email, and database.
+   encoding, regex, args, files and path contracts, memory and I/O foundations,
+   and portable cryptographic primitives.
+2. **System:** archives, networking, process, tasks, events, watchers, terminal,
+   logging, email, and database.
 3. **Data and web:** data loaders and transformations, HTTP, web/router/forms,
-   reactive, sync, services/jobs, storage, and browser.
+   reactive, synchronization, services/jobs, storage, and browser.
 4. **Specialized:** compute/models, UI/TUI/font, games/raylib, plugin/mod,
    compiler/reflect, testing, and remaining host domains.
 
-The exact member order is derived from the Core dependency graph. High-use
-foundations lead within that graph.
+Within a category, high-use foundations lead according to the dependency graph.
+For each coherent area:
 
-For each wave:
-
-1. write and owner-gate material contract choices;
+1. owner-gate material contract choices;
 2. freeze valid baseline behavior;
-3. implement Jet semantics in the self-hosting safe subset;
-4. implement the shared provider and approved leaf seams;
-5. prove every applicable tier and failure surface;
+3. implement Jet semantics in the approved portable Jet subset;
+4. implement the shared provider and approved typed leaf seams;
+5. prove each applicable tier and failure surface;
 6. migrate all callers and generated consumers;
-7. remove obsolete high-level Rust and placeholders;
+7. remove obsolete high-level implementations and placeholders;
 8. close correctness and record a performance baseline;
 9. optimize only after correctness closure;
 10. rerun parity and strict performance cells.
 
 ## Performance and learnability
 
-The eventual performance gate is strict per matched workload and metric. No
-aggregate score may hide a loss. Hot paths and representative workloads carry
-peer cells for latency, throughput, allocation, copying, startup, compilation,
-and artifact size where applicable. No performance claim extends beyond its
-measured coverage.
+The performance gate is strict per matched workload and metric. No aggregate
+score hides a loss. Hot paths and representative workloads carry peer cells for
+latency, throughput, allocation, copying, startup, compilation, and artifact
+size where applicable. No performance claim extends beyond measured coverage.
 
-Performance-motivated surfaces have paired plain and optimized programs. Safe
-Jet code is optimized first. Audited native or unsafe leaves are explicit
-expert paths and preserve the same contract.
+A performance-motivated surface has paired plain and optimized programs. Optimize
+safe Jet code first. Audited native or unsafe leaves are explicit expert paths
+and preserve the same contract.
 
-A layered, frequency-weighted corpus combines current examples and
-conformance, repository usage, representative beginner tasks, and domain
-workloads. High-frequency APIs receive paired beginner/expert evidence for
-source size, diagnostics and recovery, preparation cost, and runtime cost.
+Use a layered, frequency-weighted corpus of examples, conformance cases,
+repository usage, representative beginner tasks, and domain workloads.
+High-frequency APIs receive paired beginner and expert evidence for source size,
+diagnostics and recovery, preparation cost, and runtime cost.
 
-## Completion law
+## Completion criteria
 
 A CoreLib area is complete only when:
 
 - Jet owns its public behavior;
-- all declarations have meaningful contracts;
+- every declaration has a meaningful contract;
 - every applicable tier shares one observable meaning;
 - capability policy is explicit;
 - errors, effects, authority, limits, and hostile cases are proven;
 - examples, goldens, and generated views are current;
-- all callers and obsolete implementations are migrated or removed;
+- callers and obsolete implementations are migrated or removed;
 - correctness evidence is integrated;
 - a performance baseline exists;
 - no known gap remains in the declared scope.
 
-World-class status additionally requires the strict performance and
-frequency-weighted learnability evidence defined above.
-
-Execution status, active cards, blockers, evidence logs, and wave progress live
-in Tower, not in this document.
+A stronger comparative claim additionally requires the strict performance and
+frequency-weighted learnability evidence above. Execution order, active work
+records, blockers, and evidence logs belong in Tower rather than in this
+specification.

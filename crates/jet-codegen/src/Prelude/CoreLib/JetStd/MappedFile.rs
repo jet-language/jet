@@ -6,20 +6,6 @@
 // provenance remain compiler-owned.
 //
 
-static JET_MAPPED_PATHS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
-
-fn jet_mapped_paths() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, usize>> {
-    &JET_MAPPED_PATHS
-}
-
-fn jet_mapped_path_key(path: &str) -> String {
-    std::fs::canonicalize(path)
-        .unwrap_or_else(|_| std::path::PathBuf::from(path))
-        .to_string_lossy()
-        .into_owned()
-}
 
 fn jet_mapped_source_identity(key: &str) -> String {
     let digest = super::jet_sha256_raw(key.as_bytes());
@@ -31,33 +17,6 @@ fn jet_mapped_source_identity(key: &str) -> String {
     identity
 }
 
-fn jet_mapped_register(key: &str) {
-    let mut paths = jet_mapped_paths()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *paths.entry(key.to_owned()).or_insert(0) += 1;
-}
-
-fn jet_mapped_unregister(key: &str) {
-    let mut paths = jet_mapped_paths()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match paths.get_mut(key) {
-        Some(count) if *count > 1 => *count -= 1,
-        Some(_) => {
-            paths.remove(key);
-        }
-        None => {}
-    }
-}
-
-fn jet_mapped_path_is_live(path: &str) -> bool {
-    let key = jet_mapped_path_key(path);
-    let paths = jet_mapped_paths()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    paths.get(&key).copied().unwrap_or(0) != 0
-}
 
 
 // JET_VETTED_UNSAFE_BEGIN: jet_mapped_file
@@ -264,10 +223,10 @@ impl JetMappedStorage {
             #[cfg(unix)]
             jet_mapped_os::shared_lock(&file)?;
 
-            let key = jet_mapped_path_key(path);
+            let key = super::jet_mapped_path_key(path);
             let source_identity = jet_mapped_source_identity(&key);
             if length == 0 {
-                jet_mapped_register(&key);
+                super::jet_mapped_register(&key);
                 return Ok(Self {
                     path: path.to_string(),
                     key,
@@ -291,7 +250,7 @@ impl JetMappedStorage {
             #[cfg(windows)]
             let (pointer, mapping) = jet_mapped_os::map(&file, length)?;
 
-            jet_mapped_register(&key);
+            super::jet_mapped_register(&key);
             Ok(Self {
                 path: path.to_string(),
                 key,
@@ -354,7 +313,7 @@ impl Drop for JetMappedStorage {
         }
         // Keep the registry lease until after unmapping/unlocking, so a writer
         // can never observe the path as free while bytes are still borrowed.
-        jet_mapped_unregister(&self.key);
+        super::jet_mapped_unregister(&self.key);
     }
 }
 
@@ -694,11 +653,11 @@ pub(crate) fn jet_std_files_map_lines_view(map: &JetMappedFile) -> JetMappedLine
 /// denies write/delete sharing on the mapped handle. Foreign Unix writers must
 /// cooperate with that advisory lock.
 pub(crate) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
-    jet_mapped_path_is_live(path).then(|| {
+    super::jet_mapped_writer_refusal(path).map(|refusal| {
         IOError::other(
             IOOperation::Write,
-            Some(path.clone()),
-            "file is mapped read-only",
+            Some(refusal.path),
+            refusal.reason,
         )
     })
 }

@@ -119,7 +119,7 @@ pub const MARKER_TRACK: &str = "Track";
 
 /// S57 (ratified, as amended by D-META-STAGE1=B and D-ONCE-AT1=D): compile-time
 /// demand. The mark belongs to the name, so it is written at every mention —
-/// `@limit :: 1000` then `print("{@limit}")`. A bare mark opens a compile-time
+/// `@LIMIT :: 1000` then `print("{@LIMIT}")`. A bare mark opens a compile-time
 /// block (`@ { … }`) and precedes the `if` and `loop` verbs at compile time
 /// (`@if`, `@loop`). Ordinary foldable expressions need no mark. The retired
 /// `#Known` spellings teach E0377.

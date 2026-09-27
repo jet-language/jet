@@ -780,6 +780,7 @@ authority: {
             project_dir: Some(&dir),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let authority = Authority::load(
             &ctx,
@@ -956,6 +957,7 @@ authority: {
             project_dir: Some(&dir),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let error = Authority::load(&ctx, "ruby", "https://8.8.8.8", &["8.8.8.8"])
             .expect_err("configured provider credentials must be rejected before curl lookup");

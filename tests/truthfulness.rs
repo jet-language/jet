@@ -298,44 +298,20 @@ fn docs_referenced_examples_exist() {
 
 
 fn extract_example_paths(text: &str) -> Vec<String> {
+    let prefix = "examples/features/";
     let mut out = Vec::new();
-    let prefixes = ["examples/features/", "examples/canon.jet"];
-    for prefix in prefixes {
-        if prefix.ends_with(".jet") {
-            if text.contains(prefix) {
-                out.push(prefix.to_string());
-            }
-            continue;
-        }
-        let mut rest = text;
-        while let Some(pos) = rest.find(prefix) {
-            rest = &rest[pos + prefix.len()..];
-            let end = rest
-                .find(|c: char| {
-                    !c.is_alphanumeric() && c != '_' && c != '.' && c != '-' && c != '/'
-                })
-                .unwrap_or(rest.len());
-            let tail = &rest[..end];
-            if tail.ends_with(".jet") {
-                out.push(format!("{}{}", prefix, tail));
-            }
+    let mut rest = text;
+    while let Some(pos) = rest.find(prefix) {
+        rest = &rest[pos + prefix.len()..];
+        let end = rest
+            .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.' && c != '-' && c != '/')
+            .unwrap_or(rest.len());
+        let tail = &rest[..end];
+        if tail.ends_with(".jet") {
+            out.push(format!("{}{}", prefix, tail));
         }
     }
     out
-}
-
-// ---------------------------------------------------------------------------
-// Check 2: canon.jet exists and compiles
-// ---------------------------------------------------------------------------
-#[test]
-fn canon_jet_exists() {
-    let canon = root().join("examples/canon.jet");
-    assert!(canon.is_file(), "examples/canon.jet must exist");
-    let src = fs::read_to_string(&canon).unwrap();
-    assert!(
-        jet::compile_with_path(&src, "examples/canon.jet").is_ok(),
-        "examples/canon.jet must pass the front end"
-    );
 }
 
 

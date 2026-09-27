@@ -47,7 +47,7 @@ struct Factorization {
 }
 
 
-c_max_elements :: 16777216
+C_MAX_ELEMENTS :: 16777216
 
 fn validate_matrix(tensor: Tensor) !ComputeError {
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
@@ -94,12 +94,12 @@ fn checked_numel(shape: [Int]) -> Int !ComputeError {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
     n := 1
     loop dim in shape {
-        if dim < 0 || dim > c_max_elements -> return Err(ComputeError.Shape)
+        if dim < 0 || dim > C_MAX_ELEMENTS -> return Err(ComputeError.Shape)
         if dim == 0 {
             n = 0
             next
         }
-        if n > c_max_elements /% dim -> return Err(ComputeError.Shape)
+        if n > C_MAX_ELEMENTS /% dim -> return Err(ComputeError.Shape)
         n = n * dim
     }
     Ok(n)

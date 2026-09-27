@@ -89,7 +89,9 @@ pub struct NixClosureRecord {
     pub channel: String,
     pub revision: String,
     pub system: String,
-    pub signed_index_manifest: String,
+    /// Signed manifest digest for official catalogs; canonical index digest for
+    /// explicit local catalogs. Signing is determined by the envelope's tier/trust.
+    pub index_authority: String,
     pub derivation: String,
     pub output: String,
     pub nar_hash: String,
@@ -110,7 +112,7 @@ impl NixClosureRecord {
             ("channel", self.channel.as_str()),
             ("revision", self.revision.as_str()),
             ("system", self.system.as_str()),
-            ("signed-index-manifest", self.signed_index_manifest.as_str()),
+            ("index-authority", self.index_authority.as_str()),
             ("derivation", self.derivation.as_str()),
             ("output", self.output.as_str()),
             ("nar-hash", self.nar_hash.as_str()),
@@ -149,9 +151,9 @@ impl NixClosureRecord {
         ) {
             return Err("Nix closure record has an unsupported system".into());
         }
-        if !is_lower_hex(&self.signed_index_manifest, 64) {
+        if !is_lower_hex(&self.index_authority, 64) {
             return Err(
-                "Nix closure record signed index manifest must be a 64-character lowercase SHA-256"
+                "Nix closure record index authority must be a 64-character lowercase SHA-256"
                     .into(),
             );
         }
@@ -464,6 +466,17 @@ pub struct LockEnvelope {
     /// Nix package catalog provenance. Empty for non-Nix envelopes.
     pub catalog_tier: String,
     pub catalog_trust: String,
+}
+
+impl LockEnvelope {
+    /// An authority digest identifies bytes; only this explicit provenance pair
+    /// distinguishes a verified signed manifest from an unsigned local index.
+    pub fn validate_nix_catalog(&self) -> Result<(), String> {
+        match (self.catalog_tier.as_str(), self.catalog_trust.as_str()) {
+            ("official-signed", "verified") | ("local-unofficial", "unverified") => Ok(()),
+            _ => Err("Nix lock requires a recognized, consistent catalog tier and trust".into()),
+        }
+    }
 }
 
 /// D-JPK-TOOLCHAIN1=A (A4): a pinned toolchain is an ordinary hangar object,
@@ -1795,8 +1808,8 @@ fn write_nix_closure(out: &mut String, closure: &NixClosureRecord) {
         escape_str(&closure.system)
     ));
     out.push_str(&format!(
-        "nix-signed-index-manifest = \"{}\"\n",
-        escape_str(&closure.signed_index_manifest)
+        "nix-index-authority = \"{}\"\n",
+        escape_str(&closure.index_authority)
     ));
     out.push_str(&format!(
         "nix-derivation = \"{}\"\n",
@@ -2210,8 +2223,8 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "nix-channel" => pkg.nix_closure_mut().channel = Some(unescape_str(val)),
                 "nix-revision" => pkg.nix_closure_mut().revision = Some(unescape_str(val)),
                 "nix-system" => pkg.nix_closure_mut().system = Some(unescape_str(val)),
-                "nix-signed-index-manifest" => {
-                    pkg.nix_closure_mut().signed_index_manifest = Some(unescape_str(val))
+                "nix-index-authority" => {
+                    pkg.nix_closure_mut().index_authority = Some(unescape_str(val))
                 }
                 "nix-derivation" => pkg.nix_closure_mut().derivation = Some(unescape_str(val)),
                 "nix-output" => pkg.nix_closure_mut().output = Some(unescape_str(val)),
@@ -2812,7 +2825,7 @@ struct PartialNixClosure {
     channel: Option<String>,
     revision: Option<String>,
     system: Option<String>,
-    signed_index_manifest: Option<String>,
+    index_authority: Option<String>,
     derivation: Option<String>,
     output: Option<String>,
     nar_hash: Option<String>,
@@ -2830,9 +2843,9 @@ impl PartialNixClosure {
             channel: self.channel.ok_or("Nix closure is missing `channel`")?,
             revision: self.revision.ok_or("Nix closure is missing `revision`")?,
             system: self.system.ok_or("Nix closure is missing `system`")?,
-            signed_index_manifest: self
-                .signed_index_manifest
-                .ok_or("Nix closure is missing `signed-index-manifest`")?,
+            index_authority: self
+                .index_authority
+                .ok_or("Nix closure is missing `index-authority`")?,
             derivation: self
                 .derivation
                 .ok_or("Nix closure is missing `derivation`")?,
@@ -3284,6 +3297,7 @@ pub fn record_nix_realization(
     envelope: LockEnvelope,
 ) -> Result<(), String> {
     nix_closure.validate()?;
+    envelope.validate_nix_catalog()?;
     if nix_closure.output != output || envelope.output_hash != output {
         return Err(
             "Nix closure and envelope outputs must match the realized output digest".into(),
@@ -3655,6 +3669,7 @@ pub fn nix_realization_strict(
             if envelope.output_hash != closure.output || envelope.platform != closure.system {
                 return Err("Nix envelope identity disagrees with its closure record".into());
             }
+            envelope.validate_nix_catalog()?;
             return Ok(Some((closure, envelope)));
         }
     }
@@ -3707,6 +3722,7 @@ pub fn locked_nix_package_strict(
         if envelope.output_hash != closure.output || envelope.platform != closure.system {
             return Err("Nix envelope identity disagrees with its closure record".into());
         }
+        envelope.validate_nix_catalog()?;
         return Ok(Some((pkg.name, pkg.version, closure, envelope)));
     }
     Ok(None)
@@ -4759,7 +4775,7 @@ mod a4_envelope_tests {
             channel: "nixpkgs-unstable".into(),
             revision: "a".repeat(40),
             system: "x86_64-linux".into(),
-            signed_index_manifest: "b".repeat(64),
+            index_authority: "b".repeat(64),
             derivation: "c".repeat(64),
             output: output.into(),
             nar_hash: format!("sha256:{}", "d".repeat(64)),
@@ -4831,7 +4847,11 @@ mod a4_envelope_tests {
             "ripgrep@default",
             &output,
             closure,
-            env(&output, "x86_64-linux", "", "canonical-source"),
+            LockEnvelope {
+                catalog_tier: "official-signed".into(),
+                catalog_trust: "verified".into(),
+                ..env(&output, "x86_64-linux", "", "canonical-source")
+            },
         )
         .unwrap();
         let raw = std::fs::read_to_string(root.join(".jet/lock")).unwrap();

@@ -1,485 +1,956 @@
-# Language Spec (living document)
+# Jet language specification
 
-Behavior described here is authoritative when ratified in
-docs/spec/syntax-decisions.md (enforced by `tests/decisions.rs` on every
-`cargo test`). Open decisions in docs/spec/syntax-decisions.md are not implemented until
-ratified. The examples/ directory is the executable form of this spec: if
-the spec and a passing example disagree, the spec is wrong — fix the spec.
+This specification defines Jet's source syntax and durable language contracts. It
+is for people writing Jet, reviewing a language change, or implementing another
+execution tier. It describes the contract and its reasons; it is not a feature
+inventory or a progress log.
 
-Vocabulary: [Jet vocabulary](vocabulary.md).
+[Ratified syntax decisions](syntax-decisions.md) are the rationale and decision
+record for this contract. A decision ID is a citation, not an implementation
+status: only ratified decisions define the language. The canonical lexical ledger
+is [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs), and
+[`tests/decisions.rs`](../../tests/decisions.rs) checks that the ratified decision
+surface and ledger agree. The parser and semantic checker are the executable
+language rules; the reference implementation is in
+[`crates/jet-parser`](../../crates/jet-parser/) and
+[`crates/jet-sema`](../../crates/jet-sema/). The Prelude is under
+[`crates/jet-codegen/src/Prelude`](../../crates/jet-codegen/src/Prelude/) and
+the core library under [`Core/`](../../Core/). The Rust-hosted compiler is the
+reference implementation while the compiler is ported to Jet; this document
+states the contract, not where it is implemented.
 
-## M1 — what exists today (values, expressions, control flow)
+The [`examples/`](../../examples/) tree is the executable form of the examples in
+this document. Prefer a feature example under `examples/features/` when checking
+a claim. If this document disagrees with a checked example or with the parser,
+sema, or Prelude source, the executable truth wins and the prose must be fixed.
+Run `jet check` on a feature file, or `jet run` when the claim has runtime
+behavior. `jet eval <file.jet|expression>` evaluates pure Jet and prints the
+value; add `--json` for JSON output. Vocabulary is defined in [Jet
+vocabulary](vocabulary.md).
 
-### Lexical rules
+## Contents
 
-- Source is UTF-8. Identifiers: a letter or `_`, then letters, digits, `_`.
-- Source files use the `.jet` extension (N2). The path-accepting commands
-  (`jet run`/`build`/`check`/`eval`) make the extension optional: `jet run
-  examples/test` resolves to `examples/test.jet` when the literal path has no
-  matching file. If neither the literal path nor `<path>.jet` exists, the
-  original name is kept so the file-not-found diagnostic names what you typed.
-- Line comments: `//` to end of line (S5). Block comments: `/* … */`, which
-  nest (an unbalanced `/*` is E0002), so any region can be commented out (S5).
-- String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`
-  `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
-  embeds any printable expression; format selectors use the closed `:` rail
-  (`{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Unit(name|bare)}`); `{{` and
-  `}}` write literal braces; a lone `{` or `}` is E0001. A run of N backticks
-  opens a raw ordinary `String`; the next maximal run of exactly N backticks
-  closes it, while other runs remain content. Raw text has no escapes or
-  interpolation, preserves line-ending bytes, and strips one edge space from
-  both ends only when it contains a non-space character.
-- Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
-  and interpolation. The newline right after the opening `"""` and the one right
-  before the closing `"""` are dropped, and the closing `"""`'s indentation is
-  stripped from every line (Swift-style). An unterminated `"""` is E0002.
-- Typed head bodies (D-BOUND-RAW1=A) are the raw boundary: in
-  `Type{"…"}` and inferred `.{"…"}` bodies, backslashes stay
-  literal for the head's grammar. Quote, brace, closing-delimiter, and hole
-  rules stay unchanged. Plain strings keep the four-entry escape table.
-- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1, D-UNIFYLIT1=A): `SQL{"…"}`,
-  `HTML{"…"}`, and `Sh{"…"}` use one checked interpolation engine. For `Sh`,
-  literal words become argv items and each `{hole}` becomes exactly one argv
-  item; neither word splitting, glob expansion, nor shell parsing touches a
-  hole. Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited
-  escape. Bare `"…"` never elaborates into these types. Marker declarations
-  use one list: `marker Name(args..., @sites: [...], @repeatable: ..., ...)`.
-  Typed-text declarations do not add a second marker declaration form.
-- Numbers (S67): exact arbitrary-precision decimal `Int` and `Float`
-  (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
-  allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
-  give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
-  E0001. `Int` uses a small machine-word fast path and spills without changing
-  its type; fixed-width destinations remain range-checked. Unary minus is an operator, not part of the literal. In an operator
-  expression, a bare whole-number literal adopts a fixed-width peer when that
-  type contains its exact value (D-INTLIT-WIDTH1=F); with no sized peer it stays
-  `Int` (D-NUMLIT-PEER1=A). The operands then follow the ordinary numeric
-  widening law. A typed or destination-owned literal keeps that destination's
-  range check.
-- Explicit conversion (D-SHAPE-CONVERT1=A) is destination-owned:
-  `Target.from_source(value)`. Numeric narrowing returns a fallible result.
-  Safe widening is implicit under D-INTLIT-WIDTH1, D-VERDICT-1304-1, and
-  D-NUMWIDEN-CROSS1. Numeric-backed distinct and unit types use the same
-  source-kind names. Text interpretation remains `Target.parse(text)`.
-  Source-owned `to_*`, casts, and a neutral `convert` helper are absent.
-- Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A,
-  D-TIMERES1=A) use
-  `Duration.nanoseconds|microseconds|milliseconds|seconds|minutes|hours(number)`;
-  non-finite and out-of-range values fail with `RangeError`. A `Duration` is a
-  signed whole-nanosecond `i64` carrier. `duration.in(.Unit)` reads a whole
-  unit, truncating toward zero; `total_in(unit)` keeps the fractional value.
-  `round(unit, increment, rounding_mode)` uses the nine canonical rounding
-  modes, while `abs()`, `negated()`, `sign()`, `is_zero()`, and
-  `difference(other)` are exact carrier operations. Time literals (`ns`, `us`,
-  `ms`, `s`, `min`, `h`, `d`) resolve through the in-scope canonical Time
-  family and produce the checked Duration delta.
-- Civil time (D-TIMEDEPTH1 / D-TIME-CALENDAR1) keeps exact calendar and elapsed
-  planes separate. `LocalDate` exposes ISO week fields and construction,
-  calendar replacement, period arithmetic, checked formatting, and
-  `until`/`since` with explicit rounding options. `LocalTime` preserves
-  nanoseconds, supports Duration arithmetic, rounding, difference, and checked
-  formatting. `DateTime` exposes Unix seconds/microseconds/nanoseconds,
-  sub-second fields, Duration and Period arithmetic, rounding, replacement,
-  checked formatting, and `until`/`since`; `in_zone` changes its view without
-  changing the instant. `ZonedDateTime` adds explicit DST disambiguation,
-  RFC 9557 round-trip text, transition queries, `start_of_day`,
-  `hours_in_day`, `with_time`, `with_zone`, and the same difference family.
-  `Period` exposes its components, sign, absolute/negated/add/sub operations,
-  and anchor-dependent fractional `total_in`. `Instant.elapsed()` returns a
-  Duration. The `largest_unit` option is accepted for the Temporal-shaped
-  difference calls; Jet's canonical return remains an exact Duration, while
-  calendar totals require an explicit Date, LocalDate, or DateTime anchor.
-  Jet does not add separate YearMonth or MonthDay types without a later
-  owner-ratified type decision.
-- `true` and `false` are `Bool` literals.
-- Source has no visible statement separators. The lexer inserts internal
-  terminators at line ends after statement-ending tokens (S6-R).
-- The lexer recovers from bad characters and keeps going; one run reports
-  every lexical error it can.
+**Language core:** [Lexical structure](#lexical-structure) · [Core grammar](#core-grammar) · [Values, expressions, and calls](#values-expressions-and-calls) · [Branching, results, and loops](#branching-results-and-loops) · [Compile-time names and staged syntax](#compile-time-names-and-staged-syntax) · [Data types and methods](#data-types-and-methods) · [Fixed-size lists](#fixed-size-lists) · [Closures and function values](#closures-and-function-values) · [Errors as values](#errors-as-values) · [Physical dimensions](#physical-dimensions)
 
-### Grammar (EBNF)
+**Ownership, effects, and safety:** [Ownership and borrowing](#ownership-and-borrowing) · [Access sigils](#access-sigils) · [Boundary crossings](#boundary-crossings) · [Effect system](#effect-system) · [Expert memory tier](#expert-memory-tier)
 
-```
-program  = { func | struct | const } ;
-func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ type ]
-           ( "->" expr | "-[" [ effect-row ] "]>" block | block ) ;
-params   = param { "," param } ;
-param    = ident ":" [ "^" | "&" ] type ;
-effect-row = effect { "," effect } | ".." ident ;
-block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
-// S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
-// at each line end after a statement-ending token; the grammar stays
-// terminator-based. A leading `.` or binary/logical operator on the next line
-// suppresses insertion (continuation). A callable arrow, `::`, or `{` stays
-// attached to the declaration head. `NL` denotes that synthetic terminator.
-stmt     = binding | assign | if | loop | fenced-stmt
-         | break | next | "return" [ expr ] NL
-         | result-handler NL
-         | expr NL ;
-binding  = [ "#Track" ] ( ident "::" expr     // immutable
-         | ident ":=" expr ) NL               // mutable
-         | destructure ( "::" | ":=" ) expr NL ;
-// Types ride the value (D-DOTCTOR3 `Type{ … }`) or live on signatures/fields.
-// Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
-destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
-            | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
-fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C / D-VERDICT-1320-1
-fence    = "@[" fence-entry { "," fence-entry } "]@"
-         | "@[" numbered-name ".." numbered-name "]@" ;
-// binding fences: entries are plain names; expression fences: any expression
-assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
+**Programs and modules:** [Imports and visibility](#imports-and-visibility) · [Composable configuration modules](#composable-configuration-modules) · [Concurrency](#concurrency) · [Core library](#core-library) · [Foreign-function interfaces](#foreign-function-interfaces) · [Browser effects and web values](#browser-effects-and-web-values) · [Terminal direct input](#terminal-direct-input)
+
+**Tools:** [Formatting Jet source](#formatting-jet-source) · [Writing and running tests](#writing-and-running-tests) · [Size-oriented builds and language tooling](#size-oriented-builds-and-language-tooling) · [REPL state, authority, and editing](#repl-state-authority-and-editing) · [jet inspect expand](#jet-inspect-expand) · [Semantic index and codemods](#semantic-index-and-codemods) · [Semantic source import](#semantic-source-import) · [Web development dashboard](#web-development-dashboard) · [Canvas visual editor](#canvas-visual-editor) · [Public front-end toolkit](#public-front-end-toolkit)
+
+**Packages, builds, and releases:** [Command registry and typed inputs](#command-registry-and-typed-inputs) · [Editions and compatibility](#editions-and-compatibility) · [Toolchain pins and source channels](#toolchain-pins-and-source-channels) · [Inline script dependencies](#inline-script-dependencies) · [Sandboxed WASM packages](#sandboxed-wasm-packages) · [Programmable builds](#programmable-builds) · [JetOS plans and proofs](#jetos-plans-and-proofs)
+
+**Scope:** [Deliberately absent](#deliberately-absent)
+
+## Lexical structure
+
+- Source is UTF-8. An identifier starts with a letter or `_` and continues with
+  letters, digits, or `_`.
+- Source files use the `.jet` extension. `jet run`, `jet build`,
+  `jet check`, and `jet eval` accept a file path without the suffix and try the
+  corresponding `.jet` path when the literal path does not exist. `jet eval` also
+  accepts an expression directly. If neither path exists, the original spelling
+  is retained for the file-not-found diagnostic (N2).
+- Jet's closed artifact suffix family is `.jetmap` (source maps), `.jetnb`
+  (notebooks), `.jetproof` (proof evidence), `.jettrace` (performance traces),
+  `.jetreplay` (game-input replays), and `.jetproof-replay` (proof replays).
+  Consumers reject a different family member by artifact kind; retired suffixes
+  have no compatibility aliases (D-ARTIFACT-EXT1=A).
+- A line comment starts with `//` and ends at the line ending. A block comment
+  starts with `/*` and ends with the matching `*/`; block comments nest. An
+  unbalanced block comment is E0002 (S5).
+- A single-line string uses `"..."`. Its only escapes are `\n`, `\t`, `\"`,
+  and `\\`; another escape is E0001. Interpolation uses `{expr}`. The format
+  selector rail is closed: `{value:Debug}`, `{value:Pretty}`,
+  `{value:Fixed(2)}`, `{value:Grouped(2)}`, and `{value:Unit(name|bare)}` are
+  the registered forms. `{{` and `}}` produce literal braces; an unmatched
+  brace is E0001 (S8, S20).
+- A run of N backticks opens a raw ordinary `String`; the next maximal run of
+  exactly N backticks closes it. Other runs remain text. Raw text has no
+  escapes or interpolation, preserves line-ending bytes, and removes one edge
+  space from each end only when the raw text contains a non-space character
+  (D-RAWSTR1).
+- A triple-quoted string, `"""…"""`, may span lines and has the ordinary
+  escape and interpolation rules. The newline immediately after the opening
+  delimiter and the newline immediately before the closing delimiter are
+  removed. The closing delimiter's indentation is removed from every line. An
+  unterminated triple-quoted string is E0002 (S70).
+- A checked text head, such as `SQL{"select {table}"}`, is a nominal typed
+  value. Its body is a raw boundary for that head's grammar: backslashes remain
+  literal, while quote, brace, delimiter, and interpolation-hole rules still
+  apply. Plain strings retain the four-entry escape table
+  (D-BOUND-RAW1=A, D-TEXTHEAD-TYPE1=A).
+- `SQL{"…"}`, `HTML{"…"}`, and `Sh{"…"}` use the checked interpolation
+  engine. In `Sh`, literal words become argv items and each hole becomes one
+  argv item; no word splitting, glob expansion, or shell parsing is applied to
+  a hole. Converting a runtime `String` to checked text is E0149; the audited
+  `Sh.raw(text)` operation is the escape hatch. A bare string never silently
+  changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
+  D-UNIFYLIT1=A).
+- Marker declarations use one named parameter list:
+  `marker Name(args..., @sites: [...], @repeatable: ..., ...)`. Ordinary
+  arguments and `@`-marked metadata share that list; checked-text marker
+  declarations are retired, so typed text heads do not introduce a second
+  marker form (D-META-FORM1, D-MARKER-SITES1, D-BOUND-SINK1=A).
+- Decimal `Int` and `Float` literals are exact arbitrary-precision values.
+  A decimal `Float` has digits on both sides of `.`, with an optional `e` or
+  `E` exponent. `_` may separate digits. `0x`, `0o`, and `0b` introduce
+  integer literals. A base prefix without digits is E0001. Unary `-` is an
+  operator, not part of a literal. A whole-number literal in an operator
+  expression adopts a fixed-width peer when that peer can represent it;
+  otherwise it remains `Int`. Ordinary numeric widening then applies. A typed
+  or destination-owned literal is checked against that destination's range
+  (D-INTLIT-WIDTH1, D-NUMLIT-PEER1).
+- Explicit conversion is destination-owned:
+  `Target.from_source(value)`. Numeric narrowing is fallible; safe widening is
+  implicit where the numeric decisions allow it. Numeric-backed distinct and
+  unit types use the same source-kind names. Text interpretation is
+  `Target.parse(text)`. Source-owned `to_*` conversions, casts, and a neutral
+  `convert` helper are not Jet syntax (D-SHAPE-CONVERT1=A).
+- A `Duration` is a signed whole-nanosecond `i64` carrier. Construct one with
+  `Duration.nanoseconds`, `.microseconds`, `.milliseconds`, `.seconds`,
+  `.minutes`, or `.hours`; non-finite and out-of-range input produces
+  `RangeError`. `duration.in(.Unit)` reads one whole unit and truncates toward
+  zero; `total_in(unit)` preserves the fractional value. `round` supports the
+  nine canonical rounding modes. `abs`, `negated`, `sign`, `is_zero`, and
+  `difference` operate on the exact carrier. The `ns`, `us`, `ms`, `s`, `min`,
+  `h`, and `d` suffixes resolve through the canonical Time family
+  (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A, D-TIMERES1=A).
+- Civil time keeps calendar and elapsed time separate. `LocalDate` provides ISO
+  week fields, construction, calendar replacement, period arithmetic, checked
+  formatting, and `until`/`since` with explicit rounding. `LocalTime` keeps
+  nanoseconds and supports `Duration` arithmetic, rounding, differences, and
+  checked formatting. `DateTime` provides Unix second/microsecond/nanosecond
+  views, sub-second fields, `Duration` and `Period` arithmetic, rounding,
+  replacement, checked formatting, and `until`/`since`; `in_zone` changes its
+  view without changing the instant. `ZonedDateTime` adds explicit DST
+  disambiguation, RFC 9557 round trips, transition queries, `start_of_day`,
+  `hours_in_day`, `with_time`, and `with_zone`. `Period` exposes its parts,
+  sign, absolute/negated/add/sub operations, and anchor-dependent totals.
+  `Instant.elapsed()` returns a `Duration`. `largest_unit` is accepted by the
+  Temporal-shaped difference calls, but Jet's canonical return remains an
+  exact `Duration`; calendar totals need an explicit date anchor. Jet has no
+  separate `YearMonth` or `MonthDay` types without a later owner-ratified type
+  decision (D-TIMEDEPTH1, D-TIME-CALENDAR1).
+- `true` and `false` are `Bool` literals. Source has no visible statement
+  separator. The lexer inserts an internal terminator after a line ending a
+  statement; a leading `.`, binary operator, or logical operator continues the
+  expression (S6-R). It recovers from bad characters and reports every lexical
+  error found in one run.
+
+## Core grammar
+
+The following compact grammar shows the surface that the rules below rely on;
+the parser and [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs) own the
+complete token ledger. `;` is shown only as the internal terminator `NL`, not as
+source syntax.
+
+```text
+program  = { item | module-binding | script-stmt } ;
+script-stmt = stmt ;
+item     = func | struct | enum | trait | impl | alias | distinct | use | test
+         | comptime ;
+func     = [ "pub" ] "fn" ident [ type-params ] "(" [ params ] ")"
+           [ result ] body ;
+result   = ( "->" type [ "from" ident { "|" ident } ]
+           | effect-row [ "->" type [ "from" ident { "|" ident } ] ]
+           | "!" error-type )
+           [ effect-row ] ;
+effect-row = "-[" [ effect { "," effect } | ".." ident ] "]>" ;
+body     = "{" { stmt } [ expr ] "}" | "->" expr ;
+params   = param-or-zone { "," param-or-zone } ;
+param-or-zone = param | "/" | "*" ;
+param    = [ "#Root" ] ( [ "&" | "^" ] "self"
+           | [ "&" | "^" ] ident [ ident ] ":" [ "&" | "^" ]
+             [ "..." ] type [ "from" ident { "|" ident } ]
+             [ "{" expr "}" ] ) ;
+module-binding = [ "#Track" ] ident ( "::" | ":=" ) expr NL ;
+comptime = "@" ident "::" expr NL ;
+stmt     = binding | assign | if | loop | "break" | "next"
+         | "return" [ expr ] | result-handler | expr ;
+pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
+         | "[" [ ident { "," ident } ] "]" ;
+fence    = "@[" ( ident | expr ) { "," ( ident | expr ) } "]@" ;
+assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
-// D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
+```
+
+A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
+write `&self` or `^self`. A type is never written between a binding name and its
+binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
+`{…}`), or appear on signatures and fields. The old `name: Type :: value` and
+`name: Type := value` forms are retired (D-BIND-BARE1=A).
+View-typed parameters may add `from owner` or `from owner | other_owner`; the
+names identify sibling owners in the published provenance relation.
+
+`if` and `loop` also have expression forms. The essential productions are:
+
+```text
 if       = "if" cond effect-body
            { "else" "if" cond effect-body } [ "else" effect-body ]
-         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // ordered arm table with named subject
-         | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // ordered arm table
+         | "if" [ subject comparison ] "{" arm { arm }
+           [ "else" "->" arm-body ] "}" ;
 arm      = arm-head "->" arm-body NL ;
-guard-arm = cond "->" guard-stmt-body NL ;
-effect-body = block | "->" non-if-stmt ;
-guard-stmt-body = block | non-if-stmt ;
-arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
-range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
-arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
-result-handler = expr "?" ident "->" handler-branch
-                 "!" ident "->" handler-branch ; // D-RESULT-DECON2=B
-handler-branch = block | expr ;  // one fixed `.Ok` arm and one `.Err` arm
-loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
-loop-body= "loop" effect-body
-         | "loop" cond effect-body
-         | "loop" source-clauses [ "if" cond ] loop-result-body
-         | "loop" ident ":=" expr "," cond [ "," expr ] loop-result-body ;
+loop     = [ ident "::" ] "loop" loop-head loop-body ;
+loop-head= [ cond ]
+         | source-clauses [ "if" cond ]
+         | ident ":=" expr "," cond [ "," expr ] ;
 source-clauses = source-clause { "," source-clause } ;
-source-clause = ( ident | "(" ident "," ident ")" ) "," source [ "," expr ] ;
-loop-result-body = effect-body | "->" value-arm-body ;
-source   = expr ;                              // a range literal is one Range expression (D-RANGE-VALUE1)
-break    = "break" [ expr | "(" ident [ "," expr ] ")" ] NL ;
-next     = "next" [ "(" ident ")" ] NL ;
-cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
-if-expr  = "if" cond "->" value-arm-body
-           "else" ( "->" value-arm-body | if-expr )
-         | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}"
-         | "if" subject cmp-op "{" value-dispatch-arm { value-dispatch-arm }
-           "else" "->" value-arm-body "}" ;   // D-IFDIST1
-value-dispatch-arm = arm-head "->" value-arm-body NL ;
-cmp-op   = "==" | "!=" | "<" | ">" | "<=" | ">=" ;
-value-guard-arm = cond "->" value-arm-body NL ;
-value-arm-body = expr | value-block ;
-value-block = "{" { stmt } expr "}" ;
-expr     = precedence climbing over:
-           "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
-           >  "|"  >  "~|"  >  "&"  >  "<<" ">>"      // D-BITOREXPR1: "|" is OR; D-XORSPELL1: "~|" is xor
-           >  "+" "-"  >  "*" "/" "/%" "%" "%%"  >  unary "-" "!"
-           >  "^"                                     // D-EXPSEM1: power, groups right
-           >  call | ident | literal | "(" expr ")" ;
+source-clause = ( ident | "(" ident "," ident ")" ) "in" expr
+                [ "," expr ] ;
+loop-body= effect-body | "->" value-arm-body ;
+effect-body = block | "->" non-if-stmt ;
 ```
 
-### Semantics
+The expression parser uses precedence climbing. From weakest to strongest, the
+relevant operators are `||`, `&&`, comparisons, `|`, `~|`, `&`, shifts, `+` and
+`-`, `*`, `/`, `/%`, `%`, `%%`, unary `-` and `!`, power `^`, then calls,
+field/index access, identifiers, literals, and parenthesized expressions.
+`|` is bitwise OR, `&` is bitwise AND, and `~|` is bitwise XOR
+(D-BITOREXPR1, D-XORSPELL1, D-EXPSEM1).
 
-- Types: `Int`, `Float`, `Bool`, `String`. Local inference: types ride the
-  value (`Type{ … }`) when needed; mismatched headed literals are ordinary
-  type errors.
-- A program must define `fn run` with no parameters and no return type,
-  `fn run() !` for top-level error propagation, or a single typed CLI
-  parameter as described by D-CLIFLAG1 (E0101, E1308). Execution starts
-  there. `run` never takes `pub` (S12). Notebook and REPL evaluation may
-  construct their own explicit `run` for the submitted fragment.
-- At ordinary file scope, `name :: value` declares an immutable module global
-  and `name := value` declares a mutable module global. Both use a tier-stable
-  scalar literal (or an immutable string literal), are initialized before
-  `fn run`, and are visible to every function in that file; only `:=` may be
-  assigned after initialization. Computed work belongs inside `fn run`. Inside
-  a function, the same spellings remain local bindings (D-BIND-BARE1).
-- Loose executable statements at ordinary file scope are rejected with E0621;
-  Jet never invents an implicit runtime function. Move executable code into
-  an explicit `fn run`.
-- Names may not shadow an existing name in scope (E0118).
-- Types never annotate the binding name — use `Type{ … }` or a signature/field.
-- `@[ a, b ]@` expands one complete binding or expression statement per entry.
-  Multiple fences advance in lock-step. `@[ task1..task8 ]@` generates or
-  reuses the ascending numbered names. An expression fence also expands an
-  ascending integer-literal range such as `@[0..3]@` to four entries;
-  descending or non-literal ranges remain one Range value. Expression-position
-  fences accept expression entries (`print(@[ "a", total(1, 2) ]@)`); binding
-  fences need plain names. A fence is not a list or destructure (D-FENCE-GLYPH1,
-  D-FENCE-RANGE1).
-- `#Track name :: value` / `#Track name := value` opt a binding into
-  D-TRACK-ORIGIN1 provenance. Read it only as the typed comptime fact
-  `value.@origin -> ?OriginInfo`; there is no runtime origin projection.
-- Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
-  numeric widening law permits it; `% & | ~| << >>` remain integer-only.
-  Bitwise OR is `|`, bitwise AND is `&`, and bitwise XOR is `~|`.
-  `+` on `String` is a teaching error pointing at interpolation. Compound
-  assignment (S17) mirrors the binary operators.
-- Comparisons (`== != < > <= >=`) use the same numeric widening law and yield
-  `Bool`; other operand types must match. `&& || !` operate on `Bool` (E0110).
-- `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
-  alternatives in arm heads use single `|`.
+## Values, expressions, and calls
 
-A control construct is an expression wherever it produces a value; its runtime
-artifacts are types; the construct itself never is. Jet already uses lambdas
-for deferred control, so `Loop` and `If` types would duplicate the lambda
-mechanism and violate I8. Value-producing cases are already expressions. Typed
-artifacts hold reusable values, while constructs stay zero-cost keywords and
-keep code readable from top to bottom. Historical source: type-unification audit
-F11 (the report is not retained here). Current law: [syntax decisions](syntax-decisions.md).
+Jet's primitive value types include `Int`, `Float`, `Bool`, and `String`, as well
+as the fixed-width numeric, character, collection, option, result, tuple, and
+user-defined types described below. Local inference keeps the type on a value
+head when needed; a headed literal whose fields or elements do not match its
+head is an ordinary type error.
 
-- `if` is Jet's one branching form. Its preferred multi-branch surface is an
-  ordered arm table: `if subject == { head -> body }` when naming a subject
-  improves clarity, or `if { head -> body }` without one. A head may be a value
-  or structural pattern against the subject, or any `Bool` expression evaluated
-  as written; unrelated expressions may appear in the same table. The first
-  matching or true head wins. Chained `else if` remains legal, but there should
-  rarely be a reason to prefer it and it is not a canonical teaching form.
-  Conventional effect-only branches use `->` for one adjacent statement and
-  braces for multiple statements or scoped bodies. Arm-table arrows select an
-  arm, including an arm yielding `()`. Value branches require `else` unless a closed
-  subject is exhaustive; result types unify. Braces group multiline bodies.
-- A fallible Result may use the compact exhaustive handler
-  `result ? ok -> success ! error -> failure`. The two identifiers are
-  branch-local payload bindings. The parser lowers this fixed form to the
-  ordinary `.Ok` and `.Err` pattern tests, so branch typing, effects,
-  divergence, ownership, and every execution tier use the existing mechanism.
-  The `?` is contextual here; postfix propagation, `?.`, unary `!`, and `??`
-  keep their existing meanings.
-- `loop` has infinite,
-  conditional, source (`loop x in source [, stride]`), map-pair
-  (`loop (key, value) in source`), and explicit-state
-  (`loop i := init, cond [, afterthought]`) headers. `a..b` and `a..<b`
-  construct one `Range` value over `Int`; the first includes `b` and the second
-  excludes it. A Range may be stored, passed, returned, and used as a loop
-  source or slice bound. It exposes `.start`, `.end`, and `.contains(value)`.
-  Literal range loops still compile directly to jumps without allocation.
-  Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
-  and is checked before the first pull. `break`/`next`
-  inside loops only (E0115, S23). A loop may carry an ordinary-name label
-  (D-LOOPLABEL3) — `outer :: loop … { }`. `break(outer)`,
-  `break(outer, value)`, and `next(outer)` target it from a nested loop.
-  E0987 names an out-of-scope label. E0988 teaches retired dot and `@` forms,
-  rejects `outer := loop`, and explains that a loop name is not a runtime
-  value.
-  Normal explicit-state fallthrough and targeted `next` run the afterthought
-  exactly once, then retest; normal source fallthrough and targeted `next` pull
-  stride items and use the final pull. `break`, `return`, propagated failure,
-  and panic skip the target afterthought. Abandoned inner loops run no edge.
-  Bare `next` is control only as a complete statement or `??` fallback;
-  `next()`, `.next()`, and `fn next` are ordinary identifier uses, while a value
-  named `next` after `??` needs parentheses: `value ?? (next)`.
-- A finite source loop in value position may use `-> expression` or `-> { ... }`.
-  Each accepted iteration yields one non-unit value. The result is an eager
-  List in iteration order. A header guard or `next` omits items. Multiple
-  source clauses yield one flat List; an explicitly nested collecting loop
-  preserves nesting. Maps and Sets use explicit terminals. Lazy work uses the
-  existing iterator adapters.
-- A statement-position finite source, bare infinite, condition-only, or
-  mutable-state loop may use `-> statement`; the statement runs for its effect
-  and its value is discarded. A non-unit discarded value gets the registered
-  lint; bind the loop with `::` to collect values or use a write handle for an
-  in-place update. A loop returns one final value only through `break value` or
-  `break(name, value)` when it is used as a value. All payload exits unify. In a
-  collecting loop, `break` returns the partial List and payload breaks are
-  rejected.
-- `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
-  heads top to bottom. Bare values and ranges compare against the subject;
-  predicate heads are `Bool`; `else` is mandatory unless enum/option
-  exhaustiveness proves coverage.
-- **Range arms (D-RANGE1/D-PATR, c25):** in multi-arm `if`, an arm head that is
-  a range `lo..hi` fires when the subject is in that inclusive band (S22) —
-  `90..100 -> "A"` desugars to `subject >= 90 && subject <= 100`. The subject
-  and bounds must share an ordered scalar type (`Int`/`Char`); the open
-  `Int`/`Char` domain always still needs a trailing `else` (D-PATR). c25 adds
-  the porting-hazard teaching errors: `..=` in an arm head is **E0318** (Jet's
-  `..` is already inclusive — write `lo..hi`), `step` in an arm head is
-  **E0319** (`step` is a loop modifier, not a band), and an inverted/empty band
-  `hi..lo` is **E0316**. Arm heads accept range literals only. A
-  `distinct Int(0..10)` constraint also stays literal-only because a runtime
-  Range cannot determine a type declaration (D-RANGE-VALUE1=A).
-- **Ambient surface (D-NAME-ALIAS1=A, D-CORE-PRELUDE1/2):** one readable
-  `core/prelude.jet` module declares the closed no-prefix surface. Functions
-  are `print`, `input`, `panic`, `assert`, and `assert_eq`.
-  `pub use` aliases add `eprint`, `Clock`, `Instant`, `Date`, `Duration`,
-  `Path`, `read_file`, `write_file`, and `file_exists`. The comptime-gated
-  names `embed_file`, `embed_bytes`, `find`, and `fetch` stay gated at their
-  existing declarations. `random` stays qualified as `core.math.random`.
-  User declarations replace a prelude alias and produce the ratified shadow
-  lint; libraries cannot inject names; additions and removals need an owner
-  ballot. Core meaning stays in Prelude/CoreLib (I9).
-  **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of every readable prelude
-  name. Use a qualified Core call, or remove the marker.
+An executable entry is `fn run`. An executable `run` has no parameters, or has
+one parameter whose type is a CLI-derived program struct; it returns `()` or a
+unit-fallible result. `run` is not `pub`. The checker gives an omitted entry
+contract the default fallible `Result<(), Err>` carrier, so source may use a
+plain `fn run() { … }`. An explicit unit-fallible contract names its error,
+for example `fn run() !IOError`; a bare `!` is not a contract. Other output
+kinds have their own entry contract. Notebook and REPL evaluation may construct
+an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
+D-FAIL-EXIT1=A).
 
-  **Prelude membership law (D-CORE-PRELUDE1=A):** an ambient name must pass
-  all seven checks: measured direct frequency; total and safe behavior; a name
-  that carries no semantics; no better home; first-hour coverage; one fixed set
-  for every file; and a collision-conscious name. User declarations win over
-  an ambient name and produce L0510. The set changes only at an epoch boundary.
-  The edition migration lint is L2001; it points older packages at the new
-  name. A prelude entry may be total or return a `Result`; it may not add an
-  implicit conversion. `Duration` and `Instant` remain the Time-family
-  quantities from D-TYPE2-TIME1.
-- **Tool artifact extensions (D-ARTIFACT-EXT1=A):** the closed family is
-  `.jetmap` (source maps), `.jetnb` (notebooks), `.jetproof` (proof evidence),
-  `.jettrace` (performance traces), `.jetreplay` (game input replays), and
-  `.jetproof-replay` (proof replays). Consumers reject a different family
-  member by artifact kind; retired suffixes have no compatibility aliases.
-- `print(x)` is prelude-declared (S9); takes one or more printable arguments
-  (E0103, E0112) and writes each on its own line with a trailing newline
-  (D-VERDICT-1321-1). `term.print`/`term.eprint` accept the same variadic
-  form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
-- `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
-  stdin, strips the trailing newline, and returns `String !IOError`.
-  Use `??` to unwrap or handle the error.
-- Functions: multi-argument calls, checked arity (E0104) and argument
-  types (E0112). A function with a return type must return on every path
-  (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
-- **Named args and defaults (S61, D-NARG1):** parameters may carry a
-  default value (`fn f(x: Int{0})`). A call-site label binds by NAME, so a
-  call may skip a default and write its labelled arguments in any order
-  (`f(x: 1)`). `/` closes the positional-only zone and `*` opens the
-  label-only zone; `timeout seconds: Int` publishes `timeout` while the body
-  reads `seconds`. Supplied expressions run left to right as written; unbound
-  defaults then run in declaration order. The same law covers free functions,
-  methods, constructors, generic calls and function values (D-APILABEL1=A).
-  `jet fmt` preserves call-site labels as written (D-NARG2).
-  A positional `Bool` parameter on a `pub` fn or `pub` method triggers the
-  advisory L2401 lint.
-- **Deterministic call mapping ([D-CALLPOS1=A](syntax-decisions.md))**: bare arguments fill slots
-  left to right, defaults fill unbound slots afterwards, and a final `...T`
-  packs the remaining tail. Types never reroute a bound value. Adjacent
-  same-type parameters remain legal positionally; parameter-name inlay hints
-  make their public labels visible. An imported candidate set must have one
-  successful binding; two successes are E0772 and require names to
-  deconflict.
-- Definitions are unique (E0105), can't shadow built-ins (E0106), and
-  unknown type names are E0119.
+At ordinary file scope, `name :: value` declares an immutable module global and
+`name := value` declares a mutable module global. The initializer is a tier-stable
+scalar literal or immutable string literal, runs before `fn run`, and is visible
+to functions in the file; only the mutable form may be assigned after
+initialization. Computation belongs in an explicit function. Inside a function,
+the same spellings are local bindings. A top-level executable statement is
+rejected with E0621; Jet does not synthesize an implicit runtime function.
+The `const` keyword is retired and is recognized only to teach its replacement
+(E0146). Compile-time bindings use the `@name :: value` form described below.
 
-### Staged errors
+Names cannot shadow an existing name in the same scope (E0118), and definitions
+are unique (E0105). A name that would shadow a built-in is rejected with E0106;
+unknown names and types are E0102/E0107 and E0119, with suggestions where the
+checker has a useful candidate.
 
-Features that exist in the roadmap but not the language yet fail with an
-error naming the milestone (see staged table in docs/spec/syntax-decisions.md).
-A future feature must never die as a generic syntax error. Old Jet and foreign
-syntax teaching is paused until post-Epoch 6 (D-S14-PAUSE); active docs and
-fixtures use canonical syntax only.
+A statement fence expands one complete binding or expression statement per
+entry. Multiple fences advance in lock-step. An ascending numbered range such
+as `@[ task1..task8 ]@` creates or reuses the corresponding names. An expression
+fence can also expand an ascending integer-literal range, so `@[0..3]@` has four
+entries. Descending or non-literal ranges remain one `Range` value. Expression
+fences accept expressions, as in `print(@[ "a", total(1, 2) ]@)`; binding fences
+accept plain names. A fence is not a list or destructure
+(D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1).
 
-## M2 — ownership (memory model v5, D-MEM1, done 2026-07-04)
+`#Track name :: value` and `#Track name := value` attach the origin fact. Read
+that fact as `value.@origin -> ?OriginInfo`; there is no runtime origin
+projection (D-TRACK-ORIGIN1=A).
 
-Borrow-checker mechanics live in the transpiler; tier-1 users never write
-Rust's `&`, `&mut`, `*`, or lifetime parameters. Two sigils, enforced (no
-inference, no elevation):
+Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
+numeric widening law. `%`, `&`, `|`, `~|`, `<<`, and `>>` are integer-only.
+`+` on `String` is a teaching error that points to interpolation. Compound
+assignment follows the corresponding binary operator. Comparisons use the same
+numeric widening law and return `Bool`; nonnumeric operands must have matching
+types. `&&`, `||`, and `!` operate on `Bool` (E0110). `&&` and `||` are boolean
+operators; a value alternative in an arm head uses `|`.
 
-| You write     | It means                       | Compiles to Rust |
-|----------------|--------------------------------|-------------------|
-| `fn f(x: T)`   | read (default; the only unmarked meaning) | `x: &T`   |
-| `fn f(x: &T)`  | write — exclusive edit access   | `x: &mut T`       |
-| `fn f(x: ^T)`  | take — ownership moves to callee | `x: T`          |
+A control construct is an expression when it produces a value. Its result has a
+type, but `If` and `Loop` are not types: deferred control uses lambdas, and
+inventing construct types would duplicate that mechanism (I8). The syntax and
+semantics of a value-producing `if` or `loop` are therefore the same at every
+execution tier.
 
-An unmarked parameter is **always** read — a body write to it, or handing it
-to a `&`/`^` position, is a hard error at the definition (fix-it: add `&` at
-the parameter and every call site). A read call remains allocation-free for
-every non-scalar shape, including strings, collections, structs, generic
-values, and callbacks: the compiler borrows the existing value. A cloneable
-read value entering an owning destination is materialized automatically; a
-bare `::` binding remains a read window, while non-cloneable values and
-`copies: .Explicit` require `~` or a `^` parameter. Call sites mirror the
-parameter's sigil:
+`print` is an ambient prelude operation. It accepts one or more printable
+arguments and writes one line per argument with a trailing newline. `eprint` is
+the ambient stderr twin.
+The explicit `core.term.print` and `core.term.eprint` operations each take one
+`String`; use them for a qualified call rather than relying on ambient aliases.
+`Float` prints a decimal part, so a negative whole-valued float is `-5.0`, not
+`-5`. `input()` or `input(prompt)` reads one line, removes its trailing newline,
+and returns `String !IOError`; use `??` to handle the error. `panic` is the
+bug-stop builtin; `assert` and `assert_eq` are registered assertion builtins.
+Other readable aliases are `Clock`, `Instant`, `Date`, `Duration`, `Path`,
+`read_file`, `write_file`, `file_exists`, and `channel`. The comptime-gated
+names are `embed_file`, `embed_bytes`, `find`, and `fetch`; `random` remains
+qualified as `core.math.random` (D-NAME-ALIAS1=A, D-CORE-PRELUDE1=A).
+A user declaration shadows a readable prelude alias; the language-owned built-in
+names remain reserved. `#NoPrelude` disables the readable prelude aliases for that
+file, so use the qualified Core call instead (D-NAME-ALIAS1=A, D-PRELUDEX1=A).
+The readable prelude is a closed set. A candidate must satisfy its seven
+membership tests: measured frequency; total and safe behavior; names that never
+carry semantics; no better home; first-hour coverage; one fixed set for every
+file; and collision-conscious naming. A user declaration that replaces an alias
+earns L0510; adding a name uses the edition migration lint L2001. Prelude entries
+may be total or return a `Result`, but may not add an implicit conversion
+(D-CORE-PRELUDE1=A).
+
+Functions support multiple arguments, checked arity (E0104), and checked
+argument types (E0112). A function with a non-unit success result must return
+that result on every path (E0114). A parameter may have a default, written on
+its type as `fn f(x: Int{0})`. A call-site label binds by the public parameter
+name, so `f(x: 1)` may omit a default and labelled arguments may be supplied in
+any order. `/` closes the positional-only zone; `*` opens the label-only zone;
+`timeout seconds: Int` publishes `timeout` while the body reads `seconds`.
+Expressions supplied by the caller run left to right; unbound defaults run in
+declaration order. The same mapping applies to free functions, methods,
+constructors, generic calls, and function values. `jet fmt` preserves labels as
+written. A positional `Bool` in a public function or method earns advisory lint
+L2401 (S61, D-NARG1, D-NARG2, D-APILABEL1=A).
+
+Bare arguments fill parameter slots left to right. Defaults then fill unbound
+slots, and a final `...T` parameter packs the remaining tail. Types never reroute
+a bound value. An imported candidate set must have exactly one successful
+binding; two successes produce E0772 and require labels to disambiguate
+(D-CALLPOS1=A).
+
+Ranges are values. `a..b` is inclusive and `a..<b` is half-open; both are
+`Range` values over `Int` that can be stored, passed, returned, looped, or used
+as slice bounds. A range exposes `.start`, `.end`, and `.contains(value)`.
+Literal range loops can lower directly to jumps without allocation. Bounds and
+stride expressions evaluate once from left to right. A stride is a positive
+`Int` and is checked before the first pull (S22, D-RANGE-VALUE1=A,
+D-RANGE-EXCL1=C).
+
+## Branching, results, and loops
+
+`if` is Jet's one branching form. Its canonical multi-branch form is an ordered
+arm table: `if subject == { … }` names a subject, while `if { … }` uses the
+implicit subject for guard arms. A head can be a value, a structural pattern,
+or any `Bool` expression; unrelated head forms may coexist. The first match or
+true guard wins. Chained `else if` remains legal, but an arm table is the
+preferred teaching form. `->` introduces a one-statement arm or value; braces
+hold multiple statements and make a scope. Arm tables can yield `()`; value
+branches require `else` unless a closed subject is exhaustive, and all arm
+results unify (D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, D-IFDIST1=A).
+
+`if subject == { head -> body }` compares a bare value head with the subject.
+A range head `lo..hi` tests inclusive membership. The subject and both bounds
+must be an ordered scalar type (`Int` or `Char`). Open `Int` and `Char` domains
+still require `else`. `..=` in an arm head is E0318 because `..` is already
+inclusive; `step` in an arm head is E0319 because stride belongs to loops; an
+inverted or empty band is E0316. Range heads are literals. A `distinct Int`
+constraint likewise requires literal bounds because a runtime `Range` cannot
+define a type (D-PATR, D-RANGE1, D-RANGE-VALUE1=A).
+
+A fallible result can use the fixed exhaustive handler
+`result ? ok -> success ! error -> failure`. `ok` and `error` are branch-local
+payload bindings. The parser lowers this form to the ordinary `.Ok` and `.Err`
+pattern tests, so normal typing, effects, divergence, ownership, and execution
+tiers apply. The `?` here is contextual; postfix propagation, `?.`, unary `!`,
+and `??` keep their ordinary meanings (D-RESULT-DECON2=B).
+
+When the subject of `if subject == { … }` is not a plain name — a call or a
+field access, for example — the arms refer to it as `it`, as in
+`it == .Ok(n)`.
+
+`loop` supports infinite, conditional, source, map-pair, and explicit-state
+forms:
+
+```jet
+loop value in source, stride if keep(value) -> value
+loop (key, value) in source -> key
+loop i := init, i < limit, i + 1 -> print(i)
+```
+
+A source loop may use `-> expression` or a braced value body. Each accepted
+iteration yields one non-unit value. The eager result is a `List` in iteration
+order; a guard or `next` omits an item. Multiple source clauses produce one flat
+list. An explicitly nested collecting loop preserves nesting. Maps and sets use
+explicit terminals; lazy work uses iterator adapters. In statement position,
+a finite source, infinite, condition-only, or mutable-state loop may use
+`-> statement`; its value is discarded. A discarded non-unit value earns the
+registered lint. Bind a collecting loop with `::`, or use a write handle for an
+in-place update. A value loop returns a final value only through `break value`
+or `break(name, value)`; all exits unify. A collecting loop returns its partial
+list and rejects payload breaks (D-COMPREHENSION1).
+
+`break` and `next` are legal only inside loops (E0115). A loop may have an
+ordinary-name label, `outer :: loop … { … }`; `break(outer)`,
+`break(outer, value)`, and `next(outer)` target it from a nested loop. E0987
+reports an out-of-scope label. E0988 teaches retired loop-name and `@` forms,
+rejects `outer := loop`, and explains that a loop name is not a runtime value.
+Normal explicit-state fallthrough and targeted `next` run the afterthought once
+and retest. Source fallthrough and targeted `next` pull the stride and use the
+final pull. `break`, `return`, propagated failure, and panic skip the target
+afterthought; abandoning an inner loop runs no edge. Bare `next` is control only
+as a complete statement or `??` fallback. `next()`, `.next()`, and `fn next`
+remain ordinary identifier uses; a value named `next` after `??` needs
+parentheses: `value ?? (next)`.
+
+## Compile-time names and staged syntax
+
+`@name :: value` is the explicit compile-time-demand binding. Ordinary foldable
+expressions do not need the marker. At file scope, unmarked `name :: value` and
+`name := value` remain runtime module globals; they do not require `#Persist`.
+`#Static @name` requests a stable-address Rust static when the contract needs
+one. `#Persist name := value` additionally marks hot-reload state on a bare
+binding (D-VERDICT-1308-1, D-PERSIST1).
+
+`embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]`
+embeds raw bytes, and `find("glob") -> [String]` returns sorted relative paths.
+`find` accepts the std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`.
+They are the sanctioned build-time I/O operations inside a compile-time binding;
+other comptime evaluation is pure.
+Paths and globs are string literals resolved relative to the embedding file, never
+absolute and never escaping the project with `..` (E0957). Missing or unreadable
+input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched
+file records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1).
+
+When a ratified feature has a staged diagnostic, unsupported syntax receives that
+registered error and its milestone rather than a generic syntax failure. A spelling
+with no ratified language rule is not silently accepted as a new feature: the
+parser or sema may recognize a retired spelling to emit a teaching diagnostic and
+its canonical fix; otherwise it is an ordinary parse or type error. Old Jet and
+foreign-syntax teaching remains paused until post-Epoch 6 (D-S14-PAUSE); active
+docs and fixtures use canonical syntax only.
+
+## Data types and methods
+
+Structs and enums carry data; methods attach behavior. A struct literal is
+`Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
+use `Type.Variant`, and pattern tests use `==`. Optional values use `?T`,
+`Val(value)`, and `None`; `None` is not legal for a non-optional `T`. Generic
+arguments use `Type<Args>`. Fresh hidden-state construction uses `Type.new(…)`.
+Expected-type elaboration permits `.new(…)` when a binding, return, field, or
+call argument determines exactly one receiver. Generic receiver arguments may
+also be omitted from `Type.new(…)` when constructor inputs and expected type
+force one answer; otherwise write `Type<Args>.new(…)` (S27, S29–S33,
+D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
+
+```jet
+struct Circle {
+    radius: Float
+
+    fn area(self) -> Float {
+        3.14159 * self.radius * self.radius
+    }
+}
+
+impl Circle {
+    fn unit() -> Circle {
+        Circle{radius: 1.0}
+    }
+}
+```
+
+`self` is the receiver and follows the same access law as any parameter. In an
+`&self` method, field assignment, compound assignment, and whole-receiver
+replacement are legal. The same write in a read method is E0205. Calling a
+write-receiver method requires a changeable receiver binding and is E0202.
+Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
+live in the type, in `impl Type { … }`, or as a top-level external inherent
+method `fn Type.method(self, …) { … }`; the type must be defined in the current
+source module. Static methods omit `self`, as in `Circle.unit()`.
+
+Multiple construction shapes use distinctly named no-`self` statics such as
+`Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name
+is E0105. Enum `if subject == { … }` tables must be exhaustive.
+
+Traits contain signatures and implementations contain behavior. Implement a trait
+inside its type or with `impl Type.Trait { … }`; qualify a foreign type when the
+module owns the implementation:
+
+```jet
+trait Shape {
+    fn area(self) -> Float
+}
+
+impl Circle.Shape {
+    fn area(self) -> Float { 3.14159 * self.radius * self.radius }
+}
+```
+
+A trait name in type position, such as `[Shape]` or `fn f(shape: Shape)`, means
+dynamic dispatch with invisible boxing. Generic bounds use `fn f<T: Bound>(…)`
+and `struct Pair<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
+`Comparable`, `Encode`, and `Decode` derive when every field qualifies. The
+package default can deny `auto_derive` through
+`policy: .{ lints: .{ deny: [auto_derive] } }`. A signed type marker opts one
+trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
+`#Codable` requests both codec directions; `#Encode` and `#Decode` request one
+(D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
+
+### Encoding and validation
+
+`Encode.encode(self) -> DataTree` and
+`Decode.decode(tree: DataTree) -> Self ![FieldError]` are ordinary trait methods.
+`DataTree.decode<T>()` is the public typed-dispatch path for primitive,
+container, generated, and hand-written implementations. A built-in derive adds
+typed Jet items beside the marked type and sends them through the same sema, TIR,
+and codegen path as hand-written members. JSON therefore compares the same
+encoded bytes and decoded values for generated and hand-written codecs. A
+user-defined derive expands only when its provider or target is entry-local;
+otherwise E2711 points at the derive marker (D-SERDE2, D-SERDE16,
+D-META-CODE1, D-META-BODY1).
+
+A struct's `validate { … }` block declares checks in the exact form
+`check(condition, at: field, "message")`. `field` names a sibling field. Every
+failed check accumulates a `FieldError` with its `path` and `reason` in
+`[FieldError]` rather than failing fast. Sema requires this statement shape
+(E0353), a real field (E0354), and pure references (S60/E3401).
+`Type.validate(value)` returns `value ![FieldError]`. A derived decoder validates
+through the same list; hand-written codecs opt in explicitly. `Validate.over(s)`
+builds outside-context checks and `finish()` returns `T ![FieldError]`
+(D-VALIDATE1, D-VALIDATE-DECODE1=B).
+
+### Computed fields, tags, and applied rules
+
+`name: T -> expr` is an unmarked read-time formula over sibling fields. Put bare
+`#Memo` immediately before the field to retain the result after its first read;
+writes to stored dependencies invalidate it. A memoized field is read-only and
+is not supplied in a `Type{ … }` literal. Arguments to bare `#Memo` are E0382.
+See [`computed_field.jet`](../../examples/features/memory/computed_field.jet)
+(D-FIELDPOL1, D-FIELDMEMO1).
+
+`tag Name { deny: [Net] }` declares an erased dataflow fact and its policy.
+`deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
+to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that
+tag. Tags have no methods: a method in a tag body is E0732, and using a tag
+where dispatch or method attachment is expected is E0731. Tag names are
+PascalCase. Prelude declares `Input`, `PII`, `Secret`, and `Credential`
+(D-QUAL2, D-TAG-SURFACE1, D-CASING1).
+
+`#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
+markers use PascalCase and parenthesized arguments when needed. An explicit empty
+effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`
+spelling is not an alias (D-ONCE-AT1=D).
+
+`#Off <stmt>` parses and type-checks one statement but emits no code in any
+build. `#DebugOnly <stmt>` type-checks in every build and emits only in debug or
+dev builds. Names introduced inside either marker are scoped to that marker body.
+The registered build-profile fact is `@build.profile`; bare `build.profile` is
+not a user-typeable comptime value (D-CANVASSTATE1).
+
+`#Meta(category: "Movement", tunable)` attaches checked tooling facts to a
+binding, top-level const, or function. `category` is a non-empty plain string
+literal and `tunable` is a bare flag. The marker emits no code and changes no
+runtime behavior (D-CANVASMETA1).
+
+### Target selection and build-time embedding
+
+`#Target(OS.Linux | MacOS | Windows)` gates an `impl` to a native operating
+system. `jet build --target=<triple>` emits only matching implementations and
+uses the host OS by default. Ungated code can select the surviving implementation
+with the compiler-known switch
+
+```jet
+@if @build.os == {
+    .Linux -> …
+    .MacOS -> …
+    .Windows -> …
+    else -> …
+}
+```
+
+The switch folds before target-gating checks. Arms must cover each OS or provide
+`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `@build.os`
+(E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants
+(E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
+
+Inside an `@` binding, `embed_file`, `embed_bytes`, and `find` are the only
+sanctioned build-time file operations. Their path, hash, and purity rules are
+defined in the compile-time section above.
+
+### Published schemas and migrations
+
+`#PublishedSchema struct Name { … }` marks a public record whose field layout is
+snapshotted under `.jet/cache/schema/`. A later project build compares the
+current shape with that snapshot by field name, ignoring order. A breaking shape
+change is E0910 unless a `migration` block declares it. The four operations are:
+
+```jet
+migration UserRecord {
+    rename name -> display_name
+    remove legacy_id
+    add verified: Bool = false
+    change price: Int -> Usd via { c -> Usd.from_int(c) }
+}
+```
+
+`rename` targets an existing field of the same type. `change` resolves its
+converter in order: inline `via { … }`, an in-scope `impl Old -> New`, then an
+E0910 asking for one. `add` supplies the value for old records. There is no
+`reorder` operation because field order is not a breaking shape change. `drop`
+and `reorder`, and other unknown verbs, teach E0911. An operation that contradicts
+the real shape is itself an E0910-family error. A single-file run accepts the
+marker but enforces the comparison only when a project snapshot exists
+(D-MIGRATE1, D-MIGRATE2A/B/D/E/F).
+
+`jet inspect schema status` lists snapshotted published types, their pinned
+version, and fields, and flags pending E0910 changes. `jet inspect schema squash
+--before <ver>` rewrites snapshots to the current struct shape, records the
+squash boundary, and changes only `.jet/cache/schema/`. There is no
+`jet inspect schema check`; the E0910 from `jet build` is the CI gate
+(D-MIGRATE2C).
+
+Typed `decode<T>` is the one codec contract and returns `T ![FieldError]` (or
+`[T] ![FieldError]` for CSV). Schema migration is silent inside that call; it
+has no second decoder or migration-report result (D-MIGRATE3=A as amended by
+D-VALIDATE-DECODE1=B).
+
+For a concrete `#PublishedSchema` type that derives `Decode` and has migration
+blocks, decode first tries the current shape. If that fails, it compares the
+wire key set (after any `#Rename`/`#RenameAll` treatment) with historical shapes
+from newest to oldest, rewrites the first match forward in source order, and
+decodes the current shape. The `rename` operation moves a
+key, `remove` drops it, `add` evaluates its default, and `change` decodes,
+converts, and re-encodes the old field. A converter and an `add` default are
+ordinary Jet expressions checked and lowered through the normal pipeline. If no
+shape matches, the original decode error is returned. Types with no migration
+blocks pay no chain cost, and CSV applies the chain per row (D-MIGRATE4=A).
+
+### Struct layout
+
+`#Layout(c)` before a struct requests C layout and preserves field order for
+foreign sharing. Growable fields (`[T]`, `[K:V]`, and `String`) are rejected with
+E1104 because they have no stable C layout; fixed arrays `[T#N]` are allowed.
+Reserved `packed`, `align(N)`, and `columnar` forms parse but report E1105 until
+their contracts are defined (D-REPRC1).
+
+## Fixed-size lists
+
+`[T#N]` refines a list to exactly `N` elements of type `T`. Destructuring must
+use exactly `N` names. At code generation the representation is `Vec<T>`, as
+for `[T]` (S76).
+
+```ebnf
+type_fixed_list = "[" type "#" int_literal "]" ;
+```
+
+```jet
+result :: [Int#3]{2, 4, 6}
+[a, b, c] :: result
+```
+
+A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
+and `clear` on a fixed-size list are **E0964**. A literal index outside
+`0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer
+interval may index without a runtime bounds check when `lo >= 0` and `hi < N`
+(D-TYPE2-REFINE1).
+Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
+
+## Closures and function values
+
+A lambda is `(params) -> expression` or `(params) -> { ... }`. A single
+assignment or a unit call needs no extra braces after the arrow. Parameter
+annotations may be omitted when an expected function type supplies them; with
+no expected type, omitted annotations report **E0801** (S46).
+
+```jet
+square :: (n: Int) -> n * n
+increment :: (n: Int) -> {
+    n + 1
+}
+```
+
+`->` is the callable and control arrow. A named callable has `->` before a
+braced non-unit result; a unit or unit-fallible callable keeps a bare braced
+body. An effect ceiling has its own arrow, `-[Effect]>` or `-[]>`. An
+arrowless braced value body reports **E0080**; `jet fmt` inserts the canonical
+arrow (D-CALLABLE-ONE1=A).
+
+Function values use a function type with parameter types and a result:
+`fn(T1, T2) -> R`. A result may be omitted for a unit callback. A pure
+function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
+replace the empty set. Unmarked parameters have plain read access. A named
+function becomes a value only when every parameter can be called with that read
+access; parameters requiring `&` or `^` keep the function direct-call-only
+(S47, D-MEM-PARAM1).
+
+Direct named and method calls keep their ordinary syntax. A function-valued
+expression is invoked with `.call(...)`; a struct field or method actually
+named `call` shadows that built-in projection. Direct calls on names, fields,
+indexes, and lambdas remain valid. The adjacent `)(` function-value spelling
+is rejected with **E-CALL-VALUE** (D-CALLVALUE1=B).
+
+```jet
+fn apply(f: fn(Int) -> Int, n: Int) -> Int {
+    f.call(n)
+}
+
+fn make_adder(base: Int) -> fn(Int) -[]> Int {
+    (n: Int) -> base + n
+}
+```
+
+### Captures and escaping lambdas
+
+A lambda captures a name for shared read access when the body only reads it.
+Writing a captured name requires a mutable `:=` binding; otherwise the compiler
+reports **E0111**. An escaping lambda—one stored in a binding, returned,
+stored in a struct field, or passed to a `^T` parameter—must own its captures.
+Copy values are copied at closure creation; other clonable values are cloned;
+an owned non-clonable value moves. A borrowed non-clonable parameter cannot
+escape (**E0120**). The old `take(...)` prefix is rejected with **E0057**.
+Self-recursion through the lambda's own binding is **E0804**; calling a
+non-function is **E0803** (S47).
+
+Function values expose only read parameters when coerced from a named
+function. This rule prevents the value conversion from erasing a write or
+move requirement. The same capture and call checks apply to interpretation,
+JIT, and generated programs.
+
+### Collection adapters
+
+Concrete lists provide eager `map`, `filter`, `each`, `find`, `any`, `all`,
+`sort_by`, and `reduce`; maps provide `each` with key and value parameters.
+Call `.lazy()` to enter the deferred `Iter` vocabulary. The lazy adapter set
+includes `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`,
+`take_while`, `skip_while`, `flat_map`, `scan`, `fold`, `position`, `min_by`,
+`max_by`, `group_by`, and `partition`. `indexed()` yields `(idx: Int, item: T)`
+(D-ITER1, D-EXT1 Tier 1, D-CORE-EAGER1).
+
+The zip family is variadic and named. Strict `zip` requires equal lengths and
+reports **E0128**; `zip_short` stops at the shortest input; `zip_pad` reaches
+the longest input and uses `None`, one typed `fill:`, or typed per-column
+`fills:` values. Free calls preserve labels; method calls use `a`, `b`, `c`,
+and so on. Zero free inputs produce an empty `Iter<Unit>`; one input is the
+identity. `partition(f)` returns `(false_: [T], true_: [T])`. These adapters
+are lazy on `Iter`, while concrete list, map, and set `map` and `filter` are
+eager.
+
+`first()` is the consuming positional terminal. Use `skip(n).first()` for a
+zero-based selection; an out-of-range selection returns `None`. There is no
+`nth` adapter. `min_by` and `max_by` retain the last source item when keys
+compare equal. The examples are `examples/features/basics/closures.jet`,
+`examples/features/basics/callbacks.jet`, and
+`examples/features/collections/iter_adapters.jet`
+(D-S14-PAUSE, D-SHAPE-PIPE1=C, D-BITOREXPR1=A).
+
+The lambda diagnostics are covered by `tests/ui/lambda_*.jet` and
+`tests/ui/not_a_function.jet`; integration coverage is in `tests/closures.rs`.
+
+## Errors as values
+
+### Failure contracts and propagation
+
+A fallible value has one shared result carrier. A success type `T` uses the
+implicit default error family `Err` when it is used in a fallible context. Add
+`?` before the success type when success may be absent, and add `!` before a
+named error domain. The supported forms are:
+
+- `T` — a non-optional success with the implicit `Err` failure route;
+- `?T !E` — an optional success with error `E`;
+- `T !E` — a non-optional success with error `E`;
+- `!E` — unit success with error `E`.
+- `T !(E1 | E2)` — an explicit error union; prefix the success type for
+  `?T !(E1 | E2)`. (D-UNIONTYPE1=A)
+
+The explicit `!` must name an error domain; ordinary failure leaves the error
+contract implicit. The entry function `fn run()` has the default fallible
+`Result<(), Err>` carrier, so it may propagate a standard-library failure
+without writing a return annotation. Pin an entry to an application error with
+`fn run() !StoreError { ... }` when that distinction is part of the interface.
+(D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
+
+Construct the two sides with `Ok(value)` and `Err(error)`. Pattern tests use
+`.Ok(value)` and `.Err(error)`, for example `result == .Ok(n)`. A failure
+conversion is one declared rail:
+
+```jet
+impl DiskError -> StoreError {
+    fn convert(error: DiskError) -> StoreError {
+        StoreError.Io
+    }
+}
+```
+
+The conversion applies when a fallible call propagates. A conversion into the
+default `Err` may name a foreign source type. A typed target must obey the
+orphan rule: the declaration must be owned by the source or target side. The
+compiler reports an undeclared conversion as E2402, a duplicate as E2405, and a
+violation of the typed-target rule as E2406. (D-ERR-CONV, D-FAIL-CONV1,
+D-FAIL-CONV2)
+
+A fallible call propagates its failure automatically: success continues with
+its payload and failure returns from the current fallible context. Optional
+values propagate `None` in the same way. The postfix form `?(text)` is not a
+second propagation operator; it adds one failure-context frame to the report.
+Use it when a boundary needs a local explanation. (S7, D-FAIL-CTX1)
+
+`??` is the fallback operator for an optional or fallible value. It yields the
+success payload or evaluates its right side. Its precedence is looser than
+`&&` and `||`, and the right side may be a value, `return`, `return expr`, or
+`panic(...)`. `??` is the only fallback spelling; it must produce the
+enclosing success type, otherwise the compiler reports E0405. (S35, S71)
+
+`panic(message)`, failed `assert`/`assert_eq`, `#Todo`, a raw Prelude panic, and
+scheduler, stream, or foreign-boundary stops enter the shared runtime report
+boundary. Program-side runtime breaches use E3001 and the process-stop boundary
+uses exit code 70; an explicitly requested process exit keeps its requested
+code. An unhandled error returned by the entry function is rendered as a full
+report and exits 1. E3002 records the trail of `?(text)` frames, while E3003
+reports an expired wait or I/O deadline. See [diagnostics.md](diagnostics.md)
+for the complete report shape and fixes. (S36)
+
+### Cleanup at a process stop
+
+An explicit stop runs active cleanup before the process ends. `defer close(...)`
+actions run in reverse declaration order, `scope.guard` closures run in reverse
+registration order, and `os.atexit` handlers run in registration order after
+scope cleanup. Work registered after the stop does not run. A host kill or an
+abort does not promise these finalizers.
+
+### Handling and discarding failure values
+
+The compiler rejects an unchecked fallible value (E0401), a fallible call used
+as a bare statement (E0402), a discarded `#MustUse` result (E0419), a failure
+that does not fit the enclosing domain (E0403), `Ok`/`Err` outside a result
+context (E0404), and a bad fallback (E0405). Handle the value, propagate it,
+or bind it. The sole intentional-discard spelling is
+`.drop("reason")`; the reason is part of the source-level audit trail.
+(D-IGNORERET2, D-MARK-DISCARD1)
+
+## Physical dimensions
+
+The compiler knows the dimension identities of `Length`, `Time`, `Speed`,
+`Area`, and `Temperature`. Addition, subtraction, and comparison require equal
+dimensions; a mismatch is E0359 before code generation. Multiplication adds
+normalized exponents and division subtracts them, so `Length / Time` is
+`Speed`, `Length * Length` is `Area`, and `Speed * Time` is `Length`. Semantic
+index and API snapshots serialize normalized identity and numeric base; runtime
+values carry only the numeric base (D-SHAPE-QUANTITY1).
+
+Currency remains nominal. A user quantity family declares a base and exact
+rational scale/offset with stable package identity. A nonzero offset mints
+separate `Point` and `Delta` types for each member. Sema owns closed affine
+algebra and exactness: implicit conversion is value-aware and never rounds,
+destination-owned exact conversion returns `Result`, and
+`_rounded(value, mode, digits: n)` is the explicit fallible rounding path.
+Modes are `TowardZero`, `Floor`, `Ceiling`, and `NearestEven`; `digits` is
+nonnegative destination decimal places, and the rounded rational must be
+exactly representable by the destination. Imported `Quantity<Dimension, Kind>`
+retains its concrete unit through checking, API freeze, semantic inspection,
+Codable, AOT, and JIT lowering (D-QUAL3, D-QUANTITY-DECL1).
+
+## Ownership and borrowing
+
+Jet has one explicit ownership contract. A parameter without an access marker is
+always a read parameter; sema decides this from the signature and never raises
+it to write or take access from body usage. The public surface is:
+
+| Source type | Access | Required call-site marker |
+| --- | --- | --- |
+| `T` | read; the callee cannot mutate the caller's value | none |
+| `&T` | exclusive write/edit access | `&` |
+| `^T` | take; ownership moves to the callee | `^` |
+
+For non-scalar values, a read call borrows the existing value without an
+allocation. A body write through an unmarked parameter, or passing it to a write
+or take position, is a hard error at the definition or call site; add `&` or `^`
+to the contract and mirror it where the call transfers access. A cloneable read
+value entering an owning destination is materialized automatically. A bare
+`::` binding of a place remains a read window; non-cloneable values and
+`#Policy(copies: .Explicit)` require an explicit `~` copy or an owning `^`
+contract (D-MEM1, D-MEM-COPYSEM1).
 
 ```jet
 fn bump(n: &Int) { n += 1 }
-fn archive(name: ^String) String -> { return name }
+fn archive(name: ^String) -> String { name }
 
 fn run() {
     score := 41
-    bump(&score)                 // & mirrors &Int
-    saved :: archive(^"vault")   // ^ mirrors ^String
+    bump(&score)
+    saved :: archive(^"vault")
+    print(saved)
 }
 ```
 
-(examples/features/memory/ownership.jet) Method receivers carry the sigil on
-`self`; plain `self` is read; the sigil lives on the definition, not the call
-site:
+The sigil on a method receiver is written at its definition. Plain `self` is a
+read receiver; `&self` is a write receiver; `^self` consumes the receiver.
 
 ```jet
+struct Player {
+    hp: Int
+}
+
 impl Player {
-    fn show(self) Int -> { return self.hp }                      // read receiver
-    fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
+    fn show(self) -> Int { self.hp }
+    fn heal(&self, amount: Int) { self.hp = self.hp + amount }
+}
+
+fn run() {
+    player := Player{hp: 10}
+    player.heal(2)
+    print(player.show())
 }
 ```
 
-```jet
-p.heal(10)    // clean — the &self is on the method definition, not here
-p.show()      // plain read receiver
-```
+Writing through a read receiver is E0205 and points to `&self`. Calling a
+`&self` method requires a changeable receiver binding and is checked with E0202.
+Using the same name twice while a write access is live is E0204: pass `&x` once,
+or materialize `~x` first.
 
-A write through a read receiver is **E0205** ("write the receiver as
-`&self`"); calling a `&self` method needs a changeable binding at the call
-site (**E0202**, "does not have edit access (`&`)"). Using the same name
-twice in one call while a `&` on it is active is **E0204** ("while something
-is being changed, nobody else may be looking at it") — pass `&x` once, or
-`~x` first.
+### Copies, moves, and owned destinations
 
-**Named binding vs. temporary.** Passing a *named binding* to a `^` (take)
-parameter without `^` is **E0209** — a hard error, never a silent clone (the
-old `L0201` lint that auto-cloned is gone). A *temporary* — a literal,
-`~x`, or a call result — passes freely with no `^`, since nothing survives
-to be used after. `~x` (D-SHAPE-COPY1=A, supersedes D-CAP2) is the one copy
-spelling — a real prefix expression, not a method: `.clone()` is not
-user-typable Jet syntax (`clone` falls through to the ordinary "no such
-method" error). The retired `copy x` word teaches **E0991**, pointing at
-`~x`. `~` on a value Jet can't duplicate — a function, a trait value — is
-**E0211**; on a scalar it's legal but redundant (already trivially
-copyable).
+A named binding passed to a take parameter without `^` is E0209. Jet never hides a
+clone to make that call work. A literal, `~x`, or call result is a temporary and
+may enter a take parameter without another marker. `~x` is the one copy spelling;
+it creates an independent owned value. `.clone()` is not user-typable Jet syntax,
+and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
+duplicate, such as a function or trait value, is E0211. Copying a scalar is
+legal but redundant.
 
 ```jet
 name :: "vault"
-saved :: ~name    // fresh, independent value; `name` still usable after
+saved :: ~name
+print(name)
+print(saved)
 ```
+See [`copy_verb.jet`](../../examples/features/memory/copy_verb.jet) for the
+explicit-copy form.
 
-(examples/features/memory/copy_verb.jet)
+### Named views and places
 
-### Named views, not raw references
+Raw reference syntax is not a first-class Jet value: `-> &T` return types,
+`&T` fields, and `#Ref` provenance are not in the grammar. A named `View<T>` or
+`ViewMut<T>` can cross a return or aggregate boundary only when sema proves a
+bounded set of receiver, parameter, or static owner paths for each output slot.
+Every possible owner remains live while the view is live. Lists, tuples, options,
+results, enum payloads, named aggregates, callbacks, and closed trait dispatch
+carry the same hidden relation. Temporary owners, unbounded dynamic dispatch,
+and incompatible read/write paths are E2305, or E2307 for string views
+(D-MEM-VIEWRET1, D-MEMPROVENANCE2=A).
+At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
+`.before()`, or a tracked string-view binding; a plain owned `String` is not a
+borrowed window.
 
-Raw reference syntax is not first-class: `-> &T` return types, `&T` struct
-fields, and `#Ref` provenance are not in the grammar. D-MEMPROVENANCE2=A
-extends D-MEM-VIEWRET1: named `View<T>` / `ViewMut<T>` values can cross
-returns and aggregates when sema proves a bounded set of receiver, parameter,
-or static owner paths for each output slot. Every possible owner stays live
-while the view is live. Lists, tuples, options, results, enums, named
-aggregates, callbacks, and closed trait dispatch carry the same hidden
-relation (see `examples/features/memory/returned_views.jet` and
-`examples/features/memory/owner_backed_views.jet`). Temporary owners,
-unbounded dynamic dispatch, and incompatible read/write paths remain
-**E2305** (or **E2307** for string views). An ordinary owned field still owns
-its value:
+An ordinary owned field owns its value:
 
 ```jet
-struct Span { text: String, meta: String }
+struct Span {
+    text: String
+    meta: String
+}
 
 fn describe(source: String, kind: String) {
-    s :: Span{text: source, meta: kind}   // fields own their data
-    print(s.text)
+    value :: Span{text: source, meta: kind}
+    print(value.text)
 }
 ```
 
-(examples/features/memory/ref_field.jet) When a program genuinely needs
-"many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
-instead of a raw stored reference. Fill `View<str>` only from
-`.trim()` / `.after()` / `.before()` or a tracked string-view binding. A plain
-owned `String` is not a borrowed window.
+Use `Shared<T>` or `Pool<T>`/`Id<T>` when many owners need one value. A plain
+owned `String` is not a borrowed window. A read-only view entering an owning
+slot is materialized as an owned copy, as though `~` had been written. This
+covers bindings, returns, fields, collection elements, enum payloads, fallback
+values, and stored read-only captures. Declared `View<T>` and `ViewMut<T>`
+boundaries retain their provenance; `ViewMut<T>` is never copied implicitly.
+`#Policy(copies: .Explicit)` makes read-only materialization explicit. The same
+rule is shared by AOT, JIT, interpreter, comptime, and web lowering; each engine
+marshals the sema-approved result.
 
-An implicit read-only `View<T>` or string view entering a non-view owning slot
-means an owning copy, exactly as if the source were prefixed with `~`. This
-applies to bindings, returns, fields, collection elements, enum payloads,
-fallback values, and stored read-only captures. Declared `View<T>`/`ViewMut<T>` boundaries keep their
-provenance rules: `ViewMut<T>` is never copied implicitly, and
-`#Policy(copies: .Explicit)` restores the refusal for read-only views.
-The semantic materialization is shared by AOT, JIT, interpreter, comptime, and
-web lowering; engines only marshal its approved result.
-
-#### Place access (D-SHAPE-PLACE1=A)
-
-A place is a name followed by its maximal field, index, or range projection.
-Binding a bare place creates a checked read window; prefixing it with `&`
-creates the exclusive write window; prefixing it with `~` makes independent
-owned storage:
+A place is a name followed by its maximal field, index, or range projection. A
+bare place is a checked read window; `&place` is the exclusive write window; and
+`~place` creates independent owned storage.
 
 ```jet
 values := [10, 20, 30, 40]
@@ -488,263 +959,193 @@ edit :: &values[2..3]
 copy :: ~values[0..1]
 ```
 
-The two windows above are disjoint. A bare read window remains a view when it
-stays in a non-owning place; when it enters an owning slot, D-MEM-COPYSEM1
-materializes an owned value. Constant disjoint ranges and indexes lower
-through a safe structural split, while different fields use Rust's native
-field disjointness. Dynamic projections stay conservatively overlapping. Jet
-never asks rustc to validate Jet semantics. A call or temporary is not a
-place: bind it first (**E0213**). The retired `values.view(0..1)` spelling is
-**E0214** and points at `values[0..1]`. Method calls never extend a place, so
-`&values[0..1].sort()` applies write access to the maximal range and then calls
-the method on that window.
+The windows above are disjoint. A bare read window remains a view in a non-owning
+place and materializes when it enters an owning slot. Constant disjoint indexes
+and ranges lower through a safe structural split; known fields are disjoint;
+dynamic projections conservatively overlap. Jet's sema, not rustc, validates
+these facts. A call or temporary is not a place: bind it first (E0213). The
+retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
+Method calls do not extend a place, so `&values[0..1].sort()` writes the maximal
+range and then calls the method on that window (D-SHAPE-PLACE1=A).
 
-#### Unified provenance and alias model (D-MEM1/S9, #649)
+Sema keeps one provenance and alias graph for every borrowed window, regardless
+of whether the runtime representation is a string slice, `View<T>`, arena
+window, buffer, or matrix window. An owner is identified by declaration, not by
+spelling: a local uses its definition identity, a public function parameter its
+zero-based position, and static storage its declaration. Shadowing therefore
+creates a different owner. A place is an owner plus ordered field, index, or
+range projections; reborrowing preserves that owner.
 
-Sema keeps one fact graph for every borrowed window, independent of its runtime
-representation. String windows, list `View<T>`, arena allocations, and existing
-buffer or matrix window APIs enter the same graph. A type-specific side table
-must not decide lifetime or alias safety.
+Each view fact records place, read/write access, lexical extent, source kind, and
+invalidation state. Read views may overlap. A write view is unique and cannot
+overlap any live read or write view. Different known fields are disjoint; ranges
+and indexes overlap unless sema proves otherwise. Moving or replacing an owner,
+writing an overlapping place, or resizing or relocating its storage is E0212
+while a view is live. Arena reset or close invalidates its views; a later read is
+E0632. Facts end after the last use or at lexical scope, whichever comes first;
+control-flow joins and loops keep invalidation conservatively. Captures and field
+projections preserve the fact. A captured or returned view crossing a task or
+channel boundary is rejected once as E1102.
 
-An **owner** is identified by its declaration, not its spelling. A local owner
-uses its definition identity, a public function owner uses its zero-based
-parameter position, and a static owner uses its static declaration. Shadowing a
-name therefore creates a different owner. A **place** is an owner plus an
-ordered field, index, or range projection. A **window** names the part of that
-place a view can observe. Reborrowing a view preserves the original owner and
-appends projections; it never invents a new owner.
+D-MEMPROVENANCE2 carries a view fact through public calls, returns, aggregate
+fields and elements, generic instantiations, methods, function values, lambdas,
+and trait dispatch. Each output slot has a bounded deterministic source set;
+branches and compatible trait implementations union their sources. All paths
+for one output slot must agree on access. Open dynamic dispatch without a
+proven contract, temporary owners, captured mutable views, and incompatible
+access paths are E2305/E2307. Function types carry the same hidden relation;
+a generic callback without a narrower declaration conservatively keeps every
+compatible non-scalar argument live.
 
-Each view fact records its place, read or write access, lexical extent, source
-kind, and invalidation state. Read views may overlap. A write view is unique:
-it may not overlap any live read or write view. Different known fields are
-disjoint; ranges and indices overlap unless sema can prove otherwise. When in
-doubt, sema treats places as overlapping.
-
-Moving or replacing an owner, writing an overlapping place, or calling an
-operation that may resize or relocate its storage is rejected while a view is
-live (**E0212**). Arena reset or close invalidates its views; a later read is
-**E0632**. A local fact ends after its last use or at lexical scope, whichever
-comes first. At control-flow joins, invalidation on any reachable branch
-survives; loops use the same conservative rule across iterations. Captures and
-field projections preserve the fact rather than rebuilding it from a type name.
-Tasks and channels reject a captured or returned view once as **E1102**.
-
-D-MEMPROVENANCE2=A carries the same fact through public calls, returns,
-aggregate fields and elements, generic instantiation, methods, function values,
-lambdas, and trait dispatch. Each returned view slot is keyed by its full
-output path. Its source relation is a bounded, deterministic set. Each member
-names the receiver, a zero-based parameter, or static storage, followed by
-field/index/range projections. Branches and compatible trait implementations
-union their possible sources. Sema computes these maps to a deterministic fixed
-point, so declaration and implementation order do not change the result.
-
-All paths for one declared view output slot must agree on read or write access.
-Open dynamic dispatch without a proven contract, temporary owners, captured
-mutable views, and incompatible access paths are rejected as **E2305** (or
-**E2307** for string views). A read-only view captured or stored into a
-non-view owning slot is materialized by default; `copies: .Explicit` restores
-the refusal. Rebinding a declared stored view cannot replace its proven source
-relation. Function types carry the same hidden relation; a generic callback
-without a narrower declaration conservatively keeps every compatible
-non-scalar argument live.
-
-Public API snapshots publish each relation in canonical form. A single source
-uses the compatibility-preserving `source;access:...;path:...`. A source union uses
+Public API snapshots publish each relation canonically. One source is
+`source;access:...;path:...`; a union is
 `one_of(source;path:...,source;path:...);access:...`, sorted by stable source
-identity. Adding, removing, or changing a possible source changes the API
-digest and is reported as a breaking provenance change.
-
-TIR receives only sema-approved provenance and lowering flags. It does not infer
-owners, overlap, lifetimes, or escape safety. Codegen uses the approved relation to
-emit a hidden Rust lifetime for `View<T>`/`ViewMut<T>` returns and containing
-aggregates. Generated references are a representation of sema facts, never
-their definition or a validation mechanism.
+identity. Adding, removing, or changing a possible source changes the API digest
+and is a breaking provenance change. TIR receives only sema-approved provenance
+and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
 
 ### Zero-copy string views
 
-`String.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a
-zero-copy view into the receiver's own buffer, invisible in the local type
-(`String` stays one Jet-level type end to end), whenever sema can prove the
-binding can't outlive its owner:
+Binding `String.trim()`, `.after(sep)`, or `.before(sep)` to a local creates a
+zero-copy view into the receiver's buffer when sema proves the binding cannot
+outlive its owner. The Jet-level type remains `String`.
 
 ```jet
 padded := "  nate@jet-lang.dev  "
 email :: padded.trim()
 domain :: email.after("@")
-print("padded still readable: {padded}")   // reading the owner still works
+print("padded still readable: {padded}")
 ```
 
-(examples/features/memory/string_view.jet) A local view may chain another
-`.trim()/.after()/.before()`, be interpolated (`"{domain}"`), be carried in a
-view-typed aggregate, or be copied into an owned `String` with `~`. An
-owning destination performs that materialization by default; use
-`#Policy(copies: .Explicit)` when every copy must be written as `~`. At a
-named boundary, `View<str>` states the same owner-tied contract as
-`View<T>`: a parameter- or receiver-rooted view may be returned or stored,
-with public provenance inferred by sema. **E2307** reports a local or temporary
-owner that cannot outlive a declared view, an unstable public source, or an
-explicit-policy refusal. See `examples/features/memory/returned_views.jet` for a
-runtime-selected source, a multi-buffer parser, and a borrowing deserializer.
-Either kind of view crossing a `task`/
-`Sender.send` boundary is reported once, as **E1102** (unsendable value) —
-a task or channel moves owned data between threads, and a view can't cross
-without ownership.
+A local view may chain another string-view operation, be interpolated, be placed
+in a view-typed aggregate, or be copied with `~`. An owning destination copies it
+by default. At a named boundary, `View<str>` states the owner-tied contract;
+E2307 rejects a temporary or unstable owner, or an explicit-copy policy that was
+not satisfied. See
+[`string_view.jet`](../../examples/features/memory/string_view.jet) and
+[`returned_views.jet`](../../examples/features/memory/returned_views.jet).
 
-### Escape hatches — `Shared<T>` and `Pool<T>`/`Id<T>`
+### Shared state, local cells, and pools
 
-`Shared<T>` and `Pool<T>`/`Id<T>` solve cross-scope and many-owner ownership.
-They are distinct from provenance-carrying `View<T>`/`ViewMut<T>`, which model
-owner-tied borrowed access.
-
-**`Shared<T>`** (D-SHARED-API1, amended by D-CONC-SHARE1=A) is a lock-guarded
-shared value — "a copyable door". It reads and writes like any other value:
+`Shared<T>` is a lock-guarded, copyable handle. `shared value` constructs it and
+infers `T` from the value. A field read takes one read lock and a field write one
+write lock; a read-modify-write such as `config.hits += 1` holds one lock across
+both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
+cheap handle, not the payload, so it can cross a task boundary without `^`
+(D-SHARED-API1, D-CONC-SHARE1=A).
 
 ```jet
-config :: shared AppConfig{ name: "jet-server", hits: 0 }
-t1 :: task handle(1, config)   // no `^` needed
-label :: config.name           // one locked read
-config.hits += 1               // one locked write
+struct AppConfig {
+    name: String
+    hits: Int
+}
+
+fn handle(id: Int, config: Shared<AppConfig>) -> String {
+    label :: config.name
+    "request {id} on {label}"
+}
+
+fn run() {
+    config :: shared AppConfig{name: "jet-server", hits: 0}
+    t1 :: task handle(1, config)
+    print(t1.join() ?? panic("task failed"))
+    config.hits += 1
+}
 ```
 
-(examples/features/memory/shared_config.jet) `shared x` builds the cell and
-infers `T` from `x`. A field read takes the read lock, a field write takes the
-write lock, and **each statement is one atomic step** — a read-modify-write
-like `config.hits += 1` holds one lock across both halves, so no update is
-lost. Several statements commit together under `#Transact`. Cloning
-`Shared<T>` is always a cheap handle clone, never a deep copy of `T` — so it
-crosses a `task` boundary with no `^`.
+The lock is per statement. When one statement touches a second shared value,
+the ordered shared engine avoids nesting locks and therefore avoids the plain
+access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
+are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
+use `shared x`.
 
-The lock is per statement, so a reader sees locking at the `shared` binding and
-in `#Transact` blocks. When one statement reads a second shared value, the
-write commits through the ordered engine below instead of nesting one value's
-lock inside another's, so plain access cannot deadlock.
+Expert code can hold a lock across helper calls with `guard_read()` or
+`guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
+exit. `.map(value -> value.field)` narrows one guard to a field. `.split(first,
+second)` is legal only when sema proves the stored field paths disjoint. Guards
+are task-local and cannot be copied or sent. A public guard parameter reads by
+default; `&guard: SharedGuard<T>` requires and preserves edit access
+(D-SHAREDGUARD1=A, D-SHAREDGUARD2=A).
 
-The `read(f)` / `edit(f)` closure spellings are retired (E1116), and so is the
-`Shared.new(x)` constructor (E1115). Reading a whole payload rather than one
-field is the expert guard's job.
+`Condition.new()` creates a wait set. `guard.wait(condition, predicate)` requires
+an edit guard, registers before releasing the lock, reacquires the same lock,
+and checks the predicate again. Cancellation unregisters the waiter before final
+release. `notify_one()` wakes one waiter and `notify_all()` wakes all waiters.
+See [`shared_guard_queue.jet`](../../examples/features/memory/shared_guard_queue.jet)
+for the bounded-queue shape.
 
-Expert code can hold the same lock across helper calls (D-SHAREDGUARD1=A,
-D-SHAREDGUARD2=A):
-
-```jet
-space_ready :: Condition.new()
-guard :: queue.guard_edit()
-guard.wait(space_ready, q -> q.jobs.len() < q.capacity) ?? panic("wait failed")
-guard.value.jobs.push(job)
-space_ready.notify_one()
-```
-
-`guard_read()` and `guard_edit()` return an owned `SharedGuard<T>`. The guard
-releases on every exit. `.map(value -> value.field)` narrows one guard to a
-field. `.split(first, second)` creates two guards only when sema proves the
-field paths are disjoint; both guards retain the original lock and provenance.
-Guards are task-local and cannot be copied or sent.
-The public `SharedGuard<T>` name is safe at helper boundaries: a normal
-parameter reads it, while `&guard: SharedGuard<T>` requires and preserves edit
-access. A returned or stored public guard keeps read access; perform edits at
-the acquisition site or through an explicit write helper.
-
-`Condition.new()` creates a wait set. `guard.wait(condition, predicate)`
-requires an edit guard. It registers before release, reacquires the same lock,
-and checks the predicate again. Cancellation unregisters the waiter before the
-guard's final release. `notify_one()` wakes one waiter; `notify_all()` wakes
-all waiters. A guard is the one form that holds a lock across a helper call or
-a whole-payload read; plain field access covers everything else.
-
-See `examples/features/memory/shared_guard_queue.jet` for a bounded queue that
-covers the notify-before-park race.
-
-Inside a `#Transact` block (D-STM1, amended by D-CONC-STM1=A), a write to a
-`Shared` value joins the block's atomic commit instead of locking on its own
-line: every touched value changes together or not at all, and no other task
-ever sees a half-applied change. One marker, one meaning (I8): the same
-`#Transact` that gives single-task rollback spans shared state. The
-transaction name is optional; it is required only to attach `on_commit` and
-`on_rollback` hooks.
-
-**The transaction law** (D-CONC-STM1=A):
-
-- The block body runs **exactly once**. A `log.info(…)` inside a transaction is
-  emitted exactly once, never duplicated.
-- Writes are buffered as the body runs. At the block's end the commit sorts the
-  touched values by stable address, takes **every write lock at once in that
-  fixed order**, applies the buffered writes, and releases. Address-ordered
-  acquisition cannot deadlock, so the deadlock class hand-ordered locking is
-  famous for simply disappears.
-- Under contention a transaction **waits on the locks**. It is never retried,
-  and the body is never re-run. An optimistic retrying mode would need its own
-  ballot.
-- A `?`-failure or early return before the commit drops the buffered writes.
+Inside `#Transact`, writes to `Shared` values are buffered and commit atomically.
+The body runs exactly once. At commit, touched values are write-locked together
+in stable-address order, buffered writes are applied, and the locks are released.
+Contention waits; it does not retry the body. A `?` failure or early return
+before commit drops buffered writes. Irreversible `Net`, `FS`, or `Exec` effects
+inside the body are E0746; move them after the transaction or register them with
+`on_commit` on a named transaction. A transaction name is optional; the named
+form exposes `on_commit` and `on_rollback`. `name.on_rollback(() -> { … })`
+hooks run in reverse registration order after a `?` failure or early return and
+are dropped on a clean commit. Registering one takes control of undo for the
+handled value, so that value is not automatically snapshotted (D-STM1,
+D-CONC-STM1=A, D-TXN-ROLLBACK).
 
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
     #Transact {
-        from.balance -= amount   // both land, or neither
-        to.balance += amount     // no lock order to get wrong
+        from.balance -= amount
+        to.balance += amount
     }
 }
 ```
 
-(examples/features/memory/shared_transact.jet) A shared write inside a
-transaction yields nothing — the write happens at commit. An irreversible
-effect (`Net`/`FS`/`Exec`) directly in the block is still E0746: move it after
-the block or register it with `tx.on_commit(…)` on the named form.
+`Cell<T>` is the local interior-mutation path. `Cell.new(value)` infers `T`.
+`get`, `set`, `replace`, and `get_or_set` are value methods; `read` and `edit`
+closure methods keep a dynamic loan inside one call. `get` and `get_or_set` copy
+their result, so the result type must satisfy the copy law. `guard_read()` and
+`guard_edit()` keep a loan across calls. Read guards may coexist; an edit guard
+conflicts with every other guard and reports a `Cell borrow conflict` panic.
+Dropping a guard releases its loan on normal return, early return, and panic
+unwind. `map` projects one field and `split` creates two disjoint projected
+edit guards. A cell guard can cross a direct helper or named tuple but cannot be
+stored in a user struct, enum, list, fixed list, map, option, result, union, or
+lambda. `Cell`, `CellReadGuard`, and `CellEditGuard` cannot cross a task,
+channel, `Shared`, task-group, or parallel-adapter boundary; use `Shared<T>` for
+synchronized cross-boundary state (D-LOCALCELL1=A).
 
-**`Cell<T>`** (D-LOCALCELL1=A) is the local interior-mutation path. It lets a
-read receiver update private state without an `Arc` or an operating-system
-lock. `Cell.new(value)` infers `T`. Value methods are `get`, `set`, `replace`,
-and `get_or_set` for `Cell<?T>`. Closure methods `read` and `edit` keep the
-dynamic loan inside one call. `get` and `get_or_set` copy their result, so the
-stored result type must support Jet's copy law. Use `read` when it does not.
-
-`guard_read()` and `guard_edit()` keep a dynamic loan across calls. Any number
-of read guards can coexist. An edit guard conflicts with every other guard.
-A conflict stops at runtime with a `Cell borrow conflict` panic. Dropping a
-guard releases its loan on normal return, early return, and panic unwind.
-`guard.map(project)` keeps the same loan for one projected field.
-`guard.split(first, second)` returns two projected guards that share the
-original loan. Sema accepts direct field paths and proves the two edit paths
-disjoint. The loan ends only after both guards drop.
-
-Cell guards are temporary loan handles. A function can pass or return one
-directly, and named tuples can contain guards recursively. This keeps mapped
-and split guards useful across named helpers. A guard cannot be stored in a
-user struct, enum, list, fixed list, map, `Option`, `Result`, `Shared`, another
-`Cell`, a union, or a lambda. Keep it in a local name or tuple and use
-`map` or `split` to project it.
-
-`Cell<T>`, `CellReadGuard<T>`, and `CellEditGuard<T>` are local types. Sema
-rejects them across task, task-group, channel, `Shared<T>`, and parallel
-adapter boundaries. Use `Shared<T>` when state must cross one of these
-boundaries.
-
-**`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
-lives in one shared table, and other values point at it by `Id<T>` — plain
-copyable, comparable index+generation data, never touching `T` itself:
+`Pool<T>` is a generational arena and `Id<T>` is copyable index-plus-generation
+data. The pool owns each `T`; an `Id<T>` never accesses `T` by itself. `add`
+returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
+entries. Removing an entry bumps its generation and returns `?T`. Indexing a
+stale ID panics, like an array bounds failure, rather than silently reading old
+storage.
 
 ```jet
-world := Pool<Player>.new()
-kai :: world.add(Player{ name: "Kai", hp: 100, attack: 15, target: None })
-world[kai].target = Val(rem)          // nested write through a real place
-fallen :: world.remove(kai)           // ?T, mirrors Map.remove
+struct Player {
+    name: String
+    hp: Int
+    attack: Int
+    target: ?Id<Player>
+
+fn run() {
+    world := Pool<Player>.new()
+    kai :: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
+    world[kai].hp += 1
+    fallen :: world.remove(kai)
+    _ :: fallen
+}
 ```
 
-(examples/features/memory/entity_world.jet, entity_tree.jet) `pool[id]`
-indexes for read and write; `.ids()` walks every live entry. A stale `Id<T>`
-(its slot was removed) panics at runtime, mirroring the array-out-of-bounds
-precedent (examples/features/memory/pool_stale_id.jet) — not a new
-diagnostic code.
+See [`entity_world.jet`](../../examples/features/memory/entity_world.jet) and
+[`entity_tree.jet`](../../examples/features/memory/entity_tree.jet) for pool
+links and nested writes (D-POOLID-API1).
 
 ### Transitive memory facts
 
-Memory floors are effect-row prohibitions (D-AUTHORITY-MEM1 and D-MEM-FACTS1),
-not `#Policy` settings. Sema checks every reachable call, including
-dependencies, against the function's `!Mem.*` denial. The unbounded forms are
-`!Mem.Alloc` and `!Mem.Rc`; the bounded form is
-`!Mem.Alloc(above: N)`. **E0921** identifies the incompatible source operation,
-prints the full call path, and names the denial plus its provenance. An
-open-world dispatch must have a sealed target set or a signed dependency
-summary; otherwise the strict fact is unprovable and rejected.
+Memory floors are effect-row prohibitions, not `#Policy` settings. Sema checks
+every reachable call, including dependency calls, against the function's
+`!Mem.*` denial. The unbounded forms are `!Mem.Alloc` and `!Mem.Rc`; the bounded
+form is `!Mem.Alloc(above: N)`. E0921 identifies the incompatible operation,
+prints the full call path, and names the denial and its provenance. An open-world
+dispatch needs a sealed target set or signed dependency summary; otherwise the
+strict fact is unprovable and rejected (D-AUTHORITY-MEM1, D-MEM-FACTS1).
 
 ```jet
 fn integrate(e: &Entity, dt: Float) -[!Mem.Alloc]> {
@@ -752,66 +1153,48 @@ fn integrate(e: &Entity, dt: Float) -[!Mem.Alloc]> {
 }
 ```
 
-`@name :: value` is the explicit compile-time-demand binding
-(S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
-At file scope, unmarked `name :: value` and `name := value` are runtime module
-globals; they do not require `#Persist`. `#Static @` emits a Rust `static`
-when a stable address is required. `#Persist name := value` additionally marks
-hot-reload state on a bare binding (D-PERSIST1).
+The human aliasing rule is: while something is being changed, nobody else may be
+looking at it. Foreign `read` and `write` spellings are not Jet access syntax;
+under D-S14-PAUSE they receive ordinary parse errors, apart from a separately
+ratified narrow teaching diagnostic.
 
-Aliasing rule, stated for humans: *while something is being changed, nobody
-else may be looking at it.* Foreign `read`/`write` spellings are paused under
-D-S14-PAUSE and get ordinary parse errors.
+## Access sigils
 
-## Access sigils (D-MEM1)
+Access markers are prefix sigils on the type, not on the binding name. The
+unmarked type is the enforced read default; the only explicit access sigils are
+`&` for exclusive write and `^` for take. They appear on parameters, and the
+call site mirrors them when a caller supplies a write window or transfers
+ownership.
 
-The access marker is a prefix sigil on the **type**, not the name. Two sigils
-ship in v1 (unmarked read is the default, not a sigil):
-
-| Sigil | Access | Compiles to Rust |
-|-------|-----------|-------------------|
-| `T` (bare) | read — callee only reads; enforced, never elevated | `x: &T` |
-| `&T` | write — exclusive edit access | `x: &mut T` |
-| `^T` | take — ownership moves to callee | `x: T` |
-
-`~` is the copy sigil (D-SHAPE-COPY1=A, below), not a parameter access marker —
-it has no arm in this table. Raw-pointer access (`p.*` postfix deref, prefix
-`*x`) is a separate, `#Unsafe`-gated mechanism (D-CAP9) — also not a
-parameter access marker; the compiler's `AccessConvention` enum keeps dead
-`Share`/`Raw` variants internally, inert until a future tier reactivates
-them.
-
-### Placement
-
-The access marker rides the type on the parameter:
+| Written type | Meaning | Native lowering of a non-scalar parameter |
+| --- | --- | --- |
+| `T` | read; the callee cannot elevate it | shared borrow |
+| `&T` | exclusive edit access | mutable borrow |
+| `^T` | ownership moves to the callee | owned value |
 
 ```jet
-fn damage(p: &Player, amount: Int) {   // &Player: write; Int: read (bare)
-    p.hp = p.hp - amount
+struct Player {
+    hp: Int
+}
+
+fn damage(player: &Player, amount: Int) {
+    player.hp = player.hp - amount
+}
+
+fn consume(resource: ^String) { print(resource) }
+
+fn run() {
+    player := Player{hp: 10}
+    damage(&player, 3)
+    consume(^"resource")
 }
 ```
 
-The call site mirrors the sigil — the access marker is always visible where
-mutation or movement happens:
+An access marker composes with the optional prefix: `&?User` is write access to
+an optional `User`, and `^?Texture` takes an optional `Texture`. More than one
+access marker on a parameter is E0029:
 
-```jet
-damage(&p, 30)    // & mirrors the parameter's &Player
-close(^file)      // ^ mirrors ^File — file is consumed
-```
-
-### Optional composition
-
-An access marker composes with the `?` presence prefix directly: `&?User`
-means "write access over an optional User", `^?Texture` means "take an
-optional Texture". The sigil and `?` follow the same type-side grammar as
-any other type annotation — the sigil is the parameter prefix, and `?` is the
-optional type prefix.
-
-### E0029 — two access markers
-
-Placing more than one access marker on a single parameter is a parse error:
-
-```
+```text
 error[E0029]: two access markers on one parameter
   --> file.jet:3:12
    |
@@ -819,1962 +1202,882 @@ error[E0029]: two access markers on one parameter
    |           ^^ remove one access marker
 ```
 
-Access markers use sigils only: bare `T` (read), `&T` (write), `^T`
-(take) — no fourth spelling.
+`~` is the copy sigil, not an access marker. Raw-pointer access (`p.*` or
+prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
+parameter-access table (D-MEM1, D-SHAPE-COPY1=A, D-CAP9).
 
-## M3 — data & methods (done)
+## Boundary crossings
 
-Structs and enums carry fields; methods attach behavior (S27). Ratified
-surface (Group 2): struct literals **`Type{f: v}`** (S29; flush, S29-FLUSH); enums with
-**`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
-**`?T`** with **`Val(v)`** / **`None`** (S32); generic args
-**`Type<Args>`** (S33). `None` is only legal for `?T`, never plain `T`.
-Fresh hidden-state construction uses `Type.new(…)`. Under D-SHAPE3a, the
-receiver may be omitted as `.new(…)` when an expected type from a binding,
-return, field, or call argument determines exactly one receiver. This is
-ordinary expected-type elaboration, not a global constructor search.
-Under D-SHAPE-OPAQUE-INFER1, `Type.new(…)` may likewise omit generic receiver
-arguments when constructor inputs and the surrounding expected type force one
-answer; otherwise write `Type<Args>.new(…)` explicitly.
-
-```
-struct Circle {
-    radius: Float;
-
-    fn area(self) Float -> {
-        return 3.14159 * radius * radius;
-    }
-}
-
-impl Circle {
-    fn unit() Circle -> {
-        return Circle{ radius: 1.0 };
-    }
-}
-```
-
-- **`self`** is the receiver; prefix the type sigil (`^self`, `&self`) like any parameter (D-MEM1) — bare `self` is read.
-- **Self-mutation (D-MUTSELF1):** inside a **`&self`** method the receiver may be
-  changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `&`
-  parameter is already a valid assignment LHS). The same write in a non-`&self`
-  method (a read receiver) is **E0205**, pointed at the assignment with a "write
-  the receiver as `&self`" fix. Calling a `&self` method needs a changeable
-  receiver binding (`:=`), enforced at the call site by E0202.
-- Invoke with **`c.area()`** (not `area(c)`).
-- Methods may live **inside** the type, in **`impl Type { }`**, or as a top-level
-  external inherent method **`fn Type.method(self, ...) { }`** (D-EXTMETH1) —
-  same rules either way. The type must be defined in the current source module.
-- Static methods omit `self` (e.g. `Circle.unit()`).
-- **Named constructors (D-CTOR1):** multiple construction shapes = multiple
-  distinctly-named no-`self` statics returning the type (`Point.cartesian`,
-  `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
-  a teaching message pointing at constructor naming.
-- Enum `if subject == { … }` arms must be exhaustive; missing cases are a compile error.
-- **Traits (S28, M9):** `trait Name { fn sig(self) T; … }` — signatures
-  only. Implement inside a type (`impl Trait { … }`) or outside as
-  `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
-  A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
-  dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
-  and `struct Pair<T> { … }`. Built-in traits follow S55:
-  `Printable`/`Equatable`/`Debug`/`Comparable`/`Encode`/`Decode` auto-derive
-  whenever every field qualifies.
-  The package default is on; `policy: .{ lints: .{ deny: [auto_derive] } }` refuses silent
-  generation. A signed type marker opts one trait in or out (`#Debug`,
-  `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
-  D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;
-  `#Encode` and `#Decode` request one direction.
-- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
-  and `Decode.decode(tree: DataTree) -> Self ![FieldError]` are ordinary Jet
-  trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
-  primitive, container, generated, and hand-written implementations all use it.
-  Built-in derives build typed Jet items beside the marked type and check them
-  through the same sema, TIR, and codegen path as hand-written members. The
-  #Codable and hand-written codec forms therefore share one engine: both call
-  `Encode`/`Decode` over `DataTree`, and JSON compares their encoded bytes and
-  decoded values in `derive_and_hand_written_codecs_share_one_engine`.
-  A serde derive and a generic codec helper are the same engine with different
-  entry points; `serde_derive_and_generic_share_one_engine` proves both the
-  encoded bytes and decoded values.
-  Compiler-owned beginner derives, user `derive` bodies, and `b.generate` all
-  enter one typed item-template expansion before ordinary sema. A compiler
-  builder may provide reflected item data, but it does not get a second
-  expansion or codegen path.
-  A user-defined derive may expand only when its provider or target type is
-  entry-local; otherwise E2711 points at the derive marker.
-- **Accumulated validation (D-VALIDATE1, card #506):** a `validate { … }`
-  section in a struct body declares rules as `check(cond, at: field, "msg")`
-  statements; `field` is a bare sibling-field reference (D-FIELDPOL1). Every
-  failing `check` accumulates into `[FieldError]` (`{ path, reason }`) instead
-  of failing fast. Sema requires each rule
-  statement be exactly this shape (E0353), `at:` to name a real field
-  (E0354), and purity-checks the whole synthesized function (S60/E3401) —
-  a rule may reference only sibling fields and pure calls. `Type.validate(value)`
-  runs the block standalone, returning `value ![FieldError]`. Derived struct
-  decoders now pass a successfully shaped value through that validator, so
-  shape and rule failures share one list. Hand-written codecs still opt into
-  validation explicitly. `Validate.over(s)` starts the outside-context
-  builder; chained `check(cond, at: field, "msg")` rules use the same field
-  vocabulary and accumulate into `[FieldError]`, and `finish()` returns
-  `T ![FieldError]`. The contract ruling is recorded as
-  `D-VALIDATE-DECODE1=B`.
-- **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T -> expr` is an
-  unmarked read-time formula over sibling fields. Put `#Memo` immediately
-  before the field when the result should be retained after its first read;
-  writes to stored siblings in the formula dependency graph invalidate it.
-  A memoized field is still not a writable field and is not supplied in a
-  `Type{ … }` literal. A bare `#Memo` is the field spelling; arguments are
-  rejected with E0382. See `examples/features/memory/computed_field.jet`.
-- **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
-  erased dataflow fact and its policy. `deny` is required and nonempty; `from`
-  is optional. Direct `#Name` tags attach to values, fields, parameters, and
-  returns. `#Scrub(Name)` removes exactly that tag. A tag carries no methods, so
-  declaring one in a tag body is **E0732**, and using a tag where dispatch or
-  method attachment is expected — `derive`d, or implemented/used as a trait —
-  is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
-  (D-CASING1). Prelude declares `Input`, `PII`, `Secret`, and `Credential`.
-- **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
-  line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. An explicit empty effect row is `-[]>`;
-  compile-time demand is the prefix marker `@` (D-ONCE-AT1=D supersedes the
-  former `$` spelling).
-- **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
-  type-checks one statement, including block-shaped statements, then emits no
-  code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
-  in every build, emits only in debug/dev builds, and strips from release output.
-  Names introduced inside either marker are scoped to that marker body.
-  Bare `build.profile` is not a user-typeable comptime value; the registered
-  fact spelling is `@build.profile`.
-- **Canvas metadata (D-CANVASMETA1):** `#Meta(category: "Movement", tunable)`
-  attaches checked tooling facts to bindings, top-level consts, and functions.
-  `category` must be a non-empty plain string literal; `tunable` is a bare flag.
-  The marker emits no code and changes no runtime behavior.
-- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(OS.Linux
-  |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
-  --target=<triple>` emits only the matching build's impls (host OS by default).
-  Ungated code reaches the surviving impl through the compile-time switch
-  **`@if @build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
-  }`** — `@build.os` is a compiler-known comptime value, the switch folds to the
-  arm matching the build's target OS and discards the rest before any gating
-  check runs. Arms must cover every OS or carry an `else`
-  (**E-OSTARGET-DISPATCH-EXHAUSTIVE**); the subject must be `@build.os`
-  (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
-  (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
-  full rules.
-- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside an `@` binding,
-  **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
-  and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
-  UTF-8 requirement — images, fonts, any blob). **`find("glob") -> [String]`**
-  returns sorted relative file paths for a std-only glob (`*`, `**`, `?`,
-  `{a,b}`, `[a-z]`). These are the *only* sanctioned build-time I/O; comptime is
-  otherwise pure (**E3401** — D-META-EFFECT1 c3: one call-graph purity walk
-  shared with the run-time `-[]>` check; retires the former E0951). Paths/globs must be string literals resolved
-  relative to the embedding file's directory, never absolute and never escaping
-  the project via `..` (**E0957**). A missing or unreadable embedded file is
-  **E0955**; for `embed_file`, a non-UTF-8 file is also **E0955**, with a fix
-  pointing at `embed_bytes`. Every embedded file and every file matched by
-  `find` records its sha256 in `.jet/lock`.
-- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `#PublishedSchema struct
-  Name { ... }` marks a public record whose field layout is snapshotted at release
-  under `.jet/cache/schema/`. On later project builds, sema compares the current
-  shape to the saved snapshot (keyed by field name, so order is ignored). A
-  breaking data-shape change is refused — **E0910** — unless a `migration` op
-  declares the intent. The four ops:
-
-  ```jet
-  migration UserRecord {
-      rename name -> display_name              // D-MIGRATE1: field renamed (same type)
-      remove legacy_id                         // D-MIGRATE2D: field deleted
-      add verified: Bool =  false               // D-MIGRATE2A: new field + default for old data
-      change price: Int -> Usd via { c -> Usd.from_int(c) } // D-MIGRATE2E: type change + converter
-  }
-  ```
-
-  - `rename` must target an existing field with the same type.
-  - `change f: Old -> New` resolves its converter in order (D-MIGRATE2B): the inline
-    `via { … }`, else an `impl Old -> New` in scope (the D-ERR-CONV surface), else
-    E0910 asking for one. The `via` body is single- or multi-line and reuses the
-    callable arrow and lambda grammar.
-  - `add f: T =  default` supplies the value old records (written before the field
-    existed) are read with. A field is only "added" if absent from the snapshot.
-  - There is **no `reorder` verb** (D-MIGRATE2F): reordering is never a breaking
-    change and needs no op (writing `reorder` teaches E0911).
-  - `drop` is not a verb (use `remove`); both `drop` and `reorder` are taught back
-    via **E0911**, as is any other unknown verb.
-
-  A declared op that contradicts the real shape (e.g. `remove f` where `f` still
-  exists, `add f` where `f` already existed, a `change` whose from/to types don't
-  match) is itself an E0910-family teaching error. E0910 checks *intent*; the
-  runtime data conversion is the D-MIGRATE4 chain below.
-  Single-file runs accept the marker but only enforce the check when a project
-  snapshot exists.
-
-  **`jet inspect schema` (D-MIGRATE2C):** `jet inspect schema status` lists every snapshotted
-  `#PublishedSchema` type with its pinned published version and fields, flagging any
-  type that has a pending breaking change vs its snapshot (reusing the E0910 diff).
-  `jet inspect schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
-  *current* struct shape and records `squashed_before = <ver>`, so future builds
-  treat the current shape as the authoritative baseline and migration blocks for
-  versions before `<ver>` are no longer required (delete the now-stale blocks). It
-  edits only `.jet/cache/schema/`, never user source. There is **no `jet inspect schema
-  check` verb** — `jet build`'s E0910 is already the CI gate.
-
-  **Decode-time migration transparency (D-MIGRATE3=A, retired by
-  D-VALIDATE-DECODE1=B):** the separate migration-report result was removed.
-  Every codec's typed `decode<T>` is the one canonical contract,
-  `T ![FieldError]` (or `[T] ![FieldError]` for CSV). Published
-  schema migration remains silent inside that call; no second decoder or
-  compatibility wrapper exists.
-
-  **Runtime migration chain (D-MIGRATE4=A):** decoding a concrete
-  `#PublishedSchema` type that derives `Decode` and has `migration { }` blocks
-  runs the chain. The blocks, in source order, are the steps: with `K` blocks
-  the historical shapes are `v1` (oldest) … `vK`, and the current struct is
-  `v(K+1)`; each historical shape's field set is derived at compile time by
-  inverting the ops (`add` ⇒ absent before, `remove` ⇒ present before,
-  `rename a -> b` means `a` before, while `change` means no field-set difference). At decode
-  time:
-
-  1. **Current shape first** — the ordinary decode is tried as-is. Success is
-     the fresh case (`migrated: false`). This is also the ambiguity rule:
-     *prefer the newest matching version*, so data that satisfies the current
-     shape never migrates.
-  2. **Shape detection** — on failure, the data's top-level field-name set
-     (wire keys, after any `#Rename`/`#RenameAll` treatment) is compared
-     against the historical shapes, newest (`vK`) to oldest (`v1`); the first
-     match wins.
-  3. **Walk forward** — the matched shape's data is rewritten step by step,
-     oldest-matching → current: `rename` moves a key, `remove` drops one,
-     `add` evaluates its default expression and fills the field, `change`
-     decodes the old field type, runs the `via { … }` converter (or the
-     `impl Old -> New` conversion, D-MIGRATE2B), and re-encodes the result.
-     Converter bodies and `add` defaults are ordinary Jet expressions,
-     type-checked and lowered through the normal pipeline. The rewritten data
-     then decodes as the current shape.
-  4. **No match** — the ordinary decode error is returned unchanged (garbage
-     stays garbage).
-
-  Plain `decode` applies the same chain silently. Version labels are positional
-  — `v1` is the oldest shape the blocks describe. Types without migration
-  blocks pay nothing: no step functions and no per-type chain code are emitted,
-  and their decode path is unchanged. CSV applies the chain per row.
-
-- **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
-  `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
-  sharing. Field order is preserved as written. Growable fields (`[T]`, `[K:V]`,
-  `String`) are rejected with **E1104** because they lack a stable C layout;
-  fixed-size arrays `[T#N]` are allowed. Reserved variants (`packed`, `align(N)`,
-  `columnar`) parse but error with **E1105** until their milestones ship.
-
-## Boundary crossings — one law (D-BOUND-LAW1=A)
-
-Nothing foreign becomes Jet silently. Every crossing names its schema, and every
-crossing leaves its fact. This is one law for comptime, build, link, and run
-boundaries. A new boundary feature must name one row and fill all five columns:
-time, schema, checker, evolution, and fact. A proposal that needs a new row or
-column returns to design review; it does not create a second boundary mechanism.
+Nothing foreign becomes a Jet value silently. Every crossing names its schema and
+leaves its fact. A boundary feature must occupy one row and state its time,
+schema, checker, evolution, and fact. A proposal that needs a new row or column
+returns to design review instead of creating a second boundary mechanism
+(D-BOUND-LAW1=A).
 
 | Time | Schema named by | Checked by | Evolves by | Fact left |
 | --- | --- | --- | --- | --- |
 | comptime — literal | the checked text type from D-TEXTHEAD-TYPE1 | the type checker and E2712 | source edits | the typed source expression; no runtime origin is needed |
-| build — manifest | the closed manifest vocabulary from D-CONF | manifest validation and its registered errors | editions and explicit manifest changes | parsed manifest identity and its provenance |
+| build — manifest | the closed manifest vocabulary from D-CONF | manifest validation and registered errors | editions and explicit manifest changes | parsed manifest identity and its provenance |
 | build — dependency | the lockfile entry and content hash | E1204 hash verification and the trust gate | re-resolution, lockfile update, or edition change | locked bytes, hash, and trust decision |
 | link — foreign signature | the binder descriptor from D-FFI-UNIFY1 | the language binder and link checks | explicit rebind or descriptor change | the foreign effect leaf and link provenance |
-| run — wire value | the target type with D-SERDE1 / D-ENC1 | typed decode and D-VALIDATE-DECODE1 FieldError values | named migration steps from D-MIGRATE1 and D-MIGRATE4 | the origin fact until successful typed decode |
+| run — wire value | the target type with D-SERDE1 / D-ENC1 | typed decode and D-VALIDATE-DECODE1 `FieldError` values | named migration steps from D-MIGRATE1 and D-MIGRATE4 | the origin fact until successful typed decode |
 
-The ratified rules are instances of this same grid:
+The ratified instances use the same grid:
 
 | Instance | Grid cell | Existing rule |
 | --- | --- | --- |
 | literal | comptime / typed literal | D-TEXTHEAD-TYPE1 and E2712 reject unchecked checked-text bodies |
-| manifest | build / manifest | D-CONF names the accepted fields and manifest diagnostics reject other shapes |
-| dependency | build / dependency | E1204 binds the resolved bytes to the lockfile hash; the trust commands record the grant decision |
+| manifest | build / manifest | D-CONF names accepted fields and manifest diagnostics reject other shapes |
+| dependency | build / dependency | E1204 binds resolved bytes to the lockfile hash; trust commands record the grant decision |
 | link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect leaf |
-| schema binder | link / foreign signature | D-BOUND-BIND1 turns a JSON, CSV, SQL DDL, XML, or proto schema into visible ordinary Jet source, hashed and stamped in its header |
-| wire | run / wire value | D-SERDE1 and D-ENC1 use DataTree and one typed codec path |
-| validation | run / wire value | D-VALIDATE1 accumulates FieldError values; D-VALIDATE-DECODE1 gives decode failures one shape |
-| migration | run / wire value | D-MIGRATE1 and D-MIGRATE4 apply named schema operations and report migration status |
+| schema binder | link / foreign signature | D-BOUND-BIND1 turns a JSON, CSV, SQL DDL, XML, or proto schema into visible Jet source, hashed and stamped in its header |
+| wire | run / wire value | D-SERDE1 and D-ENC1 use `DataTree` and one typed codec path |
+| validation | run / wire value | D-VALIDATE1 accumulates `FieldError` values; D-VALIDATE-DECODE1 gives decode failures one shape |
+| migration | run / wire value | D-MIGRATE1 and D-MIGRATE4 apply named schema operations transparently through typed decode |
 | fact | all rows / fact | D-FACT-LAW1 and D-FACT-FLOW1 keep dataflow facts in the shared sema ledger |
 | trust | build / dependency | D-JPK-GRANTCMD1 and D-JPK-GRANTSCHEMA1 make authority explicit, reviewable, and revocable |
-| error | the checker column of every row | registered E-codes, FieldError values, and typed foreign errors name what failed and its repair path |
-
-The grid is a planning and proof obligation, not a new runtime layer. Sema
-owns the checks and facts; the Prelude owns runtime boundary meaning. AOT
-emission, Cranelift, and interpreter paths marshal the same typed result and
-fact semantics. Boundary work is complete only when the same cell is proven
-through AOT, default jet run, and interpreter execution where the cell has a
-runtime path.
-
-## M4 — errors as values (done)
-
-Failure-returning functions use one shared Result carrier. A bare success type
-uses the ordinary implicit **`!Err`** route: `T` has a non-optional success and
-the default **`Err`** failure. Prefix **`?`** makes success optional, and prefix
-**`!`** names the error domain. Write **`?T !E`** for optional success with an
-explicit error, **`T !E`** for a non-optional success with an explicit error,
-and **`!E`** for unit success with an explicit error. Omitting the error
-declaration uses the implicit default `Err` route, including for unit success.
-Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
-**`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
-Cross-type failure conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
-`impl Source -> Target { … }` converts a `Source` error into `Target`, including
-the default `Err` target; ordinary fallible propagation applies it automatically. A conversion into
-`Err` may name a foreign source type, while typed targets keep the orphan rule
-(S28). D-FAIL-CONV2=A ships that conversion for the standard library's own
-error family, so a plain `fn run()` can pass a library failure up and declare
-nothing; a program's own error type still needs its own
-declaration. `E2402` fires when `?` would need an undeclared conversion; `E2405`
-fires on duplicate declarations; `E2406` fires on typed-target orphan-rule
-violations.
-
-- Fallible calls propagate implicitly (S7): they unwrap `ok` and early-return
-  `err`; an optional result similarly propagates `None`. The only postfix
-  journey form is contextual **`?(text)`**, which adds one failure-context
-  frame.
-- Return types use the prefix failure contract like every other type position.
-  Write **`T`** for the ordinary implicit `!Err` route, **`?T !E`** for an
-  optional success, **`T !(E1 | E2)`** for an explicit error union, and
-  **`!E`** for a unit-fallible result. Parentheses remain legal grouping where
-  the type requires them.
-- **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
-  optional: yields the success payload or evaluates the right side. Precedence is
-  looser than **`&&`** / **`||`**, so `a ?? b` and `x == 1 || y ?? 0`
-  parse predictably. The right side may be a value, **`return`**, **`return expr`**,
-  or **`panic(…)`**. The retired word **`or`** is paused under D-S14-PAUSE and
-  gets an ordinary parse error.
-- **`panic("msg")`** and **`assert(cond)`** / **`assert(cond, "msg")`**
-  (S36), `#Todo`, raw Prelude panics, and scheduler/stream/FFI stops enter one
-  report boundary and exit code 70. Explicit process stops enter the same
-  cleanup boundary and preserve their requested code.
-- In **`if <fallible-expr> { … }`**, when the subject is not a plain
-  name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
-- **`fn run()`** is fallible by default: `?` works inside it with no annotation.
-  An unhandled entry error prints its full report and exits 1. An expert may
-  pin the family with **`fn run() !StoreErr`**.
-
-At an explicit process stop, active `defer close(^resource)` actions run in
-reverse declaration order, `scope.guard` closures run in reverse registration
-order, and `os.atexit` handlers run in registration order after scope cleanup.
-Statements and finalizers registered after the stop do not run. A host kill or
-abort skips these finalizers.
-
-Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
-ignored **`#MustUse`** results (**E0419**), bad propagation (**E0403**),
-`ok`/`err` outside a result context (**E0404**), and fallback type mismatches
-(**E0405**) are compile errors with fixes that name **`?`**, **`??`**, pattern
-tests, binding, and **`.drop("reason")`** — the sole intentional-discard
-spelling (D-IGNORERET2, amended by D-MARK-DISCARD1=A: the `#Suppress(MustUse)
-{ … }` lexical-scope form is retired).
-
-## M6 phase 1 — `jet fmt` (done)
-
-**`jet fmt <file.jet>`** rewrites the file in place to canonical Jet style
-(S44). **`jet fmt --dry-run <file>`** prints a unified diff and writes nothing.
-**`jet fmt --check <file>`** reports changed files and exits **1** when the
-file would change (CI mode). Formatting is lex → parse → print;
-sema and rustc are not run.
-**`jet fmt --simplify <file>`** opts into ratified simplest-spelling rewrites;
-the default `fmt` output remains unchanged by this mode.
-
-Style (zero configuration): 4-space indent, `{` on the same line as its
-header, one statement per line, at most one blank line between top-level
-items, spaces around binary operators, no space before `;`/`,`/call `(`,
-trailing commas on multiline comma lists and no trailing commas on one-line
-lists (D-TRAILCOMMA1). Explicit `;` is retired and diagnosed as E0373; its
-behavior-preserving fix is a line break when code follows or removal at line
-end (D-SEMI1).
-
-`//` and `/* … */` comments are preserved and re-attached by source span. Real
-parse errors still block fmt. The typed `package.jet`/Config formatter is a
-separate closed-record path: when it sees comments, it fails closed until it
-owns their placement rather than reporting the source as clean unchanged. A
-leading inline `package { … }` carrier is preserved byte-for-byte, including
-its exact source spans; only the ordinary Jet source after it is formatted.
-
-Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
-`tests/ui/*.fixed.jet` (`tests/fmt.rs`).
-
-## M6 phase 2 — `jet test` + `jet new` (done)
-
-**`#Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
-Bodies parse like a parameterless function; use **`assert(cond)`** /
-**`assert(cond, "msg")`** and **`assert_eq(a, b)`** (S36) for checks. Duplicate
-test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` is
-paused under D-S14-PAUSE and gets an ordinary parse error. **`jet run`** / **`jet build`** ignore test
-blocks; only **`jet test`** compiles and runs them.
-
-**`jet test <file.jet>`** (or a directory of `*.jet` files) builds one harness
-binary per file (no cargo project; R9). Each test runs in isolation; failures
-use a generated unwind boundary (not observable in user code). Output is one
-line per test (`name: pass` / `name: FAIL`), a shared summary (`N passed, M
-failed, K skipped`), and exit **1** when any test fails. Failed assertions print
-the registered `Stop [E3001]` report with the Jet source location; equality
-checks say `expected …, got …`.
-
-**Scope members (D-DOTSCOPE1)** — inside a `#Test { … }` body, a
-statement-position `.name { … }` / `.name(args) { … }` resolves against the
-marker's declared vocabulary (`Syntax::scope_members`). This is the one spelling
-for scope vocabulary (I8); the parser/sema shape is generic (a marker→members
-table), so other markers can grow members later without new grammar. `#Test`
-declares five, including `.measure`, so a member
-there is **E0614**. A member outside any member-declaring marker is **E0615**;
-an unknown member **E0614** (lists the vocabulary); a wrong argument shape
-**E0617**; a member nested instead of a top-level statement of the block
-**E0618**. Members only *run* under **`jet test`** — `jet run`/`jet build` ignore
-`#Test` blocks entirely (unchanged); a malformed member is still reported in any
-mode (structural check).
-
-- **`.setup { … }`** — must be the first statement (**E0616** otherwise). Its
-  statements are spliced inline and run first; a failure inside fails the test on
-  the normal path. It does **not** open a new scope — bindings made in `.setup`
-  are visible to the rest of the test body (init sugar).
-- **`.expect_fail { … }`** — the region *must* fail (an `assert` failure or a
-  panic). It runs under the harness's panic-catching boundary with a silenced
-  hook; if it completes cleanly the **test** fails with `expected this region to
-  fail, but it passed`. If it fails, execution continues after the region and the
-  test can still pass.
-- **`.timeout(<dur>) { … }`** — the region must complete within the duration value or
-  the test fails with a `timeout: region took …` message. v1 ships **post-hoc**
-  semantics: the region runs to completion, then its elapsed time is compared
-  against the budget (it does not interrupt a hang — out of scope). `<dur>` is
-  a canonical Time literal or a Duration binding, such as `wait :: 500ms` followed
-  by `.timeout(wait)`.
-- **`.skip { … }` / `.skip("reason") { … }`** — the region is **not executed**
-  (emitted as a dead `if false` block, so it still type-checks). When `.skip` is
-  the **first** statement the whole test is skipped: it reports `name: skip` and
-  the shared summary reports its skipped count. A `.skip` later in the body skips
-  only that region; the rest of the test still runs.
-- **`.measure { … }`** — marks the containing claim for measurement. Plain
-  `jet test` runs it once as correctness evidence; `jet test --measure` selects
-  only claims with this member and reports their samples.
-
-**`jet new <name>`** creates `<name>/run.jet` with a `#CLI` typed entry whose
-default `name` is `world`, plus `<name>/package.jet` and `<name>/.gitignore`
-(`build/`). The generated source is the canonical fixed-shape CLI recipe
-(D-CLI-RECIPE1=A): use a typed entry for fixed inputs, `core.args` for a
-dynamic grammar, and raw `core.process.argv()` only for an explicit passthrough.
-Inside that package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
-`jet test` use the shared entry resolver: `run.jet`, then `src/run.jet`, then
-`<package>.jet`. An explicit file or directory remains an explicit target;
-workspace ambiguity names the members and requires `-p` or an explicit path.
-One retired `main.jet` layout migrates to `run.jet` with a notice; mixed or
-canonical-plus-retired layouts fail closed as ambiguous (D-ILE1,
-D-CLI-BARE1, D-VERDICT-678-1).
-
-Example: `examples/features/tooling/tests.jet`; scope members in
-`examples/features/tooling/test_members.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
-`tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`, and the
-`scope_*` fixtures for the member fail paths.
-
-## Measured test claims + perf timing (D-CLAIM-BENCH1=A)
-
-**`#Test("name") { .measure { … } }`** is the one claim form for correctness
-and performance. Plain **`jet test`** runs every claim once. **`jet test
---measure`** selects only measured claims, runs the shared measurement harness
-with five warmups, calibration-based iteration scaling, and twenty serial
-samples under the optimized AOT profile. Human lines, JSON records, and machine
-evidence label the execution tier, profile, warmups, iterations, and serial
-mode. `--filter` selects measured claims by name. `jet run` and `jet build`
-ignore test claims. The old benchmark command and marker are retired; their
-teaching diagnostic points to `.measure` and `jet test --measure`.
-
-The harness sinks the measured body with `black_box` so the optimizer cannot
-elide the returned result. Example: `examples/features/tooling/bench.jet`; the
-executable golden remains the `jet run` output.
-
-### Optimizer-trap catalog for measured regions
-
-A benchmark can measure the optimizer instead of the work. The harness sinks the
-region result with `black_box`, but that does not keep intermediate values that a
-loop computes and drops. A unit-returning loop can therefore disappear, or leave
-only a cheap operation behind.
-
-- **Dead-loop elision.** The nested-loop language benchmark in `UJ_W0O3sFnY`
-  measured integer division because the loop's intended work had no live result.
-- **Lazy-resource deferral.** The first mmap benchmark in `BOrAVwwCXq8` did not
-  fault in the file pages inside the measured region. It reported a result about
-  2000x too fast.
-- **Loop-invariant folding.** If a loop repeats work whose inputs never change,
-  an optimizer can compute it once or replace it with a constant.
-- **Result-sink limit.** The harness's result sink does not protect work whose
-  values die inside the body, and it does not force a lazy resource whose cost
-  occurs after the region. Put the force and the value sink inside the measured
-  loop. The approved identity sink is `keep(value)` under D-BENCH-KEEP1; it
-  returns the same value and must be treated as used.
-
-This catalog applies to measured regions, including the shipped `.measure` form.
-D-CLAIM-BENCH1 retires the former benchmark marker and command in favor of
-`.measure` and `jet test --measure`; the trap rules and sink guidance stay with
-measurement.
-
-**Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
-`jet-timing.json` (load/sema/ffi/codegen µs, plus `build_plan` µs when a build
-entry runs, and generated-Rust bytes), prints
-`jet-timing binary_bytes=…` after link, and the LSP appends per-request latency
-to `jet-lsp-timing.json`. Other values do not enable timing. All gated by the
-env var (zero cost otherwise; I6 hand-rolled JSON, no external crate).
-**`tools/perf/corpus.tsv`** pins representative source and golden-output
-digests. **`tools/perf/dashboard.sh`** drives that corpus through the production
-default JIT and optimized AOT paths, with six clean/no-change/edit rows per
-corpus entry, isolated caches, exact output parity, wall latency, peak RSS,
-phase totals, and sample dispersion. Report version 4 records the
-compiler/toolchain and machine identity, workload identity, and verified
-semantic/diagnostic/effect/tier parity receipts. `variance_pct` is the
-interquartile spread relative to the median; the dashboard rejects more than
-five 1.5-IQR Tukey-fence outliers. It records the compiler/toolchain, target,
-host, kernel, CPU, memory, governor, and stage identity. **`tools/perf/ci-perf-check.sh`** fails on
-changed or missing corpus/identity/timing evidence, output drift, unverified
-parity, variance over 100%, or latency/peak-RSS regression over the pinned 15%
-threshold;
-**`tools/perf/update-baseline.sh`** refreshes the pinned baseline.
-The five active corpus rows are ordered
-`examples/features/basics/hello.jet`,
-`examples/features/collections/wordcount.jet`,
-`examples/features/serde/json.jet`,
-`examples/features/basics/pattern_matching.jet`, and
-`examples/features/devloop/job_runner.jet`; `job_runner` is fifth.
-
-**NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
-and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
-`jet run …` / `jet self lsp` / `cargo test --test lsp`. Editor setup:
-`editors/vscode/README.md`. Release binary: `nix build .#jet`.
-
-## Unified FFI frame (D-FFI-UNIFY1)
-
-Every foreign ecosystem mounts through one model: a language root plus library
-name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
-Every root accepts the same single-library form and the same member list:
-`use <lang>.<lib> as alias` or `use <lang>.[lib as alias, other]`.
-C, C++, Python, and JS are active namespace binders. C uses the namespace surface
-(`use c.<lib>` or `use c.[lib as alias, other]` / `#Extern module c.<lib>`).
-C++ uses the same forms over a
-clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
-explicitly, public scalar classes become owned opaque handles, exceptions become
-`T !CppError`, pure named callbacks keep their checked C ABI, and template
-instantiations are requested on demand. `jet inspect bind cpp` requires the
-selected target and absolute clang/archiver paths; include/library search paths
-and link libraries are audited in binding provenance and reused at final link.
-JS uses the same single/member-list surface;
-the host is target-dispatched, with browser JS on web targets and the native
-JS-on-WASM host on native targets. Generated JS binding caches live under
-`.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
-`<lib>.d.ts` records the TypeScript declaration provenance. Rust keeps the shipped
-`extern rust "crate@version" { ... }` declaration block as its active binder
-surface until the `rust.*` namespace migrates. Python is active through its
-supervised sidecar; Swift's planned route is a typed bridge over generated
-C-ABI shims.
-
-`jet inspect bind js <lib>.d.ts --runtime <module.js>` accepts only exported
-scalar declarations (`number`, `bigint`, and `boolean`). It emits the same
-checked C/Jet wrapper, a supervised Node worker, and descriptor-stamped
-provenance. The Node broker is the explicit opt-in transport; target-dispatched
-JS remains the native/web execution route.
-
-The compiler stores this shape in one descriptor table. Each descriptor names
-the ABI contract, ownership and layout rules, callback and error model, safe
-wrapper boundary, cache suffix, provider, effect leaf, and capability set.
-Generated stubs and binder artifacts include the descriptor stamp. A stale
-stamp is a binding-generation error before the foreign call. `jet inspect bind`
-reports the same descriptor data for every language root.
-
-The inline fourth tier is also implemented. `#FFI(c|cpp) fn` carries one exact
-triple-quoted raw body whose Jet signature remains the checked contract.
-`#FFI(asm) fn` is available only inside an audited `#Unsafe("reason")` region
-with `use core.mem`; its named operands, return anchor, clobbers, and selected
-target are checked before lowering. These native boundaries are not resident-JIT
-code: the JIT reports the foreign boundary by name, while native build/run owns
-execution and link proof.
-
-## E3 — Typed Python sidecar (D-FFI-PY1=A, sidecar vertical)
-
-`jet inspect bind py <script.py> --pkg <lib>` checks top-level Python functions
-with scalar annotations (`int`, `float`, and `bool`), then writes the typed
-`.jet/bindings/py/<lib>.jet` cache, a supervised worker, a C archive, and a
-queryable provenance record. The generated Jet wrapper is the only safe call
-surface. It uses the shared descriptor stamp, scalar wire values, and the
-`-[FFI.Py]>` effect row. `py.*` calls never expose a Python exception,
-traceback, command string, or raw foreign symbol to Jet; a failed worker call
-becomes a checked result error.
-
-The sidecar adapter uses the common checked C bridge used by scalar foreign
-adapters. Its worker validates the declared argument and result types before
-the foreign call, contains Python stdout/stderr, and fails closed on malformed
-or non-finite values. Unsupported annotations, async functions, defaults,
-variadics, and malformed signatures reject during binding with **E3208**.
-Python package realization remains the PyPI provider's responsibility; the
-bridge consumes the provisioned `python3` runtime and records its descriptor,
-source, worker, and archive identities in provenance.
-
-The scalar bridge archive lives under
-`.jet/bindings/<lang>/.bridges/<identity>/`. The stable `lib<abi>.a` projection
-links to that archive. The identity includes the descriptor, source and worker
-bytes, runtime and native toolchain identities, and the typed function list.
-Identical inputs reuse one identity. A changed input selects a new identity.
-
-`jet inspect dossier ffi` prints the golden-tested per-language capability
-matrix derived from the same descriptor table that routes imports and resolves
-foreign archives. Planned roots remain visible as planned; no host-tool probe
-turns an unavailable local installation into a false active claim.
-
-## M7 — Rust FFI (`extern rust`, done)
-
-**`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
-entry is a normal Jet signature plus **`= "rust::path"`** naming the target
-item. This source-level declaration is sufficient even inside a project with
-`package.jet`; users do not need the package manager just to call a foreign
-function. **`extern rust "std" { … }`** works for Rust standard-library items with
-no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
-
-Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `[T]`/`[K:V]`/`?T`/`T !E` built from allowed types, and
-structs/enums whose fields are allowed. Capability parameters use the ratified
-`&`/`^` meanings from D-FFI-CAP1; raw foreign calls carrying one require an
-audited `#Unsafe` boundary (**E0702**). Generated typed bindings own the
-adapter and may expose the capability directly. Unsupported types still fail
-at the declaration boundary with **E0702**.
-A returned handle may use `#Close(close)`; the named sibling must consume
-exactly `^` of that handle and return no value, which registers it with
-`close(^handle)` exactly once.
-
-When any crate dependency is needed, the driver builds a hidden cached cargo
-bridge under `~/.cache/jet/ffi/` and links it into the generated program (R9:
-the user's folder never grows a manifest). Missing **`cargo`** → **E0703**;
-fetch/build failures → **E0704** (cargo output in an indented block); a wrong
-foreign path or signature → **E0705**. Panics inside foreign code are caught
-at the boundary and become the M4 runtime report (exit 70).
-
-Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**).
-
-Example: `examples/features/lowlevel/ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
-Integration: `tests/ffi.rs` (gated on `cargo`).
-
-## E2-M14 — C FFI (implemented: overlay + merge + link + bind backend)
-
-**S59** — C import with auto-generated bindings (default) and optional user
-overlay. (Full spec follows in this section.)
-
-| Layer | Shape |
-|---|---|
-| Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
-| Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
-| Call site | `use "header.h" as alias`, `use c.<lib> as alias`, or `use c.[lib as alias, other]` (one bring-in per lib per file) |
-
-Foreign function bindings mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
-"InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
-loads the bindgen cache at `.jet/bindings/c/<lib>.jet` (when present), merges the
-user overlay over it (**effective module = bindgen ∪ overlay; overlay wins**;
-incompatible re-declaration → **E3205**), and materializes one synthetic module
-so calls resolve like any namespaced module call. Codegen emits an `extern "C"`
-block plus small per-function wrappers (the only place compiler-vetted `unsafe`
-is emitted, S58); `String`↔`*const c_char` and `Char`↔`u32` convert at the edge.
-For a C function declared to return `String`, the pointer is borrowed from C:
-it must be non-null, NUL-terminated, and valid UTF-8. Jet copies it immediately
-into an owned `String` and never frees the C pointer. Null and invalid UTF-8 are
-runtime boundary failures; neither becomes an empty or lossy string. APIs with
-owned buffers, nullable strings, another encoding, or a library-specific free
-function stay raw and need an audited wrapper.
-
-Link key = last segment `<lib>`: a declared `<lib>: c@…` dep in the `deps:`
-block of `package.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
-`c@"path"` → local `-L`/`-I`/`-l`) → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
-`-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
-threaded into the `rustc` link line. By-value scalars/`String`/C-layout
-structs+enums at the edge; aggregates (`[T]`, maps, `?T`, tuples, …) → **E3203**.
-D-CABI-RESULT1 keeps status-plus-out APIs raw: a parameter may be `*T` only
-when `T` is C-safe, and every call is an unsafe-function call requiring an
-audited `#Unsafe("reason")` region. The caller creates the non-null pointer
-through `core.mem`, initializes its slot, checks the raw status, and reads the
-slot only on a status the wrapper knows initialized it. Pointer returns remain
-**E3202**; direct `Result` declarations remain **E3203**. `#Bindgen` is legal only inside a
-generated cache file (**E3207**); users may not name the reserved `__bindgen__`
-segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
-
-`jet inspect bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
-shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
-implementation, D-CBIND3 superseded). It parses C function prototypes over the
-bindable type subset (scalars, `char*` strings, `void`) and emits a `#Bindgen`
-cache; declarations it cannot map are skipped and reported rather than faked
-(I3). The cache also records the shared descriptor stamp; a stale generated
-cache is rejected and must be regenerated. **E3208** fires only when the header cannot be read or contains no
-bindable prototypes — the fix is a hand-written `#Extern module c.<lib>` overlay
-for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
-**E3201–E3208** in diagnostics.md with snapshots (front-end ones under
-`tests/ui/cffi_*`; link-time/gated ones pinned in `tests/cffi.rs`).
-
-## E3 — Go project binder (D-FFI-GO1=A, scalar + handle surface implemented)
-
-`jet inspect bind go <source.go> --pkg <lib>` finds cgo `//export Name`
-functions whose parameters and optional result are `int64`, `float64`, or
-`uintptr`, runs
-the provisioned Go compiler with `go build -buildmode=c-archive`, and writes
-the archive plus a typed `.jet/bindings/go/<lib>.jet` cache. Programs import it
-with `use go.<lib> as alias` or `use go.[lib as alias, other]`; calls execute in-process through the shared C ABI
-linker, so the Go runtime is part of the native program rather than a sidecar.
-`uintptr` maps to a private-field, move-only `go.<lib>.Handle`; passing it to a
-foreign function consumes it, preventing Jet from reusing a released
-`runtime/cgo.Handle`. The binder accepts handles only on a 64-bit host ABI and
-supervises compilation with a 60-second deadline plus bounded diagnostic
-capture. Calls through generated `go.*` caches contribute the `FFI.Go` effect leaf;
-ordinary C externs remain maximally effectful. Unsupported signatures fail before compilation. Go compiler failures
-are laundered through **E3208** and never expose raw foreign source frames
-(I2/I4).
-
-Example: `examples/features/lowlevel/polyglot_go/`.
-
-## E3 — Fortran project binder (D-FFI-FORTRAN1=A, checked ISO_C_BINDING vertical)
-
-`jet inspect bind fortran <source.f90> --pkg <lib>` discovers explicit
-`bind(C, name="...")` functions and compiles them with the provisioned
-`gfortran` toolchain. Scalar `integer(c_int64_t)` and `real(c_double)` inputs
-must use `value`. Fixed-shape input arrays of those elements must use
-`intent(in)` and map to flat `[Int]` or `[Float]` values in Fortran
-column-major order. The generated public wrapper records every extent and
-rejects a list whose length does not exactly match the shape before passing its
-pointer across the private C ABI seam. Generated `fortran.*` calls contribute
-the `FFI.Fortran` effect leaf. Unsupported declarations and compiler failures are
-laundered through **E3208** rather than exposing `gfortran` diagnostics.
-
-Example: `examples/features/lowlevel/polyglot_fortran/`.
-
-## E3 — COBOL project binder (D-FFI-COBOL1=A, GnuCOBOL C-ABI vertical)
-
-`jet inspect bind cobol <program.cob> --copybook <record.cpy> --pkg <lib>`
-compiles one linkage program with provisioned GnuCOBOL and writes a
-`cobol.<lib>` cache. The copybook subset is closed: one level-01 record with
-level-05 fixed text, COMP-5 integers, and COMP-3 packed decimals. The binder
-records exact offsets and widths, emits an `#Codable` Jet record, and maps every
-COMP-3 field to `Decimal`, never `Float`. Its callable C bridge accepts packed
-decimal values as scaled minor-unit `Int` values, initializes `libcob` once,
-and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. The public
-wrapper keeps range and foreign-program failures typed as `CobolError` while
-publishing the `-[FFI.Cobol]>` effect. Generated tools have 60-second deadlines
-and 64 KiB capture ceilings. Binding also proves the generated C bridge and
-COBOL object link together with undefined symbols denied, then records the
-descriptor, source/copybook hashes, layout facts, runtime, and archive hash in
-`.provenance`. Unknown layouts, ABI-proof failures, and laundered foreign-tool
-failures use **E3208**.
-
-## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
-
-`jet inspect bind java <source.java> --pkg <lib>` uses the provisioned OpenJDK
-toolchain to compile bytecode and discovers public JVM descriptors through
-`javap -s`. Supported constructors and non-overloaded methods use `long` and
-`double`; unsupported descriptors fail binding rather than guessing an ABI.
-The generated cache links a std-only JNI bridge against the provisioned
-`libjvm`. It creates one JVM lazily inside the native Jet process, attaches
-calling threads, and destroys the JVM at process teardown.
-
-Java objects cross as opaque `java.<lib>.Handle` values backed by a bounded
-1,024-slot global-reference table. Calls borrow the handle; `close(^handle)`
-consumes Jet ownership and releases the global reference. Remaining references
-are released during JVM teardown. Constructors and value-returning methods are
-fallible with `JavaError.Exception`; the bridge clears the Java exception and
-returns only the typed Jet error, never a Java stack or foreign source frame.
-Generated calls carry the `FFI.Java` effect leaf. `javac`, `javap`, `cc`, and `ar`
-run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
-binds the source, discovered bytecode surface, class cache path, and schema with
-SHA-256. Tool failures use **E3208** what/why/fix copy.
-
-Example: `examples/features/lowlevel/polyglot_java/`.
-
-## E3 — .NET project binder (D-FFI-DOTNET1=A, embedded class vertical)
-
-`jet inspect bind cs <source.cs> --pkg <lib>` compiles the source with the
-provisioned .NET 8 SDK and discovers its public API through managed reflection.
-One public class, one constructor, and non-overloaded methods using `long` and
-`double` project into a typed `cs.<lib>` module. Unsupported types and overloads
-fail binding rather than guessing an ABI.
-
-The generated native archive embeds CoreCLR through
-`hostfxr_initialize_for_runtime_config` and
-`load_assembly_and_get_function_pointer`. Generated managed entry points use
-`[UnmanagedCallersOnly]`; no worker process, file protocol, or environment
-transport participates in calls. Instances cross as opaque move-only `Handle`
-values backed by a 1,024-slot generation-checked `GCHandle` table.
-`close(^handle)` deterministically releases the managed root. Exhaustion becomes
-`DotNetError.ResourceLimit`; managed exceptions become
-`DotNetError.Exception`; invalid, stale, or released handles become
-`DotNetError.InvalidHandle`, with foreign exception text never exposed. Calls
-carry the `FFI.DotNet` effect leaf. SDK, C compiler, and
-archive tools run under a 60-second deadline with 64-KiB output capture.
-Provenance binds source, reflected surface, hostfxr identity, and schema with
-SHA-256. Tool failures use the snapshotted **E3208** diagnostic.
-
-Example: `examples/features/lowlevel/polyglot_dotnet/`.
-
-## E3 — Tcl project binder (D-FFI-TCL1=A, live-session vertical)
-
-`jet inspect bind tcl <script.tcl> --pkg <lib>` compiles a std-only C bridge
-against the Nix-provisioned Tcl headers and shared runtime, then writes a typed
-`tcl.<lib>` cache. `open()` creates an in-process interpreter and evaluates the
-script once as session initialization. Later `eval`, `eval_int`, and
-`eval_float` calls share its variables and procedures. `eval_once` uses a fresh
-interpreter and destroys it after one call.
-
-`Session` is opaque and thread-affine. A bounded 64-slot table owns every live
-interpreter; `close(^session)` consumes the Jet handle, and process teardown
-deletes any remaining interpreters before Tcl finalization. String results are
-copied through a 64-KiB thread-local boundary and reject embedded NUL or
-oversize values. Integer and float entrypoints use Tcl's typed object parsers.
-Tcl failures become `TclError.Eval`; raw Tcl result text and stack frames never
-cross the boundary. Calls carry the `FFI.Tcl` effect leaf.
-
-Evaluation is synchronous. A long-running Tcl command blocks its calling Jet
-thread until Tcl returns. This vertical exposes no cancellation claim and does
-not kill or corrupt the in-process interpreter on timeout; cancellation needs a
-future Tcl event-limit contract. Bridge tools run under a 60-second deadline
-with 64-KiB diagnostic capture. Binding provenance hashes the initialization
-script, Tcl runtime identity, and schema. Bind failures use **E3208**.
-
-Example: `examples/features/lowlevel/polyglot_tcl/`.
-
-## E3 — Lua project binder (D-FFI-LUA1=A)
-
-`jet inspect bind lua <script.lua> --pkg <lib>` validates the script with the
-Jetpack-provisioned Lua compiler, discovers direct top-level
-`function name(input)` declarations without executing the script, and compiles
-a native archive against the provisioned Lua 5.4 headers. Each `open()` owns an
-independent in-process `lua_State` and evaluates the script once. Mutable module
-state persists within one session and remains isolated between sessions. No
-subprocess or raw Lua handle is part of the public API.
-
-Generated functions accept `DataTree`; sibling `<name>_typed<T>` adapters require
-`T: [Encode, Decode]` and validate the decoded result before returning it. Null,
-booleans, integers, floats, text, lists, and string-keyed maps retain their data
-meaning. Cyclic tables, unsupported keys and values, nesting beyond 64 levels,
-and input or output at least 1 MiB fail at the boundary. Lua errors become the
-closed `LuaError` variants; exception text, paths, and stack frames never cross.
-Calls carry the `FFI.Lua` effect leaf.
-
-Sibling `<name>_view(session, deadline_ms)` adapters require the Lua function to
-return a table and pin that table in the owning session's registry. `TableView`
-integer reads and writes address the live table directly: they do not serialize
-the table through JSON or `DataTree`, and Lua-side mutations are visible through
-the same view. `TableView.Close` releases the registry reference at scope exit.
-Session close releases every remaining table and invalidates all copied or stale
-view handles; post-close access returns `LuaError.NotRunning`.
-
-The VM instruction hook enforces each call deadline and observes concurrent
-`cancel(session)` requests without destroying the session. A caught timeout,
-cancellation, Lua exception, or protocol error leaves the VM available for the
-next call. A bounded 32-slot generation table owns states. `close(^session)`
-deterministically calls `lua_close`; stale and post-close calls return
-`LuaError.NotRunning`. Provenance binds source, runtime identity, and schema.
-Binding tools have a 60-second deadline and 64-KiB output cap; parse and tool
-failures use laundered **E3208** copy. LuaRocks realization remains Jetpack
-provider work and is not claimed by this binder.
-
-Example: `examples/interop/lua/`.
-
-## E3 — Ada project binder (D-FFI-ADA1=A, GNAT C-ABI vertical)
-
-`jet inspect bind ada <package.ads> --pkg <lib>` reads exported functions from
-an Ada package spec, compiles its sibling body with Nix-provisioned GNAT, and
-writes a typed `ada.<lib>` binding cache. Supported exports use `Export`,
-`Convention -> C`, and `External_Name`; inputs and results are
-`Interfaces.C.long_long`/`Long_Long_Integer` or
-`Interfaces.C.double`/`Long_Float`. Unsupported ABI shapes fail binding rather
-than being guessed.
-
-Scalar subtypes with `range LOW .. HIGH` become pre-call checks in generated
-Jet wrappers. A value outside the Ada range returns `AdaError.Constraint`
-before the C-ABI export executes. Calls carry the `FFI.Ada` effect leaf. Generated
-bridges run GNAT elaboration once and finalization at process exit.
-
-GNAT, binder, C compiler, and archiver processes have a 60-second deadline and
-64-KiB output bounds. Raw GNAT locations are laundered behind **E3208**.
-Provenance hashes the spec, package body, GNAT runtime identity, and binding
-schema. The native link records the exact GNAT runtime directory and rejects a
-missing or non-absolute runtime identity.
-
-Example: `examples/features/lowlevel/polyglot_ada/`.
-
-`jet import ada <dir>` preserves each Ada package spec and sibling body as the
-authority, emits an editable `ada.<package>` binder stub, and records JT0101
-for unsupported source semantics. It does not invent translations for ranges,
-exceptions, tasking, representation clauses, or ownership. Run `jet inspect
-bind ada <package.ads> --pkg <package>` for the call-in-place C-ABI surface.
-
-## E3 — Object Pascal project binder (D-FFI-PASCAL1=A)
-
-`jet inspect bind pascal <library.pas> --pkg <lib>` compiles a FreePascal
-library's exported `cdecl` routines and writes a typed `pascal.<lib>` cache.
-`Int64` and `Double` cross as Jet `Int` and `Float`. A declared class binds
-through exported `<class>_new`, pointer-first scalar methods, and `<class>_free`
-wrappers. Unsupported ABI shapes fail binding instead of being guessed.
-`jet import pascal <dir>` preserves the Pascal source as the authority and
-emits an editable binder stub plus JT0101 provenance; it does not invent a
-source translation for classes, runtime ownership, or unsupported bodies.
-Example: `examples/features/lowlevel/polyglot_pascal/`.
-
-Class pointers never reach Jet. A generated C bridge owns them in a bounded
-64-slot table and returns opaque integer identities wrapped in a move-only Jet
-type. Methods borrow that type. `<class>_close(^handle)` consumes it. Closing a
-stale identity is rejected by the table before the Pascal destructor runs;
-process teardown destroys any remaining owned objects before FreePascal library
-finalization. Calls carry the `FFI.Pascal` effect leaf.
-
-FreePascal, C compiler, and archiver processes have a 60-second deadline and
-64-KiB output bounds. Compiler failures use laundered **E3208** what/why/fix
-copy. Provenance hashes source, canonical compiler identity, and binder schema.
-Native links pin the generated static bridge and shared Pascal runtime cache,
-including its runtime search path.
-
-## E3 — Dart and Flutter host FFI (D-FFI-DART1=A)
-
-`jet inspect bind dart <contract.dart> --jet <compute.jet> --pkg <lib>` builds
-one in-process, bidirectional FFI estate. The Dart or Flutter application owns
-the isolate. The generated `<lib>_host.dart` loads the native Jet compute
-library with `dart:ffi`, initializes `dart_api_dl` from
-`NativeApi.initializeApiDLData`, pins isolate-local callbacks, and registers
-their native function pointers. Jet compute exports use the existing plugin
-C-ABI surface, so the same library can call Dart callbacks and be called from
-Dart. No helper process, command shell, environment variable, or file protocol
-participates in a call.
-
-`shutdownJetDart()` unregisters every native callback pointer before closing
-the pinned `NativeCallable` values. The isolate can then terminate without
-leaving native code a callable address whose Dart owner has been released.
-
-Dart callbacks are top-level `@pragma('vm:entry-point')` functions with
-positional `int`/`double` inputs and an `int`/`double` result. Unsupported,
-optional, named, generic, object, string, async, or overloaded shapes fail
-binding rather than being guessed. Generated Jet wrappers return
-`DartError.NotInitialized` until the Dart host initializes API DL and
-`DartError.CallbackUnavailable` until a callback is registered. Calls carry
-the `FFI.Dart` effect leaf.
-
-`NativeCallable.isolateLocal` makes this vertical synchronous and
-isolate-thread-affine. Flutter uses the same generated Dart host and deploys
-the produced platform library through its ordinary native-library packaging;
-Jet does not claim to embed or launch a Flutter engine. Dart SDK discovery,
-C compilation, archiving, and native Rust compilation are bounded to 60
-seconds and 64 KiB of captured output. Tool failures are laundered behind
-**E3208**. Provenance hashes the contract, Jet compute source, both canonical
-source paths, canonical Dart SDK tool identity, and binder schema.
-
-## E3 — Persistent PowerShell object pipeline (D-FFI-PWSH1=A)
-
-`jet inspect bind pwsh <script.ps1> --pkg <lib>` validates the script with
-PowerShell 7, binds its named `function` declarations, projects the conventional
-PowerShell `-` separator to `_` in Jet names, and writes a typed
-`pwsh.<lib>` cache. `open()` starts one supervised `pwsh` worker, waits at most
-five seconds for its fixed startup handshake, and loads the
-script once. Calls on that session retain script/module state and run the
-named function's pipeline. Jet never accepts runtime PowerShell source or a
-command string: generated entrypoints carry a binder-approved function
-identity, and the worker checks the same allowlist before invocation.
-The shipped process supervisor is POSIX-only; other hosts reject binding
-generation instead of emitting a bridge they cannot supervise truthfully.
-
-Every function accepts one canonical `DataTree` input and returns one
-`DataTree`. Nested objects, lists, integers, floats, booleans, text, and null
-cross through a length-framed structured JSON protocol; stdout text is not the
-result channel. Requests and responses are capped at 1 MiB and JSON depth 64.
-The bridge validates frame lengths and response envelopes before the generated
-Jet wrapper exposes a value. PowerShell exceptions become
-`PowerShellError.CommandFailed`; raw error records, script paths, stderr, and
-stack traces never cross the boundary. Calls carry the `FFI.PowerShell` effect leaf.
-Generated Jet source uses the canonical `->` callable arrow and dotless typed
-construction; retired spellings are never emitted.
-
-Each call declares a 1–300000 ms deadline. Expiry kills and reaps the whole
-worker process group and invalidates its session. `cancel(session)` performs
-the same group cancellation for an in-flight call; `close(^session)` consumes
-the handle, and process teardown reaps remaining workers. Handles contain a
-generation so stale identities cannot address a reused slot. At most 32
-workers exist per process. Binding-time `pwsh`, C compiler, and archiver runs
-have a 60-second deadline and 64-KiB output capture. Failures use laundered
-**E3208** copy. Provenance hashes the script, canonical script and PowerShell
-identities, worker protocol, and binder schema.
-
-## E3 — Persistent Perl worker (D-FFI-PERL1=A)
-
-`jet inspect bind perl <script.pl> --pkg <lib>` validates the script with the
-provisioned Perl compiler, discovers named main-package `sub` declarations from
-compiler metadata without running the top-level runtime body, and writes a
-typed `perl.<lib>` cache. Foreign function names project to Jet `snake_case`
-while the worker retains and invokes the exact Perl name. Perl's normal
-compile-time blocks still obey `perl -c`.
-`open()` starts one supervised Perl process, loads the script once, and retains
-its lexical and package state across calls. Generated entrypoints carry fixed
-function identities; the worker rejects names outside the binder-generated
-allowlist. Runtime source and arbitrary command strings never cross the API.
-The process supervisor is POSIX-only; unsupported hosts reject binding
-generation instead of emitting an unusable bridge.
-
-Every bound function accepts one `DataTree` and returns one `DataTree` through
-Perl's core `JSON::PP`. Null, booleans, integers, floats, text, arrays, and
-objects retain their JSON data meaning. The binary protocol length-frames each
-request and response, checks response identities, limits frames to 1 MiB, and
-never treats stdout text as a result. Perl exceptions become
-`PerlError.CommandFailed`; stderr, script paths, stack traces, and exception
-text stay inside the worker. Calls carry the `FFI.Perl` effect leaf.
-
-Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
-reaps the worker process group and invalidates the generation-tagged handle.
-`close(^session)` consumes the session. At most 32 workers exist per process;
-process teardown reaps all survivors. Binding-time Perl, C compiler, and
-archiver processes have 60-second deadlines and 64-KiB output capture. Their
-failures use laundered **E3208** copy. Provenance hashes source, canonical
-script and Perl identities, worker protocol, and binder schema. CPAN package
-realization remains the Jetpack provider's responsibility; the binder consumes
-the Perl executable and installed modules exposed by that realized environment.
-
-## E3 — Persistent Ruby worker (D-FFI-RUBY1=A)
-
-`jet inspect bind ruby <script.rb> --pkg <lib>` uses the provisioned Ruby
-runtime's `Ripper` parser to discover direct top-level method declarations
-without executing the script. Bindable methods have one required positional
-argument and a Jet-compatible name. Generated entrypoints are a fixed allowlist;
-runtime source, method names, and arbitrary commands never cross the API.
-
-`open()` starts one supervised Ruby process and loads the script once, retaining
-global and object state across calls. Each method accepts and returns `DataTree`
-through Ruby's standard `JSON` library. The binary protocol length-frames every
-request and response, verifies response identities, limits frames to 1 MiB, and
-never treats stdout text as a result. Ruby exceptions become
-`RubyError.CommandFailed`; exception text, stack traces, stderr, and paths stay
-inside the worker. Calls carry the `FFI.Ruby` effect leaf.
-
-Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
-reaps the worker process group and invalidates the generation-tagged handle.
-`close(^session)` consumes the session. At most 32 workers exist per process;
-process teardown reaps survivors. Binding-time Ruby, C compiler, and archiver
-processes have 60-second deadlines and 64-KiB output capture. Failures use
-laundered **E3208** copy. Provenance hashes source, canonical script and Ruby
-identities, worker protocol, and binder schema. RubyGems resolution and install
-are not implemented by this binder and remain unclaimed Jetpack provider work.
-
-## E3 — Persistent R worker (D-FFI-R1=A)
-
-`jet inspect bind r <script.R> --pkg <lib>` parses the script without running
-its top-level body and binds direct named functions with one required argument.
-`open()` starts one supervised R worker, loads the script once, and retains its
-state. A normal `<name>` adapter round-trips `DataTree`; `<name>_table<T>` maps
-ordinary `[T]` rows to `data.frame` and back through the same framed JSON
-channel. This bridge wording does not reintroduce a public Jet table carrier.
-
-`<name>_plot` runs the function on an isolated SVG graphics device and returns
-the plot as `String`. The worker parses resulting XML structurally, permits only
-an inert SVG element, attribute, local-fragment, and presentation-style
-vocabulary, and emits deterministic canonical XML. It rejects scripts, event
-handlers, `foreignObject`, external references, active CSS, declarations,
-entities, malformed XML, and input or canonical output above 512 KiB. Plot
-failures become `RError.CommandFailed`; R errors and rejected SVG content never
-cross the boundary. Each worker gets a supervisor-created private temporary
-directory. Success, error, deadline, cancellation, close, and process teardown
-all remove its SVG and directory.
-
-All calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
-reaps the process group and invalidates that handle; a new session starts a
-clean worker. Frames remain capped at 1 MiB, handles are generation-tagged, and
-at most 32 workers exist per process. CRAN realization belongs to Jetpack; the
-binder consumes the provisioned R runtime and installed modules.
-
-## E3 — Windows COM automation (D-FFI-COM1=A)
-
-`com.*` exists only on a Windows host. Elsewhere, importing it or running
-`jet inspect bind com` emits **E3260** before reading a type library or looking
-for a generated cache. Jet does not route COM through PowerShell or scripts.
-
-`jet inspect bind com <library.tlb> --pkg <lib>` reads a file-backed type
-library. `--registered <guid> --major <n> --minor <n> [--lcid <n>]` reads the
-Windows type-library registry through `LoadRegTypeLib`. The inspector uses
-`ITypeLib` and `ITypeInfo`, rejects hidden, restricted, out-parameter, and
-unrepresentable members, and emits committable typed stubs. Primitive VARIANT
-types become Jet scalars, BSTR becomes `String`, dispatch interfaces become a
-move-only `Object`, and VARIANT/SAFEARRAY values become `DataTree` through a
-bounded JSON boundary. Dynamic name-based IDispatch remains available only in
-an explicit `#Unsafe` region; the safe generated surface carries fixed DISPIDs.
-
-The Windows bridge initializes a single-threaded COM apartment per live
-object, pins each generation-tagged handle to its creating thread, invokes
-members through `IDispatch::Invoke`, and launders HRESULT/EXCEPINFO into
-`ComError` variants without exposing vendor text. `close(^object)` consumes the
-handle, calls `Release`, and balances `CoUninitialize`; stale, cross-thread,
-and double-close handles fail before invocation. Frames and DataTree recursion
-are capped at 1 MiB and depth 64. Both dispatch type infos and dual automation
-interfaces are inspected. Provenance hashes the extracted type-library schema
-and generated surface; a released file-backed binding may omit the original
-`.tlb`, but if that input remains available its bytes must still match the
-recorded hash.
-
-## Data-schema binders (D-BOUND-BIND1=A)
-
-The binder verb reads data schemas as well as language headers:
-`jet inspect bind json|csv|sql|xml|proto <file> [--type <Name>] [-o|--out <path>]`
-writes ordinary Jet source — one `#Codable` struct per record, with `#Rename`
-where the wire key is not a Jet name. The default destination is
-`bindings/<input-stem>.jet`; `-o`/`--out` names another path. Nothing imports it
-for you (D-NAME-FILES1=C): you read it, commit it, and own it like any source,
-and you may edit it by hand.
-
-Every generated file opens with the stable provenance header: the exact
-command, the input path, the `sha256` of the input bytes, the format, and one
-`inference` line per rule the binder applied — the header is where those rules
-are written down, so a reader never has to guess what was inferred. Commands
-and paths are escaped in the header, so a hostile file name cannot inject
-source. Regeneration is explicit. Writing the default destination when its
-recorded command differs is **E2104**, not a silent overwrite; a schema that
-cannot be parsed or yields no record is **E3208**; an unreadable input or
-unwritable output is **E2105**. Grid cell: link / foreign signature.
-
-## E2-M13 — Expert low-level tier (S58, implemented)
-
-C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
-emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`).
-
-- **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`*T`,
-  `mem.volatile_read`, `mem.volatile_write`, `mem.address_of`, allocators).
-  Naming one of these without the import → **E3102**.
-- **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
-  violate memory safety (pointer build/deref, volatile access). The reason
-  string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
-  `#Audit("…")` line is retired → **E0055**). Under **D-UNSAFE-REASON1=A**,
-  bare `#Unsafe { … }` and bare `#Unsafe fn` are hard errors (**E3112**).
-  `#Unsafe("reason") fn` marks a whole-function contract; its body is itself
-  an audited region, and calling it requires an enclosing `#Unsafe` block →
-  **E3103**.
-- **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
-  dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
-  legal outside a gate. When the address names a current-frame place, its
-  runtime sentry registration expires with that Jet frame; heap, static, and
-  foreign storage keep their own lifetime rules. `mem.volatile_read(p)` and
-  `mem.volatile_write(p, value)` perform explicit volatile/MMIO access through a
-  typed pointer. Using a low-level op outside `#Unsafe` → **E3101**.
-
-Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
-`unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
-sema. Diagnostics **E3101–E3104 + E3112** in diagnostics.md with snapshots
-(`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
-`tests/ui/unsafe_missing_reason`, `tests/ui/unsafe_fn_missing_reason`); the audited end-to-end example is
-`examples/features/lowlevel/lowlevel.jet`.
-
-D-UNSAFE-OBLIG1 adds a policy layer without weakening either gate. Absent policy
-and `.GateOnly` retain the behavior above. Policy never suppresses the mandatory
-reason.
-`.Obligations` requires an operation-specific typed assertion immediately after
-each low-level operation, using the closed facts `valid_ptr`, `aligned`, and
-`no_alias`, for example `assert valid_ptr, aligned`. `.PerSite` requires each
-gate to add `obligations: .Track` or `.Skip`; an organization `.Obligations`
-floor rejects `.Skip`. CI/admins provide that floor explicitly through
-`JET_ORG_UNSAFE_POLICY=<path>`; the file uses the package-policy shape
-`policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`,
-its path is retained as provenance, and a
-configured unreadable or malformed file fails closed. `jet inspect unsafe FILE`
-reports every gate, operation, discharge state, and effective-policy provenance
-in stable human or `--json` form. Human rows use the source file's
-`file:line:column` location; JSON keeps the byte span and adds matching 1-based
-start/end line and column objects. Loader failures use the ordinary diagnostic
-renderer, including the source frame, Why, Fix, and `NO_COLOR` behavior.
-Assertions erase in sema before the shared AOT/dev TIR boundary.
-
-## Web browser API (D-FLAGSHIP-WEBAPI1, implemented)
-
-`use core.web as web` exposes the browser-owned pieces that a web flagship slice
-needs outside the retained `core.ui` paint surface:
-
-- `web.on(selector, event, handler)` binds a DOM event listener. The handler gets
-  a `WebEvent` value; handlers that do not need the event may ignore it.
-- `web.value(selector) -> String` reads an input value or element text.
-- `web.storage.local.get(key) -> ?String` and
-  `web.storage.session.get(key) -> ?String` read browser storage. Missing keys
-  compose with the normal `??` fallback: `web.storage.local.get("tasks") ?? "[]"`.
-- `set(key, value)`, `remove(key)`, and `clear()` mutate local/session storage.
-
-`core.web` carries the `Browser` effect. The web JS backend emits real
-`addEventListener`, `querySelector`, `localStorage`, and `sessionStorage` calls;
-native codegen lowers the same checked calls to inert stubs so rustc never
-becomes the browser API checker.
-
-## Web queries (D-WEBQUERY1, implemented)
-
-`use core.web.query as query` exposes one reactive query contract. A query
-always has an explicit cache key. The key is the sole identity of its live
-record; the declared footprint is dependency metadata, not a second identity.
-
-- `query.live(key, footprint, initial, fetch)` creates a live query. `fetch`
-  returns the next encoded value or an error. The query state moves through
-  `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and `Offline`.
-- `query.subscribe(source)` creates an external subscription whose cache key is
-  `source` and whose footprint is `ext:<source>`.
-- `q.get()`, `q.state()`, and `q.mutation_state()` read the value and the
-  lifecycle carriers. `q.show()` and `q.facts()` report identity, generation,
-  freshness, observer count, invalidation cause, and mutation status without
-  including payloads.
-
-Registering the same key with a different footprint is rejected with the named
-runtime diagnostic `E2473`; callers must use one dependency declaration for a
-key. A mutation targets the query's declared footprint by default, so only
-dependent queries become stale. Explicit invalidation targets may name a
-`key:<key>` or a footprint.
-
-`offlineFirst` mutation mode applies the optimistic value, persists the
-payload and invalidation targets in FIFO order, and restores the exact prior
-state on a failed online action. The queue is stored at
-`$JET_WEB_QUERY_QUEUE_PATH`, or
-`$XDG_STATE_HOME/jet/web-query-queue.v1`, or
-`$HOME/.local/state/jet/web-query-queue.v1`. Writes use a temporary file and
-atomic rename. If no state directory exists, or if the queue cannot be read or
-written, enqueue and replay fail with a durability error rather than silently
-losing a mutation.
-
-The app graph serializes query facts (`key`, `footprint`, `source`, and `kind`)
-for tooling. Development HTML may expose a `Queries` panel with lifecycle
-metadata; release HTML never includes that panel or query payloads.
-
-## First-party events and hooks (D-EVENT1, implemented)
-
-`use core.event as event` exposes the first compiler-known event family as
-ordinary Core values. There is no `event` declaration syntax in this slice.
-
-- `event.new<T>() -> Event<T>` creates a typed many-subscriber event source.
-- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> !String`
-  creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
-  for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
-  queue, running, blocked, failure, cancellation, deadline, close, and overflow
-  outcomes are explicit.
-- `event.hook<T, R>(fallback) -> Hook<T, R>` creates an ordered intervention
-  point. `.run(payload, fallback)` returns the last active handler result, or
-  the call-site fallback when no handler is active.
-- `event.decision_hook<T, E>(HookPolicy.FirstCancelElseTransform)` creates a
-  typed fold. Handlers return `HookDecision.Continue`, `.Transform(value)`,
-  `.Cancel`, or `.Fail(error)`; `run` returns `HookOutcome.Continue(final)`,
-  `.Cancel`, or `.Fail(error)`.
-- `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
-  all owned subscriptions and permanently closes that owner. Cancellation is
-  idempotent; a later subscription attempt through the cancelled scope returns
-  an inactive `Subscription` and installs no listener. `scope.active_count()`
-  reports currently active subscriptions.
-- `Event<T>.on(scope, handler)`, `.once(scope, handler)`, and
-  `.on_priority(scope, priority, handler)` return `Subscription`. Priority sorts
-  before source order; `once` auto-unsubscribes after first delivery.
-- `Event<T>.emit(payload)` returns `EventTrace`; `AsyncEvent.emit_async(payload)`
-  returns a task whose report records the accepted payload's terminal state and
-  ordered trace.
-
-Synchronous emission snapshots active listeners at dispatch start, sorts by
-priority descending then registration order, and invokes that snapshot
-depth-first. Unsubscribing before a listener's turn skips it; subscribing during
-delivery affects only a later or explicitly nested emission. A `once` listener
-is deactivated before its handler runs, so reentrant emission cannot deliver it
-twice. D-EVENT2=A keeps this beginner `Event<T>` handler path infallible; typed
-failure aggregation is outside this synchronous API.
-
-With `JET_OBSERVE=1`, the runtime publishes one bounded, payload-free sequence
-for executed Event, AsyncEvent, and DecisionHook transitions. `jet inspect live`
-and Canvas opened with `?pid=<live Jet pid>` consume that same validated source;
-Canvas reports `runtime_events: null` when no live process is attached and never
-turns source-call matches into runtime facts.
+| error | checker column of every row | registered E-codes, `FieldError` values, and typed foreign errors name what failed and its repair path |
+
+The grid is a planning and proof obligation, not a runtime layer. Sema owns
+checks and facts; the Prelude owns runtime boundary meaning. Rust emission,
+Cranelift, and interpreter paths marshal the same typed result and fact
+semantics. A boundary with a runtime path must preserve the same cell through
+AOT, the default `jet run`, and interpreter execution.
+
+## Effect system
+
+This section defines effect inference, authority, and the checked tooling that
+exposes those facts. It is for authors of functions and packages, and for tools
+that consume checked programs. Executable truth lives in the [effect
+table](../../crates/jet-codegen/src/Prelude/Effects.jet), [syntax
+tables](../../crates/jet-foundation/src/Syntax/), [sema effect
+checker](../../crates/jet-sema/src/Sema/Effects.rs), [inspect
+projections](../../Source/CmdExpand.rs), and [expand
+tests](../../tests/cli_parts/expand.rs).
+
+Every function has an **effect set**: the ambient powers exercised by its body,
+such as filesystem, network, clock, or process access. Jet infers the set,
+propagates it through calls, and erases it before code generation. An empty set
+is purity; effects are not runtime values, handlers, or monads
+(D-EFF1, D-QUAL1, I3).
+
+### Effect names and declarations
+
+The thirteen grantable roots are `Net`, `FS`, `IO`, `DB`, `Time`, `Rand`,
+`Env`, `Exec`, `Log`, `GPU`, `FFI`, `Browser`, and `Secret`. A path may add
+user-chosen dotted leaves, for example `FS.Read` or `Net.HTTP.Get`. The root
+must be one of those names; descendants are checked by tree ancestry, so a
+bound on `FS` covers `FS.Read`. Foreign-language names such as `FFI.Go` and
+`FFI.Py` are leaves beneath `FFI`; the parent covers the whole foreign-call
+tree. The Prelude also registers common leaves such as `DB.Read`, `DB.Write`,
+`FS.Read`, `FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
+
+A package may declare a leaf at compile time:
 
 ```jet
-use core.event as event
+effect Log.Audit
+```
+
+Declarations from the package, its dependencies, and the Prelude form one
+package view. If a root has declared leaves, a dotted use under that root must
+name one of the view's declared leaves. A bare root remains valid. A root with
+no declared leaves remains open. The same rule applies to function effect
+rows, `#FX`, and package effect budgets. Declarations have no runtime
+representation. An unknown root is a language error, not a new effect.
+
+`Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
+cannot be granted by an authority, positive effect ceiling, or package budget.
+Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics
+and denial facts; they do not have to be listed in a positive effect ceiling.
+`Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
+memory or panic denial still rejects a reachable operation (D-EFFTREE1,
+D-PANICROOT1, D-AUTHORITY-MEM1).
+
+Core operations contribute the following broad categories. More precise leaves
+are retained when the operation supplies them.
+
+| Root | Typical operations |
+| --- | --- |
+| `IO` | `print`, `eprint`, input, and terminal operations |
+| `FS` | `core.files` and file watchers |
+| `Net` | `core.net`, `core.http`, and port watchers |
+| `Time` | ambient clock, zone, sleep, and timer operations |
+| `Rand` | ambient random operations |
+| `Env` | `core.sys` environment operations |
+| `Exec` | argv, process, command, pipeline, and process watchers |
+| `DB` | database operations; query and execute refine to `DB.Read` and `DB.Write` |
+| `Log` | `core.log` operations |
+| `GPU` | graphics and game operations |
+| `FFI` | calls through a foreign-language boundary |
+| `Browser` | browser or DOM provider operations |
+| `Secret` | decrypted repository-secret reads |
+
+A call to an opaque `extern rust` or C function contributes the maximal effect
+set because the checker cannot inspect its body. This keeps inference sound
+without attempting to read foreign code. Deterministic constructors such as a
+seeded `Clock` or `Rng` carry no ambient effect; reading ambient time or
+randomness still does.
+
+For example, interpolated `print` in
+`examples/features/basics/first_hour_expert.jet` records both `IO` and the
+`Mem.Alloc` needed for its fresh `String`; `core.process.argv()` records
+`Exec`. The manifest-less authority supplies only the beginner default and
+does not alter these sema facts.
+
+### Application authority
+
+A manifest-less program receives the beginner grant `IO`, `Mem.Alloc`, and
+`Exec`. This covers output, ordinary allocation, and argv reads without a
+manifest. A `package.jet` replaces that default with its explicit
+`authority.holds` policy. A deny wins over a grant, and the floor does not
+silently grant filesystem, network, process-control, or other roots. An
+undecided or denied required effect stops before host state changes with
+E1803. The authority projection keeps required, granted, denied, and policy
+identity as separate facts (D-AUTH-AMBIENT1).
+
+Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
+`--deny=<RIGHTS>`, where the value is a comma-separated list of canonical roots
+or leaves, such as `--allow=FS.Read,Time`. The spaced form is also accepted.
+The CLI has no per-effect flag family: all authority uses this one rights
+surface (D-RIGHTS-CLI1).
+
+### Function and block ceilings
+
+A function may omit an effect row; sema still infers its complete transitive
+row. A declared row is an upper bound, not a claim that the function uses every
+listed effect. The unannotated form uses `-> Type`; an effect ceiling is written
+before the return type, as in:
+
+```jet
+fn load(path: String) -[FS]> String {
+    core.files.read(path)
+}
+```
+
+The body must use a subset of the declared set. An omitted effect is E0740 and
+names the introducing call and the declared set. `-[]>` is an empty upper bound;
+any effect in the body is rejected as a purity violation. Effect annotations
+are erased, so an annotated and an unannotated function with the same body
+produce the same runtime code.
+
+`#FX(...) { ... }` applies the same idea to one block:
+
+```jet
+fn run() {
+    #FX(FS, IO) {
+        text :: core.files.read("x") ?? ""
+        print(text)
+    }
+}
+```
+
+The region permits only the listed effects, including effects reached through a
+call, or reports E0712. It is a ceiling, not a grant: the operations still
+happen and contribute to the enclosing function's inferred row. `#FX` is a
+lexical block and disappears in generated code.
+
+### Higher-order and trait effects
+
+A higher-order function's row includes its own body and the effects of function
+values passed at each call. A lambda is walked inline. A directly named
+function contributes its known row. A local, returned, stored, or otherwise
+unknown function value contributes the maximal set, which is conservative and
+sound.
+
+```jet
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+
+fn run() -[IO]> Unit {
+    apply(log_it, 1)
+}
+```
+
+If `log_it` reaches `Net`, the call in `run` violates the `IO` ceiling. A
+function-typed parameter can carry its own bound, such as `fn(Int) -[Net]> Int`;
+passing a callback outside that bound is E0747. `-[via f]>` publishes a tight
+pass-through for a named function-valued parameter, including when the value
+escapes.
+
+A trait method may declare an upper bound:
+
+```jet
+trait Shape {
+    fn area(self) -[]> Int
+}
+
+impl Square.Shape {
+    fn area(self) -[]> Int { self.side * self.side }
+}
+```
+
+Every implementation must fit the bound or E0742 is reported. A dynamic call
+uses the trait's declared bound because its concrete implementation is unknown
+at the call site. An unannotated method is inferred per implementation under
+static dispatch; a dynamic-dispatch call that needs a bound receives the
+annotate-the-method diagnostic (D-EFF2, D-EFF3).
+
+### Opaque cryptographic values
+
+`core.crypto` exposes opaque, move-only `Secret`, `SigningKey`,
+`X25519SecretKey`, and `SharedSecret` values. They cannot be compared with
+ordinary equality, cloned, hashed, printed, reflected, or serialized. Constant-
+time operations are the comparison API. Raw bytes leave an opaque value only
+through explicitly named expert exposure functions.
+
+The expert surface names `xchacha20poly1305_seal/open`,
+`aes256gcm_seal/open`, `ed25519_sign`, `ed25519_verify_strict`, `x25519_raw`,
+`hkdf_sha256_raw`, `argon2id`, `secret_bytes`, `signing_key_bytes`,
+`x25519_secret_bytes`, and `shared_secret_bytes`. Every expert call is
+lexically inside `#Unsafe("reason")`; importing the module does not open that
+gate. AEAD authentication failures use `CryptoError.OpenFailed`; X25519 rejects
+an all-zero shared secret. HKDF output is at most 8160 bytes. Argon2id accepts
+8192–262144 KiB, 1–10 iterations, 1–8 lanes, `memory >= 8 * lanes`, and
+`memory * iterations <= 1048576`; salts are 8–64 bytes and output is 16–64
+bytes. Invalid expert parameters use the `CryptoError` family.
+
+`crypto.file_seal(recipients, source, destination)` and
+`crypto.file_open(identity, source, destination)` use the recipient-based JETC
+v2 envelope. The fixed prefix is `JETC`, version 2, kind 1, suite 1, flags 0,
+followed by little-endian header and body lengths. The authenticated header
+contains a 16-byte file id, an ephemeral X25519 public key, a 16-byte nonce
+prefix, a fixed 1 MiB chunk size, 1–256 canonical recipient stanzas, no
+metadata, and its tag. Body records contain little-endian length, final flag,
+ciphertext, and tag. Non-final records are exactly 1 MiB, and an exact multiple
+has one empty final record. Readers bound declared sizes before allocation and
+accept only safe-open v2.
+
+Sealing snapshots and revalidates a no-follow regular source before requesting
+randomness. Seal and open stream one authenticated chunk at a time, poll
+cancellation between chunks, zeroize secret and plaintext buffers on every
+exit, and publish with atomic no-overwrite semantics only after authentication
+and durable staging. Safe-open identity, framing, recipient, and authentication
+failures collapse to `FileCryptoError.OpenFailed`; no partial destination is
+published. A target without the required native bridge fails closed rather than
+claiming filesystem JETC support (D-CRYPTO-API1, D-CRYPTO-ENVELOPE2).
+
+### HTTPS and graphics
+
+`core.net.fetch` and `core.http.client` support `https://` through the rustls
+bridge and system certificate roots. Plain `http://` remains available for
+loopback and existing endpoints. Handshake, trust, and missing-root failures
+are E4201, E4202, and E4203. Advanced client configuration belongs in
+`core.net.tls`. HTTPS serving is an explicit labeled argument:
+`Server.serve(addr, mux, tls: Server.tls(cert, key))`; an unlabeled TLS value is
+rejected so the transport choice is visible at the call site (D-TLS1,
+D-TLSSERVE1).
+
+`core.game.raylib` provides the typed window, drawing, input, sound, and texture
+operations. Its default path is headless; `JET_RAYLIB_DISPLAY=1` enables the
+native display bridge, and a missing raylib library uses the headless path.
+`core.game` is scene-first: `game.Scene.new`, `scene.assets.image` and
+`sound`, `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
+`game.Replay.record`, `game.Backend.headless`, and `game.run` provide
+deterministic headless replay with a frame hook. Effects and authority still
+apply to the bridge (D-RAYLIB1, D-GAME1-3).
+
+## Expert memory tier
+
+The low-level tier keeps ordinary Jet free of raw pointer syntax. `use core.mem`
+is the discovery gate for pointer types and operations; `#Unsafe("reason")`
+is the audit gate. A low-level operation outside the corresponding gate is a
+compile error, not an implicit capability escalation. (D-LL1, D-UNSAFE2)
+
+### Pointer operations and lifetime sentries
+
+`*x` takes a raw pointer to `x`, and `p.*` dereferences it. These operations
+require `use core.mem` and an audited region. `mem.address_of(x)` produces an
+inert address value and can be named outside the audit gate, but using that
+address as a pointer still requires the gate. `mem.volatile_read(p)` and
+`mem.volatile_write(p, value)` provide explicit typed volatile/MMIO access.
+
+An address into a current stack frame has a runtime sentry whose registration
+expires when that Jet frame ends. Heap, static, and foreign storage retain their
+own ownership rules. Code generation lowers an audited region to the native
+unsafe block; it does not invent a safety proof. E3101 reports a low-level
+operation outside `#Unsafe`, E3102 reports a missing `core.mem` discovery
+import, E3103 reports an unsafe function call without an enclosing gate, and
+E3112 requires a nonempty reason. The audited example is
+[`examples/features/lowlevel/lowlevel.jet`](../../examples/features/lowlevel/lowlevel.jet).
+
+A function marker `#Unsafe("reason") fn` makes the entire function body an
+audited contract. Its caller must itself be inside an enclosing unsafe region.
+The reason belongs to `#Unsafe`; there is no separate audit marker in the
+contract. (D-UNSAFE-REASON1=A)
+
+### Unsafe obligations
+
+The obligation policy adds evidence without weakening either gate. With no
+policy or `.GateOnly`, the mandatory reason and gate rules remain. An
+`.Obligations` policy requires operation-specific typed assertions immediately
+after each low-level operation using the closed facts `valid_ptr`, `aligned`,
+and `no_alias`, for example `assert valid_ptr, aligned`. `.PerSite` additionally
+requires every gate to select `obligations: .Track` or `.Skip`; an organization
+floor may reject `.Skip`.
+
+CI or an administrator supplies the floor through
+`JET_ORG_UNSAFE_POLICY=<path>`. Its package-policy shape is
+`policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`.
+The path is retained as provenance, and an unreadable or malformed configured
+file fails closed. `jet inspect unsafe FILE` reports each gate, operation,
+discharge state, and effective policy; `--json` retains byte spans plus
+1-based line and column objects. Assertions erase in sema before the shared AOT
+or development TIR boundary. See
+[`examples/features/lowlevel/unsafe_obligations.jet`](../../examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
+
+### Explicit pointer casts
+
+Jet has no compact cast-and-dereference operator. To reinterpret an address,
+first construct `mem.Ptr<T>.from_addr(addr)`, then use postfix `p.*` in the same
+audited region. The two operations make the cast and dereference obligations
+separate. The Jai comparison is illustrated by
+[`examples/features/lowlevel/pointer_cast_deref.jet`](../../examples/features/lowlevel/pointer_cast_deref.jet). (D-POINTERCHAIN1)
+
+### Allocator families
+
+`core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using
+these allocators does not require `#Unsafe`. `Arena.new()` or
+`Arena.new(capacity: N)` grows aligned heterogeneous chunks; `Bump` places
+monotonically in one caller-capacity buffer; `Pool` owns a caller-bounded slot
+count and reuses compatible size/alignment classes after reset. Values are
+dropped in reverse allocation order before storage is reused. Allocator handles
+are thread-confined, so move plain owned data across a task or channel rather
+than moving the allocator itself.
+
+`arena.reset()` retains backing storage for reuse. Terminal release uses the
+universal resource operation `close(^allocator)`; `.free()` is not the
+allocator release spelling. Using an allocator after its move is E0121. The
+walkthrough is [`examples/features/memory/arena.jet`](../../examples/features/memory/arena.jet). (D-ALLOC1, D-ALLOC-C, D-ALLOC-D)
+
+The fallible allocation family is separate from plain abort-on-failure calls:
+`List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
+`Map.try_insert`, `String.try_push`, and each allocator's `try_alloc` return
+`AllocError { requested_bytes, allocator }`. A plain `new`, `alloc`, or
+mutation retains its abort-on-failure behavior. The AOT emitter, Cranelift
+host, and interpreter carry the same fallible result; they do not choose a
+different allocation policy. See
+[`examples/features/memory/try_allocation.jet`](../../examples/features/memory/try_allocation.jet). (D-ALLOCFAIL1=A)
+
+### Arena regions and scope-bound views
+
+`arena.alloc(value)` places a value in retained arena storage and returns a
+scope-bound view, not an owned copy. `reset()` mutably borrows the arena and
+`close(^arena)` consumes it, so the compiler rejects either operation while a
+view is live. The runtime has one narrowly contained lifetime-extension helper
+inside the memory implementation; that lifetime never appears in user syntax.
+
+A view must stay inside its region and before the arena is reset or closed.
+E0631 rejects a view returned, stored in another owner, passed to a `&` or `^`
+parameter, or captured by an escaping closure. E0632 rejects a read after the
+arena reset. Regions are implicit and scope-inferred from the lexical scope of
+the arena binding. Expert code may use `#Region(r) { ... }` for a named or
+narrower region, or one spanning more than one allocator; the same escape rule
+applies. Views are non-reassignable, non-escaping locals, and analysis that
+cannot prove those properties is rejected. The example and diagnostics are
+[`examples/features/memory/arena_regions.jet`](../../examples/features/memory/arena_regions.jet),
+[`tests/ui/arena_view_escape.stderr`](../../tests/ui/arena_view_escape.stderr),
+and [`tests/ui/arena_view_after_reset.stderr`](../../tests/ui/arena_view_after_reset.stderr). (D-ALLOC2, D-REGION1)
+
+## Imports and visibility
+
+### Importing files, modules, and packages
+
+Jet has two import forms: a quoted path names a file, and an unquoted name
+names a module.
+
+```jet
+use "scoring";
+use util as text;
+use core.files;
+```
+
+A quoted path is relative to the directory of the file containing the `use`.
+The `.jet` suffix is implicit. A path cannot escape its project with `..`.
+The last path segment supplies the default namespace; `as` gives either form
+an explicit alias (S16).
+
+An unquoted module name is resolved by recursively searching from the project
+root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
+namespace (S51).
+A realized `library` package is another module-search root, so its public
+items are used with the same `use package;` and `package.item` syntax. The
+package must already be realized: compilation does not realize dependencies on
+demand. An `executable` package belongs on `PATH`, not in `use`; naming one in
+an import is **E0982**. A declared library that has not been realized is
+**E0983**. If a package omits `kind`, its staged `bin/` output or top-level
+`run` function makes it an executable; otherwise it is a library. An explicit
+kind takes precedence. A single-file `jet run` or `jet build` still requires
+an executable entry point and reports **E0101** when it has no `run` function
+(U10, U17, D-LIB-USE, D-ILE1).
+
+Cross-file access is qualified:
+
+```jet
+score :: scoring.score(91);
+```
+
+Only `pub` declarations and `pub` struct fields cross a file boundary. A
+file-wide `#PubFile` marker changes the default for that file: top-level
+items are public unless they carry `priv` (S18, D-VISDEFAULT1=C,
+D-VISDEFAULT2=A).
+
+```jet
+#PubFile
+
+fn greet() -> String {
+    "hello"
+}
+
+priv fn secret() -> Int {
+    42
+}
+```
+
+The import graph is loaded before semantic checking, so checks cover the whole
+program. The relevant diagnostics are **E0602** (path escapes the project),
+**E0603** (missing import), **E0604** (import cycle), **E0605** (private item),
+and **E0606** (ambiguous module). The executable import example is
+`examples/features/modules/imports/`; the corresponding UI fixtures are under
+`tests/ui/import_escape/`, `import_missing/`, `import_cycle/`,
+`import_private/`, `import_private_field/`, and `import_ambiguous/`.
+
+### Code modules
+
+Code modules use `module` where Rust uses `mod`, and `.` where Rust uses `::`
+(D-MOD1). The path-import form above remains the short form for importing one
+file.
+
+```jet
+module math {
+    pub fn clamp(value: Int, low: Int, high: Int) -> Int {
+        if value < low -> low
+        else if value > high -> high
+        else -> value
+    }
+}
 
 fn run() {
-    scope :: event.scope()
-    clicked :: event.new<Int>()
-
-    sub :: clicked.on(scope, (n) -> { print("clicked {n}") })
-    clicked.once(scope, (n) -> { print("once {n}") })
-
-    print(clicked.emit(1).summary())
-    sub.unsubscribe()
-    scope.cancel()
+    math.clamp(3, 0, 2)
 }
 ```
 
-### Jai transliteration: compact cast/deref chains (D-POINTERCHAIN1=A, docs-only)
+`module math;` declares a file module. The loader searches beside the file for
+`math.jet`, then for `math/module.jet`. Neither file is **E0607**; finding both
+is **E0606**. `module math { ... }` is inline and adds the `math` namespace to
+the containing file; it performs no file lookup. The same `module` keyword is
+used by JetOS declarations. The semicolon form always declares a code module,
+and the parser distinguishes braced code and JetOS contributions from their
+contents.
 
-Jai allows a single compact expression that casts and dereferences a raw pointer
-in one chain, e.g. `slot.value_pointer.(*Bool).* = true`. Jet rejects that
-compact form outright — there is no cast-and-deref operator. The equivalent is
-two explicit, audited lines: reinterpret an address through
-`mem.Ptr<T>.from_addr(addr)` (the cast step), then read or write through it
-with postfix `p.*` (the deref step), both inside `#Unsafe`:
+Qualified access always works. `use math.clamp;` imports one member, and
+`use math.[clamp, lerp];` imports a member group. The `.[ ]` member-list form
+has the same meaning after `use` and in an expression such as
+`point.[x, y]`; use entries may also have aliases and dotted paths. Wildcard
+imports are rejected with **E0612**. An unqualified import of an undefined
+member is **E0611**, and importing an item from a module that is not in scope is
+**E0610** (D-MOD2).
+
+Declarations are private by default. `pub` exports to every consumer;
+`pub(package)` exports only within the same payload or workspace package and
+not to downstream packages. Access to a private inline item reports **E0609**;
+access across files reports **E0605**. An unknown `pub(...)` qualifier is
+**E0411**. Inline-module bodies are type-checked in their defining scope, so a
+private sibling can call another sibling without exporting it
+(D-MOD3, D-PUBPKG1).
+
+A directory module exposes a child only through an explicit Rust-style
+re-export:
 
 ```jet
-use core.mem
-
-flag :: true
-#Unsafe("flag is live on this stack frame and the pointer never escapes") {
-    addr :: mem.address_of(flag)
-    p :: mem.Ptr<Bool>.from_addr(addr)
-    print(p.*)
-}
+pub use wrap.wrap;
 ```
 
-No new syntax, sema, or codegen — this section only names the existing
-`mem.address_of` / `mem.Ptr<T>.from_addr` / postfix `.*` vocabulary (§E2-M13
-above) as the answer to "what does Jai's chain do in Jet." Example:
-`examples/features/lowlevel/pointer_cast_deref.jet`.
+A public declaration that is not re-exported does not become part of the
+parent directory's surface. Re-exported calls retain the defining function's
+borrow and move rules. Examples covering file modules, inline modules,
+qualified and grouped imports, and re-exports are in
+`examples/features/modules/` (D-MOD4).
 
-### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19)
+### Generic modules
 
-Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
-under `core.mem` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
-gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
-allocate with `arena.alloc(value)`. `reset()` keeps the backing storage (cheap, allocator is
-reusable). Terminal release uses the universal resource operation `close(^allocator)`; the
-retired `.free()` spelling is rejected with a fix to `close`. A later use is the ordinary
-**E0121** use-after-move error. Example:
-`examples/features/memory/arena.jet`.
-
-The runtime families are not aliases. `Arena` grows through aligned heterogeneous chunks and
-reuses every retained chunk after reset. `Bump` is one contiguous caller-capacity buffer with
-monotonic placement and explicit exhaustion. `Pool` has a caller-bounded slot count; reset bumps
-its generation and reuses compatible retained size/alignment classes, while incompatible classes
-are replaced without imposing a secret maximum value size. Values are dropped in reverse
-allocation order before storage is reused. Allocator handles are thread-confined; move plain owned
-data across task/channel boundaries instead.
-
-`Fixed` retains the ratified no-hidden-heap law, but that law is not implementation-complete. The
-front end currently erases `size: N` to monomorphic `Type::Named("Fixed")`, and emitted signatures
-name monomorphic `jet_mem::JetFixed`; therefore an arbitrary runtime size cannot become owned
-stack/static storage without either hidden heap allocation or an invented maximum. The existing
-heap-backed compatibility runtime is not acceptance evidence for `Fixed`. Completion requires the
-compiler to preserve a compile-time capacity (or an owner-ratified caller-buffer representation);
-#648 must not disguise that gate with a heap facade or silent cap.
-
-The fallible family (D-ALLOCFAIL1=A) is separate from the plain allocation
-calls: `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
-`Map.try_insert`, `String.try_push`, and each allocator's `try_alloc` return a
-fallible value whose error is the Core `AllocError` record
-`{ requested_bytes, allocator }`. The canonical Prelude path reports failure
-without invoking the hosted abort hook. The AOT emitter, Cranelift host, and
-interpreter marshal that same result; they do not decide allocation policy.
-Plain `new`/`alloc`/mutation calls retain their existing abort-on-failure
-behavior.
-
-### Arena regions and scope-bound views (D-ALLOC2, D-REGION1; ratified 2026-06-21, implemented)
-
-The c05 upgrade makes the arena *real*: `arena.alloc(value)` places a value in retained
-allocator storage and returns a **scope-bound `view`** — Rust `&'arena mut T`
-— not an owned copy. The runtime (`Source/Prelude/Mem.rs`, `mod jet_mem`) carries the one
-vetted lifetime-extension internal (D-LL1, inside the helper only; never leaks to user code,
-golden-test enforced); reset borrows the arena mutably and close consumes it, so rustc itself
-forbids reset/close while a view is live — the I2 backstop.
-
-A view is sound only inside its **region** and only until the arena is reset or closed. Two
-sema checks (`Source/Sema/CheckerOwnership.rs`), both at least as strict as rustc's borrow
-checker so Jet always rejects first (I2):
-
-- **E0631** — the view escapes its region: returned, stored in another binding
-  or struct field, passed to a `&`/`^` parameter, or captured by an escaping
-  closure.
-- **E0632** — the view is read after its arena was reset.
-
-Regions (D-REGION1): **implicit and scope-inferred by default** — the region is the lexical
-scope of the `arena` binding; the beginner never types a lifetime. **Plus an explicit
-`#Region(r) { … }` block** for expert cases
-inference can't give: a region spanning two allocators, narrower than the enclosing function,
-or named. The escape rule is enforced against the inferred scope or the named region
-identically. v1 restriction (I8): views are non-reassignable, non-escaping locals; anything
-the analysis can't prove is rejected with a teaching error. Example: `75_arena_regions.jet`;
-UI snapshots `tests/ui/arena_view_escape` (E0631), `tests/ui/arena_view_after_reset` (E0632);
-unit tests `tests/arena.rs`.
-
-## M6 phase 3 — multi-file imports (done)
-
-Two use forms (S16): **quotes = file path, no quotes = module.**
-**`use "path/to/file";`** — quoted path to a `.jet` file, relative to
-the using file's directory (`use "./lib";` for a sibling file;
-default namespace = last path segment). **`use name;`** or
-**`use core.files;`** — unquoted module name (searches recursively from
-the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
-compiler-exported module per S51). Optional **`as alias`** in both forms.
-
-Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
-other files (S18), including **`pub`** struct fields. A file may opt into
-public-by-default with a single **`#PubFile`** marker (D-VISDEFAULT1=C /
-D-VISDEFAULT2=A); inside such a file, top-level items export unless marked
-**`priv`**. The driver loads the import
-graph, sema checks the whole program, codegen emits one Rust file with **`mod`**
-blocks; generated module and item names each use the canonical `__jet_` prefix
-(`main` stays `main`).
-
-Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
-**E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
-Example: `examples/features/modules/imports/` (three files; file import + `as alias`). UI
-fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
-
-**Library packages resolve through the same `use` (U17, D-LIB-USE A).** One
-import concept covers files, modules, **and `library` packages**: once a
-`library` package (U10) is realized — its source staged in the shared hangar
-store by the `core` provider — `use <pkg>;` resolves to that staged tree and its
-`pub` items are usable as `pkg.item` (S18). A realized library is simply found by
-the same module resolver, with the hangar staging dir added as an extra search
-root (the staged tree is searched exactly like the project tree or a path dep).
-No new keyword, no `..` import, no special call form — it is an ordinary module
-on the search path. An **`executable`** package goes on PATH, not `use`: naming
-one in `use` is **E0982**. A package's **`kind` is inferred when omitted**
-(D-ILE1): in a `package.jet` `packages:` block a bare `name` (no `: kind`), or a
-package with no `package.jet` at all, resolves to `executable` when its source stages
-a `bin/` or declares a top-level `fn run`, otherwise `library`; an explicit
-`library`/`executable` always wins. Single-file `jet run`/`build file.jet` stays
-executable-requiring (R9; E0101 if it has no `run`). A `library` dependency the project declares but hasn't
-realized yet is **E0983** (run `jetpack use <pkg> --prep`) — `jet build`/`run` never realize
-on demand, keeping them offline and deterministic, the same flow as pre-fetched
-deps. Resolver: `Source/Loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
-(offline realize → `use` → call) and `tests/ui/use_unrealized_library/`.
-
-## Code module system (D-MOD1–4, done 2026-06-18)
-
-Jet's module system is **Rust's, with two surface swaps**: the keyword is
-`module` (not `mod`) and scoping uses `.` (not `::`). The `use "path" as alias`
-form above stays as the ceremony-free single-file entry point.
-
-**Declaration forms (D-MOD1).** `module math;` declares a file module — the
-loader searches the using file's directory for `math.jet`, then `math/module.jet`;
-neither found is **E0607**, both found is **E0606** (ambiguous). `module math
-{ … }` is an **inline module** — its items live in the `math` namespace of the
-containing file, no file lookup. `module` is shared with the JetOS declaration
-(U3); the parser disambiguates by peeking past `{` (a code module body opens with
-`fn`/`struct`/`pub`/… or `}`, a JetOS body with `sources`/`imports`/a
-contribution path) and by the `;` form, which is always a code module.
-
-**Access (D-MOD2).** Qualified `math.clamp(…)` always works. Optionally bring
-items unqualified with `use math.clamp;` or a group `use math.[clamp, lerp];`.
-The same `.[ ]` form means “these members of that prefix” in both positions:
-after `use` it creates aliases; in an expression such as `point.[x, y]` it
-creates the member values. Expression entries remain members; use entries may
-also carry `as` aliases and dotted paths. Wildcards (`use math.*`) are
-rejected — **E0612**. Unqualified import of an undefined item is **E0611**; of
-an item in a module not in scope, **E0610**.
-
-**Visibility (D-MOD3, D-PUBPKG1).** Private by default; `pub` exports to every
-consumer; `pub(package)` exports only inside the same payload/workspace package
-boundary and stays hidden from downstream package consumers. A private item is
-unreachable from outside its file or inline module: `math.helper()` where
-`helper` is private is **E0609** (inline) / **E0605** (cross-file). An unknown
-`pub(…)` qualifier is **E0411**. Inline-module function bodies are fully
-type-checked, and a sibling call (`area` → `square`) lowers to the
-module-mangled name (`__jet_geo__square`), so private siblings never leak into the
-file's namespace or to rustc.
-
-**Re-export (D-MOD4 — Rust-exact `pub use`).** A directory module's `module.jet`
-exposes a submodule item only by re-exporting it: `pub use wrap.wrap;`. Nothing
-auto-surfaces — a `pub`-but-not-re-exported item stays internal to the directory.
-`text.wrap(…)` then resolves through the re-export to the defining module, with
-the real function's borrow/move conventions preserved.
-
-Examples: `examples/features/modules/inline_module`, `43_module_file`,
-`44_module_dir`, `45_module_use_unqualified`, `46_module_use_group`,
-`47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`,
-`170_generic_modules`. UI
-fixtures: `tests/ui/module_{missing,private,unknown_namespace,wildcard,
-inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,
-value_wrong_type,value_not_comptime,disallowed_value_type,trait_bound_unsatisfied,
-cycle_direct,cycle_indirect}`.
-
-### Generic modules (D-GENMOD1, D-GENMOD2, D-CONF-GENSPELL1, D-GENMOD-VALUE1,
-D-GENMOD-BODY1, D-GENMOD-IDENTITY1)
-
-A **generic module** is a module template parameterized by types and compile-time
-values. Instantiating it produces a specialized ordinary module.
-
-**Template form (D-CONF-GENSPELL1=A):**
+A generic module is a module template with type parameters and compile-time
+value parameters. Applying it creates a specialized ordinary module
+(D-GENMOD1, D-GENMOD2, D-CONF-GENSPELL1, D-GENMOD-VALUE1, D-GENMOD-BODY1,
+D-GENMOD-IDENTITY1).
 
 ```jet
-module cache<K>(capacity: Int) {
-    pub fn key_of(k: K) String -> { … }
+module cache<K: Hash>(capacity: Int) {
+    pub fn key_of(k: K) -> String {
+        "key"
+    }
 }
-```
 
-Type parameters and bounds use the angle list (`<K>` or `<K: Hash>`).
-Value parameters use the typed parenthesis list (`(capacity: Int)`).
-The two lists are separate, in the same order as a function's type and value
-arguments.
-
-**Instantiation alias:**
-
-```jet
 module int_cache :: cache<Int>(64)
 ```
 
-Value parameters are immutable Tier-0 comptime `Bool`, `Int`, `Char`, `String`,
-or fieldless-enum values (D-GENMOD-VALUE1=A). The compiler evaluates and
-normalizes each closed expression before specialization. Registered build facts
-such as `@build.settings.cache_slots` are legal leaves in that expression and
-use the same fuel-limited evaluator as other Tier-0 values. `Int` parameters may appear in the
-generic-module-only fixed-list layout form `[T#capacity]`. Value argument types
-must match exactly; E0853 reports a mismatch.
+Type parameters and bounds use the angle list (`<K>` or `<K: Hash>`). Value
+parameters use the typed parenthesis list (`(capacity: Int)`); the two lists
+are separate. A value argument must be an immutable Tier-0 comptime `Bool`,
+`Int`, `Char`, `String`, or fieldless-enum value. The compiler closes and
+normalizes each argument before specialization. Registered build facts may be
+leaves in such an expression and use the same fuel-limited evaluator as other
+Tier-0 values. An `Int` value parameter may also supply the generic-module
+fixed-list layout form `[T#capacity]`. A value type mismatch is **E0853**.
 
-The template body has ordinary-module parity and definition-site lexical scope
-(D-GENMOD-BODY1=A). It may contain functions, structs, enums, tags, constants,
-traits and impls, tests and benches, nested modules and generic modules,
-aliases, and existing legal markers. Applying a template does not change what
-its body can see or authorize.
+The body has ordinary-module parity: it may contain functions, structs, enums,
+tags, module-global values, traits and impls, tests and benches, nested modules,
+generic modules, aliases, and other legal markers. Definition-site lexical
+scope and all ordinary visibility rules remain in force.
 
-Instantiation is applicative (D-GENMOD-IDENTITY1=A). The resolved template
-DefinitionId and normalized arguments form the instance identity. Repeating
-the same application shares nominal member types and one checked/code-generated
+An instance is identified by the resolved template definition and normalized
+arguments. Repeating the same application shares nominal member types and one
 specialization; different arguments or a different template definition produce
-a different instance.
+different instances. Semantic checks reject invalid targets, arity, bounds,
+value kinds and types, scope, and cycles with **E0850**–**E0853** and
+**E0855**–**E0857**; a specialization identity collision is **E0859**. The
+value-argument example is `examples/features/modules/fact_value_arguments.jet`.
 
-**Implementation status:** parser, sema, and codegen specialize full module
-bodies across same-file and imported templates. Type/value substitution,
-definition-site capture, bounds, cycles, applicative identity, stable instance
-fingerprints, build-fact settings/provenance, semindex/LSP identity, and
-fail-closed E0859 collision handling are implemented. E0850–E0853 and E0855–E0857 reject invalid targets, arity,
-bounds, value kinds/types, scope, and cycles in sema before codegen. Remaining
-acceptance is covered by `examples/features/modules/fact_value_arguments.jet`
-and its profile settings manifest.
+## Composable configuration modules
 
-## M6 phase 4 — `--small` + LSP v0 (done)
+A `module` declaration can contribute typed values to reserved configuration
+namespaces. Several modules may share a file (U3).
 
-**`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.
-Smaller binaries than the default speed-oriented profile (`tests/release_gates.rs` on
-`examples/features/collections/wordcount.jet`).
-
-**`jet self lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
-Features: full-document diagnostics on open/change (real front end, including
-import graph from disk with an in-memory overlay for the open buffer), S14
-teaching-error quick-fixes (`Diagnostic.edit`), and formatting via `jet fmt`.
-Scripted tests: `tests/lsp.rs`.
-
-### Hand-rolled parser contracts
-
-The std-only parsers at compiler and package boundaries accept only these
-published grammars. Unsupported or ambiguous input is rejected; it is never
-partially guessed.
-
-| Boundary | Accepted input | Deliberate rejection |
-|---|---|---|
-| LSP/DAP JSON, framing, and request envelopes | UTF-8 RFC 8259 null/booleans, finite numbers, strings (including `\\u` surrogate pairs), arrays, and objects through depth 64. Object names are unique. LSP `Content-Length` bodies are capped at 1 MiB before allocation; DAP bodies are capped at 16 MiB; framing headers are capped at 8 KiB and 64 fields. JSON-RPC requests use `jsonrpc: "2.0"`, a string `method`, object/array `params`, and a string or signed-64-bit-integer `id`. DAP requests use `type: "request"`, a positive `u32` `seq`, a nonempty string `command`, and optional object `arguments`; breakpoint lines are positive `u32` integers. LSP positions are nonnegative `u32` integers; `jet.impact` depth is clamped to 1–64. | Oversized headers/bodies, duplicate `Content-Length` headers, or non-UTF-8 frames; duplicate JSON names; raw string control characters; malformed/overflowing numbers; lone surrogates; deeper nesting; non-object requests; fractional IDs/positions/sequences/lines; and scalar parameters. JSON-RPC syntax errors return `-32700`; invalid JSON-RPC envelopes return `-32600` with a null id. Malformed DAP envelopes are not dispatched, and unknown string commands receive an unsuccessful response. |
-| Project configuration files | `package.jet` owns package identity, `workspace.jet` owns workspace membership, and `env.jet` owns named source aliases and environment facts. All three use Jet grammar and are resolved from the nearest applicable project root. | A `jetpack.toml` file is a retired second grammar and is rejected with E1225 before dependency resolution. |
-| SemVer and dependency ranges | SemVer 2.0.0 `major.minor.patch`, optional pre-release/build identifiers, and the documented node-semver comparator, caret, tilde, x, hyphen, whitespace-AND, and `||`-OR forms. A leading version `v` is accepted for tag compatibility; an empty requirement means `*`. | Core numeric overflow/leading zeroes, empty identifiers, invalid characters, wildcard-before-number forms, empty `||` alternatives, and any range whose exclusive upper bound would overflow `u64`. Pre-release numeric identifiers remain spec-unbounded and compare without integer conversion. |
-| C bind prototypes | Top-level `return_type name(parameters);` declarations for the documented scalar, `char*`, and `void` subset. `(void)`/empty lists and unnamed scalar parameters are accepted. Unsupported but structurally valid types are reported in the skipped list. | Function bodies/pointers, variadics, unbalanced lists, empty comma fields, trailing declarator text, non-ASCII C identifiers, and declarations with no return type. No guessed binding is emitted. |
-| Registry JSONL and signed advisory feed | One UTF-8 JSON object per registry line with nonempty string `name`/`version`, `tier`, and `gate_status`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, plus optional boolean `yanked`; `tier` is `core` or `community`, and `gate_status` records the five named gate states. The offline advisory file starts with `jet-advisory-feed-v1`, then a signed `feed|sequence|issued-unix|expires-unix|maturity-seconds|key-id|public-key|signature` header, exact `release|package#version|first-seen-unix|source-class` records, `advisory|id|package|affected|fixed-or-empty|title|severity` records, and exact `exception|package#version|reason|reviewer|expires-unix` records. The package source policy may additionally carry exact, expiring `PolicyException` records under `policy.exceptions`, with `id`, `scope`, `reason`, and `expires`. `key-id` is `sha256-` plus the hash of the decoded public-key bytes. `.jet/advisory-trust` pins the publisher key, minimum sequence, accepted digest, and revoked keys. The default third-party maturity window is 24 hours; first-party and workspace releases default to zero. See [registry tiers](registry-tiers.md). | Malformed/duplicate/nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, invalid tier or gate status, unsigned/untrusted/stale/expired/rolled-back/forked advisory feeds, compromised keys, missing remote release records, invalid exact targets, advisory field-count errors, empty required fields, invalid affected/fixed versions, malformed or expired source exceptions, or `|` inside fields. Reads fail closed with E2607, E2609, E2610, or E2611 rather than skipping security metadata. |
-
-**VS Code / Cursor**: `editors/vscode/` — TextMate grammar + LSP client (plain
-JS, no compile step; `install.sh` packs and installs the vsix). The client
-auto-discovers the server: `jet.languageServerPath` setting, then
-`<workspaceFolder>/target/debug/jet`, then `jet` on PATH. `jet self lsp` never
-invokes rustc, so the cargo debug binary is sufficient.
-
-## M8 — Functions as values (closures, done)
-
-**Lambdas (S46):** `(params) -> expr` or `(params) -> { … }`. A single
-assignment or void call after `->` needs no braces (`a -> a.n += 1`,
-`() -> work()`). Parameter types
-may be omitted when the expected function type is known (**E0801** when not).
-The one callable and control arrow is **`->`**; it also selects dispatch-arm
-values and finite-loop items.
-
-**Named callable bodies (D-CALLABLE-ONE1=A):** a plain `->` is present before
-a braced body exactly when the declared success result is non-unit. Unit
-functions and unit-fallible functions keep bare braces; effect ceilings carry
-their own arrow (`-[Effect]>` or `-[]>`). One-expression callable bodies keep
-their existing `->` form. An arrowless braced value body reports E0080; `jet
-fmt` recovers it and writes the canonical arrow.
-
-**Function types (S47):** `fn(T1, T2) R` (no parameter names; the result may be
-omitted for `()` callbacks). An explicit effect bound sits outside the callable
-arrow, as `-[E]>`; `-[]>` means a pure callback. Their unmarked parameters
-always have plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
-values when referenced without a call only if every parameter also has plain read
-access. Functions with
-write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
-those requirements.
-
-**Function-value calls (D-CALLVALUE1=B):** direct named and method calls keep
-`f(…)` and `value.method(…)`. A call result that is itself a function is invoked
-with `callee.call(…)`. Function-typed receivers gain this builtin projection,
-while a struct field or method literally named `call` shadows it. Direct calls
-on plain names, fields, indexes, and lambdas remain valid. The same
-function-value binder and lowering serve every execution tier; the retired
-adjacent-call spelling `)(` is rejected with **E-CALL-VALUE**.
-
-**Capture rules (S47):** shared read for names only read; mutable borrow for
-names written (a `:=` binding required, else **E0111**). Escaping lambdas (stored in a
-binding, returned, in a struct field, or passed to a `^T` parameter) must own
-captures. Copy values copy at closure creation. Other clonable values clone at
-closure creation. Owned non-clonable values move. A borrowed non-clonable
-parameter cannot escape (**E0120**). The retired `take(...)` prefix is **E0057**.
-Self-recursion through the binding is rejected (**E0804**). Calling a
-non-function → **E0803**.
-
-**Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
-`sort_by`, `reduce` on `[T]`; `each` on `[K:V]` (two parameters). On a
-concrete list, map/filter execute now and return a plain list; write `.lazy()`
-first for the deferred `Iter` vocabulary.
-
-**D-ITER1 — lazy iterator adapter set (c105):** `take(n)`, `skip(n)`, `step_by(n)`,
-`dedup()`, `chunks(n)`, `windows(n)`, `take_while(f)`, `skip_while(f)`, `flat_map(f)`,
-`scan(init, f)`, `fold(init, f)`, `position(f)`, `min_by(f)`, `max_by(f)`, `group_by(f)`,
-`partition(f)` on `[T]`. No new grammar — all are library methods on the iterator
-protocol (D-EXT1 Tier 1). `take` is accepted in dot-method position even though `take`
-is also the lambda-capture keyword. `indexed()` returns `(idx: Int, item: T)`.
-The zip family is variadic and named: strict `zip` requires equal lengths and
-reports E0128, `zip_short` stops at the shortest input, and `zip_pad` reaches the
-longest input. `zip_pad` uses `None` for omitted fills, one typed `fill:` value
-for all columns, or typed `fills: (field: value, ...)` per column. Free calls
-preserve labels; methods use `a`, `b`, `c`, and so on. Zero free inputs are an
-empty `Iter<Unit>` and one input is identity. `partition(f)` returns
-`(false_: [T], true_: [T])`. These adapters are lazy on the `Iter` plane;
-concrete list/map/set `map` and `filter` are eager under D-CORE-EAGER1,
-and `.lazy()` enters the deferred plane explicitly.
-`first()` is the consuming positional terminal: use `skip(n).first()` for a
-zero-based pick, yielding `?T`; an index past the end returns `None`. This is
-the only positional-pick path; `nth` is not part of the API. `min_by` and
-`max_by` keep the last source item when keys compare equal.
-
-D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
-parse errors. Current lambda syntax is `(x) -> …`. D-SHAPE-PIPE1=C assigns a
-single bar to pattern and choice alternatives there; D-BITOREXPR1=A assigns it
-to bitwise OR in value position. It has no lambda or flow alias.
-
-Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
-`examples/features/collections/iter_adapters.jet`. Ui:
-`tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
-E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`.
-Integration: `tests/closures.rs`.
-
-## M10 — Core library (done)
-
-Full user-facing reference: **docs/spec/reference/core-library.md**.
-
-Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
-generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
-math, random, time, args, exact default and fixed-width numeric types, and
-unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
-one `DataTree` value, plus `#Codable` derive). Every fallible call returns
-`T !E`, handled with `??`, a pattern test, or contextual `?(text)` like any M4 result. Importing a
-module is free (R10) — codegen only emits the helpers a program actually
-calls. See core-library.md for the full module list, signatures, and
-examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
-
-### `Bytes`
-
-Growable byte builder with one read cursor (D-ITERTOOLS1=A / #1467). EOF is
-`position == len`. Construct with `Bytes.new()`, `Bytes.with_capacity(n)`,
-or `Bytes.from(bytes)`.
-
-Write path: `write_u8` / `write_byte`, width-specific `write_u16_*` / `write_u32_*` /
-`write_u64_*`, `write_bytes` / `write`, `write_to`.
-
-Cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte` / `next`,
-`read_bytes`, `read_string`, `get`, `first`.
-
-String-like ops decode UTF-8 (lossy) then reuse String behavior: `contains`,
-`starts_with`, `ends_with`, `trim` / `trim_start` / `trim_end`, `to_lower` /
-`to_upper` / `to_title` / `title`, `replace`, `split`, `join`, `lines`,
-`index_of` / `last_index_of`, `is_ascii`, `to_string` / `string`, `parse`.
-
-Lifecycle: `flush`, `close`, `shutdown`, `copy` / `clone`, `copy_to`, `equal`,
-`compare`, `capacity`, `get_buffer` / `buffer`, `to_bytes`, `len`, `is_empty`,
-`clear`.
-
-Consuming typed reads stay on `core.encoding.Reader` / `core.term` Writer handles —
-Bytes does not grow a second Reader/Writer type (I8).
-
-Example: `examples/features/io/byte_buffer.jet`.
-
-### `core.math`
-
-Callable surface for floating-point and whole-number helpers (D-MATHLIB2,
-D-CORESURFACE1, D-NUMTYPE1). Beyond the base libm set (`sin`/`cos`/`exp`/`ln`/…),
-Jet ships:
-
-- inverse hyperbolics and accurate near-zero forms: `acosh`, `asinh`, `atanh`,
-  `cbrt`, `exp2`, `exp_m1`, `ln_1p`, `log(x, base)`, `signum`, `fma`, `copysign`
-- float classification and neighbors: `is_normal`, `is_subnormal`,
-  `is_canonical`, `is_signed`, `is_zero`, `is_integer`, `sign_bit`, `next_up`,
-  `next_down`, `next_after`, `ldexp`, `scaleb`, `logb`, `ilogb`, `significand`,
-  `ulp`, `radix`, `zero`
-- decomposition pairs (named tuples): `sin_cos`, `modf`, `frexp`, `div_mod`,
-  `div_rem`
-- specials: `erf`, `erfc`, `gamma`, `lgamma`, `inv`, `cot`, `copy`, `cmp`
-- whole-number helpers: `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`,
-  `digits`, `leading_ones`, `trailing_ones`, plus checked/saturating/wrapping
-  integer families
-- exact ratios: `fraction(n, d) -> ?Fraction` with `.numerator()`,
-  `.denominator()`, `.to_string()`, `.to_float()`, `.is_zero()`, and arithmetic
-
-`round` returns the nearest integer, with an exact half rounded away from zero
-(`-2.5` becomes `-3`; `2.5` becomes `3`). For `min` and `max`, one NaN
-operand yields the non-NaN operand; two NaN operands yield NaN.
-
-Examples: `examples/features/math/math_audit.jet`,
-`examples/features/math/more_math.jet`, `examples/features/math/fraction.jet`.
-
-### `core.sys` (D-OSFACTS1, ledger #1465)
-
-System facts and process identity live in `core.sys`. Environment variables and
-cwd/home stay in `core.sys`. Subprocess run/exit stay in `core.process`.
-
-Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
-`pid`/`getpid`, `hostname`, `username`, `release`, `version`, `getppid`,
-`getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `getpgid`, `getpgrp`,
-`getsid`, `expand`, `uptime`, `loadavg`, `times`, `exitcode`, `success`,
-`sync`, `set_current_dir`, `on_interrupt`.
-
-POSIX process/session control requires an audited `#Unsafe("…")` region and a
-host-OS gate (`@if @build.os` / `#Target(OS.*)`): `fork`, `setuid`,
-`setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
-`waitpid`, `pipe`, `close_fd`, `mkfifo`, `umask`, `getpriority`,
-`setpriority`, `utime`, `atexit`, `stop`. Those helpers do not fake POSIX
-semantics on Windows.
-
-Examples: `examples/features/io/os_facts.jet`,
-`examples/features/io/os_process_control.jet`.
-
-D-CORE-COMPRESS1=A splits compression by job. `core.archive.gzip` and
-`core.archive.zstd` are the only byte-stream codec homes; both expose
-`compress` and fallible `decompress`. `core.archive` exposes zip/tar container
-operations only (`zip_compress`, `zip_decompress`, `tar_add`, `tar_get`,
-`tar_names_json`). It has no gzip re-export or compatibility alias.
-
-D-EMAIL1/D-EMAIL-SMTP-SURFACE1/D-EMAIL-SMTP-CONFIG1/
-D-EMAIL-DKIM-CONFIG1 define one native
-`core.email` path. Typed `Message` values retain a separate envelope so Bcc is
-never serialized. `smtp_from_env()` and `smtp(config)` construct the same
-`Mailer`; `Mailer.send(message)` performs verified TLS-from-connect or mandatory
-STARTTLS, authenticates only after verified TLS and post-upgrade EHLO, returns
-relay-acceptance `SendReport`, and never retries. `SystemPlusCa` extends system
-roots while retaining hostname verification. Passwords use the existing
-move-only `Secret`, cross one private extraction boundary, and are zeroized on
-failure and drop. Ambient task cancellation and `#Context` deadlines govern
-every transport wait; interruption after DATA is `DeliveryUnknown`.
-Optional `SMTPConfig.dkim:?DkimConfig` binds one Ed25519 signing identity to
-every send through that Mailer. The signer uses relaxed/relaxed DKIM over final
-MIME bytes, requires `from`, rejects invalid or absent requested headers before
-connecting, and never falls back to unsigned mail. Environment configuration
-requires the domain, selector, and base64 32-byte seed together. Separate
-identities use separate Mailers.
-
-D-QUERY-RETAIN1=A defines one typed `Query<T>` over ordinary list results,
-checked readers, and checked SQL. `data.query(rows)` and the SQL form return the
-same query carrier; `collect` is the checked boundary that materializes an
-ordinary `[T]`. `filter`, stable `sort_by`, `map`, `min`, and `max` retain typed
-callbacks and plan order. `inner_join` returns stable `DataJoin<L, R>` pairs
-with full duplicate-key multiplicity, while `left_join` returns
-`DataJoin<L, ?R>` and preserves every left row. `group_by` produces
-`Group<K, V>` reductions. `DataStream<T>` remains one-shot and fallible;
-`DataLoader<T>` remains typed and stateful. There is no public `Table<T>`,
-`Series<T>`, `LazyFrame<T>`, or `DataGroup` carrier.
-This supersedes the earlier `D-DATAFRAME1`/`D-DATA-SURFACE1` carrier wording;
-historical alternatives and review evidence remain historical records.
-Eager list `inner_join`/`left_join` adapters remain list operations and share
-the checked join semantics; they do not reintroduce a table carrier.
-
-## E2-M1 — Concurrency (tasks and channels, verified 2026-08-06)
-
-`task` provides spawning and nested combinators. `core.tasks` remains the normal
-core module for task control and timer helpers; typed channels use the builtin
-`channel<T>()` form:
-
-```jet
-use core.tasks as tasks;
+```ebnf
+module       = "module" dashed-name "{" contribution* "}" ;
+contribution = namespace "." dashed-name ":" expr [","] ;
+namespace    = "env" | "image" ;
+dashed-name  = ident { "-" ident } ;
 ```
 
-`task work()` or `task { work() }` starts a zero-parameter child. Copyable
-captures are copied at closure creation. Owned non-copyable captures move.
-Mutable or otherwise non-sendable captures are **E1101**/**E1102**; give the
-value to the task with `^`, make an owned immutable snapshot with `freeze`, or
-use `Shared`/a lock for deliberate shared mutation. Values crossing the task
-boundary must be sendable (**E1102**): no `view` borrows, no structs that
-contain `ref` fields, no trait values, and no closures with non-sendable
-captures.
+Package, module, image, and environment names may use kebab case, for example
+`module web-app`, `env.web-tools`, and `image.halcyon-oci`. A hyphen joins
+segments only when it is adjacent to both; `a - b` remains subtraction. Code
+identifiers—variables, fields, types, and functions—remain plain identifiers.
+Leading, trailing, and doubled hyphens are invalid (S84).
 
-#### Frozen snapshots and consuming captures (D-CONC-FREEZE1=A)
+Automatic discovery skips a declaration whose declared name begins with `_`:
+`module _name { ... }`. An explicit `use project._name` is still allowed under
+ordinary visibility rules. The name, not the filename or scan order, controls
+discovery; `jet project parts --skipped` lists omitted declarations. Duplicate
+declared names conflict even when one is omitted from discovery
+(D-SHAPE-MODULEINTERNAL1=A).
 
-`freeze(x)` is the prefix verb for one deeply immutable, owned snapshot. The
-snapshot can be read by bare task captures, including after a lexical group
-ends, because no task can write through it. A write through the root, a field,
-or an index is **E1113** and names the `freeze(...)` source site. `freeze` of a
-frozen value is the identity; it does not copy twice. A source that contains a
-lock-backed `Shared`, a resource, or another non-cloneable value is **E1114**;
-any remaining crossing-proof failure keeps the shared **E1102** diagnostic.
+The reserved role namespaces are `env` (an `Env` development environment),
+`system` (a `System` JetOS host), and `image` (an OCI image or JetOS installer
+input). An `env.<name>:` contribution uses the ordinary expression parser,
+usually an `Env{ ... }` struct literal. A string prompt is shorthand; the
+structured `Prompt` value selects label/path and stripping modes. The shell
+hook command is `jet env hook <shell>` for `bash`, `zsh`, or `fish`; the hook
+is opt-in, restores the prior shell outside an environment tree, and honors a
+non-empty `JET_ENV_DISABLE`. Activation of a trust-sensitive environment uses
+the normal trust gate (D-ENVHOOK1=A).
 
-`task ^name { ... }` explicitly consumes `name` into that child. It uses the
-same crossing prover as an ordinary capture; after the child is created,
-using `name` is the normal **E0121** use-after-move. This capture spelling is
-task-only; `^` on an ordinary call argument keeps its existing move
-meaning. `Shared` and `Cell` keep their existing synchronized and local-only
-semantics.
+### Images and package adapters
 
-The freeze proof is one `Frozen` plane in `FlowFacts`, not a second sendability
-rail. TIR carries only the approved provenance and lowers `freeze` to existing
-`Clone`, `MaterializeView`, or `ExplicitCopy` nodes. AOT, default `jet run`,
-the interpreter, comptime, and any applicable web lowering consume that same
-representation. The REPL can evaluate the pure `freeze(x)` value operation;
-tasks and task captures remain its registered **E1802** hard boundary.
+An `image.<name>:` contribution describes a Jetpack OCI image. `from: env.<name>`
+projects a typed environment into the image. Image records may carry `services`,
+`target`, `user`, `entrypoint`, `health`, `expose`, `env_vars`, `files`, and
+`base`. `files` explicitly layers project-relative non-secret paths; managed
+environment files and dotenv inputs are omitted. `.Iso`, `.Qcow`, and `.Raw`,
+and `from: system.<name>`, are JetOS installer inputs handled by `jet os image`.
 
-Example and golden: `examples/features/concurrency/freeze_capture.jet` and
-`examples/features/expected/concurrency/freeze_capture.out`. UI snapshots:
-`tests/ui/frozen_write.jet` and
-`tests/ui/frozen_capture_use_after_move.jet` and
-`tests/ui/freeze_shared_source.jet`.
+An environment package list may contain `Pkg.adapt(name:, source:, deps:,
+recipe:)`. Dependencies are realized first, and only their verified executable
+members are available to a `Recipe.build` `.exec` step. `Recipe.copy()`,
+`Recipe.prebuilt(bin:, as:)`, and finite `Recipe.build` steps (`.fetch`,
+`.exec`, `.install`, and `.install_tree`) produce ordinary hangar packages
+through the same store and lock path as other packages. `jetpack add <ref>
+--adapt` writes a draft adapter and does not execute upstream code (U20).
 
-`handle.join() -> T !TaskFailure` waits for the task and consumes its handle.
-Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a bound
-`Task` without joining, using its result, or detaching it is a compile error
-(**L1101**, D-CONC-JOIN1) because the program may end before the task finishes.
-A panic, cancellation, or blown deadline is returned as `.Panicked(reason)`,
+Direct providers verify their source and closure before projection. For example,
+the LuaRocks reference has the exact `<name>#version=<version>@luarocks` shape;
+source SHA-256 values, dependency closure, and the qualified reference are
+recorded in `.jet/lock`. Mutable refs, unsupported native-build metadata,
+cycles, unsafe archive paths, source drift, and cache tampering fail closed.
+Offline reuse verifies sealed Hangar output without contacting the repository
+(D-JPK-PROVIDERS2).
+
+Core and adapted packages can be realized without an installed Nix executable.
+A reference without a pinned compatibility output reports **E1272**; foreign
+flake projection uses the bounded native evaluator and reports **E1256** for
+unsupported expressions. Package search and information commands read local
+`.jet/discovery/index.jsonl`, provider fixtures, and Hangar metadata only;
+they do not fetch. `jet env info [--env <name>] [--preset <name>] [--json]` is a
+read-only report of one selected environment plan: package references, typed
+service facts, jobs and checks, variables with source labels, managed files,
+and integrations. It does not realize, start, or apply anything (U23, U26/#789).
+
+The selected environment facts are also available through the existing LSP
+resource bridge as `jet://environment` via `resources/list` and
+`resources/read`; the bridge remains read-only and does not enter the lifecycle.
+
+### Workspace overlays
+
+`workspace.jet` may carry reviewed overlay policy inside `module workspace`.
+An `overlay <name> { ... }` records provider and channel swaps, package-local
+source/version/flag/patch changes, and `allowUnfree` decisions. For example,
+`Provider.nixpkgs(channel: "plasma-beta")` selects a provider channel and
+`package("foo").patches += [patch("patches/foo.patch")]` records a deterministic
+source patch. Workspace-wide unfree review uses `policy.allowUnfree`.
+`jetpack override draft <ref> --patch <file>` writes source policy only; it
+does not create hidden state. Patch application is deterministic unified-diff
+application. `jetpack explain package-overlay:<overlay>:<package>` reports the
+provider, channel, policy fingerprint, and update command from that source
+policy (D-JPK-OVERLAY1).
+
+### Explanations, provenance, and offline operation
+
+Recipe failures retain per-step logs and scratch in Hangar-managed storage.
+`jet logs <pkg>` and `--shell-on-fail` identify the failure surface.
+`jet explain <ref>` reports store identity, provider facts, dependency and
+closure edges, liveness roots, and rebuild checks. The causal forms
+`jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
+one view, and `jet explain <ref> --json` emits the stable `jet.report/v1`
+projection. `jet inspect provenance` reads the one lock-backed provenance
+record for each dependency and shows integrity, transparency, publisher, and
+build-attestation facts; present evidence is labeled `verified` or `recorded`
+(U27).
+
+Mutation output plans before applying. `-y` and `--yes` are equivalent; a
+non-interactive mutation without either prints the plan and makes no change.
+The plan rows use `+`, `-`, and `~` in colored and plain output (D-FE-CLI1).
+One-shot Jetpack commands are user-owned and coordinate with file locks; they
+do not require a resident daemon, a root-owned Hangar, or a privileged helper.
+Linux recipe execution uses the Bubblewrap boundary and refuses an executable
+action with **L0205** when that backend is unavailable; requiring the backend
+through configuration reports **E1275** before launch (U28).
+
+`jet trust list`, `jet trust explain [<grant>]`, `jet trust grant <grant>
+[--scope user|repo]`, and `jet trust revoke <grant>` operate on package, build,
+environment, service, image, fleet, and JetOS authority grants. Trust decisions
+are `allow`, `prompt`, or `deny`; provenance requirements are `none`, `logged`,
+or `attested`. The grant store accepts the existing `hash:` and `pattern:`
+records (U19). A `package.jet` authority policy may set `authority.trust`
+defaults and per-profile, service, provider, and `require` decisions. An absent
+`require` means `none`; unknown authority fields are manifest errors
+(D-JPK-GRANTCMD1/SCHEMA1).
+Lock-backed provenance reports integrity, transparency, publisher, and
+build-attestation facts; present evidence is labeled `verified` or `recorded`,
+and integrity failures remain **E1204**. Lints warn by default, while
+`package.jet` policy can deny named lints and produce **E1293**. Host policy
+can narrow but not widen that rule
+(I1, I8, D-BOUND-PROV1, D-LINTPOLICY1=A, D-JPK-POLICYSURFACE1).
+
+Once a package is realized, realize-class operations can reuse it with
+`--offline`. Network-class operations reject `--offline`; a missing local
+object reports **E1276** rather than fetching (U29).
+
+### Services, secrets, and vault keys
+
+An environment may declare project-local development services:
+
+```jet
+services: {
+    database: { enable: true }
+}
+```
+
+They are managed with `jetpack services up`, `down`, `health`, `logs`, and
+`wait`. They are not system services and do not activate JetOS
+(D-JPK-SERVICE1).
+
+A `secrets` map contains secret metadata or a read-time composition. The
+compiler checks declaration types, duplicate names, environment labels,
+policy/generator shapes, placeholders, input names, and composition cycles. A
+known profile checks allowed environments; a dynamic profile defers that check
+to activation. A missing required entry reports **E1263** with its name and
+environment. Compositions resolve on each `core.crypto.vault.get` read and
+derive the result in memory. Plans, diagnostics, logs, fixtures, snapshots,
+and audit events contain names and sorted input names, never secret values
+(D-JPK-SECRETMETA1=B, D-JPK-SECRETCOMPOSE1=D).
+
+`core.crypto.vault` persists `SigningKey` and `X25519SecretKey` behind immutable
+`KeyRef<T>` handles. Reads, preparation, authorization, and commits require
+`Secret`. Mutation is a compare-and-swap sequence: prepare a five-minute,
+move-only `MutationPlan<T>`, authorize its exact native preview into a one-use
+`VaultWrite<T>`, then consume the write and plan in order. Rotation creates a
+new generation and retires the previous active generation; an exact retired
+reference still loads, while a revoked reference fails before key bytes are
+copied (D-CRYPTO-VAULT1=A).
+
+String secrets and typed keys share the age-encrypted `.jet/secrets.age`
+artifact but use separate namespaces. Its authenticated plaintext is the
+bounded `JVLT` version-2 format. The canonical `JVKW` version-1 envelope is the
+portable backup format: recipient mode wraps an independent backup key for
+1–16 sorted X25519 recipients, while passphrase mode uses fixed Argon2id
+parameters. Both modes authenticate source repository, name, generation, record
+hash, and concrete key type. Import decrypts into a short-lived
+`WrappedImportPlan<T>` and then reuses native authorization and compare-and-swap
+commit; same-origin imports are idempotent and revoked origins cannot reactivate.
+Secret-dependent open failures collapse to `KeyWrapError.OpenFailed`. Raw
+32-byte import is available only in an audited `#Unsafe` region. Headless
+mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
+workspace, environment, DAP, and stdin are not write authority.
+
+## Concurrency
+
+`task` is the reserved concurrency word. `core.tasks` supplies task control and
+timer helpers, and typed channels use `channel<T>()`.
+
+### Tasks, ownership, and crossing boundaries
+
+A task starts zero-parameter work captured from its surrounding scope:
+
+```jet
+task work()
+task { work() }
+```
+
+Copyable captures are copied at closure creation; owned non-copyable captures
+move. A task-boundary value must be sendable (**E1102**). Mutable or otherwise
+non-sendable captures report **E1101** or **E1102**. A `view` borrow, a struct
+containing `ref` fields, a trait value, or a closure with non-sendable captures
+cannot cross. Give ownership to a child with `^`, make an immutable owned
+snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
+mutation (D-CONC-CROSS1).
+
+### Frozen snapshots and consuming captures
+
+`freeze(x)` creates one deeply immutable, owned snapshot. A task may read it
+after the lexical group ends because no task can write through it. Writing the
+root, a field, or an index is **E1113**. Freezing a frozen value is the
+identity; freezing a value containing a lock-backed `Shared`, a resource, or
+another non-clonable value is **E1114**. Other crossing failures remain
+**E1102** (D-CONC-FREEZE1=A).
+
+`task ^name { ... }` consumes `name` into the child. Using `name` after child
+creation is the ordinary **E0121** use-after-move. This `^` capture spelling is
+specific to tasks; `^` on an ordinary call argument retains its move meaning.
+`Shared` and `Cell` retain their synchronized and local-only semantics.
+
+The example and golden output are `examples/features/concurrency/freeze_capture.jet`
+and `freeze_capture.out`; UI fixtures are
+`tests/ui/frozen_write.jet`, `frozen_capture_use_after_move.jet`, and
+`freeze_shared_source.jet`.
+
+### Task completion and cancellation
+
+`handle.join()` consumes a task handle and returns `T !TaskFailure`. Calling
+`join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
+result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
 `.Cancelled`, or `.DeadlineBlown`.
 
-`handle.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
-`Task<T>` handle so **L1101** is suppressed, and the task continues running in
-the background. Detach is sound only when the spawned lambda holds fully-owned
-data. Two detach-site diagnostics guard unsound cases:
+`handle.detach()` consumes the handle and lets the task run in the background;
+it suppresses **L1101**. Detach is sound only when the child owns all data it
+can use. A detached child that captures or returns a `view` borrow reports
+**E1106**; another sendability failure reports **E1103** (D-DETACH1).
 
-- **E1106**: the lambda returned or captured a `view` borrow — a detached task
-  may outlive the borrow's source, so the `view` would dangle. Fix: pass an
-  owned `~` copy or `share` instead.
-- **E1103**: the lambda had a different sendability failure at spawn (E1102
-  already fired); detaching an unsound task is doubly dangerous.
+Task handles expose `pause()`, `resume()`, and `cancel()`. `tasks.yield_now()`
+cooperatively yields at a wait point, `tasks.current_task()` returns the
+running task's control trace (and an idle value outside a task), and
+`sender.close()`/`receiver.close()` close channel ends. Pause holds a task at
+its next wait point until `resume()`; it is scheduler state, not a flag the
+application must poll. Task failure uses `TaskFailure` (D-COROUTINE1).
 
-D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
-task handles instead of new `coroutine` syntax. `handle.pause()`, `handle.resume()`, and `handle.cancel()` set
-control-plane state on the handle. `tasks.yield_now()` cooperatively yields at
-a wait point; `tasks.current_task() -> String` returns the running task's
-control trace (idle defaults outside a task). `sender.close()` /
-`receiver.close()` close a channel end explicitly. Pause holds a running task
-at its next wait point until `resume()`; these are enforced by the M:N
-scheduler, not mere flags. `trace()` and `exception()` are retired; task
-failure uses `TaskFailure`.
+Cancellation is preemptive at wait points: channel send and receive,
+`time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at the
+next such point and runs Drop-backed cleanup. A cancelled receive unwinds
+instead of returning `Closed`; a race loser stops at its next wait point; and
+a cancelled `task.all` member reports `Cancelled`.
 
-D-CANCELMODEL1=C (ratified 2026-07-11): cancellation is **preemptive at wait
-points**. A cancelled task — a race loser, a fail-fast sibling, or an explicit
-`handle.cancel()` — unwinds at its next wait point (channel receive/send,
-`time.sleep`, task join, a `select` arm, I/O), running Drop-backed (RAII)
-cleanup on the way out, exactly as a blown deadline (E3003) already does. There
-is one unwind mechanism with two triggers (deadline, cancel). A cancelled task
-does not fall through to the code after the wait: a cancelled `receive()` unwinds
-instead of returning `Closed`, and a race loser stops at its next wait point and
-releases resources via Drop rather than running to completion. A cancelled
-`task.all` member reports `Cancelled` rather than a completed value. A scoped
-shielded region defers (never discards) the unwind until a critical section
-finishes — its wait points complete normally and the deferred cancel/deadline
-lands when the region exits. D-SHIELDNAME1=A spells that lexical region
-`#Shield { … }`. It takes no arguments, nests by depth, and always leaves through
-an RAII guard, so return, error propagation, and unwinding cannot strand a task
-in the shielded state. At the outermost normal exit, an expired deadline lands
-before a pending cancellation. Outside a task, the region is a transparent
-block; at comptime it has no scheduler effect.
+`#Shield { ... }` defers cancellation or a blown deadline until the lexical
+critical section exits. It takes no arguments, nests, and always restores its
+state through an RAII guard on return, error propagation, or unwinding. An
+expired deadline is delivered before a pending cancellation at the outermost
+normal exit. Outside a task it is a transparent block; at comptime it has no
+scheduler effect. Cleanup reached during an unwind completes its wait normally
+rather than starting a second unwind; a failure already propagating is not
+replaced. Generator completion notification still runs while its producer is
+cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 
-Cleanup itself defers the same way. Once a task is unwinding — for a cancel, a
-blown deadline, or a failure — that unwind already runs every remaining Drop
-and reports the task's outcome, so a wait point reached from cleanup completes
-normally instead of starting a second unwind: the cancel stays requested and
-lands on the outcome the in-flight unwind reports, and a failure already on its
-way out is never replaced by it. A generator's completion notification is
-therefore still delivered while its producer is being cancelled.
+### Channels
 
-`channel<T>() -> (Sender<T>, Receiver<T>)` (D-CONC-CHAN1) creates a
-linked send/receive pair, destructured at the call site: `(tx, rx) ::
-channel<T>()`. A second sender is `~tx` — there's no combined
-"channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
-channel (ownership semantics for non-copy values), and
-`receiver.receive() -> T !Closed` blocks until a value arrives or all senders
-are gone. Close the sender, then `loop value in receiver -> ...` drains until
-the channel closes. Channel payloads
-must be sendable (**E1102**).
+`channel<T>()` returns a linked sender and receiver and is normally destructured
+at the call site:
 
-`channel<T>(capacity: N)` creates the same pair with a bounded buffer.
-Its full-buffer behavior is defined by the [Bounded buffering law](#bounded-buffering-law).
-To limit active work, seed the channel with `N`
-tokens; each worker receives one before work and sends it back afterward. Token
-ownership then admits at most `N` active workers. Both patterns are demonstrated
-in `examples/features/concurrency/bounded_workers.jet`.
+```jet
+(tx, rx) :: channel<Int>()
+tx.send(7)
+value :: rx.receive() ?? panic("channel closed")
+```
+
+A second sender is made with `~tx`; there is no combined channel value from
+which to fetch one. `send` moves its value into the channel, and
+`receive() -> T !Closed` waits until a value arrives or all senders close.
+Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a
+bounded buffer. Seed a channel with `N` tokens when at most `N` workers may be
+active; `examples/features/concurrency/bounded_workers.jet` demonstrates the
+pattern (D-CONC-CHAN1).
 
 ### Bounded buffering law
 
 Jet bounded buffers preserve accepted values and apply backpressure by default.
 Only `AsyncEvent` may discard a payload, and only when its immutable
-`AsyncPolicy` explicitly selects `DropNewest` or `DropOldest`; `Block` preserves
-it by waiting. This split follows ratified roles: `channel` is typed work
-transfer, where capacity bounds queued memory and active work, while `AsyncEvent`
-is an asynchronous many-subscriber occurrence stream whose pressure choice is
-explicit and observable in its dispatch report. No primitive gains a new
-overflow knob here. See [D-EVENT2=A](syntax-decisions.md) and
-[D-TASKRUNTIME1=A](syntax-decisions.md).
+`AsyncPolicy` explicitly chooses `DropNewest` or `DropOldest`. `Block` waits
+and preserves the payload. A channel is typed work transfer; its capacity
+bounds queued memory and producer pressure. An `AsyncEvent` is an asynchronous
+many-subscriber occurrence stream, so its explicit pressure choice is visible
+in its dispatch report. No other primitive gains an overflow option (D-EVENT2,
+D-TASKRUNTIME1).
 
-Both queue APIs use `capacity` for the numeric bound:
-`channel<T>(capacity: N)` and
-`AsyncPolicy{ capacity: N, overflow: ... }`. Channel capacity applies
-backpressure only; channels have no drop policy.
+Both queue APIs call the numeric bound `capacity`:
+`channel<T>(capacity: N)` and `AsyncPolicy{ capacity: N, overflow: ... }`.
+Channel capacity supplies backpressure only; channels have no drop policy.
 
 | Primitive | Full behavior | Buffering law |
-|---|---|---|
-| `channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
-| `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt | Only explicit loss path; report exposes acceptance and terminal state |
-| future `core.service` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
-| `core.files` buffered handles | Reader/writer calls block or flush; no Jet queue or drop policy | Bounded-memory stream; caller pace controls progress |
-| `core.term` stream handles and `core.http` `Body` | Blocking reads/writes use OS or socket backpressure; body limits reject over-limit input | Transport streaming preserves accepted bytes; no overflow drop |
-| `core.encoding` readers/writers and `core.data.DataStream` | Blocking `next`/`write`/`flush`; `EncodingLimits`/`DataLimits` bound retained work; no hidden queue or drop | Bounded pull/push stream, not lossy delivery |
-| `core.log` sinks | No public bounded queue, capacity, or overflow policy; sink writes and `flush` are explicit | No buffering-loss rule today; sampling/disable are explicit emission controls |
+| --- | --- | --- |
+| `channel<T>(capacity: N)` | `send` waits for receiver space; a deadline or cancellation wakes the wait. | Preserve work-queue values in FIFO order; capacity bounds queued memory and producer pressure. |
+| `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt. | The only explicit loss path; the report exposes acceptance and terminal state. |
+| A service worker mailbox | Full delivery waits under a deadline or returns `Full`. | At-most-once, per-sender FIFO; no silent drop. |
+| Buffered file handles | Read and write calls block or flush; there is no Jet queue or drop policy. | Bounded-memory stream; caller pace controls progress. |
+| Terminal streams and HTTP `Body` | OS or socket backpressure controls blocking reads and writes; body limits reject over-limit input. | Accepted transport bytes are preserved; overflow is not dropped. |
+| Encoding readers/writers and `DataStream` | `next`, `write`, and `flush` block; `EncodingLimits` and `DataLimits` bound retained work. | A bounded pull/push stream, not lossy delivery. |
+| Log sinks | No public bounded queue, capacity, or overflow policy; writes and `flush` are explicit. | Sampling and disabling are explicit emission controls, not silent buffer loss. |
 
-`Queue`, `PriorityQueue`, `Cache`, and `Bytes` capacity fields are storage
-capacity, not concurrent producer/consumer buffering. Host-internal queues for
-browser events, HTTP admission, observation, and tooling are implementation
-limits, not Jet primitives. Any future buffered log sink or other lossy surface
-needs an owner decision before adding a policy knob.
+`Queue`, `PriorityQueue`, `Cache`, and `Bytes` capacity fields describe storage,
+not concurrent producer/consumer buffering. Host-internal queues for browser
+events, HTTP admission, observation, and tooling are implementation limits, not
+Jet primitives. A future lossy log sink requires an explicit owner decision.
 
-D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
-`#Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points
-observe the inherited budget (task joins, channel receive, `time.sleep`, TCP
-read/write stubs). When the budget is exceeded, runtime report **E3003** is
-emitted in Jet terms and execution exits with the runtime error code.
+### Deadlines and teaching diagnostics
 
-Teaching errors: **E0040** points `async`/`await` users at `task`;
-**E0041** points `Mutex`/`lock` users at channels.
+`#Context(deadline: <Int epoch_ms>) { ... }` supplies an ambient deadline.
+Wait and I/O points inherit it, including task joins, channel receive,
+`time.sleep`, and network reads and writes. Exceeding the budget emits **E3003**
+and exits with the runtime error code (D-DEADLINE1).
 
-### Parallel collection adapters (D-PARCAPTURE1=D)
+The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
+**E0041** directs `Mutex`/`lock` users to channels.
 
-Lists expose one explicit parallel family: `para_map`, `para_filter`,
-`para_partition`, and `para_fold`. The old provisional `par_*` spellings are
-removed rather than aliased. Map and filter preserve source order. Partition
-returns `(false_: [T], true_: [T])`, preserving source order within each side.
+### Parallel collection adapters
 
-All four operations use one bounded indexed chunk engine. Chunk boundaries are
-stable, worker count never exceeds available host parallelism, and scheduling
-does not change result order. `para_fold(seed_factory, step, merge)` creates a
-fresh accumulator for each chunk, steps through each chunk in source order, and
-combines partial results with a deterministic adjacent-pair tree. An empty input
-calls the seed factory once. The seed must be an identity for `merge`
-(`merge(seed, x) == x == merge(x, seed)`), and `merge` must be associative;
-otherwise the deterministic tree is still stable, but it does not define a
-portable parallel reduction.
+Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.
+The older `par_*` spellings are not aliases. Map and filter preserve source
+order. `para_partition` returns `(false_: [T], true_: [T])` with source order
+within each side.
 
-When the plan has one chunk, the engine runs that chunk on the caller thread.
-This keeps small inputs serial and avoids paying for worker setup; the crossover
-to a useful `para_map` speedup depends on item count, callback cost, and the host.
-Run `jet test --measure examples/features/tooling/para_map_crossover_bench.jet` on the
-same machine as the workload before choosing between `map` and `para_map`.
-The measured test owns the optimized profile; do not compare its numbers with
-debug or default builds.
+All four use one bounded indexed chunk engine. Chunk boundaries are stable;
+worker count does not exceed available host parallelism; scheduling cannot
+change result order. `para_fold(seed_factory, step, merge)` creates a fresh
+accumulator per chunk, steps each chunk in source order, and combines partial
+results with a deterministic adjacent-pair tree. Empty input calls the seed
+factory once. The seed must be an identity for `merge`, and `merge` must be
+associative; without those laws the tree remains deterministic but is not a
+portable parallel reduction. A one-chunk plan runs on the caller thread.
 
-The checked-in reference run (Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
-three invocations) first favored `para_map` at 256 items with callback cost 256;
-costs 1 and 32 did not cross within the matrix. This is a teaching example, not
-a portable threshold.
+If multiple callbacks fail, each chunk stops at its first failure, all started
+chunks are joined, and the operation reports the failure at the lowest source
+index, independent of completion order. It returns no partial collection or
+fold accumulator. Effects already performed outside the returned collection
+are not rolled back. Ordinary mutable captures, hidden callback capture facts,
+non-sendable values, and function-typed worker values are rejected with
+**E1101** or **E1102** before code generation; there is no implicit
+serialization or capture merge (D-PARCAPTURE1=D).
 
-If callbacks fail at more than one item, each chunk stops at its first failure,
-all started chunks are joined, and the operation reports the original Jet
-failure belonging to the lowest source index, independent of worker completion
-order. It returns no
-partial map, filter, partition, or fold accumulator. Effects already performed
-outside the returned collection are not rolled back, so callbacks should keep
-external effects explicit and synchronization-safe.
+### Structured tasks and combinators
 
-Sema rejects ordinary mutable captures, stored/imported callbacks whose capture
-facts are hidden, and values that cannot be safely shared or transferred between
-workers as **E1101** for shared writes and **E1102** for values the crossing
-prover cannot send. Inline lambdas and top-level functions expose the required
-facts. Function-typed items, results, and fold accumulators are not transferable
-worker values and are rejected before code generation. There is no hidden
-serialization or implicit capture merge; callers
-return data, use `para_partition` or `para_fold`, or choose explicit synchronized
-state.
-
-### Structured tasks and nested combinators (D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1; ratified 2026-08-06)
-
-`task` is the one reserved concurrency word. `all`, `race`, `any`, and `group`
-remain ordinary names and become combinators only after `task.`. A task body is
-zero-parameter work captured from its surrounding scope:
+`all`, `race`, `any`, and `group` become concurrency combinators only after
+`task.`. Each branch starts one child
+(D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1).
 
 ```jet
 one :: task work()
@@ -2784,13 +2087,12 @@ winner :: (task.race { fast(), slow() }) ?? 0
 first :: (task.any { read_cache(), read_network() }) ?? fallback
 ```
 
-Each branch of `task.all`, `task.race`, or `task.any` starts one child. `all`
-waits for every branch and fail-fast cancels the remaining children. `race`
-returns the first successful result and cancels the losers. `any` returns the
-first completed result and cancels the remaining children. The combinators
-consume their children; there are no list twins or handle-list spellings.
+`task.all` waits for every branch and fail-fast cancels remaining children.
+`task.race` returns the first successful result and cancels losers.
+`task.any` returns the first completed result and cancels the remaining
+children. The combinators consume their children and have no handle-list twin.
 
-For `task.all`, branches may instead be named:
+`task.all` may name all branches:
 
 ```jet
 results :: (task.all {
@@ -2800,22 +2102,14 @@ results :: (task.all {
 print(results.text, results.count)
 ```
 
-The named form returns the existing anonymous named tuple/record, so fields
-may have different types and are read by name. All branches must use the same
-style: mixing a named branch with a positional branch is **E1117** and does
-not lower. Tuple field naming and canonicalization remain authoritative; child
-evaluation and result assembly retain source order. `task.race` and `task.any`
-remain positional.
+The named form returns an anonymous named tuple or record. Named and positional
+branches cannot be mixed; that is **E1117**. Child evaluation and assembly
+retain source order. `race` and `any` remain positional.
 
-`task.group name { … }` opens a lexical group. `task.group name(limit: n) { … }`
-also bounds the number of active children; an `n` below one is clamped to one
-before child admission. The group owns every child created in its body and
-joins the children when the block closes.
-The same `Group` parameter may be passed to a helper; `task` in that helper
-uses the caller's group. A group is a borrow of its scope, so it may be named in
-every direct parameter position — a method's parameter list exactly like a free
-function's (**D-CONC-GROUP1=A**, which amends D-TASKGROUP-PARAM1=A by lifting
-its named-free-function restriction only):
+`task.group name { ... }` creates a lexical group. `task.group name(limit: n)
+{ ... }` limits active children; a limit below one is clamped to one before
+admission. The group owns and joins every child created in its body. A `Group`
+may be passed directly as a free-function or method parameter:
 
 ```jet
 fn add_work(group: Group, value: Int) {
@@ -2830,68 +2124,37 @@ struct Crawler {
         task value + step
     }
 }
-
-fn run() {
-    task.group workers(limit: 4) {
-        add_work(workers, 41)
-        crawler :: Crawler{step: 1}
-        crawler.add_stepped(workers, 41)
-    }
-}
 ```
 
-Nothing else about the ban moved. `Group` in a struct field, a return type,
-a local annotation, a lambda parameter, an alias, or any aggregate is still
-refused, and a lambda may not capture the handle — so no child outlives the
-scope that joins it. `self` holds the receiver, never the group, so a method
-opens no new escape. A spawn through a parameter group still owns its captures.
+`Group` is not allowed in a struct field, return type, local annotation,
+lambda parameter, alias, or aggregate. A lambda cannot capture the group
+handle. A method receiver does not retain the group, and a spawn through a
+`Group` parameter still owns its captures (D-CONC-GROUP1=A).
 
-`join()` is fallible: `Task<T>.join() -> T !TaskFailure`. The failure values
-are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
-`TaskStatus`, `.trace()`, and `.exception()` are retired; cancellation and
-deadline behavior use the one failure rail.
+`join()` is `Task<T>.join() -> T !TaskFailure`; its failures are `.Cancelled`,
+`.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`,
+`.trace()`, and `.exception()` are not part of this interface.
 
-#### Borrowed captures in a group child (D-TASKBORROW1=A)
+#### Borrowed captures in a group child
 
-A lexical group joins every child before its block returns, so a child may
-borrow places the owner still gives access to — the loan opens before the child launches
-and closes at the join. Reads are borrowed freely. A write borrow is admitted
-only where the compiler proves the places never overlap; distinct fields and
-distinct constant indexes are disjoint, and anything dynamic is treated as
-overlapping. Two children reaching one place is **E1101**.
+A lexical group joins every child before its block returns. A child may borrow
+an owner that remains accessible through that join. Reads are unrestricted;
+write borrows require a proof of non-overlap. Distinct fields and distinct
+constant indexes are disjoint, while dynamic places are overlapping. Two
+children reaching one place report **E1101**.
 
-```jet
-task.group g {
-    left :: &particles[0]
-    right :: &particles[2]
-    print((task.all {
-        { left.position += left.velocity; left.position },
-        { right.position += right.velocity; right.position }
-    }) ?? [])
-}
-```
+An owner declared inside the group drops before the group can join it, and a
+`Group` passed as a parameter joins in another frame; both cases report
+**E1102**. Channels and task bodies still require sendable owned values
+(D-TASKBORROW1=A).
 
-A group lends only what outlives its own join. An owner declared inside the
-group's own block drops before the group joins, and a group reached through a
-`Group` parameter joins in another frame; both stay **E1102**. Channels
-and task bodies still require sendable owned values.
+### Select and scheduling
 
-Combinators are nested selectors, not methods on a group handle:
-
-| Operation | Completion and cancellation |
-| --- | --- |
-| `task.all { a(), b() }` | Returns `[T] !TaskFailure`; waits for every child and fail-fast cancels the remaining children. The named form `task.all { a: f(), b: g() }` returns an anonymous named tuple/record with heterogeneous fields; mixed styles are **E1117**. |
-| `task.race { a(), b() }` | Returns `T !TaskFailure`; the first successful result wins and cancels the losers. |
-| `task.any { a(), b() }` | Returns `T !TaskFailure`; the first completed result wins and cancels the remaining children. |
-| `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
-
-- Waiting on several sources at once — a select — is a subjectless `if` table
-  whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends
-  D-CONCSELECT1=A's fluent builder and D-CONC-CHAN1's spelling of it). The
-  comma head marks the wait; a Bool head in the same table is a registered
-  diagnostic. `after` takes a Duration literal and fires when no source is ready by
-  that Duration deadline; an optional `else` arm makes the wait non-blocking. The whole
-  table compiles to one wait, so there is no test-then-read race:
+A select is a subjectless `if` table. Each arm head binds a value and names a
+source; the comma marks the wait. A bare `Bool` arm is rejected rather than
+being interpreted as a source. `after` takes a duration literal and fires
+when no source is ready by that duration. An optional `else` makes the wait
+non-blocking.
 
 ```jet
 if {
@@ -2901,1392 +2164,1216 @@ if {
 }
 ```
 
-Cancellation at the wait follows D-CANCELMODEL1=C. Example: `select_channel.jet`.
+The table compiles to one wait, so testing a source and then reading it cannot
+race. Cancellation at the wait follows the cancellation rules above
+(D-CONC-CHAN2=D, D-CONCSELECT1=A).
 
-The M:N scheduler (D-ASYNCRT1=A) parks tasks at channel/timer/IO waits instead
-of blocking OS threads. Native I/O pollers: Linux `epoll`, macOS/BSD `kqueue`,
-and Windows IOCP. The Windows backend registers sockets with a completion port,
-handles completion, cancellation, deadlines, stale packets, scale, cleanup, and
-terminal poller failure without a portable-poll fallback. Task-local Jet traps
-unwind into the scheduler so sibling combinators can
-report `panic: a task panicked` instead of exiting the whole process early.
-
-Scale tests: `scheduler_spawn_10000_tasks` in CI; `scheduler_spawn_100000_tasks_bench`
-is `#[ignore]` for local 100k stress.
+The scheduler is M:N: tasks park at channel, timer, and I/O waits instead of
+blocking OS threads. Native pollers are `epoll` on Linux, `kqueue` on macOS and
+BSD, and IOCP on Windows. Task-local failures unwind into the scheduler so a
+sibling combinator can report a task panic without exiting the process early
+(D-ASYNCRT1=A).
 
 ### Deadlock stance
 
-**Guarantee.** Jet guarantees deadlock-free lock acquisition for one narrow
-path: a `#Transact` commit collects the touched `Shared<T>` values and acquires
-their write locks in stable address order. This removes lock-order cycles
-inside transaction commit. Plain shared access rides the same guarantee: a
-statement that reads a second shared value commits through this ordered engine
-instead of nesting one value's lock inside another's.
+Jet guarantees deadlock-free lock acquisition for one narrow path: a
+`#Transact` commit collects its touched `Shared<T>` values and acquires write
+locks in stable address order. Plain shared access that reads a second shared
+value uses the same ordered commit engine, so it does not nest locks in an
+arbitrary order.
 
-**Non-guarantee.** Jet does not guarantee deadlock freedom for arbitrary
-structured-concurrency programs, and it does not detect arbitrary deadlocks at runtime.
-`task`, `task.group`, join duties, and `channel` define ownership,
-lifetime, and wait behavior; they do not prove progress. Two tasks can wait for
-each other through bounded channels, or a task can wait for a result that no task
-sends.
+Jet does not guarantee deadlock freedom for arbitrary structured-concurrency
+programs and does not detect arbitrary deadlocks at runtime. Tasks, groups,
+join duties, and channels specify ownership, lifetime, and wait behavior; they
+do not prove progress. Tasks can wait for one another through bounded channels,
+or a task can wait for a result that no task sends. The scheduler wakes tasks
+when a source, cancellation, or deadline changes but does not construct a
+global wait-for graph. A deadline or cancellation can bound a wait; neither
+makes a deadlock successful.
 
-The M:N scheduler parks tasks at channel, timer, and I/O wait points. It wakes a
-task when the relevant source, cancellation, or deadline changes, but it does not
-build or check a global wait-for graph. A `#Context` deadline or explicit
-cancellation can bound a wait; neither makes a deadlock successful. The
-`#Transact` guarantee does not extend to arbitrary lock or guard use, channels,
-task joins, or I/O.
+See [channel buffering](#bounded-buffering-law) and
+[concurrency boundary safety](architecture.md#concurrency-boundary-safety).
 
-See [task and scheduler rules](#e2-m1--concurrency-tasks-and-channels-verified-2026-08-06),
-[channel buffering](#bounded-buffering-law), and
-[concurrency boundary safety](architecture.md#concurrency-boundary-safety-status).
+## Core library
 
-## Modules — `module name { … }` (U3, unified-ecosystem §4–5; parser, Stage 1a)
+The [core-library reference](reference/core-library.md) is the complete
+user-facing module and signature index. Compiler-known `core.*` namespaces
+cover file, terminal, environment, process, math, random, time, arguments,
+numeric, and encoding operations. `core.encoding` uses one `DataTree` value for
+JSON, CSV, TOML, and YAML and supports `#Codable`. Every fallible call returns
+`T !E`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
+a core namespace does not by itself emit every helper: code generation keeps
+the helpers a program calls. Teaching errors are **E0037**–**E0039**
+(D-CORENS1, D-CORENS-CANON1).
 
-A module is a named, composable top-level declaration that contributes typed
-values to reserved namespaces. Many modules may share a file.
+Core surface diagnostics and examples are exercised by the `tests/ui/core_*`
+fixtures.
 
-```ebnf
-module      = "module" dashed-name "{" contribution* "}" ;
-contribution = namespace "." dashed-name ":" expr [","] ;
-namespace   = "env" | "image" ;
-dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
-```
+### `Bytes`
 
-- **Dashed names (S84):** package / module / image / env **names** may
-  be kebab-case — `module web-app`, `env.web-tools`, `image.halcyon-oci` —
-  matching nixpkgs/npm convention. A `-` joins two segments only when it is
-  *span-adjacent* to both (no surrounding whitespace), so a spaced `a - b` stays
-  subtraction; this is a parser rule (`expect_dashed_name`), not a lexer or
-  expression-grammar change. Code identifiers (variables, fields, types,
-  functions) stay plain `ident`. No leading, trailing, or doubled hyphen.
-- **Internal with a leading underscore:** automatic discovery skips
-  `module _name { … }` based on the declared name, not its filename or scan
-  order. An explicit `use project._name` remains allowed under ordinary
-  visibility rules and resolves the declaration name regardless of filename.
-  The underscore changes discovery, not access; rename it to `module name` to
-  opt back in. `jet project parts --skipped` lists omitted declarations;
-  duplicate declared names are conflicts even when omitted
-  (D-SHAPE-MODULEINTERNAL1=A).
-- **Active reserved namespaces** are `env` → `Env` (dev environment),
-  `system` → `System` (jetos host), and `image` → `Image` (OCI container image
-  or jetos installer input).
-- **`env.<name>:` values reuse the ordinary expression parser** — typically a
-  struct literal (`Env{ packages: […], prompt: "…" }`), so lists and strings
-  work with no new grammar. `prompt: "name"` is the beginner shorthand. For
-  prompt depth, write `prompt: Prompt{ label: "name", path: .Short, strip: .On }`
-  (`path: .Full` and `strip: .Off` are the other modes). `jet env` renders that
-  as one hybrid prompt: label plus path by default, `Ctrl-G` status glance on
-  demand, and the optional strip showing the same status words.
-- **Auto-activation hook (D-ENVHOOK1=A):** `jet env hook <shell>`
-  (`bash`/`zsh`/`fish`) prints a one-line, opt-in shell hook the user installs
-  once (`jet env hook fish | source`, or a line in the shell config). After
-  that, entering any directory whose tree carries an `env.jet` activates that
-  env — the same packages, `PATH`, and prompt as `jet env` — and leaving the
-  tree restores the shell exactly as it was. The first activation of an
-  untrusted, trust-sensitive env prompts through the ordinary D-JPK-GRANTCMD1
-  trust gate (never on `cd` into a project you already trust); explicit
-  `jet env` stays available for one-off shells and anyone who declines the hook.
-  Set `JET_ENV_DISABLE` to any non-empty value to suppress activation (and drop
-  any active env) in the current shell. The hook re-checks on each prompt via a
-  private `jet env export <shell>` callback that emits nothing until the current
-  directory crosses an env boundary, so it is a no-op on the vast majority of
-  prompts.
-- **`image.<name>:` values are Jetpack OCI images.** `from: env.<name>` projects
-  the selected typed environment through this same image record; the safe
-  default is a non-root runnable `/bin/sh` assembled from verified Hangar
-  executable output. The record also accepts `services`, `target`, `user`,
-  `entrypoint`, `health`, `expose`, `env_vars`, `files`, and `base`; `files`
-  explicitly layers regular project-relative non-secret paths, while managed
-  environment files and dotenv inputs stay omitted. Service projection remains
-  rejected until the typed supervisor prerequisite lands.
-  `base:` is captured but not yet realized for remote references. `.Iso`,
-  `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer inputs handled
-  by `jet os image`, not by `jet image`.
-- **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
-  `Pkg.adapt(name:, source:, deps:, recipe:)`. `source:` is a provider ref such as
-  `"./vendor/tool"`; each `deps:` package is realized and its verified executable
-  members are the only tools available to a `Recipe.build` `.exec` step. Jetpack realizes `Recipe.copy()`,
-  `Recipe.prebuilt(bin:, as:)`, and finite `Recipe.build(steps: […])` actions
-  (`.fetch`, `.exec`, `.install`, and `.install_tree`) into ordinary hangar
-  packages, with the same store/lock path as any other package. `jetpack add
-  <ref> --adapt` prints a draft adapter and does not run upstream code.
-- **Direct ecosystem providers (D-JPK-PROVIDERS2):** LuaRocks uses the exact
-  `<name>#version=<version>@luarocks` root. Jetpack resolves the repository
-  manifest and rockspec dependency closure, verifies every source SHA-256,
-  records the qualified ref and closure in `.jet/lock`, and projects the
-  realized `LUA_PATH`/`LUA_CPATH` into the environment. Mutable refs, unsupported
-  platform/native build metadata, dependency cycles, unsafe archive paths,
-  source drift, and cache tampering fail closed. Offline reuse re-verifies the
-  sealed Hangar output without contacting the repository.
-- **No-Nix machines (U23):** core packages and adapted packages realize without
-  Nix. Package refs that lack a pinned compatibility output are reported
-  together as E1272, naming only those holes. Jetpack does not invoke an
-  installed Nix executable for package realization; use a verified output or
-  draft an adapter with `jetpack add <ref> --adapt`.
-  Foreign-flake projection uses the bounded native evaluator. Unsupported
-  expressions remain E1256; Jetpack does not delegate this path to an
-  installed `nix` binary.
-- **Offline discovery (U26):** `jet search <query>` and
-  `jet info <source>.<package>` read only `.jet/discovery/index.jsonl`, local
-  provider fixtures, and hangar metadata. They never fetch. `--json` emits the
-  same package records the editor discovery hooks consume: source, name,
-  resolved ref, version, platforms, docs, provenance, and typed service option
-  fields. Search matches option names, defaults, and documentation. LSP
-  completion and hover expose the same package and typed option records.
-- **Environment discovery cockpit (U26/#789):** `jet env info [--env <name>]
-  [--preset <name>] [--json]` reads one selected typed environment plan. It
-  reports package refs, typed service readiness/dependency/restart/watch facts,
-  the ratified `jobs` and `checks` lists, variables with source labels, managed
-  files, and integration facts. It does not realize packages, start services,
-  run lifecycle actions, or apply files; sibling `env.<name>` contributions are
-  not merged into the selected report.
-  The existing `jet self lsp` transport serves the same selected JSON facts as
-  the read-only MCP resource `jet://environment` through `resources/list` and
-  `resources/read`; the bridge does not enter the lifecycle.
-- **Failed-build debugging (U27):** recipe-backed builds persist per-step logs
-  under the hangar. On failure, scratch is preserved in hangar-managed storage
-  and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
-  `jet explain <ref>` prints Store identity, provider facts, dependency and
-  closure edges, liveness roots, and rebuild checks. The causal views
-  `jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
-  one part of the same fact model. `jet explain <ref> --json` emits the stable `jet.report/v1`
-  projection. Syntax, overlay, and code-form explanations use the same
-  `jet.report/v1` status renderer; code-form `jet explain E1234` keeps the
-  existing diagnostic essay content inside that status projection.
-- **Hybrid CLI output (D-FE-CLI1):** trivial reads stay quiet, multi-package
-  realization/build work reports dependency-chain progress, and mutations plan
-  before applying. Plan rows use `+`, `-`, and `~` in both colored and plain
-  output. `-y` and `--yes` are the same confirmation bypass; non-interactive
-  mutation without either prints the plan and changes nothing. Diagnostic text
-  and JSON output remain unchanged.
-- **Package overlays and overrides (D-JPK-OVERLAY1):** `workspace.jet` may carry
-  reviewed overlay policy inside `module workspace`. An `overlay <name> { ... }`
-  block records provider/channel swaps (`provider: Provider.nixpkgs(channel:
-  "plasma-beta")`), per-package source/version/flag/patch changes
-  (`package("foo").patches += [patch("patches/foo.patch")]`), and package-local
-  `allowUnfree`. Workspace-wide unfree review uses
-  `policy.allowUnfree: ["discord"]`. `jetpack override draft <ref> --patch
-  <file>` only writes that source policy; it never creates hidden state. Patch
-  application is deterministic unified-diff application against the source tree,
-  and `jetpack explain package-overlay:<overlay>:<package>` prints provider,
-  channel, policy fingerprint, and update command from the same source policy.
-- **No daemon / no root (U28):** jetpack is a one-shot, user-owned process:
-  no resident daemon, no root-owned default hangar, no privileged sandbox
-  helper. Concurrent commands coordinate through file locks. Linux executable
-  recipe actions use the native Bubblewrap boundary; if the required backend
-  is unavailable, Jetpack emits L0205 and refuses the executable action, while
-  `jetpack config sandbox require` makes that condition E1275 before launch.
-  Core Cargo library actions use the same boundary and require the exact
-  staged-source/recipe/platform/`exec:cargo` build identity before launch;
-  their producer receipts record the actual backend and policy, or the
-  non-executing substitute/reuse outcome. Host Cargo is never an unsandboxed
-  fallback.
-- **Universal trust grants (D-JPK-GRANTCMD1/SCHEMA1):** `jet trust` is the
-  public command family for the unified grant graph. `jet trust list` shows
-  package, build, env, service, image, fleet, and jetos authority grants;
-  `jet trust explain [<grant>]` expands exact authority and revocation keys;
-  `jet trust grant <grant> [--scope user|repo]` records a reviewed local grant;
-  `jet trust revoke <grant>` removes it so the next risky action asks again.
-  The store remains backward-compatible with U19 `hash:` and `pattern:` lines.
-  `package.jet` may carry reviewed source authority as
-  `authority: .{ trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested }, providers: { … } }`.
-  Trust decisions are `allow`, `prompt`, or `deny`. The provenance requirement
-  is `none`, `logged`, or `attested`; absent `require` means `none`. Unknown
-  fields are a manifest error.
-- **Dependency provenance (D-BOUND-PROV1):** `jet inspect provenance` reads
-  the one lock-backed record for each dependency. It shows the locked
-  integrity hash, transparency entry, publisher identity, and build
-  attestation. Integrity stays enforced by E1204. Other fields show
-  `verified` or `recorded` when present. `authority.trust.require` can require
-  logged or attested evidence during dependency resolution.
-- **The override law (D-LINTPOLICY1=A):** warnings and lints never fail a
-  build by default — errors stay reserved for programs Jet cannot compile
-  safely or unambiguously (I1 memory/type safety has no override and is
-  outside this law). Every bypass is spelled at the site or on the command
-  line, never in hidden config, and lands in the audit record (`jet inspect
-  dossier`, effect-budget provenance, build facts). Walls are team policy
-  only: `package.jet`'s `policy: { lints: { deny: […] } }` stays under the
-  `policy:` namespace alongside `authority.trust` (D-JPK-POLICYSURFACE1) — `deny:` lists
-  stable lint names (e.g. `float_money`), and a lint that fires while its name is listed
-  fails the build with E1293 instead of only warning. Absent entirely, every
-  lint stays a warning (I1/D-LINTPOLICY1 default); host/org policy narrows,
-  never widens (already law). This is the one policy surface for lint walls
-  — no per-call flag or attribute may duplicate it (I8).
-- **Offline guarantee (U29):** once a package ref is realized into the hangar,
-  realize-class verbs can use it again with `--offline` and no provider
-  metadata refresh. Network-class verbs (`add`, `update`, `outdated`,
-  publish/cache sync) refuse `--offline`, and a missing local object reports
-  E1276 instead of fetching or timing out.
-Stage 1a is parser-only for the AST shape; the jetpack module evaluator
-(`Source/Jetpack/ModuleEval.rs`) gives these contributions meaning (field-checking +
-capture into a plan model). The U5 merge engine consumes `env` contributions.
-
-### Jetpack Services And Secrets
-
-- **Dev services (D-JPK-SERVICE1):** an `env.<name>` role-module may carry
-  `services: { name: { enable: Bool, ... } }`. These are project-local
-  processes managed by Jetpack for the dev loop (`jetpack services
-  up/down/health/logs/wait`). They are not system services and do not imply jetos
-  activation.
-- **Secrets (D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D):** an
-  `env.<name>` role-module declares one typed map from secret names to either
-  metadata or a read-time composition:
-
-  ```jet
-  secrets: {
-      API_KEY: {
-          required: true
-          description: "CI credential"
-          allowed_environments: ["ci", "prod"]
-          rotation: max_age(90d)
-          default: none
-          generate: none
-      }
-      DB_URL: compose(
-          template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app
-          from: [DB_HOST, DB_USER, DB_PASSWORD]
-      )
-  }
-  ```
-
-  The compiler checks declaration types, duplicate names, environment labels,
-  policy/generator shape, template placeholders, input names, and composition
-  cycles. A known profile checks allowed-environment labels; a dynamic profile
-  defers that check to activation. Activation checks the selected profile and
-  store presence. `required: false` permits absence; a required missing entry
-  reuses **E1263** and names the entry and environment. The compiler cannot
-  prove ciphertext contains a value. Composition resolves on every
-  `core.crypto.vault.get` read, keeps only source pairs encrypted, and derives
-  the result in memory, so rotation changes the next read. Plans and read
-  audits contain the output name and sorted input names only; no secret value is
-  written to diagnostics, logs, fixtures, snapshots, or audit events.
-- **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.crypto.vault` persists only
-  `SigningKey` and `X25519SecretKey` behind immutable `KeyRef<T>` handles.
-  Reads, preparation, authorization, and commits all require `Secret`.
-  Mutation is a three-step compare-and-swap: prepare a five-minute move-only
-  `MutationPlan<T>`, authorize its exact native preview into a one-use
-  `VaultWrite<T>`, then consume write and plan in that order. Rotation creates
-  the next generation and retires the prior active generation; exact retired
-  refs still load, while revoked refs fail before key bytes are copied.
-  String secrets and typed keys share the age-encrypted `.jet/secrets.age`
-  artifact but occupy disjoint namespaces. Its authenticated plaintext is the
-  canonical bounded `JVLT` version-2 format; the first authorized mutation
-  migrates historical String rows without inferring keys from them. There is
-  Safe portable backup uses the canonical `JVKW` v1 envelope: recipient mode
-  wraps an independent backup key for 1–16 sorted X25519 recipients, while
-  passphrase mode uses fixed Argon2id parameters. Both modes authenticate the
-  source repository/name/generation/record hash and the concrete key type.
-  Import decrypts into a short-lived `WrappedImportPlan<T>`, then reuses native
-  authorization and consuming compare-and-swap commit; same-origin imports are
-  idempotent and revoked origins never reactivate. All secret-dependent open
-  failures collapse to `KeyWrapError.OpenFailed`. Raw 32-byte import is available only
-  through `core.crypto.expert` inside an audited `#Unsafe` region. Headless
-  mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
-  workspace, environment, DAP, and stdin are never write authority.
-
-### jetos Runtime Slice
-
-`jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm`
-is active. A bare host (`jet os switch laptop`) selects `system.laptop` in
-`./config.jet`; `laptop@../machines` selects an exact external root. Builds create named
-generations; `generations` lists newest first; `switch --name <name>` overrides
-the automatic name; `rollback` activates a prior generation. `plan` prints the
-checked system plan without building. `proof` reads the latest generation's
-plan, proof, provenance, health, boot, init, secrets, VM, and rollback facts.
-The current slice records a root `sw/bin` package closure, hangar/cache facts,
-systemd service/timer/socket units plus target wants, users/groups, filesystems and swap,
-networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
-systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
-terminal login facts with serial/virtual getty units and user home and
-generation projection,
-NixOS/flake-parts/Home Manager import through `jet os import <flake-or-dir>`
-with semantic `jetos-import-facts.json` input and audited facts-only fallback,
-per-user generations under `users/`, Flatpak exact reconcile plans,
-permission overrides, undeclared-app removal, and AppImage runtime integration under
-`flatpak/`/`appimage/`, performance profile, sysctl, zram, sched-ext scheduler, initrd, and
-bootloader tuning proof under `performance/`, option priority
-explain output under `module-system/`, storage plans, fstab projections,
-safe-by-default `jetos-storage-apply`, and `jetos-persist-activate`
-impermanence proof under `storage/`, container/microVM workload plans with
-mounts, secrets, resources, health, and rollback proof under `workloads/`, hardware scan source,
-profile manifests, boot specialisation entries, and `jetos-hardware-scan` /
-`jetos-hardware-doctor` commands under `hardware/`, reusable theme projections under `theme/` and concrete GTK,
-Qt, terminal, editor, display-manager, and Studio preview files, and
-`jetos-service-logs` journal/fallback log query support under
-`service-manager/`,
-fleet deploy plans plus generated `jetos-fleet-deploy` host scripts under
-`fleet/`, runnable workload launchers under `workloads/`, a generated
-`jetos-flatpak-reconcile` command for remotes/apps/permissions/removals,
-`jetos-appimage-run` for AppImage desktop integration, lifecycle channel policy,
-proof-gated auto-upgrade service/timer, rollback-on-health-fail proof, and
-explainable `jetos-lifecycle-gc` retention scripts under
-`lifecycle/`, option priority/explain output under `module-system/` with
-winner/loser contenders and disabled-module manifests, typed option
-reference/search artifacts under `options/` including type, default, example,
-doc, tier, priority, and provenance plus exact/explain search modes, and image
-variant artifacts under `systems/images/`: qcow2, raw, SD-card image, and a
-netboot bundle with kernel/initrd/iPXE config plus
-`jetos-image-variants-<host>.proof.json`,
-first-wave `apps.program.*` modules under `apps/programs/` for git, ssh, fish,
-starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer,
-fastfetch, VS Code, Cursor, Discord, Spicetify, and browser policy projection,
-plus `jetos-app-module-apply`,
-desktop breadth projections for PipeWire/rtkit, GNOME and Plasma Wayland
-sessions, libvirt/SPICE/swtpm/USB redirection, GameMode/Steam/Proton policy,
-locales/keymaps, XDG mime defaults, fonts, smartcard pcscd, and AppImage binfmt,
-owner-`~/nixos` acceptance coverage matrix, VM gate list, no-omission diff, and
-`jetos-acceptance-prove` proof under `acceptance/`,
-repo-ciphertext/host-key tmpfs-only secret activation proof, guided-ext4 disk
-intent with `--manual`, and `jetos` hybrid ISO media staging/proof. When pinned
-xorriso, Limine, zstd, QEMU, and filesystem tools are present, `jet os image`
-writes the ISO artifact, the qcow2/SD/netboot variant proof, and records the
-exact tool paths in proof JSON.
-Generated terminal profiles set `JETOS_BRAND=JetOS` and a clean `JetOS <host>`
-prompt for login shells and VM run-mode shells; `/etc/issue` and `/etc/motd`
-carry the same light host branding.
-Fleet deploy scripts default to tar-over-SSH staging, remote proof before
-switch, health check, and rollback-on-fail; tests may replace those commands
-with local hooks, but the generated default is a real push path, not a proof
-label. Lifecycle GC is explain-before-delete by default and deletes old
-generation directories only when invoked with `--apply`.
-Installer media copies the generation as a self-contained tree; host-root
-symlinks are dereferenced before the ISO is built so the guest install does not
-depend on the build machine's paths.
-Compatibility escape
-hatches such as overlays and specialArgs are allowed only as explicit
-`packages.*` options; each one is written to the generation's compat audit file
-and provenance so Studio can show it and native replacement work can track it.
-`jet os vm prove <host> --disk <path>` is the install/reboot proof entrypoint;
-`--real` upgrades it to replacement acceptance and rejects script/fake VM tools.
-it fails with E1279 rather than faking boot media when pinned QEMU/media tools
-are missing, and it fails with E1285 rather than treating a prepared QEMU harness
-as a passed guest proof. It writes the VM proof harness, runs the recorded QEMU
-create/install/reboot phases, captures a `JETOS_GUEST_PROOF:` marker from the
-installed guest's serial output, and writes the guest proof artifact. The QEMU
-installer phase boots the hybrid ISO with `console=ttyS0`; the ISO's Limine
-entry carries `rdinit=/jetos/init`, `jetos.mode=install`, and the target
-disk. The installer writes a GPT disk with a FAT ESP, ext4 `jetos-root`,
-`EFI/BOOT/BOOTX64.EFI`, the kernel/initrd, and an installed Limine config. The
-installed-disk verifier phase boots that disk through firmware/Limine with
-`rdinit=/jetos/init`, `jetos.mode=verify`, and the installed root label. A rerun
-may promote the harness to `guest-passed` only when the guest proof records the same
-host, generation, disk, media proof, tool hashes, and required guest assertions;
-harness JSON names the expected guest proof path, command argv, and per-phase
-run logs. The proof then boots a graphical desktop verifier with QEMU VNC,
-stdvga, and the packaged `bochs` DRM module; promotion requires the guest to see
-a framebuffer (`fb0`) and execute the generated display-manager,
-desktop-session, and terminal-fallback launchers in proof mode before it emits
-`graphical-console-ready` and `desktop-launchers-run`. The required guest
-assertion set includes terminal-login readiness, desktop-session readiness,
-graphical-console readiness, and launcher readiness:
-the installed generation must carry `terminal/facts.json`, `/etc/profile`,
-`/etc/shells`, enabled `serial-getty@ttyS0.service`, and the user home profile
-inside the root projection, plus `desktop/facts.json`, the GNOME Wayland session
-launcher, the display-manager unit, the terminal fallback launcher, the installed
-jetos Studio app, a guest-visible graphical framebuffer, and launchers that
-resolve GNOME/GDM commands from the installed system closure before VM proof can
-pass. The
-ratified interactive launch surface is `jet os vm run <host> --disk <path>`;
-it opens only a disk already tied to the latest generation by a `guest-passed`
-VM proof, exposes a graphical VNC console, and attaches serial output to the
-current process. It fails with E1287 rather than launching an unproven qcow2. The
-default CachyOS kernel is a first-party `cachyos-kernel`
-source-built package carrying recipe/config/patch/initrd-input hashes beside the
-kernel and initrd artifacts; missing kernel package provenance is E1280, missing
-bootable kernel/initrd artifact headers are E1282, missing source recipe
-or builder provenance is E1284, and a failing `source/build.sh` bootstrap build
-is E1286.
-The build script is package-internal and authoritative: when the source recipe
-is present, `source/build.sh` runs before boot validation even if stale boot
-files already exist. `JETOS_KERNEL_SOURCE`, `JETOS_KERNEL_OUT`, and
-`JETOS_KERNEL_PACKAGE` point at the realized first-party package, and the script
-must write the kernel and initrd artifacts that the generation, installer, and
-VM proof will boot. Installer media appends a JetOS initrd overlay containing
-`/jetos/init`, `/jetos/install.sh`, and `/jetos/guest-verify.sh`; `/jetos/init` dispatches
-`jetos.mode=install`, `jetos.mode=verify`, and `jetos.mode=desktop-verify`,
-mounts proc/dev/sys before reading cmdline, probes `LABEL=jetos-root`,
-`/dev/vda2`, and `/dev/sda2` before falling back to install mode, and the ISO
-Limine config enters this dispatcher. The hybrid ISO
-carries both BIOS Limine boot files and a FAT `boot/efiboot.img` ESP with
-`EFI/BOOT/BOOTX64.EFI`, so QEMU/OVMF and physical UEFI firmware boot the same
-installer artifact. The graphical verifier phase still direct-boots the same
-kernel/initrd with `rdinit=/jetos/init` so it can force a VNC/stdvga display for
-desktop proof; the installed-disk verifier uses firmware disk boot. The verifier
-emits the serial guest-proof marker. The default systemd
-init path requires a first-party `systemd` package; missing init provenance is
-E1281. Each generation defaults to the ratified GNOME-on-Wayland desktop profile
-with terminal login as the secondary fallback. The display-manager service
-launches the system session when GNOME/GDM are present and falls back to the
-terminal launcher instead of blocking boot. Each generation also installs the
-first-party jetos Studio app projection under `sw/bin/jetos-studio`,
-`share/applications`, and `studio/`;
-`studio/data.json` carries the read-only host/package/service/option projection
-artifact paths, no-plaintext secret policy, adaptive fleet surface, separate-app
-Canvas deep-link metadata, and changeset apply gates. The root projection carries these files into
-`/run/current-system`. Studio remains a separate jetos system app from Canvas
-and may fall back to the browser over the same local projection service. It may
-deep-link to Canvas for generic source graph editing, but it stores no Canvas
-semantic state. The
-direct launch command is `jetos studio`; `jetos studio --headless` prints the
-installed app path for CI/review without opening a browser, and `--json` prints
-the root, app, metadata, and data paths without opening a browser.
-`jetos studio --serve <loopback:port>` serves `index.html`, `app.json`, and
-`data.json` over the local browser fallback. `GET /studio/source` serves the
-selected `config.jet` for the adjacent source pane. The same local service
-accepts source transactions at `POST /studio/transaction`; the first implemented
-transaction is `set-option`, which returns an exact source diff and writes
-`config.jet` only when `write:true`. `POST /studio/run` executes the matching
-`jet os check|plan|build|proof|generations` action from the selected
-project/host and returns captured output, so Studio never substitutes hidden
-state for CLI proof. The build action writes a named Studio candidate generation
-before proof.
-
-`module vmtest.<name>` declares a JetOS VM scenarterm. Its `hosts:` map names
-scenario handles bound to `system.<host>` declarations, and `run: test { ... }`
-captures typed host-handle assertions such as `wait_for_boot`,
-`assert_unit_active`, and `assert_port_open`. `jet os vm test <name> --disk
-<path>` evaluates that scenario through the same installer/reboot proof harness
-as `jet os vm prove`, writes one host proof per scenario host, then records
-`systems/vm-tests/<name>-vmtest-proof.json` with the source test body,
-assertion method facts, host generations, disks, and proof artifact paths.
-
-`jetos user plan|build|switch|rollback|prove <name>` is the standalone
-per-user path. It selects a `user.<name>` or `users.<name>` generation from
-`config.jet`, renders the same `users/<name>/profile.json` artifact used by
-`jet os switch`, and builds/activates/proves it through normal named
-generations rather than a separate hidden state store. The generated
-`jetos-user-apply <name>` command applies that generation to a home directory:
-projects declared files, links package binaries into `.jetos/profile/bin`,
-writes user service units under `.config/systemd/user`, and records
-`.jetos/proof/user-<name>.json`.
-
-## Fixed-size list `[T#N]` (S76)
-
-`[T#N]` is a type refinement meaning "a list of exactly N elements of type T."
-It can be destructured with an exact-count pattern.
-At codegen it erases to `Vec<T>` (same as plain `[T]`).
-
-```ebnf
-type_fixed_list = "[" type "#" int_literal "]" ;
-```
+`Bytes` is a growable byte builder with one read cursor. End of input is
+`position == len`.
 
 ```jet
-result :: [Int#3]{2, 4, 6};
-[a, b, c] :: result;   // OK — 3 names for 3 elements
+buffer :: Bytes.with_capacity(128)
+buffer.write([65, 66])
+print(buffer.string())
 ```
 
-- Destructuring a `[T#N]` with the wrong number of names is **E0963**.
-- Calling `push`, `pop`, `insert`, `remove`, or `clear` on a `[T#N]` is **E0964**.
-- A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
-- A range fact on `distinct Int(lo..hi)` may index a `[T#N]` without a runtime
-  bounds check when `lo >= 0` and `hi < N`. Sized integer interval facts use
-  the same prover.
-- `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
-  length information is erased at that point.
+Constructors are `Bytes.new()`, `Bytes.with_capacity(n)`, and
+`Bytes.from(bytes)`. The write family includes `write_u8`/`write_byte`,
+width-specific `write_u16_*`, `write_u32_*`, and `write_u64_*`,
+`write_bytes`/`write`, and `write_to`. Cursor operations include `position`,
+`eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`,
+`read_string`, `get`, and `first`.
 
-## Effect system (D-EFF1, D-QUAL1, D-EFF2, D-EFF3)
+String-like operations decode UTF-8 lossily and then use String behavior:
+`contains`, `starts_with`, `ends_with`, `trim`, `trim_start`, `trim_end`,
+`to_lower`, `to_upper`, `to_title`, `title`, `replace`, `split`, `join`,
+`lines`, `index_of`, `last_index_of`, `is_ascii`, `to_string`/`string`, and
+`parse`. Lifecycle and inspection operations include `flush`, `close`,
+`shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`,
+`get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, and `clear`.
 
-Every function carries an **effect set**: the categories of ambient power its
-body exercises — touching the network, the filesystem, the clock, and so on.
-The set is **inferred**, never declared by default, **propagated along calls**
-(a caller's set includes every callee's set), and **fully erased in codegen**
-(I3) — effects are a compile-time proof, with no runtime value, handler, or
-monad. A `fn … -[]>` is exactly the function whose inferred set is empty.
+Consuming typed reads remain on `core.encoding.Reader`; terminal output remains
+on the `core.term` writer. `Bytes` does not introduce a second reader or
+writer hierarchy. See `examples/features/io/byte_buffer.jet`
+(D-ITERTOOLS1=A, #1467).
 
-### The effect vocabulary
+### `core.math`
 
-Effects are a closed, compiler-known set of PascalCase tags (D-CASING1). Each
-primitive Core operation contributes one effect; an effect appears in a
-function's set when the function reaches an operation that carries it.
+`core.math` supplies floating-point and whole-number helpers: the base libm
+family, inverse hyperbolics and accurate near-zero forms, classification and
+neighbor operations, decomposition pairs such as `sin_cos` and `frexp`,
+special functions, checked/saturating/wrapping integer families, and exact
+ratios. Exact ratio values expose numerator, denominator, string, float, zero,
+and arithmetic operations.
 
-Packages can name precise leaves with a top-level compile-time declaration:
+`round` returns the nearest integer with an exact half away from zero
+(`-2.5` becomes `-3`, and `2.5` becomes `3`). For `min` and `max`, one NaN
+operand yields the non-NaN operand; two NaN operands yield NaN. Examples are
+`examples/features/math/math_audit.jet`, `more_math.jet`, and `fraction.jet`
+(D-MATHLIB2, D-CORESURFACE1, D-NUMTYPE1).
+
+### `core.sys` and process boundaries
+
+System facts and process identity live in `core.sys`; environment variables and
+cwd/home are also `core.sys`. Subprocess execution and exit status live in
+`core.process`. Safe facts include OS name and family, architecture, CPU count,
+temporary directory, executable, `pid`/`getpid`, hostname, username, release,
+version, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`,
+`getpgid`, `getpgrp`, `getsid`, `expand`, `uptime`, `loadavg`, `times`,
+`exitcode`, `success`, `sync`, `set_current_dir`, and interrupt registration
+(D-OSFACTS1).
+POSIX process and session control requires an audited `#Unsafe("...")` region
+and a host-OS target gate. The gated set includes `fork`, `setuid`, `setgid`,
+`setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`, `waitpid`, `pipe`,
+`close_fd`, `mkfifo`, `umask`, `getpriority`, `setpriority`, `utime`, `atexit`,
+and `stop`.
+
+These helpers do not emulate POSIX semantics on Windows. Examples are
+`examples/features/io/os_facts.jet` and `os_process_control.jet`.
+
+### Other core contracts
+
+`core.archive.gzip` and `core.archive.zstd` are the byte-stream codec homes;
+`core.archive` owns ZIP and tar container operations and does not re-export a
+codec (D-CORE-COMPRESS1=A). `core.email` uses typed `Message` values with a
+separate envelope, so Bcc is never serialized. Mail transport verifies TLS,
+authenticates only after verified TLS and post-upgrade EHLO, never retries, and
+reports `DeliveryUnknown` when cancellation or a deadline interrupts after
+DATA.
+Optional DKIM configuration signs final MIME bytes with one Ed25519 identity;
+invalid or missing requested headers fail before connecting, with no unsigned
+fallback. Passwords use move-only `Secret` values and are zeroized on failure
+and drop (D-EMAIL1, D-EMAIL-SMTP-SURFACE1, D-EMAIL-SMTP-CONFIG1,
+D-EMAIL-DKIM-CONFIG1).
+
+`Query<T>` is the typed carrier for ordinary list results, checked readers, and
+checked SQL. `data.query(rows)` and the SQL form produce the same carrier;
+`collect` materializes an ordinary `[T]`. Query operations retain typed
+callbacks and plan order. `inner_join` preserves duplicate-key multiplicity;
+`left_join` preserves every left row and uses `?R`; `group_by` produces
+`Group<K, V>`. `DataStream<T>` is one-shot and fallible, and `DataLoader<T>` is
+stateful and typed. There is no public `Table<T>`, `Series<T>`, `LazyFrame<T>`,
+or `DataGroup` carrier (D-QUERY-RETAIN1=A).
+
+## Foreign-function interfaces
+
+### One model for foreign boundaries
+
+A project binder mounts a language root and library name as `<language>.<lib>`.
+Generated Jet modules and their provenance live below
+`.jet/bindings/<language>/`; generated Jet is ordinary source and can be
+inspected. Import a whole library or a member list with
+`use <lang>.<lib> as alias` or
+`use <lang>.[lib as alias, other]`. A generated descriptor records the ABI
+contract, ownership/layout rules, callback and error model, effect leaf,
+provider, cache suffix, and capability set. Every generated artifact carries
+the `jet-ffi-descriptor-v1` stamp, and a stale stamp is rejected before a
+foreign call. Foreign-interface routing and cache validation read the same
+descriptor table. (D-FFI-UNIFY1)
+
+A binder is not an unchecked symbol lookup. It must reject an unsupported
+signature before emitting a callable surface, record the declaration and tool
+identities, and keep foreign diagnostics behind Jet's boundary error (usually
+E3208). Generated scalar sidecars use content-addressed bridge identities that
+include the descriptor, source bytes, worker, runtime, native toolchain, target,
+and function list. An input or toolchain change therefore selects a new
+artifact rather than silently reusing an old archive.
+
+### Inline native functions
+
+The inline tier accepts `#FFI(c)`, `#FFI(cpp)`, and `#FFI(asm)` functions whose
+body is exactly one triple-quoted raw foreign-source string. The Jet signature
+is the checked ABI contract. C, C++, and assembly require an enclosing
+`#Unsafe("reason")` gate; assembly also requires `use core.mem`. The checker
+validates scalar signatures, named operands, the `; -> return` anchor, clobbers,
+and the selected target before lowering. Native code is linked by the native
+build path; resident JIT execution reports the boundary by name rather than
+pretending that the raw body is portable JIT code. See
+[`examples/features/lowlevel/inline_c.jet`](../../examples/features/lowlevel/inline_c.jet)
+and [`examples/features/lowlevel/inline_asm.jet`](../../examples/features/lowlevel/inline_asm.jet).
+(D-FFI-INLINE1, D-FFI-RAWBODY1, D-FFI-ASM1, D-FFI-CPP1)
+
+### Rust declarations
+
+The existing direct declaration surface is
+`extern rust "crate@version" { ... }`. Each entry has a normal Jet signature
+and `= "rust::path"`; `extern rust "std"` needs no extra dependency. A
+non-`core` crate requires an exact version pin (E0701). By-value boundary types
+include scalars, `String`, `Char`, lists/maps/options/results built from allowed
+types, and structs or enums whose fields obey the same rule.
+Capability parameters use the `&` and `^` conventions; a raw foreign call that
+carries one requires an audited `#Unsafe` boundary (E0702).
+
+A returned resource may declare `#Close(close)`. Its close function must consume
+exactly `^` of the handle and return no value, so `close(^handle)` owns one
+release. When a dependency is needed, Jet builds a hidden cached cargo bridge
+under `~/.cache/jet/ffi/` or the directory selected by `JET_FFI_CACHE_DIR`; it
+does not add a manifest to the user's project. Missing cargo is E0703, a
+fetch/build failure is E0704, and an invalid foreign path or signature is E0705.
+A panic at the foreign boundary becomes the shared runtime report. The worked
+surface is [`examples/features/lowlevel/ffi.jet`](../../examples/features/lowlevel/ffi.jet);
+Rust FFI integration assertions live in [`tests/ffi_rust.rs`](../../tests/ffi_rust.rs).
+The descriptor table also records the namespaced `rust.*` and `swift.*`
+bridge roots; this direct block is the Rust declaration surface described here.
+(S50, D-FFI-CAP1)
+
+### C ABI
+
+`jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]`
+reads bindable C prototypes and writes the cache
+`.jet/bindings/c/<lib>.jet` by default. The generated module is marked
+`#Bindgen module c.<lib>.__bindgen__`. A source overlay uses
+`#Import module c.<lib> { ... }`; the effective module is the generated
+binding union, with the overlay winning an incompatible redeclaration. A
+header declaration that the generator cannot map is skipped and reported,
+not guessed. E3208 means the header cannot be read or contains no bindable
+prototype; write an explicit overlay for a declaration outside the generated
+subset. (S58, S59)
+
+`#Bindgen` is compiler-generated and legal only in
+`.jet/bindings/c/<lib>.jet`; a user overlay uses `#Import module`.
+The reserved `__bindgen__` path is E3206. A second C `use` form for the same
+library is E3204; an incompatible overlay is E3205, and handwritten
+`#Bindgen` is E3207.
+
+A C declaration binds by-value scalars, `String`, `Char`, and C-layout
+aggregates. Lists, maps, tuples, options, results, and other Jet aggregates
+are E3203 at this boundary. Pointer returns are E3202. The status-plus-out
+pattern is the deliberate exception: a pointer parameter is allowed only when
+its pointee is C-safe, the wrapper is marked as requiring an audited unsafe
+call, and the caller creates and initializes the slot through `core.mem`,
+checks the returned status, and reads the slot only when the ABI promises it
+was initialized. Raw pointer work still requires `use core.mem` and
+`#Unsafe("reason")`. (D-CABI-RESULT1)
+
+A C `String` return must be non-null, NUL-terminated, and valid UTF-8. Jet
+copies it immediately and never frees the C pointer. Owned buffers, nullable
+strings, other encodings, and library-specific free functions remain raw until
+a user-written audited wrapper supplies their ownership contract. C library
+linking uses the last `<lib>` segment as its key. A `c@system` dependency uses
+pkg-config with a bare `-l` fallback; a `c@"path"` dependency supplies local
+include/library/link information. Otherwise pkg-config is queried and E3201
+reports a missing link identity. Link flags are resolved at build time.
+
+The end-to-end C binding checks are in [`tests/cffi.rs`](../../tests/cffi.rs).
+
+### C++ ABI
+
+`jet inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]`
+uses a clang AST and a content-addressed C-ABI shim. The target, clang path,
+and archiver path are required and absolute. Namespace selection is explicit;
+public scalar classes become owned opaque handles, exceptions become checked
+`T !CppError` results, and pure named callbacks retain a checked C ABI. Template
+instantiations are emitted only for explicit `--instantiate` requests. Include
+paths, library paths, and link libraries are part of binding provenance and are
+reused at final link. Unsupported layouts or callbacks fail binding rather than
+being approximated. (D-FFI-CPP1)
+
+### Python
+
+**Binds.** `jet inspect bind py <script.py> [--pkg <lib>] [-o <out.jet>]`
+accepts top-level functions whose parameters and result use the scalar
+annotations `int`, `float`, or `bool`. Defaults, variadic parameters, async
+functions, malformed signatures, and other annotations are rejected with the
+binder error E3208.
+
+**Boundary.** The generated `.jet/bindings/py/<lib>.jet` wrapper, supervised
+worker, C archive, and provenance record form one checked scalar surface. Calls
+carry `-[FFI.Py]>`; worker stdout/stderr, exception text, tracebacks, command
+strings, and raw symbols do not cross into Jet. Non-finite values and malformed
+worker results fail closed. Python package installation remains the PyPI
+provider's responsibility; the binder consumes the provisioned `python3` and
+records its identity.
+
+**Evidence.** The scalar archive is under
+`.jet/bindings/py/.bridges/<identity>/`, with a stable `lib<abi>.a` projection.
+The identity includes the descriptor, source and worker bytes, runtime,
+native toolchain, and typed function list. The source fixture is
+[`examples/interop/python`](../../examples/interop/python); the generated
+surface and effect spelling are asserted in [`tests/ffi_python.rs`](../../tests/ffi_python.rs). (D-FFI-PY1)
+
+### JavaScript and TypeScript
+
+**Binds.** `jet inspect bind js <module.d.ts> --runtime <module.js> [--pkg <lib>] [-o <out.jet>]`
+uses the declaration file as the ABI source and checks the runtime module with
+Node. Exported declarations may use only `number`, `bigint`, and `boolean`
+parameters and results. Optional, default, rest, dynamic, callback, and
+asynchronous result shapes are rejected instead of being guessed.
+
+**Boundary.** The generated wrapper uses scalar conversion and a supervised
+Node worker for the bind-time/native sidecar. It rejects non-finite numbers,
+wrong scalar results, missing exports, and an async result where the declaration
+promises a scalar. The same `<lang>.<lib>` surface is target-dispatched: web
+builds use the browser JavaScript engine, while native builds use the native
+JS-on-WASM host. Npm realization remains provider work.
+
+**Evidence.** The cache stores `<lib>.jet` and declaration provenance below
+`.jet/bindings/js/`, including the runtime and declaration identities. The
+language descriptor supplies the `FFI` effect root and the target capability
+row. (D-FFI-JS1)
+
+### Go
+
+**Binds.** `jet inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]`
+selects cgo `//export Name` functions whose parameters and optional result are
+`int64`, `float64`, or `uintptr`. The provisioned compiler builds a
+`-buildmode=c-archive` archive and writes a typed `go.<lib>` cache.
+
+**Boundary.** Calls execute in-process through the C archive; the Go runtime is
+part of the native program, not a sidecar. `uintptr` is a private, move-only
+`go.<lib>.Handle`; passing it to a foreign function consumes the handle so a
+released `runtime/cgo.Handle` cannot be reused. Handles require a 64-bit host
+ABI. Generated calls carry `FFI.Go`; unsupported signatures and tool failures
+are rejected or laundered through E3208. Compilation has a 60-second deadline
+and bounded diagnostics.
+
+**Evidence.** Use [`examples/features/lowlevel/polyglot_go`](../../examples/features/lowlevel/polyglot_go)
+for the archive, handle, and close path. (D-FFI-GO1)
+
+### Fortran ISO C binding
+
+**Binds.** `jet inspect bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]`
+selects explicit `bind(C, name="...")` functions. Scalar
+`integer(c_int64_t)` and `real(c_double)` inputs require `value`. Fixed-shape
+input arrays use `intent(in)` and map to flat `[Int]` or `[Float]` values.
+
+**Boundary.** The generated wrapper records every array extent and rejects a
+list whose length differs from the declared shape before passing its pointer
+through the private C ABI. The order is Fortran column-major order. Unsupported
+shapes and gfortran failures use E3208, and calls carry `FFI.Fortran`.
+
+**Evidence.** The checked matrix fixture is
+[`examples/features/lowlevel/polyglot_fortran`](../../examples/features/lowlevel/polyglot_fortran). (D-FFI-FORTRAN1)
+
+### COBOL and copybooks
+
+**Binds.** `jet inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]`
+compiles one GnuCOBOL linkage program. The copybook subset is one level-01
+record with level-05 fixed text, `COMP-5` integers, and `COMP-3` packed
+decimals. The binder records offsets and widths and emits an editable
+`#Codable` Jet record.
+
+**Boundary.** `COMP-3` maps to `Decimal`, never `Float`; the C bridge accepts
+packed decimal values as scaled minor-unit `Int` values. It initializes libcob
+once and calls the exported `int PROGRAM(cob_u8_t*)` entry in-process. Range
+and foreign-program failures become `CobolError`, and calls carry
+`-[FFI.Cobol]>`. Undefined-link checks, the descriptor, source/copybook
+hashes, runtime, and archive hash are recorded in `.provenance`. Unknown
+layouts and ABI-proof failures use E3208; bridge tools have 60-second and
+64-KiB bounds.
+
+**Evidence.** The payroll fixture is
+[`examples/interop/cobol`](../../examples/interop/cobol). (D-FFI-COBOL1)
+
+### Java and the JVM
+
+**Binds.** `jet inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]`
+compiles the source and discovers public descriptors with `javap -s`. One
+constructor and non-overloaded methods using `long` and `double` form the
+supported surface.
+
+**Boundary.** A generated JNI bridge links the provisioned `libjvm`, starts one
+JVM lazily in the Jet process, attaches calling threads, and destroys the JVM
+at process teardown. Java objects are opaque `java.<lib>.Handle` values in a
+bounded 1,024-slot global-reference table. Calls borrow a handle;
+`close(^handle)` consumes it and releases the global reference. Constructors
+and value-returning methods return `JavaError.Exception` on a Java exception;
+Java stack text and foreign frames remain inside the bridge. Calls carry
+`FFI.Java`, and javac/javap/cc/ar are bounded to 60 seconds with 64-KiB
+capture.
+
+**Evidence.** Provenance joins the source, reflected bytecode surface, class
+cache, and schema. See
+[`examples/features/lowlevel/polyglot_java`](../../examples/features/lowlevel/polyglot_java). (D-FFI-JVM1)
+
+### .NET
+
+**Binds.** `jet inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]`
+compiles with the provisioned .NET 8 SDK and uses reflection. One public class,
+one constructor, and non-overloaded `long`/`double` methods project into a
+typed `cs.<lib>` module.
+
+**Boundary.** The native archive embeds CoreCLR through `hostfxr` and
+`load_assembly_and_get_function_pointer`; managed entry points use
+`[UnmanagedCallersOnly]`. No worker or file protocol participates in calls.
+Instances are opaque move-only handles in a 1,024-slot generation-checked
+`GCHandle` table. `close(^handle)` releases the managed root. Exhaustion,
+managed exceptions, and invalid/stale handles become `DotNetError.ResourceLimit`,
+`DotNetError.Exception`, and `DotNetError.InvalidHandle`; foreign exception
+text does not cross. Calls carry `FFI.DotNet`, with 60-second tool deadlines
+and 64-KiB diagnostics.
+
+**Evidence.** Provenance binds the source, reflected surface, hostfxr identity,
+and schema. See
+[`examples/features/lowlevel/polyglot_dotnet`](../../examples/features/lowlevel/polyglot_dotnet). (D-FFI-DOTNET1)
+
+### Tcl
+
+**Binds.** `jet inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]`
+compiles a standard-only C bridge against the provisioned Tcl headers and
+runtime. `open()` creates an in-process interpreter and evaluates the script
+once; `eval`, `eval_int`, and `eval_float` share that session. `eval_once` uses
+a fresh interpreter for one call.
+
+**Boundary.** `Session` is opaque and thread-affine. A bounded 64-slot table owns
+interpreters; `close(^session)` consumes the Jet handle, and process teardown
+cleans remaining interpreters before Tcl finalization. String results are
+copied through a 64-KiB boundary and reject embedded NUL and oversized values.
+Typed Tcl parsing supplies integer and float entrypoints. Tcl failures become
+`TclError.Eval`; raw Tcl result text and frames stay inside the bridge. Calls
+carry `FFI.Tcl`. Evaluation is synchronous: this surface makes no
+cancellation claim for a long-running command.
+
+**Evidence.** Binding tools use a 60-second deadline and 64-KiB capture; source,
+runtime, and schema are hashed in provenance. See
+[`examples/features/lowlevel/polyglot_tcl`](../../examples/features/lowlevel/polyglot_tcl). (D-FFI-TCL1)
+
+### Lua
+
+**Binds.** `jet inspect bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]`
+discovers direct top-level `function name(input)` declarations without running
+the script and compiles against provisioned Lua 5.4. Each `open()` owns an
+independent in-process `lua_State`; the script runs once for session
+initialization and its mutable state persists within that session.
+
+**Boundary.** Generated functions use `DataTree`; sibling
+`<name>_typed<T>` adapters require `T: [Encode, Decode]` and validate the
+decoded result. Null, booleans, integers, floats, strings, lists, and
+string-keyed maps retain their data meaning. Cycles, unsupported keys/values,
+depth over 64, and input/output at least 1 MiB fail at the boundary. Lua
+failures become closed `LuaError` variants and do not expose stack text.
+`<name>_view(session, deadline_ms)` can pin a returned table in the session;
+`TableView` reads and writes the live table without JSON serialization and
+`close` releases its registry reference. Session close invalidates stale views
+with `LuaError.NotRunning`.
+
+**Evidence.** VM hooks enforce call deadlines and observe cancellation without
+destroying a healthy session. A generation-tagged 32-slot state table owns
+sessions; tools have 60-second and 64-KiB bounds, and provenance joins source,
+runtime, and schema. LuaRocks realization remains provider work. See
+[`examples/interop/lua`](../../examples/interop/lua). (D-FFI-LUA1)
+
+### Ada
+
+**Binds.** `jet inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]`
+reads exported functions from an Ada package specification and compiles its
+sibling body with GNAT. Supported exports use `Export`, `Convention => C`, and
+`External_Name`; scalar arguments and results use
+`Interfaces.C.long_long`/`Long_Long_Integer` or
+`Interfaces.C.double`/`Long_Float`.
+
+**Boundary.** A scalar subtype with `range LOW .. HIGH` becomes a pre-call check;
+an out-of-range value returns `AdaError.Constraint` before the export runs.
+GNAT elaboration runs once and finalization runs at process exit. Calls carry
+`FFI.Ada`; GNAT, binder, C compiler, and archiver tools have 60-second and
+64-KiB bounds, and missing or non-absolute runtime identity is rejected.
+
+**Evidence.** Provenance hashes the specification, body, GNAT identity, and
+schema. `jet import ada <dir>` preserves the Ada sources and emits an editable
+binder stub with JT0101 for unsupported semantics; it does not translate
+ranges, exceptions, tasking, representation clauses, or ownership. The native
+fixture is [`examples/features/lowlevel/polyglot_ada`](../../examples/features/lowlevel/polyglot_ada). (D-FFI-ADA1)
+
+### Object Pascal
+
+**Binds.** `jet inspect bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]`
+compiles FreePascal `cdecl` exports. `Int64` and `Double` cross as Jet `Int`
+and `Float`. A declared class uses exported `<class>_new`, pointer-first scalar
+methods, and `<class>_free` wrappers. `jet import pascal <dir>` preserves the
+source and emits a binder stub with JT0101 rather than inventing class or
+ownership semantics.
+
+**Boundary.** Class pointers never reach Jet. The C bridge owns them in a
+bounded 64-slot table and returns opaque move-only identities;
+`<class>_close(^handle)` consumes one identity. Stale or double close fails
+before the Pascal destructor runs, and process teardown destroys remaining
+objects before runtime finalization. Calls carry `FFI.Pascal`; compiler and
+archiver tools have 60-second and 64-KiB bounds, and native links pin the
+Pascal runtime search path.
+
+**Evidence.** See [`examples/features/lowlevel/polyglot_pascal`](../../examples/features/lowlevel/polyglot_pascal). (D-FFI-PASCAL1)
+
+### Dart and Flutter
+
+**Binds.** `jet inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]`
+builds one bidirectional, in-process FFI surface. The generated
+`<lib>_host.dart` loads the native Jet compute library with `dart:ffi`,
+initializes `dart_api_dl` from `NativeApi.initializeApiDLData`, and registers
+isolate-local callbacks. The Dart or Flutter application owns the isolate; no
+helper process, shell, environment transport, or file protocol participates in
+a call.
+
+**Boundary.** `shutdownJetDart()` unregisters every native callback before
+closing pinned `NativeCallable` values. Callback functions are top-level
+`@pragma('vm:entry-point')` functions with positional `int`/`double` inputs and
+an `int`/`double` result. Optional, named, generic, object, string, async, and
+overloaded shapes are rejected. Generated wrappers return
+`DartError.NotInitialized` before API-DL initialization and
+`DartError.CallbackUnavailable` before registration. Calls carry `FFI.Dart`
+and are synchronous and isolate-thread-affine.
+
+**Evidence.** Flutter deploys the generated host and platform library through
+ordinary native-library packaging; Jet does not embed or launch a Flutter
+engine. SDK, C, archiver, and native compilation are bounded to 60 seconds and
+64-KiB capture, with E3208 for tool failures. See
+[`examples/features/lowlevel/polyglot_dart`](../../examples/features/lowlevel/polyglot_dart). (D-FFI-DART1)
+
+### PowerShell
+
+**Binds.** `jet inspect bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]`
+parses named functions with PowerShell 7, maps the conventional `-` separator
+to `_` in Jet names, and writes a typed cache. `open()` starts one supervised
+`pwsh` worker, waits for its startup handshake, and loads the script once. The
+worker accepts only binder-approved function identities; Jet never sends source
+or an arbitrary command string. The shipped supervisor is POSIX-only.
+
+**Boundary.** Each call accepts and returns one `DataTree` through a
+length-framed structured JSON protocol. Objects, lists, integers, floats,
+booleans, text, and null retain their data meaning. Requests and responses are
+capped at 1 MiB and depth 64. Exceptions become
+`PowerShellError.CommandFailed`; error records, paths, stderr, and stack traces
+remain in the worker. Calls carry `FFI.PowerShell`.
+
+**Evidence.** A call has a 1–300000 ms deadline. Expiry or cancellation kills
+and reaps the complete process group and invalidates its generation-tagged
+session; `close(^session)` consumes the handle. At most 32 workers exist per
+process. Binding-time tools have 60-second and 64-KiB bounds and E3208
+laundered diagnostics. See
+[`examples/interop/powershell`](../../examples/interop/powershell). (D-FFI-PWSH1)
+
+### Perl
+
+**Binds.** `jet inspect bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]`
+uses compiler metadata to discover named main-package `sub` declarations without
+running the top-level body. Foreign names project to Jet `snake_case`, while
+the worker calls the exact Perl name. `open()` starts one supervised POSIX
+worker, loads the script once, and retains package and lexical state. Generated
+entries carry a fixed allowlist.
+
+**Boundary.** Each entry accepts and returns one `DataTree` through Perl's core
+`JSON::PP`. Requests and responses are length-framed and capped at 1 MiB;
+stdout is not a result channel. Exceptions become
+`PerlError.CommandFailed`; stderr, paths, stack traces, and exception text stay
+inside the worker. Calls carry `FFI.Perl` and do not accept runtime source.
+
+**Evidence.** Calls use a 1–300000 ms deadline. Timeout or cancellation kills
+the process group; generation-tagged handles reject stale identities and
+`close(^session)` consumes a session. At most 32 workers exist. CPAN
+realization is provider work. Binding tools have 60-second and 64-KiB bounds
+and E3208 diagnostics. See
+[`examples/interop/perl`](../../examples/interop/perl). (D-FFI-PERL1)
+
+### Ruby
+
+**Binds.** `jet inspect bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]`
+uses Ruby's `Ripper` parser to find direct top-level methods without executing
+the file. A bindable method has one required positional argument and a
+Jet-compatible name. The generated allowlist fixes the callable identity;
+source and arbitrary commands never cross the API.
+
+**Boundary.** `open()` starts one supervised worker and loads the script once,
+retaining its state. Methods accept and return `DataTree` through Ruby's
+standard JSON library. Length-framed messages are capped at 1 MiB and stdout
+is not the result channel. Ruby exceptions become
+`RubyError.CommandFailed`; exception text, traces, stderr, and paths stay
+inside the worker. Calls carry `FFI.Ruby`.
+
+**Evidence.** Timeout and cancellation use a 1–300000 ms deadline and kill the
+process group; `close(^session)` consumes a generation-tagged session, with at
+most 32 workers. Compiler and archive tools have 60-second and 64-KiB bounds.
+RubyGems installation remains provider work. See
+[`examples/interop/ruby`](../../examples/interop/ruby). (D-FFI-RUBY1)
+
+### PHP
+
+**Binds.** `jet inspect bind php <script.php> [--pkg <lib>] [-o <out.jet>]`
+requires a POSIX supervisor, lints the script, and discovers top-level named
+PHP functions. A bindable function takes exactly one required positional
+argument by value; references, defaults, variadics, nested functions, and
+unsupported generated names are rejected. The generated cache uses a native C
+pool bridge.
+
+**Boundary.** PHP calls accept and return one `DataTree` over a length-framed
+JSON protocol. The pool has four workers per pool and eight generation-tagged
+pool slots. A worker allowlist fixes the function identity; stdout is not the
+result channel. `PhpError` distinguishes not-running, timeout, cancellation,
+protocol, command, and resource-limit failures. Calls carry `FFI.Php` and do
+not expose PHP exception text or source paths.
+
+**Evidence.** Worker frames and responses are capped at 1 MiB. A call deadline
+or cancellation replaces the affected workers; `close(^pool)` consumes the
+pool handle. Binding lint, C compilation, and archiving use bounded diagnostics
+and the descriptor/provenance record. See
+[`examples/interop/php`](../../examples/interop/php). (D-FFI-PHP1)
+
+### R
+
+**Binds.** `jet inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]`
+parses the script without running its top-level body and binds direct named
+functions with one required argument. `open()` starts a supervised worker,
+loads the script once, and retains its state. A normal function round-trips
+`DataTree`; `<name>_table<T>` maps ordinary `[T]` rows to a data frame and back
+through the same framed channel.
+
+**Boundary.** `<name>_plot` runs on an isolated SVG device and returns a
+`String`. The bridge parses the XML structurally and emits deterministic
+canonical XML. It rejects scripts, event handlers, `foreignObject`, external
+references, active CSS, declarations, entities, malformed XML, and input or
+output above 512 KiB. R failures and rejected SVG content become
+`RError.CommandFailed`; calls carry `FFI.R`. Each worker receives a private
+temporary directory, which is removed on success, failure, cancellation, and
+close.
+
+**Evidence.** Calls use a 1–300000 ms deadline, process-group cancellation,
+generation-tagged handles, 1-MiB frames, and at most 32 workers. CRAN
+realization remains provider work. See
+[`examples/interop/r`](../../examples/interop/r). (D-FFI-R1)
+
+### Octave
+
+**Binds.** `jet inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]`
+requires a POSIX supervisor and `octave-cli` (or `octave`). It discovers
+functions of the form `name = function(input)` with exactly one matrix input
+and one matrix output. Multiple outputs, `varargin`, duplicate names, and
+non-identifiers are rejected before a bridge is emitted.
+
+**Boundary.** The generated `octave.<lib>` surface accepts a rank-two `Tensor`
+and returns a rank-two `Tensor !OctaveError -[FFI.Octave, GPU]>`. The wire value
+carries exact shape and column-major flat data. Jet checks rank, dimensions,
+width, finiteness, and real numeric output; frames and responses are capped at
+1 MiB. A generation-tagged 32-session supervisor enforces deadlines and
+cancellation, and errors become `OctaveError` variants without foreign text.
+
+**Evidence.** Provenance records the script, Octave identity, worker, JSON
+transport, column-major order, rank-two shape, and session bound. Binding tools
+use 60-second and 64-KiB capture. See
+[`examples/interop/octave`](../../examples/interop/octave). (D-FFI-OCTAVE1)
+
+### Windows COM automation
+
+**Binds.** `com.*` exists only on Windows. On another host, importing it or
+running `jet inspect bind com` fails with E3260 before reading a type library or
+looking for a cache. On Windows,
+`jet inspect bind com <library.tlb> [--pkg <lib>] [-o <out.jet>]` reads a
+file-backed type library; the registered form is
+`--registered <guid> --major <n> --minor <n> [--lcid <n>]`.
+
+**Boundary.** The inspector uses `ITypeLib` and `ITypeInfo` and rejects hidden,
+restricted, out-parameter, or unrepresentable members. Primitive VARIANT types
+become Jet scalars, BSTR becomes `String`, dispatch interfaces become
+move-only opaque `Object` values, and VARIANT/SAFEARRAY values cross as bounded
+`DataTree`. Dynamic name-based `IDispatch` is available only inside explicit
+`#Unsafe`; generated safe calls use fixed DISPIDs. Each live object owns a
+single-threaded apartment and a generation-tagged handle tied to its creating
+thread. `close(^object)` releases it and balances `CoUninitialize`; stale,
+cross-thread, and double-close uses fail before invocation. HRESULT and
+EXCEPINFO become `ComError` variants without vendor text. Calls carry
+`FFI.Com`; frames and DataTree depth are capped at 1 MiB and 64.
+
+**Evidence.** Provenance hashes the extracted type-library schema and generated
+surface. A released file-backed binding may omit the original `.tlb`, but when
+the input remains available its bytes must match the recorded hash. See
+[`examples/features/lowlevel/polyglot_com`](../../examples/features/lowlevel/polyglot_com). (D-FFI-COM1)
+
+### Data-schema binders
+
+`jet inspect bind json|csv|sql|xml|proto <input> [--type <Type>] [-o <output>]`
+reads a data schema or sample and writes ordinary Jet source. The output uses
+one `#Codable` struct per record and adds `#Rename` when a wire key is not a
+valid Jet name. The default destination is
+`.jet/bindings/<sanitized-input-stem>.jet`; `-o` selects another path. The
+binder does not import the file for the author: read it, commit it, and own it
+as source, including any hand edits.
+
+Each generated file begins with provenance containing the exact command, input
+path, input `sha256`, format, and one `inference` line for every rule applied.
+Command and path fields are escaped so a hostile file name cannot inject Jet
+source. Regeneration is explicit. Writing the default destination with a
+different recorded command is E2104, an unreadable input or unwritable output
+is E2105, and an invalid schema or input with no record is E3208. The generic
+binder implementation and CLI dispatch live in
+[`Source/CmdDevTools.rs`](../../Source/CmdDevTools.rs). (D-BOUND-BIND1, D-NAME-FILES1)
+
+## Browser effects and web values
+
+`core.web` is the server-rendered web application surface over `core.http`; its
+`App`, pages, sessions, forms, and live records are Jet values. Browser-owned
+operations carry the `Browser` effect and are lowered by the web target. The
+source authority is [`Core/web/web.jet`](../../Core/web/web.jet), while the
+browser test controller is [`Core/web/browser.jet`](../../Core/web/browser.jet). (D-FLAGSHIP-WEBAPI1)
+
+### Browser events, values, and storage
+
+Use `core.web` for the checked browser operations:
+
+- `web.on(target, event, handler)` registers a DOM event handler. The handler
+  receives `WebEvent`; a handler that does not need it can ignore the argument.
+- `web.value(target) -> String` reads the selected input or element value.
+- `core.web.storage.local.get(key) -> ?String` and
+  `core.web.storage.session.get(key) -> ?String` read origin-local and
+  tab-scoped storage. `set`, `remove`, and `clear` mutate the corresponding
+  namespace, and `get_or` composes a missing key with a fallback.
+
+For example, the browser conformance surface uses
+`web.on("#new-task", "input", handler)` and
+`web.storage.local.set("draft", web.value("#new-task"))`. The generated web
+runtime uses `addEventListener`, DOM selection, `localStorage`, and
+`sessionStorage`; native codegen provides inert checked routes rather than
+asking rustc to type-check browser APIs. The round-trip is exercised by
+[`tests/web_build.rs`](../../tests/web_build.rs).
+
+### Web queries
+
+A `WebQuery` has one explicit cache key. The key is the record identity; the
+current Core query source does not make a separate public footprint parameter.
+`query.live(key, data, url, loader)` creates an initial fresh query and calls
+`loader` when `url` is nonempty. `query.new(key, seed)` creates a seeded query,
+and `query.subscribe(key)` creates a stale subscription record.
+
+The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
+`Offline`. Mutation states are `Idle`, `Pending`, `Success`, `Error`, and
+`Settled`; network modes are `Online`, `Always`, and `OfflineFirst`. `get`,
+`show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
+`facts` read values and bounded lifecycle facts. `invalidate(&q)` marks a
+query stale and advances its generation. `refresh(&q)`, `queue(&q, data)`, and
+`retry(&q, replay)` are fallible operations; `cancel(&q)` returns whether an
+in-flight operation was cancelled. `mutate` checks the key and optional
+expected value, applies the mutation, and returns a `WebMutationState`;
+`mutate_with_invalidations` additionally validates target keys.
+
+Keys are at most 256 bytes, payloads at most 1 MiB, and subscribers and
+invalidation targets are bounded by the Core limit of 1,000,000. Reusing a key
+with a different dependency footprint is E2473: a key must have one
+invalidation declaration. Offline mode reports `WebQueryError.Offline` rather
+than pretending that a mutation was durable. The offline-first runtime persists
+queued payloads and invalidation targets under
+`$JET_WEB_QUERY_QUEUE_PATH`, `$XDG_STATE_HOME/jet/web-query-queue.v1`, or
+`$HOME/.local/state/jet/web-query-queue.v1`; it uses a temporary file and atomic
+rename and reports a durability error when no usable state directory or queue
+file is available. Query state and queue transitions are defined by
+[`Core/web/query.jet`](../../Core/web/query.jet) and
+[`CoreLib/Top/WebQuery.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs). (D-WEBQUERY1)
+
+### Events and hooks
+
+`use core.event as event` exposes typed compiler-known event values; it does
+not add an event declaration syntax. `event.new<T>()` creates an infallible
+synchronous `Event<T>`. `event.scope()` creates an owner for subscriptions;
+`scope.cancel()` is idempotent, unsubscribes every owned listener, and makes
+later subscriptions through that scope inactive. `scope.active_count()` counts
+active subscriptions.
+
+`Event<T>.on(scope, handler)`, `.once(scope, handler)`, and
+`.on_priority(scope, priority, handler)` return a `Subscription`. Priority sorts
+higher values first and registration order breaks ties. `once` deactivates its
+subscription before invoking the handler. `emit(payload)` returns an
+`EventTrace` with delivered, queued, dropped, and summary accessors.
+
+Synchronous emission snapshots the active listeners at dispatch start, sorts by
+priority and registration order, and dispatches that snapshot depth-first.
+Unsubscribing before a listener's turn skips it; subscribing during delivery
+affects a later or nested emission. A `once` listener cannot run twice through
+reentrant emission. The beginner event path is infallible; typed failure
+aggregation belongs to the asynchronous event surface. (D-EVENT1,
+D-EVENT2)
+
+`event.async_result<T, E>(policy, failures)` returns
+`AsyncEvent<T, E> !EventConfigError`. Its policy has a positive queue capacity
+and one overflow mode: `Block`, `DropNewest`, or `DropOldest`. Its failure
+policy is `StopFirst`, `Collect`, `Log`, or `Ignore`. `on`, `once`, and
+`on_priority` handlers may return unit or `Result<(), E>`; `emit_async` returns
+a task whose `DispatchReport<E>` records acceptance, terminal state, delivered
+handlers, failures, and ordered trace. `queued_count`, `running_count`, and
+`blocked_count` expose bounded lifecycle facts. Close and scope cancellation
+make queued, blocked, or running entries terminate with explicit states rather
+than silently dropping the report. (D-EVENT-CONTINUE1)
+
+`event.hook<T, R>(fallback)` creates an ordered intervention point. Its
+`.run(payload, fallback)` returns the last active handler result, or the
+call-site fallback when no handler is active. `event.decision_hook<T, E>(HookPolicy.FirstCancelElseTransform)`
+creates a typed fold. Handlers return `HookDecision.Continue`,
+`.Transform(value)`, `.Cancel`, or `.Fail(error)`; `run(payload)` returns
+`HookOutcome.Continue(value)`, `.Cancel`, or `.Fail(error)`. Hooks use the same
+scope, priority, and once rules as events.
 
 ```jet
-effect Log.Audit
-```
+use core.event as event
 
-The package view merges its declarations with loaded dependency and Prelude
-declarations. After a root has any declared leaves, dotted uses under that root
-must match a declaration exactly. Bare roots remain valid, and a root with no
-declared leaves remains open. The same check applies to function effect rows,
-`#FX` and package effect budgets. Declarations have no runtime
-representation.
-
-| Effect  | Carried by |
-|---------|-----------|
-| `IO`    | `print`, `eprint`, `input`, `read_all_input`, `core.term.*` |
-| `FS`    | `core.files.*` (whole-file helpers and streaming handles), `core.watcher.files` |
-| `Net`   | `core.net.*`, `core.http.*`, `core.watcher.port` |
-| `Time`  | ambient `core.time` clock/zone reads (`now`, `now_utc`, `today`, `instant`, `zone`, `sleep`, `start`) |
-| `Rand`  | `core.math.random.*` |
-| `Env`   | `core.sys.*` |
-| `Exec`  | `core.process.argv`, `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
-| `DB`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `DB.Read`, `conn.execute` carries `DB.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `DB` root |
-| `Log`   | `core.log.*` |
-| `GPU`   | `core.game.raylib.*`, future `core.gpu.*` / `core.game.*` |
-
-A call to an `extern rust`/C foreign function, whose body the compiler can't
-inspect, contributes the **maximal** set (every effect) — it is assumed to do
-anything. This keeps inference sound without reading foreign code.
-
-The #2259 witnesses are `print("Shipping {project}")` in
-`examples/features/basics/first_hour_expert.jet` and
-`core.process.argv()` in that example and
-`gauntlet/entries/sieve/jet/run.jet`. The interpolated print records
-`Mem.Alloc` for its fresh `String` as well as `IO`; argv records `Exec`.
-These are honest sema facts. The application authority only supplies the
-ratified manifest-less beginner default and does not change inference.
-
-### Manifest-less application authority (D-AUTH-AMBIENT1=A)
-
-A program with no `package.jet` receives the beginner ambient basics
-`IO`, `Mem.Alloc`, and `Exec`. This covers stdout, ordinary allocation, and
-argv reads without manifest ceremony. An explicit `package.jet` replaces this
-default with its `authority.holds` allow/deny rows, so an expert can deny or
-audit the same effects deliberately. The floor does not authorize filesystem,
-network, process-control, or other effects; those still stop with E1803. A
-manifest deny wins over an ambient grant. The inferred deny-only `Panic` row
-stays visible for audit, but it never creates a positive `allow:` request; an
-explicit `deny: [Panic]` still stops it.
-
-### Cryptography (D-CRYPTO-API1)
-
-`core.crypto` owns opaque, move-only `Secret`, `SigningKey`,
-`X25519SecretKey`, and `SharedSecret` values. They do not support ordinary
-equality, cloning, hashing, printing, Display/Debug interpolation, reflection,
-or serialization. Compare with constant-time operations. Raw bytes leave an
-opaque value only through the explicitly named expert exposure functions.
-
-The complete expert surface is `xchacha20poly1305_seal/open` (32-byte key,
-24-byte nonce), `aes256gcm_seal/open` (32-byte key, 12-byte nonce),
-`ed25519_sign`, `ed25519_verify_strict`, `x25519`, `hkdf_sha256`, `argon2id`,
-`secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
-`shared_secret_bytes`. Every call is lexical `#Unsafe`; importing the module
-does not weaken the gate. AEAD authentication failures collapse to
-`CryptoError.OpenFailed`. X25519 rejects all-zero shared secrets by default.
-HKDF-SHA256 output is at most 8160 bytes. Expert Argon2id accepts 8192–262144
-KiB, 1–10 iterations, 1–8 lanes, `memory >= 8 * lanes`, and
-`memory * iterations <= 1048576`; salts are 8–64 bytes and outputs 16–64
-bytes. These failures use the same `CryptoError` family as the safe API.
-
-`crypto.file_seal(recipients, source, destination)` and
-`crypto.file_open(&recipient, source, destination)` use the recipient-based
-JETC v2 envelope ratified by D-CRYPTO-ENVELOPE2. The fixed prefix is `JETC`,
-version 2, kind 1, suite 1, flags 0, followed by little-endian header and body
-lengths. The authenticated header carries a 16-byte file id, ephemeral X25519
-public key, 16-byte nonce prefix, the fixed 1 MiB chunk size, 1–256 canonical
-recipient stanzas, no metadata, and its tag. Body records carry a little-endian
-length, final flag, ciphertext, and tag. Non-final records are exactly 1 MiB;
-there is exactly one final record, including an empty final record after an
-exact multiple. Readers cap all declared sizes before allocation and accept
-safe-open v2 only.
-
-Sealing snapshots and revalidates a no-follow regular source before requesting
-envelope randomness. Seal and open stream one authenticated chunk at a time,
-poll cancellation between chunks, zeroize secret and plaintext buffers on every
-exit, and publish with atomic no-overwrite semantics only after authentication
-and durable staging. Identity, framing, recipient, and authentication failures
-from safe open collapse to `FileCryptoError.OpenFailed`; no failure publishes a
-partial destination. The current native bridge supplies this runtime on Linux.
-Other targets fail closed and do not claim JETC filesystem support. The
-ratified Windows delete-on-close and rename implementation remains required
-before any future cross-platform completion claim; it is not part of #526's
-entropy-adapter work.
-
-### HTTPS client default (D-TLS1)
-
-`core.net.fetch` and `core.http.client` support `https://` in the default build
-through the rustls bridge and system certificate roots. Plain `http://` remains
-available for loopback fixtures and old endpoints. HTTPS client failures are
-reported in Jet terms: E4201 for handshake failure, E4202 for certificate trust
-failure, and E4203 when the host image has no usable certificate roots.
-Advanced client TLS configuration belongs in `core.net.tls` (custom roots,
-pinning, client certificates). D-TLSSERVE1=A adds HTTPS serving as a named
-option on the same server entry point: `Server.serve(addr, mux, tls:
-Server.tls(cert, key))`. The third argument must be labeled `tls:`; unlabeled
-TLS config is rejected so the transport switch is visible at the call site.
-
-### Graphics and games (D-RAYLIB1, D-GAME1-3)
-
-`core.game.raylib` is the first-party graphics bridge package. The typed surface is
-`window_open`, `window_should_close`, `window_ready`, `begin_drawing`,
-`clear_background`, `draw_rectangle`, `draw_text`, `end_drawing`,
-`close_window`, `key_down`, `set_target_fps`, and `color`. By default the
-bridge runs headless so CI does not need a display server. With
-`JET_RAYLIB_DISPLAY=1`, generated code
-dynamically loads the native raylib shared library and calls the real C API; if
-the library is absent, it degrades to the same headless path.
-
-`core.game` is the flagship engine name (D-GAME2=A). Its public beginner API is
-scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game
-data, while `scene.on_frame((frame) -> { ... })` attaches per-frame logic.
-The current Core floor is headless and deterministic: `game.Scene.new`,
-`scene.assets.image`/`sound`, `scene.input.bind`, `scene.component<T>()`,
-`scene.query<T...>()`,
-`game.Replay.record`, `game.Backend.headless`, and
-`game.run(scene, replay: replay)` produce a stable transcript without renderer,
-audio, editor, or file-backend dependencies.
-
-### Declaring a boundary — effects in the callable head
-
-A function may omit an effect row. Sema still infers its complete transitive
-row. Ordinary `->` introduces a concise callable body and never claims purity. Public API
-metadata stores that normalized inferred row, so publishing rejects effect drift.
-
-A function may pin an **upper bound** on its effects by writing
-`-[E1, E2, …]>` after the optional return type:
-
-```ebnf
-fn_effects = "fn" ident "(" params ")" [ type ]
-             ( "-[" [ effect { "," effect } ] "]>" block | block ) ;
-```
-
-```jet
-fn load(path: String) String -[FS]> {
-    core.files.read(path)      // OK: FS ⊆ {FS}
-}
-```
-
-The compiler infers the body's real effect set and checks it is a **subset** of
-the declared bound. An effect the body uses that the bound omits is **E0740**,
-naming the effect, the call that introduced it, and the declared set. The row is
-an assertion the author makes a contract — the inferred set may be *smaller*
-than the bound (the bound is a ceiling, not an exact set), but never larger.
-
-`-[]>` is the same contract with an empty bound: any effect at all is a
-purity violation (reported as **E3401**, the established purity diagnostic).
-
-Effects are erased: `-[FS]>`, `-[]>`, and an unannotated function with the same
-body all generate byte-identical Rust.
-
-### Restricting a region — `#FX(…) { … }`
-
-Where `-[…]>` bounds a whole function, `#FX(…) { … }` restricts a **block**.
-Inside the region, the only effects allowed — directly or through any call it
-reaches — are the ones listed; anything else is **E0712**. It is a hard local
-ceiling, not a grant: the effects still happen and still count toward the
-enclosing function's set.
-
-```ebnf
-caps_region = "#FX" "(" effect { "," effect } ")" block ;
-```
-
-```jet
 fn run() {
-    #FX(FS, IO) {
-        text :: core.files.read("x") ?? "";   // FS — allowed
-        print(text);                            // IO — allowed
-    }
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+    clicked.on(scope, n -> print("clicked {n}"))
+    clicked.once(scope, n -> print("once {n}"))
+    print(clicked.emit(1).summary())
+    scope.cancel()
 }
 ```
 
-A call inside the region that transitively touches `Net` would be E0712 even
-though no `Net` call appears literally in the block. Like every effect
-construct, `#FX` is a plain lexical block in codegen — it erases.
+With `JET_OBSERVE=1`, the runtime publishes one bounded, payload-free sequence
+for Event, AsyncEvent, and DecisionHook transitions. `jet inspect live` and a
+Canvas session attached to the live Jet identity consume that validated source;
+a source-call match alone is not a runtime observation. The observation writer
+bounds event history and does not include channel values, task locals,
+environment, or credentials. The executable event example is covered by
+[`tests/canvas.rs`](../../tests/canvas.rs) and the public API by
+[`Core/event/event.jet`](../../Core/event/event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
-### Higher-order effects — transparent flow-through (D-EFF2)
+## Terminal direct input
 
-A higher-order function's effect set is **its own body plus, at each call, the
-effects of the function values passed to it** — so a callback's effects surface
-at the *call site*, not buried inside the higher-order callee. This is the
-zero-syntax default:
-
-```jet
-fn apply(f: fn(Int) Int, x: Int) Int -> { return f(x); }
-
-fn run() -[IO]> {
-    apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {IO}
-}
-```
-
-- A **lambda** argument's body is walked inline, so its effects already belong
-  to the enclosing function.
-- A **directly-named function** argument flows its effects through precisely.
-- Any **other** function value (a local binding, a parameter passed onward, a
-  returned or stored callback) has an origin that isn't statically known at the
-  call, so it defaults to the **maximal** effect set — sound, conservative.
-
-Two expert levers refine this (ratified D-EFF2, additive to the default above):
-`fn(…) -[]>` / `fn(…) -[Net]>` **parameter types** demand/bound a callback
-(passing one with effects outside the bound is **E0747**), and `-[via f]>` on a
-signature publishes a tight pass-through that holds even when the value escapes.
-The conservative default is correct without them; they trade syntax for
-precision.
-
-### Effects on trait methods (D-EFF3)
-
-A trait method may declare an effect upper bound — `fn hash(self) -[]>` (the
-empty set) or `fn render(self) -[GPU]>`. The bound is two things at once:
-
-- **The impl obligation.** Every implementation's inferred effects must fit
-  inside the bound, or it is **E0742**. So a trait can promise "all `hash`
-  implementations are pure" and the compiler holds every impl to it.
-- **The dispatch contract.** A call through a trait object (`Box<dyn Trait>`)
-  sees the declared bound as its effect, because the concrete impl is unknown at
-  the call site — so safe-by-default survives dynamic dispatch.
-
-```jet
-trait Shape {
-    fn area(self) Int -[]>;     // every impl must be pure
-}
-impl Square.Shape {
-    fn area(self) Int -> { return self.side * self.side; }    // OK — pure
-}
-```
-
-An un-annotated trait method is inferred per-impl under static dispatch; the
-dynamic-dispatch fix-it (annotate the method when it's called through an object
-under an effect ceiling, E0743) is the remaining surface here.
-
-## Terminal direct-input (D-TERM1, ratified 2026-06-22)
-
-`live { … }` enters un-buffered, no-echo terminal input mode for its body and
-restores the terminal on every exit path (normal return, `?` propagation, panic
-unwind) via a RAII scope guard (D-DEFER1).
+A `#Live { ... }` block enters unbuffered, no-echo terminal input for its body.
+An RAII guard restores the terminal on normal return, `?` propagation, and panic
+unwind. The marker itself does not require an import; `term.read_key()` does.
 
 ```jet
 use core.term as term
 
 #Live {
-    k :: term.read_key()
-    if k == Enter { return }
-    print("got: {k}")
+    key :: term.read_key()
+    if key == Enter { return }
+    print("got: {key}")
 }
 ```
 
-`use core.term as term` is required for `term.read_key() -> Key`. The `live`
-keyword itself does not require the import — the block's syntactic gate is
-sufficient.
+`Key` is a prelude enum exposed by `core.term` with these variants:
 
-**`Key` enum** (prelude type, `core.term`):
-
-| Variant | Payload | Description |
-|---------|---------|-------------|
+| Variant | Payload | Meaning |
+| --- | --- | --- |
 | `Char(c)` | `Char` | Printable character |
-| `Enter` | — | Enter / Return |
+| `Enter` | — | Enter or Return |
 | `Escape` | — | Escape |
 | `Backspace` | — | Backspace |
 | `Tab` | — | Tab |
 | `Delete` | — | Forward delete |
-| `Up` / `Down` / `Left` / `Right` | — | Arrow keys |
+| `Up`, `Down`, `Left`, `Right` | — | Arrow keys |
 | `F(n)` | `Int` | Function key F1–F12 |
-| `Ctrl(c)` | `Char` | Ctrl + character |
-| `Unknown` | — | Unrecognised byte sequence |
+| `Ctrl(c)` | `Char` | Ctrl plus a character |
+| `Unknown` | — | Unrecognized byte sequence |
 
-Pattern matching uses `== Variant(binding)` (PatternTest form):
+Pattern tests can bind payloads with `==`, and enum literals may use the
+qualified form such as `Key.Char('a')` or `Key.Enter`.
 
-```jet
-if k == Char(c) { print("char: {c}") }
-if k == Enter   { break }
-if k == F(n)    { print("F{n}") }
-```
+A live block is impure: E3401 rejects it in a `-[]>` function. E3301 rejects it
+for a target without an OS terminal device, and the interactive REPL rejects
+it. The implementation uses inline `extern "C"` for POSIX termios and
+`extern "system"` for the Windows console API; it does not require an external
+crate (D-TERM1, D-DEFER1).
 
-Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
+## Formatting Jet source
 
-**Restrictions:**
-- E3401: `live { … }` is impure — rejected in a `fn … -[]>`.
-- E3301: rejected for selected no-OS targets (no OS terminal device).
-- REPL: rejected in interactive mode.
+`jet fmt <file.jet>` formats source in place. `jet fmt --check <file.jet>`
+reports files that would change and exits nonzero without writing them; add
+`--diff` to the check for unified diffs. `jet fmt -` reads source from stdin
+and writes formatted source to stdout; `--stdin-path=<label>` supplies the
+reported source name. These commands run the lexer, parser, and printer, not
+sema or rustc. (S44)
 
-**Platform FFI:** I6-compliant; uses inline `extern "C"` (POSIX termios) and
-`extern "system"` (Windows console API) — no external crates.
+The formatter also accepts `--lang`, `--simplify`, `--changed`, and
+`--explicit-copies`. `--simplify` opts into the ratified simplest spellings;
+the default output does not depend on it. `--changed` selects changed project
+files. `--explicit-copies` keeps copy operations explicit where that mode
+requires them. For a write-free preview, use `--check` and optionally
+`--diff`; the public help advertises `--check`.
 
-## REPL Core effects
+Canonical style uses four-space indentation, an opening brace on the header
+line, one statement per line, at most one blank line between top-level items,
+spaces around binary operators, no space before `;`, `,`, or a call `(`, and
+trailing commas only on multiline comma lists. Explicit semicolons are not
+canonical: E0373 supplies the behavior-preserving line-break or end-of-line
+fix. Comments are retained and reattached by source span. A real parse error
+blocks formatting. (D-TRAILCOMMA1, D-SEMI1)
 
-The REPL keeps accepted statement ASTs and live `CtValue`s across turns.
-Lists, maps, options, results, structs, enums, and closures are not rebuilt
-from display text; explicit binding annotations remain available to `:type`.
+`package.jet` is formatted by its typed closed-record formatter rather than the
+ordinary Jet formatter. If that path cannot place an authored comment safely,
+it fails closed instead of declaring the file clean. A leading inline package
+carrier is preserved byte-for-byte, including its source spans; only the Jet
+source after the carrier is formatted. The driver preflights every selected
+file before writing any file, so one read or parse failure leaves the batch
+unchanged. The formatter contract is exercised by
+[`tests/fmt.rs`](../../tests/fmt.rs); its idempotence law is
+`fmt(fmt(source)) == fmt(source)`.
 
-Pure Core calls run directly. Ambient Core calls use normal Jet authority:
-the call must be inside `#FX(root)`, and the REPL must authorize the exact
-operation and resource before it touches host state. A TTY prompts for once,
-session, or deny. A session allowance is an exact tuple and offers continue
-or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
-`--allow-net`, and `--allow-io` skip ordinary prompts for their roots;
-matching `--deny-*` flags override them. Piped and transcript sessions never
-prompt and deny unflagged effects with E1803. Filesystem access is confined to
-the project root descriptor fixed at session start; every later component is
-opened descriptor-relative without following symlinks. Platforms unable to
-enforce that confinement fail closed. Ambient random draws require `Rand`, but
-explicitly seeded `Rng` values are injected data. REPL-owned `print`/`eprint`
-capture is inherent and needs no `IO` grant.
+## Writing and running tests
 
-Process execution opens the canonical executable before authorization and
-launches that exact descriptor without resolving its pathname again. Stdin is
-closed unless a future separately authorized stream surface supplies it. The
-child starts in the verified project directory with an empty environment;
-stdout and stderr are captured. Interrupts forward to its process group, and
-the REPL kills and reaps that group after 30 seconds.
-Native-only modules still report E1802.
+A top-level `#Test("name") { ... }` block is a test claim. Its body has ordinary
+function statements and uses `assert`, `assert_eq`, snapshots, or another
+checked assertion. Duplicate names report E0105; a nested `#Test` reports
+E0601. `jet run` and `jet build` ignore test claims, while `jet test` compiles
+and runs them. (S43, D-CASING1)
 
-## REPL multiline editing
+For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
+that file. Each claim runs behind a process-local unwind boundary, and the
+harness emits one result per claim plus a summary. Human output names `pass`,
+`FAIL`, `skip`, expected-fail, and unexpected-pass outcomes; JSON mode emits the
+same result categories. `jet test` exits with status 1 when any selected claim
+fails. A failing assertion carries the E3001 report and Jet
+source location. A test target with no tests or doctests reports E0601; bare
+package testing skips source members with neither, then reports the resolved
+package contains no testable member at all. (R9)
 
-Raw-terminal `jet repl` uses syntax-aware Enter
-(D-FE-REPL-MULTILINE1=A). Enter submits input when the REPL parser accepts its
-item, statement, or expression shape. When parsing instead stops at the end of
-the current input, Enter inserts a newline and redraws each continuation with
-the `· ` prompt. Invalid input that already contains the parser's problem
-submits immediately so the normal compiler-owned diagnostic can explain it.
+Bare `jet test` in a package discovers every source member in the package's
+checked project set, not only the entry file. A directory without a package
+manifest is walked recursively for `*.jet` files. A package-level `fn test`
+override owns the command unless `--show-default` requests the stock harness.
+The default child-output policy is `--capture=failed`; choose `all` or `none`
+explicitly. `--fresh` bypasses only the persisted test-result cache; the build
+cache remains reusable. `--docs` selects checked documentation examples.
+`--watch`, `--where=<expr>`, `--filter=<substring>`, `--shuffle[=<seed>]`,
+`--serial`, `--coverage`, `--update-snapshots` (or `-u`), `--release`, and
+`--profile=<name>` select the corresponding test-run behavior. Browser claims
+use `--browser=<engines>`, `--browser-retries=<n>`,
+`--browser-reporter=<text|json|html>`, `--browser-ui`, `--browser-visual`, and
+`--browser-trace`.
 
-Escape then Enter always inserts a newline, including when the current input
-is already complete. Enter on an empty continuation line force-submits. The
-editor repaints the whole logical buffer after insertion, deletion, history,
-or cursor movement, then restores the cursor to its source position. Cooked
-and non-TTY sessions keep D-REPL9's bracket-balance continuation and `...  `
-prompt; they do not claim parser-aware raw editing.
+### Test scope members
 
-## REPL evaluation interruption
+A dot-prefixed scope member is a statement directly inside a marker that
+publishes that vocabulary. `#Test` declares `.setup`, `.expect_fail`,
+`.timeout`, `.skip`, and `.measure`; members cannot occur in an ordinary
+function, inside a control block, or inside another member. E0614 reports an
+unknown member, E0615 reports a member outside a vocabulary, E0616 requires
+`.setup` to be first, E0617 reports the wrong argument shape, and E0618
+reports nesting. The checker validates malformed members in every command mode,
+but only `jet test` executes them. (D-DOTSCOPE1)
 
-In a raw interactive REPL, Ctrl-C during interpreter execution cancels the
-current turn and restores the prompt within 100 ms for Jet-controlled work
-(D-FE-REPL-INTERRUPT1=A). The interpreter polls before every instruction and
-before and after each runtime call. A blocking external call follows that
-call's cancellation behavior; while it remains active the REPL prints
-`warning: interrupt requested; waiting for active external I/O to stop`.
+- `.setup { ... }` is first, runs inline, and leaves its bindings visible to
+  the rest of the test. It does not create a separate scope.
+- `.expect_fail { ... }` requires a runtime stop. It may name one E30xx stop
+  code, as in `.expect_fail(E3010) { ... }`; a different stop or a clean return
+  fails the claim. A matched failure is consumed and execution continues after
+  the region.
+- `.timeout(duration) { ... }` takes one canonical duration value. Version 1
+  compares elapsed time after the region completes; it does not interrupt a
+  hung body.
+- `.skip { ... }` or `.skip("reason") { ... }` type-checks but does not execute
+  the region. A first `.skip` skips the entire claim; a later one skips only
+  its region.
+- `.measure { ... }` marks the containing claim for the measurement harness.
 
-Cancellation is transactional for session state. Bindings, moves, and
-statement history from the interrupted turn do not commit; earlier session
-state remains. Host effects completed before cancellation cannot be undone,
-so the REPL prints `Interrupted. External effects already performed were not
-rolled back.` The interrupted turn remains visible as `interrupted` in
-`:turns` and can be replayed with the ordinary rerun mechanism. A second
-Ctrl-C received while that turn is still stopping exits the REPL. Outside
-evaluation, Ctrl-C keeps its editor behavior: clear nonempty input first;
-exit from an empty prompt.
+`jet new <name>` creates a new simple project directory and refuses an existing
+path. It writes `package.jet`, `run.jet`, the optional command homes
+`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet`, a `.gitignore`, and a toolchain
+lock record. The generated entry contains a canonical typed CLI starter and a
+test claim; `--annotated` includes commented example dependencies and the web
+starter selects the browser scaffold.
+The same command family also provides `jet new service|route|job|migration` for
+backend source scaffolds; those subcommands have their own `--path`, `--route`,
+`--model`, SQL, risk, lock, and preview/apply options. The scaffold source is
+the command implementation in [`Source/CmdCompile.rs`](../../Source/CmdCompile.rs).
+(D-CLI-RECIPE1, D-ILE1, D-CLI-BARE1, D-VERDICT-678-1)
 
-## Semantic assistance
+Inside a package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
+`jet test` share one entry resolver: a selected command home first, then
+`run.jet`, then `src/run.jet`, then `<package>.jet`. An explicit file or
+directory stays explicit. In an ambiguous workspace, name the member with `-p`
+or pass a path. A lone `main.jet` is moved to `run.jet` with a notice; a layout
+that has both is ambiguous and fails with E2105 (D-ILE1, D-ROLEFILE1).
+
+### Measured test claims
+
+`#Test("name") { .measure { ... } }` is the one claim form that supplies both
+correctness and performance evidence. Plain `jet test` runs every claim once;
+`jet test --measure` selects only measured claims. The measurement harness
+builds an optimized AOT executable, performs five warmups, calibrates the
+iteration count, and records twenty serial samples. Its records identify the
+execution tier, profile, warmups, iterations, and serial mode. `--filter` still
+selects measured claims by name. A standalone benchmark marker and command
+are not a second test surface. (D-CLAIM-BENCH1=A)
+
+The harness sends the region's result through `black_box`, but that sink does
+not keep dead intermediate work alive. Put the operation's observable result or
+the approved identity sink `keep(value)` inside the measured loop.
+(D-BENCH-KEEP1). The following traps can otherwise produce a measurement
+of the optimizer rather than the intended work:
+
+- a loop whose result is dropped can be eliminated;
+- a lazy resource such as an mmap may not fault pages inside the region;
+- loop-invariant work can be folded or hoisted; and
+- the harness sink cannot make a value live after the region or force a lazy
+  operation that occurs later.
+
+The language example is
+[`examples/features/tooling/bench.jet`](../../examples/features/tooling/bench.jet),
+and the test command contract is covered by
+[`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). The separate
+compiler-speed dashboard at [`tools/perf/dashboard.sh`](../../tools/perf/dashboard.sh)
+uses its own one-warmup, twenty-sample policy and six clean/no-change/edit
+production rows; [`tools/perf/ci-perf-check.sh`](../../tools/perf/ci-perf-check.sh)
+rejects missing or mismatched corpus, identity, parity, variance, and budget
+evidence. Do not use dashboard numbers as a substitute for the `.measure`
+claim's execution record.
+
+## Size-oriented builds and language tooling
+
+### Size-oriented builds
+
+`jet build --small` selects the size-oriented build profile. The profile uses
+`opt-level=z`, fat LTO, `panic=abort`, and stripped symbols rather than the
+speed-oriented defaults. The command-line help describes the flag as
+“Favor a smaller binary”; it does not promise a particular byte-size ratio
+(S15).
+
+### Language server
+
+`jet self lsp` speaks JSON-RPC over standard input and output. It uses the same
+front end as checking, reads the import graph from disk, and overlays the open
+buffer over those files. Diagnostics cover the complete document, and teaching
+quick-fixes use `Diagnostic.edit`. Formatting is available through `jet fmt`
+(I6, S14).
+The server's protocol loop accepts JSON-RPC requests and emits framed
+`Content-Length` responses; clients do not need a second compiler process.
+The LSP integration coverage is in `tests/lsp.rs`.
+
+The VS Code/Cursor client in `editors/vscode/` provides the TextMate grammar
+and LSP transport. `install.sh` packages the extension. Server discovery uses
+`jet.languageServerPath`, then `<workspaceFolder>/target/debug/jet`, then
+`jet` on `PATH`; `jet self lsp` does not invoke `rustc`.
+
+### Hand-rolled parser contracts
+
+The standard-library-only parsers at compiler and package boundaries accept
+only the published grammars. They reject unsupported or ambiguous input rather
+than guessing at a partial value.
+
+| Boundary | Accepted input | Rejection rules |
+| --- | --- | --- |
+| LSP/DAP JSON and framing | UTF-8 RFC 8259 null, booleans, finite numbers, strings (including valid `\\u` surrogate pairs), arrays, and objects to depth 64. Object names are unique. LSP `Content-Length` bodies are capped at 1 MiB before allocation; DAP bodies at 16 MiB; framing headers at 8 KiB and 64 fields. JSON-RPC uses `jsonrpc: "2.0"`, a string `method`, object or array `params`, and a string or signed 64-bit `id`. DAP requests use `type: "request"`, a positive `u32` `seq`, a nonempty `command`, and optional object `arguments`; breakpoint lines are positive `u32` integers. LSP positions are nonnegative `u32` integers; `jet.impact` depth is limited to 1–64. | Oversized messages or headers, duplicate `Content-Length` headers, non-UTF-8 frames, duplicate JSON names, raw string control characters, malformed or overflowing numbers, lone surrogates, deeper nesting, non-object requests, fractional IDs/positions/sequences/lines, and scalar parameters. JSON-RPC syntax errors return `-32700`; invalid envelopes return `-32600` with a null id. Malformed DAP envelopes are not dispatched, and unknown string commands receive an unsuccessful response. |
+| Project configuration | `package.jet` supplies package identity, `workspace.jet` supplies workspace membership, and `env.jet` supplies named source aliases and environment facts. Each uses Jet grammar and resolves from the nearest applicable project root. | `jetpack.toml` is not a second configuration grammar; it is rejected with **E1225** before dependency resolution. |
+| SemVer and dependency ranges | SemVer 2.0.0 versions and the documented comparator, caret, tilde, `x`, hyphen, whitespace-AND, and `||`-OR forms. A leading `v` is accepted for tag compatibility; an empty requirement means `*`. | Numeric overflow and leading zeroes, empty identifiers, invalid characters, wildcard-before-number forms, empty `||` alternatives, and ranges whose exclusive upper bound overflows `u64`. Pre-release numeric identifiers remain spec-unbounded and compare without integer conversion. |
+| C bind prototypes | Top-level `return_type name(parameters);` declarations for the documented scalar, `char*`, and `void` subset. Empty lists and `(void)` are accepted; scalar parameters may be unnamed. Unsupported but structurally valid types are reported as skipped. | Bodies, pointers, variadics, unbalanced lists, empty comma fields, trailing declarators, non-ASCII identifiers, and declarations without a return type. No guessed binding is emitted. |
+| Registry and advisory feeds | Each registry line is one UTF-8 JSON object with nonempty string `name`, `version`, `tier`, and `gate_status`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, and optional boolean `yanked`; `tier` is `core` or `community`, and `gate_status` records the five named gate states. The offline advisory file starts with `jet-advisory-feed-v1`, then a signed `feed|sequence|issued-unix|expires-unix|maturity-seconds|key-id|public-key|signature` header, exact `release|package#version|first-seen-unix|source-class` records, `advisory|id|package|affected|fixed-or-empty|title|severity` records, and exact `exception|package#version|reason|reviewer|expires-unix` records. Package source policy may add exact, expiring `PolicyException` records under `policy.exceptions`, with `id`, `scope`, `reason`, and `expires`. `key-id` is `sha256-` plus the hash of the decoded public-key bytes. `.jet/advisory-trust` pins the publisher key, minimum sequence, accepted digest, and revoked keys. The default third-party maturity window is 24 hours; first-party and workspace releases default to zero. See [registry tiers](registry-tiers.md). | Malformed or duplicate or nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, invalid tier or gate status, unsigned, untrusted, stale, expired, rolled-back, or forked advisory feeds, compromised keys, missing remote release records, invalid exact targets, advisory field-count errors, empty required fields, invalid affected or fixed versions, malformed or expired source exceptions, or `|` inside fields. Reads fail closed with **E2607**, **E2609**, **E2610**, or **E2611** rather than skipping security metadata. |
+
+## REPL state, authority, and editing
+
+The REPL retains accepted statement ASTs and live `CtValue`s between turns.
+Lists, maps, options, results, structs, enums, and closures remain values rather
+than being rebuilt from display text. Explicit binding annotations remain
+available to `:type`.
+
+Pure Core calls run directly. Ambient calls use the same authority model as a
+program: the call must be inside a matching `#FX` boundary, and the REPL must
+authorize the exact operation and resource before host state changes. A
+TTY prompts for once, session, or deny. A session decision is an exact tuple
+and offers continue or revoke on reuse. Piped and transcript sessions never
+prompt; an unflagged effect is E1803. Filesystem access stays below the project
+root descriptor opened at session start. Later components open descriptor-
+relative without following symlinks; a platform that cannot enforce this
+confinement fails closed.
+
+Ambient random draws require `Rand`; an explicitly seeded `Rng` is input data.
+REPL-owned `print` and `eprint` capture does not need an `IO` grant. Process
+execution opens the canonical executable before authorization and launches that
+exact descriptor. Stdin is closed unless a separately authorized stream
+surface supplies it. The child starts in the verified project directory with an
+empty environment; stdout and stderr are captured. Interrupts target the
+process group, which the REPL kills and reaps after 30 seconds. Native-only
+features report E1802.
+
+### Multiline input
+
+In a raw-terminal `jet repl`, Enter submits when the parser accepts the current
+item, statement, or expression. If parsing stops at the end of the buffer,
+Enter inserts a newline and draws each continuation with `· `. Invalid input
+that already contains a parser problem submits immediately so the compiler can
+report it.
+
+Escape followed by Enter always inserts a newline, even for a complete input.
+Enter on an empty continuation line force-submits. The editor repaints the
+logical buffer after insertion, deletion, history, or cursor movement and
+restores the source cursor position. Cooked and non-TTY sessions use bracket
+balance and the `...  ` prompt; they do not claim raw parser-aware editing
+(D-FE-REPL-MULTILINE1=A).
+
+### Interrupts
+
+Ctrl-C during raw REPL evaluation cancels the current turn and restores the
+prompt within 100 ms for Jet-controlled work. The interpreter polls before
+each instruction and around runtime calls. A blocking external call follows
+its own cancellation behavior and the REPL warns while it waits.
+
+Cancellation is transactional for session state: bindings, moves, and statement
+history from the interrupted turn do not commit. Host effects already completed
+cannot be undone, so the REPL reports that external effects were performed.
+`:turns` records the turn as `interrupted`, and the normal rerun mechanism can
+replay it. A second Ctrl-C while stopping exits the REPL. Outside evaluation,
+Ctrl-C clears nonempty editor input and exits from an empty prompt
+(D-FE-REPL-INTERRUPT1=A).
+
+### Semantic assistance and history
 
 REPL documentation and completion, LSP hover and completion, and `jet ?` help
-project their facts from `jet-semindex`'s shared semantic symbol index. A
-symbol fact carries stable module/member identity, kind, signature, summary,
-examples, provenance, and source span where one exists. Checked definitions,
-members, parameters, locals, imports, and aliases retain their semantic
-identity; equal spellings in different modules or on different owners remain
-distinct. Language builtins live in the same index rather than consumer-local
-tables. `jet ?` command facts use the same model, with search categories,
-flags, and cross-links kept as presentation metadata.
+read the shared `jet-semindex` facts. A fact carries stable module/member
+identity, kind, signature, summary, examples, provenance, and an optional
+source span. Definitions, members, parameters, locals, imports, and aliases
+retain identity, so equal spellings from different owners remain distinct.
+Builtins use the same index. Command help adds search categories, flags, and
+cross-links as presentation metadata.
 
-Raw-terminal REPL completion inserts a unique match immediately. Multiple
-matches open a selectable list: Up and Down change selection, Tab advances,
-Enter inserts, and Escape closes the list. Cooked terminals and `NO_COLOR`
-use the same candidates with a textual selection marker; ANSI styling is not
-required to discover or choose an item.
+A raw-terminal completion inserts a unique match. Multiple matches open a
+selectable list: Up and Down select, Tab advances, Enter inserts, and Escape
+closes. Cooked terminals and `NO_COLOR` use the same candidates with a textual
+selection marker.
 
-## REPL history
+The REPL retains the latest 2,000 successful submissions between sessions.
+Failed turns and meta-commands are not stored. History is at
+`$XDG_STATE_HOME/jet/repl-history` on XDG systems or the platform state
+directory elsewhere. The directory and file are owner-only. Inputs are stored
+losslessly, including multiline, effectful, and secret-bearing text; Jet cannot
+identify every secret.
 
-The REPL keeps the latest 2,000 successful submissions between sessions
-(D-FE-REPL-HISTORY1=A). Failed turns and meta-commands are not stored. History
-lives at `$XDG_STATE_HOME/jet/repl-history` on XDG systems or the platform
-state-directory equivalent. Its directory and file are owner-only. Each input
-is stored losslessly, including multiline, effectful, or secret-bearing text;
-Jet cannot truthfully identify every secret.
-
-State-path traversal rejects symlink/reparse components and holds the opened
-history directory as the authority for later reads, replacements, and erasure.
-Each write and clear takes a bounded, crash-released cross-process lock, then
-re-reads current history before changing it. Concurrent sessions therefore
-merge successful submissions, and a stale session cannot resurrect entries
-removed by `:history clear`. Replacement is atomic and durable on supported
-platforms.
+State-path traversal rejects symlink or reparse components and keeps the opened
+history directory as the authority for later reads, replacement, and erasure.
+Writes and clear operations take a bounded cross-process lock, reread current
+history, and atomically replace durable data where supported. Concurrent
+sessions therefore merge successful submissions, and a stale session cannot
+resurrect an entry removed by `:history clear`.
 
 F3 opens interactive history search. `:history search <text>` is the textual
-path and `:history clear` erases the whole file. `JET_REPL_HISTORY=off` keeps
-history in memory for the current session only. `JET_REPL_HISTORY_LIMIT=N`
-changes the retained-entry bound. If the file ends in a corrupt or incomplete
-record, the REPL discards that tail, preserves the valid prefix, and warns. If
-private storage cannot be opened or written, the REPL warns and continues with
-session-only history.
+path, and `:history clear` erases the file. `JET_REPL_HISTORY=off` makes history
+session-only; `JET_REPL_HISTORY_LIMIT=N` changes the retained bound. A corrupt
+or incomplete final record is discarded while the valid prefix is preserved
+with a warning. If private storage cannot be opened or written, the REPL warns
+and continues with session-only history (D-FE-REPL-HISTORY1=A).
 
-## Editions & release policy (E2-M2)
+## `jet inspect expand`
 
-A project pins an **edition** with `edition: "2026"` in its `package.jet`
-(D-REL3). An edition opts the project into a specific era of Jet syntax; the
-toolchain advertises the editions it supports in `jet --version` and rejects a
-future edition it can't provide (E2001). Single-file `jet run file.jet` carries
-no edition marker and always uses the newest stable edition (E2-V4). The full
-compatibility contract — patch/minor/major/epoch/edition definitions, the
-backward-compatibility guarantee, the deprecation window (L2001 → E2002), the
-migration authority (only `jet fix` + edition upgrade, D-REL5), and the
-generated-code license statement — lives in docs/spec/release-policy.md.
-
-## Toolchain as a dependency — the `jet:` pin (D-JPK-TOOLCHAIN1=A, #179, U30)
-
-A `package.jet` pins **which Jet compiler** builds the project with a top-level
-`jet:` field, whose value is a **channel ref** (D-JPK-CHANNEL1 semantics):
-
-```jet
-name:    "wordstats"
-version: "0.3.1"
-jet:     0.4              // track the 0.4 series
-```
-
-Accepted forms: a `MAJOR.MINOR` series (`0.4`), a `MAJOR.MINOR.PATCH` exact
-(`0.4.2`), or a named channel (`main`). A range/operator form (`>=1.0.0`) is
-**not** a pin — it is the legacy compatibility constraint (E1208) and stays a
-minimum-version gate; a channel-form pin is owned by version dispatch instead
-(E1249 rejects a malformed pin). Absent `jet:` = unpinned: the running `jet`
-builds it with no fetch (rung-0/1 stays frictionless).
-
-The channel resolves to an exact version recorded in the `.jet/lock`
-`[[toolchain]]` block (channel + version + envelope). The channel re-resolves
-only on `jet update jet` and first realization; every other run reads the lock.
-A running `jet` in the pinned channel builds the project natively. A `jet` from
-a different series **realizes the pinned compiler as a prebuilt hangar object**
-(D-JPK-CACHE1 substitution) and **re-execs into it** (D-JPK-DISPATCH1) — never a
-source build of the compiler; a platform cache miss is E1251, never a silent
-wrong `jet`. A `JET_TOOLCHAIN_EXEC=<version>` env marker guards the re-exec so
-the pinned child runs natively without looping. Under `--offline`/CI an unlocked
-channel is E1250 (run `jet update jet`, commit the lock). Verbs: `jet self toolchain`
-(read-only pin/version/status), `jet update jet [<channel>]` (the only place the
-pin moves), `jet init` (writes a `jet:` pin for the running channel by default).
-
-This is a *different* toolchain from the Rust/native **build** toolchain that
-compiles a user's `extern rust` bridge crates (D-JPK-BUILDTOOL1, E1240): that
-one builds bridge dependencies; this one pins the Jet compiler itself.
-
-## Source channels and outdated (D-JPK-CHANNEL1=A, U21)
-
-Source refs may carry channel selectors: `#latest`, `#main`, or a major-series
-mask such as `#v0.x`. Each source also has one movement policy: no marker is
-pinned forever, `#latest` moves only through `jetpack update`, and leading
-`#auto` opts into automatic movement. Moving policies keep their marker when
-the exact resolved selector is written back to the declarative source:
-
-```jet
-rustc@nixpkgs
-jq@nixpkgs#latest
-omp@releases#auto
-```
-
-The channel is tracking intent; `.jet/lock` records the exact source that intent
-resolved to:
-
-```toml
-[[source_channel]]
-name = "default"
-channel = "latest"
-exact = "acme/tool@github#v1.2.0"
-```
-
-`jetpack update [source]` is the only verb that moves `[[source_channel]]`.
-`jetpack outdated` compares the lock to channel metadata and writes nothing.
-`jet build`, `jet run`, `jetpack env`, and `jet dev` read only the
-exact lock entry; an unlocked channel source is E1271, including under CI or
-`--offline`.
-
-### Frozen-forward identity block
-
-The Package root's `name`, `version`, and `jet` fields form the project's
-**identity block**, read by the single `Package` parser before the rest of the
-manifest facts. Identity is bare top-level syntax. The canonical grammar is
-**contract-frozen** and must never be narrowed, so version dispatch can never be
-wedged by later manifest evolution (the Go `go.mod` contract):
-
-- The reader extracts top-level `name:`, `version:`, and `jet:` as simple
-  `key: value` entries, unquoted and trimmed. There is no `payload:` or
-  `identity:` wrapper.
-- Any other top-level key, any unknown nested block inside or outside the Package,
-  and any surrounding syntax the running `jet` doesn't recognise is tolerated
-  and skipped — it never blocks the identity read.
-
-Guarantee: **every past and future `jet` can read the identity block of any
-`package.jet`.** New manifest features may only *add* fields/blocks the identity
-reader ignores; the three identity fields keep this exact `key: value` shape.
-### Inline Package carrier (D-ECO-INLINEPACKAGE1=A, Tower #2409)
-
-A single entry `.jet` file may carry its Package context in one optional leading
-block:
-
-```jet
-package {
-    name: "inline-demo"
-    version: "0.1.0"
-}
-
-pub(package) fn helper() => String {
-    return "same package"
-}
-
-fn run() {
-    print(helper())
-}
-```
-
-The block is structural context, not a second Package grammar. The loader
-extracts its exact body bytes and source spans, then passes that body to the
-same canonical `PackageFacts` parser used for `package.jet`. The ordinary Jet
-parser, formatter, and LSP mask only the block's bytes, preserving offsets for
-diagnostics and semantic features; they do not reimplement Package fields.
-`package` remains contextual, so `pub(package)` keeps its existing
-package-scoped visibility meaning.
-
-Only one inline block may appear, and it must precede every other top-level
-declaration. The byte-zero `#!/...` launch header is file metadata and may
-precede the carrier. A malformed or unbalanced block is E1362, a non-leading
-block is E1360, and a duplicate is E1361. An inline block and a project
-`package.jet` cannot coexist; that conflict is E1363. A file with an inline
-block is otherwise a normal single-file package context and does not create a
-synthetic manifest file.
-
-
-### Manifest import boundaries (D-STRUCT-EDGE1)
-
-The package manifest may narrow the declaring package's resolved import graph:
+`jet inspect expand` is the single transparency command for compiler-inferred
+facts. It reads the ordinary checked bundle; it does not run a second analysis
+or ask rustc.
 
 ```text
-boundaries: {
-    deny: [{ from: "app.ui", to: "app.db" }]
-}
+jet inspect expand --facts <lens> <file.jet>
+jet inspect expand <file.jet>
+jet inspect expand --facts inline --json <file.jet>
 ```
 
-`from` and `to` are quoted exact module names, or names with one trailing `*`
-subtree wildcard. The loader resolves each file/module edge using the owning
-package's module names. A matching denial is `E0619`; a rule matching no loaded
-edge is the non-blocking `L0619` warning. An absent `boundaries` key preserves
-the existing import behavior. The checked edge facts enter the
-`Structure.ImportEdge` registry and GateLedger, while the manifest policy is
-erased before AOT, Cranelift, interpreter, and web runtime lowering.
+The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
+`origin`, `derive`, `templates`, and `callable-signature`.
 
-## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
+- `inline` reports `#Inline` and `#Inline(Always)` contracts and their emitted
+  Rust attributes.
+- `memory` reports transitive `Mem.*` denial facts, including bounded
+  `Mem.Alloc(above: N)` facts.
+- `web` reports checked routes, actions, mounts, and policy.
+- `effects` reports resolved function rows, direct effects, callees, and
+  provenance.
+- `layout` reports target-aware size, alignment, stride, and field offsets when
+  the compiler has a physical layout; absent optional facts retain their reason.
+- `origin` reports typed `#Track` provenance from the checked `?OriginInfo`
+  projection; it adds no runtime metadata channel.
+- `derive` reports behavior already attached to checked types and spans.
+- `templates` reports checked `@loop` marker expansions, including `impl`,
+  `#Test`, and `.measure` rows.
+- `callable-signature` reports labels, local names, defaults, access modes,
+  zones, types, variadics, effects, errors, returned-view provenance, identity,
+  and policy chain.
 
-Tool families use one noun-then-verb grammar. D-SHAPE6 moved
-`dossier`, `schema`, `expand`, `live`, and `semindex` under `jet inspect`.
-It moved `publish`, `keygen`, `key`, and `yank` under `jet registry`.
-Other commands in these groups keep their existing grouped routes.
-The daily commands `jet run`, `jet build`, `jet test`, and `jet fmt` stay flat.
-A bare moved action is E2101 and names its canonical grouped route. It is never
-a compatibility alias. Help, completion, manual, typo suggestion, and dispatch
-views use the same command registry.
+The removed stored-reference field mechanism has no `refs` lens. Asking for it
+is an unknown lens, not a compatibility path.
 
-### Typed entry-signature CLI parsing (D-CLIFLAG1, D-SHAPE-CLI1, c7cliflag)
+An unknown lens is E2941, lists the registered choices, and exits nonzero. A
+missing lens or entry path is E2104. A source that fails the ordinary check
+prints its normal diagnostics and exits nonzero. A clean program with no facts
+for a requested lens exits successfully.
 
-When present, the entry function's resolved parameter type IS the CLI spec —
-no separate flag DSL to learn. `fn run()` (S12, zero-arg) is the simple program
-entry; a program opts into CLI parsing by defining `fn run` with one parameter:
+`--json` keeps the canonical semantic-index document and adds one `expand`
+projection. The projection records the selection (`all` for the bare form),
+lens name and summary, structured facts, and source locations where available.
+The checked bundle and sema facts are shared with human output. Human output
+retains the stable `effect roles` header and grouped lens lines including
+`inline —`, `effects —`, `layout —`, and `callable-signature —`; empty lenses
+are skipped in the bare form. In JSON, a usage error starts with the
+`jet.status/v1` envelope and an unknown lens carries `"code":"E2941"`.
 
-```jet
-#CLI
-struct ServeArgs {
-    #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
-    #Short("v") verbose: Bool
-    config: ?String
-}
+Lenses live in one static registry in `Source/CmdExpand.rs`. A future ratified
+projection adds a row rather than a new subcommand or mechanism-specific flag
+(D-EXPANDCLI1).
 
-fn run(args: ServeArgs) {
-    http.serve(routes(), port: args.port)
-}
+## Semantic index and codemods
+
+`jet inspect semindex --json <file.jet>` emits semantic-index schema v20:
+definitions, references, call edges, effects, member facts, and typed package
+and workspace-overlay facts. Member facts unify fields, variants, inline
+methods, external inherent methods, trait methods, and trait requirements under
+stable owner order. Resolved references carry definition identity; unresolved
+or ambiguous references carry no target. Structural `expr`, `stmt`, `item`,
+and written `type` boundaries support refactoring without spelling guesses
+(D-SEMINDEX1, D-WD2).
+
+The registry exposes semantic projections through `semindex`, `output`, and
+related inspect actions; it has no dossier route. Tools consume the checked
+index and command/output schemas rather than reconstructing field mappings. LSP
+scattered-method breadcrumbs are editor overlays with source links and do not
+edit source.
+
+The codemod commands use one replay engine:
+
+```text
+jet inspect codemod <plan.json> --dry-run
+jet inspect codemod apply <plan.json> [--yes]
+jet inspect codemod undo <log.json>
 ```
 
-`#CLI` is a sibling derive of `#Codable` on the same marker/derive
-machinery (D-MARKERMOVE1). On a `#CLI` struct, `#Doc("...")` gives the
-program description; on a field it gives that flag's `--help` line. A field
-with no `#Doc(...)` gets a generic "value for --name" line instead. On a
-callable member, `#Doc("...")` gives the command summary. Descriptions preserve
-embedded line breaks.
-
-**Entry semantics.** `run` is the only reserved program entry name (S12). Plain
-`fn run()` is the default and never requires arguments. `fn run(args: T)` is an
-explicit opt-in used only when the program wants external command input in its
-signature, where `T` is a CLI spec shape below. A Package may instead declare a
-typed Executable `Output` whose checked `entry:` function has the same CLI
-contract; this does not reserve another function name.
-No variadic entry signature exists; raw argv access stays explicit inside
-`fn run()` via `core.args`/`core.term.args`. `main` has no entry meaning in Jet.
-Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
-
-An App-returning typed entry uses the same contract: Jet decodes the one typed
-argument, calls `run(args)`, and serves the returned `App` at the runtime edge.
-The return shape changes the entry boundary only; it does not change the CLI
-schema or parser.
-
-### Checked Output callable references (D-SHAPE-OUTPUT-CALLABLE1)
-
-A runnable Package `Output` links to ordinary Jet code with a function
-reference. The reference uses normal scope, import, visibility, rename, and
-editor-navigation rules; it is never a string lookup and `.jet/lock` cannot
-rescue a stale source reference.
-
-```jet
-cli :: Output.Executable{ name: "todo", entry: launch }
-api :: Output.Service{ name: "todo-api", entry: serve }
-release :: Output.Check{ name: "release", entry: verify_release }
-
-fn launch() {}
-fn serve() {}
-fn verify_release() {}
-```
-
-`Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
-`Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
-has fixed text `name:`. Executable, Service, and Check also require `entry:`.
-An Executable takes zero or one `#CLI`-derived parameter; Service and Check
-take none. All three return `()` or `!`. Sema resolves and validates the
-callable before TIR or Rust emission, and publishes its definition and solved
-effect row to semantic tooling.
-
-For a singular run, explicit selection is handled by the command layer. With
-no explicit address, legacy `fn run` wins; otherwise a sole compatible
-Executable is selected. Multiple candidates produce E1321 with a sorted list.
-
-**Pinned field-mapping rule** — every `#CLI` struct field maps to exactly
-one named `--flag`, by this rule (checked top to bottom, first match wins).
-D-CLI-POS1=A adds positional filling for required value fields:
-
-| Field shape | Named form | Bare form | Absent at runtime |
-|---|---|---|---|
-| `Bool` | `--name` (boolean flag) | — | `false` |
-| `?T` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
-| scalar with `{expr}` | `--name VALUE` (optional) | — | `expr` |
-| required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
-| any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
-
-Supported scalars: `Int` (including `Int(lo..hi)`), `Float`, `Bool`, `String`, `Path`. Any other field
-type (a `[K:V]`, a closure, a `[T]`, a nested struct that isn't itself
-`#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults use
-the existing inline `{expr}` field form (D-DEFAULT-SHAPE1), the same absence-default
-mechanism used by the checked field schema. Field name
-`snake_case` → flag `--snake-case` (underscores become dashes); no
-casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
-one). Every field always accepts its named `--field` spelling; when both a
-named value and a bare positional appear for the same field, the named value
-wins. `#Flag` on a Bool / optional / defaulted field is **E1309** (nothing
-to opt out of). Declaration order of required value fields is part of the
-command interface; reordering them is a breaking shape change reported through
-the checked `CLISchema` / dossier / embedded command metadata.
-Every generated CLI spec also registers `--help` automatically (rendering
-the program description, command summaries, and the struct's
-fields/types/`#Doc` text); a field named `help` collides
-with it and is **E1306**.
-
-`#Short("n")` adds the one-ASCII-letter `-n` form to the field's existing
-long form. `#Env("PORT")` reads `PORT` only when command input is absent.
-Explicit command input wins over the environment, and the environment wins
-over the field default. Generated help shows this precedence. The checked
-`CLISchema`, dossier, embedded metadata, and shell completion keep both marker
-values. An invalid or duplicate short name is **E1318**. These markers outside
-a `#CLI` struct, and `#Env` on a presence-only `Bool` flag, are **E1319**.
-
-**Nested `#CLI` structs are not supported in v1** — a field whose type is
-itself a `#CLI`-derived struct is E1305, same as any other unmapped type.
-(Grouped `--outer-inner` flag prefixing was scoped out rather than bolted
-onto the decode machinery under time pressure that would otherwise force a
-second, prefix-threaded code path — a real feature, not a punt: it needs
-its own worked design before it rides this derive.)
-
-**Program struct and commands (D-CLI-GLOBAL1=E).** The typed form has one
-`#CLI` struct for the whole program. Its scalar fields are root/shared flags.
-The same root flags are legal before or after a command. For each value,
-command input wins over `#Env`, and `#Env` wins over the field default. A
-`#CLI(Standard)` struct adds `--verbose`/`-v`, `--quiet`/`-q`,
-`--color=auto|always|never`, and `--version`; bare `#CLI` adds only
-automatic `--help`.
-
-Callable members are commands. A method receives a read-only `self` containing
-the parsed shared fields. A member binding `name = function` binds an existing
-function; that function may receive the program struct as its first read-only
-parameter, followed by scalar command parameters. The member name is the
-lowercased command word and its `#Doc` is the command summary:
-
-```jet
-#CLI(Standard)
-struct Deploy {
-    #[Doc("configuration file"), Env("DEPLOY_CONFIG")] config: ?String
-    #Doc("preview changes") plan = plan_impl
-
-    #Doc("apply the deployment")
-    fn apply(self, target: String) { ... }
-}
-
-fn plan_impl(args: Deploy) { ... }
-fn run(args: Deploy) { ... }
-```
-
-Callable members are behavior, not data. They are never constructed,
-serialized, or exposed as positional fields. A callable member on a
-`#Codable` struct is **E1346**. Non-callable targets, invalid parameter shapes,
-mutable receivers, duplicate command words, and command/root-flag collisions
-are **E1345**, **E1347**, and **E1344** as applicable. A program with commands
-and no command token prints the root help and command list; an unknown command
-is a real error.
-
-**Codegen** generates directly onto `core.args`'s existing `ArgsSpec`/
-`ParsedArgs` builder (D-ARGS1) — the same `.flag`/`.option`/`.parse`
-surface a hand-written call chain uses, so there is exactly one parser
-(I8), not two. A bad flag at runtime (unknown flag, bad `--port` value, a
-missing required flag) is the same `core.args` runtime-error voice as
-`ArgsSpec.parse`'s own messages — no new diagnostic codes for that path,
-only for the compile-time shape checks above (E1305, E1306, E1308, E1309,
-E1344–E1347). `88_args_spec`/
-`64_cli_args`-style direct builder use is untouched; this feature is a
-layer generated on top of it, not a replacement.
-
-`jet inspect dossier <entry.jet> run --json` projects that same checked command
-schema as `command_schema`: the optional `#Doc` description on the entry type,
-root/shared flags, command-local flags, value type, required/default state, help
-text, optional `#Doc` summary on each command, commands, and completion words.
-Shared flags occur once at root. The human dossier prints the same facts. Tools
-consume this projection instead of reconstructing field-to-shell mapping.
-
-**Executable command metadata (D-SHAPE-CLI-CARRIER1=A).** Every compiled
-program carries one versioned `JetCommandSchema` record inside its executable.
-The record includes the optional entry `#Doc` description and optional
-command `#Doc` summaries; completion words do not include these
-human descriptions. The record is inside the executable:
-`.jet_command` in ELF, `.jetcmd` in PE, `__jetcmd` in Mach-O, and the
-`jet.command` custom section in Wasm. Universal Mach-O files carry the same
-record in every architecture slice. The record is emitted before the artifact
-is cached, packaged, or signed, so it is part of the artifact identity. Readers
-parse the format section tables with bounded offsets and lengths; missing,
-malformed, duplicate, unsupported-version, or disagreeing universal-slice
-records fail closed. Universal slices cannot contain another universal
-container. External discovery opens the artifact once, requires a regular
-file, then reads at most the 512 MiB limit plus one byte from that same handle.
-It never executes the target program.
-
-`jet self completions SHELL --for PROGRAM` (D-SHAPE-CLI-COMPLETE1=A) reads that
-record and writes a bash, zsh, fish, or PowerShell script to stdout. Without
-`--for`, Jet's own completion output is unchanged. External scripts contain
-only checked schema candidates: root `--help`, root/shared flags, and
-lowercased command words, then only the selected command's `--help` and
-command-local flags. Shared flags are not repeated. They never
-query live application values. Scripts register the executable's basename,
-not its supplied path; a basename containing control characters is rejected.
-Plain `fn run()` embeds an empty application schema and therefore still
-produces a valid built-in-only `--help` script. Metadata failures are E2103 on
-stderr.
-
-**Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
-including the reserved `--help`), E1308 (`run`'s one parameter isn't a
-`#CLI` program struct), E1309 (`#Flag` on a field that is already flag-only),
-E1344 (command/root collision), E1345 (invalid callable binding), E1346
-(callable members on a `#Codable` struct), and E1347 (mutable command
-receiver). See docs/spec/diagnostics.md.
-
-The public `#CLI` program struct may be declared in the entry file or in one
-directly imported module. Its generated parser/decode helpers remain internal
-projections over the same `ArgsSpec` engine.
-
-## `jet inspect expand` — transparency command (D-EXPANDCLI1, card #183)
-
-Every "the compiler inferred this for you" mechanism (I8: magic default,
-expert opt-in) needs a way to ask the compiler what it decided. `jet inspect expand`
-is that one command for all of them — never a second, mechanism-specific
-CLI flag per feature.
-
-```
-jet inspect expand --facts <lens> <file.jet>   # one lens's facts
-jet inspect expand <file.jet>                  # every lens, grouped, empty ones skipped
-jet inspect expand --facts inline --json <file.jet>  # canonical semindex + inline projection
-```
-
-Facts are read straight off the ordinary check pass — never a second
-analysis, never rustc (I2/I3). A lens renders fields already sitting on the
-checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by the
-time the bundle compiled at all) — the same side-channel `jet inspect semindex`/
-`jet inspect impact` already read, not a parallel pipeline.
-
-**Shipped lenses:**
-
-- `inline` (D-INLINE-PARAM1) — every fn/method carrying `#Inline` or
-  `#Inline(Always)`: the contract and the Rust attribute codegen emits
-  (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
-  no line — the lens reports contracts, not every function in the program.
-
-- `memory` (D-MEM-FACTS1/D-AUTHORITY-MEM1) — declared and projected `Mem.*`
-  effect denials, including bounded `Mem.Alloc(above: N)` facts.
-- `web` (D-WEBAPP1) — the checked application graph: routes, actions, mounts,
-  and policy.
-- `effects` (D-EFF1 / D-SEMINDEX1) — each checked function's resolved effect
-  row, including direct effects, callees, and provenance.
-- `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. One
-  target-aware engine computes size, alignment, stride, and field offsets for
-  Jet-owned physical layouts; default-layout byte facts remain optional, and
-  the lens names the registered diagnostic and reason when they are absent.
-- `origin` (D-TRACK-ORIGIN1=A) — typed `#Track` provenance rows. The projection
-  is the folded `?OriginInfo` value behind `value.@origin`; it carries no
-  runtime metadata channel and never reconstructs movement or ambiguity.
-- `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
-  enums, and distinct types, with their checked identity and source span.
-- `templates` (D-STRUCT-ONCE1=A) — marker applications and the checked
-  `impl`, `#Test`, and `.measure` declarations produced by closed `@loop`
-  sources. Closed type-list targets and interpolated test names remain visible
-  in this projection; the rows come from the one checked bundle.
-- `callable-signature` (D-CALLPOLICY1=E) — the complete checked callable
-  contract: public labels and local names, defaults, access modes, zones,
-  types, variadics, effects, errors, returned-view provenance, source identity,
-  and the declared policy chain.
-
-A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
-stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
-(no stored-borrow fields in v1), and the lens went with it — `jet inspect expand
---facts refs` is an unknown-lens usage error today, like any retired name.
-
-Unknown `--facts <lens>` lists the registered lenses and exits nonzero
-(usage error, not an E-code — it never reaches the diagnostic renderer). A
-file that fails to compile prints the ordinary front-end diagnostics and
-exits nonzero: facts require a clean check, same as `jet inspect semindex`/
-`jet inspect impact`. A clean program with no facts for a lens (or for every lens,
-bare form) exits 0 — absence of facts is not a failure.
-
-`--json` keeps the canonical semantic-index document and adds one additive
-`expand` projection. The projection records the requested selection (`all` for
-the bare form), the registered lens name and summary, and structured facts with
-source paths, byte spans, and line/column positions where a lens has a source
-location. The checked bundle and sema facts are shared with human output; JSON
-does not create a second schema or analysis path.
-Usage errors such as an unknown lens stay outside the diagnostic-code table and
-use a small versioned `error.kind = "usage"` object; a source that fails the
-ordinary check uses one versioned document whose `diagnostics` entries are
-serialized by the shared machine-diagnostic renderer.
-
-**Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`
-(name, one-line summary, renderer) — adding a lens for a future ratified
-mechanism (effects, layout, derive expansion) is one row, never a new
-subcommand or a new flag (I8).
-
-## Semantic index, dossier, and codemods (D-SEMINDEX1, D-WD2, D-CODEMOD1)
-
-`jet inspect semindex --json <file.jet>` emits schema v12: definitions, references,
-call edges, effects, member facts, and typed Package/workspace-overlay facts. Member facts stitch fields, variants,
-inline methods, external inherent impl methods, trait impl methods, and trait
-requirements into one stable owner-ordered view. Every resolved reference also
-carries its definition identity; unresolved or ambiguous references carry no
-target and semantic edits must not fall back to spelling. Compiler-internal
-structural facts expose checked `expr`, `stmt`, `item`, and written `type` node
-boundaries for refactoring tools.
-
-`jet inspect dossier <file.jet> [Symbol]` renders those facts as a human report;
-`--json` emits the same lens data. The first shipped lens is the type/member
-dossier. It never re-checks by another path and never invents facts missing
-from semindex.
-
-The LSP exposes scattered-method breadcrumbs as inlay hints at the owning type
-declaration. These are editor-only overlays: they do not edit source and carry
-source links to the real impl method spans.
-
-`jet inspect codemod <plan.json> --dry-run`, `jet inspect codemod apply <plan.json>`, and
-`jet inspect codemod undo <log.json>` use one replay engine for both schema versions.
-A missing version or `version: 1` is the original semantic rename:
+A missing `version` or `version: 1` is the semantic rename form:
 
 ```json
 {"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}
 ```
 
-Schema 2 (D-CODEMOD-BATCH1=A) is an ordered batch over typed Jet templates.
-`project` is relative to the object. Each root is one `.jet` file or directory
-beneath `examples/` or `tests/ui/`; absolute, parent, and symlink escapes fail.
-Directory discovery is recursive and byte-path ordered. Rules are either a
-semantic `symbol_rename` or an `ast_rewrite` whose `node` is `expr`, `stmt`,
-`item`, or `type`. `@value` captures one subtree and `@values...` captures a
-list. Matching is confined to the requested compiler-owned AST boundaries;
-same token bytes in another node class are not candidates. Symbol definitions
-and references are selected by their resolved definition anchors, never by
-spelling. Every rule declares its exact match count; duplicate ids, unknown fields,
+Schema 2 is an ordered batch over typed Jet templates. `project` is relative to
+the plan object. Each root is one `.jet` file or directory below `examples/` or
+`tests/ui/`; absolute, parent, and symlink escapes fail. Rules are
+`symbol_rename` or `ast_rewrite` over `expr`, `stmt`, `item`, or `type` nodes.
+`@value` captures one subtree and `@values...` captures a list. Matching uses
+compiler-owned AST boundaries and resolved definition anchors, not token
+spelling.
+
+Every rule declares its exact match count. Duplicate IDs, unknown fields,
 ambiguous names, unused captures, unresolved replacement names, zero matches,
-and overlapping edits fail before any write. Rule N+1 sees a compiler-reindexed
-overlay containing rule N, so a later semantic rule may target an earlier
-rule's output.
+and overlapping edits fail before writes. Rule N+1 sees a compiler-reindexed
+overlay containing rule N's output.
 
 ```json
 {
@@ -4306,134 +3393,410 @@ rule's output.
 ```
 
 Clean roots must finish without front-end errors. Fixture roots must reproduce
-their complete paired `.stderr` exactly. An intentional snapshot change names
-a non-symlink project file in `snapshot_after`; the engine first proves those
-bytes equal the compiler-rendered result, then includes the paired `.stderr` in
-the same plan, transaction, and undo log. Code-only fixture changes are refused.
+their paired `.stderr` exactly. An intentional snapshot change names a
+non-symlink project file in `snapshot_after`; the engine verifies the compiler-
+rendered result and includes the paired stderr in the same transaction. A
+code-only fixture change is refused.
 
 Dry-run holds the codemod lock through discovery, staged compilation,
-validation, input rehash, and diff output but writes no source, snapshot, log,
-temporary file, or journal. Apply requires `--yes` after warning that an editor
-which ignores the codemod lock can still race the final rename. Apply writes
-same-directory temporary files, fsyncs contents and parents, and advances a
-fsynced recovery journal around each rename. Replacement reopens each parent
-without following links, verifies the destination through that handle, and
-renames relative to the same handle (`openat`/`renameat` on Unix; directory and
-file handles plus `SetFileInformationByHandle` on Windows). The process lock is an
-OS-owned advisory lock on Unix and a delete-on-close exclusive file on Windows, so
-crash recovery does not depend on `/proc`. A later codemod recovers a crash
-before planning; unexpected concurrent bytes preserve the journal and stop.
-Schema-2 logs contain byte-exact before/after images. Undo verifies every
-after-hash before making any write and uses the same journal protocol to restore
-source and snapshots. Existing schema-1 inverse-edit logs remain readable.
-Unified dry-run output emits the standard no-newline marker for each side whose
-last line lacks a terminating newline.
+validation, input rehash, and diff output, but writes no source, snapshot, log,
+temporary file, or journal. Apply requires `--yes`. Same-directory temporary
+files are fsynced, parent directories are fsynced, and a recovery journal wraps
+each rename. Replacement reopens parents without following links and renames
+relative to the checked handle. Unix uses an OS advisory lock; Windows uses a
+delete-on-close exclusive file. Concurrent byte changes stop and preserve the
+journal. Schema-2 logs contain byte-exact before/after images. Undo verifies
+every after-hash before writing and uses the same journal protocol. Schema-1
+inverse-edit logs remain readable. Unified dry-run output marks non-newline-
+terminated sides explicitly (D-CODEMOD1, D-CODEMOD-BATCH1).
 
-## Web dev-server dashboard (D-FE-DEVSRV1)
+## Semantic source import
 
-`jet dev <file.jet> --target=web` exposes one shared status snapshot at
+`jet import LANG DIR` parses foreign constructs it can prove, emits ordinary
+editable Jet, and records every other construct as a structured JT01xx omission
+in `import-report.json`. Unsupported code is neither guessed nor silently
+dropped.
+
+The initial `py` subset covers annotated top-level functions over `int`,
+`float`, `str`, `bool`, and `None`; straight-line local assignment, return,
+calls, arithmetic/comparison/boolean expressions, and equality asserts.
+Parameterless Python `test_` functions become Jet Test functions. Unsupported
+imports, signatures, expressions, and nested control flow stay out of callable
+Jet and appear in the omissions report with construct, reason, fix, source,
+generated target, and migration status (D-MIGRATE-SRC1).
+
+Dry-run prints the same plan without writing. A rerun is byte-idempotent.
+`--update` uses the last generated baseline: untouched generated files advance,
+owner-edited files remain when foreign source is unchanged, and simultaneous
+edits conflict before any conflicted file is written. Directory walks are
+deterministic and do not follow symlinks.
+
+The fixed corpus under `tests/fixtures/source_import` and
+`tests/source_import.rs` runs imported Jet against Python 3, compares oracle
+output, pins generated bytes, proves a second import is byte-identical, and
+proves that a three-way conflict writes no conflicted file. The language
+boundary is published in the [migration tier map](reference/migration-tier-map.md):
+Python, Java, C#, TypeScript/JavaScript, and Go use the scalar-function subset;
+C and C++ use the explicit binder-plus-overlay boundary. Foreign source remains
+authoritative until each JT0101 omission is resolved
+(D-MIGRATE-SRC1, D-ADOPT-TIER1).
+
+## Web development dashboard
+
+`jet dev <file.jet> --target=web` exposes one status snapshot at
 `/__jet_dev_status`. The terminal dashboard and browser corner strip render the
-same status words, client count, build time, and diagnostic. Browser clients
-have tab-scoped identities with a short polling lease, so the count represents
-live tabs rather than transient HTTP connections.
+same status words, client count, build time, and diagnostic. Browser clients use
+tab-scoped identities with a short polling lease, so the count represents live
+tabs rather than transient HTTP connections.
 
-In a TTY, the terminal keeps a two-row header pinned above the scrolling log.
-Pressing `v` toggles request and rebuild detail without changing the shared
-status; `--verbose` starts with that detail open. The scroll region is installed
-only after raw input and its cleanup guard are active. `NO_COLOR` replaces the
-status dot with a bracketed state word while retaining TTY pinning and controls.
-Non-TTY output is plain and append-only.
+In a TTY, a two-row header stays pinned above the scrolling log. `v` toggles
+request and rebuild detail; `--verbose` starts with detail open. The scroll
+region is installed only after raw input and its cleanup guard are active.
+`NO_COLOR` uses a bracketed state word while retaining controls. Non-TTY output
+is plain and append-only.
+During a rebuild the browser dims the last good page. A failed build expands the
+strip into an overlay with the verbatim front-end diagnostic while serving the
+last good artifacts. Escape collapses the overlay without hiding error status;
+the next clean build clears it and reloads. Failed polls and expired leases
+produce a shared reconnecting state that overrides ready, building, and error
+while retaining the last build time and diagnostic. A renewed lease reveals
+that retained state, and recovery reloads even if a restarted server reuses a
+previous numeric version (D-FE-DEVSRV1).
 
-While rebuilding, the browser dims the last good page. A failed build expands
-the strip into an overlay containing the front end's verbatim diagnostic and
-keeps serving the last good artifacts. `Esc` collapses that diagnostic without
-hiding the error status. The next clean build clears it and reloads. A failed
-status poll shows reconnecting in the browser; expiry of its server lease puts
-the terminal on the same reconnecting state. The renewed lease returns both to
-the underlying build state. Reconnecting overrides ready, building, and error
-on both surfaces while retaining the last build time and any diagnostic in the
-shared snapshot. The renewed lease reveals that retained state again. Recovery
-reloads even when a restarted server reuses the previous process's numeric
-version.
+## Canvas visual editor
 
-## Canvas visual editor prototype (D-BPE-*)
+The web development server serves Canvas at `/canvas`; its versioned JSON
+endpoints are also available under `/__jet_canvas`. Canvas is a projection of
+checked Jet source, not a graph asset. `/__jet_canvas/graph` emits
+`jet.canvas.graph` schema v1 with one function graph per checked function,
+deterministic source-order layout, structural nodes, typed pins, data and
+fallible wires, inline pure expressions, source byte spans, and semantic-index
+handles.
 
-`jet dev <file.jet> --target=web` serves Canvas at `/canvas` (with the same
-versioned JSON endpoints also reachable under `/__jet_canvas`). Canvas is a
-projection of checked Jet source, not a graph asset. `/__jet_canvas/graph`
-emits `jet.canvas.graph` schema v1 with one function graph per checked function:
-deterministic source-order layout, structural nodes, typed pins, data/fallible
-wires, inline pure expressions, source byte spans, and semindex fact handles.
+`POST /__jet_canvas/transaction` accepts `jet.canvas.edit` schema v1. A
+transaction carries the current source revision; stale revisions fail with a
+conflict. Supported edits include rename, inline expression edit, binding
+promotion, call insertion, function/signature edits, trait implementation
+creation, wire break/move, source replacement, structural rail insertion,
+comment/collapse regions, action preview, and no-op/reprojection. Successful
+writes go through `jet fmt`, re-check through the front end, replace ordinary
+`.jet` source, and reproject.
 
-`POST /__jet_canvas/transaction` accepts `jet.canvas.edit` schema v1.
-Transactions include source no-op/reprojection, rename, inline expression edit,
-binding promotion, call insertion, function/signature edits, trait impl creation,
-wire break/move, source replace, structural rail inserts, comment/collapse
-regions, and action preview. Each transaction must carry the current source
-`revision`; stale revisions fail with a conflict. Successful writes go through
-`jet fmt`, re-check through the front end, replace ordinary `.jet` source, and
-then reproject.
-
-The Code lens is read-only by default. `Edit Source` switches to an explicit
-source editor, and `Apply Source` sends a `replace_source` transaction through
-the same format/check/reproject path. Canvas never writes a graph asset or owns a
-second parser/checker.
+The Code lens is read-only by default. `Edit Source` enables an explicit source
+editor, and `Apply Source` sends a `replace_source` transaction through the
+same format/check/reproject path. Canvas never writes a graph asset and never
+owns a second parser or checker.
 
 `POST /__jet_canvas/query` accepts read-only query schema v1 for find,
 references, source-to-graph, rename preview, action palette, and Core catalog
-browsing. `GET /canvas/core-catalog` exposes the same read-only `core.*`
-catalog from the canonical Core library reference. Catalog entries carry
+browsing. `GET /canvas/core-catalog` exposes the read-only `core.*` catalog
+from the canonical Core library reference. Entries carry
 `canvas.catalog:core.read` authority and `writes:"none"`; browsing never claims
-that a Core call executed.
+that a Core call ran.
 
-`GET /canvas/proof` reports the selected source revision's current proof state:
-front-end check result, Git text state, local debug persistence, and command
-receipt status. Missing build/run authority receipts are reported as missing and
-stale; Canvas never converts a graph projection into proof that code ran.
-The Run button opens the real `jet run <source>` command authority card; it does
-not simulate output. `POST /canvas/command` executes only whitelisted
-run/check/build authority cards for the current revision, records the receipt,
-and lets the proof rail mark that exact revision current. Build output commands
-require explicit confirmation.
+`GET /canvas/proof` reports the selected revision's front-end check, Git text
+state, local debug persistence, and command receipt status. Missing or stale
+build/run receipts stay missing or stale; a graph projection is never proof
+that code ran. Run opens the real `jet run <source>` authority card. The
+whitelisted command endpoint runs only check, run, or build cards for the
+current revision and records the receipt; build output requires confirmation.
+The public field contract is pinned in
+[`reference/canvas-protocol.md`](reference/canvas-protocol.md), and the AST
+coverage ratchet in [`reference/canvas-parity.md`](reference/canvas-parity.md).
+Unknown request fields are ignored by v1; unknown operations fail as edit
+errors, and unknown future graph fields cannot carry hidden semantics
+(D-BPE-*).
 
-The public v1 graph/edit field contract is pinned in
-[`docs/spec/reference/canvas-protocol.md`](reference/canvas-protocol.md), and the
-AST-derived Canvas coverage ratchet is pinned in
-[`docs/spec/reference/canvas-parity.md`](reference/canvas-parity.md).
-Unknown request fields are ignored by v1; unknown operations fail as Canvas edit
-errors, and unknown future graph fields may never carry hidden semantics.
+## Public front-end toolkit
 
-## Public front-end toolkit API (D-FRONTENDAPI1=A, card #227)
+The compiler toolkit is a read-only value facade over the front end. Rust tools
+use `jet::Compiler`; the public values are stable data, not AST handles or
+mutable compiler state. Version 1 provides:
 
-The public compiler toolkit is a read-only value facade over the front end.
-Rust dogfood tools use `jet::Compiler`; the exposed shapes are stable data,
-not AST handles or mutable compiler state.
+- `lex_source(src)`: token views with stable kinds, byte ranges, and
+  line/column positions;
+- `parse_source(src)`: top-level syntax summaries and diagnostics;
+- `check_file(path)`: diagnostics, syntax summaries, and a semantic-index
+  snapshot when checking succeeds;
+- `source_map_from_generated_rust(rust)`: generated-Rust line markers mapped to
+  Jet source lines.
 
-Version 1 exports:
+A compile-time `CompilerChecked` value retains source text, checked function and
+effect facts, optional semantic-index data, syntax, and diagnostics. The
+`inspect compiler` command exposes the same operations as deterministic JSON
+with `schema_version: 1` and `api_version: 1`; its operations are `lex`,
+`parse`, `check`, and `source-map`. Runtime calls to `core.compiler` are E0956.
 
-- `lex_source(src)` → token views with stable kind strings, byte ranges, and
-  line/column positions.
-- `parse_source(src)` → top-level syntax summaries plus diagnostics.
-- `check_file(path)` → diagnostics, syntax summaries, and a semantic-index
-  snapshot when the file checks cleanly.
-- `source_map_from_generated_rust(rust)` → generated Rust line markers mapped
-  back to Jet source lines.
+Diagnostics are value records with code, severity, message, why, fix, and span.
+Semantic facts reuse the existing index schema. The API does not return
+`Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
+internals, and modified syntax cannot be fed back into compilation
+(D-FRONTENDAPI1).
 
-The compile-time `CompilerChecked` value preserves the source text, checked
-function/effect facts, and optional structured semantic index alongside its
-syntax and diagnostics. The CLI `check` operation serializes that same value
-inside its file-addressed JSON envelope; it does not replace structured facts
-with a JSON string or a second partial shape.
+## Command registry and typed inputs
 
-Diagnostics are cloned into value records (`code`, severity, message, why,
-fix, span). Semantic facts are cloned from the existing semindex schema. No
-API returns `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state,
-or sema internals, and no API can feed modified syntax back into compilation.
+The command registry is the one source for dispatch, help, manual pages,
+completion, and typo suggestions. Daily commands such as `jet run`, `jet build`,
+`jet test`, `jet fmt`, and `jet search` remain flat. Registry actions such as
+`publish`, `keygen`, `key`, `yank`, and `vendor` use `jet registry`. Inspection
+actions use `jet inspect`; among them are `semindex`, `output`, `expand`,
+`schema`, `codemod`, `compiler`, `graph`, and `outdated`. A bare moved word is
+E2101 and names its canonical route; it is not a compatibility alias. The
+registry source is `crates/jet-cli/src/CLI.rs` and the runtime dispatch is in
+`Source/` (D-SHAPE6, D-CLI-ONE1).
 
-## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A)
+### Typed entry signatures
 
-A bare `.jet` script — no `package.jet` — may open with an inline dependency
-instead of a manifest:
+A typed entry's resolved parameter type is its CLI specification; no separate
+flag DSL is required. Plain `fn run()` is the zero-input entry. A program opts
+into typed input with one parameter whose type is a `#CLI` struct:
+
+```jet
+#CLI
+struct ServeArgs {
+    #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
+    #Short("v") verbose: Bool
+    config: ?String
+}
+
+fn run(args: ServeArgs) {
+    http.serve(routes(), port: args.port)
+}
+```
+
+`#CLI` is a sibling derive of `#Codable`. `#Doc` on a struct describes the
+program, on a field describes its option, and on a callable member describes
+its command. Descriptions preserve embedded line breaks. `#Short` and `#Env`
+are field markers. `#CLI(Standard)` additionally registers
+`--verbose`/`-v`, `--quiet`/`-q`, `--color=auto|always|never`, and `--version`.
+Plain `#CLI` always registers `--help`.
+
+`run` is the reserved program entry name. A typed `fn run(args: T)` is an
+explicit request for command input; a `main` function has no entry meaning.
+Raw argv access remains explicit through `core.args` or `core.term.args`. An
+`Output.Executable` entry uses the same contract. There is no variadic typed
+entry. An App-returning typed entry decodes the one argument, calls `run(args)`,
+and serves the returned App; it does not change the CLI schema
+(D-CLIFLAG1, D-SHAPE-CLI1).
+
+### Field mapping
+
+Each supported `#CLI` field maps to exactly one long flag. Required scalar
+fields also fill bare positional values in declaration order unless `#Flag`
+opts that field out. Named input wins over a positional value. The supported
+shapes are:
+
+| Field shape | Named form | Bare form | Missing value |
+| --- | --- | --- | --- |
+| `Bool` | `--name` | none | `false` |
+| `?T` for a supported scalar | `--name VALUE` | none | `None` |
+| scalar with `{expr}` | `--name VALUE` | none | `expr` |
+| required scalar with `#Flag` | `--name VALUE` | rejected | runtime `core.args` error |
+| other supported scalar | `--name VALUE` | declaration-order positional | runtime `core.args` error |
+
+Supported scalar types are `Int`, including inline ranges, `Float`, `Bool`,
+`String`, and `Path`. A map, closure, list, or nested `#CLI` struct is E1305.
+Field names convert underscores to dashes. Every field accepts its named form.
+`#Flag` on a bool, optional, or defaulted field is E1309. Declaration order is
+part of the command interface and is represented in the checked `CLISchema`.
+A field named `help` collides with generated `--help` and is E1306.
+
+`#Short("n")` adds `-n` to the long form and must be one unique ASCII letter.
+`#Env("PORT")` is read only when command input is absent. The precedence is
+command input, then environment, then field default. Invalid or duplicate
+short names are E1318; field markers outside a `#CLI` struct and `#Env` on a
+presence-only bool are E1319. Nested `#CLI` structs are deliberately not
+supported in this contract; grouped prefix decoding would require its own
+shape and diagnostics (D-CLI-GLOBAL1, D-CLI-POS1).
+
+### Program commands and Output
+
+One `#CLI` program struct owns root flags. The same root flags are legal before
+or after a command. Callable members are commands; a method receives a
+read-only `self` containing parsed shared fields. A binding `name = function`
+can bind an existing function whose first parameter is the program struct. The
+member name is lowercased for the command word, and `#Doc` supplies its summary.
+Callable members are behavior, not data: they are not serialized or exposed as
+positional fields. A callable member on a `#Codable` struct is E1346. Invalid
+bindings, parameters, mutable receivers, duplicate command words, and
+root-command collisions use E1345, E1347, and E1344 as applicable. A program
+with commands and no command token prints root help; an unknown command is an
+error.
+
+An `Output` is a closed sum with `Library`, `Executable`, `Service`, `Check`,
+`Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every value has a
+text `name:`. Executable, Service, and Check also have an `entry:` reference.
+The reference follows normal scope, import, visibility, rename, and editor
+navigation rules; it is never a string lookup and a lock cannot rescue a stale
+reference:
+
+```jet
+CLI :: Output.Executable{name: "todo", entry: launch}
+API :: Output.Service{name: "todo-api", entry: serve}
+RELEASE :: Output.Check{name: "release", entry: verify_release}
+
+fn launch() {}
+fn serve() {}
+fn verify_release() {}
+```
+
+An Executable takes zero or one supported typed CLI parameter; a Service or
+Check takes no parameters. Each returns `Unit` or `Unit ?`. Sema resolves and
+validates the reference before TIR or Rust emission and publishes its definition
+and effect row to semantic tooling.
+With no explicit selection, a legacy `fn run` wins; otherwise one compatible
+Executable is selected. Multiple candidates are E1321 with a sorted list
+(D-SHAPE-OUTPUT-CALLABLE1).
+
+Code generation builds on the existing `core.args` `ArgsSpec`/`ParsedArgs`
+parser. Hand-written builder use remains valid; typed CLI is a checked layer
+on that one parser, not a second implementation. Runtime bad-flag messages
+remain the `core.args` voice. Compile-time shape diagnostics include E1305,
+E1306, E1308, E1309, and E1344–E1347.
+
+Each compiled program carries a versioned `JetCommandSchema` in its artifact:
+`.jet_command` in ELF, `.jetcmd` in PE, `__jetcmd` in Mach-O, and
+`jet.command` in Wasm. Universal Mach-O slices each carry the record. The
+record is part of artifact identity and is emitted before caching, packaging,
+or signing. Readers use bounded section offsets and lengths; missing,
+malformed, duplicate, unsupported-version, or disagreeing records fail closed.
+External discovery opens one regular file and reads at most 512 MiB plus one
+byte without executing it.
+
+The external completion form is
+`jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]`. Without
+`--for`, Jet's own completions are unchanged. With it, the reader uses only the
+checked schema: root help, shared flags, command words, and the selected
+command's local flags. It does not query application values and registers the
+executable basename, rejecting control characters. A plain `fn run()` still
+has a valid built-in-only schema. Metadata failures are E2103
+(D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1).
+
+## Editions and compatibility
+
+A package may pin an edition with `edition: "2026"` in `package.jet`. Supported
+editions are `2026`, `2027`, and `2028`; a missing field uses the newest stable
+edition supported by the running toolchain. A single-file `jet run file.jet`
+has no edition marker and uses that newest edition. An unsupported future
+edition is E2001. The durable compatibility contract for patch, minor, major,
+epoch, edition, migration, deprecation, and generated-code licensing lives in
+[the release policy](release-policy.md) (D-REL3, E2-V4).
+
+## Toolchain pins and source channels
+
+The top-level `jet:` field pins the Jet compiler channel used for a package:
+
+```jet
+name: "wordstats"
+version: "0.3.1"
+jet: "0.4"
+```
+
+A pin is a `MAJOR.MINOR` series, an exact `MAJOR.MINOR.PATCH`, or a named
+channel such as `main`, `stable`, or `nightly`. Comparison and wildcard forms
+such as `>=1.0.0` remain legacy minimum-version constraints and are not channel
+pins. A malformed channel pin is E1249. If `jet:` is absent, the running
+compiler is used without a fetch.
+
+The resolved exact version is recorded in `.jet/lock` as a `[[toolchain]]`
+record containing channel, version, and envelope. `jet update jet [<channel>]`
+is the only operation that moves that pin; ordinary runs read the lock. A
+compiler from another series realizes the pinned compiler as a prebuilt object
+and re-executes it. It never source-builds a compiler for this dispatch. A
+platform cache miss is E1251. Under `--offline` or CI, an unlocked channel is
+E1250. `jet self toolchain` reports the selected pin and lock facts, while
+`jet self update` updates a signed toolchain installation. `jet init` writes a
+pin for the running channel when creating a package. This compiler pin is
+separate from the native build toolchain used to compile an `extern rust`
+bridge crate (D-JPK-TOOLCHAIN1, D-JPK-CACHE1, D-JPK-DISPATCH1).
+
+Source references may carry `#latest`, `#main`, or a major-series selector such
+as `#v0.x`. A missing marker is pinned; `#latest` moves only through the
+package-manager update operation; `#auto` opts into automatic movement. The
+lock records the exact resolved source:
+
+```jet
+rustc@nixpkgs
+jq@nixpkgs#latest
+omp@releases#auto
+```
+
+```toml
+[[source_channel]]
+name = "default"
+channel = "latest"
+exact = "acme/tool@github#v1.2.0"
+```
+
+`jetpack update [<source>]` is the operation that moves a source-channel
+record. `jetpack outdated` compares lock facts with channel metadata without
+writing. `jet build`, `jet run`, the environment view, and `jet dev` read the
+exact lock entry; an unlocked channel is E1271, including in CI and `--offline`
+mode (D-JPK-CHANNEL1).
+
+### Package identity
+
+The canonical Package identity consists of top-level `name:`, `version:`, and
+`jet:` entries. A frozen-forward identity reader extracts those simple,
+trimmed values before parsing the rest of the manifest. Unknown surrounding
+keys and nested blocks are ignored by that identity reader so a later manifest
+feature cannot prevent toolchain dispatch. The full manifest parser still
+validates the complete manifest vocabulary; identity stays at the top level,
+not inside a wrapper (D-JPK-TOOLCHAIN1).
+
+### Inline package context
+
+A single-entry `.jet` file may carry package context in one leading `package`
+block:
+
+```jet
+package {
+    name: "inline-demo"
+    version: "0.1.0"
+}
+
+pub(package) fn helper() -> String {
+    "same package"
+}
+
+fn run() {
+    print(helper())
+}
+```
+
+The block is structural context, not a second Package grammar. The loader
+extracts its body bytes and spans and passes the body to the same
+`PackageFacts` parser used for `package.jet`. The ordinary parser, formatter,
+and LSP mask only those bytes, preserving offsets; they do not reimplement
+Package fields. `pub(package)` retains package-scoped visibility.
+
+Only one inline block may appear, and it must precede every other top-level
+declaration. A byte-zero `#!/...` launch header may precede it. A malformed
+or unbalanced block is E1362, a non-leading block is E1360, and a duplicate is
+E1361. Coexistence with a project `package.jet` is E1363. The file otherwise
+has normal single-file package context and does not create a synthetic
+manifest (D-ECO-INLINEPACKAGE1).
+
+### Manifest import boundaries
+
+A manifest can narrow the declaring package's resolved import graph:
+
+```text
+boundaries: {
+    deny: [{ from: "app.ui", to: "app.db" }]
+}
+```
+
+`from` and `to` are quoted exact module names or names with one trailing `*`
+subtree wildcard. A matching denial is E0619; a rule that matches no loaded edge
+is the non-blocking L0619 warning. With no `boundaries` key, ordinary import
+behavior remains. Checked edges enter the `Structure.ImportEdge` and GateLedger
+facts, while manifest policy is erased before native, interpreter, and web
+lowering (D-STRUCT-EDGE1).
+
+## Inline script dependencies
+
+A manifest-less `.jet` script may begin with an inline dependency:
 
 ```jet
 // stats.jet
@@ -4444,41 +3807,30 @@ fn run() {
 }
 ```
 
-`pkg#version` is the `#` directive plane's version-selector form
-(D-MARKER-FAMILY1); the version is a dotted numeric selector (`1.4`, `1.4.2`),
-never a range operator. Only a single-segment module name takes one — `use
-core.files#1.0` is nonsensical and isn't accepted.
+`pkg#version` is the `#` directive-plane selector. The selector is dotted
+numeric text such as `1.4` or `1.4.2`, not an operator range, and applies only
+to a single-segment package name. `core.files#1.0` is not a package dependency.
 
-`jet run stats.jet` collects every inline ref from the entry file, resolves
-each, and wires the resolved directory into module search exactly like a
-hangar-realized `library` (U17) — the rest of import resolution is
-unchanged. Resolution is a local directory lookup only (no network, no
-code execution): a script's own `.jet/inline-deps/<name>/<version>/` copy
-(the `.jet/` managed-folder convention), or a version matching one there by
-dotted prefix (`1.4` matches `1.4.2`). Consuming the public Jet package
-registry by name isn't wired yet (E1207/M12.2 — publishing today writes only
-the sparse index line, never a fetchable source tree); an inline ref that
-resolves nowhere is E1253.
+`jet run stats.jet` collects inline references from the entry file and resolves
+them into the module search. Resolution is local: a matching copy under
+`.jet/inline-deps/<name>/<version>/` or the documented fixture override. It
+never executes dependency code during resolution and does not fetch from the
+public registry by name. An unresolved reference is E1253.
 
-A loose selector (`1.4` rather than an exact `1.4.2`) is fine to write —
-rung 0 stays magic — but is L0203: nothing pins it until `jet store lock stats.jet`
-writes a `stats.jet.lock` sidecar (`script_hash` + each dep's resolved
-version and content hash, keyed by the script's own file-content hash so an
-edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
-written `package.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
-(vision.md's ladder) without discarding what it already declared.
+An exact `major.minor.patch` selector is pinned. A looser selector such as
+`1.4` is accepted but emits L0203 until
+`jet fetch --lock stats.jet` writes `stats.jet.lock`. The sidecar records the
+script content hash, resolved versions, and content hashes; editing the script
+makes the lock stale. `jet init stats.jet` lifts inline references into the
+manifest's `deps` block without discarding their declarations
+(D-JPK-SCRIPTDEP1).
 
-## `target: sandbox` — isolated WASM Component Model packages (c81, D-PLUGIN1=A, D-PLUGIN-EXPORT1=A, D-DEP-WASM1=A, D-EMBED2=C)
+## Sandboxed WASM packages
 
-A package built `target: sandbox` compiles to an isolated `wasm32` Component
-Model module instead of a native binary. A host program loads and calls it —
-safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
-Component is the safety boundary, by construction. This is a general
-application-sandbox substrate (WIT world `jetplugin`), distinct from PATH
-`jet-*` helpers (D-DX5) and from the compiler-extension API (Tower #549,
-D-DX5-HOOK1=A: typed read-only post-sema snapshot in world
-`compiler-extension-v1`, same wasmtime substrate, separate host) — don't
-conflate them (I8).
+A package with `target: sandbox` compiles to an isolated `wasm32` Component
+Model module. A native host loads and calls it across the Component boundary;
+the sandbox does not require a `#Unsafe` gate. This application-sandbox world
+is distinct from PATH helpers and from the compiler-extension world.
 
 ```jet
 // package.jet
@@ -4487,20 +3839,15 @@ version: "0.1.0"
 ```
 
 ```jet
-// main.jet — the sandbox's own source, no `fn run()` (it's loaded, not run)
-pub fn scale(a: Float, b: Float) Float -> {
-    return a * b
+// sandbox source; it is loaded, not a run entry
+pub fn scale(a: Float, b: Float) -> Float {
+    a * b
 }
 ```
 
-`jet build main.jet --target=sandbox` writes a `.wit` world (generated from
-the entry file's top-level `pub fn` surface) plus the wasm32 guest Rust, then
-shells out to `rustc --target wasm32-unknown-unknown --crate-type cdylib`
-followed by `wasm-tools component embed`/`component new` (D-DEP-WASM1=A) —
-external CLI tools, never linked into the compiler (I6) — producing a
-`.wasm` Component Model binary.
-
-A host is an ordinary native Jet program:
+The sandbox build derives a WIT world from the entry file's top-level `pub fn`
+surface, emits guest code, and uses the Component Model toolchain to produce a
+`.wasm` component. A host uses a typed plugin handle:
 
 ```jet
 use core.plugin as plugin
@@ -4513,336 +3860,346 @@ fn run() {
 }
 ```
 
-`Plugin.load(path, authority) -> Plugin<Interface>` produces a typed handle.
-The handle exposes the frozen, registered Component export names as ordinary
-named methods; the method's complete parameter and result contract is checked
-before code generation. There is no dynamic export lookup or missing-export
-fallback to teach. Every exported function remains homogeneous: all parameters
-and the return type use the same `Int`, `Float`, `Bool`, or `Text` shape
-(E1260), or a recursively closed Component Model shape.
+`plugin.load(path, authority)` exposes only frozen named exports. Sema checks
+parameter and result contracts before code generation. There is no dynamic
+export lookup or missing-export fallback. Exported functions use a homogeneous
+`Int`, `Float`, `Bool`, or `Text` shape, or a recursively closed Component
+Model shape (E1260).
 
-At load, the Component loader reads the module under the explicit,
-resource-scoped `FS.Read` authority and preflights every declared WIT import
-as a typed fact. The guest's `authority.needs` and the one narrowed Authority
-must cover each fact before the linker registers it or instantiation starts.
-Unknown, wrong-shape, missing, or denied imports fail closed before guest code
-or an external effect can run. A guest with no declared imports has an
-explicit empty capability set, never an ambient fallback. Registered imports
-re-check the same typed decision at the call edge and apply the same resource
-scope to their path or endpoint arguments. A failure is a clean `Err`, not a
-host crash (I2).
+The loader reads the component under explicit resource-scoped `FS.Read`
+authority and preflights every declared WIT import. The guest's
+`authority.needs` and the narrowed host authority must cover each import before
+linking or instantiation. Unknown, wrong-shape, missing, or denied imports fail
+closed before guest code runs. A guest with no declared imports has an explicit
+empty capability set, never an ambient fallback. Registered imports re-check
+the same typed decision at the call edge and retain resource scope. Failure is a
+clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
+ABI values but do not grant host capabilities.
 
-A sandbox guest may declare supported host effects through its package
-`authority.needs`; the compiler checks those declarations and the Component
-host enforces them at load. Guest-local `Mem` effects remain allowed because
-the Component Model Text ABI needs sandbox memory for string arguments and
-results. New host capabilities still require a ratified decision.
+The manifest `export:` target names the interface and defaults to the package
+name. The frozen public interface is keyed as `plugin__<export>` in
+`.jet/cache/api/`; unchanged interfaces freeze silently, while removing or
+changing an export is E1257. E1258 reports authority denial, E1259 a component
+build/toolchain failure, and E1260 an unsupported export shape
+(D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-DEP-WASM1, D-EMBED2).
 
-D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
-target field (`sandbox { export: "mathkit" }`), defaulting to the package
-name. D-PLUGIN-VERSION1=A: the exported interface is frozen via
-`Sema::ApiFreeze`'s pub-metadata semver-snapshot mechanism (the same one an
-ordinary library's public API uses, E1218/E2601) — keyed `plugin__<export>`
-in `.jet/cache/api/` so it never collides with a library's own frozen API in
-the same project. Rebuilding a sandbox with an unchanged interface freezes
-silently; removing or changing an export is E1257, naming the exact delta.
+### Embedding artifacts
 
-Full worked example: `examples/features/packages/sandbox_mathkit/` (a
-`sandbox_src/` package + a host `run.jet`; golden-enforced, I5). New
-diagnostics: E1257 (interface changed incompatibly), E1258 (authority
-denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
-shape) — see docs/spec/diagnostics.md.
+Native and sandbox artifacts use one top-level `pub fn` export list and one
+scalar lowering table. Each exported function uses one homogeneous `Int`,
+`Float`, `Bool`, or `Text` shape; no separate `#Export` marker is required.
 
-D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
-target field (`sandbox { export: "mathkit" }`), defaulting to the package
-name. D-PLUGIN-VERSION1=A: the exported interface is frozen via
-`Sema::ApiFreeze`'s pub-metadata semver-snapshot mechanism (the same one an
-ordinary library's public API uses, E1218/E2601) — keyed `plugin__<export>`
-in `.jet/cache/api/` so it never collides with a library's own frozen API in
-the same project. Rebuilding a sandbox with an unchanged interface freezes
-silently; removing or changing an export is E1257, naming the exact delta.
+`jet build --lib` emits a linkable native static or shared library and a C
+header. It needs no Component runtime, but the native artifact is trusted code:
+the C host owns its ABI and capabilities. Text results are released with the
+generated `jet_text_free` function.
 
-Full worked example: `examples/features/packages/sandbox_mathkit/` (a
-`sandbox_src/` package + a host `main.jet`; golden-enforced, I5). New
-diagnostics: E1257 (interface changed incompatibly), E1258 (authority
-denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
-shape) — see docs/spec/diagnostics.md.
+`jet build --target=sandbox` emits the Component from the same list. A sandbox
+host supplies a Component runtime; the guest has no ambient Jet authority, and
+future host capabilities must be explicit WIT imports. The native and Component
+artifacts therefore share source semantics while offering different trust and
+runtime guarantees.
 
-### Embedding artifacts — one export table, two host boundaries
+## Programmable builds
 
-The native and sandbox embedding artifacts use one export list and one scalar
-lowering table. The list is the entry file's top-level `pub fn` surface; each
-function must have one homogeneous `Int`, `Float`, `Bool`, or `Text` shape.
-There is no separate `#Export` marker to keep in sync.
+`jet build` checks the root program and then evaluates at most one package-local
+`fn build(b: BuildContext) -> BuildPlan` through the comptime interpreter. The
+entry may live in any package source file or in `package.jet`; two candidates
+name both sites and fail. An explicit Output `entry:` can select a rare layout.
+For a workspace, member entries run in deterministic dependency order with
+separate read-only plans; the workspace entry runs last with a fresh context
+and can add only workspace-owned targets. Dependency entries are checked but
+not run. With no package entry, the ordinary zero-configuration battery remains
+the build path.
 
-`jet build --lib` emits a linkable native static/shared library and a generated
-C header from that list. It needs no WASM or Component runtime in the host
-process. The native artifact is trusted code: it does not provide sandboxing,
-and the C host must treat the declared ABI and any host-side capabilities as
-its responsibility. Text results are released with the generated
-`jet_text_free` function.
-
-`jet build --target=sandbox` emits the WASM Component from the same list. A
-sandbox host must carry a Component runtime, but the guest runs behind the
-runtime's sandbox boundary. The host gets no ambient Jet authority: the current
-world declares no host imports, and future host capabilities must be explicit
-WIT imports. The native library and Component therefore share semantics while
-making different guarantees — zero-runtime linkage only on native, sandboxing
-only on the Component.
-
-## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
-
-`jet build` checks the root program, then runs one optional package-local
-`fn build(b: BuildContext) BuildPlan` through the same interpreter used by
-comptime. The compiler discovers it in any source file in the package, or in
-the package's `package.jet`; two candidates name both sites and fail. An
-Output-level `entry:` remains an explicit override for rare layouts. For a
-workspace entry, member entries run in deterministic dependency order with
-separate read-only plans; the workspace entry runs last with a fresh
-`BuildContext` and can add only workspace-owned targets. Imported dependency
-entries are checked but never run. With no package-local entry, the existing
-zero-configuration batteries pipeline is unchanged.
-
-Build code registers ordinary typed values. Targets are declared once with
-`b.add_executable`, `b.add_library`, `b.add_test`,
-`b.add_asset_bundle`, `b.add_doc`, `b.add_install`, `b.add_package`, or
-`b.add_publish`; each returns a `BuildTarget`. `b.action(name, inputs, outputs,
-argv, caps)` returns a `BuildAction`. `b.plan()` or `b.plan(default)` hands the
-same canonical graph to scheduling, caching, execution, query tools, and the
-LSP. Expert actions may additionally pass a typed `BuildToolchain` and a list
-of typed `BuildProbe` handles as arguments six and seven. `b.toolchain(name,
-target_triple)` records the target identity; `b.probe(name, kind, value)`
-supports `find_program`, `pkg_config`, and `header` probe kinds.
+Build code registers typed values. Targets include
+`b.add_executable`, `b.add_library`, `b.add_test`, `b.add_asset_bundle`,
+`b.add_doc`, `b.add_install`, `b.add_package`, and `b.add_publish`. Each returns
+a `BuildTarget`. `b.action(name, inputs, outputs, argv, caps)` returns a
+`BuildAction`; optional typed `BuildToolchain` and `BuildProbe` arguments add
+toolchain and probe identity. `b.plan()` or `b.plan(default)` hands one
+canonical graph to scheduling, caching, execution, queries, and LSP.
+`b.toolchain(name, target_triple)` records target identity. `b.probe` supports
+`find_program`, `pkg_config`, and `header` probes.
 
 ```jet
-fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
     #Impure("run declared toolchain probe and action") {
-    shell :: b.probe("shell", "find_program", "sh")
-    native :: b.toolchain("native", "x86_64-linux")
-    stamp :: b.action(
-        "stamp",
-        ["assets/version.txt"],
-        ["build/version.txt"],
-        ["sh", "-c", "cp assets/version.txt build/version.txt"],
-        ["Exec", "FS"],
-        native,
-        [shell]
-    )
-    app :: b.add_executable("app", ["main.jet"], [stamp])
-    return b.plan(app)
+        shell :: b.probe("shell", "find_program", "sh")
+        native :: b.toolchain("native", "x86_64-linux")
+        stamp :: b.action(
+            "stamp",
+            ["assets/version.txt"],
+            ["build/version.txt"],
+            ["sh", "-c", "cp assets/version.txt build/version.txt"],
+            ["Exec", "FS"],
+            native,
+            [shell]
+        )
+        app :: b.add_executable("app", ["main.jet"], [stamp])
+        return b.plan(app)
     }
-    return b.plan()
 }
 
 fn run() { print("hello") }
 ```
 
-Action dependencies come from target dependencies and declared file
-producer/consumer edges. Ready nodes run concurrently in deterministic stages;
-`linker`, `console`, `gpu`, and named resource pools serialize. Cached actions
-key declared input content, argv, environment, authority, toolchain, probes,
-resource pools, plugins, and generated-source hashes. Cache hits restore only
+Action dependencies come from target dependencies and declared producer and
+consumer edges. Ready nodes run concurrently in deterministic stages; `linker`,
+`console`, `gpu`, and named resource pools serialize. Cached actions include
+declared input content, argv, environment, authority, toolchain, probes,
+resource pools, plugins, and generated-source hashes. A cache hit restores only
 declared outputs from the local CAS.
 
-Execution has no ambient fallback. On Linux each action runs under bubblewrap
-with private mount, PID, IPC, UTS, and network namespaces. Only declared inputs
-enter its writable work tree; only declared outputs return. Network remains
-unshared unless both source and policy grant `Net`. A missing sandbox is E3505,
-not an unsandboxed run. Single-file authority uses the ratified per-effect
-flags (`--allow-exec`, `--allow-fs`, `--allow-net`, and the remaining D-EFF4
-names). Package/workspace policy can grant or cap the same authority set.
-The vocabulary is one closed typed ten-effect enum shared by sema, policy,
-CLI, graph, cache, and executor. Every effectful `b.action`/`b.probe` call must
-be inside its active `#Impure("reason")` region. Signature declaration and
-effective grant are checked before any probe or process runs.
+There is no ambient execution fallback. On Linux each action runs under
+bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only
+declared inputs enter its writable tree and only declared outputs leave it.
+Network is unshared unless both source and policy grant `Net`. A missing
+sandbox is E3505, not an unsandboxed run. Build authority uses the same
+`--allow=<RIGHTS>` and `--deny=<RIGHTS>` surface as other commands. Every
+effectful action or probe is inside an active `#Impure("reason")` region;
+signature declaration and effective grant are checked before execution.
 
-`b.generate(name) { … }` takes the same typed item block as a derive and
-materializes `.jet/generated/<package>/<name>.jet`. Action outputs ending in
-`.jet` follow the same path. Built-in derives, user derives, and this build
-entry all use one typed expansion before the filled block enters ordinary sema;
-malformed members use ordinary Jet diagnostics. The build-only entry and
-imported build entries are removed before codegen, so rustc never sees build
-handles.
+`b.generate(name) { ... }` materializes
+`.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
+the same path. Built-in derives, user derives, and build entries share one
+checked expansion pass. Build-only entries and imported build entries are
+removed before runtime code generation, so build handles never reach rustc.
 
-Generation is additive and has one owner per managed path. Generated modules
-are ordered in deterministic dependency rounds using ordinary quoted-file
-imports; a later round may observe an earlier round, the number of rounds is
-bounded by the number of generated modules, and a cycle is E3511 before any
-generated file is written. A selected action may not also own a generated
-`.jet` path. Existing source collisions are E3510. `--locked` checks the
-generated input and output hashes before materialization and records the same
-provenance after the complete runtime bundle is checked.
+Generation is additive with one owner per managed path. Generated modules are
+ordered in dependency rounds using ordinary quoted-file imports; a later round
+can observe an earlier one. The round count is bounded by generated-module
+count, and a cycle is E3511 before any generated file is written. An action and
+generated source cannot own the same path; existing source collisions are
+E3510. `--locked` checks generated input and output hashes before materializing
+and records provenance after the complete runtime bundle is checked
+(D-BUILDENTRY1).
 
-The remote cache/execution seam is transport-only. Cache reads, writes, and
-remote execution require an explicit policy grant plus a complete sandbox
-proof whose action key, toolchain digest, output paths, and provenance are
-checked for parity. A proof also binds the authorized builder, trust domain,
-worker identity, platform, ABI, and credential-bound worker receipt. A missing
-worker or remote record is an error; `fallback_local` is an explicit host
-binding choice that resumes the same sandboxed local executor after a remote
-failure. Timeouts write an authenticated cancellation tombstone; late worker
-results are rejected and cannot become cache records. The host creates and
-removes bindings with `jet remote bind`, `jet remote list`, and `jet remote
-remove`; `jet build --builder <name>` selects one. Source text, ordinary CLI
-flags, and environment variables cannot create an endpoint, credential, or
-trust root. Request, result, cache-record, and CAS-blob envelopes use
-authenticated HMAC-SHA256 transport records. Input/output blobs must exist
-before a request/result or cache record is published, and a new submission
-removes any older result for the same action key before a worker can answer.
-Every remote execution request carries a unique attempt ID. The ID is bound
-into the worker receipt, request, authenticated cancellation marker, and
-result; resubmitting an already-cancelled attempt or publishing a result for
-an older attempt fails even when the action key is unchanged. Execution
-cancellation, result publication, and result reads share a cross-process
-kernel/file commit lock over their final visibility transition; an in-process
-mutex is not a correctness boundary. Authenticated cache-only transports may
-read, but cache writes and execution blob exchange require the host-bound
-worker identity.
+### Remote execution and plugins
+
+The remote cache and execution seam is transport-only. Cache and remote
+execution require explicit policy and a complete sandbox proof binding action
+key, toolchain digest, outputs, provenance, authorized builder, trust domain,
+worker identity, platform, ABI, and a credential-bound worker receipt. Missing
+worker or remote records are errors. `fallback_local` explicitly resumes the
+same sandboxed local executor after remote failure. Timeouts write an
+authenticated cancellation tombstone; late results cannot become cache records.
+
+`jet remote bind`, `jet remote list`, and `jet remote remove` manage host
+bindings; `jet build --builder <name>` selects one. Source text, ordinary flags,
+and environment variables cannot create an endpoint, credential, or trust root.
+Request, result, cache-record, and CAS-blob envelopes use authenticated
+HMAC-SHA256 records. Blobs exist before request, result, or cache publication.
+Every execution has a unique attempt ID bound into request, result, receipt,
+and cancellation marker. Cancellation, publication, and reads share a
+cross-process commit lock; an in-process mutex is not a correctness boundary.
+Cache-only reads may use authenticated transport, but cache writes and
+execution blob exchange require the host-bound worker identity.
 
 WASM build plugins enter through the packaged manifest/component loader or the
-typed in-memory test seam. The loader verifies a regular non-symlink file, the
-Component Model binary envelope, the fixed API version, and its SHA-256 digest
-before application. Authority grants are checked per plugin and the graph is
-rolled back on every rejected contribution, so a hostile plugin cannot leave
-partial actions, targets, or generated modules behind. Packaged manifests are
-bounded to 64 KiB and components to 64 MiB; request and response pipes are
-bounded too, and both the compiler loader and the production `jetpack` host
-reject symlinks and non-regular package files.
+typed in-memory test seam. The loader verifies regular non-symlink files, the
+Component envelope, API version, and SHA-256 digest before application. It
+checks authority per plugin and rolls back rejected contributions, so a plugin
+cannot leave partial actions, targets, or generated modules. Packaged manifests
+are bounded to 64 KiB and components to 64 MiB; request and response pipes are
+bounded too. Production loaders reject symlinks and non-regular package files.
 
-Legacy CMake, Make, Gradle, npm, and Cargo support remains an explicit Tier-2
-wrapper. `LegacyWrapperSpec::from_project_file` parses the wrapper's canonical
-root file into the typed command, paths, authority, environment, cache,
-kind, pools, and provenance fields. It records the file as a typed action
-input, rejects links, oversized/non-UTF-8 files, and unsupported constructs,
-and records the bounded non-symlink project source closure as typed inputs;
-the action key therefore includes auxiliary scripts, headers, and lockfiles.
-Imported CMake and Gradle projects must declare each exact output with a
-`jet: output=...` directive; the importer never guesses a target artifact.
-An imported npm package must declare its exact entry output in `main` or
-`module`. Dependency-bearing npm imports fail before execution because the
-hermetic sandbox does not copy `node_modules`; no undeclared install or
-network fallback is attempted. Make recipes, Gradle task bodies, unpinned
-Cargo dependencies, non-registry Cargo sources, and unmodeled package fields
-fail closed rather than being dropped. The production `b.legacy` bridge fails
-if its declared graph does not match the import. The production build policy
-denies these wrappers in CI unless a stronger host policy explicitly replaces
+### Legacy wrappers
+
+CMake, Make, Gradle, npm, and Cargo remain explicit Tier-2 wrappers. A
+`LegacyWrapperSpec` parses a canonical root file into typed command, paths,
+authority, environment, cache, kind, pools, and provenance. It records that
+file and its bounded non-symlink source closure as typed inputs, rejects links,
+oversized or non-UTF-8 files, and refuses unsupported constructs. CMake and
+Gradle imports require an exact `jet: output=...` directive. npm imports require
+an exact `main` or `module` entry; dependency-bearing imports fail because the
+hermetic sandbox does not copy `node_modules`. No undeclared install or network
+fallback is attempted. Make recipes, Gradle task bodies, unpinned Cargo
+sources, non-registry Cargo sources, and unmodeled fields fail closed.
+Production policy denies wrappers in CI unless a stronger host policy replaces
 that default.
 
-Fleet host overrides are typed values, not deferred source snippets. Their
-fields use the same pure comptime evaluator and dependency-cycle checks as
-computed module fields; each result retains exact source, dependency, and
-purity provenance for inspection.
+Fleet host overrides are typed values evaluated by the same pure comptime
+engine and cycle checks as computed module fields. Results retain exact source,
+dependency, and purity provenance.
 
-`core.compiler` is the typed read-only compiler API. `lex`, `parse`, `check`,
-and `source_map` are compile-time-only and preserve source, spans, diagnostics,
+### Compiler and package model APIs
+
+`core.compiler` is a typed, read-only compiler API. `lex`, `parse`, `check`, and
+`source_map` are compile-time-only and retain source, spans, diagnostics,
 semantic facts, and generated-line mappings. `jet inspect compiler` mirrors
-these operations in deterministic JSON with `schema_version: 1` and
-`api_version: 1`; runtime calls are E0956.
+these operations as deterministic JSON with schema and API version 1. Runtime
+calls are E0956.
 
-The package-model calls have a separate v1 contract. Every view carries
-`schema_version: 1` (`PACKAGE_MODEL_SCHEMA_VERSION`):
+Package-model operations use separate schema version 1 views:
 
-| Operation | Value | Composition and ordering |
+| Operation | Value | Ordering and composition |
 | --- | --- | --- |
-| `manifest()` | `CompilerManifest`: `schema_version`, `file`, optional `jet`, `edition`, `description`, `license`, `repository`, `layer`, `target`, and lists `dependencies`, `packages`, `outputs`, `build_profiles` | Uncomposed `package.jet`; dependency and output map keys are sorted, while package-target and build-profile declarations keep model order. |
-| `package()` | `CompilerPackage` with the same fields and optionality as `CompilerManifest` | Composed package facts after the declared Config files pass authority and model validation; it adds no `name` or `version` field. |
-| `lock()` | `CompilerLock`: `schema_version`, `file`, `version`, `root_dependencies`, and `packages` | Lock model order. Each `CompilerLockedPackage` has required `name`, `version`, `source_kind`, `fingerprint`, `dependencies`, and optional `source`, `revision`, `content_hash`, `layer`, and `inferred_layer`. |
-| `profiles()` | `CompilerProfileSet`: `schema_version`, `file`, and `profiles` | Profile and collision keys are sorted. `CompilerProfile` keeps declaration-order `extends`, `packages`, and `sources`; a collision is `CompilerKeyValue { key, value }`. |
+| `manifest()` | `CompilerManifest` with schema, file, optional `jet`, `edition`, description, license, repository, layer, target, and dependency/package/output/profile lists | Uncomposed `package.jet`; map keys sorted, declaration lists retain model order |
+| `package()` | `CompilerPackage` with the same fields and optionality | Composed package facts after Config and authority validation; it does not add current-package identity |
+| `lock()` | `CompilerLock` with schema, file, version, root dependencies, and locked packages | Lock model order; package records retain source and digest facts |
+| `profiles()` | `CompilerProfileSet` with schema, file, and profiles | Profile and collision keys sorted; declaration-order extends, packages, and sources retained |
 
-The nested list records are also fixed: `CompilerDependency` has required
-`name` and `source`; `CompilerPackageTarget` has required `name` and
-`targets`; `CompilerPackageOutput` has required `name` and `kind` plus
-optional `entry`; and `CompilerBuildProfile` has required `name`, `optimize`,
-`debug_info`, and `small` plus optional `panic`. Optional source fields are
-`Option<String>`. Empty collections remain empty lists. Git sources redact
-credentials, URL queries, and fragments. The views intentionally never repeat
-current-package identity, which remains `@build.package.name` and
-`@build.package.version`.
+Nested records are fixed: `CompilerDependency` requires `name` and `source`;
+`CompilerPackageTarget` requires `name` and `targets`;
+`CompilerPackageOutput` requires `name` and `kind` and may have `entry`; and
+`CompilerBuildProfile` requires `name`, `optimize`, `debug_info`, and `small`
+and may have `panic`. A locked package requires `name`, `version`, `source_kind`,
+`fingerprint`, and `dependencies`, with optional `source`, `revision`,
+`content_hash`, `layer`, and `inferred_layer`. Empty collections remain empty
+lists. Optional source fields remain optional strings. Git sources redact
+credentials, URL queries, and fragments. Current package identity remains
+available through `@build.package.name` and `@build.package.version`, not as a
+repeated field in each view.
 
-Each operation is a compile-time `Result`. A failed read carries
-`PackageReadError { code, message, file, cause }` in the Rust facade and
-`CompilerPackageError` with the same fields in the Jet value. Malformed,
-missing, changed, and escaping files fail with their logical file and cause;
-the cause preserves its typed diagnostic code and actionability without
-absolute authority paths or secret material. Reads are restricted to the
-pinned package root. They do not become empty views.
-Every manifest, Config, lock, or profile file consumed by a view is recorded
-as a relative hashed build input and contributes to the cache key. The model
-does not retain field-level source positions, so the API does not fabricate
+Each operation returns a compile-time `Result`. The Rust facade reports
+`PackageReadError { code, message, file, cause }`; the Jet carrier is
+`CompilerPackageError` with the same four fields. Missing, malformed, changed,
+or escaping files keep their logical file and typed cause; the cause carries
+actionability without absolute authority paths or secret material. Reads are
+restricted to the pinned package root and never become empty views.
+Every consumed manifest, Config, lock, or profile is a relative hashed build
+input and contributes to the cache key. The model does not invent source
 positions. Runtime calls remain E0956.
 
-The selected target source/dependency closure plus generated modules becomes a
-fresh runtime bundle. Native, cross, web, sandbox, and freestanding lowering all
-consume that same checked bundle. `--locked` compares generated input/output
-hashes before committing provenance; drift is E3512 and action outputs roll
-back.
+The selected target and dependency closure plus generated modules form one
+fresh checked runtime bundle for native, cross, web, sandbox, and freestanding
+lowering. `--locked` compares generated hashes before committing provenance;
+drift is E3512 and action outputs roll back. `jet inspect graph`, `jet inspect
+query build`, and `jet inspect explain-build` expose the same typed graph and
+cache provenance without running actions. LSP checking uses the same root
+signature and static graph facts.
 
-`jet inspect graph <file> --json` and `jet inspect query build <file> --json` return the same
-typed graph without executing actions. `jet inspect explain-build <target|action|file>
-<file>` reports graph and cache provenance. LSP checking uses the same selected
-root signature validation and the same static graph facts, including E3501.
+## JetOS plans and proofs
 
-## Physical dimension algebra
+The `jet os` command family is:
 
-D-SHAPE-QUANTITY1 makes the `Length`, `Time`, `Speed`, `Area`, and
-`Temperature` unit-family
-identities compiler-known. Addition, subtraction, and comparison require equal
-dimensions; E0359 reports a mismatch before codegen. Multiplication adds and
-division subtracts normalized exponents, so `Length / Time` is `Speed`,
-`Length * Length` is `Area`, and `Speed * Time` is `Length`. The semantic index
-and API snapshots serialize the normalized identity and numeric base. Backends
-receive only that numeric base: dimensions have no runtime representation.
+```text
+jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm
+```
 
-Currency remains nominal D-QUAL3 behavior. D-QUANTITY-DECL1 extends a closed
-family with `base`, exact rational `scale`/`offset`, and stable package-owned API
-identity. A family with any nonzero offset mints separate `Point` and `Delta`
-named types for every member. Sema owns the closed affine algebra and exactness:
-implicit conversion is value-aware and never rounds, destination-owned exact
-conversion returns `Result`, and `_rounded(value, mode, digits: n)` is the
-fallible explicit rounding path. Its ratified modes are `.TowardZero`,
-`.Floor`, `.Ceiling`, and `.NearestEven`; `n` is a nonnegative count of
-destination decimal places, and the rounded rational must be exactly
-representable by the destination so binary storage adds no further loss.
-Imported `Quantity<Dimension, Kind>` bounds preserve their
-concrete unit through checking, API freeze, semantic inspection, Codable, AOT,
-and resident JIT lowering.
+A host name selects `system.<name>` in `./config.jet`; `host@../machines` selects
+an exact external root. Builds create named generations, `generations` lists
+them newest first, `switch --name <name>` selects a name explicitly, and
+`rollback` activates a prior generation. `plan` prints the checked plan without
+building. `proof` reads the selected generation's plan, proof, provenance,
+health, boot, init, secrets, VM, and rollback facts.
 
-## Semantic source import
+A system plan can carry a package closure, services and target wants,
+users/groups, filesystems and swap, network/firewall/wireless facts, boot and
+kernel facts, terminal and desktop facts, storage and persistence plans,
+workloads, hardware facts, profile and specialization entries, theme
+projections, fleet plans, lifecycle policy, typed option records, and image
+variant records. These facts are written into generation artifacts and are
+available to proof and explain commands; secrets remain ciphertext or metadata,
+never plaintext in generated reports.
 
-D-MIGRATE-SRC1 extends the canonical import command to foreign source:
-jet import LANG DIR. A language importer parses constructs it can prove,
-emits ordinary editable Jet, and records every other construct as a structured
-JT01xx TODO in import-report.json. Unsupported code never becomes guessed
-behavior and never disappears silently.
+Generated terminal profiles set `JETOS_BRAND=JetOS` and a `JetOS <host>`
+prompt for login and VM run-mode shells; `/etc/issue` and `/etc/motd` carry
+the same host branding. Compatibility escape hatches such as overlays and
+`specialArgs` are allowed only as explicit `packages.*` options, and each is
+recorded in generation compatibility audit and provenance facts.
 
-The first importer is py. Its initial proven subset is annotated top-level
-functions over int, float, str, bool, and None; straight-line local assignment,
-return, calls, arithmetic/comparison/boolean expressions, and equality asserts.
-Python test_ functions with no parameters become Jet Test functions. Unsupported
-imports, signatures, expressions, and nested control flow stay absent from
-callable Jet and appear in the omissions report with what, why, fix, source,
-generated target, and migration status.
+`jet os import <flake-or-dir>` consumes semantic
+`jetos-import-facts.json` input; the facts-only fallback is audited. Storage
+application is safe by default and requires its explicit apply command. Fleet
+deploy scripts stage over SSH, request remote proof before switching, health
+check the result, and roll back on failure. Lifecycle garbage collection
+explains before deletion and needs `--apply` to delete old generation
+directories.
 
-Dry-run computes and prints the same plan without writing. A plain rerun is
-byte-idempotent. Update uses the last generated baseline: untouched generated
-files advance, owner-edited files remain when foreign source is unchanged, and
-simultaneous edits conflict before any conflicted file is written. Directory
-walks are deterministic and do not follow symlinks.
+### VM proof and installed media
 
-The production proof is the fixed corpus in `tests/fixtures/source_import`:
-`tests/source_import.rs` runs the imported Jet against Python 3, compares the
-oracle output, and pins the generated bytes. It also proves a second import is
-byte-identical and that a three-way conflict writes no conflicted file.
+`jet os vm prove <host> --disk <path>` is the install and reboot proof
+entrypoint. `--real` upgrades it to replacement acceptance and rejects script or
+fake VM tools. Missing pinned QEMU or media tools report **E1279**; a prepared
+harness without guest proof reports **E1285**. The harness records QEMU create,
+install, reboot, and verifier phases and requires the installed guest to emit
+a matching `JETOS_GUEST_PROOF:` marker. The installer boots with
+`console=ttyS0`; its Limine entry supplies `rdinit=/jetos/init`,
+`jetos.mode=install`, and the target disk. The installed-disk verifier uses
+`jetos.mode=verify` and the installed root label.
 
-The enterprise language boundary is published in the
-[migration tier map](reference/migration-tier-map.md). D-ADOPT-TIER1=A
-promises source import for Python, Java, C#, TypeScript/JavaScript, and Go;
-C and C++ have the explicit binder-plus-overlay verdict. The importer wave
-uses one scalar-function subset and keeps the foreign source authoritative
-until every JT0101 omission is resolved.
+The installer writes a GPT disk with a FAT ESP, an ext4 `jetos-root`,
+`EFI/BOOT/BOOTX64.EFI`, the kernel and initrd, and an installed Limine config.
+The proof also checks terminal-login, desktop-session, graphical-console, and
+launcher readiness, including the generation's terminal facts, shell profile,
+serial getty, desktop facts, display-manager unit, fallback launcher, and
+installed Studio app. `jet os vm run <host> --disk <path>` opens only a disk
+linked to the latest `guest-passed` proof; otherwise it reports **E1287**.
+
+The default kernel is a first-party `cachyos-kernel` package with recipe,
+configuration, patch, and initrd-input hashes beside its artifacts. Missing
+kernel provenance is **E1280**; missing bootable artifact headers are **E1282**;
+missing source or builder provenance is **E1284**; and a failing package
+`source/build.sh` is **E1286**. When present, the package-internal build script
+runs before boot validation and writes the kernel and initrd that the
+installer and proof boot.
+
+The installer initrd contains `/jetos/init`, `/jetos/install.sh`, and
+`/jetos/guest-verify.sh`. `/jetos/init` dispatches `install`, `verify`, and
+`desktop-verify` modes after mounting proc, dev, and sys and probing the root
+label and installer disks. The hybrid ISO carries BIOS Limine files and a FAT
+UEFI image so QEMU/OVMF and physical UEFI use the same installer artifact.
+
+### JetOS Studio and VM scenarios
+
+`jetos studio` launches the installed Studio app. `jetos studio --headless`
+prints its installed path; `--json` prints root, app, metadata, and data paths;
+`--serve <loopback:port>` serves the local browser fallback. `GET /studio/source`
+returns the selected `config.jet`. `POST /studio/transaction` accepts source
+transactions such as `set-option` and writes only with `write: true`, returning
+an exact diff. `POST /studio/run` executes the selected
+`jet os check|plan|build|proof|generations` action and returns captured output;
+Studio does not replace CLI proof with hidden state. It remains a separate
+JetOS system app from Canvas, may fall back to the browser over the same local
+projection service, and may deep-link to Canvas for generic source-graph
+editing without storing Canvas semantic state.
+
+`module vmtest.<name>` declares a VM scenario. Its `hosts:` map names scenario
+handles bound to `system.<host>` declarations, and `run: test { ... }` contains
+assertions such as `wait_for_boot`, `assert_unit_active`, and
+`assert_port_open`. `jet os vm test <name> --disk <path>` uses the same
+installer/reboot proof harness as `vm prove` and writes a proof per host plus a
+scenario proof artifact containing the source test, assertion method, host
+generations, disks, and artifact paths.
+
+`jetos user plan|build|switch|rollback|prove <name>` selects a `user.<name>` or
+`users.<name>` generation from `config.jet` and uses the same named-generation
+model. `jetos-user-apply <name>` projects declared files, links package binaries
+into `.jetos/profile/bin`, writes user service units, and records a user proof
+under `.jetos/proof/`.
 
 ## Deliberately absent
 
-See non-goals in docs/spec/philosophy.md. The parser should produce staged
-or guiding errors for the ones users will reach for (e.g. `and` → teaching
-error naming `&&`, per S14).
+These are intentional boundaries, not implied promises:
+
+- Jet does not provide a general `Any` top type. Use a precise type, a generic,
+  a trait, or a closed data carrier; E0350 explains the boundary.
+- Stored-borrow reference fields and their `refs` expansion lens are absent.
+  Borrowed views may still be used where their checked callable contract allows.
+- Nested `#CLI` structs and implicit grouped flag prefixes are not part of the
+  typed CLI shape.
+- The registry is not an inline-script source resolver. Manifest-less inline
+  dependencies resolve from the local managed cache or fixture and fail with
+  E1253 when absent.
+- A sandbox guest has no ambient host capability, dynamic export lookup, or
+  missing-export fallback. New host imports require an explicit contract.
+- Canvas owns no graph asset and no second parser or checker; its projection is
+  not execution proof.
+- Build actions have no unsandboxed fallback. Remote failure can use only the
+  explicit sandboxed local binding.
+- Runtime effect handlers, monads, and effect values are not part of the
+  language; effects are checked and erased.
+- Importers never infer unsupported foreign behavior, and the command does not
+  silently discard omissions. Foreign-language support outside the published
+  tier boundary requires the binder or an explicit importer contract.
+- Retired spellings and routes are not compatibility aliases. The command
+  registry and its canonical grouped routes are the only CLI contract.
+- Jet is not described here as self-hosted. The Rust-hosted compiler remains
+  the reference execution path while the staged `Compiler/` work proceeds under
+  its separate bootstrap gates.
+
+For teaching diagnostics, staged parser errors should point toward the current
+operator spelling—for example, `and` should teach `&&`—rather than accepting a
+retired form (S14).

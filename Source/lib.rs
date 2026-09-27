@@ -124,7 +124,41 @@ mod NativeLinker;
 pub use jet_devserver::Canvas;
 pub use jet_driver::BudgetView;
 pub use jet_driver::ProjectParts;
+#[doc(hidden)]
+pub(crate) const BOOTSTRAP_CANONICAL_SOURCE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
+#[doc(hidden)]
+pub mod BootstrapBuildIdentity {
+    include!("../Compiler/Bootstrap/BuildIdentity.rs");
+}
 pub mod Compiler;
+#[doc(hidden)]
+#[allow(dead_code)]
+mod compiler_bootstrap_host {
+    include!("../Compiler/Bootstrap/Host/Native.rs");
+}
+#[doc(hidden)]
+#[allow(unused_imports)]
+pub(crate) use compiler_bootstrap_host::{
+    append_bootstrap_host_glue, open_authorized_sources, AuthorizedSourceLease,
+    AuthorizedSourceSnapshot, BootstrapBindingDescriptor, BootstrapHostCodecError,
+};
+
+#[doc(hidden)]
+#[allow(dead_code)]
+mod compiler_bootstrap_runner {
+    include!("../Compiler/Bootstrap/Runner.rs");
+}
+#[doc(hidden)]
+#[allow(unused_imports)]
+pub(crate) use compiler_bootstrap_runner::{
+    bootstrap_artifact_build_id, invoke_bootstrap_entry, prepare_bootstrap_artifact,
+    prepare_bootstrap_artifact_from_aot, run_bootstrap_artifact, BootstrapArtifact,
+    BootstrapRunError,
+};
+#[cfg(test)]
+mod bootstrap_tests {
+    include!("../Compiler/Bootstrap/Tests.rs");
+}
 pub mod Doctest;
 pub mod Doctor;
 pub mod Fetch;

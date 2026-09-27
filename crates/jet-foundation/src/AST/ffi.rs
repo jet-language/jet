@@ -892,10 +892,37 @@ impl ExternFn {
         if generated_array_shape {
             return true;
         }
-        // D-FFI-CAP1: the resident JIT/interpreter bridge is value-shaped only
-        // for user-authored declarations. Generated CBind arrays are the one
-        // checked exception: their pointer/count descriptor carries the
-        // native access convention and the bridge owns the temporary storage.
+        // D-FFI-WRITEBACK1: direct scalar, String, and checked opaque-handle
+        // rows use the resident uniform ABI. Keep records and lists out of
+        // this value-shaped route: records retain their typed CModule ABI,
+        // while generated list/count rows use the branch above.
+        fn is_scalar(ty: &Type) -> bool {
+            match ty {
+                Type::Int | Type::IntN { .. } | Type::Float | Type::Float32 | Type::Bool => true,
+                Type::InlineRange { base, .. }
+                | Type::Tagged { inner: base, .. }
+                | Type::Quantity { base, .. } => is_scalar(base),
+                _ => false,
+            }
+        }
+        let is_resident_value = |ty: &Type| {
+            is_scalar(ty) || matches!(ty, Type::String) || is_handle(ty)
+        };
+        let resident_value_shape = self.params.iter().all(|param| match param.convention {
+                AccessConvention::Read | AccessConvention::Write => is_resident_value(&param.ty),
+                AccessConvention::Move => is_handle(&param.ty),
+            })
+            && self
+                .return_type
+                .as_ref()
+                .is_none_or(|ty| is_resident_value(ty));
+        if resident_value_shape {
+            return true;
+        }
+        // D-FFI-CAP1: non-scalar nominal/sequence rows remain on their typed
+        // CModule paths. Generated CBind arrays are the checked exception:
+        // their pointer/count descriptor carries native access convention and
+        // the bridge owns the temporary storage.
         if self
             .params
             .iter()
@@ -1404,5 +1431,159 @@ impl FfiLink {
         std::iter::once(self.target_deps_dir.as_path()).chain(
             (self.host_deps_dir != self.target_deps_dir).then_some(self.host_deps_dir.as_path()),
         )
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{
+        AccessConvention, ExternFn, FfiCloseSource, FfiHandleFact, FfiThreadSafety, Param, ParamZone,
+        Type,
+    };
+    use crate::Diagnostics::Span;
+
+    fn param(name: &str, convention: AccessConvention, ty: Type) -> Param {
+        Param {
+            convention,
+            root: false,
+            name: name.to_string(),
+            name_span: Span::new(0, 0),
+            public_label: None,
+            zone: ParamZone::Either,
+            ty,
+            ty_span: Span::new(0, 0),
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+        }
+    }
+
+    fn foreign(params: Vec<Param>, return_type: Option<Type>, generated: bool) -> ExternFn {
+        ExternFn {
+            abi: None,
+            name: "ffi_fixture".to_string(),
+            name_span: Span::new(0, 0),
+            params,
+            return_type,
+            return_type_span: None,
+            rust_path: "ffi_fixture".to_string(),
+            rust_path_span: Span::new(0, 0),
+            generated,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
+            effect_root: None,
+            undo: None,
+            close: None,
+            span: Span::new(0, 0),
+        }
+    }
+
+    fn handle(name: &str) -> FfiHandleFact {
+        FfiHandleFact {
+            lib: "fixture".to_string(),
+            typedef_name: name.to_string(),
+            jet_name: name.to_string(),
+            close: format!("{name}_close"),
+            close_source: FfiCloseSource::Conventional,
+            thread_safety: FfiThreadSafety::Safe,
+        }
+    }
+
+    #[test]
+    fn resident_writeback_gate_admits_checked_scalar_string_and_handle_rows() {
+        let no_handles = Vec::new();
+        assert!(foreign(
+            vec![param("value", AccessConvention::Write, Type::Int)],
+            None,
+            false,
+        )
+        .hidden_c_bridge_compatible_with_handles(&no_handles));
+        assert!(foreign(
+            vec![param("value", AccessConvention::Write, Type::String)],
+            Some(Type::String),
+            false,
+        )
+        .hidden_c_bridge_compatible_with_handles(&no_handles));
+
+        let handles = vec![handle("HbFont")];
+        assert!(foreign(
+            vec![
+                param("font", AccessConvention::Write, Type::Named("HbFont".into())),
+                param("scale", AccessConvention::Read, Type::Int),
+            ],
+            None,
+            true,
+        )
+        .hidden_c_bridge_compatible_with_handles(&handles));
+        assert!(foreign(
+            vec![param("font", AccessConvention::Move, Type::Named("HbFont".into()))],
+            None,
+            true,
+        )
+        .hidden_c_bridge_compatible_with_handles(&handles));
+        let mixed_handles = vec![handle("HbFont"), handle("HbBuffer")];
+        assert!(
+            foreign(
+                vec![
+                    param("font", AccessConvention::Write, Type::Named("HbFont".into())),
+                    param("buffer", AccessConvention::Read, Type::Named("HbBuffer".into())),
+                ],
+                None,
+                true,
+            )
+            .hidden_c_bridge_compatible_with_handles(&mixed_handles)
+        );
+        assert!(
+            !foreign(
+                vec![param("font", AccessConvention::Write, Type::Named("HbFont".into()))],
+                None,
+                true,
+            )
+            .hidden_c_bridge_compatible_with_handles(&no_handles)
+        );
+    }
+
+    #[test]
+    fn resident_writeback_gate_preserves_record_and_list_direct_routes() {
+        let handles = vec![handle("HbFont")];
+        assert!(
+            !foreign(
+                vec![param(
+                    "record",
+                    AccessConvention::Write,
+                    Type::Named("Coord".into()),
+                )],
+                None,
+                false,
+            )
+            .hidden_c_bridge_compatible_with_handles(&handles)
+        );
+        assert!(
+            !foreign(
+                vec![param(
+                    "records",
+                    AccessConvention::Write,
+                    Type::List(Box::new(Type::Named("Coord".into()))),
+                )],
+                None,
+                false,
+            )
+            .hidden_c_bridge_compatible_with_handles(&handles)
+        );
+
+        let generated_array = foreign(
+            vec![
+                param(
+                    "values",
+                    AccessConvention::Read,
+                    Type::List(Box::new(Type::Int)),
+                ),
+                param("length", AccessConvention::Write, Type::Int),
+            ],
+            Some(Type::List(Box::new(Type::Int))),
+            true,
+        );
+        assert!(generated_array.hidden_c_bridge_compatible_with_handles(&handles));
     }
 }

@@ -1,0 +1,552 @@
+// Private source-coupled raw-token tags, not keyword spellings.
+// Each input row is [kind, byte_start, byte_end, first_char_is_uppercase].
+// Each output row is [event, raw_token_index, byte_position].
+K_IDENT :: 1
+
+K_RAW_STR :: 2
+
+K_STR :: 3
+
+K_INT :: 4
+
+K_FLOAT :: 5
+
+K_UNIT_NUMBER :: 6
+
+K_CHAR :: 7
+
+K_TRUE :: 8
+
+K_FALSE :: 9
+
+K_SELF :: 10
+
+K_NULL :: 11
+
+K_BREAK :: 12
+
+K_RETURN :: 13
+
+K_RPAREN :: 14
+
+K_RBRACKET :: 15
+
+K_RBRACE :: 16
+
+K_QUESTION :: 17
+
+K_PLUS_PLUS :: 18
+
+K_MINUS_MINUS :: 19
+
+K_GT :: 20
+
+K_SHR :: 21
+
+K_FENCE_CLOSE :: 22
+
+K_DOT :: 23
+
+K_QUESTION_DOT :: 24
+
+K_AND_AND :: 25
+
+K_OR_OR :: 26
+
+K_PLUS :: 27
+
+K_MINUS :: 28
+
+K_STAR :: 29
+
+K_SLASH :: 30
+
+K_SLASH_PERCENT :: 31
+
+K_PERCENT :: 32
+
+K_PERCENT_PERCENT :: 33
+
+K_EQ_EQ :: 34
+
+K_NOT_EQ :: 35
+
+K_LT :: 36
+
+K_LE :: 37
+
+K_GE :: 38
+
+K_COMPARE :: 39
+
+K_AMP :: 40
+
+K_PIPE :: 41
+
+K_CARET :: 42
+
+K_TILDE_PIPE :: 43
+
+K_SHL :: 44
+
+K_QUESTION_QUESTION :: 45
+
+K_LBRACE :: 46
+
+K_LPAREN :: 47
+
+K_LBRACKET :: 48
+
+K_EOF :: 49
+
+K_BANG :: 50
+
+K_UNIFIED_ARROW :: 51
+
+K_ARROW :: 52
+
+K_LAMBDA_ARROW :: 53
+
+K_EQ :: 54
+
+K_LINE_COMMENT :: 55
+
+K_BLOCK_COMMENT :: 56
+K_FN :: 57
+K_PUB :: 58
+K_PRIV :: 59
+K_IF :: 60
+K_ELSE :: 61
+K_IN :: 62
+K_MUTATE :: 63
+K_MOVE :: 64
+K_COPY :: 65
+K_STRUCT :: 66
+K_ENUM :: 67
+K_IMPL :: 68
+K_TRAIT :: 69
+K_TAG :: 70
+K_EFFECT :: 71
+K_DERIVE :: 72
+K_IT :: 73
+K_CONST :: 74
+K_COMPTIME :: 75
+K_LOOP :: 76
+K_YIELD :: 77
+K_USE :: 78
+K_EXTERN :: 79
+K_MODULE :: 80
+K_FENCE_OPEN :: 81
+K_COLON :: 82
+K_COLON_COLON :: 83
+K_COLON_EQ :: 84
+K_COMMA :: 85
+K_SEMI :: 86
+K_DOT_DOT :: 87
+K_DOT_DOT_LT :: 88
+K_DOT_DOT_DOT :: 89
+K_AT :: 90
+K_TILDE :: 91
+K_TILDE_PIPE_EQ :: 92
+K_TILDE_TILDE :: 93
+K_PLUS_EQ :: 94
+K_MINUS_EQ :: 95
+K_STAR_EQ :: 96
+K_SLASH_EQ :: 97
+K_SLASH_PERCENT_EQ :: 98
+K_PERCENT_EQ :: 99
+K_PERCENT_PERCENT_EQ :: 100
+K_AMP_EQ :: 101
+K_PIPE_EQ :: 102
+K_CARET_EQ :: 103
+K_SHL_EQ :: 104
+K_SHR_EQ :: 105
+K_HASH :: 106
+K_DOLLAR :: 107
+
+
+fn kind_at(facts: [Int], index: Int) -> Int {
+    if index < 0 || index >= facts.len() /% 4 -> return 0
+    return facts[index * 4]
+}
+
+fn ends_statement(kind: Int) -> Bool {
+    if kind == {
+        K_IDENT -> true
+        K_RAW_STR -> true
+        K_STR -> true
+        K_INT -> true
+        K_FLOAT -> true
+        K_UNIT_NUMBER -> true
+        K_CHAR -> true
+        K_TRUE -> true
+        K_FALSE -> true
+        K_SELF -> true
+        K_NULL -> true
+        K_BREAK -> true
+        K_RETURN -> true
+        K_RPAREN -> true
+        K_RBRACKET -> true
+        K_RBRACE -> true
+        K_QUESTION -> true
+        K_PLUS_PLUS -> true
+        K_MINUS_MINUS -> true
+        K_GT -> true
+        K_SHR -> true
+        else -> false
+    }
+}
+
+fn suppresses_terminator(kind: Int) -> Bool {
+    if kind == {
+        K_FENCE_CLOSE -> true
+        K_DOT -> true
+        K_QUESTION_DOT -> true
+        K_AND_AND -> true
+        K_OR_OR -> true
+        K_PLUS -> true
+        K_MINUS -> true
+        K_STAR -> true
+        K_SLASH -> true
+        K_SLASH_PERCENT -> true
+        K_PERCENT -> true
+        K_PERCENT_PERCENT -> true
+        K_EQ_EQ -> true
+        K_NOT_EQ -> true
+        K_LT -> true
+        K_GT -> true
+        K_LE -> true
+        K_GE -> true
+        K_COMPARE -> true
+        K_AMP -> true
+        K_PIPE -> true
+        K_CARET -> true
+        K_TILDE_PIPE -> true
+        K_SHL -> true
+        K_SHR -> true
+        K_QUESTION_QUESTION -> true
+        else -> false
+    }
+}
+
+fn arrow(kind: Int) -> Bool {
+    if kind == {
+        K_UNIFIED_ARROW -> true
+        K_ARROW -> true
+        K_LAMBDA_ARROW -> true
+        else -> false
+    }
+}
+
+fn newline_between(source: [U8], start: Int, end: Int) -> Bool {
+    if start < 0 || start > end || end > source.len() -> return false
+    cursor := start
+    loop cursor < end {
+        if source[cursor] == 10 -> return true
+        cursor += 1
+    }
+    return false
+}
+
+fn scope_member_starts_at(facts: [Int], index: Int) -> Bool {
+    if kind_at(facts, index) != K_DOT || kind_at(facts, index + 1) != K_IDENT -> return false
+    cursor := index + 2
+    if kind_at(facts, cursor) == K_LBRACE -> return true
+    if kind_at(facts, cursor) != K_LPAREN -> return false
+    depth := 0
+    loop cursor < facts.len() /% 4 {
+        kind :: kind_at(facts, cursor)
+        if kind == K_LPAREN -> depth += 1
+        if kind == K_RPAREN {
+            depth -= 1
+            if depth == 0 {
+                cursor += 1
+                break
+            }
+        }
+        if kind == K_EOF -> return false
+        cursor += 1
+    }
+    return kind_at(facts, cursor) == K_LBRACE
+}
+
+fn leading_dot_variant(facts: [Int], index: Int) -> Bool {
+    kind :: kind_at(facts, index)
+    if kind == K_NULL -> return true
+    return kind == K_IDENT && facts[index * 4 + 3] == 1
+}
+
+fn skip_comment_tokens(facts: [Int], index: Int) -> Int {
+    cursor := index
+    loop {
+        kind :: kind_at(facts, cursor)
+        if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT -> cursor += 1 else -> break
+    }
+    return cursor
+}
+
+fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool {
+    if kind_at(facts, index) != K_DOT -> return false
+    cursor := skip_comment_tokens(facts, index + 1)
+    if kind_at(facts, cursor) == K_LBRACE {
+        depth := 0
+        loop cursor < facts.len() /% 4 {
+            kind :: kind_at(facts, cursor)
+            if kind == K_LBRACE -> depth += 1
+            if kind == K_RBRACE {
+                depth -= 1
+                if depth == 0 {
+                    cursor += 1
+                    break
+                }
+            }
+            if kind == K_EOF -> return false
+            cursor += 1
+        }
+        cursor = skip_comment_tokens(facts, cursor)
+        return arrow(kind_at(facts, cursor))
+    }
+    if !leading_dot_variant(facts, cursor) -> return false
+    cursor += 1
+    // D-PATO: each structural or-pattern alternative has the same
+    // leading-dot variant/path/payload shape. Keep consuming alternatives
+    // before looking for a guard or arrow; otherwise a following arm's
+    // leading `.` is mistaken for a fluent chain continuation.
+    loop {
+        cursor = skip_comment_tokens(facts, cursor)
+        loop {
+            if kind_at(facts, cursor) != K_DOT -> break
+            variant := skip_comment_tokens(facts, cursor + 1)
+            if !leading_dot_variant(facts, variant) -> break
+            cursor = variant + 1
+            cursor = skip_comment_tokens(facts, cursor)
+        }
+        cursor = skip_comment_tokens(facts, cursor)
+        if kind_at(facts, cursor) == K_LPAREN {
+            depth := 0
+            loop cursor < facts.len() /% 4 {
+                kind :: kind_at(facts, cursor)
+                if kind == K_LPAREN -> depth += 1
+                if kind == K_RPAREN {
+                    depth -= 1
+                    if depth == 0 {
+                        cursor += 1
+                        break
+                    }
+                }
+                if kind == K_EOF -> return false
+                cursor += 1
+            }
+        }
+        cursor = skip_comment_tokens(facts, cursor)
+        if kind_at(facts, cursor) != K_PIPE -> break
+        cursor += 1
+        cursor = skip_comment_tokens(facts, cursor)
+        if kind_at(facts, cursor) != K_DOT -> return false
+        cursor = skip_comment_tokens(facts, cursor + 1)
+        if !leading_dot_variant(facts, cursor) -> return false
+        cursor += 1
+    }
+    cursor = skip_comment_tokens(facts, cursor)
+    // D-IFDIST1: a braceless arm may add a Boolean guard after its complete
+    // structural head (`.Key(key) | .Other(key) && key == "b" -> ...`).
+    // Scan that guard only on its source line; an unrelated arrow on a later
+    // line must not turn a fluent chain into a new arm.
+    connector :: kind_at(facts, cursor)
+    is_boolean_connector :: if connector == {
+        K_AND_AND -> true
+        K_OR_OR -> true
+        else -> false
+    }
+    if is_boolean_connector {
+        guard_start :: facts[cursor * 4 + 1]
+        depth := 0
+        loop cursor < facts.len() /% 4 {
+            kind :: kind_at(facts, cursor)
+            is_open_delimiter :: if kind == {
+                K_LPAREN -> true
+                K_LBRACKET -> true
+                K_LBRACE -> true
+                else -> false
+            }
+            if is_open_delimiter -> depth += 1 else {
+                is_close_delimiter :: if kind == {
+                    K_RPAREN -> true
+                    K_RBRACKET -> true
+                    K_RBRACE -> true
+                    else -> false
+                }
+                if {
+                    is_close_delimiter -> {
+                        if depth > 0 -> depth -= 1
+                    }
+                    arrow(kind) && depth == 0 -> {
+                        return !newline_between(source, guard_start, facts[cursor * 4 + 1])
+                    }
+                    else -> {}
+                }
+            }
+            cursor += 1
+        }
+        return false
+    }
+    return arrow(kind_at(facts, cursor))
+}
+
+fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool {
+    return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
+}
+
+pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
+    events := [Int]{}
+    last_code := -1
+    index := 0
+    loop index < facts.len() /% 4 {
+        kind :: kind_at(facts, index)
+        is_comment :: if kind == {
+            K_LINE_COMMENT -> true
+            K_BLOCK_COMMENT -> true
+            else -> false
+        }
+        if is_comment -> index += 1 else {
+            if {
+                kind == K_EOF -> {
+                    if last_code >= 0 {
+                        previous :: kind_at(facts, last_code)
+                        if ends_statement(previous) && previous != K_RBRACE {
+                            events.push(1)
+                            events.push(index)
+                            events.push(facts[last_code * 4 + 2])
+                        }
+                    }
+                    index += 1
+                }
+                else -> {
+                    if last_code >= 0 {
+                        previous :: kind_at(facts, last_code)
+                        end :: facts[last_code * 4 + 2]
+                        start :: facts[index * 4 + 1]
+                        if newline_between(source, end, start) && ends_statement(previous) {
+                            split :: if kind == {
+                                K_UNIFIED_ARROW -> true
+                                K_ARROW -> true
+                                K_LAMBDA_ARROW -> true
+                                K_EQ -> true
+                                K_MINUS_MINUS -> true
+                                K_LBRACE -> true
+                                else -> false
+                            }
+                            if {
+                                split && previous == K_RPAREN -> {
+                                    events.push(2)
+                                    events.push(index)
+                                    events.push(start)
+                                }
+                                else -> {
+                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index)) && !result_handler_failure_starts_at(facts, index) && kind != K_RPAREN && kind != K_RBRACKET {
+                                        events.push(1)
+                                        events.push(index)
+                                        events.push(end)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    last_code = index
+                    index += 1
+                }
+            }
+        }
+    }
+    return events
+}
+fn split_spelling(kind: Int) -> String {
+    if kind == {
+        K_UNIFIED_ARROW -> "->"
+        K_ARROW -> ":>"
+        K_LAMBDA_ARROW -> "=>"
+        K_EQ -> {
+            spelling :: "-[…]"
+            "{spelling}>"
+        }
+        K_MINUS_MINUS -> {
+            spelling :: "-[…]"
+            "{spelling}>"
+        }
+        K_LBRACE -> "{{"
+        else -> ""
+    }
+}
+
+fn lexed_with_terminators(facts: [Int], lexed: Lexed, events: [Int]) -> Lexed {
+    tokens := [Token]{}
+    diagnostics := lexed.diagnostics
+    event_index := 0
+    token_index := 0
+    raw_index := 0
+    loop raw_index < facts.len() /% 4 {
+        loop event_index < events.len() /% 3 && events[event_index * 3 + 1] == raw_index {
+            event :: events[event_index * 3]
+            at :: events[event_index * 3 + 2]
+            if {
+                event == 1 -> {
+                    tokens.push(Token{
+                        kind: K_SEMI,
+                        span: Span{start: at, end: at},
+                        payload: empty_payload(""),
+                    })
+                }
+                else -> {
+                    kind :: kind_at(facts, raw_index)
+                    start :: facts[raw_index * 4 + 1]
+                    end :: facts[raw_index * 4 + 2]
+                    spelling :: split_spelling(kind)
+                    diagnostics.push(diagnostic_from_registry(
+                        "E0986",
+                        Val(Span{start: start, end: end}),
+                        "`{spelling}` must stay on the same line as the closing `)`",
+                        "an arrow, effect row, or opening block continues the header on its line",
+                        "move `{spelling}` up to the `)` line",
+                    ))
+                }
+            }
+            event_index += 1
+        }
+        kind :: kind_at(facts, raw_index)
+        start :: facts[raw_index * 4 + 1]
+        end :: facts[raw_index * 4 + 2]
+        if token_index < lexed.tokens.len() {
+            token :: lexed.tokens[token_index]
+            if {
+                token.kind == kind && token.span.start == start && token.span.end == end -> {
+                    tokens.push(token)
+                    token_index += 1
+                }
+                else -> {
+                    if token.span.start <= start -> token_index += 1
+                }
+            }
+        }
+        raw_index += 1
+    }
+    Lexed{tokens: tokens, diagnostics: diagnostics}
+}
+
+fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
+    facts :: raw_token_facts(source, config_surface)
+    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
+    events :: terminator_events(source, facts)
+    lexed_with_terminators(facts, raw, events)
+}
+
+pub fn lex(source: [U8]) -> Lexed {
+    lex_with_terminators(source, false, false)
+}
+
+pub fn lex_config(source: [U8]) -> Lexed {
+    lex_with_terminators(source, true, false)
+}
+
+pub fn lex_generated(source: [U8]) -> Lexed {
+    lex_with_terminators(source, false, true)
+}

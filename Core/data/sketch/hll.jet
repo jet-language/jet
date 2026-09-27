@@ -6,8 +6,8 @@
 // keep the same state behind an opaque handle.
 use core.math as math
 
-c_registers :: 256
-c_max_rho :: 57
+C_REGISTERS :: 256
+C_MAX_RHO :: 57
 
 
 pub struct Hll {
@@ -16,7 +16,7 @@ pub struct Hll {
 }
 
 pub fn new() -> Hll {
-    Hll{m: c_registers, regs: zero_registers(c_registers)}
+    Hll{m: C_REGISTERS, regs: zero_registers(C_REGISTERS)}
 }
 
 pub fn add(hll: Hll, key: String) -> Hll {
@@ -26,7 +26,7 @@ pub fn add(hll: Hll, key: String) -> Hll {
     hash :: hash64(key)
     index :: register_index(hash, width)
     rest :: hash >> 8
-    rho := c_max_rho
+    rho := C_MAX_RHO
     if rest != U64{0} -> rho = rest.leading_zeros() + 1
     if rho > regs[index] -> regs[index] = rho
     Hll{m: width, regs: regs}
@@ -73,7 +73,7 @@ fn hll_width(hll: Hll) -> Int {
     if hll.m <= 0 || hll.regs.len() == 0 -> return 0
     width := hll.m
     if width > hll.regs.len() -> width = hll.regs.len()
-    if width > c_registers -> width = c_registers
+    if width > C_REGISTERS -> width = C_REGISTERS
     width
 }
 

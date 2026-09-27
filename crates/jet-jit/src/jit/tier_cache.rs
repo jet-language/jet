@@ -779,6 +779,7 @@ pub fn run_cached_module(
             module,
             host,
             main_id,
+            typed_entry_id: None,
             // The rail the cold run decided, read back rather than re-derived:
             // a warm run has no TIR program to ask.
             main_returns_result: rail.returns_result,

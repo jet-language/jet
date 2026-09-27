@@ -14,17 +14,17 @@ enum Switch {
     Off
 }
 
-@raw :: "{{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"first\":123456789012345678901234567890,\"second\":\"ready\"}}"
+@RAW :: "{{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"first\":123456789012345678901234567890,\"second\":\"ready\"}}"
 
 fn direct_min_encode() -[]> String { return json.to_string(DataTree.Int(-9223372036854775808)) }
 
 fn dynamic_roundtrip() -[]> String {
-    value :: json.parse(@raw) ?? panic("dynamic parse")
+    value :: json.parse(@RAW) ?? panic("dynamic parse")
     return json.to_string(value)
 }
 
 fn typed_roundtrip() -[]> String {
-    value :: json.decode<IntegerRecord>(@raw) ?? return "typed-rejected"
+    value :: json.decode<IntegerRecord>(@RAW) ?? return "typed-rejected"
     return json.to_string(value)
 }
 

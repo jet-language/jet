@@ -1,10 +1,10 @@
 // core.web.forms — typed HTML forms and validation carriers.
 
-c_max_form_bytes :: 1048576
+C_MAX_FORM_BYTES :: 1048576
 
-c_max_form_fields :: 256
+C_MAX_FORM_FIELDS :: 256
 
-c_max_form_text :: 1048576
+C_MAX_FORM_TEXT :: 1048576
 
 #Error
 pub enum WebFormError {
@@ -156,13 +156,13 @@ pub fn field(form: WebForm, name: String, kind: String, required: Bool) -> WebFo
     loop item in out.fields {
         if item.name == name -> return Err(WebFormError.Invalid)
     }
-    if out.fields.len() >= c_max_form_fields -> return Err(WebFormError.Invalid)
+    if out.fields.len() >= C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
     out.fields.push(WebFormFieldState{name: ~name, value_type: parse_kind(~kind), required: required, value: "", touched: false, validating: false, errors: [String]{}})
     Ok(out)
 }
 
 pub fn set(form: &WebForm, name: String, value: String) !WebFormError {
-    if value.len() > c_max_form_text -> return Err(WebFormError.Invalid)
+    if value.len() > C_MAX_FORM_TEXT -> return Err(WebFormError.Invalid)
     loop i in 0..<form.fields.len() {
         if form.fields[i].name == name {
             form.fields[i].value = ~value
@@ -215,14 +215,14 @@ pub fn html(form: WebForm) -> String { render_html(form) }
 pub fn show(form: WebForm) -> String { render_html(form) }
 
 pub fn input(name: String, fields: [WebFormFieldSpec]) -> WebFormInput !WebFormError {
-    if !valid_name(~name) || fields.len() == 0 || fields.len() > c_max_form_fields -> return Err(WebFormError.Invalid)
+    if !valid_name(~name) || fields.len() == 0 || fields.len() > C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
     names := [String]{}
     wires := [String]{}
     loop field in fields {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return Err(WebFormError.Invalid)
         if field.default != None {
             default :: field.default
-            if default.len() > c_max_form_text || has_control_text(~default) -> return Err(WebFormError.Invalid)
+            if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return Err(WebFormError.Invalid)
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return Err(WebFormError.Invalid)
         names.push(field.name)
@@ -285,7 +285,7 @@ pub fn input_replace(input: WebFormInput, name: String, replacement: WebFormFiel
 }
 
 pub fn typed(input: WebFormInput, action: String) -> WebFormTyped !WebFormError {
-    if action.len() == 0 || action.len() > c_max_form_text || !fields_valid(input.fields) -> return Err(WebFormError.Invalid)
+    if action.len() == 0 || action.len() > C_MAX_FORM_TEXT || !fields_valid(input.fields) -> return Err(WebFormError.Invalid)
     states := states_from_specs(input.fields)
     Ok(WebFormTyped{form: WebForm{action: ~action, method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
 }
@@ -300,7 +300,7 @@ pub fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebF
     if name.len() == 0 -> return Err(WebFormError.Missing)
     loop i in 0..<form.form.fields.len() {
         if form.form.fields[i].name == name {
-            if form.form.fields[i].value.len() > c_max_form_text -> return Err(WebFormError.Invalid)
+            if form.form.fields[i].value.len() > C_MAX_FORM_TEXT -> return Err(WebFormError.Invalid)
             form.form.fields[i].validating = true
             form.form.status = WebFormStatus.Validating
             validator(~form.form.fields[i].value)
@@ -320,14 +320,14 @@ pub fn typed_set_action(form: WebFormTyped, handler: fn(WebFormDecodedInput) -> 
 
 pub fn action_error() -> WebFormActionError { WebFormActionError{field_errors: [String:[String]]{}, form_errors: [String]{}} }
 pub fn action_field_error(error: WebFormActionError, field: String, message: String) -> WebFormActionError {
-    if field.len() == 0 || field.len() > 128 || message.len() == 0 || message.len() > c_max_form_text -> return ~error
+    if field.len() == 0 || field.len() > 128 || message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return ~error
     out := ~error
     existing :: out.field_errors.get(field)
     if existing == None {
         _ :: out.field_errors.add(~field, [String]{~message})
     } else {
         errors := ~existing
-        if errors.len() >= c_max_form_fields -> return out
+        if errors.len() >= C_MAX_FORM_FIELDS -> return out
         errors.push(~message)
         _ :: out.field_errors.add(~field, errors)
     }
@@ -335,9 +335,9 @@ pub fn action_field_error(error: WebFormActionError, field: String, message: Str
 }
 
 pub fn action_form_error(error: WebFormActionError, message: String) -> WebFormActionError {
-    if message.len() == 0 || message.len() > c_max_form_text -> return ~error
+    if message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return ~error
     out := ~error
-    if out.form_errors.len() < c_max_form_fields -> out.form_errors.push(~message)
+    if out.form_errors.len() < C_MAX_FORM_FIELDS -> out.form_errors.push(~message)
     out
 }
 
@@ -386,13 +386,13 @@ pub fn typed_submit_async(form: WebFormTyped) -> WebFormTypedSubmission {
 }
 
 pub fn typed_post(form: WebFormTyped, body: String) -> String !WebFormError {
-    if body.len() > c_max_form_bytes || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
+    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
     decoded :: decode_typed_input(form.input, ~body) ?? return Err(WebFormError.Invalid)
     encode_typed_input(form.input, decoded)
 }
 
 pub fn typed_decode_post(form: WebFormTyped, body: String) -> WebFormDecodedInput !WebFormError {
-    if body.len() > c_max_form_bytes || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
+    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
     decode_typed_input(form.input, ~body) ?? return Err(WebFormError.Invalid)
 }
 
@@ -629,14 +629,14 @@ fn decode_typed_input(input: WebFormInput, body: String) -> ?WebFormDecodedInput
     seen := [String]{}
     if body.len() > 0 {
         pairs := split_amp(body)
-        if pairs.len() > c_max_form_fields -> return None
+        if pairs.len() > C_MAX_FORM_FIELDS -> return None
         loop pair in pairs {
             if pair.len() == 0 -> return None
             eq := find_byte(pair, 61)
             if eq <= 0 -> return None
             key := url_decode(slice_text(pair, 0, eq))
             value := url_decode(slice_text(pair, eq + 1, pair.len()))
-            if !valid_name(key) || has_control_text(key) || has_control_text(value) || value.len() > c_max_form_text -> return None
+            if !valid_name(key) || has_control_text(key) || has_control_text(value) || value.len() > C_MAX_FORM_TEXT -> return None
             if contains_name(seen, key) -> return None
             index := wire_index(input.fields, key)
             if index < 0 -> return None
@@ -743,15 +743,15 @@ fn valid_encoding(text: String) -> Bool {
     true
 }
 fn fields_valid(fields: [WebFormFieldSpec]) -> Bool {
-    if fields.len() == 0 || fields.len() > c_max_form_fields -> return false
+    if fields.len() == 0 || fields.len() > C_MAX_FORM_FIELDS -> return false
     names := [String]{}
     wires := [String]{}
     loop field in fields {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return false
-        if field.label.len() > c_max_form_text -> return false
+        if field.label.len() > C_MAX_FORM_TEXT -> return false
         if field.default != None {
             default :: field.default
-            if default.len() > c_max_form_text || has_control_text(~default) -> return false
+            if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return false
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return false
         names.push(field.name)

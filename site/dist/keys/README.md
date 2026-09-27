@@ -1,28 +1,38 @@
 # Jet public trust root
 
-This directory is the publication staging point for public trust metadata. It
-contains no private keys. The checked-in manifest is deliberately marked
-`awaiting-key-ceremony`; no test or dogfood key is an official Jet trust root.
+This directory is the static publication staging point for public trust
+metadata. It contains no private keys. The checked-in
+[`trust-manifest.json`](trust-manifest.json) has status
+`awaiting-key-ceremony`, with no root or keys; a test or dogfood key is never
+an official Jet trust root.
 
-The stable index key address is
-`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`.
-This is the canonical public trust-root path under the owned `keys.jet-lang.dev`
-domain; key rotation changes the recorded key, not this address.
-When production trust is ready, that file must contain one
-`key-id:base64-public-key` line. The manifest records its key id and `ed25519`
-algorithm when the key is prepared; the signed index manifest records
-`issued_unix` and `expires_unix` as the validity window.
+The stable Nix index key address is
+`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. That address is stable
+across key rotation. Once a production public key is prepared, the file at
+that address contains one `key-id:base64-public-key` line. The manifest records
+the key id and `ed25519` algorithm, and a signed index manifest records
+`issued_unix` and `expires_unix` for its validity window.
 
-Review that document, then install its value as the client's pinned
-`<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub` file. The signed index URL is
-configured separately in `<JETPACK_ROOT>/config/nix-index-v1.endpoint`; the
-client never trusts a key returned by a host automatically.
+Review the published key and install its value as the client's pinned:
 
-The missing key file is intentional. This tree must not carry a test, dogfood,
-or generated stand-in key while the owner-controlled ceremony is pending.
+```text
+<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub
+```
 
-After the owner-controlled production key ceremony, prepare the complete set
-with:
+The index endpoint is configured separately in:
+
+```text
+<JETPACK_ROOT>/config/nix-index-v1.endpoint
+```
+
+A client never trusts a key returned by a host automatically. The exporter
+accepts only `key-id:base64-public-key` files containing a 32-byte Ed25519 key.
+HMAC `TrustKey` secrets are host-only and must not enter this directory.
+
+## Stage trust metadata
+
+After the owner-controlled production key ceremony, stage the complete public
+set with:
 
 ```sh
 tools/jetpack-infra/stage-trust-root.sh \
@@ -32,16 +42,13 @@ tools/jetpack-infra/stage-trust-root.sh \
   --bootstrap <jetpack-root>
 ```
 
-The exporter accepts only `key-id:base64-public-key` files with a 32-byte
-Ed25519 key. HMAC `TrustKey` secrets are host-only and must never enter this
-directory. Rotation requires an offline threshold-root decision, verification
-of the new root by the old root, a manual update of each verifier's local pin,
-and a reviewed replacement manifest. A host-returned key is never an automatic
-replacement for the local pin.
+Rotation requires an offline threshold-root decision, verification of the new
+root by the old root, a manual update of each verifier's local pin, and a
+reviewed replacement manifest. DNS, TLS, production signing, and hosting are
+separate publication controls; this directory supplies public metadata and
+signing inputs, not private signing authority.
 
-Real DNS, TLS, production signing, and hosting remain pending. The one-command
-publish step, after those gates are complete, is:
-
-```sh
-rsync -a --checksum --ignore-existing site/dist/keys/ "$HOST_ROOT/keys/"
-```
+The trust-root procedure is
+[`docs/spec/packaging/trust-root.md`](../../../docs/spec/packaging/trust-root.md),
+and the publication checks are exercised by
+[`tests/jetpack_trust_root.rs`](../../../tests/jetpack_trust_root.rs).

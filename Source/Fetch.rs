@@ -393,6 +393,7 @@ impl<'a> Resolver<'a> {
             project_dir: Some(self.project_root),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = jetpack::Foreign::realize_manifest_dependencies(
             &roots,

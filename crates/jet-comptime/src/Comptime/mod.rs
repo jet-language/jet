@@ -76,17 +76,18 @@ mod typed_text_kernel {
 }
 
 pub use AmbientRuntime::{
-    ambient_hooks, ambient_runtime_snapshot, ambient_worker_context, package_read_root,
-    record_package_input, try_ambient_core_closure, try_ambient_mir_handle,
-    try_ambient_standalone_closure, try_ambient_standalone_closure_mut,
+    ambient_hooks, ambient_mir_prelude_hook, ambient_runtime_snapshot, ambient_worker_context,
+    package_read_root, record_package_input, try_ambient_core_closure, try_ambient_mir_handle,
+    try_ambient_mir_prelude, try_ambient_standalone_closure, try_ambient_standalone_closure_mut,
     try_core_call as try_ambient_core_call, try_core_call_typed as try_ambient_core_call_typed,
     try_core_call_typed_with_sink, try_extern_call as try_ambient_extern_call,
     try_handle as try_ambient_handle, try_mir_extern_call as try_ambient_mir_extern_call,
     with_ambient, with_ambient_core_closure, with_ambient_mir_extern, with_ambient_mir_handle,
-    with_ambient_runtime_snapshot, with_ambient_worker_context, with_package_read_context,
-    AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall, AmbientHandle,
-    AmbientMirExternCall, AmbientMirHandle, AmbientMirHandleResult, AmbientRuntimeSnapshot,
-    AmbientStandaloneClosure, AmbientWorkerContext, StandaloneClosureHost,
+    with_ambient_mir_prelude, with_ambient_runtime_snapshot, with_ambient_worker_context,
+    with_package_read_context, AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall,
+    AmbientHandle, AmbientMirExternCall, AmbientMirExternResult, AmbientMirExternWriteback,
+    AmbientMirHandle, AmbientMirHandleResult, AmbientMirPreludeCall, AmbientMirPreludeResult,
+    AmbientRuntimeSnapshot, AmbientStandaloneClosure, AmbientWorkerContext, StandaloneClosureHost,
 };
 pub use Template::{
     format_tir_template_body, TemplateBody, TemplateHole, TemplateHoleKind, TemplateItem,

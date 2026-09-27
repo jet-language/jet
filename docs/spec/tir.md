@@ -1,57 +1,86 @@
 # TIR semantic core
 
-Canonical definitions stay in `crates/jet-codegen/src/Codegen/TIR/mod.rs` and
-its exhaustive engine matches. This page records the lowering boundary and the
-optimizer fact-channel contract.
+This page is the compiler contract at the boundary between semantic analysis and
+executable lenses. It covers totality, the read-only fact channel, lowering,
+and coverage obligations. The current host implementation is
+`crates/jet-codegen/src/Codegen/TIR/mod.rs` and its exhaustive matches; the
+staged self-host port under `Compiler/JetFoundation/Source/TIR/TIR.jet` must
+preserve the same contract.
 
-## Law (R12 / D-ONECORE1=A)
+TIR is a semantic contract, not a commitment to Rust as a permanent
+implementation and not a claim that the self-host port is already the active
+compiler. A port may change representation, but it may not move semantic
+choices into an executable lens or create a second meaning.
 
-One structured semantic core. Every engine (AOT emit, Cranelift, interpreter)
-consumes that core exhaustively. Surface sugar expands in lowering (or earlier
-sema rewrite) into core nodes engines already handle.
+## One semantic core (R12 / D-ONECORE1=A)
 
-## Fact channel (#2301 / #668 amendment)
+There is one structured semantic core. Every executable lens—Rust AOT emit,
+Cranelift, interpreter, and web—consumes that core exhaustively. Surface sugar
+expands during lowering or an earlier sema rewrite into core nodes that those
+lenses already handle. A coverage miss is an internal compiler error, never a
+fallback.
 
-The frozen TIR exposes one typed, read-only `TFactChannel` view. It projects
-facts already selected by sema from existing TIR carriers; it is not a side
-table, a third IR, or a third executable lens. The view has no per-node heap
-allocation. Its first classes and carriers are:
+TIR is post-sema and total: every fact codegen needs is carried concretely on
+the node, never re-inferred through a fallback. The emitter pattern-matches
+those fields and formats output; it does not re-run semantic decisions such as
+expression typing or overflow classification. `tir_covers` is the coverage
+proof for reachable functions.
+
+## Read-only fact channel
+
+The frozen TIR exposes one typed, borrowed `TFactChannel` view. It projects facts
+already selected by sema from existing TIR carriers; it is not a side table, a
+third IR, or a third executable lens, and it adds no per-node heap allocation.
+The initial fact/carrier contract is:
 
 | Fact | TIR carrier | Missing fact |
 |---|---|---|
-| Type | `TExpr.ty`, typed locals/parameters, `TFunc.ret` | Keep the conservative typed operation. |
-| Integer bounds | `Type::integer_range`, exact integer literals, `TNumericOp::InlineRange`, fixed-list proof | Keep the checked range/index operation. |
-| Exclusivity | sema `AccessConvention` lowered to `TCallArg` borrow flags and `Borrow` nodes | Keep shared/unknown memory dependencies and wrappers. |
+| Type | `TExpr.ty`, typed locals and parameters, `TFunc.ret` | Keep the conservative typed operation. |
+| Integer bounds | `Type::integer_range`, exact integer literals, `TNumericOp::InlineRange`, fixed-list proof | Keep the checked range or index operation. |
+| Exclusivity | sema `AccessConvention` lowered to `TCallArg` borrow flags and `Borrow` nodes | Keep shared or unknown memory dependencies and wrappers. |
 | Purity | sema `Func.is_pure` and `AutoVectorizationFacts.effect_free_body` | Do not apply a reorder or vector hint. |
-| Comptime value | sema comptime binding facts lowered to `TExprKind::CtLit` | Keep runtime evaluation/serialization. |
+| Comptime value | sema comptime binding facts lowered to `TExprKind::CtLit` | Keep runtime evaluation or serialization. |
 
-The channel is consumed read-only by both executable lenses. A missing field
-means “not proven”; it never authorizes codegen to re-derive sema policy. A
-private SSA implementation may be derived inside an optimized lens, but it is
-not a third semantic representation or source of truth. Every TIR construct
-remains exhaustive for AOT, Cranelift, interpreter, and web.
+Both executable lenses consume the channel read-only. A missing field means
+“not proven”; it never authorizes codegen to re-derive sema policy. An optimized
+lens may derive a private SSA form internally, but that form is not a third
+semantic representation or source of truth. Every TIR construct remains
+exhaustive for AOT, Cranelift, interpreter, and web.
 
-## Desugared at lowering (engines must not special-case)
+## Lowering rules
 
-| Surface | Core form | Card |
+Engines must not special-case these surface forms:
+
+| Surface | Core form | Authority |
 |---|---|---|
-| `freeze(x)` | `Clone`, `MaterializeView`, or `ExplicitCopy` selected by sema-approved source type; frozen provenance stays in the capture metadata | D-CONC-FREEZE1=A |
-| `task ^name { … }` | existing task lambda with an explicit consuming capture; the task crossing prover owns legality | D-CONC-FREEZE1=A |
+| `freeze(x)` | `Clone`, `MaterializeView`, or `ExplicitCopy`, selected by the sema-approved source type; frozen provenance stays in capture metadata. | D-CONC-FREEZE1=A |
+| `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
 
-## Core keepers (engines must handle)
+The freeze example is a lowering rule, not an engine-side capture check. A
+self-host implementation must carry the same already-proved ownership facts to
+each lens.
 
-Literals (`IntLit`/`FloatLit`/`BoolLit`/`CharLit`/`StrLit` plain), `Local`,
-`Call`, `MethodCall`/`BuiltinMethod`/`CoreCall`, `ListLit`, `TupleLit`,
-`StructLit`, `EnumLit`, `Field`, `Index`, `Binary`/`Unary`, `If`/`IfExpr`,
-`Match`-shaped stmts, `Let`/`Assign`, `Loop`/`While`/`CountedLoop`/`Range`,
-`Return`/`Break`/`Continue`, `Clone`/`Borrow`/`Drop`, `Print`, `Lambda`,
-`Inline` (empty comptime elision), and the host/select/task nodes already in
-`mod.rs`. Prefer deleting a wide node over adding a new one.
+## Core keepers
 
-## Proof
+Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and
+plain `StrLit`), `Local`, `Call`, `MethodCall`/`BuiltinMethod`/`CoreCall`,
+`ListLit`, `TupleLit`, `StructLit`, `EnumLit`, `Field`, `Index`,
+`Binary`/`Unary`, `If`/`IfExpr`, `Match`-shaped statements, `Let`/`Assign`,
+`Loop`/`While`/`CountedLoop`/`Range`, `Return`/`Break`/`Continue`,
+`Clone`/`Borrow`/`Drop`, `Print`, `Lambda`, `Inline` (empty comptime
+elision), and the host, select, and task nodes defined by `mod.rs`. Prefer
+deleting a wide node over adding a new one.
 
-- No hand-maintained JIT gap entries. `jit_coverage_audit` must stay green.
-- `examples/features/concurrency/freeze_capture.jet` is the executable proof
+## Proof obligations
+
+- Keep `jit_coverage_audit` as the coverage check; a hand-maintained gap list
+  is not a substitute for the structural proof.
+- `examples/features/concurrency/freeze_capture.jet` is the cross-lens fixture
   for AOT, default `jet run`, and forced interpretation. Comptime returns an
-  already-owned `CtValue` for `freeze`; the REPL task boundary remains E1802,
-  and web has no separate freeze policy or engine-side capture check.
+  already-owned `CtValue` for `freeze`.
+- The REPL task boundary remains E1802, and web has no separate freeze policy or
+  engine-side capture check.
+
+These checks protect the contract's boundaries. They do not turn the current
+Rust host into a permanent architecture commitment, and they do not let a
+future `Compiler/` implementation silently introduce a parallel semantic core.

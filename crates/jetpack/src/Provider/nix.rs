@@ -224,6 +224,9 @@ impl Provider for NixProvider {
             }
             Err(error) => return Err(ProviderError::NixIndex(error)),
         };
+        crate::Store::require_catalog_permission(
+            Some(verified.trust.label()), ctx.allow_local_nix_catalog,
+        ).map_err(|error| ProviderError::BadOutput(error.to_string()))?;
         let roots = ctx.nix_roots.ok_or_else(|| {
             ProviderError::BadOutput(
                 "index-backed Nix realization has no Hangar roots for closure admission".into(),
@@ -242,6 +245,7 @@ impl Provider for NixProvider {
             roots,
             &requests,
             ctx.offline,
+            None,
             current_progress(),
         )
         .map_err(|error| nix_cache_error(roots, error))?;

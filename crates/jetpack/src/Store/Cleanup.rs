@@ -1246,7 +1246,7 @@ pub fn hangar_doctor(
 
         let mut repair_errors = BTreeMap::new();
         for (store_path, request) in requests {
-            if let Err(error) = admit_nix_closure_with_progress(roots, &[request], offline, None) {
+            if let Err(error) = admit_nix_closure_with_progress(roots, &[request], offline, None, None) {
                 repair_errors.insert(store_path, error.to_string());
             }
         }
@@ -1572,6 +1572,20 @@ fn scan_doctor_cas(
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         let metadata = fs::symlink_metadata(&path)?;
+        // RuntimePolicy owns this namespace. Removing it can split active
+        // shared-CAS lock holders across different lock-file inodes.
+        if name == ".locks" {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                report.findings.push(HangarDoctorFinding {
+                    kind: "drift".to_string(),
+                    subject: doctor_subject(hangar, &path),
+                    detail: "CAS lock namespace is not a directory".to_string(),
+                    fixed: false,
+                    repair: DoctorRepair::None,
+                });
+            }
+            continue;
+        }
         if name.ends_with(PARTIAL_SUFFIX) {
             report.findings.push(HangarDoctorFinding {
                 kind: "stale stage".to_string(),

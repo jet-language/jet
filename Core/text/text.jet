@@ -589,36 +589,36 @@ fn combining_class(cp: Int) -> Int {
 
 fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
 
-c_sbase :: 44032
-c_lbase :: 4352
-c_vbase :: 4449
-c_tbase :: 4519
-c_lcount :: 19
-c_vcount :: 21
-c_tcount :: 28
-c_ncount :: 588
-c_scount :: 11172
+C_SBASE :: 44032
+C_LBASE :: 4352
+C_VBASE :: 4449
+C_TBASE :: 4519
+C_LCOUNT :: 19
+C_VCOUNT :: 21
+C_TCOUNT :: 28
+C_NCOUNT :: 588
+C_SCOUNT :: 11172
 
 fn hangul_decompose(cp: Int) -> [Int] {
-    sindex :: cp - c_sbase
-    if sindex < 0 || sindex >= c_scount -> return [Int]{cp}
-    l :: c_lbase + sindex /% c_ncount
-    v :: c_vbase + (sindex % c_ncount) /% c_tcount
-    t :: c_tbase + sindex % c_tcount
-    if t == c_tbase -> return [Int]{l, v}
+    sindex :: cp - C_SBASE
+    if sindex < 0 || sindex >= C_SCOUNT -> return [Int]{cp}
+    l :: C_LBASE + sindex /% C_NCOUNT
+    v :: C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT
+    t :: C_TBASE + sindex % C_TCOUNT
+    if t == C_TBASE -> return [Int]{l, v}
     [Int]{l, v, t}
 }
 
 fn hangul_compose(a: Int, b: Int) -> ?Int {
-    lindex :: a - c_lbase
-    if lindex >= 0 && lindex < c_lcount {
-        vindex :: b - c_vbase
-        if vindex >= 0 && vindex < c_vcount -> return Val(c_sbase + (lindex * c_vcount + vindex) * c_tcount)
+    lindex :: a - C_LBASE
+    if lindex >= 0 && lindex < C_LCOUNT {
+        vindex :: b - C_VBASE
+        if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
     }
-    sindex :: a - c_sbase
-    if sindex >= 0 && sindex < c_scount && sindex % c_tcount == 0 {
-        tindex :: b - c_tbase
-        if tindex > 0 && tindex < c_tcount -> return Val(a + tindex)
+    sindex :: a - C_SBASE
+    if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
+        tindex :: b - C_TBASE
+        if tindex > 0 && tindex < C_TCOUNT -> return Val(a + tindex)
     }
     None
 }
@@ -633,7 +633,7 @@ fn decompose(text: String, compat: Bool) -> [Int] {
 }
 
 fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
-    if cp >= c_sbase && cp < c_sbase + c_scount -> return hangul_decompose(cp)
+    if cp >= C_SBASE && cp < C_SBASE + C_SCOUNT -> return hangul_decompose(cp)
     if cp == 192 -> return [Int]{65, 768}
     if cp == 193 -> return [Int]{65, 769}
     if cp == 194 -> return [Int]{65, 770}
@@ -887,16 +887,16 @@ fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
 
 
 fn is_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
-fn is_l(cp: Int) -> Bool { cp >= c_lbase && cp < c_lbase + c_lcount }
-fn is_v(cp: Int) -> Bool { cp >= c_vbase && cp < c_vbase + c_vcount }
-fn is_t(cp: Int) -> Bool { cp >= c_tbase + 1 && cp < c_tbase + c_tcount }
+fn is_l(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
+fn is_v(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
+fn is_t(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }
 fn is_lv(cp: Int) -> Bool {
-    s :: cp - c_sbase
-    s >= 0 && s < c_scount && s % c_tcount == 0
+    s :: cp - C_SBASE
+    s >= 0 && s < C_SCOUNT && s % C_TCOUNT == 0
 }
 fn is_lvt(cp: Int) -> Bool {
-    s :: cp - c_sbase
-    s >= 0 && s < c_scount && s % c_tcount != 0
+    s :: cp - C_SBASE
+    s >= 0 && s < C_SCOUNT && s % C_TCOUNT != 0
 }
 fn is_ri(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
 fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }

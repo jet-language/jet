@@ -187,6 +187,15 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open this Result handler branch")?;
         let mut stmts = Vec::new();
         loop {
+            // S6-R: a nested block statement ends at `}`, so consume the
+            // lexer-inserted zero-width terminator before the next branch item.
+            // Authored semicolons remain visible to the existing diagnostics.
+            if matches!(self.peek().kind, TokKind::Semi)
+                && self.peek().span.start == self.peek().span.end
+            {
+                self.bump();
+                continue;
+            }
             match self.peek().kind {
                 TokKind::RBrace => {
                     let span = self.bump().span;
@@ -1631,6 +1640,15 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open this `if` branch")?;
         let mut stmts = Vec::new();
         loop {
+            // S6-R: a nested block statement ends at `}`, so consume the
+            // lexer-inserted zero-width terminator before the next value item.
+            // Authored semicolons remain visible to the existing diagnostics.
+            if matches!(self.peek().kind, TokKind::Semi)
+                && self.peek().span.start == self.peek().span.end
+            {
+                self.bump();
+                continue;
+            }
             match &self.peek().kind {
                 TokKind::RBrace => {
                     let span = self.peek().span;
@@ -1923,5 +1941,253 @@ impl<'a> Parser<'a> {
             else_body,
             span,
         })
+    }
+}
+
+#[cfg(test)]
+mod value_block_tests {
+    use crate::AST::{Expr, Item, Program, Stmt};
+    use crate::Diagnostics::Diagnostic;
+    use crate::Lexer::lex;
+    use crate::Parser::parse;
+
+    fn parsed(source: &str) -> Program {
+        let (tokens, lex_diagnostics) = lex(source);
+        assert!(
+            lex_diagnostics.is_empty(),
+            "lex diagnostics for valid source: {lex_diagnostics:?}"
+        );
+        parse(&tokens).unwrap_or_else(|diagnostics| panic!("parse diagnostics: {diagnostics:?}"))
+    }
+
+    fn rejected(source: &str) -> Vec<Diagnostic> {
+        let (tokens, lex_diagnostics) = lex(source);
+        assert!(
+            lex_diagnostics.is_empty(),
+            "lex diagnostics for parser rejection: {lex_diagnostics:?}"
+        );
+        parse(&tokens).expect_err("source should be rejected")
+    }
+
+    fn binding_init<'a>(program: &'a Program, function_name: &str) -> &'a Expr {
+        let function = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == function_name => Some(function),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing function `{function_name}`"));
+        let Some(Stmt::Val(binding)) = function.body.first() else {
+            panic!("function `{function_name}` does not start with a value binding");
+        };
+        &binding.init
+    }
+
+    #[test]
+    fn value_block_accepts_control_statement_before_tail() {
+        let program = parsed(
+            r#"
+fn run() {
+    result :: if ready -> {
+        loop {
+            break
+        }
+        1
+    } else -> 0
+}
+"#,
+        );
+        let Expr::If {
+            then_body,
+            then_value,
+            else_value,
+            ..
+        } = binding_init(&program, "run")
+        else {
+            panic!("binding initializer is not an if expression");
+        };
+        assert_eq!(then_body.len(), 1);
+        assert!(matches!(&then_body[0], Stmt::Loop { .. }));
+        assert!(matches!(then_value.as_ref(), Expr::Int(1, ..)));
+        assert!(matches!(else_value.as_ref(), Expr::Int(0, ..)));
+    }
+
+    #[test]
+    fn value_block_accepts_multiple_nested_control_statements_before_tail() {
+        let program = parsed(
+            r#"
+fn run() {
+    result :: if ready -> {
+        loop {
+            if done {
+                break
+            }
+        }
+        if fallback {
+            notify()
+        }
+        7
+    } else -> 0
+}
+"#,
+        );
+        let Expr::If {
+            then_body,
+            then_value,
+            ..
+        } = binding_init(&program, "run")
+        else {
+            panic!("binding initializer is not an if expression");
+        };
+        assert_eq!(then_body.len(), 2);
+        assert!(matches!(&then_body[0], Stmt::Loop { .. }));
+        assert!(matches!(
+            &then_body[1],
+            Stmt::Switch { arms, .. } if arms.len() == 1
+        ));
+        assert!(matches!(then_value.as_ref(), Expr::Int(7, ..)));
+    }
+
+    #[test]
+    fn value_block_preserves_non_value_and_diverging_tail_rules() {
+        let diagnostics = rejected(
+            r#"
+fn run() {
+    result :: if ready -> {
+        loop {
+            break
+        }
+        side :: 1
+    } else -> 0
+}
+"#,
+        );
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0114"),
+            "expected E0114 for a non-value tail, got {diagnostics:?}"
+        );
+        assert!(
+            !diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+            "synthetic terminator must not create a spurious E0003: {diagnostics:?}"
+        );
+
+        let loop_value = parsed(
+            r#"
+fn run() {
+    result :: if ready -> {
+        loop {
+            break
+        }
+    } else -> 0
+}
+"#,
+        );
+        let Expr::If {
+            then_body,
+            then_value,
+            ..
+        } = binding_init(&loop_value, "run")
+        else {
+            panic!("binding initializer is not an if expression");
+        };
+        assert!(then_body.is_empty());
+        assert!(matches!(
+            then_value.as_ref(),
+            Expr::CallValue { callee, .. }
+                if matches!(
+                    callee.as_ref(),
+                    Expr::Lambda(lambda) if lambda.meta.result_loop
+                )
+        ));
+
+        let program = parsed(
+            r#"
+fn run() {
+    result :: if ready -> {
+        return
+    } else -> 0
+}
+"#,
+        );
+        let Expr::If {
+            then_body,
+            then_value,
+            ..
+        } = binding_init(&program, "run")
+        else {
+            panic!("binding initializer is not an if expression");
+        };
+        assert!(matches!(then_body.as_slice(), [Stmt::Return(None, _)]));
+        assert!(matches!(then_value.as_ref(), Expr::NoElse(_)));
+    }
+
+    #[test]
+    fn value_block_rejects_authored_semicolon_and_incomplete_input() {
+        let diagnostics = rejected(
+            r#"
+fn run() {
+    result :: if ready -> {
+        1;
+    } else -> 0
+}
+"#,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0114"),
+            "authored semicolon must keep the value-tail rejection: {diagnostics:?}"
+        );
+
+        let diagnostics = rejected(
+            r#"
+fn run() {
+    result :: if ready -> {
+        1
+    } else -> {
+        0
+"#,
+        );
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic
+                        .what
+                        .contains("Expected `}` to close this `if` branch")
+            }),
+            "incomplete value branch must remain rejected: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn result_handler_value_block_accepts_control_statement_before_tail() {
+        let program = parsed(
+            r#"
+fn run() {
+    result :: fetch() ? ok -> {
+        loop {
+            break
+        }
+        ok
+    }
+    ! err -> err
+}
+"#,
+        );
+        let Expr::If {
+            then_body,
+            then_value,
+            ..
+        } = binding_init(&program, "run")
+        else {
+            panic!("binding initializer is not a Result handler");
+        };
+        assert_eq!(then_body.len(), 1);
+        assert!(matches!(&then_body[0], Stmt::Loop { .. }));
+        assert!(matches!(
+            then_value.as_ref(),
+            Expr::Ident(name, _) if name == "ok"
+        ));
     }
 }

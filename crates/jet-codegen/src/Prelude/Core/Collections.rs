@@ -1504,14 +1504,7 @@ pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
     cursor.done = !jet_loop_range_has_next(cursor);
 }
 
-type JetLoopAny = Box<dyn std::any::Any>;
-
-struct JetLoopIterCursor {
-    iter: Box<dyn Iterator<Item = JetLoopAny>>,
-    current: Option<JetLoopAny>,
-    step: usize,
-    exhausted: bool,
-}
+include!("LoopCursor.rs");
 fn jet_loop_iter_init<C: JetLoopSource>(
     collection: C,
     step_value: i64,
@@ -1530,105 +1523,8 @@ fn jet_loop_iter_init_checked<C: JetLoopSource>(
     by_value: bool,
     source_kind: JetLoopSourceKind,
 ) -> Result<JetLoopIterCursor, &'static str> {
-    let step = if has_step { step_value } else { 1 };
-    if step <= 0 {
-        return Err("iterator loop stride must be positive");
-    }
-    let mut iter = collection.jet_loop_source(source_kind, by_value);
-    let current = iter.next();
-    let exhausted = current.is_none();
-    Ok(JetLoopIterCursor {
-        iter,
-        current,
-        step: step as usize,
-        exhausted,
-    })
-}
-
-struct JetByteLoopIterCursor<'a> {
-    iter: std::slice::Iter<'a, u8>,
-    current: Option<u8>,
-    step: usize,
-    exhausted: bool,
-}
-
-#[inline(always)]
-fn jet_loop_iter_bytes_init<'a>(
-    bytes: &'a [u8],
-    step_value: i64,
-    has_step: bool,
-) -> JetByteLoopIterCursor<'a> {
-    let step = if has_step { step_value } else { 1 };
-    if step <= 0 {
-        jet_panic("<core.prelude>", 0, "iterator loop stride must be positive");
-    }
-    let mut iter = bytes.iter();
-    let current = iter.next().copied();
-    let exhausted = current.is_none();
-    JetByteLoopIterCursor {
-        iter,
-        current,
-        step: step as usize,
-        exhausted,
-    }
-}
-
-#[inline(always)]
-fn jet_loop_iter_bytes_has_next(cursor: &JetByteLoopIterCursor<'_>) -> bool {
-    cursor.current.is_some()
-}
-
-#[inline(always)]
-fn jet_loop_iter_bytes_value(cursor: &mut JetByteLoopIterCursor<'_>) -> u8 {
-    cursor
-        .current
-        .take()
-        .unwrap_or_else(|| jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion"))
-}
-
-#[inline(always)]
-fn jet_loop_iter_bytes_advance(cursor: &mut JetByteLoopIterCursor<'_>) {
-    if cursor.exhausted {
-        return;
-    }
-    for _ in 1..cursor.step {
-        if cursor.iter.next().is_none() {
-            cursor.current = None;
-            cursor.exhausted = true;
-            return;
-        }
-    }
-    cursor.current = cursor.iter.next().copied();
-    cursor.exhausted = cursor.current.is_none();
-}
-
-fn jet_loop_iter_has_next(cursor: &JetLoopIterCursor) -> bool {
-    cursor.current.is_some()
-}
-
-fn jet_loop_iter_value<T: 'static>(cursor: &mut JetLoopIterCursor) -> T {
-    let Some(value) = cursor.current.take() else {
-        jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion");
-    };
-    match value.downcast::<T>() {
-        Ok(value) => *value,
-        Err(_) => jet_panic("<core.prelude>", 0, "iterator loop item type does not match MIR"),
-    }
-}
-
-fn jet_loop_iter_advance(cursor: &mut JetLoopIterCursor) {
-    if cursor.exhausted {
-        return;
-    }
-    for _ in 1..cursor.step {
-        if cursor.iter.next().is_none() {
-            cursor.current = None;
-            cursor.exhausted = true;
-            return;
-        }
-    }
-    cursor.current = cursor.iter.next();
-    cursor.exhausted = cursor.current.is_none();
+    let iter = collection.jet_loop_source(source_kind, by_value);
+    jet_loop_iter_init_typed(iter, step_value, has_step)
 }
 
 fn jet_loop_source_kind_name(kind: JetLoopSourceKind) -> String {
@@ -1894,36 +1790,6 @@ impl<T: 'static> JetLoopSource for JetIter<T> {
     }
 }
 
-struct JetStringChars {
-    bytes: Vec<u8>,
-    offset: usize,
-}
-
-impl JetStringChars {
-    fn new(value: String) -> Self {
-        Self {
-            bytes: value.into_bytes(),
-            offset: 0,
-        }
-    }
-}
-
-impl Iterator for JetStringChars {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let end = self.offset.saturating_add(4).min(self.bytes.len());
-        let bytes = self.bytes.get(self.offset..end)?;
-        // The window can end inside the following scalar.
-        let tail = match std::str::from_utf8(bytes) {
-            Ok(tail) => tail,
-            Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()?,
-        };
-        let value = tail.chars().next()?;
-        self.offset += value.len_utf8();
-        Some(value)
-    }
-}
 
 impl JetLoopSource for String {
     fn jet_loop_source(

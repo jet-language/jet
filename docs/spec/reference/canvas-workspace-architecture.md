@@ -1,22 +1,52 @@
-# Canvas Workspace Architecture
+# Canvas workspace architecture
 
-Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+This document describes Canvas's source-backed project boundary and the editor
+seams around it. It is for the devserver, Canvas client, and Jetpack
+contributors who need one model for single files, packages, and workspaces. The
+wire shape is defined by [`canvas-protocol.md`](canvas-protocol.md); vocabulary
+is in [Jet vocabulary](../vocabulary.md). The executable boundary is in
+[`schema_api.rs`](../../../crates/jet-devserver/src/Canvas/schema_api.rs),
+[`project_scan.rs`](../../../crates/jet-devserver/src/Canvas/project_scan.rs),
+[`project_transactions.rs`](../../../crates/jet-devserver/src/Canvas/project_transactions.rs),
+and the graph/editor seams are linked below.
 
-Canvas is a source-backed package/workspace manager. Jet source files,
-`package.jet`, `workspace.jet`, environment source, and `.jet/lock` remain the
-only semantic state. Canvas projects them, edits them through checked source
-transactions, and reprojects after formatting and front-end validation.
+Canvas projects source; it does not introduce a semantic project database. Jet
+source files, `package.jet`, `workspace.jet`, environment source such as
+`env.jet`, and `.jet/lock` are the semantic inputs. Canvas formats and validates
+source transactions, then projects the resulting source again.
 
-R9 stays intact. `jet run foo.jet` and `jet dev foo.jet --target=web` remain
-ceremony-free single-file flows. Workspace mode is discovered when the entry
-file belongs to a package/workspace, or selected explicitly from Canvas.
+The single-file flows remain direct: `jet run foo.jet` and
+`jet dev foo.jet --target=web` do not require a project asset. Canvas discovers
+workspace mode when the entry file belongs to a package or workspace, or when
+the user selects that mode explicitly.
 
+## Source-backed boundary
 
-## Workspace shape
+The project graph is a view above the function/source graph. Project records
+refer to child graphs with `source_id` and file-qualified source spans. Unknown
+fields are forward-compatible only when they carry non-semantic facts; a client
+must not treat an unrecognized field as an instruction or a second source of
+truth.
 
-### Project Graph
+The source boundary is deliberately explicit:
 
-Add a workspace-level document above the existing file graph:
+- package semantics stay in `package.jet` and package source;
+- workspace membership and workspace evaluation stay in `workspace.jet`;
+- environment packages and dev services stay in environment source, including
+  `env.jet`;
+- dependency resolution facts stay in `.jet/lock`;
+- function and type semantics stay in ordinary `.jet` source.
+
+Viewport, tabs, selection, recent commands, breakpoints, watches, and unsaved
+UI preferences may be local. Shared visual intent uses source-anchored Canvas
+comments only when the user asks to share it. Canvas never creates a binary
+graph asset or a hidden semantic sidecar.
+
+## Project document
+
+`jet.canvas.project` is the project-level document. Its `schema_version` is `1`,
+and its `project_revision` hashes the projected source-truth file set. A
+representative response is:
 
 ```json
 {
@@ -25,34 +55,46 @@ Add a workspace-level document above the existing file graph:
   "project_root": "/repo",
   "project_revision": "sha256-...",
   "entry": "apps/web/main.jet",
-  "files": [
-    {"path": "apps/web/main.jet", "revision": "sha256-...", "kind": "source"}
-  ],
+  "mode": "workspace",
   "workspace": {"path": "workspace.jet", "members": []},
   "packages": [],
   "targets": [],
+  "outputs": [],
   "envs": [],
   "services": [],
+  "files": [
+    {"path": "apps/web/main.jet", "revision": "sha256-...", "kind": "source"}
+  ],
+  "parts": [],
+  "part_conflicts": [],
   "locks": [],
   "diagnostics": [],
-  "source_control": {}
+  "source_control": {"truth": "git-text"},
+  "state_policy": {
+    "semantic": "source",
+    "local": ["tabs", "viewport", "selection", "breakpoints", "watches", "comment_boxes", "staged_nodes"],
+    "shared_visual": "source-anchored-comments"
+  }
 }
 ```
 
-The existing graph document remains the function/source detail view. Project
-records link to file graphs by `source_id` and file-qualified spans. Unknown
-fields stay forward-compatible only for non-semantic facts.
+`mode` is `single_file`, `package`, or `workspace`. `files` carries the
+projected source-truth files and per-file revisions; `parts` and
+`part_conflicts` describe projected source parts and scan conflicts. The
+workspace and package records carry their source paths, so a client can open a
+child graph without inventing a path mapping. `targets` and `outputs` remain
+project facts; selecting one stays local until a command authority receives
+the exact choice.
 
-### Revision Model
+## Revisions and transactions
 
-Use `project_revision` for the projected package/workspace snapshot and
-per-file revisions for edits. A transaction conflicts only when one of its
-touched files or manifests changed. Whole-repo conflict is reserved for edits
-whose read set spans the whole workspace graph.
+A project transaction carries the current `project_revision` and a `files` list
+with the expected revision for every touched path. The server first requires an
+exact project snapshot, then checks each touched file revision before writing.
+This prevents a transaction from applying to a changed projected file set even
+when the requested edit names only one path.
 
-### Transactions
-
-Add project transactions that carry touched files explicitly:
+For example, adding a workspace member uses the project transaction envelope:
 
 ```json
 {
@@ -65,156 +107,176 @@ Add project transactions that carry touched files explicitly:
   "member_path": "packages/logger"
 }
 ```
-
-Every write path follows one rule:
-
-1. Build overlay text for every touched source file.
-2. Run formatter on each changed source.
-3. Re-run the front end and Jetpack manifest/workspace evaluators.
-4. Reject with Jet diagnostics if validation fails.
-5. Write all touched files, then reproject.
-
-The source write is one shared Canvas transaction seam. It compares the
-expected source snapshot again immediately before publish, writes the checked
-candidate to a synced temporary file, and atomically replaces the source file.
-Project transactions use the same seam for every touched file and restore
-completed files from their explicit before/after snapshots if a later publish
-fails. A conflict or I/O failure leaves source and browser undo history at the
-last committed snapshot; no Canvas graph or semantic sidecar is created.
-
-No hidden Canvas DB. Local-only state may store viewport, tabs, selection,
-recent commands, breakpoints, watches, and unsaved UI preferences. Shared visual
-intent uses existing source-anchored comments only when the user asks to share it.
-
-### Command Bridge
-
-Canvas calls existing engines instead of owning replacements:
-
-- `jet check`, `jet test`, `jet build`, `jet dev`
-- Jetpack package graph, lock, catalog, overlay, provider, provenance, and
-  environment realization APIs
-
-Actions need honest authority metadata: source edits, package fetches, env
-entry, service start/stop, secrets, network/cache, build outputs, and touched
-files. Beginner UI summarizes intent; expert UI shows exact grants, hashes,
-lock reasons, and diff.
-
-## Product Surface
-
-- Workspace Map: packages, members, files, imports, direct deps, catalog deps,
-  targets, envs, services, lock/provenance, diagnostics, dirty state.
-- Package Pane: `payload`, package kind, version, edition, runtime, exports,
-  targets, effects, grants, public API, package visibility.
-- Dependency Pane: add/remove/update deps through `package.jet` edits, with lock
-  preview, strict-visibility errors, source channel, hash, and overlay facts.
-- Targets/Tasks Pane: build/test/run/dev/doc/package/publish actions from the
-  package/build graph. Runs through existing CLI/driver surfaces.
-- Dev Pane: env packages, services, ports, logs, secrets, trust prompts, app
-  preview, Canvas preview.
-- Source Graph Pane: existing function graph, scoped by package/file, with
-  cross-file references, rename impact, source jumps, and package boundaries.
-  The `My Canvas` component tree is the compact source-backed entry point for
-  files, function graphs, and the current function's typed variables; its
-  `New`, `Callback`, and `Add` affordances use the existing checked source
-  transactions. `on_*` functions expose callback handler labels and graph
-  navigation from the current `event_views` projection; no handler graph or
-  callback registry is stored outside Jet source.
-- Diagnostics Pane: grouped by workspace, package, file, target, and manifest.
-  Only Jet diagnostics appear.
-- Trust/Provenance Pane: grants, lock reasons, envelopes, SBOM/audit facts,
-  service authority, cache/network writes.
+For `create_package`, `package_path` names the new package directory or
+manifest path in the operation's package-creation fields.
 
 
-## Ratified Decisions
+`preview: true` returns the diff and audit without writing. Apply mode builds an
+overlay for every changed source file, runs the formatter, rechecks the Jet
+front end, and evaluates the relevant package/workspace or Jetpack environment
+input. A diagnostic rejects the complete candidate before publication. The
+response records `touched` files and the changed source transaction rather than
+claiming that a graph-side write occurred.
 
-Ratified 2026-07-08:
+The shared source seam compares the expected snapshot again immediately before
+publish, writes each checked candidate to a synced temporary file, and atomically
+replaces the source file. A multi-file operation publishes all touched files
+through the same seam. If a later publish fails, explicit before/after snapshots
+restore already-published files. Conflicts and I/O failures leave source and
+browser undo history at the previous committed snapshot; no Canvas graph or
+semantic sidecar is created.
 
-- `D-CANVAS-WORKSPACE1=B`: package/workspace graph over source truth. Canvas
-  opens a project graph built from `workspace.jet`, `package.jet`, source files, env
-  source, and `.jet/lock`; file graphs remain child views.
+## Command bridge
+
+Canvas calls existing engines and Jetpack services rather than owning a second
+compiler or command implementation. The command boundary includes `jet check`,
+`jet test`, `jet build`, and `jet dev`, plus the package graph, lock, catalog,
+overlay, provider, provenance, and environment-realization APIs. The project
+scan and transaction implementations are the source of truth for the exact
+operation set.
+
+Every action exposes authority metadata for its effects: source edits, package
+fetches, environment entry, service start/stop, secrets, network/cache use,
+build outputs, and touched files. Beginner UI summarizes intent; expert UI can
+inspect grants, hashes, lock reasons, and the diff. An external adapter is an
+explicit authority boundary, not an implicit fallback for a failed source
+transaction.
+
+## Product surfaces
+
+The project tree may facet the same source-backed facts into:
+
+- a workspace map for packages, members, files, imports, dependencies, targets,
+  environments, services, locks, diagnostics, and dirty state;
+- a package pane for manifest fields, version, edition, runtime, exports,
+  targets, effects, grants, public API, and visibility;
+- a dependency pane that edits `package.jet` with lock preview, visibility
+  diagnostics, source channel, hash, and overlay facts;
+- a targets/tasks pane that dispatches build, test, run, dev, doc, package, and
+  publish through existing CLI/driver surfaces;
+- a dev pane for environment packages, services, ports, logs, secrets, trust,
+  and preview;
+- a source graph pane scoped by package and file, with references, rename
+  impact, source jumps, and package boundaries;
+- a diagnostics pane grouped by workspace, package, file, target, or manifest;
+- a trust/provenance pane for grants, lock reasons, envelopes, audit facts,
+  service authority, and cache/network writes.
+
+The `My Canvas` tree is the compact source-backed entry point for files,
+function graphs, and typed variables. Its `New`, `Callback`, and `Add`
+affordances use checked source transactions. `on_*` functions expose callback
+labels and graph navigation from `event_views`; no handler graph or callback
+registry is stored outside Jet source.
+
+## Ratified boundaries
+
+The following decision IDs define the boundary and remain citations rather than
+separate data models:
+
+- `D-CANVAS-WORKSPACE1=B`: the package/workspace graph is built over
+  `workspace.jet`, `package.jet`, source files, environment source, and
+  `.jet/lock`; file graphs remain child views.
 - `D-CANVAS-WORKSPACE-STATE1=A`: semantic facts persist in source; private
-  viewport/tabs/selection/debug watches stay local; shared visual intent uses
-  explicit source-anchored comments.
+  viewport, tabs, selection, and debug watches stay local; shared visual intent
+  uses explicit source-anchored comments.
 - `D-CANVAS-WORKSPACE-AUTH1=A`: cross-file edits use previewed source
-  transactions with touched-file revisions, formatter, front-end proof, package
-  validation, and audit payloads.
+  transactions with touched-file revisions, formatter and front-end proof,
+  package validation, and audit payloads.
 - `D-CANVAS-WORKSPACE-NAV1=A`: one semantic project tree facets packages,
-  targets, files/modules, symbols, graphs, diagnostics, deps, and Git state.
+  targets, files/modules, symbols, graphs, diagnostics, dependencies, and Git
+  state.
 
 ## Editor architecture
 
-The workspace/project layer is paired with an editor decomposition. The seams
-below are architecture contracts, not a second semantic model.
+The project layer and function editor share one semantic model. Jet source AST
+and semantic facts are the model; the front end is the compiler; graph JSON and
+checked transactions are projections and edits. Rendering, interaction, action
+lookup, Details, and debugging may have separate components, but none may
+become a second semantic store.
 
-Blueprint separates the editor into a persistent graph model, semantic node
-behavior, rendering and interaction, a compiler/validation path, an action
-registry, an editor shell, a reflected details surface, and debugger state.
-Canvas keeps those responsibilities source-backed: Jet source AST/HIR is the
-model, the front end is the compiler, and graph JSON plus checked transactions
-are projections and edits rather than a second semantic store.
+This source-as-model boundary avoids a binary graph asset, merge-only graph
+state, and stale compilation. The node registry and descriptor-driven Details
+surface keep projection coverage and editable fields in one source-backed
+contract.
 
-The durable Jet advantages are source-as-model (no binary graph asset, merge
-pain, or stale compile) and the front end as compiler. The semantic-node
-registry and the descriptor-driven Details surface keep projection coverage
-and editable fields in one source-backed model.
-### Editor seams
+### Data-graph model
 
-The editor has four source-backed seams. Jet source is the only semantic truth;
-everything below is projection and interaction.
+[`graph_projection.rs`](../../../crates/jet-devserver/src/Canvas/graph_projection.rs)
+and [`graph_json.rs`](../../../crates/jet-devserver/src/Canvas/graph_json.rs) map
+source to graph facts. A stable `node_descriptor_id` lets the render layer use
+descriptor metadata instead of re-deriving style from `kind` string matching.
 
-### Seam 1 — Data-graph model
+### Semantic node descriptors
 
-`graph_projection.rs` + `graph_json.rs` map source to graph facts. Emit a
-stable `node_descriptor_id` per node so the render layer never re-derives
-style from `kind` string matching.
+[`node_catalog.rs`](../../../crates/jet-devserver/src/Canvas/node_catalog.rs) owns
+presentation, palette, transaction, and default-editor metadata for each node
+kind. The descriptor shape is conceptually:
 
-### Seam 2 — Semantic node layer
-
-A descriptor table in `crates/jet-devserver/src/Canvas/node_catalog.rs` is the
-single source of truth for every node kind:
-
-```
+```rust
 NodeDescriptor {
-  id: "branch",
-  archetype: Control,
-  glyph: "◇",
-  header: (…colors…),
-  hover: "Chooses which path runs next.",
-  palette: PaletteMeta { category: Flow, insertable: true, rank_terms: [...] },
-  projection: fn(&Stmt) => Option<Node>,
-  transaction: "insert_branch",
-  default_editors: [...],
+    id,
+    kind,
+    archetype,
+    projected,
+    presentation: {
+        label,
+        glyph,
+        hover,
+        accent,
+        header,
+        style_archetype,
+        layout_family,
+        shape,
+    },
+    palette: {
+        visible,
+        insertable,
+        category,
+        rank,
+        rank_terms,
+    },
+    transaction,
+    default_editor,
 }
 ```
 
-The graph protocol embeds the descriptor table. `graph-rendering.js` uses its
-presentation and hover facts; `drawing-palette.js` uses visibility, ranking,
-category, glyph, color, and insertion facts. The transaction path checks the
-descriptor before creating a source transaction. The descriptor set rejects
-missing, duplicate, orphaned, non-exported, non-insertable, and
-transaction-mismatched entries.
+Projection match functions remain in graph projection; they are not a function
+field in the descriptor table. The registry validator rejects duplicate or
+orphaned entries, visibility and insertability mismatches, and transaction
+names that do not match the supported edit path. The graph protocol embeds the
+validated descriptor data. `graph-rendering.js` consumes presentation and
+hover facts; `drawing-palette.js` consumes visibility, ranking, category, and
+insertion facts.
 
-### Seam 3 — Rendering + interaction
+### Rendering and interaction
 
-Split `graph-rendering.js` into:
+Keep rendering, hit testing, and interaction as separate responsibilities. The
+existing browser modules—`graph-rendering.js`, `drawing-palette.js`,
+`project-navigation.js`, `inspector-connections.js`, and `editing-history.js`—
+should consume graph facts and descriptor metadata rather than recover meaning
+from CSS classes or display labels. A single pointer state machine covers idle,
+node drag, wire drag, rewire, marquee, and menu states; each transition maps to
+a documented gesture.
 
-- `render.js` — draw only, driven by descriptor table and graph facts.
-- `hit-test.js` — hit map plus pin/wire endpoint geometry.
-- `interaction.js` — one pointer state machine (idle → node-drag → wire-drag →
-  rewire → marquee → menu), with each state mapped to a gesture scenario.
+Placement remains free. Saved view positions win over automatic layout; Tidy is
+explicit. A compatible pin drop creates a checked source transaction, while a
+staged palette node remains local until a compatible wire materializes it.
+Unknown or stale source revisions refuse the operation without mutating source.
 
-### Seam 4 — Source-sync (transaction bus)
+### Source-sync bus
 
-`edit_actions.rs` keeps the transaction bus, with each arm registered by the
-node descriptor's `transaction` field beside its projection rule.
+[`edit_actions.rs`](../../../crates/jet-devserver/src/Canvas/edit_actions.rs)
+keeps the edit transaction boundary. Each operation validates the requested
+revision, produces ordinary Jet source, formats and checks it, then publishes
+through the shared source seam. Undo, redo, source-backed paste, comment hints,
+collapse hints, and convergence previews use the same revision-guarded path.
 
-### Details panel — make it reflect, not hand-render
+### Details panel
 
-Use a field-descriptor list
-`{label, value, editable, apply_op}` instead of per-selection `innerHTML`.
-Node, variable, and function detail views provide descriptor arrays; one
-renderer turns them into rows and an Apply button. Every field is either live
-(`apply_op` set) or absent, with no dead controls. Composite values keep one
-source-backed inline anchor; leaf validation preserves the original source on
-refusal or stale revision.
-
+Details uses field descriptors rather than per-selection HTML:
+`{label, value, editable, apply_op}`. Node, variable, and function views return
+field arrays; one renderer turns them into rows and an Apply action. A field is
+live only when `apply_op` names a checked source transaction; otherwise it is
+absent, never a dead control. Composite values retain one source expression and
+inline anchor. Leaf validation preserves the original source when the edit is
+invalid or stale.

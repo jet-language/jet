@@ -22,6 +22,29 @@ pub(crate) fn write_test_package(dir: &Path, source: &str) {
     );
     fs::write(dir.join("package.jet"), source).unwrap();
 }
+pub fn assert_awaited_web_tier(name: &str, source: &str, expected: &str) {
+    let scratch = crate::common::Scratch::new(name);
+    write_test_package(&scratch.path, TIR_TEST_PACKAGE);
+    let entry = scratch.path.join("run.jet");
+    fs::write(&entry, source).unwrap();
+    let output = jet::compile_web_with_path(source, entry.to_str().unwrap())
+        .unwrap_or_else(|diagnostics| panic!("{name} web pass fixture rejected: {diagnostics:#?}"));
+    let web = output.web.expect("web artifacts for the same Jet pass");
+    fs::write(scratch.path.join("package.json"), "{\"type\":\"module\"}\n").unwrap();
+    fs::write(scratch.path.join("app.js"), web.js_app).unwrap();
+    fs::write(scratch.path.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
+    fs::write(scratch.path.join("app_wasm.rs"), web.wasm_rust).unwrap();
+    let wasm = Command::new("rustc").current_dir(&scratch.path).args([
+        "--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib",
+        "-O", "app_wasm.rs", "-o", "app.wasm",
+    ]).output().expect("web proof requires rustc with wasm32 target");
+    assert!(wasm.status.success(), "{name} web Wasm build: {}", String::from_utf8_lossy(&wasm.stderr));
+    fs::write(scratch.path.join("run.mjs"), "const { jet_main } = await import('./app.js');\nawait jet_main();\n").unwrap();
+    let node = Command::new("node").current_dir(&scratch.path).arg("run.mjs")
+        .output().expect("web proof requires Node; absence is not a pass");
+    assert!(node.status.success(), "{name} awaited web entry: {}", String::from_utf8_lossy(&node.stderr));
+    assert_eq!(String::from_utf8_lossy(&node.stdout), expected, "{name} awaited web stdout");
+}
 
 pub fn have_rustc() -> bool {
     let present = Command::new("rustc").arg("--version").output().is_ok();

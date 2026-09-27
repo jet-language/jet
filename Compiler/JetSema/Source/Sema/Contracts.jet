@@ -1,0 +1,772 @@
+// Checked function contracts and call-site precondition production.
+//
+// A declaration's #Post clauses live in one ContractScope around its body.
+// #Pre clauses are caller obligations: this file pins each evaluated argument
+// once, checks the clauses against those pins, and leaves the callee scope's
+// pre list empty so a contract is never evaluated twice.
+
+pub struct SemaContractDeclaration {
+    pub complete: Bool
+    pub post: [TContract]
+    pub result: TContractResult
+}
+
+pub struct SemaContractCall {
+    pub bindings: [TStmt]
+    pub contracts: [TContract]
+}
+
+fn sema_contract_success_type(return_type: ?Type) -> Type {
+    if return_type == None -> return Type.Named("Unit")
+    return_type ?? Type.Named("Unit")
+}
+
+fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMode {
+    if carrier == binding -> return TContractResultMode.Direct
+    if carrier == {
+        .Result(_, _) -> return TContractResultMode.ResultPayload
+        .Option(_) -> return TContractResultMode.OptionPayload
+        .Tagged(_, inner) -> return sema_contract_result_mode(inner, binding)
+        else -> return TContractResultMode.Direct
+    }
+}
+
+fn sema_contract_result_for_function(return_type: ?Type, span: Span) -> TContractResult {
+    carrier := sema_effective_return_type(return_type)
+    binding := sema_contract_success_type(return_type)
+    mode := sema_contract_result_mode(carrier, binding)
+    binding_local := tir_generated_local("result", span)
+    carrier_local := binding_local
+    if mode != TContractResultMode.Direct -> carrier_local = tir_generated_local("result_carrier", span)
+    TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
+}
+
+fn sema_contract_file(environment: SemaScopeEnvironment, span: Span) -> String {
+    sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
+}
+
+fn sema_contract_line(environment: SemaScopeEnvironment, span: Span) -> Int {
+    sema_source_line_at(environment.source_segments, span) ?? 0
+}
+
+fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvironment) -> Bool {
+    if fact.facts.effect_bound != None {
+        row :: fact.facts.effect_bound ?? [EffectRowEntry]{}
+        for entry in row {
+            if entry.name.starts_with("!") -> next
+            return false
+        }
+        return true
+    }
+    target :: fact.callee ?? return false
+    declaration :: sema_contract_function_for_symbol(environment, target) ?? return false
+    declaration.is_pure
+}
+
+fn sema_contract_purity_diagnostic(kind: String, span: Span) -> Diagnostic {
+    sema_error("E0139", span, "a #{kind} condition can't do I/O", "a contract is checked at every call and must be a pure claim about values", "move the effect out; keep only a pure test")
+}
+
+fn sema_contract_check_pure_delta(start: Int, context: SemaCheckContext, kind: String, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    index := start
+    loop index < context.call_facts.len() {
+        fact :: context.call_facts[index]
+        if !sema_contract_call_is_pure(fact, environment) {
+            diagnostics.push(sema_contract_purity_diagnostic(kind, fact.span))
+            valid = false
+        }
+        index += 1
+    }
+    valid
+}
+
+fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: &SemaCheckContext) {
+    index := call_start
+    loop index < source.call_facts.len() {
+        destination.call_facts.push(source.call_facts[index])
+        index += 1
+    }
+    index = view_start
+    loop index < source.call_return_views.len() {
+        destination.call_return_views.push(source.call_return_views[index])
+        index += 1
+    }
+    index = name_start
+    loop index < source.name_references.len() {
+        destination.name_references.push(source.name_references[index])
+        index += 1
+    }
+    index = comptime_start
+    loop index < source.comptime_requests.len() {
+        destination.comptime_requests.push(source.comptime_requests[index])
+        index += 1
+    }
+    index = copy_start
+    loop index < source.copy_events.len() {
+        destination.copy_events.push(source.copy_events[index])
+        index += 1
+    }
+    if source.exact_int_reachable -> destination.exact_int_reachable = true
+}
+
+fn sema_contract_result_ident_in_call_args(args: [CallArg]) -> ?Span {
+    for argument in args {
+        found :: sema_contract_result_ident_in_expr(argument.expr)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_contract_result_ident_in_optional_expr(value: ?Expr) -> ?Span {
+    if value != None -> return sema_contract_result_ident_in_expr(value ?? Expr.Unit(Span{start: 0, end: 0}))
+    None
+}
+
+fn sema_contract_result_ident_in_lvalue(value: LValue) -> ?Span {
+    if value == {
+        .Index(base, index, _, _) -> {
+            found := sema_contract_result_ident_in_expr(base)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(index)
+        }
+        .Field(base, _, _) -> return sema_contract_result_ident_in_expr(base)
+        else -> return None
+    }
+}
+
+fn sema_contract_result_ident_in_pattern(value: Pattern) -> ?Span {
+    if value == {
+        .Or(alternatives, _) -> {
+            for alternative in alternatives {
+                found :: sema_contract_result_ident_in_pattern(alternative)
+                if found != None -> return found
+            }
+            return None
+        }
+        .Struct(fields, _, _) -> {
+            for field in fields {
+                if field == {.Value(_, _, expression) -> {
+                    found :: sema_contract_result_ident_in_expr(expression)
+                    if found != None -> return found
+                } .Bind(_, _, _, _) -> {}}
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn sema_contract_result_ident_in_bind_pattern(value: ?BindPattern) -> ?Span {
+    if value == None -> return None
+    pattern :: value ?? BindPattern.List([BindName]{}, Span{start: 0, end: 0})
+    if pattern == {
+        .Refutable(inner, fallback, _, _) -> {
+            found := sema_contract_result_ident_in_pattern(inner)
+            if found != None -> return found
+            return sema_contract_result_ident_in_fallback(fallback)
+        }
+        else -> return None
+    }
+}
+
+fn sema_contract_result_ident_in_fallback(value: OrFallback) -> ?Span {
+    if value == {
+        .Value(expression) -> return sema_contract_result_ident_in_expr(expression)
+        .Block(body, expression, _) -> {
+            found := sema_contract_result_ident_in_statements(body)
+            if found != None -> return found
+            return sema_contract_result_ident_in_optional_expr(expression)
+        }
+        .Return(expression, _) -> return sema_contract_result_ident_in_optional_expr(expression)
+        .Panic(_, args) -> return sema_contract_result_ident_in_call_args(args)
+        else -> return None
+    }
+}
+
+fn sema_contract_result_ident_in_binding(binding: Binding) -> ?Span {
+    found := sema_contract_result_ident_in_expr(binding.init)
+    if found != None -> return found
+    found = sema_contract_result_ident_in_bind_pattern(binding.pattern)
+    if found != None -> return found
+    for marker in binding.markers {
+        for argument in marker.args {
+            if argument == {
+                .Expr(expression) -> {
+                    found = sema_contract_result_ident_in_expr(expression)
+                    if found != None -> return found
+                }
+                .EffectRow(_, _) -> {}
+            }
+        }
+    }
+    if binding.meta != None {
+        meta :: binding.meta ?? MetaAttr{fields: [MetaField]{}, span: binding.name_span}
+        for field in meta.fields {
+            if field == {
+                .Category(expression, _) | .Maturity(expression, _) -> {
+                    found = sema_contract_result_ident_in_expr(expression)
+                    if found != None -> return found
+                }
+                .Unknown(_, expression, _) -> {
+                    found = sema_contract_result_ident_in_optional_expr(expression)
+                    if found != None -> return found
+                }
+                .Tunable(_) -> {}
+            }
+        }
+    }
+    None
+}
+
+fn sema_contract_result_ident_in_stmt(value: Stmt) -> ?Span {
+    if value == {
+        .Expr(expression) -> return sema_contract_result_ident_in_expr(expression)
+        .Val(binding) -> return sema_contract_result_ident_in_binding(binding)
+        .Assign(target, _, _, expression) -> {
+            found := sema_contract_result_ident_in_lvalue(target)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(expression)
+        }
+        .Return(expression, _) -> return sema_contract_result_ident_in_optional_expr(expression)
+        .Yield(expression, _) -> return sema_contract_result_ident_in_expr(expression)
+        .While(condition, body, _, _, _) -> {
+            found := sema_contract_result_ident_in_expr(condition)
+            if found != None -> return found
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            found := if kind == {
+                .Range(start, end, step, _) -> {
+                    candidate := sema_contract_result_ident_in_expr(start)
+                    if candidate != None -> return candidate
+                    candidate = sema_contract_result_ident_in_expr(end)
+                    if candidate != None -> return candidate
+                    sema_contract_result_ident_in_optional_expr(step)
+                }
+                .In(collection, step) -> {
+                    candidate := sema_contract_result_ident_in_expr(collection)
+                    if candidate != None -> return candidate
+                    sema_contract_result_ident_in_optional_expr(step)
+                }
+            }
+            if found != None -> return found
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            found := sema_contract_result_ident_in_expr(subject)
+            if found != None -> return found
+            for arm in arms {
+                found = sema_contract_result_ident_in_expr(arm.cond)
+                if found != None -> return found
+                found = sema_contract_result_ident_in_statements(arm.body)
+                if found != None -> return found
+            }
+            if else_body != None -> return sema_contract_result_ident_in_statements(else_body ?? [Stmt]{})
+            return None
+        }
+        .BreakValue(expression, _) | .BreakLabelValue(_, _, expression, _) -> return sema_contract_result_ident_in_expr(expression)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .Live(body, _) | .ComptimeBlock(body, _, _) -> return sema_contract_result_ident_in_statements(body)
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
+            found := sema_contract_result_ident_in_binding(init)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_expr(condition)
+            if found != None -> return found
+            if step != None {
+                found = sema_contract_result_ident_in_stmt(step ?? Stmt.Break(Span{start: 0, end: 0}))
+                if found != None -> return found
+            }
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .Unsafe(_, audit_expr, body, _) | .Impure(_, audit_expr, body, _) -> {
+            found := sema_contract_result_ident_in_optional_expr(audit_expr)
+            if found != None -> return found
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .TaskGroup(_, _, limit, body, _) -> {
+            found := sema_contract_result_ident_in_optional_expr(limit)
+            if found != None -> return found
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) -> return sema_contract_result_ident_in_statements(body)
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            found := sema_contract_result_ident_in_expr(condition)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_statements(then_body)
+            if found != None -> return found
+            if else_body != None -> return sema_contract_result_ident_in_statements(else_body ?? [Stmt]{})
+            return None
+        }
+        .ContextBlock(fields, body, _) -> {
+            for field in fields {
+                found :: sema_contract_result_ident_in_expr(field.value)
+                if found != None -> return found
+            }
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .AssumeDet(_, reason_expr, body, _) -> {
+            found := sema_contract_result_ident_in_expr(reason_expr)
+            if found != None -> return found
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            for argument in args {
+                found :: sema_contract_result_ident_in_expr(argument)
+                if found != None -> return found
+            }
+            return sema_contract_result_ident_in_statements(body)
+        }
+        .DeferClose(expression, _) -> return sema_contract_result_ident_in_expr(expression)
+        else -> return None
+    }
+}
+
+fn sema_contract_result_ident_in_statements(values: [Stmt]) -> ?Span {
+    for value in values {
+        found :: sema_contract_result_ident_in_stmt(value)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
+    if expr == {
+        .Ident(name, span) -> if name == "result" -> Val(span) else -> None
+        .Str(parts, _) -> {
+            for part in parts {
+                if part == {.Interp(value, _) -> {
+                    found :: sema_contract_result_ident_in_expr(value)
+                    if found != None -> return found
+                } .Lit(_) | .Byte(_) -> {}}
+            }
+            return None
+        }
+        .ListLit(elements, _) -> {
+            for value in elements {
+                found :: sema_contract_result_ident_in_expr(value)
+                if found != None -> return found
+            }
+            return None
+        }
+        .MemberSpread(base, _, _) | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Place(base, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Paren(base, _) -> return sema_contract_result_ident_in_expr(base)
+        .MapLit(entries, _) -> {
+            for entry in entries {
+                found := sema_contract_result_ident_in_expr(entry.key)
+                if found != None -> return found
+                found = sema_contract_result_ident_in_expr(entry.value)
+                if found != None -> return found
+            }
+            return None
+        }
+        .Index(base, index, _, _) -> {
+            found := sema_contract_result_ident_in_expr(base)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(index)
+        }
+        .Slice(base, start, end, range, _, _) -> {
+            found := sema_contract_result_ident_in_expr(base)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_expr(start)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_expr(end)
+            if found != None -> return found
+            if range != None -> return sema_contract_result_ident_in_expr(range ?? Expr.Unit(expr_span(expr)))
+            return None
+        }
+        .Range(start, end, _, _) -> {
+            found := sema_contract_result_ident_in_expr(start)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(end)
+        }
+        .Call(call) -> return sema_contract_result_ident_in_call_args(call.args)
+        .CallValue(callee, args, _) -> {
+            found := sema_contract_result_ident_in_expr(callee)
+            if found != None -> return found
+            return sema_contract_result_ident_in_call_args(args)
+        }
+        .Unary(_, operand, _) -> return sema_contract_result_ident_in_expr(operand)
+        .Binary(_, left, right, _) -> {
+            found := sema_contract_result_ident_in_expr(left)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(right)
+        }
+        .CompareChain(operands, _, _, _) -> {
+            for operand in operands {
+                found :: sema_contract_result_ident_in_expr(operand)
+                if found != None -> return found
+            }
+            return None
+        }
+        .Field(base, _, _) | .OptField(base, _, _, _, _) -> return sema_contract_result_ident_in_expr(base)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            found := sema_contract_result_ident_in_expr(receiver)
+            if found != None -> return found
+            return sema_contract_result_ident_in_call_args(args)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> {
+            for field in fields {
+                found :: sema_contract_result_ident_in_expr(field.value)
+                if found != None -> return found
+            }
+            return None
+        }
+        .TypedLit(_, body, _) -> {
+            for field in body.fields {
+                found :: sema_contract_result_ident_in_expr(field.value)
+                if found != None -> return found
+            }
+            for value in body.elements {
+                found :: sema_contract_result_ident_in_expr(value)
+                if found != None -> return found
+            }
+            return None
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            for argument in args {
+                if argument == {
+                    .Positional(value) -> {
+                        found :: sema_contract_result_ident_in_expr(value)
+                        if found != None -> return found
+                    }
+                    .Named(_, value) -> {
+                        found :: sema_contract_result_ident_in_expr(value)
+                        if found != None -> return found
+                    }
+                }
+            }
+            return None
+        }
+        .PatternTest(subject, pattern, _) -> {
+            found := sema_contract_result_ident_in_expr(subject)
+            if found != None -> return found
+            return sema_contract_result_ident_in_pattern(pattern)
+        }
+        .Try(value, _, _, context) -> {
+            found := sema_contract_result_ident_in_expr(value)
+            if found != None -> return found
+            if context != None -> return sema_contract_result_ident_in_expr(context ?? Expr.Unit(expr_span(expr)))
+            return None
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            found := sema_contract_result_ident_in_expr(value)
+            if found != None -> return found
+            return sema_contract_result_ident_in_fallback(fallback)
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            found := sema_contract_result_ident_in_expr(condition)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_statements(then_body)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_expr(then_value)
+            if found != None -> return found
+            found = sema_contract_result_ident_in_statements(else_body)
+            if found != None -> return found
+            return sema_contract_result_ident_in_expr(else_value)
+        }
+        .TupleLit(fields, _, _) -> {
+            for field in fields {
+                found :: sema_contract_result_ident_in_expr(field.value)
+                if found != None -> return found
+            }
+            return None
+        }
+        .Lambda(lambda) -> {
+            if lambda.body == {
+                .Expr(value) -> return sema_contract_result_ident_in_expr(value)
+                .Block(body) -> return sema_contract_result_ident_in_statements(body)
+            }
+        }
+        .PtrFromAddr(_, _, _, address, _) -> return sema_contract_result_ident_in_expr(address)
+        .IncDec(_, operand, _, _) -> return sema_contract_result_ident_in_expr(operand)
+        else -> return None
+    }
+}
+
+fn sema_contract_check_expr(expr: Expr, expected: Type, kind: String, forbid_result: Bool, check_purity: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if forbid_result {
+        result_span := sema_contract_result_ident_in_expr(expr)
+        if result_span != None {
+            diagnostics.push(sema_error("E0144", result_span ?? expr_span(expr), "`result` isn't available in a `#Pre` condition", "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one", "use `result` only in a `#Post` condition"))
+            return None
+        }
+    }
+    checked_scopes := sema_scope_snapshot(scopes)
+    checked_state := sema_ownership_state_snapshot(state)
+    checked_context := sema_check_context_snapshot(context)
+    call_start := checked_context.call_facts.len()
+    view_start := checked_context.call_return_views.len()
+    name_start := checked_context.name_references.len()
+    comptime_start := checked_context.comptime_requests.len()
+    copy_start := checked_context.copy_events.len()
+    value := sema_check_expression(expr, None, environment, &checked_scopes, &checked_state, &tail_store, &checked_context, &diagnostics)
+    valid := value != None
+    checked := value
+    if value != None {
+        actual :: value ?? sema_tir_expr(Type.Named("Unit"), TExprKind.Unit, expr_span(expr))
+        if actual.ty != expected {
+            if expected == Type.Bool {
+                diagnostics.push(sema_error("E0110", expr_span(expr), "a `#{kind}` condition must be Bool, but this is {type_name(actual.ty)}", "the program needs a clear yes or no here", "compare the value to something to produce Bool"))
+            } else {
+                diagnostics.push(sema_type_mismatch(expected, actual.ty, expr_span(expr)))
+            }
+            valid = false
+        }
+        checked = Val(actual)
+    }
+    if check_purity && !sema_contract_check_pure_delta(call_start, checked_context, kind, environment, &diagnostics) -> valid = false
+    sema_contract_merge_context_delta(checked_context, call_start, view_start, name_start, comptime_start, copy_start, &context)
+    if !valid -> return None
+    checked
+}
+
+fn sema_contract_type_name(ty: Type) -> ?String {
+    if ty == {
+        .Named(name) -> return Val(name)
+        .Tagged(_, inner) -> return sema_contract_type_name(inner)
+        else -> return None
+    }
+}
+
+fn sema_contract_distinct_range(ty: Type, environment: SemaScopeEnvironment) -> ?TIntegerRange {
+    name :: sema_contract_type_name(ty) ?? return None
+    for definition in environment.checked_types {
+        qualified := "{definition.module_identity}::{definition.name}"
+        if name == definition.name {
+            if definition.module_identity != environment.module_identity -> next
+        } else if name != qualified {
+            next
+        }
+        if definition.kind == {
+            .Distinct(_, range) -> return range
+            else -> return None
+        }
+    }
+    None
+}
+
+fn sema_contract_interval(expr: TExpr, environment: SemaScopeEnvironment) -> ?TIntegerRange {
+    if expr.kind == {
+        .IntLit(value, _) -> return Val(TIntegerRange{lo: value, hi: value})
+        .Local(_) -> return sema_contract_distinct_range(expr.ty, environment)
+        .MethodCall(value, method, _, _) -> if method.name == "raw" -> return sema_contract_interval(value, environment) else -> None
+        .DistinctRaw(value) -> return sema_contract_interval(value, environment)
+        else -> return None
+    }
+}
+
+fn sema_contract_interval_comparison(op: TBinaryOp, left: TIntegerRange, right: TIntegerRange) -> Bool {
+    if op == TBinaryOp.Eq -> return left.lo == left.hi && left.lo == right.lo && left.hi == right.hi
+    if op == TBinaryOp.Ne -> return left.hi < right.lo || right.hi < left.lo
+    if op == TBinaryOp.Lt -> return left.hi < right.lo
+    if op == TBinaryOp.Gt -> return left.lo > right.hi
+    if op == TBinaryOp.Le -> return left.hi <= right.lo
+    if op == TBinaryOp.Ge -> return left.lo >= right.hi
+    false
+}
+
+fn sema_contract_expr_proven(expr: TExpr, environment: SemaScopeEnvironment) -> Bool {
+    if expr.kind == {
+        .BoolLit(value) -> return value
+        .Binary(op, _, _, left, right) -> {
+            if op == TBinaryOp.And -> return sema_contract_expr_proven(left, environment) && sema_contract_expr_proven(right, environment)
+            if op == TBinaryOp.Or -> return sema_contract_expr_proven(left, environment) || sema_contract_expr_proven(right, environment)
+            if op != TBinaryOp.Eq && op != TBinaryOp.Ne && op != TBinaryOp.Lt && op != TBinaryOp.Gt && op != TBinaryOp.Le && op != TBinaryOp.Ge -> return false
+            left_range :: sema_contract_interval(left, environment) ?? return false
+            right_range :: sema_contract_interval(right, environment) ?? return false
+            return sema_contract_interval_comparison(op, left_range, right_range)
+        }
+        .CompareChain(operands, operators, _) -> {
+            if operators.len() + 1 != operands.len() -> return false
+            index := 0
+            loop index < operators.len() {
+                left_range :: sema_contract_interval(operands[index], environment) ?? return false
+                right_range :: sema_contract_interval(operands[index + 1], environment) ?? return false
+                if !sema_contract_interval_comparison(operators[index], left_range, right_range) -> return false
+                index += 1
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+fn sema_contract_disposition(condition: TExpr, environment: SemaScopeEnvironment) -> TContractDisposition {
+    if sema_contract_expr_proven(condition, environment) -> return TContractDisposition.Proven
+    TContractDisposition.Check
+}
+
+fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, span: Span, location_span: Span) -> TContract {
+    TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, location_span), line: sema_contract_line(environment, location_span), span: span, disposition: sema_contract_disposition(condition, environment)}
+}
+
+
+fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, owner: String, ty: Type, span: Span) -> Symbol {
+    id := symbol_id(SymbolKind.Local, environment.module_identity, owner, "result")
+    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+}
+
+pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
+    declared_return := func.return_type
+    if environment.registration_graph != None && declared_return != None {
+        graph :: environment.registration_graph ?? {
+            diagnostics.push(sema_error("E0301", func.name_span, "the function return type could not be resolved", "contract result bindings must use the registration graph's canonical type identity", "make the declaration's type graph available before checking its contracts"))
+            return SemaContractDeclaration{complete: false, post: [TContract]{}, result: sema_contract_result_for_function(None, func.name_span)}
+        }
+        declared :: declared_return ?? Type.Named("Unit")
+        declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
+    }
+    result := sema_contract_result_for_function(declared_return, func.name_span)
+    complete := true
+    post := [TContract]{}
+    for clause in func.pre {
+        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", true, true, environment, scopes, state, &tail_store, &context, &diagnostics)
+        if condition == None -> complete = false
+        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, scopes, state, &tail_store, &context, &diagnostics)
+        if message == None -> complete = false
+    }
+    if func.post.len() > 0 {
+        post_scopes := sema_scope_snapshot(scopes)
+        post_state := sema_ownership_state_snapshot(state)
+        owner := sema_scope_function_owner_key(scopes)
+        sema_scope_enter(&post_scopes, &post_state, owner)
+        result_symbol := sema_contract_result_binding_symbol(environment, owner, result.binding_ty, func.name_span)
+        if !sema_scope_declare_local(&post_scopes, result_symbol, false, AccessConvention.Read, None, false) {
+            diagnostics.push(sema_already_defined("result", func.name_span))
+            complete = false
+        } else {
+            sema_ownership_declare_binding(&post_state, result_symbol, false)
+            for clause in func.post {
+                condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, post_scopes, post_state, &tail_store, &context, &diagnostics)
+                if condition == None -> complete = false
+                message :: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, post_scopes, post_state, &tail_store, &context, &diagnostics)
+                if message == None -> complete = false
+                if condition != None && message != None {
+                    post.push(sema_contract_make(TContractKind.Post, condition ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit(false), clause.span), message ?? sema_tir_expr(Type.String, TExprKind.StrLit([TStrPart]{TStrPart.Literal("")}), clause.message_span), environment, clause.span, clause.span))
+                }
+            }
+        }
+        sema_scope_leave(&post_scopes, &post_state)
+    }
+    SemaContractDeclaration{complete: complete, post: post, result: result}
+}
+
+fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_identity: String) -> ?Func {
+    if item == {
+        .Struct(value) -> {
+            for method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
+            }
+        }
+        .Enum(value) -> {
+            for method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
+            }
+        }
+        .Impl(value) -> {
+            for method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(method)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolId) -> ?Func {
+    if environment.registration_graph != None {
+        graph :: environment.registration_graph ?? return None
+        for module in graph.modules {
+            for function in module.functions {
+                if function.symbol.id.key == target.key -> return Val(function.declaration)
+            }
+            for nominal in module.nominals {
+                for method in nominal.methods {
+                    if method.symbol.id.key == target.key -> return Val(method.declaration)
+                }
+            }
+            for implementation in module.impls {
+                for method in implementation.methods {
+                    if method.symbol.id.key == target.key -> return Val(method.declaration)
+                }
+            }
+        }
+    }
+    for declaration in environment.declarations {
+        if declaration.symbol_id.key == target.key {
+            if declaration.item == {.Func(value) -> return Val(value) else -> {}}
+        }
+        method :: sema_contract_method_function_for_item(declaration.item, target, environment.module_identity)
+        if method != None -> return method
+    }
+    None
+}
+
+fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol {
+    name := "contract_arg_{span.start}_{index}"
+    id := symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
+    Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+}
+
+fn sema_contract_pin_argument(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal {
+    original := argument.value
+    ty := original.ty
+    init := original
+    if argument.clone || argument.arc_clone {
+        init = sema_tir_expr(ty, TExprKind.Clone(init), original.span)
+        argument.clone = false
+        argument.arc_clone = false
+    }
+    local := tir_generated_local("contract_arg_{call_span.start}_{index}", call_span)
+    local.mutable = argument.mut_borrow
+    if argument.borrow || argument.mut_borrow {
+        access := if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
+        init = sema_tir_expr(ty, TExprKind.Borrow(init, access), original.span)
+        local.deref = true
+    }
+    symbol := sema_contract_generated_argument_symbol(environment, owner, index, parameter_name, call_span, ty)
+    local = tir_symbol_local(local.name, local.span, symbol.id)
+    local.generated = true
+    local.mutable = argument.mut_borrow
+    local.deref = argument.borrow || argument.mut_borrow
+    replacement := sema_tir_expr(ty, TExprKind.Local(local), original.span)
+    if convention == AccessConvention.Move {
+        replacement = sema_tir_expr(ty, TExprKind.Move(replacement), original.span)
+    }
+    argument.value = replacement
+    bindings.push(TStmt.Let(local, TLetTy.Inferred, init, None, false, call_span))
+    sema_scope_declare_local(&scopes, symbol, argument.mut_borrow, if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read, None, false)
+    sema_ownership_declare_binding(&state, symbol, false)
+    local
+}
+
+pub fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?SemaContractCall {
+    if func.pre.len() == 0 -> return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
+    if args.len() != slots.len() -> return None
+    if func.params.len() == 0 && args.len() > 0 -> return None
+    checked_scopes := sema_scope_snapshot(scopes)
+    checked_state := sema_ownership_state_snapshot(state)
+    owner := sema_scope_function_owner_key(scopes)
+    sema_scope_enter(&checked_scopes, &checked_state, owner)
+    bindings := [TStmt]{}
+    index := 0
+    loop index < args.len() {
+        slot := slots[index]
+        if slot < 0 || slot >= func.params.len() -> return None
+        _ := sema_contract_pin_argument(environment, owner, index, func.params[slot].name, func.params[slot].convention, &args[index], call_span, &checked_scopes, &checked_state, &bindings)
+        index += 1
+    }
+    contracts := [TContract]{}
+    complete := true
+    loop clause in func.pre {
+        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, checked_scopes, checked_state, &tail_store, &context, &diagnostics)
+        if condition == None -> complete = false
+        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, checked_scopes, checked_state, &tail_store, &context, &diagnostics)
+        if message == None -> complete = false
+        if condition != None && message != None {
+            contracts.push(sema_contract_make(TContractKind.Pre, condition ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit(false), call_span), message ?? sema_tir_expr(Type.String, TExprKind.StrLit([TStrPart]{TStrPart.Literal("")}), call_span), environment, call_span, call_span))
+        }
+    }
+    sema_scope_leave(&checked_scopes, &checked_state)
+    if !complete -> return None
+    Val(SemaContractCall{bindings: bindings, contracts: contracts})
+}

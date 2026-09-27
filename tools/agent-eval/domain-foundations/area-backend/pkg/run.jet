@@ -81,16 +81,19 @@ fn openapi_document() -[]> String !Never {
     }}
     """
 }
+
 fn contract_check(document: String) !Never -[]> {
-    if !document.contains("\"openapi\": \"3.0.3\"") -> panic("contract missing version")
-    if !document.contains("\"/health\"") -> panic("contract missing health")
-    if !document.contains("\"/orders\"") -> panic("contract missing orders")
+    if {
+        !document.contains("\"openapi\": \"3.0.3\"") -> panic("contract missing version")
+        !document.contains("\"/health\"") -> panic("contract missing health")
+        !document.contains("\"/orders\"") -> panic("contract missing orders")
+    }
 }
+
 fn state_label(delivery: ^Delivery) -[DB]> String !Never {
     state :: delivery.status() ?? panic("delivery status")
     return state.show()
 }
-
 
 fn load_user(address: String, tx: Sender<Int>) !Never {
     started :: time.now()

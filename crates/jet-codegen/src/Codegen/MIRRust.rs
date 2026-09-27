@@ -10,8 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use jet_foundation::CanonicalPass;
-use jet_foundation::Layout::TargetLayout;
-use jet_foundation::MIROptimization::Acceleration::{AccelerationTransform, D_FRED1_FIXED_ORDER};
+use jet_foundation::Layout::{LayoutFacts, TargetLayout};
 use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
 use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
@@ -83,6 +82,7 @@ fn is_view_type(ty: &MirType) -> bool {
         _ => false,
     }
 }
+
 
 #[derive(Debug)]
 enum ModelDimensionFact {
@@ -325,6 +325,82 @@ pub struct MirRustConfig<'a> {
     pub root_prefix: String,
     pub execution: MirRustExecutionConfig<'a>,
 }
+/// Exact Rust-facing identity and type metadata for the ordinary AOT artifact.
+///
+/// This is an integration descriptor, not a second symbol or type resolver.
+/// Every string is produced by the same `RustEmitter` methods that emit the
+/// corresponding item.  Private source-coupled host glue may use it to bind a
+/// generated callable without guessing mangled names or assigning an
+/// incompatible Rust function pointer.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustCallableMetadata {
+    pub function: MirFunctionId,
+    pub symbol: String,
+    pub parameter_types: Vec<String>,
+    pub parameter_access: Vec<MirAccess>,
+    pub return_type: String,
+    pub callable_type: String,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustTypeMetadata {
+    pub ty: MirTypeId,
+    pub symbol: String,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustFieldMetadata {
+    pub field: MirFieldId,
+    pub owner: MirTypeId,
+    pub symbol: String,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustVariantMetadata {
+    pub owner: MirTypeId,
+    pub source_name: String,
+    pub wire_name: String,
+    pub symbol: String,
+    pub payload_types: Vec<String>,
+}
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustTraitMetadata {
+    pub trait_id: MirTraitId,
+    pub key: String,
+    pub name: String,
+    pub symbol: String,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRustTraitMethodMetadata {
+    pub trait_id: MirTraitId,
+    pub method_id: MirTraitMethodId,
+    pub key: String,
+    pub name: String,
+    pub symbol: String,
+    pub receiver_access: Option<MirAccess>,
+    pub parameter_types: Vec<String>,
+    pub parameter_access: Vec<MirAccess>,
+    pub return_type: String,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MirRustAotMetadata {
+    pub callables: Vec<MirRustCallableMetadata>,
+    pub types: Vec<MirRustTypeMetadata>,
+    pub fields: Vec<MirRustFieldMetadata>,
+    pub variants: Vec<MirRustVariantMetadata>,
+    pub traits: Vec<MirRustTraitMetadata>,
+    pub trait_methods: Vec<MirRustTraitMethodMetadata>,
+}
+
 
 #[derive(Debug, Clone)]
 pub struct MirRustExecutionConfig<'a> {
@@ -537,6 +613,148 @@ pub fn emit_mir_program(program: &MirProgram, config: &MirRustConfig) -> String 
     out
 }
 
+/// Describe the exact ordinary-AOT names and carriers emitted for a checked
+/// MIR artifact.  Callers that bind private source-coupled host glue must use
+/// this descriptor instead of reconstructing symbols from source names.
+#[doc(hidden)]
+pub fn mir_rust_aot_metadata(
+    program: &MirProgram,
+    config: &MirRustConfig<'_>,
+) -> MirRustAotMetadata {
+    let artifact_identity = program
+        .artifact_identity(config.execution.artifact)
+        .unwrap_or_else(|error| {
+            panic!("MIR Rust metadata requires canonical artifact identity: {error}")
+        });
+    let emitter = RustEmitter::new(program, config, artifact_identity);
+    let mut metadata = MirRustAotMetadata::default();
+
+    for function in &program.functions {
+        if !emitter.module_selected(function.module_id)
+            || !emitter.selected_for_target(function)
+            || !matches!(&function.form, MirFunctionForm::TopLevel)
+        {
+            continue;
+        }
+        let parameters = emitter.declared_params(function);
+        let parameter_types = parameters
+            .iter()
+            .map(|parameter| emitter.parameter_type(parameter))
+            .collect::<Vec<_>>();
+        let parameter_access = parameters
+            .iter()
+            .map(|parameter| parameter.access)
+            .collect::<Vec<_>>();
+        let callable_parameters = parameters
+            .iter()
+            .map(|parameter| parameter.ty.clone())
+            .collect::<Vec<_>>();
+        let callable_type = emitter.callable_type(
+            &callable_parameters,
+            Some(parameter_access.as_slice()),
+            Some(&function.return_type),
+        );
+        metadata.callables.push(MirRustCallableMetadata {
+            function: function.id,
+            symbol: emitter.function_name(function.id),
+            parameter_types,
+            parameter_access,
+            return_type: emitter.rust_type(&function.return_type),
+            callable_type,
+        });
+    }
+
+    if config.execution.emit_types {
+        for definition in &program.traits {
+            if !emitter.module_selected(definition.module) {
+                continue;
+            }
+            metadata.traits.push(MirRustTraitMetadata {
+                trait_id: definition.id,
+                key: definition.key.clone(),
+                name: definition.name.clone(),
+                symbol: emitter.trait_name(definition.id),
+            });
+            for method in &definition.methods {
+                let parameter_types = method
+                    .params
+                    .iter()
+                    .map(|parameter| {
+                        emitter.synthetic_rollback_parameter_type(definition, parameter)
+                    })
+                    .collect::<Vec<_>>();
+                let parameter_access = method
+                    .params
+                    .iter()
+                    .map(|parameter| parameter.access)
+                    .collect::<Vec<_>>();
+                metadata
+                    .trait_methods
+                    .push(MirRustTraitMethodMetadata {
+                        trait_id: definition.id,
+                        method_id: method.id,
+                        key: emitter.trait_method_key(definition, method),
+                        name: method.name.clone(),
+                        symbol: emitter.trait_method_symbol(definition, method),
+                        receiver_access: method.self_access,
+                        parameter_types,
+                        parameter_access,
+                        return_type: emitter
+                            .synthetic_rollback_type(definition, &method.return_type),
+                    });
+            }
+        }
+    }
+
+    if config.execution.emit_types {
+        for definition in &program.types {
+            if !emitter.module_selected(definition.module) {
+                continue;
+            }
+            metadata.types.push(MirRustTypeMetadata {
+                ty: definition.id,
+                symbol: emitter.type_name(definition.id),
+            });
+            if let MirTypeDefKind::Enum { variants, .. } = &definition.kind {
+                for variant in variants {
+                    let payload_types = match &variant.payload {
+                        MirVariantPayload::Unit => Vec::new(),
+                        MirVariantPayload::Single(payload) => {
+                            vec![emitter.rust_type(payload)]
+                        }
+                        MirVariantPayload::Named(fields) => fields
+                            .iter()
+                            .map(|field| emitter.rust_type(&field.ty))
+                            .collect(),
+                    };
+                    metadata.variants.push(MirRustVariantMetadata {
+                        owner: definition.id,
+                        source_name: variant.name.clone(),
+                        wire_name: variant.wire_name.clone(),
+                        symbol: emitter.variant_path(Some(definition.id), &variant.name, true),
+                        payload_types,
+                    });
+                }
+            }
+        }
+    }
+
+    for row in &program.fields {
+        let symbol = emitter
+            .fields
+            .get(&row.id)
+            .cloned()
+            .unwrap_or_else(|| panic!("MIR field ID {:?} has no emitted field name", row.id));
+        metadata.fields.push(MirRustFieldMetadata {
+            field: row.id,
+            owner: row.owner,
+            symbol,
+        });
+    }
+    metadata
+}
+
+
 /// Append a complete Rust fragment from optimized canonical MIR.
 pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: &mut String) {
     let canonical_input = CanonicalPass::enabled().then(|| canonical_payload(program));
@@ -716,7 +934,7 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             }
         }
     }
-    emitter.emit_link_closure(out);
+    emitter.emit_c_abi_records(out);
     if config.execution.emit_foreign {
         for foreign in &program.foreign {
             if emitter.module_selected(foreign.module_id) {
@@ -2482,8 +2700,8 @@ impl<'a> RustEmitter<'a> {
             self.type_instances.get(&id).copied().unwrap_or_else(|| {
                 panic!("MIR trait coercion target {:?} has no instance row", id)
             });
-        if !matches!(ty.kind(), MirTypeKind::TraitObject(_)) {
-            panic!("MIR trait coercion target {:?} is not a trait object", id);
+        if !matches!(ty.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
+            panic!("MIR trait coercion target {:?} is not a single-trait object", id);
         }
         ty
     }
@@ -3268,72 +3486,7 @@ impl<'a> RustEmitter<'a> {
                     .call_metadata
                     .as_ref()
                     .map(|metadata| metadata.conventions.as_slice());
-                let parameter_types = signature
-                    .params
-                    .iter()
-                    .enumerate()
-                    .map(|(index, param)| {
-                        let access = Self::callable_parameter_access(conventions, index);
-                        let rendered = self.rust_type(param);
-                        let mode = self.callable_parameter_mode(param, access);
-                        let callable = match mode {
-                            'W' => format!("&mut {rendered}"),
-                            'R' => format!("&{rendered}"),
-                            'O' => rendered.clone(),
-                            other => panic!("MIR callable has unknown mode `{other}`"),
-                        };
-                        (rendered, callable, mode)
-                    })
-                    .collect::<Vec<_>>();
-                let params = parameter_types
-                    .iter()
-                    .map(|(_, callable, _)| callable.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let ret = signature
-                    .ret
-                    .as_ref()
-                    .map(|ret| self.rust_type(ret))
-                    .unwrap_or_else(|| "()".to_string());
-                if self.history_runtime_metadata_enabled() {
-                    let arity = signature.params.len();
-                    let modes = parameter_types
-                        .iter()
-                        .map(|(_, _, mode)| *mode)
-                        .collect::<String>();
-                    let borrowed_trait = modes.chars().any(|mode| mode != 'O');
-                    let callable_name = if borrowed_trait {
-                        self.history_callable_modes
-                            .borrow_mut()
-                            .insert((arity, modes.clone()));
-                        format!("{}JetHistoryFn{arity}B{modes}", self.config.root_prefix)
-                    } else {
-                        self.history_callable_arities.borrow_mut().insert(arity);
-                        format!("{}JetHistoryFn{arity}", self.config.root_prefix)
-                    };
-                    let generic_params = if borrowed_trait {
-                        parameter_types
-                            .iter()
-                            .map(|(rendered, _, _)| rendered.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    } else {
-                        params.clone()
-                    };
-                    let generic_params = if generic_params.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{generic_params}, ")
-                    };
-                    let lifetime = self.history_callback_lifetime.get();
-                    format!(
-                        "Box<dyn {callable_name}<{lifetime}, {generic_params}{ret}> + {lifetime}>"
-                    )
-                } else {
-                    format!(
-                        "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({params}) -> {ret}>>>>"
-                    )
-                }
+                self.callable_type(&signature.params, conventions, signature.ret.as_deref())
             }
             MirTypeKind::SendFn {
                 params,
@@ -3533,20 +3686,14 @@ impl<'a> RustEmitter<'a> {
         // canonical Rust slice spelling before falling through to nominal
         // declaration lookup.
         if name.name == "View" && args.len() == 1 {
-            if matches!(args[0].kind(), MirTypeKind::String)
-                || matches!(
-                    args[0].kind(),
-                    MirTypeKind::Apply { name, args }
-                        if args.is_empty() && name.name == "str"
-                )
-            {
+            if matches!(
+                args[0].kind(),
+                MirTypeKind::Apply { name, args }
+                    if args.is_empty() && name.name == "str"
+            ) {
                 return "&str".to_string();
             }
-            let inner = match args[0].kind() {
-                MirTypeKind::List(inner) => self.rust_type(inner),
-                _ => self.rust_type(&args[0]),
-            };
-            return format!("&[{inner}]");
+            return format!("&[{}]", self.rust_type(&args[0]));
         }
         if name.name == "ViewMut" && args.len() == 1 {
             return format!("&mut [{}]", self.rust_type(&args[0]));
@@ -3982,11 +4129,31 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         }
-        if foreign.raw_scalar_abi && matches!(param.ty.kind(), MirTypeKind::Int) {
-            // Inline C's checked scalar contract passes JetInt's raw one-word
-            // representation by value; source bounds keep it in C's int64_t
-            // domain, so the bridge must not borrow the owner.
+        if matches!(foreign.foreign_language, MirForeignLanguage::C) {
+            if let Some(definition) = self.c_abi_record_def(&param.ty) {
+                let name = self.c_abi_record_name(definition);
+                return if param.access == MirAccess::Write {
+                    format!("*mut {name}")
+                } else {
+                    name
+                };
+            }
+            if let Some(native) = self.c_abi_type(&param.ty, param.access) {
+                return native;
+            }
+        }
+        if matches!(foreign.foreign_language, MirForeignLanguage::C)
+            && !foreign.bridge_eligible
+            && param.access == MirAccess::Read
+            && !self.is_scalar(&param.ty)
+        {
+            // CModule direct rows use the checked C ABI, where an aggregate
+            // read parameter is passed by value rather than as Jet's ordinary
+            // borrowed callable parameter.
             return self.rust_type(&param.ty);
+        }
+        if foreign.raw_scalar_abi && matches!(param.ty.kind(), MirTypeKind::Int) {
+            return "i64".to_string();
         }
         if foreign.handle.is_some() && self.is_handle_type(&param.ty) {
             "*mut core::ffi::c_void".to_string()
@@ -4003,6 +4170,11 @@ impl<'a> RustEmitter<'a> {
             .return_type
             .as_ref()
             .map(|ty| {
+                if matches!(foreign.foreign_language, MirForeignLanguage::C) {
+                    if let Some(native) = self.c_abi_type(ty, MirAccess::Read) {
+                        return native;
+                    }
+                }
                 if foreign.handle.is_some() && self.is_handle_type(ty) {
                     "*mut core::ffi::c_void".to_string()
                 } else {
@@ -4010,6 +4182,77 @@ impl<'a> RustEmitter<'a> {
                 }
             })
             .unwrap_or_else(|| "()".to_string())
+    }
+
+    fn callable_type(
+        &self,
+        params: &[MirType],
+        conventions: Option<&[MirAccess]>,
+        ret: Option<&MirType>,
+    ) -> String {
+        let parameter_types = params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| {
+                let access = Self::callable_parameter_access(conventions, index);
+                let rendered = self.rust_type(param);
+                let mode = self.callable_parameter_mode(param, access);
+                let callable = match mode {
+                    'W' => format!("&mut {rendered}"),
+                    'R' => format!("&{rendered}"),
+                    'O' => rendered.clone(),
+                    other => panic!("MIR callable has unknown mode `{other}`"),
+                };
+                (rendered, callable, mode)
+            })
+            .collect::<Vec<_>>();
+        let params = parameter_types
+            .iter()
+            .map(|(_, callable, _)| callable.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ret = ret
+            .map(|ret| self.rust_type(ret))
+            .unwrap_or_else(|| "()".to_string());
+        if self.history_runtime_metadata_enabled() {
+            let arity = parameter_types.len();
+            let modes = parameter_types
+                .iter()
+                .map(|(_, _, mode)| *mode)
+                .collect::<String>();
+            let borrowed_trait = modes.chars().any(|mode| mode != 'O');
+            let callable_name = if borrowed_trait {
+                self.history_callable_modes
+                    .borrow_mut()
+                    .insert((arity, modes.clone()));
+                format!("{}JetHistoryFn{arity}B{modes}", self.config.root_prefix)
+            } else {
+                self.history_callable_arities.borrow_mut().insert(arity);
+                format!("{}JetHistoryFn{arity}", self.config.root_prefix)
+            };
+            let generic_params = if borrowed_trait {
+                parameter_types
+                    .iter()
+                    .map(|(rendered, _, _)| rendered.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                params.clone()
+            };
+            let generic_params = if generic_params.is_empty() {
+                String::new()
+            } else {
+                format!("{generic_params}, ")
+            };
+            let lifetime = self.history_callback_lifetime.get();
+            format!(
+                "Box<dyn {callable_name}<{lifetime}, {generic_params}{ret}> + {lifetime}>"
+            )
+        } else {
+            format!(
+                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({params}) -> {ret}>>>>"
+            )
+        }
     }
 
     fn callable_parameter_access(conventions: Option<&[MirAccess]>, index: usize) -> MirAccess {
@@ -4231,23 +4474,21 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|| panic!("MIR module ID {:?} has no row", id))
     }
     fn coverage_function_line(&self, function: &MirFunction) -> usize {
-        let module = self.module_row(function.module_id);
         let source = self
             .program
             .source_files
             .iter()
-            .find(|source| source.id == module.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
+            .find(|source| source.id == function.source_file)
+            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
         jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start).0
     }
     fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
-        let module = self.module_row(function.module_id);
         let source = self
             .program
             .source_files
             .iter()
-            .find(|source| source.id == module.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
+            .find(|source| source.id == function.source_file)
+            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
         let (line, _) =
             jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start);
         let source_line = source
@@ -4266,13 +4507,12 @@ impl<'a> RustEmitter<'a> {
         function: &MirFunction,
         instruction: &MirInstruction,
     ) -> MirPanicLoc {
-        let module = self.module_row(function.module_id);
         let source = self
             .program
             .source_files
             .iter()
-            .find(|source| source.id == module.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
+            .find(|source| source.id == function.source_file)
+            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
         let line = instruction
             .source_line
             .map(|line| line as usize)
@@ -4282,7 +4522,7 @@ impl<'a> RustEmitter<'a> {
         let line = u32::try_from(line)
             .unwrap_or_else(|_| panic!("MIR instruction source line {line} exceeds u32"));
         MirPanicLoc {
-            file: module.source_file,
+            file: function.source_file,
             line,
             column: 0,
         }
@@ -4294,6 +4534,22 @@ impl<'a> RustEmitter<'a> {
             .cloned()
             .unwrap_or_else(|| panic!("MIR trait ID {:?} has no declaration row", id))
     }
+    fn trait_method_symbol(
+        &self,
+        definition: &MirTraitDef,
+        method: &MirTraitMethod,
+    ) -> String {
+        if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name) {
+            method.name.clone()
+        } else {
+            mangle(&method.name)
+        }
+    }
+
+    fn trait_method_key(&self, definition: &MirTraitDef, method: &MirTraitMethod) -> String {
+        format!("{}::{}", self.module_row(definition.module).key, method.name)
+    }
+
 
     fn trait_nominal_name(&self, reference: &jet_foundation::MIR::MirTraitRef) -> String {
         let name = self
@@ -5247,12 +5503,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             ""
         };
-        let method_name =
-            if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name) {
-                method.name.clone()
-            } else {
-                mangle(&method.name)
-            };
+        let method_name = self.trait_method_symbol(definition, method);
         let Some(default_id) = method.default else {
             let _ = writeln!(out, "    fn {method_name}{generics}({params}) -> {ret};",);
             return;
@@ -6130,6 +6381,288 @@ impl<'a> RustEmitter<'a> {
                 .any(|definition| definition.id == *trait_id && definition.name == trait_name)
         })
     }
+    fn structural_derives_allowed(&self, def: &MirTypeDef) -> bool {
+        match &def.kind {
+            MirTypeDefKind::Struct { fields, .. } => fields
+                .iter()
+                .filter(|field| !field.computed)
+                .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
+            MirTypeDefKind::Enum { variants, .. } => variants.iter().all(|variant| {
+                match &variant.payload {
+                    MirVariantPayload::Unit => true,
+                    MirVariantPayload::Single(ty) => !mir_type_has_inline_nominal_word(ty),
+                    MirVariantPayload::Named(fields) => fields
+                        .iter()
+                        .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
+                }
+            }),
+            MirTypeDefKind::Distinct { base, .. } => !mir_type_has_inline_nominal_word(base),
+            MirTypeDefKind::Alias { target } => !mir_type_has_inline_nominal_word(target),
+            MirTypeDefKind::UnitFamily { .. } => true,
+        }
+    }
+    /// Project the checked Rust capability of one MIR type for the standard
+    /// derives emitted on nominal rows. This is deliberately representation-
+    /// based: a dynamic trait object has no implicit Rust `Clone`/`Debug`
+    /// bound, while `JetShared<T>` and the checked callable carriers clone
+    /// their handles without cloning the payload.
+    fn type_derive_capability(
+        &self,
+        ty: &MirType,
+        trait_name: &str,
+        visiting: &mut Vec<MirTypeId>,
+        bindings: &BTreeMap<String, MirType>,
+        generic_params: &BTreeSet<String>,
+    ) -> bool {
+        if let MirTypeKind::Apply { name, args } = ty.kind() {
+            if args.is_empty() {
+                if let Some(bound) = bindings.get(&name.name) {
+                    return self.type_derive_capability(
+                        bound,
+                        trait_name,
+                        visiting,
+                        bindings,
+                        generic_params,
+                    );
+                }
+                if generic_params.contains(&name.name) {
+                    // `#[derive]` supplies the conditional Rust bound on a
+                    // declaration's own generic parameter.
+                    return true;
+                }
+            }
+        }
+
+        let ty = if ty.identity.is_some() {
+            self.canonical_type(ty)
+        } else {
+            ty
+        };
+        match ty.kind() {
+            MirTypeKind::Int
+            | MirTypeKind::Float
+            | MirTypeKind::Bool
+            | MirTypeKind::String
+            | MirTypeKind::Char
+            | MirTypeKind::IntN { .. }
+            | MirTypeKind::Float32
+            | MirTypeKind::Measure(_) => true,
+            MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
+                trait_name == "Clone"
+            }
+            MirTypeKind::TraitObject(_) => false,
+            MirTypeKind::List(inner)
+            | MirTypeKind::Option(inner)
+            | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::InlineRange { base: inner, .. }
+            | MirTypeKind::Quantity { base: inner, .. } => self.type_derive_capability(
+                inner,
+                trait_name,
+                visiting,
+                bindings,
+                generic_params,
+            ),
+            MirTypeKind::Tagged { marker, inner } => {
+                if matches!(
+                    marker,
+                    MirTagMarker::Internal(MirInternalTag::CppCallbackAbi)
+                ) {
+                    true
+                } else {
+                    self.type_derive_capability(
+                        inner,
+                        trait_name,
+                        visiting,
+                        bindings,
+                        generic_params,
+                    )
+                }
+            }
+            MirTypeKind::Map { key, value }
+            | MirTypeKind::Result {
+                ok: key,
+                err: value,
+            } => {
+                self.type_derive_capability(
+                    key,
+                    trait_name,
+                    visiting,
+                    bindings,
+                    generic_params,
+                ) && self.type_derive_capability(
+                    value,
+                    trait_name,
+                    visiting,
+                    bindings,
+                    generic_params,
+                )
+            }
+            MirTypeKind::Tuple(fields) => fields.iter().all(|(_, field)| {
+                self.type_derive_capability(
+                    field,
+                    trait_name,
+                    visiting,
+                    bindings,
+                    generic_params,
+                )
+            }),
+            MirTypeKind::Union(members) => members.iter().all(|member| {
+                self.type_derive_capability(
+                    member,
+                    trait_name,
+                    visiting,
+                    bindings,
+                    generic_params,
+                )
+            }),
+            MirTypeKind::Apply { name, args } => {
+                // These checked aliases are references, not owned payloads.
+                // The Rust representation makes the capability boundary
+                // explicit instead of guessing from a source declaration.
+                if name.name == jet_foundation::Syntax::TYPE_PTR {
+                    return true;
+                }
+                if name.name == "View" {
+                    return trait_name == "Clone"
+                        || args.first().is_some_and(|inner| {
+                            self.type_derive_capability(
+                                inner,
+                                trait_name,
+                                visiting,
+                                bindings,
+                                generic_params,
+                            )
+                        });
+                }
+                if name.name == "ViewMut" {
+                    return trait_name != "Clone"
+                        && args.first().is_some_and(|inner| {
+                            self.type_derive_capability(
+                                inner,
+                                trait_name,
+                                visiting,
+                                bindings,
+                                generic_params,
+                            )
+                        });
+                }
+                if self.selected_user_capability_impl(ty, trait_name) {
+                    return true;
+                }
+                let Some(def) = self.structural_type_def_for(ty) else {
+                    return args.iter().all(|arg| {
+                        self.type_derive_capability(
+                            arg,
+                            trait_name,
+                            visiting,
+                            bindings,
+                            generic_params,
+                        )
+                    });
+                };
+                if !self.structural_derives_allowed(def) {
+                    return false;
+                }
+                if trait_name == "Clone"
+                    && def.ownership == MirOwnershipMode::Move
+                {
+                    return false;
+                }
+                if visiting.contains(&def.id) {
+                    return true;
+                }
+                let mut next_bindings = bindings.clone();
+                let mut next_generic_params = generic_params.clone();
+                next_generic_params.extend(
+                    def.generic_params
+                        .iter()
+                        .map(|parameter| parameter.name.clone()),
+                );
+                if let MirTypeKind::Apply { args, .. } = ty.kind() {
+                    next_bindings.extend(
+                        def.generic_params
+                            .iter()
+                            .zip(args)
+                            .map(|(parameter, argument)| {
+                                (parameter.name.clone(), argument.clone())
+                            }),
+                    );
+                }
+                visiting.push(def.id);
+                let result = match &def.kind {
+                    MirTypeDefKind::Struct { fields, .. } => fields
+                        .iter()
+                        .filter(|field| !field.computed)
+                        .all(|field| {
+                            self.type_derive_capability(
+                                &field.ty,
+                                trait_name,
+                                visiting,
+                                &next_bindings,
+                                &next_generic_params,
+                            )
+                        }),
+                    MirTypeDefKind::Enum { variants, .. } => {
+                        variants.iter().all(|variant| match &variant.payload {
+                            MirVariantPayload::Unit => true,
+                            MirVariantPayload::Single(payload) => self.type_derive_capability(
+                                payload,
+                                trait_name,
+                                visiting,
+                                &next_bindings,
+                                &next_generic_params,
+                            ),
+                            MirVariantPayload::Named(fields) => fields.iter().all(|field| {
+                                self.type_derive_capability(
+                                    &field.ty,
+                                    trait_name,
+                                    visiting,
+                                    &next_bindings,
+                                    &next_generic_params,
+                                )
+                            }),
+                        })
+                    }
+                    MirTypeDefKind::Distinct { base, .. } => self.type_derive_capability(
+                        base,
+                        trait_name,
+                        visiting,
+                        &next_bindings,
+                        &next_generic_params,
+                    ),
+                    MirTypeDefKind::Alias { target } => self.type_derive_capability(
+                        target,
+                        trait_name,
+                        visiting,
+                        &next_bindings,
+                        &next_generic_params,
+                    ),
+                    MirTypeDefKind::UnitFamily { .. } => true,
+                };
+                visiting.pop();
+                result
+            }
+        }
+    }
+
+    fn selected_user_capability_impl(&self, ty: &MirType, trait_name: &str) -> bool {
+        self.program.impls.iter().any(|implementation| {
+            !implementation.compiler_generated
+                && implementation
+                    .trait_ref
+                    .as_ref()
+                    .is_some_and(|trait_ref| trait_ref.name == trait_name)
+                && self.module_selected(implementation.module)
+                && self.impl_selected_for_target(implementation)
+                && (implementation.self_type.same_checked_type(ty)
+                    || implementation
+                        .self_type
+                        .nominal_name()
+                        .zip(ty.nominal_name())
+                        .is_some_and(|(left, right)| left == right))
+        })
+    }
+
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
         let emit_show = def.auto_printable
@@ -6398,7 +6931,18 @@ impl<'a> RustEmitter<'a> {
         if let Some(layout) = def.layout {
             match layout {
                 MirStructLayout::C => {
-                    let _ = writeln!(out, "#[repr(C)]");
+                    if matches!(&def.kind, MirTypeDefKind::Enum { .. })
+                        && def.c_layout_tag.is_some()
+                    {
+                        self.c_abi_enum_facts(def);
+                        if let Some(tag) = self.c_abi_enum_repr_tag(def) {
+                            let _ = writeln!(out, "#[repr(C, {tag})]");
+                        } else {
+                            let _ = writeln!(out, "#[repr(C)]");
+                        }
+                    } else {
+                        let _ = writeln!(out, "#[repr(C)]");
+                    }
                 }
                 MirStructLayout::CAligned { alignment, .. } => {
                     let fact = def.layout_alignment.as_ref().unwrap_or_else(|| {
@@ -6418,29 +6962,37 @@ impl<'a> RustEmitter<'a> {
                 MirStructLayout::Columnar => {}
             }
         }
-        let derives_allowed = match &def.kind {
-            MirTypeDefKind::Struct { fields, .. } => fields
-                .iter()
-                .filter(|field| !field.computed)
-                .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
-            MirTypeDefKind::Enum { variants, .. } => {
-                variants.iter().all(|variant| match &variant.payload {
-                    MirVariantPayload::Unit => true,
-                    MirVariantPayload::Single(ty) => !mir_type_has_inline_nominal_word(ty),
-                    MirVariantPayload::Named(fields) => fields
-                        .iter()
-                        .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
-                })
-            }
-            MirTypeDefKind::Distinct { base, .. } => !mir_type_has_inline_nominal_word(base),
-            MirTypeDefKind::Alias { target } => !mir_type_has_inline_nominal_word(target),
-            MirTypeDefKind::UnitFamily { .. } => true,
-        };
-        let mut derives = if derives_allowed {
-            vec!["Clone", "Debug"]
-        } else {
-            Vec::new()
-        };
+        let derives_allowed = self.structural_derives_allowed(def);
+        let declared_ty = self
+            .type_instances
+            .get(&def.id)
+            .copied()
+            .unwrap_or_else(|| panic!("MIR type {:?} has no canonical instance", def.id));
+        let clone_capable = derives_allowed
+            && self.type_derive_capability(
+                declared_ty,
+                "Clone",
+                &mut Vec::new(),
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+            );
+        let debug_capable = derives_allowed
+            && self.type_derive_capability(
+                declared_ty,
+                "Debug",
+                &mut Vec::new(),
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+            );
+        let clone_user_impl = self.selected_user_capability_impl(declared_ty, "Clone");
+        let debug_user_impl = self.selected_user_capability_impl(declared_ty, "Debug");
+        let mut derives = Vec::new();
+        if clone_capable && !clone_user_impl {
+            derives.push("Clone");
+        }
+        if debug_capable && !debug_user_impl {
+            derives.push("Debug");
+        }
         for trait_id in &def.derives {
             let trait_name = self
                 .program
@@ -6449,6 +7001,18 @@ impl<'a> RustEmitter<'a> {
                 .find(|trait_def| trait_def.id == *trait_id)
                 .map(|trait_def| trait_def.name.as_str())
                 .unwrap_or_else(|| panic!("MIR derive trait ID {:?} has no row", trait_id));
+            if trait_name == "Clone" && !clone_capable && !clone_user_impl {
+                panic!(
+                    "MIR type {:?} derives Clone without a checked Rust Clone capability or user implementation",
+                    def.id
+                );
+            }
+            if trait_name == "Debug" && !debug_capable && !debug_user_impl {
+                panic!(
+                    "MIR type {:?} derives Debug without a checked Rust Debug capability or user implementation",
+                    def.id
+                );
+            }
             if matches!(
                 trait_name,
                 "Clone"
@@ -6461,7 +7025,12 @@ impl<'a> RustEmitter<'a> {
                     | "PartialEq"
                     | "PartialOrd"
             ) {
-                if derives_allowed && !derives.contains(&trait_name) {
+                let capability = match trait_name {
+                    "Clone" => clone_capable && !clone_user_impl,
+                    "Debug" => debug_capable && !debug_user_impl,
+                    _ => derives_allowed,
+                };
+                if capability && !derives.contains(&trait_name) {
                     derives.push(trait_name);
                 }
             } else {
@@ -11727,8 +12296,18 @@ impl<'a> RustEmitter<'a> {
                 MirOperation::ReadPlace(place) => cursor_place == Some(*place),
                 MirOperation::LoopRangeValue { cursor: source, .. }
                 | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
-                MirOperation::Copy { value }
-                | MirOperation::Move { value }
+                MirOperation::Copy {
+                    value,
+                    materialize_view,
+                } => {
+                    if *materialize_view {
+                        false
+                    } else {
+                        matches(function, *value, cursor, cursor_place, seen)
+                    }
+                }
+                MirOperation::Move { value }
+                | MirOperation::TraitBox { value, .. }
                 | MirOperation::AttachTag { value, .. }
                 | MirOperation::Convert { value, .. } => {
                     matches(function, *value, cursor, cursor_place, seen)
@@ -12442,7 +13021,28 @@ impl<'a> RustEmitter<'a> {
                 index_expr,
                 column_context,
             )?,
-            MirOperation::Copy { value } | MirOperation::AttachTag { value, .. } => self
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
+                if *materialize_view {
+                    return None;
+                }
+                self.acceleration_value_expr(
+                    function,
+                    *value,
+                    vector,
+                    cursor,
+                    loop_places,
+                    index_expr,
+                    column_context,
+                    defined,
+                    source,
+                    indent,
+                )?
+            }
+            MirOperation::TraitBox { .. } => return None,
+            MirOperation::AttachTag { value, .. } => self
                 .acceleration_value_expr(
                     function,
                     *value,
@@ -13372,17 +13972,35 @@ impl<'a> RustEmitter<'a> {
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
                 self.vector_place_load(function, *place, fact, index_name, loop_places, width)
             }
-            MirOperation::Copy { value }
-            | MirOperation::Move { value }
-            | MirOperation::AttachTag { value, .. } => self.vector_value_expr(
-                function,
-                *value,
-                fact,
-                index_name,
-                defined,
-                loop_places,
-                width,
-            ),
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
+                if *materialize_view {
+                    None
+                } else {
+                    self.vector_value_expr(
+                        function,
+                        *value,
+                        fact,
+                        index_name,
+                        defined,
+                        loop_places,
+                        width,
+                    )
+                }
+            MirOperation::Move { value } | MirOperation::AttachTag { value, .. } => {
+                self.vector_value_expr(
+                    function,
+                    *value,
+                    fact,
+                    index_name,
+                    defined,
+                    loop_places,
+                    width,
+                )
+            }
+            MirOperation::TraitBox { .. } => None,
             MirOperation::Index {
                 base, index, kind, ..
             } if fact.cursor.is_some_and(|cursor| {
@@ -15698,12 +16316,31 @@ impl<'a> RustEmitter<'a> {
             MirOperation::WritePlace { .. }
             | MirOperation::ReplacePlace { .. } => "()".to_string(),
             MirOperation::InitializeUninit { .. } => "()".to_string(),
-            MirOperation::Copy { value } => {
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
                 let value_ty = self.value_type(function, *value);
-                if is_allocator_result_type(value_ty) {
+                if *materialize_view {
+                    let kind = mir_view_copy_kind(value_ty).unwrap_or_else(|| {
+                        panic!(
+                            "MIR view materialization source `{}` has no canonical copy kernel",
+                            value_ty.display_name()
+                        )
+                    });
+                    if let Some(result) = result {
+                        let target_ty = self.value_type(function, result);
+                        if !kind.target_matches(target_ty) {
+                            panic!(
+                                "MIR view materialization `{}` has destination `{}`",
+                                kind.symbol(),
+                                target_ty.display_name()
+                            );
+                        }
+                    }
+                    format!("{}({})", kind.symbol(), self.value_read(*value))
+                } else if is_allocator_result_type(value_ty) {
                     self.value_move(*value)
-                } else if is_string_view_type(value_ty) {
-                    format!("jet_string_view_copy({})", self.value_read(*value))
                 } else if matches!(value_ty.kind(), MirTypeKind::Int) {
                     self.value_read(*value)
                 } else {
@@ -15711,6 +16348,18 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             MirOperation::Move { value } => self.value_move(*value),
+            MirOperation::TraitBox { value, target } => {
+                let source_ty = self.value_type(function, *value);
+                if matches!(source_ty.kind(), MirTypeKind::TraitObject(_)) {
+                    panic!("MIR trait boxing source is already a trait object");
+                }
+                let target_ty = self.trait_object_type(*target);
+                format!(
+                    "Box::new({}) as {}",
+                    self.value_move(*value),
+                    self.rust_type(target_ty)
+                )
+            }
             MirOperation::Constant(constant) => result
                 .map(|value| self.constant_for_type(constant, self.value_type(function, value)))
                 .unwrap_or_else(|| self.constant(constant)),
@@ -16790,7 +17439,7 @@ impl<'a> RustEmitter<'a> {
                 let condition = condition
                     .unwrap_or_else(|| panic!("MIR require route has no checked condition value"));
                 let message = match values {
-                    [] => "\"condition failed\"".to_string(),
+                    [] => "jet_foundation::Outcome::jet_require_message(None)".to_string(),
                     [message] => {
                         if self.is_core_layer() {
                             self.value_read(*message)
@@ -17379,10 +18028,817 @@ impl<'a> RustEmitter<'a> {
             MirForeignLanguage::Assembly => "assembly",
         }
     }
+    fn c_abi_record_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
+        let id = match ty.kind() {
+            MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
+            _ => return None,
+        };
+        let definition = self.program.types.iter().find(|definition| definition.id == id)?;
+        matches!(
+            &definition.kind,
+            MirTypeDefKind::Struct { .. }
+                if matches!(
+                    definition.layout,
+                    Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
+                )
+        )
+        .then_some(definition)
+    }
+    fn c_abi_enum_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
+        let id = match ty.kind() {
+            MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
+            _ => return None,
+        };
+        let definition = self.program.types.iter().find(|definition| definition.id == id)?;
+        match &definition.kind {
+            MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some() => Some(definition),
+            MirTypeDefKind::Distinct { base, .. } => self.c_abi_enum_def(base),
+            MirTypeDefKind::Alias { target } => self.c_abi_enum_def(target),
+            _ => None,
+        }
+    }
 
-    fn foreign_call_arg(&self, foreign: &MirForeign, arg: &MirCallArg, param: &MirParam) -> String {
+    fn c_abi_enum_tag_type(&self, tag: MirCEnumTag) -> &'static str {
+        match tag {
+            MirCEnumTag::CInt => "i32",
+            MirCEnumTag::U8 => "u8",
+            MirCEnumTag::I8 => "i8",
+            MirCEnumTag::U16 => "u16",
+            MirCEnumTag::I16 => "i16",
+            MirCEnumTag::U32 => "u32",
+            MirCEnumTag::I32 => "i32",
+            MirCEnumTag::U64 => "u64",
+            MirCEnumTag::I64 => "i64",
+        }
+    }
+    fn c_abi_enum_repr_tag(&self, definition: &MirTypeDef) -> Option<&'static str> {
+        match self.c_abi_enum_tag(definition) {
+            MirCEnumTag::CInt => None,
+            tag => Some(self.c_abi_enum_tag_type(tag)),
+        }
+    }
+
+
+    fn c_abi_enum_name(&self, definition: &MirTypeDef) -> String {
+        mangle_path(&format!("__jet_c_abi_enum::{}", definition.key))
+    }
+
+    fn c_abi_enum_payload_name(&self, definition: &MirTypeDef) -> String {
+        format!("{}_payload", self.c_abi_enum_name(definition))
+    }
+
+    fn c_abi_enum_variant_name(&self, variant: &MirVariant) -> String {
+        mangle(&variant.name)
+    }
+
+    fn c_abi_enum_has_payload(&self, definition: &MirTypeDef) -> bool {
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            return false;
+        };
+        variants
+            .iter()
+            .any(|variant| !matches!(&variant.payload, MirVariantPayload::Unit))
+    }
+
+    fn c_abi_enum_facts<'a>(&self, definition: &'a MirTypeDef) -> &'a LayoutFacts {
+        let Some(layout) = definition.enum_layout.as_ref() else {
+            panic!(
+                "C ABI enum {:?} has no checked TargetLayoutEngine facts",
+                definition.id
+            );
+        };
+        let Some(_) = layout.bytes else {
+            panic!(
+                "C ABI enum {:?} has unknown checked size/alignment facts",
+                definition.id
+            );
+        };
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            unreachable!();
+        };
+        if layout.fields.len() != variants.len() {
+            panic!(
+                "C ABI enum {:?} layout fact count does not match variants",
+                definition.id
+            );
+        }
+        for (variant, fact) in variants.iter().zip(&layout.fields) {
+            if fact.name != variant.name
+                || fact.offset.is_none()
+                || fact.size.is_none()
+                || fact.alignment.is_none()
+                || fact.stride.is_none()
+            {
+                panic!(
+                    "C ABI enum {:?} has incomplete checked layout fact for variant `{}`",
+                    definition.id, variant.name
+                );
+            }
+        }
+        layout
+    }
+
+    fn c_abi_enum_tag(&self, definition: &MirTypeDef) -> MirCEnumTag {
+        definition
+            .c_layout_tag
+            .unwrap_or_else(|| panic!("C ABI enum {:?} has no checked tag fact", definition.id))
+    }
+
+    fn c_abi_enum_variant_discriminant(
+        &self,
+        definition: &MirTypeDef,
+        variant: &MirVariant,
+    ) -> i64 {
+        self.c_abi_enum_facts(definition);
+        variant.discriminant.unwrap_or_else(|| {
+            panic!(
+                "C ABI enum {:?} variant `{}` has no checked discriminant",
+                definition.id, variant.name
+            )
+        })
+    }
+
+
+    fn c_abi_record_name(&self, definition: &MirTypeDef) -> String {
+        mangle_path(&format!("__jet_c_abi_record::{}", definition.key))
+    }
+
+    fn c_abi_type(&self, ty: &MirType, access: MirAccess) -> Option<String> {
+        let scalar = |name: &str| {
+            if access == MirAccess::Write {
+                format!("*mut {name}")
+            } else {
+                name.to_string()
+            }
+        };
+        match ty.kind() {
+            MirTypeKind::Int => Some(scalar("i64")),
+            MirTypeKind::Float => Some(scalar("f64")),
+            MirTypeKind::Float32 => Some(scalar("f32")),
+            MirTypeKind::Bool => Some(scalar("bool")),
+            MirTypeKind::Char => Some(scalar("u32")),
+            MirTypeKind::IntN { .. } => Some(scalar(&self.rust_type(ty))),
+            MirTypeKind::String => Some(if access == MirAccess::Write {
+                "*mut core::ffi::c_char".to_string()
+            } else {
+                "*const core::ffi::c_char".to_string()
+            }),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_type(base, access),
+            MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
+                Some("*mut core::ffi::c_void".to_string())
+            }
+            MirTypeKind::Apply { .. } => {
+                if let Some(definition) = self.c_abi_enum_def(ty) {
+                    self.c_abi_enum_facts(definition);
+                    let native = if self.c_abi_enum_has_payload(definition) {
+                        self.c_abi_enum_name(definition)
+                    } else {
+                        self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition))
+                            .to_string()
+                    };
+                    return Some(if access == MirAccess::Write {
+                        format!("*mut {native}")
+                    } else {
+                        native
+                    });
+                }
+                if let Some(definition) = self.c_abi_record_def(ty) {
+                    let name = self.c_abi_record_name(definition);
+                    return Some(if access == MirAccess::Write {
+                        format!("*mut {name}")
+                    } else {
+                        name
+                    });
+                }
+                let id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
+                    _ => unreachable!(),
+                };
+                let definition = self.program.types.iter().find(|definition| definition.id == id)?;
+                match &definition.kind {
+                    MirTypeDefKind::Distinct { base, .. } => self.c_abi_type(base, access),
+                    MirTypeDefKind::Alias { target } => self.c_abi_type(target, access),
+                    _ => None,
+                }
+            }
+
+            _ => None,
+        }
+    }
+    fn c_abi_record_string_count(&self, ty: &MirType) -> usize {
+        match ty.kind() {
+            MirTypeKind::String => 1,
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_record_string_count(base),
+            MirTypeKind::Apply { .. } => {
+                if let Some(definition) = self.c_abi_enum_def(ty) {
+                    let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+                        unreachable!();
+                    };
+                    return variants
+                        .iter()
+                        .map(|variant| match &variant.payload {
+                            MirVariantPayload::Unit => 0,
+                            MirVariantPayload::Single(payload) => {
+                                self.c_abi_record_string_count(payload)
+                            }
+                            MirVariantPayload::Named(fields) => fields
+                                .iter()
+                                .map(|field| self.c_abi_record_string_count(&field.ty))
+                                .sum(),
+                        })
+                        .sum();
+                }
+                if let Some(definition) = self.c_abi_record_def(ty) {
+                    let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                        return 0;
+                    };
+                    fields
+                        .iter()
+                        .map(|field| self.c_abi_record_string_count(&field.ty))
+                        .sum()
+                } else {
+                    let id = match ty.kind() {
+                        MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                        _ => None,
+                    };
+                    let Some(id) = id else {
+                        return 0;
+                    };
+                    let Some(definition) =
+                        self.program.types.iter().find(|definition| definition.id == id)
+                    else {
+                        return 0;
+                    };
+                    match &definition.kind {
+                        MirTypeDefKind::Distinct { base, .. } => {
+                            self.c_abi_record_string_count(base)
+                        }
+                        MirTypeDefKind::Alias { target } => {
+                            self.c_abi_record_string_count(target)
+                        }
+
+                        _ => 0,
+                    }
+                }
+            }
+            _ => 0,
+        }
+    }
+    fn c_abi_write_temp_needed(&self, ty: &MirType) -> bool {
+        match ty.kind() {
+            MirTypeKind::Int | MirTypeKind::String | MirTypeKind::Char => true,
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_write_temp_needed(base),
+            MirTypeKind::Apply { .. } => {
+                if self.c_abi_enum_def(ty).is_some() {
+                    return true;
+                }
+                if self.c_abi_record_def(ty).is_some() {
+                    return true;
+                }
+                let id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                    _ => None,
+                };
+                let Some(id) = id else {
+                    return false;
+                };
+                let Some(definition) =
+                    self.program.types.iter().find(|definition| definition.id == id)
+                else {
+                    return false;
+                };
+                match &definition.kind {
+                    MirTypeDefKind::Distinct { base, .. } => self.c_abi_write_temp_needed(base),
+                    MirTypeDefKind::Alias { target } => self.c_abi_write_temp_needed(target),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+    fn c_abi_scalar_kind(&self, ty: &MirType) -> Option<&'static str> {
+        match ty.kind() {
+            MirTypeKind::Int => Some("int"),
+            MirTypeKind::String => Some("string"),
+            MirTypeKind::Char => Some("char"),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_scalar_kind(base),
+            MirTypeKind::Apply { .. } => {
+                let id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                    _ => None,
+                }?;
+                let definition = self.program.types.iter().find(|definition| definition.id == id)?;
+                match &definition.kind {
+                    MirTypeDefKind::Distinct { base, .. } => self.c_abi_scalar_kind(base),
+                    MirTypeDefKind::Alias { target } => self.c_abi_scalar_kind(target),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+
+    fn emit_c_abi_records(&self, out: &mut String) {
+        for definition in &self.program.types {
+            if !self.module_selected(definition.module)
+                || !matches!(
+                    definition.layout,
+                    Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
+                )
+            {
+                continue;
+            }
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                continue;
+            };
+            let name = self.c_abi_record_name(definition);
+            match definition.layout {
+                Some(MirStructLayout::C) => out.push_str("#[repr(C)]\n"),
+                Some(MirStructLayout::CAligned { .. }) => {
+                    let fact = definition
+                        .layout_alignment
+                        .as_ref()
+                        .unwrap_or_else(|| {
+                            panic!("C ABI record {:?} has no checked alignment fact", definition.id)
+                        });
+                    let _ = writeln!(out, "#[repr(C, align({}))]", fact.effective_alignment);
+                }
+                _ => unreachable!(),
+            }
+            out.push_str("#[derive(Clone, Copy)]\n");
+            let _ = writeln!(out, "struct {name} {{");
+            for field in fields {
+                let field_ty = self.c_abi_type(&field.ty, MirAccess::Read).unwrap_or_else(|| {
+                    panic!(
+                        "C ABI record field {:?} has no checked physical representation",
+                        field.id
+                    )
+                });
+                let _ = writeln!(out, "    {}: {field_ty},", self.field_name(field.id));
+            }
+            out.push_str("}\n\n");
+        }
+        self.emit_c_abi_enums(out);
+    }
+
+    fn emit_c_abi_enums(&self, out: &mut String) {
+        for definition in &self.program.types {
+            if !self.module_selected(definition.module)
+                || !matches!(
+                    &definition.kind,
+                    MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some()
+                )
+            {
+                continue;
+            }
+            self.c_abi_enum_facts(definition);
+            if !self.c_abi_enum_has_payload(definition) {
+                continue;
+            }
+            let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+                unreachable!();
+            };
+            let enum_name = self.c_abi_enum_name(definition);
+            let payload_name = self.c_abi_enum_payload_name(definition);
+            let tag_name = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
+            for variant in variants {
+                let MirVariantPayload::Named(fields) = &variant.payload else {
+                    continue;
+                };
+                let variant_name = format!("{payload_name}_{}", self.c_abi_enum_variant_name(variant));
+                let _ = writeln!(out, "#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {variant_name} {{");
+                for field in fields {
+                    let field_ty = self.c_abi_type(&field.ty, MirAccess::Read).unwrap_or_else(|| {
+                        panic!(
+                            "C ABI enum {:?} field {:?} has no checked physical representation",
+                            definition.id, field.id
+                        )
+                    });
+                    let _ = writeln!(out, "    {}: {field_ty},", self.field_name(field.id));
+                }
+                out.push_str("}\n\n");
+            }
+            let _ = writeln!(out, "#[repr(C)]\n#[derive(Clone, Copy)]\nunion {payload_name} {{");
+            out.push_str("    __jet_unit: u8,\n");
+            for variant in variants {
+                let variant_name = self.c_abi_enum_variant_name(variant);
+                let field_ty = match &variant.payload {
+                    MirVariantPayload::Unit => continue,
+                    MirVariantPayload::Single(payload) => self
+                        .c_abi_type(payload, MirAccess::Read)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "C ABI enum {:?} variant `{}` has no checked physical payload",
+                                definition.id, variant.name
+                            )
+                        }),
+                    MirVariantPayload::Named(_) => {
+                        format!("{payload_name}_{variant_name}")
+                    }
+                };
+                let _ = writeln!(out, "    {variant_name}: {field_ty},");
+            }
+            out.push_str("}\n\n");
+            let _ = writeln!(
+                out,
+                "#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {enum_name} {{\n    tag: {tag_name},\n    payload: {payload_name},\n}}\n\n"
+            );
+        }
+    }
+    fn c_abi_encode_enum_ref(
+        &self,
+        definition: &MirTypeDef,
+        value: &str,
+    ) -> String {
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            unreachable!();
+        };
+        let enum_name = self.type_name(definition.id);
+        let tag_type = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
+        let payload = self.c_abi_enum_has_payload(definition);
+        let arms = variants
+            .iter()
+            .map(|variant| {
+                let variant_name = self.c_abi_enum_variant_name(variant);
+                let tag = format!(
+                    "({} as {tag_type})",
+                    self.c_abi_enum_variant_discriminant(definition, variant)
+                );
+                match &variant.payload {
+                    MirVariantPayload::Unit => {
+                        if payload {
+                            format!(
+                                "{enum_name}::{variant_name} => {} {{ tag: {tag}, payload: {} {{ __jet_unit: 0 }} }}",
+                                self.c_abi_enum_name(definition),
+                                self.c_abi_enum_payload_name(definition)
+                            )
+                        } else {
+                            format!("{enum_name}::{variant_name} => {tag}")
+                        }
+                    }
+                    MirVariantPayload::Single(payload_ty) => {
+                        let encoded = self.c_abi_encode_ref(payload_ty, "payload");
+                        format!(
+                            "{enum_name}::{variant_name}(payload) => {} {{ tag: {tag}, payload: {} {{ {variant_name}: {encoded} }} }}",
+                            self.c_abi_enum_name(definition),
+                            self.c_abi_enum_payload_name(definition)
+                        )
+                    }
+                    MirVariantPayload::Named(fields) => {
+                        let encoded_fields = fields
+                            .iter()
+                            .map(|field| {
+                                let field_name = self.field_name(field.id);
+                                let encoded = self.c_abi_encode_ref(&field.ty, &field_name);
+                                format!("{field_name}: {encoded}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let variant_payload = format!(
+                            "{}_{} {{ {encoded_fields} }}",
+                            self.c_abi_enum_payload_name(definition),
+                            variant_name
+                        );
+                        format!(
+                            "{enum_name}::{variant_name} {{ {} }} => {} {{ tag: {tag}, payload: {} {{ {variant_name}: {variant_payload} }} }}",
+                            fields
+                                .iter()
+                                .map(|field| self.field_name(field.id))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            self.c_abi_enum_name(definition),
+                            self.c_abi_enum_payload_name(definition)
+                        )
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("match ({value}) {{ {arms} }}")
+    }
+
+    fn c_abi_encode_ref(&self, ty: &MirType, value: &str) -> String {
+        match ty.kind() {
+            MirTypeKind::Int => self.native_int_argument(format!("*({value})"), None),
+            MirTypeKind::String => format!(
+                "{{ __jet_c_strings.push(std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"))); __jet_c_strings.last().unwrap().as_ptr() }}"
+            ),
+            MirTypeKind::Float
+            | MirTypeKind::Float32
+            | MirTypeKind::Bool
+            | MirTypeKind::IntN { .. } => format!("*({value})"),
+            MirTypeKind::Char => format!("(*({value})) as u32"),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_encode_ref(base, value),
+            MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
+                format!("({value}).as_raw()")
+            }
+            MirTypeKind::Apply { .. } => {
+                if self.c_abi_enum_def(ty).is_some() {
+                    let id = match ty.kind() {
+                        MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                        _ => None,
+                    };
+                    if let Some(id) = id {
+                        if let Some(nominal) =
+                            self.program.types.iter().find(|definition| definition.id == id)
+                        {
+                            match &nominal.kind {
+                                MirTypeDefKind::Enum { .. } => {
+                                    let definition = self.c_abi_enum_def(ty).unwrap();
+                                    return self.c_abi_encode_enum_ref(definition, value);
+                                }
+                                MirTypeDefKind::Distinct { base, .. } => {
+                                    return self
+                                        .c_abi_encode_ref(base, &format!("&({value}).0"));
+                                }
+                                MirTypeDefKind::Alias { target } => {
+                                    return self.c_abi_encode_ref(target, value);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if let Some(definition) = self.c_abi_record_def(ty) {
+                    let fields = match &definition.kind {
+                        MirTypeDefKind::Struct { fields, .. } => fields,
+                        _ => unreachable!(),
+                    };
+                    let source = value.to_string();
+                    let fields = fields
+                        .iter()
+                        .map(|field| {
+                            let field_value =
+                                format!("&({source}).{}", self.field_name(field.id));
+                            format!(
+                                "{}: {}",
+                                self.field_name(field.id),
+                                self.c_abi_encode_ref(&field.ty, &field_value)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return format!("{} {{ {fields} }}", self.c_abi_record_name(definition));
+                }
+                let id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                    _ => None,
+                };
+                let Some(id) = id else {
+                    return value.to_string();
+                };
+                let Some(definition) = self.program.types.iter().find(|definition| definition.id == id)
+                else {
+                    return value.to_string();
+                };
+                match &definition.kind {
+                    MirTypeDefKind::Distinct { base, .. } => {
+                        self.c_abi_encode_ref(base, &format!("&({value}).0"))
+                    }
+                    MirTypeDefKind::Alias { target } => self.c_abi_encode_ref(target, value),
+                    _ => value.to_string(),
+                }
+            }
+            _ => value.to_string(),
+        }
+    }
+
+    fn c_abi_encode_owned(&self, ty: &MirType, value: String) -> String {
+        if matches!(ty.kind(), MirTypeKind::Apply { .. }) && self.c_abi_record_def(ty).is_some() {
+            return format!(
+                "{{ let __jet_c_value = {value}; {} }}",
+                self.c_abi_encode_ref(ty, "&__jet_c_value")
+            );
+        }
+        self.c_abi_encode_ref(ty, &format!("&({value})"))
+    }
+
+    fn c_abi_decode_enum_owned(
+        &self,
+        definition: &MirTypeDef,
+        value: &str,
+    ) -> String {
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            unreachable!();
+        };
+        let enum_name = self.type_name(definition.id);
+        let tag_type = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
+        let payload = self.c_abi_enum_has_payload(definition);
+        let arms = variants
+            .iter()
+            .map(|variant| {
+                let variant_name = self.c_abi_enum_variant_name(variant);
+                let tag = format!(
+                    "({} as {tag_type})",
+                    self.c_abi_enum_variant_discriminant(definition, variant)
+                );
+                match &variant.payload {
+                    MirVariantPayload::Unit => {
+                        if payload {
+                            format!("{tag} => {enum_name}::{variant_name}")
+                        } else {
+                            format!("{tag} => {enum_name}::{variant_name}")
+                        }
+                    }
+                    MirVariantPayload::Single(payload_ty) => {
+                        let physical = format!(
+                            "__jet_c_value.payload.{}",
+                            self.c_abi_enum_variant_name(variant)
+                        );
+                        let decoded = self.c_abi_decode_owned(payload_ty, &physical);
+                        format!(
+                            "{tag} => unsafe {{ {enum_name}::{variant_name}({decoded}) }}"
+                        )
+                    }
+                    MirVariantPayload::Named(fields) => {
+                        let payload_name = self.c_abi_enum_variant_name(variant);
+                        let decoded_fields = fields
+                            .iter()
+                            .map(|field| {
+                                let field_name = self.field_name(field.id);
+                                let physical = format!("__jet_c_payload.{field_name}");
+                                format!(
+                                    "{field_name}: {}",
+                                    self.c_abi_decode_owned(&field.ty, &physical)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            "{tag} => unsafe {{ let __jet_c_payload = __jet_c_value.payload.{payload_name}; {enum_name}::{variant_name} {{ {decoded_fields} }} }}"
+                        )
+                    }
+                }
+            })
+            .chain(std::iter::once(
+                "_ => panic!(\"native C enum discriminant is invalid\")".to_string(),
+            ))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if payload {
+            format!("{{ let __jet_c_value = {value}; match __jet_c_value.tag {{ {arms} }} }}")
+        } else {
+            format!("match ({value}) {{ {arms} }}")
+        }
+    }
+
+    fn c_abi_decode_owned(&self, ty: &MirType, value: &str) -> String {
+        match ty.kind() {
+            MirTypeKind::Int => {
+                format!("{}jet_std::jet_int_owned_from_i64({value})", self.config.root_prefix)
+            }
+            MirTypeKind::Float
+            | MirTypeKind::Float32
+            | MirTypeKind::Bool
+            | MirTypeKind::IntN { .. } => value.to_string(),
+            MirTypeKind::Char => format!(
+                "char::from_u32(({value}) as u32).unwrap_or_else(|| panic!(\"native C Char is invalid\"))"
+            ),
+            MirTypeKind::String => format!(
+                "{{ let __jet_c_ptr = {value}; if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }}"
+            ),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.c_abi_decode_owned(base, value),
+            MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
+                format!("{}::from_raw({value})", self.rust_type(ty))
+            }
+            MirTypeKind::Apply { .. } => {
+                let enum_id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                    _ => None,
+                };
+                if self.c_abi_enum_def(ty).is_some() {
+                    if let Some(enum_id) = enum_id {
+                        if let Some(definition) =
+                            self.program.types.iter().find(|definition| definition.id == enum_id)
+                        {
+                            match &definition.kind {
+                                MirTypeDefKind::Enum { .. } => {
+                                    let enum_definition = self.c_abi_enum_def(ty).unwrap();
+                                    return self.c_abi_decode_enum_owned(enum_definition, value);
+                                }
+                                MirTypeDefKind::Distinct { base, .. } => {
+                                    return format!(
+                                        "{}({})",
+                                        self.rust_type(ty),
+                                        self.c_abi_decode_owned(base, value)
+                                    );
+                                }
+                                MirTypeDefKind::Alias { target } => {
+                                    return self.c_abi_decode_owned(target, value);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                let id = match ty.kind() {
+                    MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
+                    _ => None,
+                };
+                let Some(id) = id else {
+                    return value.to_string();
+                };
+                let Some(definition) = self.program.types.iter().find(|definition| definition.id == id)
+                else {
+                    return value.to_string();
+                };
+                if let Some(record) = self.c_abi_record_def(ty) {
+                    let fields = match &record.kind {
+                        MirTypeDefKind::Struct { fields, .. } => fields,
+                        _ => unreachable!(),
+                    };
+                    let fields = fields
+                        .iter()
+                        .map(|field| {
+                            let field_value =
+                                format!("__jet_c_value.{}", self.field_name(field.id));
+                            format!(
+                                "{}: {}",
+                                self.field_name(field.id),
+                                self.c_abi_decode_owned(&field.ty, &field_value)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return format!("{{ let __jet_c_value = {value}; {} {{ {fields} }} }}", self.rust_type(ty));
+                }
+                match &definition.kind {
+                    MirTypeDefKind::Distinct { base, .. } => format!(
+                        "{}({})",
+                        self.rust_type(ty),
+                        self.c_abi_decode_owned(base, value)
+                    ),
+                    MirTypeDefKind::Alias { target } => self.c_abi_decode_owned(target, value),
+                    _ => value.to_string(),
+                }
+            }
+            _ => value.to_string(),
+        }
+    }
+
+    fn foreign_call_arg(
+        &self,
+        caller: &MirFunction,
+        foreign: &MirForeign,
+        arg: &MirCallArg,
+        param: &MirParam,
+    ) -> String {
+        if matches!(foreign.foreign_language, MirForeignLanguage::C)
+            && !(foreign.handle.is_some() && self.is_handle_type(&param.ty))
+        {
+            if self.c_abi_record_def(&param.ty).is_some() {
+                return match arg.access {
+                    MirAccess::Read => self
+                        .c_abi_encode_ref(&param.ty, &self.value_slot_reference(arg.value, false)),
+                    MirAccess::Move => {
+                        self.c_abi_encode_owned(
+                            &param.ty,
+                            self.call_arg_for_function(caller, arg, false),
+                        )
+                    }
+                };
+            }
+            if matches!(param.ty.kind(), MirTypeKind::String)
+                && matches!(arg.access, MirAccess::Read | MirAccess::Move)
+            {
+                let value = self.call_arg_for_function(caller, arg, false);
+                return format!(
+                    "std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\")).as_ptr()"
+                );
+            }
+            if !matches!(param.ty.kind(), MirTypeKind::String)
+                && !self.is_handle_type(&param.ty)
+                && self.c_abi_type(&param.ty, MirAccess::Read).is_some()
+                && matches!(arg.access, MirAccess::Read | MirAccess::Move)
+            {
+                return self.c_abi_encode_owned(
+                    &param.ty,
+                    self.call_arg_for_function(caller, arg, false),
+                );
+            }
+        }
         if !(foreign.handle.is_some() && self.is_handle_type(&param.ty)) {
-            return self.call_arg(arg, false);
+            let direct_c_aggregate = matches!(foreign.foreign_language, MirForeignLanguage::C)
+                && !foreign.bridge_eligible
+                && param.access == MirAccess::Read
+                && !self.is_scalar(&param.ty);
+            let borrowed = !direct_c_aggregate
+                && param.access == MirAccess::Read
+                && !self.is_scalar(&param.ty);
+            return self.call_arg_for_function(caller, arg, borrowed);
         }
         match arg.access {
             MirAccess::Read => {
@@ -17463,7 +18919,7 @@ impl<'a> RustEmitter<'a> {
                             foreign.name
                         )
                     });
-                let value = self.call_arg(&args[0], false);
+                let value = self.call_arg_for_function(caller, &args[0], false);
                 return format!(
                     "{}jet_std::JetTask::spawn(move || Ok(unsafe {{ {}({value}) }}))",
                     self.config.root_prefix,
@@ -17560,15 +19016,89 @@ impl<'a> RustEmitter<'a> {
                     digest,
                 );
             }
-            _ => {}
+        let c_record_string_count = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
+            args.iter()
+                .zip(&foreign.params)
+                .filter(|(_, param)| self.c_abi_record_string_count(&param.ty) > 0)
+                .map(|(_, param)| self.c_abi_record_string_count(&param.ty))
+                .sum()
+        } else {
+            0
+        };
+        let mut setup = Vec::new();
+        if c_record_string_count > 0 {
+            setup.push(format!(
+                "let mut __jet_c_strings = Vec::<std::ffi::CString>::with_capacity({c_record_string_count});"
+            ));
         }
+        let mut writebacks = Vec::new();
         let call_args = args
             .iter()
             .zip(&foreign.params)
-            .map(|(arg, param)| self.foreign_call_arg(foreign, arg, param))
+            .enumerate()
+            .map(|(index, (arg, param))| {
+                let needs_temp = matches!(foreign.foreign_language, MirForeignLanguage::C)
+                    && arg.access == MirAccess::Write
+                    && self.c_abi_write_temp_needed(&param.ty);
+                if !needs_temp {
+                    return self.foreign_call_arg(caller, foreign, arg, param);
+                }
+                let place = arg.place.unwrap_or_else(|| {
+                    panic!("C foreign write argument {} has no checked place", param.name)
+                });
+                let place = self.place_reference(caller, place, MirAccess::Write);
+                let temp = format!("__jet_c_ffi_arg_{index}");
+                if self.c_abi_scalar_kind(&param.ty) == Some("string") {
+                    setup.push(format!(
+                        "let mut {temp} = std::ffi::CString::new(({place}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"));"
+                    ));
+                    writebacks.push(format!(
+                        "*({place}) = {{ let __jet_c_ptr = {temp}.as_ptr(); if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }};"
+                    ));
+                    format!("{temp}.as_mut_ptr()")
+                } else if self.c_abi_scalar_kind(&param.ty) == Some("char") {
+                    setup.push(format!(
+                        "let mut {temp} = (*({place})) as u32;"
+                    ));
+                    writebacks.push(format!(
+                        "*({place}) = {};",
+                        self.c_abi_decode_owned(&param.ty, &temp)
+                    ));
+                    format!("&mut {temp} as *mut _")
+                } else {
+                    setup.push(format!(
+                        "let mut {temp} = {};",
+                        self.c_abi_encode_ref(&param.ty, &place)
+                    ));
+                    writebacks.push(format!(
+                        "*({place}) = {};",
+                        self.c_abi_decode_owned(&param.ty, &temp)
+                    ));
+                    format!("&mut {temp} as *mut _")
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
-        let call = format!("unsafe {{ {}({call_args}) }}", self.foreign_name(id));
+        let raw_call = if setup.is_empty() {
+            format!("unsafe {{ {}({call_args}) }}", self.foreign_name(id))
+        } else {
+            format!(
+                "{{ {} let __jet_c_result = unsafe {{ {}({call_args}) }}; {} __jet_c_result }}",
+                setup.join(" "),
+                self.foreign_name(id),
+                writebacks.join(" ")
+            )
+        };
+        let call = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
+            foreign
+                .return_type
+                .as_ref()
+                .filter(|ty| self.c_abi_type(ty, MirAccess::Read).is_some())
+                .map(|ty| self.c_abi_decode_owned(ty, &raw_call))
+                .unwrap_or(raw_call)
+        } else {
+            raw_call
+        };
         if foreign.callback_transport.as_deref() == Some("guest-import-result") {
             return format!("Ok({call})");
         }
@@ -17576,6 +19106,7 @@ impl<'a> RustEmitter<'a> {
             .return_type
             .as_ref()
             .is_some_and(|ty| foreign.handle.is_some() && self.is_handle_type(ty))
+            && !matches!(foreign.foreign_language, MirForeignLanguage::C)
         {
             let ty = self.rust_type(foreign.return_type.as_ref().expect("handle return type"));
             format!("{ty}::from_raw({call})")
@@ -18160,7 +19691,7 @@ impl<'a> RustEmitter<'a> {
         }
         let values = args[1..args.len() - 1]
             .iter()
-            .map(|arg| self.call_arg(arg, false))
+            .map(|arg| self.call_arg_for_function(function, arg, false))
             .collect::<Vec<_>>();
         let call = format!(
             "{call}(__jet_compute_handle.raw(), {input}::from_flat(vec![{}]), {:?})",
@@ -20369,6 +21900,13 @@ impl<'a> RustEmitter<'a> {
         })
     }
 
+    fn call_arg_needs_trait_box(&self, function: &MirFunction, arg: &MirCallArg) -> bool {
+        arg.box_as_trait.is_some()
+            && !matches!(
+                self.value_type(function, arg.value).kind(),
+                MirTypeKind::TraitObject(_)
+            )
+    }
     fn call_arg(&self, arg: &MirCallArg, borrowed: bool) -> String {
         let mut value = match arg.access {
             MirAccess::Read => self.value_read(arg.value),
@@ -20418,6 +21956,10 @@ impl<'a> RustEmitter<'a> {
         arg: &MirCallArg,
         borrowed: bool,
     ) -> String {
+        if let Some(trait_id) = arg.box_as_trait {
+            let _ = self.trait_object_type(trait_id);
+        }
+        let needs_trait_box = self.call_arg_needs_trait_box(function, arg);
         if arg.access == MirAccess::Write {
             if let Some(place) = arg.place {
                 return self.place_reference(function, place, MirAccess::Write);
@@ -20440,8 +21982,7 @@ impl<'a> RustEmitter<'a> {
             && !arg.implicit_clone
             && !arg.shared_auto_clone
             && !arg.widen_fixed_to_list
-            && arg.widen_to_union.is_none()
-            && arg.box_as_trait.is_none()
+            && !needs_trait_box
             && arg.fn_coercion.is_none()
         {
             if let Some(place) = arg.place {
@@ -20462,7 +22003,11 @@ impl<'a> RustEmitter<'a> {
             }
             return self.value_slot_reference(arg.value, false);
         }
-        self.call_arg(arg, borrowed)
+        let mut effective = arg.clone();
+        if arg.box_as_trait.is_some() && !needs_trait_box {
+            effective.box_as_trait = None;
+        }
+        self.call_arg(&effective, borrowed)
     }
     fn cell_host_method(
         &self,
@@ -21404,7 +22949,7 @@ impl<'a> RustEmitter<'a> {
                 if args[0].access == MirAccess::Write {
                     panic!("MIR hardware register write value cannot be a borrowed place");
                 }
-                let value = self.call_arg(&args[0], false);
+                let value = self.call_arg_for_function(function, &args[0], false);
                 let helper =
                     self.hardware_register_helper("write", profile_id, block, register, *width);
                 format!("{root}{helper}({value})")
@@ -21421,7 +22966,7 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR hardware DMA start buffer is not an owned move argument");
                 }
                 self.validate_dma_buffer_type(function, args[0].value, buffer_ty, "start");
-                let buffer = self.call_arg(&args[0], false);
+                let buffer = self.call_arg_for_function(function, &args[0], false);
                 format!("{root}jet_hardware_dma_start_typed({profile_id:?}, {channel:?}, {buffer})")
             }
             MirHardwareOp::DmaWait {
@@ -24467,7 +26012,7 @@ impl<'a> RustEmitter<'a> {
                 | MirOperation::ReadPlace(_)
                 | MirOperation::MovePlace { .. }
                 | MirOperation::InitializeUninit { .. }
-                | MirOperation::Copy { .. }
+                | MirOperation::TraitBox { .. }
                 | MirOperation::Move { .. }
                 | MirOperation::Constant(_)
                 | MirOperation::Unary { .. }

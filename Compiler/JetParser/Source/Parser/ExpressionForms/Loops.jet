@@ -1,0 +1,357 @@
+// Finite and collecting loop expressions. The canonical parser represents
+// both forms as immediately-called lambdas around ordinary loop statements.
+
+struct ParserExpressionFormLoopClause {
+    pub var: String
+    pub var_span: Span
+    pub var2: ?NamedSpan
+    pub kind: ForKind
+}
+
+struct ParserExpressionFormCountedLoop {
+    pub init: Binding
+    pub cond: Expr
+    pub step: ?Stmt
+    pub span: Span
+}
+
+fn parser_expression_form_loop_body_start(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_LBRACE || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
+}
+
+fn parser_expression_form_loop_clause_ahead(state: &JetParserState) -> Bool {
+    if parser_current_kind(&state) != TOKEN_COMMA -> return false
+    if parser_kind_at(&state, 1) == TOKEN_LPAREN -> return true
+    parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_COMMA || parser_kind_at(&state, 2) == TOKEN_KW_IN)
+}
+
+fn parser_expression_form_loop_guard_comma(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_COMMA && parser_kind_at(&state, 1) == TOKEN_KW_IF
+}
+
+fn parser_expression_form_loop_stride_here(state: &JetParserState) -> Bool {
+    if parser_current_kind(&state) == TOKEN_SEMI -> return true
+    parser_current_kind(&state) == TOKEN_COMMA && !parser_expression_form_loop_clause_ahead(&state) && !parser_expression_form_loop_guard_comma(&state)
+}
+
+fn parser_expression_form_loop_binding(state: &JetParserState) -> ParserExpressionFormLoopClause {
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        first :: parser_expect_name(&state, "as the first loop variable")
+        parser_expect(&state, TOKEN_COMMA, "between the two loop variables")
+        second :: parser_expect_name(&state, "as the second loop variable")
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        parser_expect(&state, TOKEN_RPAREN, "after the two loop variables")
+        return ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: Val(NamedSpan{name: second.payload.decoded, span: second.span}), kind: ForKind.In(collection: Expr.Unit(span: first.span), step: None)}
+    }
+    first :: parser_expect_name(&state, "as the loop variable")
+    ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: None, kind: ForKind.In(collection: Expr.Unit(span: first.span), step: None)}
+}
+
+fn parser_expression_form_loop_separator(state: &JetParserState) {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_KW_IN {
+        parser_bump(&state)
+        return
+    }
+    if token.kind == TOKEN_COMMA || token.kind == TOKEN_SEMI {
+        parser_bump(&state)
+        parser_expression_form_error(&state, "E0383", token.span, "a loop source needs `in`", "the source separator names the collection or range after the loop variable", "write `in` between the variable and source")
+        return
+    }
+    parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source")
+}
+fn parser_expression_form_loop_header_separator(state: &JetParserState, message: String) {
+    if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI {
+        parser_bump(&state)
+        return
+    }
+    parser_expect(&state, TOKEN_COMMA, message)
+}
+
+fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> ?Stmt {
+    if !parser_expression_form_loop_stride_here(&state) -> return None
+    parser_bump(&state)
+    if parser_expression_form_loop_body_start(&state) || parser_expression_form_loop_guard_comma(&state) -> return None
+    step_expr :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+    if parser_is_assignment_operator(parser_current_kind(&state)) {
+        operator :: parser_bump(&state)
+        value :: parser_parse_expression(&state, 1, depth + 1)
+        target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span)
+        return Val(Stmt.Assign(target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr))
+    }
+    Val(Stmt.Expr(expr: step_expr.expr))
+}
+
+fn parser_expression_form_loop_range_kind(state: &JetParserState, first: ParsedExpr, depth: Int) -> ForKind {
+    if first.expr == {
+        .Range(start, end, exclusive, _) -> {
+            step := parser_expression_form_loop_step(&state, depth + 1)
+            step_expr := None
+            if step != None {
+                statement :: step ?? Stmt.Expr(expr: Expr.Unit(span: first.span))
+                if statement == {
+                    .Expr(expr) -> step_expr = Val(expr)
+                    else -> {}
+                }
+            }
+            return ForKind.Range(start: start, end: end, step: step_expr, exclusive: exclusive)
+        }
+        else -> {}
+    }
+    if parser_current_kind(&state) == TOKEN_DOT_DOT || parser_current_kind(&state) == TOKEN_DOT_DOT_LT {
+        exclusive := parser_current_kind(&state) == TOKEN_DOT_DOT_LT
+        parser_bump(&state)
+        finish :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+        step := parser_expression_form_loop_step(&state, depth + 1)
+        step_expr := None
+        if step != None {
+            statement :: step ?? Stmt.Expr(expr: Expr.Unit(span: first.span))
+            if statement == {
+                .Expr(expr) -> step_expr = Val(expr)
+                else -> {}
+            }
+        }
+        return ForKind.Range(start: first.expr, end: finish.expr, step: step_expr, exclusive: exclusive)
+    }
+    step := parser_expression_form_loop_step(&state, depth + 1)
+    step_expr := None
+    if step != None {
+        statement :: step ?? Stmt.Expr(expr: Expr.Unit(span: first.span))
+        if statement == {
+            .Expr(expr) -> step_expr = Val(expr)
+            else -> {}
+        }
+    }
+    ForKind.In(collection: first.expr, step: step_expr)
+}
+
+fn parser_expression_form_loop_guard(state: &JetParserState, depth: Int) -> ?Expr {
+    if parser_expression_form_loop_guard_comma(&state) {
+        comma :: parser_bump(&state)
+        parser_expression_form_error(&state, "E0379", comma.span, "a guard follows its source with no comma", "the guard self-announces with `if`, so the loop head only uses commas between positional clauses", "remove the comma before `if`")
+    }
+    if parser_current_kind(&state) != TOKEN_KW_IF -> return None
+    parser_bump(&state)
+    Val(parser_parse_expression_no_struct_lit(&state, depth + 1).expr)
+}
+
+fn parser_expression_form_loop_rewrite_exits(statements: &[Stmt], target: String, nested_loop_depth: Int) {
+    index := 0
+    loop index < statements.len() {
+        statement := statements[index]
+        if nested_loop_depth == 0 {
+            if statement == {
+                .Break(span) -> statements[index] = Stmt.BreakLabel(name: target, span: span)
+                .BreakValue(value, span) -> statements[index] = Stmt.BreakLabelValue(name: target, name_span: span, value: value, span: span)
+                else -> {}
+            }
+        }
+        if statement == {
+            .Switch(_, arms, else_body, _) -> {
+                arm_index := 0
+                loop arm_index < arms.len() {
+                    parser_expression_form_loop_rewrite_exits(&arms[arm_index].body, target, nested_loop_depth)
+                    arm_index += 1
+                }
+                if else_body == {
+                    .Val(body) -> parser_expression_form_loop_rewrite_exits(&body, target, nested_loop_depth)
+                    .None -> {}
+                }
+            }
+            .ComptimeSwitch(_, arms, else_body, _) -> {
+                arm_index := 0
+                loop arm_index < arms.len() {
+                    parser_expression_form_loop_rewrite_exits(&arms[arm_index].body, target, nested_loop_depth)
+                    arm_index += 1
+                }
+                if else_body == {
+                    .Val(body) -> parser_expression_form_loop_rewrite_exits(&body, target, nested_loop_depth)
+                    .None -> {}
+                }
+            }
+            .Loop(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {}
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> parser_expression_form_loop_rewrite_exits(&body, target, nested_loop_depth)
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+                parser_expression_form_loop_rewrite_exits(&then_body, target, nested_loop_depth)
+                if else_body == {
+                    .Val(body) -> parser_expression_form_loop_rewrite_exits(&body, target, nested_loop_depth)
+                    .None -> {}
+                }
+            }
+            else -> {}
+        }
+        index += 1
+    }
+}
+
+fn parser_expression_form_make_loop_lambda(body: [Stmt], start: Span, end: Span, result_loop: Bool, collecting_loop: Bool, requires_exhaustion_route: Bool, exhaustion_span: ?Span) -> ParsedExpr {
+    lambda_meta := ast_empty_lambda_meta()
+    lambda_meta.result_loop = result_loop
+    lambda_meta.collecting_loop = collecting_loop
+    lambda_meta.requires_exhaustion_route = requires_exhaustion_route
+    lambda_meta.exhaustion_span = exhaustion_span
+    lambda := Lambda{
+        take_names: [NamedSpan]{},
+        params: [LambdaParam]{},
+        result_type: None,
+        error_type: None,
+        effects: None,
+        body: LambdaBody.Block(body: body),
+        span: Span{start: start.start, end: end.end},
+        meta: lambda_meta,
+    }
+    span := Span{start: start.start, end: end.end}
+    ParsedExpr{expr: Expr.CallValue(callee: Expr.Lambda(lambda: lambda), args: [CallArg]{}, span: span), span: span}
+}
+
+fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span, depth: Int) -> ParserExpressionFormCountedLoop {
+    name :: parser_expect_name(&state, "as the counted-loop binding")
+    sigil :: parser_expect(&state, TOKEN_COLON_EQ, "after the counted-loop binding name")
+    initial :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+    init := ast_binding(name.payload.decoded, name.span, true, initial.expr, Val(sigil.span))
+    parser_expression_form_loop_header_separator(&state, "after the counted-loop initializer")
+    condition :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+    step := None
+    if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI {
+        parser_bump(&state)
+        if !parser_expression_form_loop_body_start(&state) {
+            step_expr :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+            step = if {
+                parser_is_assignment_operator(parser_current_kind(&state)) -> {
+                    operator :: parser_bump(&state)
+                    value :: parser_parse_expression(&state, 1, depth + 1)
+                    target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span)
+                    Val(Stmt.Assign(target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr))
+                }
+                else -> Val(Stmt.Expr(expr: step_expr.expr))
+            }
+        }
+    }
+    ParserExpressionFormCountedLoop{init: init, cond: condition.expr, step: step, span: parser_cover(start, condition.span)}
+}
+
+fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> ParsedExpr {
+    start :: parser_bump(&state)
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        block :: parser_parse_block(&state)
+        end := block.span
+        loop_stmt := Stmt.Loop(body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None)
+        return parser_expression_form_make_loop_lambda(body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+    }
+    bindingless := (parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_KW_IT) && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_KW_IF)
+    counted := None
+    clauses := [ParserExpressionFormLoopClause]{}
+    if {
+        parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_EQ -> counted = Val(parser_expression_form_parse_counted_loop(&state, start.span, depth + 1))
+        bindingless -> {
+            collection :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+            clauses.push(ParserExpressionFormLoopClause{var: "it", var_span: collection.span, var2: None, kind: ForKind.In(collection: collection.expr, step: None)})
+        }
+        else -> {
+            loop {
+                clause := parser_expression_form_loop_binding(&state)
+                parser_expression_form_loop_separator(&state)
+                first :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+                clause.kind = parser_expression_form_loop_range_kind(&state, first, depth + 1)
+                clauses.push(clause)
+                if parser_current_kind(&state) == TOKEN_COMMA && (parser_kind_at(&state, 1) == TOKEN_LBRACE || parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW) {
+                    parser_bump(&state)
+                    break
+                }
+                if parser_expression_form_loop_guard_comma(&state) -> break
+                if !parser_expression_form_loop_clause_ahead(&state) -> break
+                parser_bump(&state)
+            }
+        }
+    }
+    guard := parser_expression_form_loop_guard(&state, depth + 1)
+    if parser_current_kind(&state) != TOKEN_UNIFIED_ARROW && parser_current_kind(&state) != TOKEN_LBRACE {
+        token :: parser_current(&state)
+        parser_expression_form_error(&state, "E0003", token.span, "this loop expression needs a body", "a finite loop value needs a braced body or `->` item body", "add `-> value` or `{{ ... }}")
+        return parser_expression_form_make_loop_lambda(body: [Stmt]{}, start: start.span, end: token.span, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+    }
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            block :: parser_parse_block(&state)
+            body := block.statements
+            exhaustion_span := block.span
+            if guard != None {
+                guard_expr := guard ?? Expr.Bool(value: true, span: start.span)
+                body = [Stmt]{Stmt.Switch(subject: Expr.Bool(value: true, span: start.span), arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span)}
+            }
+            result_label := "__jet_value_loop_{start.span.start}"
+            parser_expression_form_loop_rewrite_exits(&body, result_label, 0)
+            loop_stmt := Stmt.Loop(body: body, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: Val(NamedSpan{name: result_label, span: start.span}))
+            if counted == {
+                .Val(counted_loop) -> {
+                    counted_stmt := Stmt.CountedLoop(init: counted_loop.init, cond: counted_loop.cond, step: counted_loop.step, body: body, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: None)
+                    loop_stmt = Stmt.Loop(body: [Stmt]{counted_stmt}, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: Val(NamedSpan{name: result_label, span: start.span}))
+                }
+                .None -> {
+                    nested := body
+                    index := clauses.len() - 1
+                    loop index >= 0 {
+                        clause := clauses[index]
+                        nested = [Stmt]{Stmt.For(var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: None, auto_vectorization: None)}
+                        index -= 1
+                    }
+                    loop_stmt = Stmt.Loop(body: nested, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: Val(NamedSpan{name: result_label, span: start.span}))
+                }
+            }
+            return parser_expression_form_make_loop_lambda(body: [loop_stmt], start: start.span, end: exhaustion_span, result_loop: true, collecting_loop: false, requires_exhaustion_route: true, exhaustion_span: Val(exhaustion_span))
+        }
+    }
+    parser_bump(&state)
+    body := [Stmt]{}
+    end := start.span
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            block :: parser_parse_block(&state)
+            body = block.statements
+            end = block.span
+        }
+        else -> {
+            item :: parser_parse_expression(&state, 1, depth + 1)
+            body.push(Stmt.Expr(expr: item.expr))
+            end = item.span
+        }
+    }
+    if body.len() == 0 {
+        token :: parser_current(&state)
+        parser_expression_form_error(&state, "E0073", token.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it", "return a value on this path or remove `->`")
+    }
+    last := body.pop() ?? Stmt.Expr(expr: Expr.Unit(span: start.span))
+    value := Expr.Unit(span: start.span)
+    if last == {
+        .Expr(expr) -> value = expr
+        else -> parser_expression_form_error(&state, "E0073", start.span, "this collecting loop path produces no item", "a multiline collecting body uses its final expression as the item", "return a value on this path or use `next`")
+    }
+    body.push(Stmt.Yield(value: value, span: Span{start: start.span.start, end: start.span.start}))
+    if guard != None {
+        guard_expr := guard ?? Expr.Bool(value: true, span: start.span)
+        body = [Stmt]{Stmt.Switch(subject: Expr.Bool(value: true, span: start.span), arms: [SwitchArm]{SwitchArm{cond: guard_expr, body: body, span: expr_span(guard_expr)}}, else_body: None, span: start.span)}
+    }
+    collect_label := "__jet_collect_loop_{start.span.start}"
+    parser_expression_form_loop_rewrite_exits(&body, collect_label, 0)
+    loop_stmt := None
+    if counted == {
+        .Val(counted_loop) -> {
+            loop_stmt = Val(Stmt.CountedLoop(init: counted_loop.init, cond: counted_loop.cond, step: counted_loop.step, body: body, span: parser_cover(start.span, end), arrow_body: false, label: Val(NamedSpan{name: collect_label, span: start.span})))
+        }
+        .None -> {
+            nested := body
+            index := clauses.len() - 1
+            loop index >= 0 {
+                clause := clauses[index]
+                label := None
+                if index == 0 -> label = Val(NamedSpan{name: collect_label, span: start.span})
+                nested = [Stmt]{Stmt.For(var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: label, auto_vectorization: None)}
+                index -= 1
+            }
+            if nested.len() > 0 -> loop_stmt = Val(nested[0])
+        }
+    }
+    final_stmt := loop_stmt ?? Stmt.Loop(body: body, span: start.span, arrow_body: false, label: Val(NamedSpan{name: collect_label, span: start.span}))
+    parser_expression_form_make_loop_lambda(body: [Stmt]{final_stmt}, start: start.span, end: end, result_loop: false, collecting_loop: true, requires_exhaustion_route: false, exhaustion_span: None)
+}

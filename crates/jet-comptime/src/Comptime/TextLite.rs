@@ -156,19 +156,28 @@ mod text_kernel {
         pub(crate) inner: std::io::BufWriter<std::fs::File>,
         pub(crate) path: String,
     }
-    pub(crate) struct JetStdinReader {
-        inner: std::io::BufReader<std::io::Stdin>,
-    }
-    fn jet_std_io_stdin() -> JetStdinReader {
-        JetStdinReader {
-            inner: std::io::BufReader::new(std::io::stdin()),
-        }
-    }
+    include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
 
     // TextLite keeps the same runtime Authority/FileScope carrier as AOT; only
     // the CtValue adapter differs at this boundary.
     mod authority_semantics {
         include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
+    }
+    fn jet_mapped_path_key(path: &str) -> String {
+        authority_semantics::jet_mapped_path_key(path)
+    }
+
+    fn jet_mapped_register(key: &str) {
+        authority_semantics::jet_mapped_register(key)
+    }
+
+    fn jet_mapped_unregister(key: &str) {
+        authority_semantics::jet_mapped_unregister(key)
+    }
+    fn jet_mapped_writer_refusal(
+        path: &str,
+    ) -> Option<authority_semantics::JetMappedWriterRefusal> {
+        authority_semantics::jet_mapped_writer_refusal(path)
     }
     use authority_semantics::{JetAuthority, JetFileScope};
     fn jet_fault_should_fail(_operation: &str) -> bool {

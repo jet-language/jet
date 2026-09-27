@@ -1,13 +1,11 @@
 # Audits
 
-Dated audit reports written by Jet audit skills via
-`tower docs add --section audits`.
+This directory contains navigation for dated audit evidence. An audit report is
+retained evidence from a bounded review; it is not the source of current
+behavior, a work queue, or a release-status record. Use the relevant code,
+test, specification, or Tower card for current authority.
 
-Keep only the latest useful pulse, or archive the dated file after the backlog
-is carded. Re-run the skill for a fresh report; prefer
-`tower docs archive <path>` over leaving stale audits in the Docs list.
-See [the docs cleanup sweep](docs-cleanup-sweep-2026-07-25.md).
-
-Before closing an audit, run `node scripts/agent/check-audit-dispositions.mjs`.
-The check reads live and retired Tower records and lists every report with its
-finding dispositions.
+The [docs cleanup sweep](docs-cleanup-sweep-2026-07-25.md) records the directory
+organization and retention decision. Audit execution and dispositions belong to
+the owning audit skill and Tower; this page does not duplicate a live work
+queue or a command registry.

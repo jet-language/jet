@@ -216,7 +216,7 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
     server.replace_routes(routes);
     let progress = crate::Output::ByteProgress::new();
     let admitted =
-        admit_nix_closure_with_progress(&roots, &[request], false, Some(progress.clone())).unwrap();
+        admit_nix_closure_with_progress(&roots, &[request], false, None, Some(progress.clone())).unwrap();
 
     assert_eq!(
         progress.snapshot().total,
@@ -564,6 +564,69 @@ fn single_object_cache(
     )
     .unwrap();
     (root, Roots::at(jet_root), server)
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_pinned_repair_rejects_replacement_proof_before_publication() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let store_path = "/nix/store/66666666666666666666666666666666-pinned";
+    let original_nar = nar_with_directory_entries(&[b"original"]);
+    let replacement_nar = nar_with_directory_entries(&[b"replacement"]);
+    let signing_key = SigningKey::from_bytes(&[19; 32]);
+    let (root, roots, server) = single_object_cache(
+        "pinned-repair", store_path, "pinned.nar", &original_nar, &signing_key,
+    );
+    let request = NixOutputRequest { name: "out".into(), store_path: store_path.into() };
+    let original = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &original.objects[store_path];
+    let entries = crate::Store::list_checked(&roots).unwrap();
+    let receipt_path = roots.hangar_dir().join(Closure::RECEIPTS_DIR)
+        .join(&original.closure_receipt_sha256);
+    let receipt_bytes = fs::read(&receipt_path).unwrap();
+    // Unlink only this private output; never make shared file inodes writable.
+    fs::set_permissions(&object.hangar_path, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::remove_dir_all(&object.hangar_path).unwrap();
+    // Checked listing tombstones missing outputs before admission probes them.
+    // Compare publication against that damaged state, not a formerly live view.
+    let missing = crate::Store::list_checked(&roots).unwrap();
+    assert!(missing.is_empty());
+    let damaged = Closure::closure_graph_structure(&roots).unwrap();
+    assert!(damaged.deleted_records.contains(&entries[0].id));
+
+    let routes = |nar: &[u8]| BTreeMap::from([
+        ("/nix-cache-info".into(), b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec()),
+        (
+            "/66666666666666666666666666666666.narinfo".into(),
+            signed_narinfo(store_path, "pinned.nar", nar, &[], "test-cache-1", &signing_key),
+        ),
+        ("/nar/pinned.nar".into(), nar.to_vec()),
+    ]);
+    server.replace_routes(routes(&replacement_nar));
+    let error = admit_nix_closure_with_progress(
+        &roots, std::slice::from_ref(&request), false,
+        Some(&original.closure_receipt_sha256), None,
+    ).unwrap_err();
+    assert_eq!(error.kind(), NixCacheErrorKind::Admission);
+    assert!(!object.hangar_path.exists());
+    assert_eq!(fs::read_dir(roots.hangar_dir().join("objects")).unwrap().count(), 0);
+    assert_eq!(crate::Store::list_checked(&roots).unwrap(), missing);
+    assert_eq!(Closure::closure_graph_structure(&roots).unwrap(), damaged);
+    assert_eq!(fs::read(&receipt_path).unwrap(), receipt_bytes);
+
+    server.replace_routes(routes(&original_nar));
+    let repaired = admit_nix_closure_with_progress(
+        &roots, &[request], false, Some(&original.closure_receipt_sha256), None,
+    ).unwrap();
+    assert_eq!(repaired.closure_receipt_sha256, original.closure_receipt_sha256);
+    assert_eq!(repaired.objects[store_path].upstream_proof_sha256, object.upstream_proof_sha256);
+    assert_eq!(repaired.objects[store_path].hangar_digest, object.hangar_digest);
+    assert_eq!(crate::Store::list_checked(&roots).unwrap()[0].producer_record, entries[0].producer_record);
+    assert!(object.hangar_path.join("original").is_file());
+    assert!(!object.hangar_path.join("replacement").exists());
+    drop(server);
+    remove_dir(&root);
 }
 
 #[cfg(unix)]
@@ -1018,7 +1081,7 @@ fn native_nix_cache_sweeps_dead_stages_but_keeps_current_pid_stages() {
     let unrelated = stage_parent.join("nix-cache-not-a-pid-1");
     fs::create_dir_all(&unrelated).unwrap();
 
-    let transaction = NixAdmission::new(&roots).unwrap();
+    let transaction = NixAdmission::new(&roots, None).unwrap();
     assert!(!stage_parent.join("nix-cache-999999999-1").exists());
     assert!(current.exists());
     assert!(unrelated.exists());

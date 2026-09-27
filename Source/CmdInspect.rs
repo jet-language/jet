@@ -1585,7 +1585,6 @@ fn digest_slices() -> Vec<DigestSlice> {
     let headings = [
         ("first-program", "## First program"),
         ("core.source-rules", "## Core source rules"),
-        ("canonical", "## Canonical compiling example"),
         ("idioms", "## Canonical idiom suites"),
         ("syntax.keywords", "## Keywords"),
         ("syntax.types", "## Built-in type names"),
@@ -1646,7 +1645,6 @@ fn llm_digest() -> String {
     let marker_text = digest_marker_text();
     let diagnostic_text = digest_diagnostic_text();
     let core_text = digest_core_module_text();
-    let canonical = include_str!("../examples/canon.jet").trim();
     let idiom_suites_body = [
         "Each idiom has one executable, golden-backed source of truth under `examples/suites/`.",
         "",
@@ -1683,14 +1681,6 @@ fn llm_digest() -> String {
         "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     ]
     .join("\n");
-    let canonical_body = [
-        "Read this as working source syntax. It is the checked executable showcase in `examples/canon.jet`.",
-        "",
-        "```jet",
-        canonical,
-        "```",
-    ]
-    .join("\n");
     let marker_body = format!(
         "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
     );
@@ -1711,7 +1701,6 @@ fn llm_digest() -> String {
         String::new(),
         digest_section("First program", &first_program_body),
         digest_section("Core source rules", &core_rules_body),
-        digest_section("Canonical compiling example", &canonical_body),
         digest_section("Canonical idiom suites", &idiom_suites_body),
         digest_section("Keywords", &digest_list(jet::Syntax::JET_KEYWORD_LIST)),
         digest_section("Built-in type names", &digest_list(jet::Syntax::JET_TYPE_LIST)),

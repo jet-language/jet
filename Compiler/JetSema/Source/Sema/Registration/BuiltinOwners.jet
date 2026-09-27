@@ -1,0 +1,83 @@
+// Compiler-owned builtin identity facts for backend lowering.
+//
+// Builtin owners are supplied by Registration's authoritative graph facts. This
+// layer only projects those facts into checked declaration metadata; it does
+// not invent source modules, nominal declarations, exports, or ownership from
+// a name whitelist.
+// These accessors mirror jet_foundation::Syntax::{TYPE_TASK,
+// TYPE_RECEIVER,TYPE_SENDER}; Source currently has no imported Syntax constants,
+// so this file is the one authoritative Source-side spelling table.
+pub fn sema_registration_core_builtin_task_name() -> String {
+    "Task"
+}
+pub fn sema_registration_core_builtin_receiver_name() -> String {
+    "Receiver"
+}
+pub fn sema_registration_core_builtin_sender_name() -> String {
+    "Sender"
+}
+
+fn sema_registration_core_builtin_owner_fact(name: String) -> SemaRegistrationCoreBuiltinOwnerFact {
+    symbol := symbol_id(SymbolKind.Type, "", "", name)
+    SemaRegistrationCoreBuiltinOwnerFact{
+        symbol: symbol,
+        module_identity: None,
+        name: name,
+        ownership: TDeclarationOwnership.Owned,
+    }
+}
+
+pub fn sema_registration_core_builtin_owner_facts() -> [SemaRegistrationCoreBuiltinOwnerFact] {
+    [SemaRegistrationCoreBuiltinOwnerFact]{
+        sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_task_name()),
+        sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_receiver_name()),
+        sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_sender_name()),
+    }
+}
+pub fn sema_registration_core_builtin_is_name(name: String) -> Bool {
+    loop fact in sema_registration_core_builtin_owner_facts() {
+        if fact.name == name -> return true
+    }
+    false
+}
+
+pub fn sema_registration_core_builtin_owner(graph: SemaRegistrationGraph, name: String) -> ?SemaRegistrationCoreBuiltinOwnerFact {
+    loop fact in graph.core_builtin_owner_facts {
+        if fact.name == name -> return Val(fact)
+    }
+    None
+}
+
+pub fn sema_registration_core_builtin_is(graph: SemaRegistrationGraph, name: String) -> Bool {
+    sema_registration_core_builtin_owner(graph, name) != None
+}
+
+pub struct SemaRegistrationCoreBuiltinOwnerFact {
+    pub symbol: SymbolId
+    pub module_identity: ?String
+    pub name: String
+    pub ownership: TDeclarationOwnership
+}
+
+pub fn sema_registration_compiler_builtin_marker(nominal: SemaRegistrationNominal) -> ?TCompilerBuiltin {
+    if !nominal.compiler_owned -> return None
+    provenance :: nominal.generated_provenance ?? return None
+    if provenance == sema_registration_compiler_owned_default_err_provenance() -> return Val(TCompilerBuiltin.DefaultErr)
+    None
+}
+pub fn sema_checked_core_builtin_owners(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> [TCoreBuiltinOwner] {
+    owners := [TCoreBuiltinOwner]{}
+    loop fact in graph.core_builtin_owner_facts {
+        if fact.module_identity != None {
+            owner_module :: fact.module_identity ?? ""
+            if owner_module != module_row.module_identity -> next
+        }
+        owners.push(TCoreBuiltinOwner{
+            symbol: fact.symbol,
+            module_identity: fact.module_identity,
+            name: fact.name,
+            ownership: fact.ownership,
+        })
+    }
+    owners
+}

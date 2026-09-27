@@ -885,6 +885,13 @@ fn exact_rational_math_approx(method: &str) -> bool {
 fn imported_extern_call_type(_c_abi: bool, declared: Type) -> Type {
     declared
 }
+
+fn canonical_foreign_key(cx: &Cx, spelling: &str, fallback: &str) -> String {
+    cx.foreign_call_keys
+        .get(spelling)
+        .cloned()
+        .unwrap_or_else(|| fallback.to_string())
+}
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TCallArg;
@@ -2656,6 +2663,33 @@ fn canonical_codec_owner(ty: &Type, cx: &Cx) -> Type {
     match cx.imported_type_metadata_name(name) {
         Some(identity) if identity != *name => Type::Named(identity),
         _ => ty.clone(),
+    }
+}
+
+/// Return the nominal identity used by the checked method target rows. Entry
+/// locals keep their source leaf; imported and canonical receivers use the
+/// NameLedger identity already shared by field/type lowering.
+fn canonical_method_target_owner(cx: &Cx, name: &str) -> String {
+    if cx.jit_local_call_prefix.is_none() {
+        if cx.local_type_names.contains(name) {
+            return name.to_string();
+        }
+        if let Some((leaf, _)) = cx
+            .local_type_identities
+            .iter()
+            .find(|(_, identity)| identity.as_str() == name)
+        {
+            return leaf.clone();
+        }
+    }
+    crate::Codegen::TIR::canonical_enum_owner(cx, name)
+}
+
+fn canonicalize_method_receiver_type(ty: &mut Type, owner: &str) {
+    match ty {
+        Type::Named(name) | Type::Apply { name, .. } => *name = owner.to_string(),
+        Type::Tagged { inner, .. } => canonicalize_method_receiver_type(inner, owner),
+        _ => {}
     }
 }
 
@@ -6900,7 +6934,7 @@ fn lower_method_call_impl(
                                             declared_ret.clone().unwrap_or_else(unit_type),
                                         ),
                                         kind: TExprKind::ExternCall {
-                                            symbol: wrapper,
+                                            symbol: canonical_foreign_key(cx, &wrapper_key, &wrapper),
                                             c_abi,
                                             args: eargs,
                                         },
@@ -6918,6 +6952,41 @@ fn lower_method_call_impl(
                                         env,
                                     );
                                 });
+                            }
+                            if let Some(foreign_key) =
+                                cx.foreign_call_keys.get(&wrapper_key).cloned()
+                            {
+                                let eargs = args
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, arg)| {
+                                        let conv = sig
+                                            .as_ref()
+                                            .and_then(|params| params.get(index))
+                                            .map(|(convention, ty)| (*convention, ty.clone()));
+                                        lower_extern_call_arg(arg, conv, env, cx)
+                                    })
+                                    .collect();
+                                let lowered = TExpr {
+                                    ty: ret.clone(),
+                                    kind: TExprKind::ExternCall {
+                                        symbol: foreign_key,
+                                        c_abi: true,
+                                        args: eargs,
+                                    },
+                                };
+                                let undo = cx
+                                    .foreign_undos
+                                    .get(&wrapper_key)
+                                    .or_else(|| cx.foreign_undos.get(method))
+                                    .map(String::as_str);
+                                return wrap_foreign_undo(
+                                    lowered,
+                                    undo,
+                                    method_span.start as u32,
+                                    cx,
+                                    env,
+                                );
                             }
                             let undo = cx.foreign_undos.get(&wrapper_key).map(String::as_str);
                             let targs = lower_module_args(args, sig.as_deref(), env, cx);
@@ -7072,7 +7141,11 @@ fn lower_method_call_impl(
                                 let lowered = TExpr {
                                     ty,
                                     kind: TExprKind::ExternCall {
-                                        symbol: wrapper,
+                                        symbol: canonical_foreign_key(
+                                            cx,
+                                            &format!("{mod_name}::{method}"),
+                                            &wrapper,
+                                        ),
                                         c_abi,
                                         args: eargs,
                                     },
@@ -7089,6 +7162,50 @@ fn lower_method_call_impl(
                                     env,
                                 );
                             });
+                        }
+                        if let Some(foreign_key) = cx
+                            .foreign_call_keys
+                            .get(&format!("{mod_name}::{method}"))
+                            .cloned()
+                        {
+                            let eargs = args
+                                .iter()
+                                .enumerate()
+                                .map(|(index, arg)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|params| params.get(index))
+                                        .map(|(convention, ty)| (*convention, ty.clone()));
+                                    lower_extern_call_arg(arg, conv, env, cx)
+                                })
+                                .collect();
+                            let ty = imported_extern_call_type(
+                                true,
+                                cx.import_rets
+                                    .get(&(alias.clone(), method.to_string()))
+                                    .cloned()
+                                    .flatten()
+                                    .unwrap_or_else(unit_type),
+                            );
+                            let lowered = TExpr {
+                                ty,
+                                kind: TExprKind::ExternCall {
+                                    symbol: foreign_key,
+                                    c_abi: true,
+                                    args: eargs,
+                                },
+                            };
+                            let undo = cx
+                                .foreign_undos
+                                .get(&format!("{mod_name}::{method}"))
+                                .map(String::as_str);
+                            return wrap_foreign_undo(
+                                lowered,
+                                undo,
+                                method_span.start as u32,
+                                cx,
+                                env,
+                            );
                         }
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return = match imported_module_call_target_return(
@@ -7161,7 +7278,11 @@ fn lower_method_call_impl(
                                 let lowered = TExpr {
                                     ty,
                                     kind: TExprKind::ExternCall {
-                                        symbol: wrapper,
+                                        symbol: canonical_foreign_key(
+                                            cx,
+                                            &format!("{mod_name}::{method}"),
+                                            &wrapper,
+                                        ),
                                         c_abi,
                                         args: eargs,
                                     },
@@ -7178,6 +7299,48 @@ fn lower_method_call_impl(
                                     env,
                                 );
                             });
+                        }
+                        if let Some(foreign_key) = cx
+                            .foreign_call_keys
+                            .get(&format!("{mod_name}::{method}"))
+                            .cloned()
+                        {
+                            let eargs = args
+                                .iter()
+                                .enumerate()
+                                .map(|(index, arg)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|params| params.get(index))
+                                        .map(|(convention, ty)| (*convention, ty.clone()));
+                                    lower_extern_call_arg(arg, conv, env, cx)
+                                })
+                                .collect();
+                            let ty = imported_extern_call_type(
+                                true,
+                                cx.import_return_for_function(&env.fn_name, alias, method)
+                                    .flatten()
+                                    .unwrap_or_else(unit_type),
+                            );
+                            let lowered = TExpr {
+                                ty,
+                                kind: TExprKind::ExternCall {
+                                    symbol: foreign_key,
+                                    c_abi: true,
+                                    args: eargs,
+                                },
+                            };
+                            let undo = cx
+                                .foreign_undos
+                                .get(&format!("{mod_name}::{method}"))
+                                .map(String::as_str);
+                            return wrap_foreign_undo(
+                                lowered,
+                                undo,
+                                method_span.start as u32,
+                                cx,
+                                env,
+                            );
                         }
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let declared_ret =
@@ -13088,12 +13251,13 @@ fn lower_method_call_impl(
         let Some(ty_name) = ty_name else {
             return invariant_method_expr(method_span, format!("method `{method}` receiver type"));
         };
-        // Imported method metadata is keyed by the declaration's canonical nominal
-        // identity. Resolve the source-facing leaf once while retaining `ty_name`
-        // on the lowered receiver.
+        // `lookup_ty_name` is the canonical nominal target identity. Method
+        // signatures use the declaration table's owner spelling, which is a
+        // local leaf for own methods and canonical for imported methods.
         let lookup_ty_name = cx
             .imported_type_metadata_name(&ty_name)
             .unwrap_or_else(|| ty_name.clone());
+        let metadata_ty_name = cx.method_metadata_name(&ty_name, method);
         // Imported operator metadata records the RHS under its declaring
         // nominal identity, even when sema's source-facing operand is a bare
         // selective-import leaf. Use that identity for signature and MIR lookup.
@@ -13119,13 +13283,13 @@ fn lower_method_call_impl(
                 .unwrap_or_default()
         } else {
             cx.method_sigs
-                .get(&(lookup_ty_name.to_string(), method.to_string()))
+                .get(&(metadata_ty_name.to_string(), method.to_string()))
                 .cloned()
                 .unwrap_or_default()
         };
-        let recv = if matches!(
+        let mut recv = if matches!(
             cx.method_self_convs
-                .get(&(lookup_ty_name.to_string(), method.to_string())),
+                .get(&(metadata_ty_name.to_string(), method.to_string())),
             Some(AccessConvention::Move)
         ) && matches!(receiver, Expr::Ident(name, _) if env.is_resource(name))
         {
@@ -13133,6 +13297,9 @@ fn lower_method_call_impl(
         } else {
             lower_expr(receiver, cx, env)
         };
+        let target_owner = canonical_method_target_owner(cx, &ty_name);
+        canonicalize_method_receiver_type(&mut recv.ty, &target_owner);
+
         let owner_type_args = match &recv.ty {
             Type::Apply { name, args } if name == &ty_name || name == &lookup_ty_name => {
                 args.as_slice()
@@ -13145,7 +13312,7 @@ fn lower_method_call_impl(
             instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
                 instantiate_method_sig(
                     cx,
-                    &lookup_ty_name,
+                    &metadata_ty_name,
                     method,
                     &sig,
                     owner_type_args,
@@ -13182,6 +13349,7 @@ fn lower_method_call_impl(
                 };
             });
         }
+
         let distinct_numeric_operator = cx
             .distinct_types
             .get(&lookup_ty_name)
@@ -13189,7 +13357,7 @@ fn lower_method_call_impl(
             && !cx.distinct_ranges.contains_key(&lookup_ty_name)
             && !cx
                 .method_sigs
-                .contains_key(&(lookup_ty_name.clone(), method.to_string()))
+                .contains_key(&(metadata_ty_name.clone(), method.to_string()))
             && operator_method.is_none()
             && matches!(method, "add" | "sub" | "mul" | "div")
             && args.len() == 1;
@@ -13208,7 +13376,7 @@ fn lower_method_call_impl(
         } else {
             resolved_method_type_args(
                 cx,
-                &lookup_ty_name,
+                &metadata_ty_name,
                 method,
                 &sig,
                 owner_type_args,
@@ -13242,7 +13410,7 @@ fn lower_method_call_impl(
             TMethodRef::operator(&lookup_ty_name, trait_name, method, rhs)
         } else if cx
             .trait_methods
-            .contains(&(lookup_ty_name.to_string(), method.to_string()))
+            .contains(&(metadata_ty_name.to_string(), method.to_string()))
         {
             TMethodRef::bare(method)
         } else if generic_method {
@@ -13266,7 +13434,7 @@ fn lower_method_call_impl(
         } else {
             instantiate_method_ret(
                 cx,
-                &lookup_ty_name,
+                &metadata_ty_name,
                 method,
                 owner_type_args,
                 &resolved_type_args,

@@ -730,11 +730,13 @@ pub fn unit_rounding_mode(name: &str) -> Option<crate::UnitRoundingMode> {
     }
 }
 
-/// The two identifier tiers fixed by D-SHAPE-CASE1=C.
+/// Identifier cases fixed by D-SHAPE-CASE1=C; the owner amended module
+/// constants to use Screaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameCase {
     Pascal,
     Snake,
+    Screaming,
 }
 
 /// One compiler-owned category table. Parser/sema callers select the grammar
@@ -758,7 +760,7 @@ pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
     ("type parameter", NameCase::Pascal),
     ("unit family", NameCase::Pascal),
     ("config name", NameCase::Snake),
-    ("constant", NameCase::Snake),
+    ("constant", NameCase::Screaming),
     ("field", NameCase::Snake),
     ("function", NameCase::Snake),
     ("generic module", NameCase::Snake),
@@ -807,6 +809,10 @@ pub fn name_has_case(name: &str, case: NameCase) -> bool {
             (first.is_lowercase() || first.is_alphabetic() && !first.is_uppercase())
                 && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_uppercase())
         }
+        NameCase::Screaming => {
+            (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
+                && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_lowercase())
+        }
     }
 }
 
@@ -847,6 +853,16 @@ pub fn canonical_name_case(name: &str, case: NameCase) -> String {
                 out
             }
         }
+        NameCase::Screaming => {
+            let leading = name.starts_with('_');
+            let body = name.trim_start_matches('_');
+            let out = to_snake_acronym(body).to_uppercase();
+            if leading {
+                format!("_{out}")
+            } else {
+                out
+            }
+        }
     }
 }
 
@@ -878,6 +894,19 @@ mod casing_tests {
         );
         assert_eq!(canonical_name_case("HTTP_API", NameCase::Snake), "http_api");
         assert_eq!(canonical_name_case("MacOS", NameCase::Snake), "mac_os");
+    }
+    #[test]
+    fn screaming_constants_use_all_caps() {
+        assert!(name_has_case("MAX_RETRIES", NameCase::Screaming));
+        assert!(!name_has_case("max_retries", NameCase::Screaming));
+        assert_eq!(
+            canonical_name_case("max_retries", NameCase::Screaming),
+            "MAX_RETRIES"
+        );
+        assert_eq!(
+            canonical_name_case("HTTPHeader", NameCase::Screaming),
+            "HTTP_HEADER"
+        );
     }
 }
 

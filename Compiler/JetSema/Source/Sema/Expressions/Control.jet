@@ -1,0 +1,574 @@
+// Checked fallible control-flow and value-producing control expressions.
+fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span) -> TPanicLoc {
+    file := environment.source_file
+    line := 0
+    column := 0
+    index := 0
+    loop index < environment.source_segments.len() {
+        segment :: environment.source_segments[index]
+        if span.start >= segment.generated.start && span.start < segment.generated.end {
+            file = segment.source_file
+            local := span.start - segment.generated.start
+            if segment.line_starts.len() == 0 {
+                line = 1
+                column = local
+                break
+            }
+            line_index := 0
+            loop line_index + 1 < segment.line_starts.len() && segment.line_starts[line_index + 1] <= local -> line_index += 1
+            line = line_index + 1
+            column = local - segment.line_starts[line_index]
+        }
+        index += 1
+    }
+    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: "", locals: [TPanicLocal]{}}
+}
+fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier {
+    return if ty == {
+        .Result(ok, err) -> TFailureCarrier.Result(ok, err)
+        .Option(value) -> TFailureCarrier.Optional(value)
+        .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges(ty) else -> TFailureCarrier.Infallible
+        else -> TFailureCarrier.Infallible
+    }
+}
+
+fn sema_expression_present(value: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    expected_inner := None
+    result_ty := None
+    if expected != None {
+        normalized :: sema_expr_unwrap_tag(expected ?? Type.Int)
+        if normalized == {
+            .Option(inner) -> {
+                expected_inner = Val(inner)
+                result_ty = Val(normalized)
+            }
+            else -> {
+                diagnostics.push(sema_type_mismatch(normalized, Type.Option(Type.Named("Unit")), span))
+                return None
+            }
+        }
+    }
+    payload :: sema_check_expression(value, expected_inner, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if expected_inner != None && !sema_type_assignable(expected_inner ?? payload.ty, payload.ty) -> return None
+    if result_ty == None -> result_ty = Val(Type.Option(payload.ty))
+    sema_expr_expected(sema_tir_expr(result_ty ?? Type.Option(payload.ty), TExprKind.Present(payload), span), expected, environment, &diagnostics)
+}
+
+fn sema_expression_absent(span: Span, expected: ?Type, diagnostics: &[Diagnostic]) -> ?TExpr {
+    required := expected ?? {
+        diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "add a type annotation, or use `None` where the type is already known"))
+        return None
+    }
+    normalized :: sema_expr_unwrap_tag(required)
+    if normalized == .Option(_) {
+        return Val(sema_tir_expr(normalized, TExprKind.Absent, span))
+    }
+    diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "add a type annotation, or use `None` where the type is already known"))
+    None
+}
+
+
+fn sema_expression_default_err_struct(value: Expr) -> Bool {
+    if value == {
+        .Paren(inner, _) -> return sema_expression_default_err_struct(inner)
+        .StructLit(type_name, _, _, _, _, _, _) -> return type_name == "Err"
+        else -> return false
+    }
+}
+fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    argument := CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    call := Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}, resolved_ret: None, range_checked: false, widen_approx: false}
+    sema_call_check_default_err(call, Val(expected), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_expression_result_payload(value: Expr, success: Bool, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    expected_ok := None
+    expected_err := None
+    if expected != None {
+        normalized :: sema_expr_unwrap_tag(expected ?? Type.Int)
+        if normalized == {
+            .Result(ok, err) -> {
+                expected_ok = Val(ok)
+                expected_err = Val(err)
+            }
+            else -> {
+                if success {
+                    diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+                } else {
+                    diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+                }
+                return None
+            }
+        }
+    } else {
+        if success {
+            diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+        } else {
+            diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+        }
+        return None
+    }
+    if !success && expected_err == Val(Type.Named("Err")) && expected != None && !sema_expression_default_err_struct(value) {
+        result_type := Type.Result(expected_ok ?? Type.Named("Unit"), expected_err ?? Type.Named("Err"))
+        checked_default :: sema_expression_default_err_call(value, span, result_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        return Val(checked_default)
+    }
+    payload_expected := if success -> expected_ok else -> {
+        if expected_err == Val(Type.Named("Err")) {
+            if sema_expression_default_err_struct(value) -> expected_err
+            else -> Val(Type.String)
+        } else -> expected_err
+    }
+    payload := sema_check_expression(value, payload_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    ok_ty := expected_ok ?? Type.Named("Unit")
+    err_ty := expected_err ?? Type.Named("Err")
+    required := if success -> ok_ty else -> err_ty
+    if expected != None && !sema_type_assignable(required, payload.ty) {
+        diagnostics.push(sema_type_mismatch(required, payload.ty, expr_span(value)))
+        return None
+    }
+    if expected == None {
+        if success -> ok_ty = payload.ty else -> err_ty = payload.ty
+    }
+    result_ty := Type.Result(ok_ty, err_ty)
+    kind := if success -> TExprKind.Ok(payload) else -> TExprKind.Err(payload)
+    sema_expr_expected(sema_tir_expr(result_ty, kind, span), expected, environment, &diagnostics)
+}
+
+fn sema_expression_try_union_conversion(target: Type, source: Type) -> ?TTryConvert {
+    if target == {
+        .Union(members) -> {
+            found := false
+            index := 0
+            loop index < members.len() {
+                if type_identity_equal(members[index], source) -> found = true
+                index += 1
+            }
+            if !found -> return None
+            tags := [String]{}
+            index = 0
+            loop index < members.len() {
+                tags.push(type_name(members[index]))
+                index += 1
+            }
+            return Val(TTryConvert.WidenUnion("__JetUnion_{tags.join("_")}", type_name(source)))
+        }
+        else -> {}
+    }
+    None
+}
+
+fn sema_expression_try_has_result_carrier(carrier: TFailureCarrier) -> Bool {
+    if carrier == {
+        .Result(_, _) -> true
+        .Diverges(_) -> true
+        else -> false
+    }
+}
+
+fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_expr: ?Expr, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    inner :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &check_context, &diagnostics) ?? return None
+    payload_ty := None
+    carrier := sema_expression_failure_carrier(inner.ty)
+    if inner.ty == {
+        .Result(ok, _) -> payload_ty = Val(ok)
+        .Option(value) -> payload_ty = Val(value)
+        else -> {}
+    }
+    if payload_ty == None {
+        diagnostics.push(sema_error("E0403", span, "`?` only works on a fallible value, not {type_name(inner.ty)}", "`?` unwraps success or returns early with the failure", "use a Result or optional value here"))
+        return None
+    }
+    parent_carrier :: scopes.failure_carrier ?? {
+        diagnostics.push(sema_error("E0403", span, "`?` needs an enclosing fallible return context", "propagation must know which failure carrier receives the early return", "use `?` inside a function or closure with a declared fallible return"))
+        return None
+    }
+    source_error := None
+    if inner.ty == .Result(_, err) {
+        source_error = Val(err)
+    }
+    if inner.ty == {
+        .Result(_, _) -> {
+            if !sema_expression_try_has_result_carrier(parent_carrier) {
+                diagnostics.push(sema_error("E0403", span, "`?` can only propagate a Result failure into a Result return", "the operand and enclosing function need the same fallible carrier family", "return a Result or handle the value with `or`"))
+                return None
+            }
+        }
+        .Option(source_value) -> {
+            if parent_carrier == {
+                .Optional(target_value) -> {
+                    if !type_identity_equal(source_value, target_value) {
+                        diagnostics.push(sema_error("E0403", span, "`?` needs the same optional payload in the enclosing return", "optional propagation preserves the payload type while passing `none` through", "return the same `T?` type or handle this optional locally"))
+                        return None
+                    }
+                }
+                else -> {
+                    diagnostics.push(sema_error("E0403", span, "`?` on an optional needs an optional return", "absence propagates as `none` only through another optional carrier", "declare the enclosing return as `T?` or handle the optional locally"))
+                    return None
+                }
+            }
+        }
+        else -> {}
+    }
+    try_conversion := TTryConvert.NoConversion
+    if conversion == {
+        .NoConversion -> {
+            if source_error != None {
+                target_error :: if parent_carrier == {
+                    .Result(_, err) -> Val(err)
+                    .Diverges(_) -> Val(Type.Named("Never"))
+                    else -> None
+                }
+                source :: source_error ?? Type.Named("Unit")
+                target :: target_error ?? Type.Named("Unit")
+                if source == Type.Named("Never") {
+                    try_conversion = TTryConvert.Never
+                } else if source == Type.String && target == Type.Named("Err") {
+                    try_conversion = TTryConvert.DefaultErr
+                } else {
+                    union_conversion :: sema_expression_try_union_conversion(target, source)
+                    if union_conversion != None {
+                        try_conversion = union_conversion ?? TTryConvert.NoConversion
+                    } else {
+                        diagnostics.push(sema_error("E2402", span, "`?` cannot propagate `{type_name(source)}` into `{type_name(target)}` without a checked conversion", "failure propagation preserves the declared error domain", "declare an error conversion or handle the value locally"))
+                        return None
+                    }
+            }
+        }
+        }
+        .Never -> {
+            source_for_never :: source_error ?? Type.Named("Unit")
+            if source_error == None || source_for_never != Type.Named("Never") {
+                diagnostics.push(sema_error("E2402", span, "`?` is marked unreachable, but the operand can fail", "the Never conversion is valid only for an uninhabited error arm", "use a normal propagation conversion for this error type"))
+                return None
+            }
+            try_conversion = TTryConvert.Never
+        }
+        .DefaultErr -> {
+            target_error :: if parent_carrier == {
+                .Result(_, err) -> Val(err)
+                .Diverges(_) -> Val(Type.Named("Never"))
+                else -> None
+            }
+            source :: source_error ?? Type.Named("Unit")
+            target :: target_error ?? Type.Named("Unit")
+            if source != Type.String || target != Type.Named("Err") {
+                diagnostics.push(sema_error("E2402", span, "the default error conversion is not valid for this failure domain", "the built-in conversion accepts String and returns Err", "use a declared conversion for the source error type"))
+                return None
+            }
+            try_conversion = TTryConvert.DefaultErr
+        }
+        .Typed(fn_name, declared_source, declared_target) -> {
+            source :: source_error ?? Type.Named("Unit")
+            target :: if parent_carrier == {
+                .Result(_, err) -> err
+                .Diverges(_) -> Type.Named("Never")
+                else -> Type.Named("Unit")
+            }
+            if !type_identity_equal(source, declared_source) || !type_identity_equal(target, declared_target) {
+                diagnostics.push(sema_error("E2402", span, "the declared error conversion does not match this `?` site", "conversion metadata must name the operand and enclosing failure domains exactly", "use the conversion declared for these two error types"))
+                return None
+            }
+            symbol_index :: sema_scope_resolve_index(scopes, fn_name)
+            if symbol_index == None {
+                diagnostics.push(sema_error("E2402", span, "the declared error conversion `{fn_name}` is not in scope", "a checked conversion must resolve to one registered function", "declare or import the conversion before using `?`"))
+                return None
+            }
+            symbol :: scopes.bindings[symbol_index ?? 0].symbol
+            if symbol.kind != SymbolKind.Function || symbol.ty == None {
+                diagnostics.push(sema_error("E2402", span, "`{fn_name}` is not a checked error-conversion function", "the conversion route must retain a callable symbol and signature", "declare a function taking the source error and returning the target error"))
+                return None
+            }
+            check_context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
+            valid_signature := false
+            if symbol.ty == {
+                .Fn(params, ret, _, _, _, _) -> {
+                    if params.len() == 1 && ret != None && type_identity_equal(params[0], source) && type_identity_equal(ret ?? Type.Named("Unit"), target) -> valid_signature = true
+                }
+                else -> {}
+            }
+            if !valid_signature {
+                diagnostics.push(sema_error("E2402", span, "`{fn_name}` has the wrong error-conversion signature", "a conversion consumes the source error and returns the enclosing error", "declare `fn(Source) Target` for this conversion"))
+                return None
+            }
+            try_conversion = TTryConvert.Typed(fn_name, source, target)
+        }
+        .WidenUnion(enum_name, union_tag) -> {
+            source :: source_error ?? Type.Named("Unit")
+            target_members := None
+            if parent_carrier == {
+                .Result(_, err) -> {
+                    if err == {
+                        .Union(members) -> target_members = Val(members)
+                        else -> {}
+                    }
+                }
+                else -> {}
+            }
+            members :: target_members ?? {
+                diagnostics.push(sema_error("E2402", span, "the union error conversion needs a union return carrier", "widening adds one source error member to an enclosing error union", "return a declared error union or use a typed conversion"))
+                return None
+            }
+            found := false
+            index := 0
+            loop index < members.len() {
+                if type_identity_equal(members[index], source) -> found = true
+                index += 1
+            }
+            if !found {
+                diagnostics.push(sema_error("E2402", span, "the operand error is not a member of the enclosing error union", "union widening is valid only for a declared source member", "add the source error type to the return union"))
+                return None
+            }
+            try_conversion = TTryConvert.WidenUnion(enum_name, union_tag)
+        }
+    }
+    payload :: payload_ty ?? Type.Named("Unit")
+    expected_parent_carrier := false
+    if expected != None {
+        required :: expected ?? payload
+        is_carrier := type_identity_equal(required, inner.ty)
+        expected_parent_carrier = if parent_carrier == {
+            .Result(ok, err) -> type_identity_equal(required, Type.Result(ok, err))
+            .Optional(value) -> type_identity_equal(required, Type.Option(value))
+            .Diverges(value) -> type_identity_equal(required, value)
+            else -> false
+        }
+        if !is_carrier && !expected_parent_carrier && !sema_type_assignable(required, payload) {
+            diagnostics.push(sema_type_mismatch(required, payload, span))
+            return None
+        }
+    }
+    
+    context_value := None
+    if context_expr != None {
+        context_state := sema_ownership_state_snapshot(state)
+        context_value = sema_check_expression(context_expr ?? Expr.Unit(span), Val(Type.String), environment, &scopes, &context_state, &tail_store, &check_context, &diagnostics) ?? return None
+    }
+    location := sema_expression_panic_location(environment, span)
+    value_tir := sema_tir_expr(payload, TExprKind.Try(inner, try_conversion, carrier), span)
+    if context_value != None -> value_tir = sema_tir_expr(payload, TExprKind.TryWithContext(inner, context_value, try_conversion, location.file, location.line, location.function), span)
+
+    if expected != None {
+        required :: expected ?? payload
+        if type_identity_equal(required, inner.ty) || expected_parent_carrier -> return Val(value_tir)
+    }
+    sema_expr_expected(value_tir, expected, environment, &diagnostics)
+}
+
+
+fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    subject :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    payload_ty := None
+    if subject.ty == {
+        .Result(ok, _) -> {
+            if ok == .Option(inner) {
+                payload_ty = Val(inner)
+            } else {
+                payload_ty = Val(ok)
+            }
+        }
+        .Option(inner) -> payload_ty = Val(inner)
+        else -> {}
+    }
+    payload :: payload_ty ?? {
+        diagnostics.push(sema_error("E0405", span, "`or` only works on a Result or optional value", "a fallback consumes one checked failure carrier", "handle a fallible value with `or`"))
+        return None
+    }
+    fallback_payload := payload
+    fallback_tir := None
+    before := sema_ownership_state_snapshot(state)
+    fallback_state := sema_ownership_state_snapshot(before)
+    fallback_reaches_merge := false
+    if fallback == {
+        .Value(other) -> {
+            fallback_expected := if payload == Type.Named("Never") -> None else -> Val(payload)
+            checked :: sema_check_expression(other, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            if payload == Type.Named("Never") {
+                fallback_payload = checked.ty
+            } else if !sema_type_assignable(payload, checked.ty) {
+                diagnostics.push(sema_type_mismatch(payload, checked.ty, expr_span(other)))
+                return None
+            }
+            fallback_tir = Val(TOrFallback.Value(checked))
+            fallback_reaches_merge = checked.ty != Type.Named("Never")
+        }
+        .Block(body, tail, block_span) -> {
+            block_scopes := sema_scope_snapshot(scopes)
+            sema_scope_enter(&block_scopes, &fallback_state, "or.fallback@{block_span.start}")
+            checked_block :: sema_check_statements(body, scopes.return_type, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+            if !checked_block.complete {
+                sema_scope_leave(&block_scopes, &fallback_state)
+                return None
+            }
+            tail_value := None
+            if tail != None {
+                fallback_expected := if payload == Type.Named("Never") -> None else -> Val(payload)
+                tail_value = sema_check_expression(tail ?? Expr.Unit(block_span), fallback_expected, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                if tail_value == None {
+                    sema_scope_leave(&block_scopes, &fallback_state)
+                    return None
+                }
+                if payload == Type.Named("Never") -> fallback_payload = (tail_value ?? sema_tir_expr(Type.Named("Never"), TExprKind.Never("missing fallback value"), block_span)).ty
+            } else if payload != Type.Named("Unit") && payload != Type.Named("Never") {
+                sema_scope_leave(&block_scopes, &fallback_state)
+                diagnostics.push(sema_error("E0405", block_span, "the fallback block needs a value", "this `or` expression must produce the success payload on its fallback path", "add a final value expression or use `or return`"))
+                return None
+            }
+            sema_scope_leave(&block_scopes, &fallback_state)
+            if checked_block.value.len() == 0 && tail_value != None {
+                fallback_tir = Val(TOrFallback.Value(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)))
+            } else {
+                block_values := checked_block.value
+                if tail_value != None -> block_values.push(TStmt.ExprStmt(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span), expr_span(tail ?? Expr.Unit(block_span))))
+                fallback_expr := sema_tir_expr(fallback_payload, TExprKind.InlineBlock(block_values), block_span)
+                fallback_tir = Val(TOrFallback.Value(fallback_expr))
+            fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body)
+            if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named("Never"), TExprKind.Never("missing fallback value"), block_span)).ty == Type.Named("Never") -> fallback_reaches_merge = false
+            }
+        }
+        .Return(return_value, return_span) -> {
+            return_type := scopes.return_type
+            if return_value == None {
+                if !sema_stmt_return_allows_empty(return_type) {
+                    diagnostics.push(sema_error("E0405", return_span, "`or return` needs a value here", "the enclosing function returns a value on its success route", "write `or return value`"))
+                    return None
+                }
+                fallback_tir = Val(TOrFallback.Return(None))
+            } else {
+                if sema_stmt_return_success_type(return_type) == Type.Named("Unit") {
+                    diagnostics.push(sema_error("E0405", return_span, "`or return value` cannot return a value from a Unit function", "the enclosing function has no return payload", "use bare `or return` or declare a return type"))
+                    return None
+                returned_expr := return_value ?? Expr.Unit(return_span)
+                checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+                if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, &fallback_state, &context, &diagnostics) -> return None
+                if !sema_stmt_move_direct(returned_expr, &fallback_state, scopes, "or return", &diagnostics) -> return None
+                fallback_tir = Val(TOrFallback.Return(Val(checked_return)))
+            }
+        }
+        .Panic(name_span, args) -> {
+            if args.len() != 1 {
+                diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `or panic(\"message\")`"))
+                return None
+            }
+            message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            fallback_tir = Val(TOrFallback.Panic(message, sema_expression_panic_location(environment, name_span)))
+        }
+        .Break(route_span) -> {
+            if scopes.loop_depth <= 0 {
+                diagnostics.push(sema_error("E0405", route_span, "`or break` is only valid inside a loop", "the fallback route must have an enclosing loop to leave", "move this expression into a loop"))
+                return None
+            }
+            fallback_tir = Val(TOrFallback.Break)
+        }
+        .Continue(route_span) -> {
+            if scopes.loop_depth <= 0 {
+                diagnostics.push(sema_error("E0405", route_span, "`or continue` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this expression into a loop"))
+                return None
+            }
+            fallback_tir = Val(TOrFallback.Continue)
+        }
+        .BreakLabel(label, route_span) -> {
+            if scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+                diagnostics.push(sema_error("E0405", route_span, "the `or break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
+                return None
+            }
+            fallback_tir = Val(TOrFallback.BreakLabel(label))
+        }
+        .ContinueLabel(label, route_span) -> {
+            if scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+                return None
+            }
+            fallback_tir = Val(TOrFallback.ContinueLabel(label))
+        }
+    }
+    if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
+    result := sema_tir_expr(fallback_payload, TExprKind.OrFallback(subject, fallback_tir ?? TOrFallback.Value(sema_tir_expr(fallback_payload, TExprKind.Unit, span))), span)
+    sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    checked_condition :: sema_check_expression(condition, Val(Type.Bool), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    before := sema_ownership_state_snapshot(state)
+    then_state := sema_ownership_state_snapshot(before)
+    then_scopes := sema_scope_snapshot(scopes)
+    sema_scope_enter(&then_scopes, &then_state, "if.then@{span.start}")
+    then_result :: sema_check_statements(then_body, scopes.return_type, environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+    if !then_result.complete {
+        sema_scope_leave(&then_scopes, &then_state)
+        return None
+    }
+    then_checked :: sema_check_expression(then_value, expected, environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
+        sema_scope_leave(&then_scopes, &then_state)
+        return None
+    }
+    then_reaches_merge := !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named("Never")
+    sema_scope_leave(&then_scopes, &then_state)
+
+    else_state := sema_ownership_state_snapshot(before)
+    else_scopes := sema_scope_snapshot(scopes)
+    sema_scope_enter(&else_scopes, &else_state, "if.else@{span.start}")
+    else_result :: sema_check_statements(else_body, scopes.return_type, environment, &else_scopes, &else_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+    if !else_result.complete {
+        sema_scope_leave(&else_scopes, &else_state)
+        return None
+    }
+    else_checked :: sema_check_expression(else_value, expected, environment, &else_scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
+        sema_scope_leave(&else_scopes, &else_state)
+        return None
+    }
+    else_reaches_merge := !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named("Never")
+    sema_scope_leave(&else_scopes, &else_state)
+
+    if then_reaches_merge && else_reaches_merge {
+        sema_ownership_join_paths(&state, before, then_state, else_state, true)
+    } else if then_reaches_merge {
+        sema_ownership_join_paths(&state, before, then_state, before, false)
+    } else if else_reaches_merge {
+        sema_ownership_join_paths(&state, before, else_state, before, false)
+    } else {
+        sema_ownership_join_paths(&state, before, before, before, false)
+    }
+    result_ty := Type.Named("Never")
+    if then_reaches_merge && else_reaches_merge {
+        if !type_identity_equal(then_checked.ty, else_checked.ty) {
+            diagnostics.push(sema_error("E0124", span, "this `if` has branches with different types", "a value-producing `if` must agree on one type at its merge point", "make both branches produce the same type"))
+            return None
+        }
+        result_ty = then_checked.ty
+    } else if then_reaches_merge {
+        result_ty = then_checked.ty
+    } else if else_reaches_merge {
+        result_ty = else_checked.ty
+    } else if expected != None {
+        result_ty = expected ?? Type.Named("Never")
+    }
+    value := sema_tir_expr(result_ty, TExprKind.IfExpr(TIfCond.Plain(checked_condition), then_result.value, then_checked, else_result.value, else_checked), span)
+    sema_expr_expected(value, expected, environment, &diagnostics)
+}
+fn sema_expression_compare_chain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if operands.len() == 0 || ops.len() + 1 != operands.len() {
+        diagnostics.push(sema_error("E0109", span, "a comparison chain needs one operator between each pair of operands", "each comparison joins two neighboring values", "write a complete comparison expression"))
+        return None
+    }
+    checked := [TExpr]{}
+    index := 0
+    loop index < operands.len() {
+        value :: sema_check_expression(operands[index], None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked.push(value)
+        index += 1
+    }
+    tir_ops := [TBinaryOp]{}
+    index = 0
+    loop index < ops.len() {
+        op :: ops[index]
+        if op == BinOp.And || op == BinOp.Or || op == BinOp.Compare {
+            diagnostics.push(sema_error("E0109", expr_span(operands[index + 1]), "this operator cannot join a comparison chain", "a chain combines ordered or equality comparisons", "use a separate boolean expression"))
+            return None
+        }
+        _ :: sema_expr_binary_type(op, checked[index].ty, checked[index + 1].ty, expr_span(operands[index + 1]), &diagnostics) ?? return None
+        tir_ops.push(sema_expr_tir_binary_op(op))
+        index += 1
+    }
+    value := sema_tir_expr(Type.Bool, TExprKind.CompareChain(checked, tir_ops, hooks), span)
+    sema_expr_expected(value, expected, environment, &diagnostics)
+}

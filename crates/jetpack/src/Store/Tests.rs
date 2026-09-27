@@ -2449,9 +2449,12 @@ mod tests {
 
         let bundle =
             publish_nix_cas_bundle(&source_project, &source_roots, &source_entry.id).unwrap();
-        let imported_root = tempdir::Guard::new("jpk-locked-nix-import");
+        // One environment guard owns both Hangars. Acquiring a second Guard
+        // while _source_guard is alive would re-enter its process-env mutex.
+        let imported_root = source_roots.root.parent().unwrap().join("imported-root");
+        std::fs::create_dir_all(&imported_root).unwrap();
         let imported_roots = Roots {
-            root: imported_root.path.clone(),
+            root: imported_root,
             dev_mode: true,
         };
         let (_, object_digests) =
@@ -2460,7 +2463,7 @@ mod tests {
             channel: "nixpkgs-unstable".into(),
             revision,
             system: system.clone(),
-            signed_index_manifest: signed_manifest,
+            index_authority: signed_manifest,
             derivation,
             output: source_entry.envelope.output_hash.clone(),
             nar_hash,
@@ -2476,8 +2479,8 @@ mod tests {
             platform: closure.system.clone(),
             signature: String::new(),
             provenance: "locked-nix".into(),
-            catalog_tier: "official-signed".into(),
-            catalog_trust: "verified".into(),
+            catalog_tier: "local-unofficial".into(),
+            catalog_trust: "unverified".into(),
         };
         let first = record_locked_nix(
             &imported_roots,
@@ -2511,5 +2514,59 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hangar_doctor_preserves_malformed_cas_lock_namespace() {
+        use std::os::unix::fs::{MetadataExt as _, symlink};
+
+        let (roots, _guard) = temp_roots();
+        let cas = roots.hangar_dir().join("cas");
+        fs::create_dir_all(&cas).unwrap();
+        let locks = cas.join(".locks");
+        let assert_unrepaired = |report: HangarDoctorReport| {
+            assert_eq!(report.findings.len(), 1);
+            let finding = &report.findings[0];
+            assert_eq!(finding.kind, "drift");
+            assert_eq!(finding.subject, "cas/.locks");
+            assert!(!finding.fixed);
+        };
+
+        fs::write(&locks, b"not a directory").unwrap();
+        let file_metadata = fs::symlink_metadata(&locks).unwrap();
+        assert_unrepaired(hangar_doctor(&roots, false, true).unwrap());
+        assert_unrepaired(hangar_doctor(&roots, true, true).unwrap());
+        let after = fs::symlink_metadata(&locks).unwrap();
+        assert!(after.is_file());
+        assert_eq!(
+            (after.dev(), after.ino()),
+            (file_metadata.dev(), file_metadata.ino()),
+        );
+        assert_eq!(fs::read(&locks).unwrap(), b"not a directory");
+
+        fs::remove_file(&locks).unwrap();
+        let outside_cas = roots.root.join("outside-cas");
+        fs::create_dir_all(&outside_cas).unwrap();
+        let protected = outside_cas.join("must-retain");
+        fs::write(&protected, b"outside CAS").unwrap();
+        let protected_metadata = fs::metadata(&protected).unwrap();
+        symlink(&outside_cas, &locks).unwrap();
+        let link_metadata = fs::symlink_metadata(&locks).unwrap();
+        assert_unrepaired(hangar_doctor(&roots, false, true).unwrap());
+        assert_unrepaired(hangar_doctor(&roots, true, true).unwrap());
+        let after = fs::symlink_metadata(&locks).unwrap();
+        assert!(after.file_type().is_symlink());
+        assert_eq!(
+            (after.dev(), after.ino()),
+            (link_metadata.dev(), link_metadata.ino()),
+        );
+        assert_eq!(fs::read_link(&locks).unwrap(), outside_cas);
+        let after = fs::metadata(&protected).unwrap();
+        assert_eq!(
+            (after.dev(), after.ino()),
+            (protected_metadata.dev(), protected_metadata.ino()),
+        );
+        assert_eq!(fs::read(&protected).unwrap(), b"outside CAS");
     }
 }

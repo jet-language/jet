@@ -269,10 +269,10 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
     let src = r#"
-@paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+@PATHS :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
-    print(@paths.join("|"))
+    print(@PATHS.join("|"))
 }
 "#;
     let path = dir.join("main.jet");

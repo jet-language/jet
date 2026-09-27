@@ -1,0 +1,89 @@
+// Focused Source evaluator fixture for task-root ownership. This file is loaded
+// only by the bootstrap fixture harness, never by sources.list.
+
+fn jet_eval_task_roots_fixture_contains_target(value: JetEvalRuntimeValue, target: Int, cell_target: Bool) -> Bool {
+    if value == {
+        .SharedCell(index, _) -> return cell_target && index == target
+        .ForeignHandle(_, _, token) -> return !cell_target && token == target
+        .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_task_roots_fixture_contains_target(nested, target, cell_target)
+        .Closure(_, captures) -> loop capture in captures {
+            if jet_eval_task_roots_fixture_contains_target(capture, target, cell_target) -> return true
+        }
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> loop item in values {
+                    if jet_eval_task_roots_fixture_contains_target(item, target, cell_target) -> return true
+                }
+                .Map(entries) -> loop entry in entries {
+                    if jet_eval_task_roots_fixture_contains_target(entry.key, target, cell_target) || jet_eval_task_roots_fixture_contains_target(entry.value, target, cell_target) -> return true
+                }
+                .Struct(_, fields) -> loop field in fields {
+                    if jet_eval_task_roots_fixture_contains_target(field.value, target, cell_target) -> return true
+                }
+                .Enum(_, _, args) -> loop arg in args {
+                    if jet_eval_task_roots_fixture_contains_target(arg.value, target, cell_target) -> return true
+                }
+            }
+        }
+        else -> {}
+    }
+    false
+}
+fn jet_eval_task_roots_fixture_list_contains(value: JetEvalRuntimeValue, cell: Int, token: Int) -> Bool {
+    jet_eval_task_roots_fixture_contains_target(value, cell, true) && jet_eval_task_roots_fixture_contains_target(value, token, false)
+}
+
+// `callback` must be a real checked escaping closure function with one capture
+// parameter. The harness supplies its ID from the fixture MIR; this function
+// deliberately never fabricates capture facts for a zero-capture function.
+pub fn jet_eval_task_roots_fixture(program: ^MirProgram, config: ^JetEvalConfig, callback: MirFunctionId, span: Span) -> Bool {
+    machine := jet_eval_machine(^program, ^config)
+    cell := jet_eval_new_shared_cell(&machine, JetEvalRuntimeValue.Data(TComptimeValue.Unit), MirAccess.Write)
+    cell_id := if cell == {.SharedCell(index, _) -> index else -> return false}
+    cursor := jet_eval_cursor_handle_new(&machine, jet_eval_loop_cursor_handle_id(), 7, JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    cursor_token := if cursor == {.ForeignHandle(_, _, token) -> token else -> return false}
+    cell_copy :: jet_eval_copy_value(cell, &machine, span) ?? return false
+    cursor_copy :: jet_eval_copy_value(cursor, &machine, span) ?? return false
+    parent_cell :: jet_eval_copy_value(cell, &machine, span) ?? return false
+    parent_cursor :: jet_eval_copy_value(cursor, &machine, span) ?? return false
+    duplicate := JetEvalRuntimeValue.Aggregate(JetEvalRuntimeAggregate.List([JetEvalRuntimeValue]{cell, cell_copy, cursor, cursor_copy}))
+    unrelated_cell := jet_eval_new_shared_cell(&machine, JetEvalRuntimeValue.Data(TComptimeValue.Int(3)), MirAccess.Write)
+    unrelated_cell_id := if unrelated_cell == {.SharedCell(index, _) -> index else -> return false}
+    unrelated_cursor := jet_eval_cursor_handle_new(&machine, jet_eval_loop_cursor_handle_id(), 9, JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    unrelated_cursor_token := if unrelated_cursor == {.ForeignHandle(_, _, token) -> token else -> return false}
+    callback_value := JetEvalRuntimeValue.Closure(callback, [JetEvalRuntimeValue]{duplicate})
+    lease :: jet_eval_callback_transfer(&machine, ^callback_value, span) ?? return false
+    root :: jet_eval_task_root_take(&machine, lease, span) ?? return false
+    if jet_eval_task_roots_fixture_list_contains(root.callback.value, cell_id, cursor_token) == false -> return false
+    if !jet_eval_shared_cell_live(&machine, cell_id, span) -> return false
+    if !jet_eval_foreign_handle_matches(&machine, jet_eval_loop_cursor_handle_id(), 7, cursor_token, span) -> return false
+    if !jet_eval_shared_cell_live(&machine, unrelated_cell_id, span) -> return false
+    if !jet_eval_foreign_handle_matches(&machine, jet_eval_loop_cursor_handle_id(), 9, unrelated_cursor_token, span) -> return false
+    child_config := jet_eval_task_config(&machine)
+    child := jet_eval_task_machine(^root, ^child_config)
+    child_cell := jet_eval_new_shared_cell(&child, JetEvalRuntimeValue.Data(TComptimeValue.Int(41)), MirAccess.Write)
+    child_cell_id := if child_cell == {.SharedCell(index, _) -> index else -> return false}
+    child_cursor := jet_eval_cursor_handle_new(&child, jet_eval_loop_cursor_handle_id(), 11, JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    child_cursor_token := if child_cursor == {.ForeignHandle(_, _, token) -> token else -> return false}
+    published := JetEvalRuntimeValue.Aggregate(JetEvalRuntimeAggregate.List([JetEvalRuntimeValue]{child_cell, child_cursor}))
+    if !jet_eval_shared_write(&child, cell_id, MirAccess.Write, published, span) -> return false
+    resolved :: jet_eval_shared_read(&machine, cell_id, span) ?? return false
+    if !jet_eval_task_roots_fixture_list_contains(resolved, child_cell_id, child_cursor_token) -> return false
+    if !jet_eval_retire_machine(&child, span) -> return false
+    resolved_after :: jet_eval_shared_read(&machine, cell_id, span) ?? return false
+    if !jet_eval_task_roots_fixture_list_contains(resolved_after, child_cell_id, child_cursor_token) -> return false
+    if !jet_eval_shared_cell_live(&machine, cell_id, span) -> return false
+    if !jet_eval_foreign_handle_matches(&machine, jet_eval_loop_cursor_handle_id(), 7, cursor_token, span) -> return false
+    if !jet_eval_drop_value(&machine, resolved, span) -> return false
+    if !jet_eval_drop_value(&machine, resolved_after, span) -> return false
+    if !jet_eval_drop_value(&machine, parent_cell, span) -> return false
+    if !jet_eval_drop_value(&machine, parent_cursor, span) -> return false
+    if !jet_eval_retire_machine(&machine, span) -> return false
+    cell_state :: jet_eval_registry_cell(&machine, cell_id) ?? return false
+    cell_metadata := cell_state.metadata
+    if !cell_metadata.dropped || cell_metadata.aliases != 0 -> return false
+    token_state :: jet_eval_registry_token(&machine, cursor_token) ?? return false
+    token_metadata := token_state.metadata
+    if !token_metadata.retired || token_metadata.aliases != 0 -> return false
+    true
+}

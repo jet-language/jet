@@ -1,0 +1,55 @@
+fn parser_tag_decl_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_KW_TAG
+}
+
+fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `tag`")
+    deny := [NamedSpan]{}
+    from := [NamedSpan]{}
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a tag policy")
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        field :: parser_expect_name(&state, "for a tag policy field")
+        parser_expect(&state, TOKEN_COLON, "after a tag policy field")
+        values := parser_tag_path_list(&state)
+        if field.payload.decoded == "deny" {
+            if deny.len() > 0 -> parser_tag_error(&state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
+            deny = values
+        } else if field.payload.decoded == "from" {
+            if from.len() > 0 -> parser_tag_error(&state, field.span, "tag `from` is repeated", "each tag policy field is declared once", "keep one `from: [...]` field")
+            from = values
+        } else {
+            parser_tag_error(&state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths", "write `deny: [...]` or `from: [...]`")
+        }
+        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a tag policy")
+    if deny.len() == 0 -> parser_tag_error(&state, name.span, "a tag needs at least one denied destination", "an empty tag policy has no enforceable effect", "add a path to `deny: [...]`")
+    Item.Tag(value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)})
+}
+
+fn parser_tag_path_list(state: &JetParserState) -> [NamedSpan] {
+    parser_expect(&state, TOKEN_LBRACKET, "`[` before tag policy paths")
+    paths := [NamedSpan]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        first :: parser_expect_name(&state, "in a tag policy path")
+        path := first.payload.decoded
+        end := first.span
+        loop parser_current_kind(&state) == TOKEN_DOT {
+            parser_bump(&state)
+            part :: parser_expect_name(&state, "after `.` in a tag policy path")
+            path = "{path}.{part.payload.decoded}"
+            end = part.span
+        }
+        paths.push(NamedSpan{name: path, span: parser_cover(first.span, end)})
+        if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
+    }
+    parser_expect(&state, TOKEN_RBRACKET, "`]` after tag policy paths")
+    paths
+}
+
+fn parser_tag_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+    parser_add_error_code(&state, "E0734", span, what, why, fix)
+}

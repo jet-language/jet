@@ -17,6 +17,7 @@ use crate::AST::{
     InlineAsmContract, InlineAsmOutput, Item, ProgramBundle, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -70,6 +71,125 @@ pub struct InlineEntry {
     /// Sema-normalized assembly target/output/clobber facts.
     pub asm_contract: Option<InlineAsmContract>,
 }
+/// Checked `#[repr(C)]` record declarations used by the uniform native
+/// trampoline. The bridge never guesses a nominal type from its spelling:
+/// sema-projected struct fields and layout attributes are copied here.
+#[derive(Debug, Clone, Default)]
+struct CRecordDefinitions {
+    source: String,
+    names: BTreeMap<String, String>,
+    aliases: BTreeMap<String, Type>,
+    records: Vec<CRecordDecl>,
+    handle_names: HashSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CRecordDecl {
+    rust_name: String,
+    fields: Vec<(String, Type)>,
+    alignment: Option<u64>,
+}
+
+impl CRecordDefinitions {
+    fn is_record_type(&self, ty: &Type) -> bool {
+        self.is_record_type_with_stack(ty, &mut HashSet::new())
+    }
+
+    fn is_record_type_with_stack(&self, ty: &Type, stack: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Named(name) => {
+                if self.names.contains_key(name) {
+                    return true;
+                }
+                let Some(base) = self.aliases.get(name) else {
+                    return false;
+                };
+                if !stack.insert(name.clone()) {
+                    return false;
+                }
+                let result = self.is_record_type_with_stack(base, stack);
+                stack.remove(name);
+                result
+            }
+            _ => false,
+        }
+    }
+
+    fn rust_type(&self, ty: &Type) -> Option<String> {
+        self.rust_type_with_stack(ty, &mut HashSet::new())
+    }
+
+    fn rust_type_with_stack(
+        &self,
+        ty: &Type,
+        stack: &mut HashSet<String>,
+    ) -> Option<String> {
+        match ty {
+            Type::Int => Some("i64".to_string()),
+            Type::Float => Some("f64".to_string()),
+            Type::Bool => Some("bool".to_string()),
+            Type::String => Some("*const core::ffi::c_char".to_string()),
+            Type::Char => Some("u32".to_string()),
+            Type::IntN { signed, bits } => Some(format!(
+                "{}{}",
+                if *signed { 'i' } else { 'u' },
+                bits
+            )),
+            Type::Float32 => Some("f32".to_string()),
+            Type::FixedList { elem, len } => {
+                let length = match len {
+                    crate::AST::Measure::Literal { value, .. } if *value <= usize::MAX as u64 => {
+                        *value as usize
+                    }
+                    crate::AST::Measure::SignedLiteral { value, .. }
+                        if *value >= 0 && *value <= usize::MAX as i64 =>
+                    {
+                        *value as usize
+                    }
+                    _ => return None,
+                };
+                Some(format!(
+                    "[{}; {length}]",
+                    self.rust_type_with_stack(elem, stack)?
+                ))
+            }
+            Type::Named(name) => {
+                match name.as_str() {
+                    "Int" => return Some("i64".to_string()),
+                    "Float" => return Some("f64".to_string()),
+                    "Bool" => return Some("bool".to_string()),
+                    "String" => return Some("*const core::ffi::c_char".to_string()),
+                    "Char" => return Some("u32".to_string()),
+                    "I8" => return Some("i8".to_string()),
+                    "I16" => return Some("i16".to_string()),
+                    "I32" => return Some("i32".to_string()),
+                    "I64" => return Some("i64".to_string()),
+                    "U8" => return Some("u8".to_string()),
+                    "U16" => return Some("u16".to_string()),
+                    "U32" => return Some("u32".to_string()),
+                    "U64" => return Some("u64".to_string()),
+                    "F32" => return Some("f32".to_string()),
+                    _ => {}
+                }
+                if let Some(rust_name) = self.names.get(name) {
+                    return Some(rust_name.clone());
+                }
+                if self.handle_names.contains(name) {
+                    return Some("*mut core::ffi::c_void".to_string());
+                }
+                let base = self.aliases.get(name)?;
+                if !stack.insert(name.clone()) {
+                    return None;
+                }
+                let resolved = self.rust_type_with_stack(base, stack);
+                stack.remove(name);
+                resolved
+            }
+            Type::Fn { .. } => Some("*mut core::ffi::c_void".to_string()),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct NativeTool {
@@ -120,9 +240,7 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
         for item in &module.items {
             let Item::ExternRust(block) = item else {
                 if let Item::Func(f) = item {
-                    if let Some(import) = crate::Sema::guest_import_function_signature(f)
-                        .filter(|_| crate::Sema::guest_import_bridge_compatible(f))
-                    {
+                    if let Some(import) = crate::Sema::guest_import_function_signature(f) {
                         out.push(ExternEntry {
                             jet_name: import.name.clone(),
                             rust_path: import.symbol.clone(),
@@ -170,19 +288,10 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                         });
                     }
                 } else if let Item::CModule(c_module) = item {
-                    // The hidden crate can share primitive C ABI values,
-                    // checked opaque handles, and generated pointer/count
-                    // arrays. Other nominal values stay on CModule's direct
-                    // wrapper path, where codegen has the real Jet type.
-                    for function in c_module
-                        .functions
-                        .iter()
-                        .filter(|function| {
-                            function.hidden_c_bridge_compatible_with_handles(
-                                &bundle.cffi.handle_facts,
-                            )
-                        })
-                    {
+                    // The hidden crate carries every checked C row. Primitive
+                    // and handle rows use the existing scalar bridge, while
+                    // C-layout records use the typed repr(C) trampoline.
+                    for function in &c_module.functions {
                         out.push(ExternEntry {
                             jet_name: function.name.clone(),
                             rust_path: function.rust_path.clone(),
@@ -219,6 +328,138 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
         }
     }
     out
+}
+fn c_record_rust_name(key: &str) -> String {
+    format!("__JetCRecord_{}", crate::AST::mangle_path(key))
+}
+
+fn collect_c_record_definitions(bundle: &ProgramBundle) -> CRecordDefinitions {
+    fn collect_items(
+        items: &[Item],
+        owner: &str,
+        records: &mut Vec<CRecordDecl>,
+        names: &mut BTreeMap<String, String>,
+        aliases: &mut BTreeMap<String, Type>,
+    ) {
+        for item in items {
+            match item {
+                Item::Struct(definition)
+                    if definition
+                        .layout
+                        .as_ref()
+                        .is_some_and(crate::AST::StructLayout::is_c) =>
+                {
+                    let key = if owner.is_empty() {
+                        definition.name.clone()
+                    } else {
+                        format!("{owner}::{}", definition.name)
+                    };
+                    let rust_name = c_record_rust_name(&key);
+                    names.insert(key, rust_name.clone());
+                    names
+                        .entry(definition.name.clone())
+                        .or_insert_with(|| rust_name.clone());
+                    records.push(CRecordDecl {
+                        rust_name,
+                        fields: definition
+                            .fields
+                            .iter()
+                            .map(|field| (field.name.clone(), field.ty.clone()))
+                            .collect(),
+                        alignment: definition
+                            .layout
+                            .as_ref()
+                            .and_then(crate::AST::StructLayout::alignment),
+                    });
+                }
+                Item::Distinct(definition) => {
+                    let key = if owner.is_empty() {
+                        definition.name.clone()
+                    } else {
+                        format!("{owner}::{}", definition.name)
+                    };
+                    aliases.insert(key, definition.base.clone());
+                    aliases
+                        .entry(definition.name.clone())
+                        .or_insert_with(|| definition.base.clone());
+                }
+                Item::TypeAlias(definition) => {
+                    let key = if owner.is_empty() {
+                        definition.name.clone()
+                    } else {
+                        format!("{owner}::{}", definition.name)
+                    };
+                    aliases.insert(key, definition.target.clone());
+                    aliases
+                        .entry(definition.name.clone())
+                        .or_insert_with(|| definition.target.clone());
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        let nested_owner = if owner.is_empty() {
+                            module.name.clone()
+                        } else {
+                            format!("{owner}::{}", module.name)
+                        };
+                        collect_items(body, &nested_owner, records, names, aliases);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut records = Vec::new();
+    let mut names = BTreeMap::new();
+    let mut aliases = BTreeMap::new();
+    for module in &bundle.modules {
+        collect_items(
+            &module.items,
+            &module.alias,
+            &mut records,
+            &mut names,
+            &mut aliases,
+        );
+    }
+    let handle_names = bundle
+        .cffi
+        .handle_facts
+        .iter()
+        .map(|fact| fact.jet_name.clone())
+        .collect::<HashSet<_>>();
+    let mut definitions = CRecordDefinitions {
+        source: String::new(),
+        names,
+        aliases,
+        records,
+        handle_names,
+    };
+    for record in &definitions.records {
+        let repr = record
+            .alignment
+            .map(|alignment| format!("#[repr(C, align({alignment}))]"))
+            .unwrap_or_else(|| "#[repr(C)]".to_string());
+        writeln!(definitions.source, "{repr}").expect("record prelude write cannot fail");
+        writeln!(definitions.source, "struct {} {{", record.rust_name)
+            .expect("record prelude write cannot fail");
+        for (field_name, field_ty) in &record.fields {
+            let rust_ty = definitions.rust_type(field_ty).unwrap_or_else(|| {
+                panic!(
+                    "checked C record field `{field_name}` has no native Rust representation"
+                )
+            });
+            writeln!(
+                definitions.source,
+                "    {}: {rust_ty},",
+                crate::AST::mangle_path(field_name)
+            )
+            .expect("record prelude write cannot fail");
+        }
+        definitions
+            .source
+            .push_str("}\n\n");
+    }
+    definitions
 }
 
 fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEntry {
@@ -312,6 +553,7 @@ pub fn prepare_for_target(
     bundle: &ProgramBundle,
     target: &str,
 ) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
+    let record_defs = collect_c_record_definitions(bundle);
     let entries = collect_externs(bundle);
     // Reject stale or cross-target assembly contracts before any target-specific
     // link discovery or bridge generation. Web has no native provider either:
@@ -451,9 +693,8 @@ pub fn prepare_for_target(
         needs_crypto,
         needs_compress,
         needs_plugin,
-        &bundle.package_guarantees.authority_needs,
-        needs_secrets,
         &bundle.cffi.handle_facts,
+        &record_defs,
         &bundle.cffi.link_closure,
         &native_link_args,
         target,
@@ -730,6 +971,7 @@ mod inline_asm_target_tests {
                 &[],
                 false,
                 &[],
+                "",
                 &FfiLinkClosure::default(),
                 target,
                 None,
@@ -2449,6 +2691,7 @@ pub fn build_bridge(
         &[],
         needs_secrets,
         &[],
+        &CRecordDefinitions::default(),
         &FfiLinkClosure::default(),
         &[],
         &target,
@@ -2492,6 +2735,7 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         &[],
         false,
         &[],
+        "",
         &FfiLinkClosure::default(),
         &target,
         None,
@@ -2516,6 +2760,7 @@ fn build_bridge_full(
     authority_needs: &[String],
     needs_secrets: bool,
     handle_facts: &[FfiHandleFact],
+    record_defs: &CRecordDefinitions,
     link_closure: &FfiLinkClosure,
     native_link_args: &[String],
     selected_target: &str,
@@ -2645,6 +2890,7 @@ fn build_bridge_full(
         authority_needs,
         needs_secrets,
         handle_facts,
+        &record_defs.source,
         link_closure,
         selected_target,
         native_toolchain.as_ref(),
@@ -2843,7 +3089,11 @@ fn build_bridge_full(
             .map_err(|e| tool_error(&format!("couldn't write the inline foreign source: {}", e)))?;
         }
     }
-    let mut wrapper_source = emit_wrapper_lib(
+    let handle_names = handle_facts
+        .iter()
+        .map(|fact| fact.jet_name.clone())
+        .collect::<HashSet<_>>();
+    let mut wrapper_source = emit_wrapper_lib_with_handles(
         entries,
         needs_regex,
         needs_archive,
@@ -2856,6 +3106,8 @@ fn build_bridge_full(
         needs_compress,
         needs_plugin,
         needs_secrets,
+        &handle_names,
+        record_defs,
     );
     if needs_plugin {
         // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
@@ -3540,6 +3792,7 @@ fn cache_key_full(
     authority_needs: &[String],
     needs_secrets: bool,
     handle_facts: &[FfiHandleFact],
+    record_source: &str,
     link_closure: &FfiLinkClosure,
     selected_target: &str,
     native_toolchain: Option<&InlineNativeToolchain>,
@@ -3549,6 +3802,7 @@ fn cache_key_full(
     let mut identity =
         crate::ForeignBridge::IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("descriptor_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
+    identity.field("c-record-source", record_source.as_bytes());
     identity.field("selected_target", selected_target.as_bytes());
     if let Some(digest) = foundation_source_digest {
         identity.field("jet-foundation-source", digest.as_bytes());
@@ -4933,6 +5187,38 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native
 
 fn emit_wrapper_lib(
     entries: &[ExternEntry],
+    needs_regex: bool,
+    needs_archive: bool,
+    needs_db: bool,
+    needs_parquet: bool,
+    needs_http_client: bool,
+    needs_http_server_tls: bool,
+    needs_net_tls: bool,
+    needs_crypto: bool,
+    needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
+) -> String {
+    emit_wrapper_lib_with_handles(
+        entries,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_parquet,
+        needs_http_client,
+        needs_http_server_tls,
+        needs_net_tls,
+        needs_crypto,
+        needs_compress,
+        needs_plugin,
+        needs_secrets,
+        &HashSet::new(),
+        &CRecordDefinitions::default(),
+    )
+}
+
+fn emit_wrapper_lib_with_handles(
+    entries: &[ExternEntry],
     _needs_regex: bool,
     _needs_archive: bool,
     needs_db: bool,
@@ -4944,6 +5230,8 @@ fn emit_wrapper_lib(
     _needs_compress: bool,
     needs_plugin: bool,
     needs_secrets: bool,
+    handle_names: &HashSet<String>,
+    record_defs: &CRecordDefinitions,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\ntype JetFfiPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;\ntype JetFfiSharedPanicHook = std::sync::Arc<JetFfiPanicHook>;\nstatic JET_FFI_PREVIOUS_PANIC_HOOK: std::sync::Mutex<Option<JetFfiSharedPanicHook>> =\n    std::sync::Mutex::new(None);\n\nthread_local! {\n    static JET_FFI_FAILURE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };\n    // The hook is process-global, but suppression is per calling thread.\n    static JET_FFI_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> =\n        const { std::cell::Cell::new(0) };\n}\n\n// `catch_unwind` runs the panic hook before it returns the payload. Keep the\n// bridge's private conversion quiet without mutating the hook around each\n// call; FFI calls may run concurrently on unrelated threads.\nstatic JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {\n    let previous = std::sync::Arc::new(std::panic::take_hook());\n    *JET_FFI_PREVIOUS_PANIC_HOOK\n        .lock()\n        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous.clone());\n    std::panic::set_hook(Box::new(move |info| {\n        let private_marker = info\n            .payload()\n            .downcast_ref::<String>()\n            .is_some_and(|message| message.starts_with(\"__jet_ffi_runtime__: \"));\n        let quiet = private_marker\n            || JET_FFI_PANIC_BOUNDARY_DEPTH\n                .try_with(|depth| depth.get() != 0)\n                .unwrap_or(false);\n        if !quiet {\n            previous(info);\n        }\n    }));\n});\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_clear_panic_hook() {\n    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n        let previous = JET_FFI_PREVIOUS_PANIC_HOOK\n            .lock()\n            .unwrap_or_else(|poisoned| poisoned.into_inner())\n            .take();\n        let Some(previous) = previous else { return; };\n        let current = std::panic::take_hook();\n        drop(current);\n        if let Ok(previous) = std::sync::Arc::try_unwrap(previous) {\n            std::panic::set_hook(previous);\n        }\n    }));\n}\n\nfn ffi_catch_unwind<F, T>(f: F) -> Result<T, Box<dyn std::any::Any + Send>>\nwhere\n    F: FnOnce() -> T,\n{\n    let result = JET_FFI_PANIC_BOUNDARY_DEPTH.with(|depth| {\n        let previous = depth.replace(depth.get().saturating_add(1));\n        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n            std::sync::LazyLock::force(&JET_FFI_PANIC_HOOK);\n            std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))\n        }));\n        depth.set(previous);\n        result\n    });\n    match result {\n        Ok(result) => result,\n        Err(payload) => Err(payload),\n    }\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_take_failure() -> i8 {\n    JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)\n}\n\nfn ffi_host_fault() {\n    JET_FFI_FAILURE.with(|failure| {\n        if failure.get() == 0 { failure.set(2); }\n    });\n}\n\nfn ffi_panic() -> ! {\n    JET_FFI_FAILURE.with(|failure| failure.set(1));\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::resume_unwind(Box::new(format!(\"__jet_ffi_runtime__: {MESSAGE}\")));\n}\n\n",
@@ -4956,6 +5244,7 @@ fn emit_wrapper_lib(
              pub len: usize,\n\
          }\n\n",
     );
+    out.push_str(&record_defs.source);
     for descriptor in foreign_descriptor_stamps(entries) {
         out.push_str("// jet-ffi-descriptor=");
         out.push_str(&descriptor);
@@ -5087,7 +5376,7 @@ fn emit_wrapper_lib(
     }
     if entries
         .iter()
-        .any(|e| emit_cabi_trampoline(e, &names).is_some())
+        .any(|e| emit_cabi_trampoline(e, handle_names, record_defs).is_some())
     {
         out.push_str(
             "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {\n    if ptr.is_null() { return; }\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}\n\n",
@@ -5104,12 +5393,18 @@ fn emit_wrapper_lib(
                 .is_some_and(|ty| matches!(ty, Type::List(_)));
         if let Some(inline) = &e.inline {
             out.push_str(&emit_inline_wrapper_fn(e, inline));
-        } else if e.c_abi && !has_list {
-            out.push_str(&emit_c_wrapper_fn(e, &names));
+        } else if e.c_abi
+            && !has_list
+            && !e
+                .params
+                .iter()
+                .any(|(convention, _)| *convention == AccessConvention::Write)
+        {
+            out.push_str(&emit_c_wrapper_fn(e, &names, record_defs));
         } else if !e.c_abi {
             out.push_str(&emit_wrapper_fn(e, &names));
         }
-        if let Some(cabi) = emit_cabi_trampoline(e, &names) {
+        if let Some(cabi) = emit_cabi_trampoline(e, handle_names, record_defs) {
             out.push_str(&cabi);
             out.push('\n');
         }
@@ -5118,7 +5413,11 @@ fn emit_wrapper_lib(
     out
 }
 
-fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String {
+fn emit_c_wrapper_fn(
+    entry: &ExternEntry,
+    user_types: &HashSet<String>,
+    record_defs: &CRecordDefinitions,
+) -> String {
     fn callback_payload(ty: &Type) -> Option<&Type> {
         let Type::Apply { name, args } = ty else {
             return None;
@@ -5151,15 +5450,17 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
         let callback_type = "Option<unsafe extern \"C\" fn(*mut std::os::raw::c_void, i64)>";
         return format!(
             "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void;\n}}\n\n#[no_mangle]\npub unsafe extern \"C\" fn {wrapper}_callback_start(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void {{\n    {native_ident}(callback, ctx)\n}}\n",
-            wrapper = entry.wrapper_name,
-        );
-    }
-
-    fn bridge_type(ty: &Type, user_types: &HashSet<String>) -> String {
+    fn bridge_type(
+        ty: &Type,
+        user_types: &HashSet<String>,
+        record_defs: &CRecordDefinitions,
+    ) -> String {
         match ty {
-            // C typedef pointer aliases are checked opaque handles. The
-            // bridge crate carries only their native pointer representation.
-            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+            // Checked C records use their generated `#[repr(C)]` declaration.
+            // Unclassified nominal values retain the opaque-handle pointer ABI.
+            Type::Named(_) => record_defs
+                .rust_type(ty)
+                .unwrap_or_else(|| "*mut std::os::raw::c_void".to_string()),
             Type::Fn { params, ret, .. } => {
                 let params = params
                     .iter()
@@ -5175,12 +5476,15 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
             _ => rust_type(ty, user_types),
         }
     }
-
-    fn raw_type(ty: &Type, user_types: &HashSet<String>) -> String {
+    fn raw_type(
+        ty: &Type,
+        user_types: &HashSet<String>,
+        record_defs: &CRecordDefinitions,
+    ) -> String {
         match ty {
             Type::String => "*const std::os::raw::c_char".to_string(),
             Type::Char => "u32".to_string(),
-            _ => bridge_type(ty, user_types),
+            _ => bridge_type(ty, user_types, record_defs),
         }
     }
 
@@ -5188,23 +5492,33 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
         .params
         .iter()
         .enumerate()
-        .map(|(index, (_, ty))| format!("p{index}: {}", bridge_type(ty, user_types)))
+        .map(|(index, (_, ty))| {
+            format!(
+                "p{index}: {}",
+                bridge_type(ty, user_types, record_defs)
+            )
+        })
         .collect::<Vec<_>>();
     let raw_params = entry
         .params
         .iter()
         .enumerate()
-        .map(|(index, (_, ty))| format!("p{index}: {}", raw_type(ty, user_types)))
+        .map(|(index, (_, ty))| {
+            format!(
+                "p{index}: {}",
+                raw_type(ty, user_types, record_defs)
+            )
+        })
         .collect::<Vec<_>>();
     let raw_ret = entry
         .return_type
         .as_ref()
-        .map(|ty| format!(" -> {}", raw_type(ty, user_types)))
+        .map(|ty| format!(" -> {}", raw_type(ty, user_types, record_defs)))
         .unwrap_or_default();
     let ret = entry
         .return_type
         .as_ref()
-        .map(|ty| format!(" -> {}", bridge_type(ty, user_types)))
+        .map(|ty| format!(" -> {}", bridge_type(ty, user_types, record_defs)))
         .unwrap_or_default();
     let mut setup = Vec::new();
     let mut call_args = Vec::new();
@@ -5681,7 +5995,11 @@ fn foreign_rust_param_type(
 /// Cranelift-callable C ABI twin of a Rust-ABI wrapper. Scalars pass as i64/f64;
 /// `String` uses `(ptr,len)` in and `(out_ptr,out_len)` heap buffers the JIT frees
 /// via `jet_ffi_cabi_free`.
-fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> Option<String> {
+fn emit_cabi_trampoline(
+    entry: &ExternEntry,
+    handle_names: &HashSet<String>,
+    record_defs: &CRecordDefinitions,
+) -> Option<String> {
     fn scalar_type(ty: &Type) -> Option<String> {
         match ty {
             Type::Int => Some("i64".to_string()),
@@ -5700,13 +6018,31 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
             _ => None,
         }
     }
+    fn record_type(
+        ty: &Type,
+        handle_names: &HashSet<String>,
+        record_defs: &CRecordDefinitions,
+    ) -> bool {
+        matches!(ty, Type::Named(name)
+            if !handle_names.contains(name) && record_defs.is_record_type(ty))
+    }
 
-    fn native_type(ty: &Type, convention: AccessConvention) -> Option<String> {
+    // Native pointer representation is reserved for checked opaque-handle
+    // facts; nominal records use their separate typed CModule path.
+    fn native_type(
+        ty: &Type,
+        convention: AccessConvention,
+        handle_names: &HashSet<String>,
+        record_defs: &CRecordDefinitions,
+    ) -> Option<String> {
         if convention == AccessConvention::Write {
             return Some(match ty {
                 Type::List(_) => "*mut std::os::raw::c_void".to_string(),
                 Type::String => "*mut std::os::raw::c_char".to_string(),
-                Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+                Type::Named(name) if handle_names.contains(name) => {
+                    "*mut std::os::raw::c_void".to_string()
+                }
+                Type::Named(_) => format!("*mut {}", record_defs.rust_type(ty)?),
                 _ => format!(
                     "*mut {}",
                     scalar_type(ty).unwrap_or_else(|| "std::os::raw::c_void".to_string())
@@ -5716,19 +6052,30 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
         Some(match ty {
             Type::List(_) => "*const std::os::raw::c_void".to_string(),
             Type::String => "*const std::os::raw::c_char".to_string(),
-            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+            Type::Named(name) if handle_names.contains(name) => {
+                "*mut std::os::raw::c_void".to_string()
+            }
+            Type::Named(_) => record_defs.rust_type(ty)?,
             _ => scalar_type(ty)?,
         })
     }
 
-    fn return_native_type(ty: &Type) -> Option<String> {
+    fn return_native_type(
+        ty: &Type,
+        handle_names: &HashSet<String>,
+        record_defs: &CRecordDefinitions,
+    ) -> Option<String> {
         Some(match ty {
             Type::List(_) => "*const std::os::raw::c_void".to_string(),
             Type::String => "*const std::os::raw::c_char".to_string(),
-            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+            Type::Named(name) if handle_names.contains(name) => {
+                "*mut std::os::raw::c_void".to_string()
+            }
+            Type::Named(_) => record_defs.rust_type(ty)?,
             _ => scalar_type(ty)?,
         })
     }
+
 
     fn integer(ty: &Type) -> bool {
         matches!(ty, Type::Int | Type::IntN { .. })
@@ -5777,41 +6124,52 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
             .return_type
             .as_ref()
             .is_some_and(|ty| matches!(ty, Type::List(_)));
-    let direct_native = entry.c_abi && has_list;
+    let has_write = entry
+        .params
+        .iter()
+        .any(|(convention, _)| *convention == AccessConvention::Write);
+    let direct_native = (entry.c_abi && has_list)
+        || (has_write && (entry.c_abi || entry.inline.is_some()));
     if !direct_native {
-        if entry
-            .params
-            .iter()
-            .any(|(convention, ty)| *convention != AccessConvention::Read
+        if entry.params.iter().any(|(convention, ty)| {
+            *convention != AccessConvention::Read
                 && !(*convention == AccessConvention::Move
                     && entry.c_abi
-                    && matches!(ty, Type::Named(_))))
-            || entry
-                .params
-                .iter()
-                .any(|(_, ty)| matches!(ty, Type::List(_)))
+                    && (matches!(ty, Type::Named(name) if handle_names.contains(name))
+                        || record_type(ty, handle_names, record_defs)))
+                && !(*convention == AccessConvention::Write
+                    && entry.c_abi
+                    && (matches!(ty, Type::Named(name) if handle_names.contains(name))
+                        || record_type(ty, handle_names, record_defs)))
+        }) || entry
+            .params
+            .iter()
+            .any(|(_, ty)| matches!(ty, Type::List(_)))
         {
             return None;
         }
     }
-    if entry
-        .params
-        .iter()
-        .any(|(_, ty)| !matches!(ty, Type::List(_)) && scalar_type(ty).is_none()
-            && !matches!(ty, Type::String | Type::Named(_)))
-    {
+    if entry.params.iter().any(|(_, ty)| {
+        !matches!(ty, Type::List(_))
+            && scalar_type(ty).is_none()
+            && !matches!(ty, Type::String)
+            && !matches!(ty, Type::Named(name) if handle_names.contains(name))
+            && !record_type(ty, handle_names, record_defs)
+    }) {
         return None;
     }
     if let Some(ret) = &entry.return_type {
-        if !matches!(ret, Type::List(_) | Type::String | Type::Named(_))
+        if !matches!(ret, Type::List(_) | Type::String)
             && scalar_type(ret).is_none()
+            && !matches!(ret, Type::Named(name) if handle_names.contains(name))
+            && !record_type(ret, handle_names, record_defs)
         {
             return None;
         }
     }
     if direct_native {
         for (convention, ty) in &entry.params {
-            native_type(ty, *convention)?;
+            native_type(ty, *convention, handle_names, record_defs)?;
         }
     }
 
@@ -5839,9 +6197,16 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
     let mut call_args = Vec::new();
     for (index, (convention, ty)) in entry.params.iter().enumerate() {
         if direct_native {
-            let native_ty = native_type(ty, *convention)?;
+            let native_ty = native_type(ty, *convention, handle_names, record_defs)?;
             params.push(format!("p{index}: {native_ty}"));
             let expr = match ty {
+                Type::String if *convention == AccessConvention::Write => {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+                    ));
+                    format!("p{index}_ptr as {native_ty}")
+                }
                 Type::String => {
                     setup.push(format!(
                         "    let p{index}_ptr = args[{index}].ptr;\n\
@@ -5860,6 +6225,31 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                     ));
                     format!("p{index}_ptr as {native_ty}")
                 }
+                Type::Named(_)
+                    if *convention == AccessConvention::Write
+                        && record_type(ty, handle_names, record_defs) =>
+                {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+                    ));
+                    format!("p{index}_ptr as {native_ty}")
+                }
+                Type::Named(_)
+                    if record_type(ty, handle_names, record_defs) =>
+                {
+                    let record_ty = record_defs.rust_type(ty)?;
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+                    ));
+                    format!(
+                        "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
+                    )
+                }
+                Type::Named(_) => {
+                    format!("args[{index}].value as usize as *mut std::os::raw::c_void")
+                }
                 _ if *convention == AccessConvention::Write => {
                     setup.push(format!(
                         "    let p{index}_ptr = args[{index}].ptr;\n\
@@ -5867,18 +6257,10 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                     ));
                     format!("p{index}_ptr as {native_ty}")
                 }
-                Type::Float => format!("f64::from_bits(args[{index}].value)"),
-                Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
-                Type::Bool => format!("args[{index}].value != 0"),
-                Type::Char => format!("args[{index}].value as u32"),
-                Type::Named(_) => {
-                    format!("args[{index}].value as usize as *mut std::os::raw::c_void")
-                }
-                _ => format!("args[{index}].value as {native_ty}"),
             };
             call_args.push(expr);
         } else {
-            let expected = foreign_rust_param_type(*convention, ty, _user_types);
+            let expected = foreign_rust_param_type(*convention, ty, handle_names);
             let expr = match ty {
                 Type::String => {
                     setup.push(format!(
@@ -5889,6 +6271,18 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                          let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());"
                     ));
                     format!("p{index}")
+                }
+                Type::Named(_)
+                    if record_type(ty, handle_names, record_defs) =>
+                {
+                    let record_ty = record_defs.rust_type(ty)?;
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+                    ));
+                    format!(
+                        "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
+                    )
                 }
                 Type::Named(_) if entry.c_abi => {
                     // CBind handles are native pointers in the C wrapper
@@ -5913,7 +6307,10 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                 }
                 _ => format!("args[{index}].value as {expected}"),
             };
-            params.push(format!("p{index}: {}", native_type(ty, *convention)?));
+            params.push(format!(
+                "p{index}: {}",
+                native_type(ty, *convention, handle_names, record_defs)?
+            ));
             call_args.push(expr);
         }
     }
@@ -5926,13 +6323,18 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
         format!("{}({})", entry.wrapper_name, call_args.join(", "))
     };
     let native_decl = if direct_native {
+        let native_symbol = entry
+            .inline
+            .as_ref()
+            .map(|_| format!("jet_inline_{}", entry.wrapper_name))
+            .unwrap_or_else(|| entry.rust_path.clone());
         let raw_ret = match entry.return_type.as_ref() {
-            Some(ty) => format!(" -> {}", return_native_type(ty)?),
+            Some(ty) => format!(" -> {}", return_native_type(ty, handle_names, record_defs)?),
             None => String::new(),
         };
         format!(
             "unsafe extern \"C\" {{\n    #[link_name = {:?}]\n    fn {native_ident}({}){raw_ret};\n}}\n\n",
-            entry.rust_path,
+            native_symbol,
             params.join(", "),
         )
     } else {
@@ -6005,6 +6407,20 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
         }
         Some(Type::Char) => {
             body.push_str(&format!("    out.value = ({call}) as u32 as u64;\n"));
+        }
+        Some(ty @ Type::Named(_))
+            if record_type(ty, handle_names, record_defs) =>
+        {
+            let record_ty = record_defs.rust_type(ty)?;
+            body.push_str(&format!(
+                "    let result = {call};\n\
+                 let bytes = unsafe {{ std::slice::from_raw_parts(\n\
+                     (&result as *const {record_ty}).cast::<u8>(),\n\
+                     std::mem::size_of::<{record_ty}>(),\n\
+                 ) }}.to_vec().into_boxed_slice();\n\
+                 out.len = bytes.len();\n\
+                 out.ptr = Box::into_raw(bytes) as *mut u8;\n"
+            ));
         }
         Some(Type::Named(_)) => {
             body.push_str(&format!(
@@ -6483,7 +6899,12 @@ dependencies = [
             c_module: false,
             close: None,
         };
-        let source = emit_cabi_trampoline(&value_entry, &HashSet::new()).unwrap();
+        let source = emit_cabi_trampoline(
+            &value_entry,
+            &HashSet::new(),
+            &CRecordDefinitions::default(),
+        )
+        .unwrap();
         assert!(source.contains("String::from_utf8(p0_bytes)"), "{source}");
         assert!(source.contains("p0_ptr.is_null()"), "{source}");
         assert!(source.contains("ffi_catch_unwind"), "{source}");
@@ -6495,7 +6916,14 @@ dependencies = [
             params: vec![(AccessConvention::Write, Type::String)],
             ..value_entry
         };
-        assert!(emit_cabi_trampoline(&capability_entry, &HashSet::new()).is_none());
+        assert!(
+            emit_cabi_trampoline(
+                &capability_entry,
+                &HashSet::new(),
+                &CRecordDefinitions::default(),
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -6719,6 +7147,7 @@ dependencies = [
                 &[],
                 false,
                 &[],
+                "",
                 &FfiLinkClosure::default(),
                 &toolchain.target,
                 Some(toolchain),
@@ -6751,7 +7180,7 @@ dependencies = [
             c_module: true,
             close: None,
         };
-        let source = emit_c_wrapper_fn(&entry, &HashSet::new());
+        let source = emit_c_wrapper_fn(&entry, &HashSet::new(), &CRecordDefinitions::default());
         assert!(source.contains("#[link_name = \"host-add$raw\"]"));
         assert!(source.contains("fn jet_ffi_guest___jet_mod__host_add_native(p0: i64) -> i64;"));
         assert!(source.contains("unsafe { jet_ffi_guest___jet_mod__host_add_native(p0) }"));
@@ -6777,12 +7206,165 @@ dependencies = [
             c_module: true,
             close: None,
         };
-        let source = emit_cabi_trampoline(&entry, &HashSet::new()).unwrap();
+        let handles = std::iter::once("GzFile".to_string()).collect::<HashSet<_>>();
+        let source = emit_cabi_trampoline(&entry, &handles, &CRecordDefinitions::default()).unwrap();
         assert!(source.contains(
             "args[0].value as usize as *mut std::os::raw::c_void"
         ));
         assert!(source.contains("jet_ffi_gzclose(args[0].value"));
         assert!(!source.contains("as GzFile"));
+    }
+    #[test]
+    fn c_handle_cabi_preserves_writable_pointee_abi() {
+        let entry = ExternEntry {
+            jet_name: "hb_font_set_scale".into(),
+            rust_path: "hb_font_set_scale".into(),
+            wrapper_name: "jet_ffi_hb_font_set_scale".into(),
+            params: vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("HbFont".into()),
+                ),
+                (AccessConvention::Read, Type::Int),
+                (AccessConvention::Read, Type::Int),
+            ],
+            param_names: vec!["font".into(), "x_scale".into(), "y_scale".into()],
+            return_type: None,
+            crate_spec: "std".into(),
+            line_hint: "generated harfbuzz scale".into(),
+            inline: None,
+            c_abi: true,
+            generated: true,
+            c_module: true,
+            close: None,
+        };
+        let handles = std::iter::once("HbFont".to_string()).collect::<HashSet<_>>();
+        let source = emit_cabi_trampoline(&entry, &handles, &CRecordDefinitions::default()).unwrap();
+        assert!(source.contains(
+            "args[0].value as usize as *mut std::os::raw::c_void"
+        ));
+        assert!(source.contains("jet_ffi_hb_font_set_scale(args[0].value"));
+    }
+    #[test]
+    fn cabi_trampoline_emits_mutable_scalar_and_string_pointer_abi() {
+        let scalar = ExternEntry {
+            jet_name: "out_scalar".into(),
+            rust_path: "out_scalar".into(),
+            wrapper_name: "jet_ffi_out_scalar".into(),
+            params: vec![(AccessConvention::Write, Type::Int)],
+            param_names: vec!["value".into()],
+            return_type: None,
+            crate_spec: "std".into(),
+            line_hint: "portable scalar write fixture".into(),
+            inline: None,
+            c_abi: true,
+            generated: true,
+            c_module: true,
+            close: None,
+        };
+        let scalar_source =
+            emit_cabi_trampoline(&scalar, &HashSet::new(), &CRecordDefinitions::default()).unwrap();
+        assert!(scalar_source.contains(
+            "fn jet_ffi_out_scalar_native(p0: *mut i64);"
+        ));
+        assert!(scalar_source.contains("p0_ptr as *mut i64"));
+        for (index, (ty, native)) in [
+            (
+                Type::IntN {
+                    signed: false,
+                    bits: 16,
+                },
+                "u16",
+            ),
+            (Type::Float, "f64"),
+            (Type::Float32, "f32"),
+            (Type::Bool, "bool"),
+            (Type::Char, "u32"),
+            (
+                Type::InlineRange {
+                    base: Box::new(Type::Int),
+                    lo: 0,
+                    hi: 10,
+                },
+                "i64",
+            ),
+            (
+                Type::Tagged {
+                    marker: crate::AST::TagMarker::User("ffi".into()),
+                    inner: Box::new(Type::Float32),
+                },
+                "f32",
+            ),
+            (
+                Type::Quantity {
+                    base: Box::new(Type::Float),
+                    dimension: crate::AST::Dimension::scalar(),
+                },
+                "f64",
+            ),
+        ] {
+            let mut entry = scalar.clone();
+            entry.jet_name = format!("out_scalar_{index}");
+            entry.rust_path = entry.jet_name.clone();
+            entry.wrapper_name = format!("jet_ffi_{}", entry.jet_name);
+            entry.params = vec![(AccessConvention::Write, ty)];
+            let source =
+                emit_cabi_trampoline(&entry, &HashSet::new(), &CRecordDefinitions::default())
+                    .unwrap();
+            assert!(
+                source.contains(&format!(
+                    "fn {}_native(p0: *mut {native});",
+                    entry.wrapper_name
+                )),
+                "missing mutable native ABI for {}: {source}",
+                entry.jet_name
+            );
+        }
+        let generated = emit_wrapper_lib(
+            &[scalar.clone()],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert!(generated.contains("jet_ffi_out_scalar_cabi"));
+        let mut nominal = scalar.clone();
+        nominal.params = vec![(AccessConvention::Read, Type::Named("Nominal".into()))];
+        assert!(
+            emit_cabi_trampoline(&nominal, &HashSet::new(), &CRecordDefinitions::default())
+                .is_none(),
+            "unclassified nominals must not be guessed as opaque native pointers"
+        );
+
+        let string = ExternEntry {
+            jet_name: "out_string".into(),
+            rust_path: "out_string".into(),
+            wrapper_name: "jet_ffi_out_string".into(),
+            params: vec![(AccessConvention::Write, Type::String)],
+            param_names: vec!["value".into()],
+            return_type: None,
+            crate_spec: "std".into(),
+            line_hint: "portable string write fixture".into(),
+            inline: None,
+            c_abi: true,
+            generated: true,
+            c_module: true,
+            close: None,
+        };
+        let string_source =
+            emit_cabi_trampoline(&string, &HashSet::new(), &CRecordDefinitions::default())
+                .unwrap();
+        assert!(string_source.contains(
+            "fn jet_ffi_out_string_native(p0: *mut std::os::raw::c_char);"
+        ));
+        assert!(string_source.contains("p0_ptr as *mut std::os::raw::c_char"));
     }
 }
 

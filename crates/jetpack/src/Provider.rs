@@ -985,11 +985,20 @@ fn required_nix_fact(
         .ok_or_else(|| ProviderError::BadOutput(format!("Nix realization is missing `{key}`")))
 }
 
-fn nix_closure_record(
+pub(crate) fn nix_closure_record(
     entry: &super::Store::StoreEntry,
     producer: &super::Store::ProducerRecord,
     project_cas_bundle: String,
 ) -> Result<super::Lock::NixClosureRecord, ProviderError> {
+    let authority_fact = match producer.facts.get("nix.index.tier").map(String::as_str) {
+        Some("official-signed") => "nix.index.manifest.sha256",
+        Some("local-unofficial") => "nix.index.target.sha256",
+        _ => {
+            return Err(ProviderError::BadOutput(
+                "Nix realization has no recognized index authority tier".into(),
+            ));
+        }
+    };
     let size = required_nix_fact(producer, "nix.nar-size")?
         .parse::<u64>()
         .map_err(|_| ProviderError::BadOutput("Nix realization has an invalid NAR size".into()))?;
@@ -997,7 +1006,7 @@ fn nix_closure_record(
         channel: required_nix_fact(producer, "nix.index.channel")?,
         revision: required_nix_fact(producer, "nix.index.revision")?,
         system: required_nix_fact(producer, "nix.index.system")?,
-        signed_index_manifest: required_nix_fact(producer, "nix.index.manifest.sha256")?,
+        index_authority: required_nix_fact(producer, authority_fact)?,
         derivation: required_nix_fact(producer, "nix.derivation.sha256")?,
         output: entry.envelope.output_hash.clone(),
         nar_hash: required_nix_fact(producer, "nix.nar-hash")?,
@@ -1146,6 +1155,29 @@ pub(crate) fn record_nix_lock_after_store(
     // replay reconstructs from the portable closure.
     let mut lock_entry = entry.clone();
     lock_entry.cache_identity.policy_fingerprint = nix_closure.cache_key.clone();
+    // Retain the portable identity in the original admission evidence so warm
+    // replay can compare the entire lock without reading its potentially large
+    // archive or trusting a replacement catalog.
+    let mut locked_producer = producer;
+    locked_producer.facts.insert(
+        "nix.project-cas-bundle".into(),
+        nix_closure.project_cas_bundle.clone(),
+    );
+    let mut plan_facts = locked_producer.plan.facts().clone();
+    plan_facts.insert(
+        "nix.project-cas-bundle".into(),
+        nix_closure.project_cas_bundle.clone(),
+    );
+    // This updated witness must be registered even if publication preserves an
+    // already identical lock. refresh_lock_digest fills and seals this field.
+    plan_facts.remove("nix.lock.digest");
+    locked_producer.plan = crate::ProviderPlanFacts::from_facts(plan_facts)
+        .map_err(ProviderError::BadOutput)?;
+    locked_producer.policy_facts = format!(
+        "policy={}\nplatform={}",
+        lock_entry.cache_identity.policy_fingerprint, lock_entry.cache_identity.platform,
+    );
+    lock_entry.producer_record = locked_producer.encode();
     super::RuntimePolicy::with_project_lock(
         project,
         "nix-lock-publication",
@@ -1177,11 +1209,12 @@ pub(crate) fn record_nix_lock_after_store(
                 },
             )
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-            Ok(())
+            let published_digest = project_lock_digest(Some(project))
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            super::Store::refresh_lock_digest(roots, &lock_entry, &published_digest)
         },
     )
-    .map_err(|error| ProviderError::BadOutput(error.to_string()))?;
-    Ok(lock_entry)
+    .map_err(|error| ProviderError::BadOutput(error.to_string()))
 }
 
 /// How a dependency was realized, for the `jet build` per-package report
@@ -1311,6 +1344,9 @@ pub struct Ctx<'a> {
     /// Roots used by the native cache admission seam. This is separate from
     /// `store_dir` because reproducibility probes use private Hangars.
     pub nix_roots: Option<&'a Roots>,
+    /// Invocation-only permission from `--local-nix-catalog`, never a stored
+    /// grant. Non-CLI callers must opt in explicitly; derived contexts inherit.
+    pub allow_local_nix_catalog: bool,
 }
 
 /// D-JPK-OFFLINE2=B: the stable recipe id for a Nix-provider realization. Hashed
@@ -2709,6 +2745,7 @@ mod tests {
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let key = locked_nix_index_key(&spec, &table, &ctx, "x86_64-linux").unwrap();
         assert_eq!(key.channel, "nixpkgs-unstable");
@@ -2920,6 +2957,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         for (raw, kind, expected_ref) in [
             (
@@ -2975,6 +3013,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let core_plan = plan_downloads(&[core_spec], &core_table, &online).unwrap();
         assert_eq!(core_plan.new, 1);
@@ -2992,6 +3031,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         assert!(matches!(
             realize(&registry_spec, &empty(), &offline),
@@ -3026,6 +3066,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = realize(&nix_spec, &empty(), &fixture_ctx).unwrap();
         assert_eq!(realized.source_state, SourceState::Substituted);
@@ -3070,6 +3111,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let old = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &old_table, &ctx);
         let new = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &new_table, &ctx);
@@ -3097,6 +3139,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
 
         assert_eq!(
@@ -3372,6 +3415,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         match realize(&spec, &empty(), &ctx) {
             Err(ProviderError::FixtureMissing(_)) => {}
@@ -3404,6 +3448,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         // Dispatch must select the core provider, and it must materialize the
         // tree into the store with a real bin dir — no nix involved.
@@ -3471,6 +3516,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
 
         let exe = realize(&classify_in("hello@mine", &table).unwrap(), &table, &ctx).unwrap();
@@ -3554,6 +3600,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
 
         let r = realize(&spec, &table, &ctx).unwrap();
@@ -3721,6 +3768,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -3771,6 +3819,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -3841,6 +3890,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         realize(&spec, &table, &ctx).unwrap();
 
@@ -3900,6 +3950,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         match realize(&spec, &table, &ctx) {
             Err(e) => assert_eq!(e.code(), Some("E1233"), "expected E1233, got {e:?}"),
@@ -3952,6 +4003,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = realize(&spec, &table, &ctx).unwrap();
         let output = Path::new(&realized.out);
@@ -4006,6 +4058,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         // The realized output carries a complete envelope.

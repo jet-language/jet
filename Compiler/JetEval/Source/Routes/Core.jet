@@ -1,0 +1,95 @@
+// Core dispatcher. Pure rows execute their checked pure descriptor; ambient/provider rows
+// execute only through the checked runtime host adapter.
+fn jet_eval_route_core_symbol(row: MirCoreCall, machine: &JetEvalMachine, span: Span) -> ?String {
+    if row.symbol == {
+        .Prelude(name) -> return Val(name)
+        else -> {}
+    }
+    jet_eval_route_not_supported(&machine, span, "Core route does not carry a Prelude symbol")
+    None
+}
+
+fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MirCallFallibility, result_ty: ?MirType, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
+    if row.module_name == "core.math" && row.member == "fraction" {
+        if data.len() != 2 {
+            jet_eval_compiler_fail(&machine, span, "core.math.fraction requires numerator and denominator")
+            return None
+        }
+        return jet_eval_route_precise_member_host("Fraction", "new", args, &machine, result_ty, span)
+    }
+    if row.module_name == "core.math" && row.member == "decimal" {
+        if data.len() != 1 -> return jet_eval_route_told_failure("invalid Decimal string", fallibility)
+        return jet_eval_route_precise_member_host("Decimal", "from_str", args, &machine, result_ty, span)
+    }
+    if symbol == "jet_std_math_pi" {
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(3.141592653589793, 64)))
+    }
+    if symbol == "jet_std_math_abs_i64" || symbol == "jet_std_math_abs_f64" || symbol == "jet_std_math_abs_f32" {
+        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math abs ABI")
+        if data[0] == {.Int(number) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(if number < 0 -> 0 - number else -> number)))}
+        if data[0] == {.Float(number, bits) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(if number < 0.0 -> 0.0 - number else -> number, bits)))}
+        return jet_eval_route_not_supported(&machine, span, "math abs carrier")
+    }
+    if symbol == "jet_std_math_is_nan" {
+        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isnan ABI")
+        number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number != number)))
+    }
+    if symbol == "jet_std_math_is_finite" {
+        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isfinite ABI")
+        number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
+        // Jet's evaluator has no host-float predicates. NaN is the only
+        // non-finite value constructible by the pure carrier today.
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number == number)))
+    }
+    if symbol == "jet_std_math_is_infinite" -> return jet_eval_route_not_supported(&machine, span, "math isinf without a finite-float predicate")
+    jet_eval_route_not_supported(&machine, span, "pure math route {row.member}")
+}
+
+fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], fallibility: MirCallFallibility, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+    row :: jet_eval_route_core_row(&machine, call, span) ?? return None
+    route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
+    symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
+    if row.module_name == "core.term" && row.member == "eprint" {
+        if symbol != "jet_std_io_eprint" || row.arity != 1 || row.max_arity != 1 || row.borrow_mask.len() != 1 || !row.borrow_mask[0] || route_row.family != MirPreludeFamily.StaticPrelude || route_row.module_name != "core.term" || route_row.member != "eprint" || mir_symbol_name(route_row.symbol) != "jet_std_io_eprint" || route_row.abi != MirPreludeAbi.Value || route_row.signature.arity != 1 || route_row.signature.max_arity != 1 || route_row.signature.borrow_mask.len() != 1 || !route_row.signature.borrow_mask[0] || route_row.fallibility != MirCallFallibility.Infallible {
+            jet_eval_compiler_fail(&machine, span, "MIR eprint route has non-canonical metadata")
+            return None
+        }
+        if !jet_eval_route_signature_core(row, args.len(), &machine, span) -> return None
+        if !machine.config.runtime_execution {
+            jet_eval_effect_fail(&machine, span, "core.term.eprint")
+            return None
+        }
+        data :: jet_eval_route_args(args, &machine, span) ?? return None
+        if data.len() != 1 {
+            jet_eval_compiler_fail(&machine, span, "MIR eprint route requires one String argument")
+            return None
+        }
+        return jet_eval_host_row(&machine, route_row, args, result_ty, span)
+    }
+    if route_row.abi == MirPreludeAbi.Control || route_row.abi == MirPreludeAbi.Effect -> return jet_eval_route_not_supported(&machine, span, "Core route references a non-value Prelude route")
+    if !jet_eval_route_signature_core(row, args.len(), &machine, span) -> return None
+    if row.interpreter_route == CoreCallInterpreterRoute.Ambient {
+        if route_row.family != MirPreludeFamily.StaticPrelude || route_row.module_name != row.module_name || route_row.member != row.member || mir_symbol_name(route_row.symbol) != symbol || route_row.signature.arity != row.arity || route_row.signature.max_arity != row.max_arity || route_row.signature.borrow_mask != row.borrow_mask || route_row.fallibility != fallibility {
+            jet_eval_compiler_fail(&machine, span, "MIR ambient Core route disagrees with its checked Prelude row")
+            return None
+        }
+        if !machine.config.runtime_execution {
+            jet_eval_effect_fail(&machine, span, "{row.module_name}.{row.member}")
+            return None
+        }
+        if !jet_eval_route_signature_prelude(route_row, args.len(), &machine, span) -> return None
+        move_permissions := [Bool]{}
+        loop borrowed in row.borrow_mask -> move_permissions.push(!borrowed)
+
+        output :: jet_eval_host_row_with_moves(&machine, route_row, args, result_ty, move_permissions, span) ?? return None
+        return Val(jet_eval_route_success(output, fallibility))
+    }
+    if row.pure_route == CoreCallPureRoute.NoPureRoute -> return jet_eval_route_not_supported(&machine, span, "a non-pure Core route")
+    if row.interpreter_route != CoreCallInterpreterRoute.Pure(row.pure_route) -> return jet_eval_route_not_supported(&machine, span, "a Core route without the canonical pure interpreter descriptor")
+    data :: jet_eval_route_args(args, &machine, span) ?? return None
+    if row.pure_route != CoreCallPureRoute.Math -> return jet_eval_route_not_supported(&machine, span, "pure Core route family is not supported")
+    output :: jet_eval_route_core_math(row, data, args, fallibility, result_ty, &machine, span) ?? return None
+    return Val(jet_eval_route_success(output, fallibility))
+}

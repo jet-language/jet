@@ -1,169 +1,134 @@
 # Examples
 
-`canon.jet` is the compiling syntax showcase. `features/` groups every feature
-example by topic (D-REPO-EXAMPLES1); `features/expected/` mirrors the tree with
-each example's golden output. `suites/` contains complete user-story programs;
-its [README](suites/README.md) lists the stories and their goldens. Run any
-example directly:
+`examples/` is the runnable source library for Jet. The feature tree is the
+primary teaching surface; each example is a small program that can be run from
+the repository root. The source and its expected output, rather than this
+index, define the behavior.
 
-```
-jet run examples/features/basics/hello.jet
-```
+## Run an example
 
-Walk every executable under `features/` with `jet run` and report passed,
-failed, and output mismatches:
+Use the checked-out executable (or the equivalent `jet` on your `PATH`):
 
-```
-scripts/agent/run-feature-examples.mjs
+```sh
+target/debug/jet run examples/features/basics/hello.jet
 ```
 
-A path substring selects a subset: `scripts/agent/run-feature-examples.mjs basics`.
+The feature runner exercises the same layout in one pass and records the
+command, result, and output for each project:
 
-The [executable lease recovery example](jetpack/executable-lease-recovery.md)
-shows the read-only audit and explicit Hangar recovery boundary for a stale
-process-tree lease.
+```sh
+node scripts/agent/run-feature-examples.mjs
+```
 
-For the complete new-project workflow, use the [first-hour guide](../docs/spec/guides/first-hour.md).
-The explicit path above is the standalone-example form.
+For the contributor workflow around the executable and its environment, see
+[`AGENTS.md`](../AGENTS.md) and [`scripts/agent/jet-env`](../scripts/agent/jet-env).
 
-## Short path first (D-EXAMPLES-SHORTPATH1=A)
+## Find an example
 
-Flagship examples teach the **magic default** first. Manual mechanics stay in a
-clearly labelled expert sibling (`*_expert.jet`) beside the flagship — never as
-the only path.
+Start with the smallest source in [`features/basics/`](features/basics/), then
+move to a sibling with a longer name or an `expert` suffix when it exists.
+[`features/types/`](features/types/), [`features/errors/`](features/errors/),
+[`features/effects/`](features/effects/), and
+[`features/tooling/`](features/tooling/) provide useful next stops. The
+[`features/`](features/) tree is the executable registry; its directory
+structure is deliberately more complete than this index.
+
+The `expected/` tree contains output fixtures. Some top-level files and
+specialized directories are regression or integration fixtures rather than a
+learning sequence; use their neighboring source and expected-output files as
+the contract.
+
+## Auxiliary golden stream suffix
+
+The feature runner discovers `.jet` files and project directories containing a
+`run.jet`. For a source file named `topic/example.jet`, the native stdout
+fixture is `expected/topic/example.out`. For a project, the directory name is
+used as the stem, so `topic/example/run.jet` maps to
+`expected/topic/example.out`. The native checker compares stdout byte for byte;
+an example with no native golden is skipped rather than given an invented
+result.
+
+The native checker uses `.out`, `.err.out`, and `.stderr.out`. Dedicated web,
+harness, test, fuzz, and input-specific checks consume the other suffixes
+listed below:
+
+| Fixture | Meaning |
+| --- | --- |
+| `<stem>.out` | Expected native stdout. |
+| `<stem>.err.out` | Expected non-zero execution, including a panic or uncaught error. |
+| `<stem>.stderr.out` | Expected stderr while execution exits successfully. |
+| `<stem>.web.out` | Web-target output used by the corresponding web fixture. |
+| `<stem>.harness.out` | Harness-managed output. |
+| `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
+| `<stem>.test.out` | Test-command output. |
+| `<stem>.fuzz.out` | Fuzz-command output. |
+
+The relevant golden checker is the executable definition of each mapping. Keep
+source changes and their fixtures together; do not use this README as a second
+list of expected output.
+
+## Learning paths
+
+`features/basics/` is the shortest path through expressions, functions, and
+output. Continue through the language/data row before choosing a runtime or
+application topic. [`examples/learn/`](learn/README.md) is a separate,
+offline curriculum: it teaches prediction, evidence, explanation, a controlled
+change, and transfer rather than adding another feature inventory.
+
+## Short path first
+
+Flagship examples teach the magic default first. When manual mechanics are
+worth keeping, place them in a clearly labelled `*_expert.jet` sibling rather
+than making the long form the only path (D-EXAMPLES-SHORTPATH1=A).
 
 | Teach first | Keep beside it as expert |
-|---|---|
-| `#CLI` typed entry args | raw `process.argv()` walks |
-| `para_map` / `task.group` | hand-rolled channels + `task` + join |
-| streaming `files.open(…).lines()` | materializing `String.lines()` for file-scale work |
+| --- | --- |
+| `#CLI` typed entry arguments | Raw `process.argv()` walks |
+| `para_map` / `task.group` | Hand-rolled channels, tasks, and joins |
+| `files.open(...).lines()` streaming | Materializing all file text before processing |
 
-New examples should land the same way: beginner default in the named flagship,
-long path only as an expert variant when the manual form is still worth teaching.
+The maintained [`first_hour.jet`](features/basics/first_hour.jet) example and
+its [`first_hour_expert.jet`](features/basics/first_hour_expert.jet) sibling
+show this rule for typed CLI arguments. The
+[`onboarding/run.jet`](features/basics/onboarding/run.jet) project is the next
+step after `jet new`; the complete `new` → `run` → `check` → `test` → `fix` →
+`explain` workflow is in the [first-hour guide](../docs/spec/guides/first-hour.md).
 
-Start with the [onboarding example](features/basics/onboarding/run.jet) after
-`jet new`: it is a normal `run.jet` project entry and teaches the same
-`new` -> `run` -> `check` -> `test` -> `fix` -> `explain` workflow as the first-hour
-guide.
+New examples should use the beginner default first and keep an expert sibling
+only when the manual form still teaches something important.
 
-## Genre marker (one rule)
+Call a feature a teaching example: it explains a mechanism, not merely that a
+work item closed. If a file exists only as a bare, unexplained card-closure
+record, prefix that comment with `ledger` so readers can distinguish evidence
+from teaching material. A card cited alongside a decision or mechanism
+explanation does not need the marker.
 
-Every example under `features/` is a teaching example first — it explains a
-mechanism, not just a fact that a card closed. An example whose header is
-nothing but a bare `#NNNN: <what shipped>` note, with no ratified decision ID
-and no explanation of the mechanism, is a closure ledger entry wearing a
-teaching example's clothes. Mark it: prefix the card number with the word
-`ledger` (`// ledger #1477: remaining List surface after #1410/#1479.`). A
-reader then knows at a glance this file exists to prove a ledger item closed,
-not to teach — citing a card number *alongside* a decision ID or real
-explanation (the norm across this corpus) needs no marker; only the bare,
-unexplained case does.
+## Current-law teaching manifest
 
-## Current-law teaching manifest (READ-F08 / READ-F12)
+This finite manifest ties selected teaching sources to the rule they show, the
+checked-in UI or golden snapshot, and a command that exercises the same source.
+The [syntax decisions](../docs/spec/syntax-decisions.md) page supplies the
+normative language contract.
 
-This finite manifest covers only the selected examples whose local contracts
-are easy to lose in a short name or snippet. The current spellings come from
-the [Syntax decisions](../docs/spec/syntax-decisions.md); retained research
-captures, including the corrected `loop_forms`, `bounded_workers`, and
-`all_failfast` source identities, remain historical evidence rather than
-replacement source files.
-The local-contract criteria come from [READ-F12](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f12);
-the example boundary and source-integrity rules come from [READ-F08](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f08).
+| Source | Rule it demonstrates | UI/snapshot check | Command |
+| --- | --- | --- | --- |
+| [`features/basics/loop_forms.jet`](features/basics/loop_forms.jet) | One `loop` keyword covers infinite, conditional, source, mixed list/map iterables, and inclusive or exclusive ranges; `next` advances the source. | [`features/expected/basics/loop_forms.out`](features/expected/basics/loop_forms.out) | `target/debug/jet run examples/features/basics/loop_forms.jet` |
+| [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | An immutable loop binding cannot mutate the collection it reads; E0507 keeps the traversal domain and repair intent explicit. | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `target/debug/jet check tests/ui/list_loop_mutate.jet` |
+| [`features/errors/errors.jet`](features/errors/errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are distinct routes. | [`features/expected/errors/errors.out`](features/expected/errors/errors.out) | `target/debug/jet run examples/features/errors/errors.jet` |
+| [`features/errors/typed_error_families.jet`](features/errors/typed_error_families.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | [`features/expected/errors/typed_error_families.out`](features/expected/errors/typed_error_families.out) | `target/debug/jet run examples/features/errors/typed_error_families.jet` |
+| [`features/io/scope_guard.jet`](features/io/scope_guard.jet) | A statement registers a scope guard that runs once at scope exit in reverse registration order; it remains distinct from resource-only `defer close`. | [`features/expected/io/scope_guard.out`](features/expected/io/scope_guard.out) | `target/debug/jet run examples/features/io/scope_guard.jet` |
 
-| Source | Local contract made visible | Normative decisions |
-|---|---|---|
-| `features/basics/loop_forms.jet` | One `loop` keyword; source and range evaluation is eager, `next` advances the current source, and iteration reads rather than mutates its source. | S19, S22, S23; D-LOOP-IN1, D-RANGE-EXCL1, D-LOOP-CONTROLWORD1 |
-| `../tests/ui/list_loop_mutate.jet` | A mutable binding does not authorize changing a collection while that collection is being read. E0507 leaves the traversal domain and repair intent explicit. | D-BIND1, D-MEM1; E0507 |
-| `features/errors/errors.jet` | `Ok`/`Err` exits, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are four different routes. | S34, S35, S36, S7; D-FAILURE-FOUNDATION1, D-FAIL-EXIT1 |
-| `features/errors/typed_error_families.jet` | One declared `impl Source -> Target` rail changes the error carrier while preserving the success payload; it is not an implicit logging or alias mechanism. | D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2 |
-| `features/io/scope_guard.jet` | A registered guard callback is deferred, runs once at scope exit in reverse registration order, and remains distinct from resource-only `defer close(^resource)`. | D-DEFER1, D-SHAPE-RESOURCE2, D-FAIL-EXIT1 |
+The adjacent [`list_predicate_ops.jet`](features/collections/list_predicate_ops.jet)
+and [`indexed_mutation.jet`](features/collections/indexed_mutation.jet) examples
+contrast eager reads with in-place writes. Their source and neighboring golden
+files are the evidence; this manifest does not duplicate the collection API.
 
-The adjacent collection examples (`collections/list_predicate_ops.jet` and
-`collections/indexed_mutation.jet`) distinguish an eager read from an
-in-place write and show the observed storage update. Collection API
-completeness belongs to [IteratorAstra's iterator work](../docs/research/mine-for-jet-2026-09-12.md#topic-iterators);
-this manifest does not create a second API inventory. Identity and refactoring
-claims belong to [BigCodeAstra's checked identity work](../docs/research/mine-for-jet-2026-09-12.md#topic-bigcode).
-Runtime scope cleanup is covered separately by [READ-F05](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f05),
-and formatter preservation by [READ-F07](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f07);
-this patch keeps their receipts distinct from teaching-source conformance.
-Current-law example conformance is the boundary of
-[READ-F08](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f08).
+## Related executable contracts
 
-### Source identity and output shape
-
-`features/basics/values.jet` uses the current interpolation form. An output
-line is not a source-search key: source wrapping does not add a newline, while
-the explicit `\n` escape does. E0109's existing interpolation diagnostic and
-its source-specific operands teach the one text-composition mechanism; this
-does not authorize a logging or localization framework. The
-[message-identity investigation](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f11)
-keeps source identity, event keys, trace context, and message text separate.
-
-### Full-state C contrast
-
-The visible C control `while (*dest++ = *src++);` stores the assigned byte,
-uses the copied NUL byte as its termination condition, and post-increments
-both pointers. The reviewed expanded form can copy the same bytes, including
-the NUL terminator, under ordinary valid nonvolatile source/destination
-storage, but it leaves the final pointers at different positions. A truthful
-comparison therefore exposes postconditions, capacity/bounds, alias
-obligations, and the nonvolatile assumption; matching printed bytes alone is
-not equivalence. This is a teaching control, not an executed enclosing
-program or proof of the earlier unsafe rewrite. See
-[READ-C015](../docs/research/mine-for-jet-2026-09-12.md#claim-c-copy-refactor-termination-and-capacity-read-c015)
-and [READ-C028](../docs/research/mine-for-jet-2026-09-12.md#claim-c-copy-refactor-observable-state-read-c028).
-
-## Auxiliary golden stream suffixes (one rule per meaning)
-
-`features/expected/<stem>.out` always holds the plain `jet run` stdout. Every
-other suffix under `features/expected/` names a distinct proof, never an ad
-hoc pick:
-
-- `<stem>.err.out` — the example is expected to fail (panic, exit 70, or an
-  uncaught `Err`, exit 1). Its presence tells `tests/golden.rs` to require a
-  non-zero exit.
-- `<stem>.stderr.out` — the example is expected to **succeed** (exit 0) but
-  still writes incidental stderr (warnings, progress). Optional; add it only
-  when a passing example's stderr must stay pinned.
-- `<stem>.web.out` — stdout captured running the example under the web/wasm
-  target instead of native. Read by `tests/web_build.rs` and
-  `tests/web_examples_doc.rs`.
-- `<stem>.harness.out` — output from the DOM click/interaction test harness
-  for a web example, not plain stdout. Read by `tests/web_build.rs` and
-  `tests/web_examples_doc.rs`.
-- `<stem>.seed.out` / `<stem>.greet.out` — an example with more than one
-  named `#Job` job (D-JPK-TASKRUN1) uses the job name as the suffix,
-  keyed per job rather than per stream. Read by `tests/golden.rs` and
-  `tests/dev.rs` for `devloop/job_runner`.
-- `<stem>.test.out` — the pinned report from running `jet test` on the
-  example itself, not the example's own stdout. Read by `tests/jet_test.rs`.
-- `<stem>.fuzz.out` — the pinned report from running `jet fuzz` on the
-  example. Read by `tests/jet_test.rs`.
-
-Never add a suffix ad hoc: reuse one of the meanings above, or extend this
-list in the same commit that adds a new one.
-
-Suggested learning order:
-
-| Topic | What lives there |
-|---|---|
-| `basics/` | hello, functions, values, branches, loops, closures, pattern matching |
-| `types/` | structs, enums, traits, generics, distinct types, typestate, tuples |
-| `errors/` | error families, `?` propagation, panic, rollback, discard rules |
-| `collections/` | lists, maps, sets, deques, iter adapters, parallel iteration |
-| `text/` | strings, regex, unicode, hex/base64, streaming file parse |
-| `math/` | numeric floor — libm, checked/saturating/wrapping integer families |
-| `modules/` | imports, module files/dirs, packages, visibility, re-export |
-| `comptime/` | comptime blocks, splice, reflect, embed, doctests |
-| `effects/` | access sigils, taint, pure, effect prohibition, grants |
-| `memory/` | ownership, arenas, stored refs, rawptr, uninit, zero-copy, GC |
-| `serde/` | json/csv/toml/yaml, derives, schema migrations, fidelity |
-| `io/` | cli, files, stdin, paths, logging, terminal |
-| `net/` | http client/server, routes |
-| `concurrency/` | tasks, channels, select, race/cancel, deadlines, scheduler |
-| `crypto/` | envelope, signing, key migration |
-| `ui/` | view tree, styles, component kit, motion, a11y, reactive TUI |
-| `web/` | hybrid JS DOM + Wasm compute — see `docs/spec/reference/web-backend-wasm.md` for the full example index, build commands, and unsupported-breadth list |
-| `lowlevel/` | ffi, c layout, simd, freestanding, MMIO board writes, cross-compile |
-| `tooling/` | tests, measurement, debug, property tests, build profiles |
+- [`suites/`](suites/README.md) describes the suite fixtures and their golden
+  checker.
+- [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
+  documents the Jetpack lease-recovery command and its safety boundary.
+- [`tests/golden.rs`](../tests/golden.rs) and
+  [`tests/suite_goldens.rs`](../tests/suite_goldens.rs) are the source of truth
+  for the two golden layouts.

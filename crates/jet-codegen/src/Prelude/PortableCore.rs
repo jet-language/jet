@@ -9,8 +9,8 @@ use core::fmt;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicI32, Ordering};
 use crate::RuntimeDiagnosticCore::{
-    JetRuntimeDiagnosticRow, JetRuntimeStopContext, jet_runtime_stop_status,
-    jet_write_runtime_stop,
+    JetRuntimeDiagnosticRow, JetRuntimeStopContext, jet_require_eq_message,
+    jet_runtime_stop_status, jet_write_runtime_stop,
 };
 
 pub type JetOutcome<T, E> = Result<T, E>;
@@ -186,13 +186,14 @@ pub fn jet_require_eq<L: fmt::Display, R: fmt::Display, M: fmt::Display>(
     locals: Option<M>,
 ) {
     if !condition {
+        let message = jet_require_eq_message(&left_debug, &right_debug);
         jet_stop_rich(
             "E3001",
             JetRuntimeStopContext {
                 file, line, function: fn_name, source_line, column: col, caret_len,
                 expected_type: "",
             },
-            &format_args!("expected: {right_debug}, got: {left_debug}"),
+            &message,
             locals,
         );
     }

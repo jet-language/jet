@@ -6,9 +6,9 @@ use core as core
 // generated source are Jet: they never need a real browser. Headless CI
 // uses `connect` which may return `BrowserError.Headless`.
 
-c_max_source_bytes :: 1048576
+C_MAX_SOURCE_BYTES :: 1048576
 
-c_max_source_name :: 256
+C_MAX_SOURCE_NAME :: 256
 
 #Error
 pub enum BrowserError {
@@ -169,7 +169,7 @@ pub fn fixture_source(name: String, body: String) -> String !BrowserError {
 }
 
 pub fn generate_source(name: String, body: String, base_url: String) -> String !BrowserError {
-    if name.len() == 0 || name.len() > c_max_source_name || body.len() > c_max_source_bytes || base_url.len() > c_max_source_bytes {
+    if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
         return Err(BrowserError.Protocol)
     }
     url := base_url
@@ -177,7 +177,7 @@ pub fn generate_source(name: String, body: String, base_url: String) -> String !
     test_name := source_name(name)
     escaped :: esc_source(url)
     out := "// generated browser test\nfn {test_name}() {{\n    _ :: \"{escaped}\"\n    {body}\n}}\n"
-    if out.len() > c_max_source_bytes -> return Err(BrowserError.Protocol)
+    if out.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
     Ok(out)
 }
 
@@ -234,7 +234,7 @@ pub fn write_report(report: BrowserReport, path: String) !IOError {
 }
 
 pub fn server_start(root: String) -[Net]> BrowserServer !BrowserError {
-    if root.len() > c_max_source_bytes -> return Err(BrowserError.Protocol)
+    if root.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
     cfg := BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: root}
     native :: core.web.browser.server_start(cfg)
     Ok(BrowserServer{url: native.url(), running: true, logs: native.logs(), native: Val(native)})

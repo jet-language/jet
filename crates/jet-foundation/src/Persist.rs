@@ -389,7 +389,7 @@ fn payload_matches_shape(expected: &str, payload: &str) -> bool {
 /// boundary.  Reject engine-only carriers before they can be retained.
 fn runtime_value_supported(value: &MirRuntimeValue) -> bool {
     match value {
-        MirRuntimeValue::Moved | MirRuntimeValue::Closure(_) => false,
+        MirRuntimeValue::Moved | MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) | MirRuntimeValue::Closure(_) => false,
         MirRuntimeValue::Int(_)
         | MirRuntimeValue::BigInt(_)
         | MirRuntimeValue::Float { .. }

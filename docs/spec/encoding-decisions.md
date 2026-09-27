@@ -1,298 +1,820 @@
-# Encoding decision law
+# Encoding decisions
 
-This file records the durable law ratified for card #296. Later, narrower
-decisions override earlier umbrella wording: D-ENCSTREAM-SURFACE1,
-D-ENCXML1, D-JSONCANON1, D-ENC-CBOR-SURFACE1, and D-ENCBASE-STRICT1 control
-their respective public surfaces.
+Use this record when implementing, reviewing, or documenting Jet's encoding
+contracts. It defines the shared `DataTree` and bounded reader/writer model,
+then the selected wire formats and decoder policies. Executable names and
+carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet)
+and sourced from [`Core/encoding`](../../Core/encoding/encoding.jet); the
+shared Prelude ABI is in
+[`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
+and stream behavior is in
+[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs).
+Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
+lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
+[`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
+encoding examples under [`examples/features/serde`](../../examples/features/serde/).
 
-Vocabulary: [Jet vocabulary](vocabulary.md).
+The rules below describe durable contracts and their reasons. Decision IDs are
+citations; a narrower decision controls the public surface where it says so.
 
-## D-ENCBIN1=A — Canonical binary interchange format for core.encoding
+## Shared value and error model
 
-A: standardization plus a specified deterministic form (hashing/signing/content-addressing all want stable bytes) outweighs MessagePack’s ecosystem edge; one format keeps I8.
+Use one `DataTree` for untyped values. Its closed variants are `Null`, `Bool`,
+`Int`, `Float`, `Text`, `Array`, and `Object`; objects preserve insertion
+order, and integers and floats remain distinct. A codec must reject malformed
+input instead of fabricating a value. Base64, base32, and hex are scalar byte
+helpers, not `DataTree` adapters. This keeps one tree walker and one set of
+format adapters while preserving the distinction between text serialization
+and byte alphabets.
 
-### Selected option: CBOR (RFC 8949)
+Use one adapter identity per format for whole-value operations and bounded
+reader/writer operations. The streaming formats are JSON, JSONL, CSV, XML,
+and CBOR. Reader/writer access is a mode of the same codec, not a second
+library; scalar base encoders do not become readers or `DataTree` adapters.
+This gives beginners a whole-value path and experts a bounded path without
+duplicating parsers, trees, or error rules. (D-ENCSTREAM1=A)
 
-IETF standard with a deterministic-encoding profile (stable bytes for hashing/signing — pairs with crypto.seal and content-addressed stores), native binary strings, and a clean extension model. Its binary analogues are `parse`, `decode<T>`, `to_bytes`, and `to_bytes_canonical`; CBOR has no `to_string`.
+Keep shared carriers in `core.encoding`: `EncodingLimits`, `EncodingError`,
+`EncodingCause`, `EncodingFormat`, `EncodingErrorKind`, `DataEvent`, and
+`DataTree`. Refer to them through `use core.encoding as encoding`. Keep
+format handles and format-only options/events in
+`core.encoding.json`, `core.encoding.jsonl`, `core.encoding.csv`,
+`core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
+remain `core.files` types; do not add duplicate re-exports. (D-ENCSTREAM-SURFACE1=A)
 
-```jet
-use core.encoding.cbor as cbor
+`EncodingLimits` has these fields:
 
-bytes :: cbor.to_bytes(tick)              // [U8], ~1/3 the JSON size
-back :: cbor.decode<Tick>(bytes)
+- `buffer_bytes`, `max_depth`, `max_item_bytes`,
+  `max_total_bytes: ?Int`;
+- `max_expansion_depth` and `max_expansion_bytes`.
 
-// deterministic profile: same value → same bytes, always
-hash :: crypto.sha256(cbor.to_bytes_canonical(tick))
+`EncodingLimits.safe()` is `{buffer_bytes: 65536, max_depth: 256,
+max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32,
+max_expansion_bytes: 8388608}`. Legal inclusive ranges are
+`4096..16777216` for `buffer_bytes`, `1..4096` for `max_depth`,
+`1..1073741824` for `max_item_bytes`, `None` or `0..Int.max` for
+`max_total_bytes`, `0..256` for `max_expansion_depth`, and
+`0..1073741824` for `max_expansion_bytes`. Validate fields in declaration
+order before any I/O. Reject the first invalid field with kind `Limit`, byte
+offset `0`, an empty path, and a reason naming the field, value, and range.
+Expansion limits apply to XML entities; other codecs retain the fields but do
+not consume those budgets, so one limits type serves every adapter.
+
+`max_total_bytes` counts wire bytes. `max_item_bytes` counts decoded bytes
+retained for one scalar, record, key, or canonical-object-sort buffer. At
+every allocator observation, codec-owned live heap is at most
+
+```text
+buffer_bytes + max_item_bytes + max_expansion_bytes
+    + (256 * max_depth) + 65536 bytes
 ```
 
-## D-ENCSTREAM1=A — Encoding XML and bounded codec readers and writers
+Codec-owned memory includes parser/writer state, wire buffers, the current
+partially decoded item, canonical object-sort storage, and entity-expansion
+storage. It excludes consumed file-handle storage and values already returned
+to caller ownership. Counting-allocator tests cover adversarial nesting,
+items, and entities at every legal limit endpoint. (D-ENCSTREAM-SURFACE1=A)
 
-Best hybrid: beginner whole-value APIs and expert bounded-memory readers and writers share one codec model.
+`EncodingError` contains `format: EncodingFormat`, `kind: EncodingErrorKind`,
+`byte_offset: Int`, `line: ?Int`, `column: ?Int`, `path: String`,
+`reason: String`, and `cause: ?EncodingCause`. `EncodingCause` is a `Clone`
++ `Eq` snapshot `{kind: String, os_code: ?Int, message: String}`. It is not
+`IOError` and carries no host handle. `EncodingError` and `EncodingCause`
+derive `Clone` and `Eq`; `cause` is `Val` only for kind `IO`, otherwise
+`None`, and `cause()` returns that snapshot.
 
-### Selected option: Hybrid: same codec modules, tree and reader/writer modes (recommended)
+Display exactly as
 
-Each codec keeps one adapter identity for whole values and reader/writer handles. The formats are exactly JSON, JSONL, CSV, XML, and CBOR; base encoders are scalar helpers, not reader/DataTree adapters. Reader/writer access is a mode of the same codec, not a second library.
-
-```jet
-doc :: xml.parse(input)
-item :: xml.decode<Item>(input)
-
-reader :: json.reader(^file)
-loop ev in reader {
-    handle(ev)
-}
-writer :: json.writer(^out, canonical: true)
+```text
+<Format> <Kind> at byte <offset>[, line <line>, column <column>][, path <path>]: <reason>
 ```
 
-The matched Python API fixture is `examples/features/serde/encoding_json_stream.py`;
-it uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and `json.load`
-for the same canonical file round trip. `tests/encoding_parity.rs` must prove the
-Jet fixture on AOT, resident JIT, and the forced interpreter; E0956/E0953 is a
-tier failure, not an accepted parity result.
+Omit absent clauses, and keep cause text separate. `byte_offset` is a
+zero-based wire-byte offset; textual line and column are one-based; `path` is
+the best-known `DataTree` path or empty. Store the first terminal error and
+return an equal clone from every later method. Return clean EOF as stable
+`None` only after structural validation and trailing-input checks. Runtime
+parse failures are Core values, not compiler diagnostics; wrong methods or
+argument types reuse existing Core type diagnostics. A new compiler
+diagnostic still requires `diagnostics.md` and a UI snapshot under I4.
+(I4; D-ENCSTREAM-SURFACE1=A)
 
-## D-ENCSTREAM-SURFACE1=A — Public streaming encoding surface
+<a id="d-encstream-surface1--public-streaming-encoding-surface"></a>
+## Bounded reader and writer lifecycle
 
-Ratified D-ENCSTREAM1=A fixes the architecture, not this public spelling: every codec stays in core.encoding.<format>; whole-value and reader/writer modes share DataTree and Codable; reader/writer access is one mode of the same adapter. This ballot adds no language syntax and does not create a second codec family. Existing parse/to_string/encode/decode and the json.events(DataTree) String path transcript remain unchanged under release policy. Pull events exist only through json.reader and use DataEvent. Any json.events rename or return-type change requires an edition-migration decision with source rewrite, deprecation window, and old-edition behavior; no return-type-only overload exists (I8).
+Use synchronous blocking calls for backpressure. `next` reads only until one
+item or a terminal state. `write` returns only after accepting the item within
+the bound and flushing underlying bytes when needed. No thread, task, channel,
+callback, hidden queue, `WouldBlock`, or partial-success status exists. `flush`
+pushes bytes but does not validate closure. `finish` validates closure, flushes,
+is required for successful output, and is idempotent after success. A `write`
+after `finish` returns kind `State`; dropping a handle closes it, and dropping
+unfinished output never claims success. See the
+[Bounded buffering law](spec.md#bounded-buffering-law) for the
+cross-primitive classification. (D-ENCSTREAM-SURFACE1=A)
 
-Canonical namespaces: shared EncodingLimits, EncodingError, EncodingCause, EncodingFormat, EncodingErrorKind, DataEvent, and DataTree live only in core.encoding and are referenced through `use core.encoding as encoding`. Format handles and format-only options/events live only in core.encoding.json, .jsonl, .csv, .xml, and .cbor and are referenced through those aliases. FileReader/FileWriter remain core.files types; no duplicate re-exports exist.
+Expose codec-native opaque handles. JSON/JSONL/CSV/CBOR reader and writer
+structs have private state and derive none of `Codable`, `Copy`, or `Clone`;
+XML uses the exact tagged `DataTree` schema in the XML section. Every reader
+has the current-signature form
 
-Option A exact declarations are public opaque JSONReader/JSONWriter, JSONLReader/JSONLWriter, CSVReader/CSVWriter, and CBORReader/CBORWriter structs with private fields; none derives Codable, Copy, or Clone. XMLReader/XMLWriter use the exact D-ENCXML1 schema below. Every reader declares `pub fn next(&self) ?Item !encoding.EncodingError ->`. Every writer declares `pub fn write(&self, item: Item) !encoding.EncodingError`, `pub fn flush(&self) !encoding.EncodingError`, and `pub fn finish(&self) !encoding.EncodingError`. `&self` is the exact edit access because each call advances state; callers keep handles in changeable bindings. Each format exports `reader(input: ^files.FileReader, limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()}) Reader !encoding.EncodingError ->` and `writer(output: ^files.FileWriter, limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()}) Writer !encoding.EncodingError ->`; json.writer alone adds `canonical: Bool{false}`. Constructor calls consume handles with ^ per D-MEM1. Invalid limits or setup IO return EncodingError and the consumed handle closes by RAII; no failed constructor leaks or returns the handle.
+```jet
+pub fn next(&self) -> ?Item !encoding.EncodingError
+```
 
-EncodingLimits fields are buffer_bytes, max_depth, max_item_bytes, max_total_bytes: ?Int, max_expansion_depth, max_expansion_bytes. safe() is 65536, 256, 16777216, None, 32, 8388608. Valid ranges are buffer_bytes 4096..16777216, max_depth 1..4096, max_item_bytes 1..1073741824, max_total_bytes None or 0..Int.max, max_expansion_depth 0..256, max_expansion_bytes 0..1073741824. Constructors reject the first invalid field before IO with kind Limit, byte_offset 0, empty path, and reason naming field/value/range. Expansion limits apply to XML entities; other codecs retain but do not consume those budgets so one limits type stays stable. max_total_bytes counts wire bytes; max_item_bytes counts decoded bytes retained for one scalar/record/key/object-sort buffer. At every allocator observation, codec-owned live heap is at most buffer_bytes + max_item_bytes + max_expansion_bytes + (256 * max_depth) + 65536 bytes. Codec-owned includes parser/writer state, wire buffers, the current partially decoded item, canonical object-sort storage, and entity-expansion storage; it excludes consumed File-handle storage and values already returned to caller ownership. Counting-allocator tests cover adversarial nesting/items/entities and every legal limit endpoint.
+Every writer has
 
-EncodingError fields are format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: ?Int, column: ?Int, path: String, reason: String, cause: ?EncodingCause. EncodingCause is a Clone+Eq snapshot { kind: String, os_code: ?Int, message: String }; it is not IOError and carries no host handle. EncodingError and EncodingCause derive Clone and Eq. cause is Val only for kind IO, otherwise None; cause() returns that snapshot. Display is exactly `<Format> <Kind> at byte <offset>[, line <line>, column <column>][, path <path>]: <reason>` with absent clauses omitted; cause text stays separate. byte_offset is zero-based wire bytes; textual line/column are one-based; path is the best known DataTree path or empty. The first terminal error is stored; every later method returns an equal clone. Clean EOF is stable None only after full structural validation and trailing-input checks. Runtime parse failures are returned Core values, not new compiler diagnostics; wrong methods/types reuse existing Core type diagnostics. Any new compiler diagnostic still needs diagnostics.md + UI snapshot under I4.
+```jet
+pub fn write(&self, item: Item) !encoding.EncodingError
+pub fn flush(&self) !encoding.EncodingError
+pub fn finish(&self) !encoding.EncodingError
+```
 
-Synchronous blocking is the v1 backpressure law. next reads only until one item or terminal state. write returns only after the item is accepted inside the bound, flushing underlying bytes when needed; no thread, task, channel, callback, hidden queue, WouldBlock, or partial-success status exists. flush pushes bytes but does not validate closure. finish validates closure, flushes, is required for successful output, and is idempotent after success. write after finish returns kind State. Drop closes handles; dropping unfinished output never claims success.
-The cross-primitive classification is the [Bounded buffering law](spec.md#bounded-buffering-law).
+`&self` is the edit access because each call advances state; callers keep a
+handle in a changeable binding. Constructors consume file handles with `^`:
 
-A applicability: JSONReader.next ?DataEvent !EncodingError and JSONWriter.write(DataEvent); exactly one root. CBOR uses the same DataEvent and rejects tags, non-text map keys, bignums, or other values outside DataTree as Unsupported, never coercing. DataEvent is Null, Bool(Bool), Int(Int), Float(Float), Text(String), Bytes([U8]), ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd. JSONWriter rejects DataEvent.Bytes with kind Unsupported and reason `JSON cannot encode Bytes; encode bytes as Text explicitly`, and rejects a Float whose value is NaN or positive/negative infinity with kind Unsupported and reason `JSON cannot encode a non-finite Float`. Validation happens before accepting or emitting bytes for that event; bytes from earlier accepted events may already be flushed. canonical false and true use this identical rejection law. JSON canonical writing buffers/sorts each object within max_item_bytes. JSONLReader.next ?DataTree; writer.write(DataTree); one complete value per non-empty record. CSVReader.next ?CSVRow; writer.write([String]); one RFC-4180 record including quoted newlines. CSVRow carries `fields: [String]` and the one-based physical opening `line`. CSV reader options use the same delimiter, header, and skip_blank defaults and semantics as `core.encoding.csv.rows`.
+```jet
+reader(input: ^files.FileReader,
+       limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
+    -> Reader !encoding.EncodingError
+writer(output: ^files.FileWriter,
+       limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
+    -> Writer !encoding.EncodingError
+```
 
-XMLReader/XMLWriter use D-ENCXML1's exact event/node algebra, item type, lexical-preservation law, namespace-expanded names, parse/render options, and field-by-field XMLError projection below. Safe parse options never open external identifiers, expand only an explicit in-memory map, and charge shared expansion budgets. Chunk boundaries cannot change events or errors. Collecting events reconstructs the structurally equal whole value tree; lexical evidence belongs only to D-ENCXML1 fields.
+`json.writer` alone adds `canonical: Bool{false}`. Invalid limits or setup I/O
+return `EncodingError`; the consumed handle closes by RAII, so a failed
+constructor neither leaks nor returns it. (D-MEM1; D-ENCSTREAM-SURFACE1=A)
 
-Compatibility/evolution: all reader and writer names are new; json.events remains unchanged as specified above. Reader and writer types are non-Codable state handles and cannot be copied. EncodingFormat is exhaustive in v1, so adding a format variant is source-breaking for exhaustive matches and requires an edition-migration decision plus generated rewrite; adding format-specific handles alone does not change the enum. DataEvent changes only if DataTree changes through an owner decision. Beginner pass: whole-value calls remain smallest; every reader uses the ordinary bounded reader loop. Expert pass: ownership, exact event types, byte offsets, namespace/entity law, limits, flush/finish, deterministic output, and backpressure are explicit. Hybrid pass: whole and reader/writer paths use one parser, one DataTree, one error law, and one event algebra.
+The format-specific item rules are these:
 
-### Selected option: Codec-native pull handles
+- JSON reader/writer uses `DataEvent` and accepts exactly one root. CBOR uses
+  the same event algebra and rejects tags, non-text map keys, bignums, and
+  values outside `DataTree` as `Unsupported`, without coercion. The event
+  variants are `Null`, `Bool(Bool)`, `Int(Int)`, `Float(Float)`,
+  `Text(String)`, `Bytes([U8])`, `ArrayStart`, `ArrayEnd`, `ObjectStart`,
+  `Key(String)`, and `ObjectEnd`.
 
-Each codec exports its own reader/writer type but shares the exact lifecycle, limits, ownership, and error law above. Item types stay truthful: DataEvent for JSON/CBOR, DataTree for JSONL, rows for CSV, and the exact tagged DataTree schema selected by D-ENCXML1 for XML. Recommended: simple fallible pull control without flattening formats.
+The Prelude carrier may also carry `Number(String)` for exact-token JSON
+decoding; this preserves number text without adding a `DataTree` variant.
+The event list above remains the public reader/writer algebra for this
+decision.
 
+- A JSON writer rejects `DataEvent.Bytes` with kind `Unsupported` and reason
+  `JSON cannot encode Bytes; encode bytes as Text explicitly`. It rejects a
+  `Float` whose value is NaN or positive or negative infinity with kind
+  `Unsupported` and reason `JSON cannot encode a non-finite Float`. Validate
+  an event before accepting or emitting its bytes; earlier accepted events may
+  already have flushed. Canonical and noncanonical JSON use this same
+  rejection rule. Canonical JSON buffers and sorts each object within
+  `max_item_bytes`.
+- JSONL readers return `?DataTree`, writers accept `DataTree`, and each
+  non-empty record contains one complete value.
+- CSV readers return `?CSVRow`, writers accept `[String]`, and each record
+  follows RFC 4180, including quoted newlines. `CSVRow` has `fields: [String]`
+  and the one-based physical opening `line`. Delimiter, `header`, and
+  `skip_blank` options have the same defaults and semantics as
+  `core.encoding.csv.rows`.
+- XML readers and writers use the XML event/node algebra, item type,
+  lexical-preservation law, expanded names, parse/render options, and
+  field-by-field `XMLError` projection below. Safe parse options never open
+  external identifiers, expand only an explicit in-memory map, and charge
+  shared expansion budgets. Chunk boundaries cannot change events or errors.
+  Collecting events reconstructs the structurally equal whole tree; lexical
+  evidence belongs only to the XML fields below.
 ```jet
 use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 
-fn run() {
-    input := files.open("catalog.json")
-    reader := json.reader(^input, limits: encoding.EncodingLimits.safe())
-    loop next in reader {
-        if next == Val(.Key(name)) and name == "item" { print("item") }
+fn run() !(EncodingError | IOError) {
+    input :: files.open("catalog.json") ?? return
+    reader :: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
+    loop event in reader {
+        if event == .Key("item") { print("item") }
     }
 }
 ```
 
-## D-ENCXML1=A — Lossless XML representation over DataTree
 
-D-ENCSTREAM1=A already requires one core.encoding.xml adapter, one DataTree model, and whole-value plus reader/writer modes. Every option here obeys that ratified boundary; none introduces a second XmlDocument model. This ballot chooses the DataTree node algebra and fidelity level.
+The public names are new, while `json.events(DataTree)` remains the existing
+String-path transcript. Pull events exist only through `json.reader` and use
+`DataEvent`; renaming `json.events` or changing its return type requires an
+edition-migration decision with source rewrite, a deprecation window, and
+old-edition behavior. A return-type-only overload is not allowed because I8
+requires one unambiguous call. Reader and writer types are non-Codable state
+handles and cannot be copied. `EncodingFormat` is exhaustive in v1: adding a
+format variant is source-breaking for exhaustive matches and requires an
+edition-migration decision plus a generated rewrite, while adding
+format-specific handles alone does not change the enum. `DataEvent` changes
+only when an owner decision changes `DataTree`. The beginner path remains
+whole-value calls; the expert path makes ownership, event types, offsets,
+namespace/entity rules, limits, flush/finish, deterministic output, and
+backpressure explicit; both paths share one parser, tree, error law, and event
+algebra. (I8; D-ENCSTREAM-SURFACE1=A)
 
-Common parser/security law: XML 1.0 Fifth Edition plus Namespaces in XML 1.0 is the v1 floor. parse(String) accepts Unicode text whose declaration is absent or names UTF-8; its identity guarantee is String equality, not original file bytes. parse_bytes([U8]) recognizes UTF-8, UTF-8 BOM, UTF-16LE BOM, and UTF-16BE BOM, validates any XML declaration against detected encoding, and rejects every other encoding with XMLError. to_bytes preserves the original byte sequence when every token is unchanged and the requested output encoding/BOM equals the detected input encoding/BOM. When that encoding/BOM still matches but some tokens change, each unchanged valid raw-byte token is reused independently and each changed/constructed token is rendered in that same encoding; no subtree or whole document is buffered. When output encoding/BOM differs, no raw byte token is reused and every token is transcoded consistently to the requested encoding. Mixed-encoding concatenation is forbidden. No parser opens files, URLs, sockets, catalogs, external subsets, or system/public identifiers.
+## XML representation and security
 
-Predefined and numeric references validate and decode. Declared general references default to Preserve. Reject refuses them. Resolve(values: [String:String]) expands only names present in the explicit in-memory map as character data. Replacement strings are never reparsed as XML markup: `<`, `>`, `&`, quotes, and entity-looking text remain characters and render escaped. Internal declaration replacement text remains inert preservation data. Parameter entities, external parsed entities, and replacement-text markup expansion are Unsupported in v1, not silently normalized; cycles and limits still reject. External identifiers remain inert data. xml.XMLParseOptions owns entity policy and xml.XMLLimits pins max_depth, max_nodes, max_attributes_per_element, max_name_bytes, max_text_bytes, max_entity_declarations, max_entity_depth, and max_entity_replacement_bytes; safe() supplies versioned defaults. Exceeding any limit is an error, never truncation.
+Represent XML as one lossless namespace-aware ordinary `DataTree`, not an
+`XmlDocument` or `XMLEvent` type. Use XML 1.0 Fifth Edition and Namespaces in
+XML 1.0 as the floor. `parse(String)` accepts Unicode text whose declaration
+is absent or names UTF-8; its identity guarantee is `String` equality, not
+original file bytes. `parse_bytes([U8])` recognizes UTF-8, UTF-8 BOM,
+UTF-16LE BOM, and UTF-16BE BOM, validates an XML declaration against the
+detected encoding, and rejects every other encoding with `XMLError`.
 
-Names use XMLName{ raw, prefix, local, namespace_uri }. Namespace declarations are ordered XMLNamespace{ prefix, namespace_uri, quote, lexical }. Default namespaces apply to elements, never unprefixed attributes. xml/xmlns bindings and duplicate expanded attributes are validated. Clark keys are local for no namespace and {namespace_uri}local otherwise. Codable projection uses child Clark keys and attribute keys prefixed @. An element is simple-content exactly when every child is text, CDATA, or a resolved entity_ref; their decoded character values concatenate into `$text` (empty children produce `$text: ""`) and `$content` is absent. Otherwise it is mixed-content: `$text` is absent and `$content` is exactly a DataTree.Array containing every tagged child node in encounter order, including text-like nodes. Repeated child Clark keys become arrays in encounter order only in ordinary child-key projection; `$content` is never regrouped. XML names cannot begin @, $, or {, so control keys do not collide. Existing #Rename("key") and #DenyUnknownFields apply.
+Preserve an unchanged source byte sequence from `to_bytes` when every token is
+unchanged and the requested encoding/BOM equals the detected input
+encoding/BOM. If that pair still matches but tokens changed, reuse each
+unchanged valid raw-byte token independently and render each changed or
+constructed token in the same encoding; do not buffer a subtree or whole
+document. If the output encoding/BOM differs, reuse no raw byte token and
+transcode every token consistently. Forbid mixed-encoding concatenation. A
+parser never opens files, URLs, sockets, catalogs, external subsets, or
+system/public identifiers. (D-ENCXML1=A)
 
-XMLError is exactly XMLError{ kind: XMLReason, byte_offset: ?Int, line: ?Int, column: ?Int, path: String, reason: String }. XMLReason is the closed enum InvalidEncoding, Malformed, MismatchedTag, InvalidName, Namespace, DuplicateAttribute, Entity, EntityCycle, Limit, Canonicalization, Shape, Unsupported. For source-backed errors byte_offset is Val(zero-based original bytes for parse_bytes or UTF-8 bytes for parse), and line/column are Val(one-based Unicode-scalar positions). Constructed/source-less validation, shape, rendering, and canonicalization errors use None for all three locations, never a colliding numeric sentinel. path remains the best-known Clark-name/index path. parse, parse_bytes, parse_with, canonical, decode, and event folding return Result; they do not emit diagnostics or partial trees. Diagnostic codes and CLI rendering are downstream gates.
+Validate and decode predefined and numeric references. Declared general
+references default to `Preserve`; `Reject` refuses them; `Resolve(values:
+[String:String])` expands only names in the explicit in-memory map as
+character data. Never reparse replacement strings as XML markup: `<`, `>`,
+`&`, quotes, and entity-looking text stay characters and render escaped.
+Internal declaration replacement text remains inert preservation data.
+Parameter entities, external parsed entities, and replacement-text markup
+expansion are `Unsupported`; cycles and limits still reject. External
+identifiers remain inert data.
 
-Raw invalidation law for lossless options: lexical evidence is token-local, never a buffered subtree. XMLLexical is the ordinary DataTree Object {raw_text: Text|Null, raw_bytes: Array<Int>|Null, semantic: DataTree}; every raw_bytes Int is validated in 0..255; exactly one raw field is non-Null for parsed input and both are Null for constructed tokens. Its semantic snapshot is the lexical-free semantic value of that one token. Element nodes carry open_lexical and close_lexical separately; empty-element syntax has open_lexical and close_lexical Null. Document-whitespace, Text, CDATA, comment, PI, declaration, doctype, entity-ref, attribute, and namespace nodes each carry only their own token lexical. A token slice is valid only when its current lexical-free token value deeply equals semantic. Editing a token invalidates only that token; parent elements have no subtree raw slice. to_string may concatenate valid raw_text tokens with recursively rendered Unicode children. to_bytes may reuse each valid raw_bytes token independently whenever selected output encoding/BOM matches the source; an invalid/changed token is rendered in that same encoding while neighboring valid tokens remain reusable. If selected encoding/BOM differs, all tokens render/transcode and none reuse raw bytes. A reader element_start can therefore emit complete opening-tag evidence immediately and element_end complete closing-tag evidence without subtree buffering. False snapshots/raw slices are ignored, never trusted; untouched parse-render identity remains exact.
+`xml.XMLParseOptions` owns entity policy and `xml.XMLLimits` owns
+`max_depth`, `max_nodes`, `max_attributes_per_element`, `max_name_bytes`,
+`max_text_bytes`, `max_entity_declarations`, `max_entity_depth`, and
+`max_entity_replacement_bytes`. `safe()` supplies the versioned defaults.
+Exceeding a limit is an error, never truncation. (D-ENCXML1=A)
 
-Canonicalization law: xml.XMLCanonical configures `xml.canonical`; canonical processes the resolved semantic infoset, never lexical slices. Inclusive11 means W3C Canonical XML 1.1; Exclusive10 means W3C Exclusive XML Canonicalization 1.0. comments selects the standards' with/without-comments form; inclusive_prefixes is legal only for Exclusive10. V1 canonicalizes the whole document, not arbitrary node sets or XML Signature transforms. Output is UTF-8, LF, no BOM, XML declaration, or DOCTYPE; empty elements expand; entity/character references become characters; namespace declarations and attributes sort exactly per the selected W3C algorithm; escaping and whitespace normalization follow that algorithm. An unresolved entity, relative namespace URI forbidden by the selected standard, or non-document root returns XMLError.
+Use `XMLName{raw, prefix, local, namespace_uri}` and ordered
+`XMLNamespace{prefix, namespace_uri, quote, lexical}`. Default namespaces
+apply to elements, never unprefixed attributes. Validate `xml`/`xmlns`
+bindings and duplicate expanded attributes. A Clark key is `local` for no
+namespace and `{namespace_uri}local` otherwise. Codable projection uses child
+Clark keys and attribute keys prefixed with `@`.
 
-Reader coordination: reader events are document_start, declaration, document_whitespace, doctype, element_start, text, cdata, entity_ref, comment, processing_instruction, element_end, document_end. element_start carries name, ordered namespaces, ordered attributes, empty_style, and opening-token lexical only; element_end carries name and closing-token lexical only. Document-whitespace and leaf events carry only their token-local fields/evidence. Events preserve order and never require subtree buffering. Folding a complete event sequence must yield the exact whole-tree semantic DataTree; unfolding that tree must yield the same semantic events. Raw chunks carry the same XMLLexical evidence and limits; no separate event representation is allowed.
+An element has simple content exactly when every child is text, CDATA, or a
+resolved `entity_ref`; concatenate decoded character values into `$text`
+(`$text: ""` for empty content) and omit `$content`. Otherwise it has mixed
+content: omit `$text` and set `$content` to the exact `DataTree.Array` of every
+tagged child in encounter order, including text-like nodes. Repeated child
+Clark keys become arrays in encounter order only in ordinary child-key
+projection; never regroup `$content`. XML names cannot begin with `@`, `$`, or
+`{`, so control keys do not collide. Existing `#Rename("key")` and
+`#DenyUnknownFields` apply. (D-ENCXML1=A)
 
-Beginner pass: xml.parse, xml.to_string, xml.decode<T>, safe limits, preserved entities, and ordinary local names need no namespace or DTD ceremony. Expert pass: expanded names, exact byte encoding, lexical evidence, explicit entity resolution, limits, events, C14N mode, comments, and inclusive prefixes are controllable and auditable. Hybrid pass: helpers and Codable are views over the same tagged DataTree/events, not another tree.
+`XMLError` is exactly
 
-The earlier `{name, attrs, children, text}` shape is unratified and lossy.
-`parse`/`to_string` remain the entry spellings; the tagged tree and focused
-helpers are the canonical representation. No compatibility alias retains the
-lossy shape, and no compiler dependency or external crate is added.
+```text
+XMLError{
+    kind: XMLReason,
+    byte_offset: ?Int,
+    line: ?Int,
+    column: ?Int,
+    path: String,
+    reason: String,
+}
+```
 
-The XML node algebra, helper signatures, ownership and backpressure, diagnostic
-projection, conformance corpus, canonicalization vectors, and manual-tree
-migration are all governed by the laws above.
+`XMLReason` is the closed enum `InvalidEncoding`, `Malformed`,
+`MismatchedTag`, `InvalidName`, `Namespace`, `DuplicateAttribute`, `Entity`,
+`EntityCycle`, `Limit`, `Canonicalization`, `Shape`, and `Unsupported`.
+For source-backed errors, `byte_offset` is the zero-based original offset for
+`parse_bytes` or UTF-8 offset for `parse`; line and column are one-based
+Unicode-scalar positions. Constructed/source-less validation, shape,
+rendering, and canonicalization errors use `None` for all three locations,
+not a colliding numeric sentinel. `path` remains the best-known Clark-name or
+index path. `parse`, `parse_bytes`, `parse_with`, `canonical`, `decode`, and
+event folding return `Result`; they do not emit diagnostics or partial trees.
+Diagnostic codes and CLI rendering are downstream gates. (D-ENCXML1=A)
 
-The reader error projection is exact. XML reader/writer IO bypasses XMLReason
-and produces EncodingErrorKind.IO with a populated handle-free EncodingCause;
-every XMLReason projection has cause=None. InvalidEncoding maps to Syntax.
-Malformed maps to Truncated only when caused by clean underlying EOF before
-required XML closure, otherwise Syntax. MismatchedTag, InvalidName, Namespace,
-DuplicateAttribute, Entity, and Shape map to Syntax. EntityCycle and Limit map
-to Limit. Canonicalization and Unsupported map to Unsupported. format is XML;
-path and reason copy unchanged. A present XMLError byte_offset copies unchanged;
-an absent byte_offset maps to the shared EncodingError zero while line/column
-remain None. Present line/column copy unchanged.
+Keep lexical evidence token-local. `XMLLexical` is the ordinary `DataTree`
+object `{raw_text: Text|Null, raw_bytes: Array<Int>|Null, semantic: DataTree}`.
+Validate every `raw_bytes` integer in `0..255`; parsed input has exactly one
+non-`Null` raw field, while constructed tokens have both raw fields `Null`.
+`semantic` is the lexical-free semantic value of that token. Element nodes
+carry `open_lexical` and `close_lexical` separately; empty-element syntax has
+both fields `Null`. Document whitespace, text, CDATA, comment, processing
+instruction, declaration, doctype, entity reference, attribute, and namespace
+nodes carry only their own token lexical evidence.
 
-`xml.XMLReader.next(&self) ?encoding.DataTree !encoding.EncodingError ->` returns those events in source order. `xml.XMLWriter.write(&self, item: encoding.DataTree) !encoding.EncodingError` validates one exact event before accepting it, enforces document/declaration/doctype/element state, and emits no bytes for a rejected item; flush/finish follow D-ENCSTREAM-SURFACE1. Folding starts at document_start, converts declaration/doctype and leaf events to their `$xml` node forms, nests element_start through matching element_end (or closes an empty event immediately), and finishes only at document_end, yielding exactly the whole-value document DataTree.Object. Unfolding performs the inverse key-for-key projection. For every valid whole tree, fold(unfold(tree)) is deep-equal including order and lexical evidence; for every valid complete event sequence, unfold(fold(events)) is event-for-event deep-equal. Invalid order, duplicate document events, post-end input, mismatched end names, or incomplete finish returns State for writer state misuse and Syntax/Truncated for reader wire failures under the queued projection law.
+A token slice is valid only when its current lexical-free token value deeply
+equals `semantic`. Editing a token invalidates only that token; a parent has no
+subtree raw slice. `to_string` may concatenate valid `raw_text` tokens with
+recursively rendered Unicode children. `to_bytes` may reuse each valid
+`raw_bytes` token independently when selected encoding/BOM matches the source;
+a changed token is rendered in that encoding while neighboring valid tokens
+remain reusable. If selected encoding/BOM differs, render/transcode every
+token and reuse no raw bytes. An `element_start` event can therefore emit
+complete opening-token evidence immediately and `element_end` can emit
+complete closing-token evidence without subtree buffering. Ignore false
+snapshots and raw slices; untouched parse-render identity remains exact.
+(D-ENCXML1=A)
 
-Authoritative whole-node ordinary-DataTree algebra for A. Public XML values use only encoding.DataTree Null, Bool, Int, Text, Array, and Object. Byte sequences are DataTree.Array<Int> with every Int in 0..255. Every object below has exactly the listed keys; every listed key is required even when its value is Null; unknown or missing keys reject. XMLName is exactly {raw:Text,prefix:Text|Null,local:Text,namespace_uri:Text|Null}. XMLLexical is exactly {raw_text:Text|Null,raw_bytes:DataTree.Array<Int>|Null,semantic:DataTree}. `$xml` is Text and its closed values are `document`, `document_whitespace`, `declaration`, `doctype`, `element`, `namespace`, `attribute`, `text`, `cdata`, `entity_ref`, `comment`, and `processing_instruction`.
+Canonicalize the resolved semantic infoset, never lexical slices. `xml.XMLCanonical`
+configures `xml.canonical`; `Inclusive11` means W3C Canonical XML 1.1 and
+`Exclusive10` means W3C Exclusive XML Canonicalization 1.0. `comments` selects
+the standard with-comments or without-comments form; `inclusive_prefixes` is
+legal only for `Exclusive10`. Canonicalize the whole document, not arbitrary
+node sets or XML Signature transforms. Emit UTF-8 with LF line endings and no
+BOM, XML declaration, or DOCTYPE. Expand empty elements; turn entity and
+character references into characters; sort namespace declarations and
+attributes exactly by the selected W3C algorithm; and follow that algorithm's
+escaping and whitespace normalization. An unresolved entity, a relative
+namespace URI forbidden by the selected standard, or a non-document root
+returns `XMLError`. (D-ENCXML1=A)
 
-The full node schemas are: document {$xml:"document",encoding:Text|Null,bom:DataTree.Array<Int>,children:DataTree.Array<DataTree>}; document_whitespace {$xml:"document_whitespace",value:Text,lexical:XMLLexical}; declaration {$xml:"declaration",version:Text,encoding:Text|Null,standalone:Bool|Null,lexical:XMLLexical}; doctype {$xml:"doctype",name:Text,public_id:Text|Null,system_id:Text|Null,internal_subset:Text|Null,lexical:XMLLexical}; element {$xml:"element",name:XMLName,namespaces:DataTree.Array<DataTree>,attributes:DataTree.Array<DataTree>,children:DataTree.Array<DataTree>,empty_style:Text,open_lexical:XMLLexical,close_lexical:XMLLexical|Null}; namespace {$xml:"namespace",prefix:Text|Null,namespace_uri:Text,quote:Text,lexical:XMLLexical}; attribute {$xml:"attribute",name:XMLName,parts:DataTree.Array<DataTree>,normalized_value:Text|Null,quote:Text,lexical:XMLLexical}; text {$xml:"text",value:Text,lexical:XMLLexical}; cdata {$xml:"cdata",value:Text,lexical:XMLLexical}; entity_ref {$xml:"entity_ref",name:Text,resolved_value:Text|Null,lexical:XMLLexical}; comment {$xml:"comment",value:Text,lexical:XMLLexical}; processing_instruction {$xml:"processing_instruction",target:Text,value:Text,lexical:XMLLexical}.
+The beginner path uses `xml.parse`, `xml.to_string`, `xml.decode<T>`, safe
+limits, preserved entities, and ordinary local names without namespace or DTD
+ceremony. The expert path audits expanded names, exact byte encoding, lexical
+evidence, explicit entity resolution, limits, events, C14N mode, comments, and
+inclusive prefixes. Helpers and Codable remain views over the same tagged
+tree and events, not another tree. (D-ENCXML1=A)
 
-Closed payload laws: document children preserve every token in order and may contain document_whitespace/comment/processing_instruction before or after the root, at most one declaration before every other child except leading document_whitespace is forbidden before a declaration, at most one doctype after declaration and before the root, and exactly one root element; no other node tag is legal there. document_whitespace is legal only as a document child outside the root and value contains one or more XML S scalars exactly from U+0020, U+0009, U+000D, U+000A; it preserves prolog spacing, epilog spacing, and trailing newlines. Element namespaces contains only namespace nodes, attributes only attribute nodes, and children only element/text/cdata/entity_ref/comment/processing_instruction nodes. `empty_style` is exactly `"empty"` or `"explicit"`; empty requires children=[], close_lexical=Null, and one empty-element opening token, while explicit requires non-Null close_lexical. `quote` is exactly `"single"` or `"double"`. Attribute parts contains only text or entity_ref nodes. normalized_value is Null exactly when any entity_ref part is unresolved; otherwise it equals the concatenation of text values and resolved entity values after XML 1.0 attribute whitespace normalization. Namespace prefix Null is the default declaration. XML name, namespace, document-order, comment, CDATA, PI, doctype, entity, encoding/BOM, and limit validation follows the earlier standards law and rejects rather than repairing.
 
-Canonical lexical snapshot law: for a parsed token exactly one of raw_text/raw_bytes is non-Null; for a constructed token both are Null. raw_bytes members are Int 0..255. `semantic` is deep-equal to the exact lexical-free semantic payload for that token: declaration/doctype/namespace/attribute/document_whitespace/leaf use their object with lexical removed; element open uses {name,namespaces,attributes,empty_style}; element close uses {name}; document-start uses {encoding,bom}. Nested lexical fields are recursively removed from semantic before comparison. A malformed lexical object, both raw forms present, out-of-range byte, wrong semantic key/type, or unequal snapshot is never trusted: validation treats its raw forms as absent and deterministic rendering proceeds from semantic node fields. Canonicalization always ignores raw forms. No stale raw value can override a changed semantic field.
+## XML nodes, events, limits, and byte reuse
 
-Authoritative public event algebra. The item type is exactly encoding.DataTree; no XMLEvent type or new DataTree variant exists. Every event is a DataTree.Object with exactly the listed required keys and no extras. `$xml_event` is Text with the closed values below. document_start {$xml_event:"document_start",encoding:Text|Null,bom:DataTree.Array<Int>}; document_whitespace {$xml_event:"document_whitespace",value:Text,lexical:XMLLexical}; declaration {$xml_event:"declaration",version:Text,encoding:Text|Null,standalone:Bool|Null,lexical:XMLLexical}; doctype {$xml_event:"doctype",name:Text,public_id:Text|Null,system_id:Text|Null,internal_subset:Text|Null,lexical:XMLLexical}; element_start {$xml_event:"element_start",name:XMLName,namespaces:DataTree.Array<DataTree>,attributes:DataTree.Array<DataTree>,empty_style:Text,open_lexical:XMLLexical}; text {$xml_event:"text",value:Text,lexical:XMLLexical}; cdata {$xml_event:"cdata",value:Text,lexical:XMLLexical}; entity_ref {$xml_event:"entity_ref",name:Text,resolved_value:Text|Null,lexical:XMLLexical}; comment {$xml_event:"comment",value:Text,lexical:XMLLexical}; processing_instruction {$xml_event:"processing_instruction",target:Text,value:Text,lexical:XMLLexical}; element_end {$xml_event:"element_end",name:XMLName,close_lexical:XMLLexical}; document_end {$xml_event:"document_end"}. Event namespace/attribute arrays and enum values obey the same closed node laws. An empty element emits element_start with empty_style="empty" and no element_end; explicit emits a matching element_end.
+Use these reader events in document order:
+`document_start`, `declaration`, `document_whitespace`, `doctype`,
+`element_start`, `text`, `cdata`, `entity_ref`, `comment`,
+`processing_instruction`, `element_end`, and `document_end`.
+`element_start` carries the name, ordered namespaces, ordered attributes,
+`empty_style`, and opening-token lexical evidence only. `element_end` carries
+the name and closing-token lexical evidence only. Document whitespace and leaf
+events carry only their token-local fields. Events preserve order without
+subtree buffering. Folding a complete sequence yields the exact whole-tree
+semantic `DataTree`; unfolding that tree yields the same semantic events. Raw
+chunks carry the same `XMLLexical` evidence and limits; no separate event
+representation exists.
 
-xml.XMLReader.next(&self) ?encoding.DataTree !encoding.EncodingError -> returns that closed event algebra in wire order. xml.XMLWriter.write(&self,item:encoding.DataTree) !encoding.EncodingError validates the entire object before accepting it or emitting bytes. Writer state accepts exactly: one document_start; optional declaration; optional doctype; one root element with a LIFO stack of expanded XMLName; XML-legal document_whitespace/comments/PIs; matching explicit element_end; one document_end only after the stack closes; then no further item. It rejects wrong key/type/tag, illegal child class, duplicate/out-of-order declaration/doctype/root/end, empty-style end, mismatched expanded name, post-end item, or finish before document_end. Object-shape/content errors are Syntax; call-order after terminal/finish is State. Folding replaces `$xml_event` with the corresponding `$xml`, nests start/end content, and forms the exact document schema. Unfolding is the inverse. For every valid tree fold(unfold(tree)) is deep-equal including order/lexical evidence; for every valid complete sequence unfold(fold(events)) is event-for-event deep-equal.
-
-Exact xml.XMLLimits law. XMLLimits is exactly {max_depth:Int,max_nodes:Int,max_attributes_per_element:Int,max_name_bytes:Int,max_text_bytes:Int,max_entity_declarations:Int,max_entity_depth:Int,max_entity_replacement_bytes:Int}. safe() is {max_depth:256,max_nodes:1000000,max_attributes_per_element:1024,max_name_bytes:4096,max_text_bytes:16777216,max_entity_declarations:1024,max_entity_depth:32,max_entity_replacement_bytes:8388608}. Inclusive legal ranges are respectively 1..4096, 1..1000000000, 0..1000000, 1..1048576, 0..1073741824, 0..1000000, 0..256, and 0..1073741824. Cross-field requirements are max_entity_depth<=max_depth and max_entity_replacement_bytes<=max_text_bytes. Validation follows declaration order and returns the first bad field/cross-field pair before IO. All byte counts are decoded UTF-8 byte lengths except raw input offsets; node/attribute/entity counts are exact nonnegative integers. Counters and prospective additions use arbitrary-precision nonnegative arithmetic before comparison, so host integer overflow cannot wrap, pass, allocate, or truncate; a bound crossing returns Limit before retaining the crossing item.
-
-Reader and writer constructors under D-ENCSTREAM-SURFACE1=A are `xml.reader(input:^files.FileReader, limits:encoding.EncodingLimits{encoding.EncodingLimits.safe()}, xml:xml.XMLParseOptions{xml.XMLParseOptions.safe()}) xml.XMLReader !encoding.EncodingError ->` and `xml.writer(output:^files.FileWriter, limits:encoding.EncodingLimits{encoding.EncodingLimits.safe()}, xml:xml.XMLRenderOptions{xml.XMLRenderOptions.safe()}) xml.XMLWriter !encoding.EncodingError ->`. `xml.XMLParseOptions` is exactly {entities:xml.XMLEntityPolicy=.Preserve, limits:xml.XMLLimits{xml.XMLLimits.safe()}}; XMLEntityPolicy is `.Preserve`, `.Reject`, or `.Resolve([String:String])`. `xml.XMLRenderOptions` is exactly {encoding:xml.XMLEncoding=.UTF8, lexical:xml.XMLLexicalPolicy=.PreserveValid}; XMLEncoding is `.UTF8`, `.UTF8BOM`, `.UTF16LE`, or `.UTF16BE`, and XMLLexicalPolicy is `.PreserveValid` or `.Deterministic`. Canonicalization remains the separate `xml.canonical(..., xml.XMLCanonical)` operation and is not a writer option. Constructor validation is deterministic before IO: validate shared EncodingLimits in its declared field order, then XMLLimits in max_depth, max_nodes, max_attributes_per_element, max_name_bytes, max_text_bytes, max_entity_declarations, max_entity_depth, max_entity_replacement_bytes order, then entity-map keys/values or render enums. The first failure wins and projects through EncodingError.
-
-Both limit objects remain active; neither silently overrides the other. The effective depth ceiling is min(encoding.max_depth, xml.max_depth). Wire buffering and total input use encoding.buffer_bytes/max_total_bytes. One retained event/tree item and canonical-sort storage use encoding.max_item_bytes. Element/node/name/text/attribute/declaration counts use their xml.XMLLimits fields. Entity expansion uses min(encoding.max_expansion_depth, xml.max_entity_depth) and min(encoding.max_expansion_bytes, xml.max_entity_replacement_bytes), while max_entity_declarations remains XML-only. Crossing either contributing bound reports Limit naming the actual bound first crossed. The allocator ceiling remains the queued shared encoding limit law; XML limits may reduce work but never enlarge it. Whole-value parse_with applies XMLLimits alone because it has no reader EncodingLimits; the reader always applies both as above.
-
-Document-whitespace fold/render law. Reader emits one document_whitespace event for each maximal contiguous XML S token outside the root, without coalescing across a comment, PI, declaration, doctype, or root boundary. Fold maps it key-for-key to the document_whitespace node; unfold maps each node back one-for-one, so prolog spaces, epilog spaces, CR/LF spelling, and a final newline survive. Writer rejects it inside an element, before a declaration, or after document_end. to_string/to_bytes render its value exactly when lexical evidence is valid, otherwise render the validated XML S value; canonicalization discards document_whitespace outside the document element as required by the selected C14N standard.
-
-Bounded byte-reuse and declaration law. parse_bytes records one document source_encoding and source_bom in document encoding/bom. The renderer decides reuse from those two bounded facts plus each token snapshot; it never scans or buffers the whole document to choose. Reuse is permitted only when xml.XMLRenderOptions encoding/BOM exactly equals source_encoding/source_bom. Under that condition a valid unchanged token writes its raw_bytes directly and a changed/constructed token writes deterministic bytes in the same selected encoding; memory remains the active reader/writer buffer plus one token/item. If encoding/BOM differs, every token is transcoded and raw_bytes are ignored. An XML declaration with encoding Null is legal for every supported BOM/encoding and renders with the encoding pseudo-attribute absent. A non-Null declaration encoding must case-insensitively name the selected family (UTF-8 versus UTF-16); deterministic rendering uses canonical `UTF-8` or `UTF-16`, and conflict returns InvalidEncoding before any bytes, including when raw evidence exists. Untouched parse_bytes plus matching render options reuses every token, including document_whitespace, and is byte-for-byte identical; token-local edits preserve unchanged-token bytes without whole-document buffering.
-
-Exact XMLLimits counter membership and scope. `max_nodes` counts every accepted `$xml` object in the folded whole tree, including document, declaration, document_whitespace, doctype, each element, namespace, attribute, text, cdata, entity_ref, comment, and processing_instruction. XMLName and XMLLexical helper Objects are not additional nodes. In streaming, document_start accounts for the document node; declaration/document_whitespace/doctype/element_start/leaf events account for their corresponding node plus every namespace/attribute carried by element_start; element_end and document_end add zero. The prospective increment is checked before retaining/emitting the event.
-
-`max_depth` counts element nesting only: document is depth 0, the root element is depth 1, each child element is parent depth+1, and non-element nodes do not change depth. `max_attributes_per_element` counts attribute nodes only and excludes namespace declarations. `max_name_bytes` applies separately to the UTF-8 byte length of every non-Null XMLName raw, prefix, local, and namespace_uri field; declaration version/encoding, doctype name/public_id/system_id, namespace prefix/URI, entity name, and PI target are each also checked separately against it. No concatenated or normalized form may bypass its own component check.
-
-`max_text_bytes` is both a per-field and whole-document ceiling. It counts UTF-8 bytes of document_whitespace value; text/cdata/comment value; PI value; doctype internal_subset; attribute text-part values and resolved entity values; and every other free-text payload not governed by max_name_bytes. normalized_value, lexical raw/snapshot fields, and the same resolved value appearing again in normalized_value are not double-counted. Each counted field must be <= max_text_bytes and the arbitrary-precision cumulative sum across the document must also be <= it.
-
-`max_entity_declarations` counts general plus parameter declarations encountered in the internal subset, even when unsupported policy later rejects use. `max_entity_depth` counts the root replacement as depth 1 and each recursively referenced replacement as parent+1; preserved/unresolved references consume depth 0. `max_entity_replacement_bytes` is both per replacement and cumulative: each decoded replacement UTF-8 length and the arbitrary-precision sum of all replacement bytes materialized during one parse must be <= it. Repeated expansion is charged every time materialized; rejected/preserved inert text is not charged. Every counter uses prospective arbitrary-precision addition and returns Limit before allocation/retention on crossing.
-
-D-ENCSTREAM-SURFACE1=A makes the public encoding.DataTree event ABI,
-XMLReader/XMLWriter methods, shared EncodingLimits precedence, EncodingError
-projection, and constructor signatures above operative law.
-
-### Selected option: Nested tagged XML nodes in ordinary DataTree
-
-Recommended. The document is one tagged ordinary `DataTree` object containing a nested ordered tree and uses the exact explainer schema. An element has name, ordered namespaces, ordered attributes, children, empty_style, open_lexical, and close_lexical; close_lexical is Null only for empty-element syntax. Declaration, doctype, namespace, attribute, text, cdata, entity_ref, comment, and processing_instruction each carry their own token-local lexical field. XMLName and XMLLexical are exact ordinary `DataTree` objects; raw bytes and BOM are Array<Int> with every value validated 0..255, never an invented DataTree Bytes variant. All optional values are DataTree.Null, required arrays are present, extra keys reject, and recursive validation/rendering follows the exact common law. The nested shape makes parent/child inspection and Codable projection direct while preserving order and token-local evidence without subtree buffering. Its public reader item is the exact tagged encoding.DataTree event algebra and constructor/dual-limit law in the explainer; no XMLEvent type is introduced. Document-level XML S is an exact document_whitespace node/event, preserving prolog/epilog spacing and trailing newlines under the token-local encoding-compatible reuse law.
+The reader and writer use current Jet signatures:
 
 ```jet
-use core.encoding.xml as xml
-
-fn run() {
-    source :: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
-    doc := xml.parse(source) ?? panic("xml")
-    root := xml.root(doc) ?? panic("root")
-    print(xml.expanded_name(root).local)
-    print(xml.attribute(root, "a") ?? "missing")
-    for node in xml.content(root) {
-        print(xml.kind(node))
-    }
-}
-
-// p
-// 1
-// text
-// element
-// comment
-// cdata
-// entity_ref
+xml.XMLReader.next(&self) -> ?encoding.DataTree !encoding.EncodingError
+xml.XMLWriter.write(&self, item: encoding.DataTree) !encoding.EncodingError
 ```
 
-## D-ENCXML-PROJECTION1=A — Focused helpers with a typed name view
+The reader returns events in source order. The writer validates one complete
+event before accepting it, enforces document/declaration/doctype/element
+state, and emits no bytes for a rejected item; `flush` and `finish` follow the
+shared lifecycle law. Folding starts at `document_start`, turns declaration,
+doctype, and leaf events into their `$xml` node forms, nests
+`element_start` through its matching `element_end` (or closes an empty event
+immediately), and finishes only at `document_end`, yielding the whole-value
+document object. Unfolding performs the inverse key-for-key projection. For
+every valid whole tree, `fold(unfold(tree))` is deep-equal including order and
+lexical evidence; for every valid complete event sequence,
+`unfold(fold(events))` is event-for-event deep-equal. Invalid order, duplicate
+document events, post-end input, mismatched end names, or incomplete finish
+returns `State` for writer state misuse and `Syntax` or `Truncated` for reader
+wire failures under the shared projection law. (D-ENCSTREAM-SURFACE1=A;
+D-ENCXML1=A)
 
-Ratified on card #710 (inherited from #296). D-ENCXML1 already fixes the closed
-`$xml` tree, security law, Codable projection keys (`@`, Clark children, `$text`,
-`$content`), and `XMLError`. This decision selects the public helper view only.
+Project XML reader/writer failures field by field. Reader/writer I/O bypasses
+`XMLReason` and produces `EncodingErrorKind.IO` with a populated handle-free
+`EncodingCause`; every `XMLReason` projection has `cause: None`.
+`InvalidEncoding` maps to `Syntax`. `Malformed` maps to `Truncated` only when
+clean underlying EOF occurs before required XML closure; otherwise it maps to
+`Syntax`. `MismatchedTag`, `InvalidName`, `Namespace`, `DuplicateAttribute`,
+`Entity`, and `Shape` map to `Syntax`; `EntityCycle` and `Limit` map to
+`Limit`; `Canonicalization` and `Unsupported` map to `Unsupported`. The
+projected format is XML, and path and reason copy unchanged. A present
+`XMLError.byte_offset` copies unchanged; an absent offset maps to shared
+`EncodingError.byte_offset` zero while line and column remain `None`; present
+line and column copy unchanged. (D-ENCXML1=A; D-ENCSTREAM-SURFACE1=A)
 
-### Selected option: Focused helpers with a typed name view
 
-Exact public signatures:
+Public XML values use only `encoding.DataTree` variants `Null`, `Bool`, `Int`,
+`Text`, `Array`, and `Object`. Encode byte sequences as `DataTree.Array<Int>`
+with each integer in `0..255`; do not add a `DataTree.Bytes` variant. Every
+object has exactly its listed keys, every listed key is required even when its
+value is `Null`, and unknown or missing keys reject. `XMLName` is
+`{raw:Text,prefix:Text|Null,local:Text,namespace_uri:Text|Null}`.
+`XMLLexical` is
+`{raw_text:Text|Null,raw_bytes:DataTree.Array<Int>|Null,semantic:DataTree}`.
+`$xml` is text with these closed values: `document`,
+`document_whitespace`, `declaration`, `doctype`, `element`, `namespace`,
+`attribute`, `text`, `cdata`, `entity_ref`, `comment`, and
+`processing_instruction`.
 
-- `decode<T: Codable>(text: String, options: XMLParseOptions{XMLParseOptions.safe()}) T ![FieldError]`
-- `decode_bytes<T: Codable>(bytes: [U8], options: XMLParseOptions{XMLParseOptions.safe()}) T ![FieldError]`
-- `root(document: DataTree) DataTree !XMLError`
-- `expanded_name(node: DataTree) (raw: String, prefix: ?String, local: String, namespace_uri: ?String) !XMLError`
-- `attribute(element: DataTree, name: String) ?String !XMLError`
-- `content(element: DataTree) [DataTree] !XMLError`
+The complete node schemas are:
 
-Attribute selectors are local names or Clark names, never prefixes. `attribute`
-returns `normalized_value`. A found attribute with an unresolved entity returns
+```text
+ document {$xml:"document",encoding:Text|Null,bom:DataTree.Array<Int>,children:DataTree.Array<DataTree>}
+ document_whitespace {$xml:"document_whitespace",value:Text,lexical:XMLLexical}
+ declaration {$xml:"declaration",version:Text,encoding:Text|Null,standalone:Bool|Null,lexical:XMLLexical}
+ doctype {$xml:"doctype",name:Text,public_id:Text|Null,system_id:Text|Null,internal_subset:Text|Null,lexical:XMLLexical}
+ element {$xml:"element",name:XMLName,namespaces:DataTree.Array<DataTree>,attributes:DataTree.Array<DataTree>,children:DataTree.Array<DataTree>,empty_style:Text,open_lexical:XMLLexical,close_lexical:XMLLexical|Null}
+ namespace {$xml:"namespace",prefix:Text|Null,namespace_uri:Text,quote:Text,lexical:XMLLexical}
+ attribute {$xml:"attribute",name:XMLName,parts:DataTree.Array<DataTree>,normalized_value:Text|Null,quote:Text,lexical:XMLLexical}
+ text {$xml:"text",value:Text,lexical:XMLLexical}
+ cdata {$xml:"cdata",value:Text,lexical:XMLLexical}
+ entity_ref {$xml:"entity_ref",name:Text,resolved_value:Text|Null,lexical:XMLLexical}
+ comment {$xml:"comment",value:Text,lexical:XMLLexical}
+ processing_instruction {$xml:"processing_instruction",target:Text,value:Text,lexical:XMLLexical}
+```
+
+Document children preserve every token in order. They may contain document
+whitespace, comments, or processing instructions before or after the root;
+they have at most one declaration before every other child, except leading
+document whitespace is forbidden before a declaration; at most one doctype
+follows the declaration and precedes the root; and exactly one root element
+exists. No other node tag is legal there. Document whitespace is legal only as
+a document child outside the root, and its value contains one or more XML S
+scalars from U+0020, U+0009, U+000D, and U+000A. It preserves prolog and
+epilog spacing and trailing newlines. Element `namespaces` contains only
+namespace nodes, `attributes` only attribute nodes, and `children` only
+element, text, CDATA, entity-reference, comment, and processing-instruction
+nodes. `empty_style` is exactly `"empty"` or `"explicit"`: an empty element
+has no children, `close_lexical: Null`, and one empty-element opening token;
+an explicit element has non-`Null` `close_lexical`. `quote` is exactly
+`"single"` or `"double"`. Attribute parts contain only text or entity-reference
+nodes. `normalized_value` is `Null` exactly when any entity-reference part is
+unresolved; otherwise it is the concatenation of text values and resolved
+entity values after XML 1.0 attribute whitespace normalization. A `Null`
+namespace prefix denotes the default declaration. Validate XML names,
+namespaces, document order, comments, CDATA, processing instructions,
+doctypes, entities, encoding/BOM, and limits according to the security law;
+reject rather than repair. (D-ENCXML1=A)
+
+This nested shape makes parent/child inspection and Codable projection direct
+while preserving order and token-local evidence without subtree buffering.
+The lossy `{name, attrs, children, text}` shape is not accepted; no
+compatibility alias retains it, and no compiler dependency or external crate
+is part of this contract. The node algebra, helper signatures, ownership and
+backpressure, diagnostic projection, conformance corpus, canonicalization
+vectors, and manual-tree migration use the laws above. (D-ENCXML1=A)
+
+
+For a parsed token, exactly one of `raw_text` and `raw_bytes` is non-`Null`;
+for a constructed token, both are `Null`. `raw_bytes` members are integers
+`0..255`. `semantic` is deeply equal to the exact lexical-free payload:
+declaration, doctype, namespace, attribute, document whitespace, and leaves
+use their object without lexical evidence; an element opening uses
+`{name,namespaces,attributes,empty_style}`; an element closing uses `{name}`;
+and document start uses `{encoding,bom}`. Remove nested lexical fields
+recursively before comparison. A malformed lexical object, two raw forms,
+an out-of-range byte, a wrong semantic key/type, or an unequal snapshot is not
+trusted: deterministic rendering proceeds from semantic fields. Canonical
+output always ignores raw forms, so a stale raw value cannot override an edit.
+(D-ENCXML1=A)
+
+The public event item is exactly `encoding.DataTree`; do not add an `XMLEvent`
+type or a `DataTree` variant. Every event is an object with exactly its listed
+required keys and no extras. `$xml_event` has these closed values and payloads:
+
+```text
+ document_start {$xml_event:"document_start",encoding:Text|Null,bom:DataTree.Array<Int>}
+ document_whitespace {$xml_event:"document_whitespace",value:Text,lexical:XMLLexical}
+ declaration {$xml_event:"declaration",version:Text,encoding:Text|Null,standalone:Bool|Null,lexical:XMLLexical}
+ doctype {$xml_event:"doctype",name:Text,public_id:Text|Null,system_id:Text|Null,internal_subset:Text|Null,lexical:XMLLexical}
+ element_start {$xml_event:"element_start",name:XMLName,namespaces:DataTree.Array<DataTree>,attributes:DataTree.Array<DataTree>,empty_style:Text,open_lexical:XMLLexical}
+ text {$xml_event:"text",value:Text,lexical:XMLLexical}
+ cdata {$xml_event:"cdata",value:Text,lexical:XMLLexical}
+ entity_ref {$xml_event:"entity_ref",name:Text,resolved_value:Text|Null,lexical:XMLLexical}
+ comment {$xml_event:"comment",value:Text,lexical:XMLLexical}
+ processing_instruction {$xml_event:"processing_instruction",target:Text,value:Text,lexical:XMLLexical}
+ element_end {$xml_event:"element_end",name:XMLName,close_lexical:XMLLexical}
+ document_end {$xml_event:"document_end"}
+```
+
+Namespace/attribute arrays and enum values obey the same closed node laws. An
+empty element emits `element_start` with `empty_style: "empty"` and no
+`element_end`; explicit syntax emits a matching `element_end`. The writer
+accepts exactly one `document_start`; an optional declaration; an optional
+doctype; one root with a LIFO stack of expanded names; XML-legal document
+whitespace, comments, and processing instructions; matching explicit ends;
+and one `document_end` only after the stack closes. It then rejects every
+further item. Reject wrong keys, types, or tags; illegal child classes;
+duplicate or out-of-order declaration, doctype, root, or end events;
+empty-style ends; mismatched expanded names; post-end items; and `finish`
+before `document_end`. Object-shape/content errors are `Syntax`; call-order
+after terminal or finish is `State`. Folding and unfolding replace
+`$xml_event` with the corresponding `$xml` form and preserve order and
+lexical evidence. (D-ENCXML1=A)
+
+`XMLLimits` is exactly
+
+```text
+{max_depth:Int,max_nodes:Int,max_attributes_per_element:Int,
+ max_name_bytes:Int,max_text_bytes:Int,max_entity_declarations:Int,
+ max_entity_depth:Int,max_entity_replacement_bytes:Int}
+```
+
+`XMLLimits.safe()` is
+`{max_depth:256,max_nodes:1000000,max_attributes_per_element:1024,
+max_name_bytes:4096,max_text_bytes:16777216,max_entity_declarations:1024,
+max_entity_depth:32,max_entity_replacement_bytes:8388608}`. Legal inclusive
+ranges, in declaration order, are `1..4096`, `1..1000000000`, `0..1000000`,
+`1..1048576`, `0..1073741824`, `0..1000000`, `0..256`, and
+`0..1073741824`. Require `max_entity_depth <= max_depth` and
+`max_entity_replacement_bytes <= max_text_bytes`. Validate declaration-order
+fields and then the first failing cross-field pair before I/O. Count decoded
+UTF-8 bytes for byte limits, and count nodes, attributes, and entities as
+exact nonnegative integers. Use arbitrary-precision nonnegative arithmetic
+for counters and prospective additions; a crossing returns `Limit` before
+retaining the item, allocating, or truncating. (D-ENCXML1=A)
+
+Use these reader and writer constructors:
+
+```jet
+xml.reader(input: ^files.FileReader,
+           limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
+           xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
+    -> xml.XMLReader !encoding.EncodingError
+xml.writer(output: ^files.FileWriter,
+           limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
+           xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
+    -> xml.XMLWriter !encoding.EncodingError
+```
+
+`xml.XMLParseOptions` is
+`{entities: xml.XMLEntityPolicy = .Preserve,
+limits: xml.XMLLimits{xml.XMLLimits.safe()}}`. `XMLEntityPolicy` is
+`.Preserve`, `.Reject`, or `.Resolve([String:String])`. `xml.XMLRenderOptions`
+is `{encoding: xml.XMLEncoding = .UTF8,
+lexical: xml.XMLLexicalPolicy = .PreserveValid}`. `XMLEncoding` is `.UTF8`,
+`.UTF8BOM`, `.UTF16LE`, or `.UTF16BE`; `XMLLexicalPolicy` is `.PreserveValid`
+or `.Deterministic`. Canonicalization remains the separate
+`xml.canonical(..., xml.XMLCanonical)` operation, not a writer option.
+Validate shared `EncodingLimits` in field order, then XML limits in their
+field order, then entity-map keys/values or render enums. The first failure
+wins and projects through `EncodingError`. (D-ENCSTREAM-SURFACE1=A;
+D-ENCXML1=A)
+
+Both limit objects remain active; neither silently overrides the other. The
+effective depth ceiling is
+`min(encoding.max_depth, xml.max_depth)`. Wire buffering and total input use
+`encoding.buffer_bytes` and `max_total_bytes`. One retained event/tree item
+and canonical-sort storage use `encoding.max_item_bytes`. Element, node, name,
+text, attribute, and declaration counts use their XML fields. Entity expansion
+uses
+`min(encoding.max_expansion_depth, xml.max_entity_depth)` and
+`min(encoding.max_expansion_bytes, xml.max_entity_replacement_bytes)`;
+`max_entity_declarations` remains XML-only. Crossing either contributing
+bound reports `Limit` naming the actual bound first crossed. The allocator
+ceiling is the shared encoding ceiling; XML limits may reduce work but never
+enlarge it. Whole-value `parse_with` applies XML limits alone because it has
+no reader `EncodingLimits`; a reader applies both.
+
+Reader emits one `document_whitespace` event per maximal contiguous XML S
+sequence outside the root. Do not coalesce across a comment, processing
+instruction, declaration, doctype, or root boundary. Fold maps it key-for-key
+to the node and unfold maps each node back one-for-one, preserving prolog and
+epilog spaces, CR/LF spelling, and a final newline. Reject it inside an
+element, before a declaration, or after `document_end`. `to_string` and
+`to_bytes` render its value exactly when lexical evidence is valid; otherwise
+render the validated XML S value. Canonicalization discards document
+whitespace outside the document element as required by the selected C14N
+standard. (D-ENCXML1=A)
+
+`parse_bytes` records one source encoding and BOM in the document's
+`encoding`/`bom`. The renderer chooses reuse from those two bounded facts and
+each token snapshot; it never scans or buffers the whole document. Reuse is
+allowed only when `XMLRenderOptions` encoding/BOM exactly matches the source.
+A valid unchanged token writes raw bytes directly; a changed or constructed
+token writes deterministic bytes in the selected encoding, with memory bounded
+by the active reader/writer buffer plus one token/item. If encoding/BOM differs,
+transcode every token and ignore raw bytes. A declaration with `encoding: Null`
+is legal for every supported encoding/BOM. A non-`Null` encoding must
+case-insensitively name the selected family (UTF-8 or UTF-16); deterministic
+rendering uses canonical `UTF-8` or `UTF-16`, and a conflict returns
+`InvalidEncoding` before any bytes, even with raw evidence. Untouched
+`parse_bytes` plus matching render options is byte-for-byte identical,
+including document whitespace; token-local edits preserve unchanged-token
+bytes without whole-document buffering. (D-ENCXML1=A)
+
+`max_nodes` counts each accepted `$xml` object in the folded tree: document,
+declaration, document whitespace, doctype, element, namespace, attribute,
+text, CDATA, entity reference, comment, and processing instruction.
+`XMLName` and `XMLLexical` helper objects are not nodes. In streaming,
+`document_start` accounts for the document node; declaration, document
+whitespace, doctype, `element_start`, and leaf events account for their node
+plus namespaces and attributes carried by `element_start`; `element_end` and
+`document_end` add zero. Check each prospective increment before retaining or
+emitting the event.
+
+`max_depth` counts element nesting only: document is depth 0, the root is
+depth 1, each child is parent depth plus one, and non-elements do not change
+depth. `max_attributes_per_element` counts attribute nodes and excludes
+namespace declarations. `max_name_bytes` applies separately to the UTF-8
+length of every non-`Null` `XMLName` `raw`, `prefix`, `local`, and
+`namespace_uri`; declaration version/encoding, doctype name/public/system
+identifiers, namespace prefix/URI, entity name, and processing-instruction
+target each receive their own check. No concatenated or normalized form may
+bypass a component check.
+
+`max_text_bytes` is both a per-field and whole-document ceiling. Count UTF-8
+bytes for document whitespace; text, CDATA, and comment values; processing-
+instruction values; doctype internal subsets; attribute text parts and
+resolved entity values; and every other free-text payload not governed by
+`max_name_bytes`. Do not double-count `normalized_value`, lexical
+raw/snapshot fields, or a resolved value repeated in `normalized_value`. Each
+field must fit the limit, and arbitrary-precision cumulative document bytes
+must also fit.
+
+`max_entity_declarations` counts general and parameter declarations in the
+internal subset, even when policy later rejects use. `max_entity_depth` counts
+the root replacement at depth 1 and each recursive replacement at its parent
+depth plus one; preserved or unresolved references consume depth 0.
+`max_entity_replacement_bytes` is both per-replacement and cumulative: each
+decoded replacement length and the arbitrary-precision sum of materialized
+replacement bytes in one parse must fit. Charge repeated expansion each time
+it is materialized; do not charge rejected or preserved inert text. Every
+counter uses prospective arbitrary-precision addition and returns `Limit`
+before allocation or retention on a crossing. (D-ENCXML1=A)
+
+## XML helper view
+
+Expose focused helpers over the closed XML tree rather than a second document
+model. The exact helper surface is:
+
+```jet
+decode<T: Codable>(text: String,
+                   options: XMLParseOptions{XMLParseOptions.safe()})
+    -> T ![FieldError]
+decode_bytes<T: Codable>(bytes: [U8],
+                         options: XMLParseOptions{XMLParseOptions.safe()})
+    -> T ![FieldError]
+root(document: DataTree) -> DataTree !XMLError
+expanded_name(node: DataTree)
+    -> (raw: String, prefix: ?String, local: String, namespace_uri: ?String) !XMLError
+attribute(element: DataTree, name: String) -> ?String !XMLError
+content(element: DataTree) -> [DataTree] !XMLError
+```
+
+Select attributes by local name or Clark name, never by prefix. `attribute`
+returns `normalized_value`; a found attribute with an unresolved entity returns
 `XMLError` kind `Entity`. `content` returns exact child nodes in source order.
-The focused helpers keep `XMLError` and source locations. Typed decode projects
-parse, projection, and Codable shape failures into the one `[FieldError]` list;
+Keep `XMLError` and source locations in these helpers. Typed decode projects
+parse, projection, and Codable shape failures into one `[FieldError]` list;
 the root path is empty and nested paths use the same field/index segments as
-every other codec. No additional query or wrapper type ships.
+every other codec. Do not add another query or wrapper type. (D-ENCXML-PROJECTION1=A)
 
 ```jet
 use core.encoding.xml as xml
 
-document := xml.parse(source)
-root := xml.root(document)
-name := xml.expanded_name(root)
-print(name.local)
-print(name.namespace_uri ?? "none")
-print(xml.attribute(root, "{urn:shop}id") ?? "missing")
-for child in xml.content(root) {
-    print(xml.expanded_name(child)?.local)
+#Codable
+struct Catalog { book: [Book] }
+#Codable
+struct Book {
+    #Rename("@id") id: String
+    title: String
 }
 
-catalog := xml.decode<Catalog>(source)
-copy := xml.decode_bytes<Catalog>(wire)
+fn run() !(XMLError | [FieldError]) {
+    source :: "<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
+    document :: xml.parse(source) ?? return
+    root :: xml.root(document) ?? return
+    name :: xml.expanded_name(root) ?? return
+    print(name.local)
+    print((xml.attribute(root, "id")) ?? "missing")
+    children :: xml.content(root) ?? return
+    loop child in children {
+        child_name :: xml.expanded_name(child) ?? return
+        print(child_name.local)
+    }
+    catalog :: xml.decode<Catalog>(source) ?? return
+    wire :: xml.to_bytes(document, xml.XMLRenderOptions.safe()) ?? return
+    copy :: xml.decode_bytes<Catalog>(wire) ?? return
+    print(catalog.book.len())
+    print(copy.book[0].title)
+}
 ```
 
-## D-JSON-EXACTNUM1=A — Exact typed JSON numbers
+The node sequence remains ordered and lossless, including document type,
+comments, CDATA, and entity references:
 
-Ratified 2026-08-06 on card #1395, D-JSON-EXACTNUM1 keeps one JSON number
-tokenizer for dynamic and typed decoding. Untyped `json.parse` retains its
-ratified `DataTree` projection:
-integral numbers become `Int` and fractional numbers become `Float`.
+```jet
+use core.encoding.xml as xml
 
-Typed `json.decode<T>` and `data.json<T>` retain each valid number token until
-the target consumes it. `Decimal` parses the token directly, preserving its
-sign, exponent, and lexical scale (`12.340` remains `12.340`). The exact
-integer destination is the arbitrary-precision default `Int` after D-INTBIG1
-and D-TYPE2-NUM1; `JetBigInt` is internal storage only, not a user-facing
-decode target. Exact `Int` rejects non-integral fractions. Neither target uses
-quoted text as a fallback, and no typed path round-trips through binary64.
+fn inspect() !(XMLError | [FieldError]) {
+    source :: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
+    document :: xml.parse(source) ?? return
+    root :: xml.root(document) ?? return
+    name :: xml.expanded_name(root) ?? return
+    print(name.local)
+    print((xml.attribute(root, "a")) ?? "missing")
+    children :: xml.content(root) ?? return
+    print(children.len())
+}
+```
 
-Whole-value and stream decoding share this tokenizer, projection, limits, and
+The child order in `children` is `text`, `element`, `comment`, `cdata`,
+`entity_ref`; the first two printed values are `p` and `1`, and the child
+count is `5`.
+
+
+## JSON numbers and canonical output
+
+Keep one JSON number tokenizer for dynamic and typed decoding. Untyped
+`json.parse` maps integral numbers to exact `Int` and fractional numbers to
+`Float`. Typed `json.decode<T>` and `data.json<T>` retain each valid number
+token until the target consumes it. `Decimal` parses the token directly,
+preserving sign, exponent, and lexical scale (`12.340` remains `12.340`).
+The exact integer destination is arbitrary-precision `Int` under D-INTBIG1 and
+D-TYPE2-NUM1; `JetBigInt` is internal storage, not a user-facing decode
+target. Exact `Int` rejects non-integral fractions. Neither target falls back
+to quoted text or round-trips through binary64.
+
+Whole-value and stream decoding share the tokenizer, projection, limits, and
 field-error vocabulary. Invalid JSON, non-finite input, target mismatch,
 fixed-width overflow, and digit/exponent-limit failures remain ordinary JSON
-or `[FieldError]` values. Canonical output remains governed by D-JSONCANON1;
-this decision adds no second writer.
+or `[FieldError]` values. Canonical output uses the separate JSON
+canonicalization law; this decision adds no second writer. (D-JSON-EXACTNUM1=A;
+D-INTBIG1; D-TYPE2-NUM1)
 
-## D-JSONCANON1=A — Canonical JSON semantics
+Use RFC 8785 JSON Canonicalization Scheme for hashing and signing. It must not
+depend on incidental renderer behavior: `json.canonical` is the JCS contract,
+while `json.to_string` and `json.to_string_pretty` remain ordinary renderers
+and are not hashing contracts. Canonicalization is recursive, emits UTF-8
+without BOM or trailing LF, emits no insignificant whitespace, preserves array
+order, rejects duplicate object keys, never normalizes Unicode, never coerces
+Bytes, numbers, or text, and never emits NaN or infinity.
 
-Canonical JSON is the one hashing and signing contract. It must not depend on
-incidental renderer behavior: `json.canonical` uses the RFC 8785 law below,
-while `json.to_string` and `json.to_string_pretty` remain ordinary JSON
-renderers and are not hashing contracts.
-
-Common law for every replacement option: canonicalization is recursive, emits UTF-8 without BOM or trailing LF, emits no insignificant whitespace, preserves array order, rejects duplicate object keys, never normalizes Unicode, never coerces Bytes/numbers/Text, and never emits NaN or infinity. A failure is `encoding.EncodingError` with format JSON, cause None, byte_offset 0, line/column None, the exact DataTree path, and the option's kind/reason. `json.canonical` therefore becomes `canonical(data: encoding.DataTree, limits: encoding.EncodingLimits = encoding.EncodingLimits.safe()) String !EncodingError`. Whole-value canonicalization validates EncodingLimits in queued field order before traversal. buffer_bytes and expansion fields are retained for one shared type but unused; max_depth bounds DataTree container nesting with root container depth 1; max_total_bytes, when Val(n), bounds final UTF-8 output bytes; max_item_bytes bounds aggregate live canonical-object workspace. It renders arrays directly into one final output allocation and buffers object members for sorting. Excluding caller-owned DataTree and the returned String after transfer, codec-owned live heap is at most current_output_bytes + max_item_bytes + (256 * max_depth) + 65536 bytes; a prospective output/workspace crossing returns Limit before retaining the crossing bytes. Under D-ENCSTREAM-SURFACE1=A, `json.writer(..., canonical:true)` uses the identical primitive serializer, key comparator, domain checks, errors, and output bytes. For both entrypoints, aggregate live canonical-object workspace is the sum of encoded keys, UTF-16 comparison keys, separators, and not-yet-emitted canonical child bytes across every simultaneously open nested object; that aggregate, not each object independently, must remain <= max_item_bytes. The reader/writer path buffers through ObjectEnd, rejects a duplicate key or invalid value before accepting/emitting that buffered object, and otherwise obeys queued finish/terminal/allocator law. Whole-value and reader/writer output for the same event tree are byte-identical.
-
-Option A exact RFC 8785/JCS law: input must be I-JSON. Bool/Null spell normally. Text is preserved scalar-for-scalar; U+0008/U+0009/U+000A/U+000C/U+000D use `\b/\t/\n/\f/\r`, other U+0000..U+001F use lowercase `\u00xx`, quote and reverse-solidus escape, every other scalar emits unchanged, and slash never escapes. Invalid Unicode rejects, though ordinary Jet String cannot construct a lone surrogate. Object keys sort recursively by unsigned UTF-16 code units of the raw unescaped key; prefix-shorter sorts first.
-
-JCS numbers use the RFC 8785 frozen ECMAScript `Number::toString`/ECMA-262 7.1.12.1 Note-2 shortest-round-tripping binary64 algorithm, verified against RFC 8785 Appendix B. Float -0.0 emits `0`; finite Float uses that algorithm; NaN and either infinity reject Unsupported with reason `JCS cannot encode a non-finite Float`. DataTree Int is admitted exactly when IEEE-754 roundTiesToEven conversion to binary64 represents the same mathematical integer; 9007199254740992 is admitted, while 9007199254740993 is not. An admitted Int is serialized by the same ECMAScript algorithm. A non-representable Int rejects Unsupported with reason `JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text`. Bytes rejects Unsupported with the already-queued reason `JSON cannot encode Bytes; encode bytes as Text explicitly`. Duplicate keys reject Syntax with reason `JCS requires unique object keys`. No locale, host formatter, Unicode normalization, decimal pre-rounding, or external crate participates.
-
-Compatibility follows the ratified release policy: the breaking return and byte
-correction uses edition `2027`, while edition `2026` retains its compatibility
-signature and prototype bytes. `jet fix` is the migration authority; it rewrites
-the canonical call and fallible handling, reports affected hashing/signing
-fixtures, and leaves an explicit limits argument only where the source already
-carried one.
-
-Beginner pass: ordinary JSON DataTree within the familiar interoperable number range needs one `json.canonical(data)` call. Expert pass: exact input domain, UTF-16 ordering, number algorithm, errors, buffering bound, byte output, and edition transition are auditable. Hybrid pass: beginner whole-value and expert reader/writer entrypoints invoke the same semantic writer; there is no separate signing serializer.
-
-Independent evidence must cover RFC 8785 vectors, number and key-order
-boundaries, invalid values, limits, chunk boundaries, cross-tier byte parity,
-terminal errors, and edition migration. Compiler and runtime code remain
-std-only; new compiler diagnostics remain I4-gated, while runtime
-EncodingError text follows the law above.
-
-### Selected option: Strict RFC 8785 JCS
-
-Use the interoperable JSON Canonicalization Scheme exactly. Safe-range Int and finite Float share the specified ECMAScript binary64 serializer; unsupported Jet-only values fail rather than changing meaning. Recommended: hashing/signing bytes match browsers, Java, and other JCS implementations while one explicit fallible boundary protects Jet's richer DataTree.
+A canonicalization failure is `encoding.EncodingError` with format JSON, no
+cause, byte offset 0, no line or column, the exact `DataTree` path, and the
+option's kind and reason. The public operation is
 
 ```jet
+canonical(data: encoding.DataTree,
+          limits: encoding.EncodingLimits = encoding.EncodingLimits.safe())
+    -> String !encoding.EncodingError
+```
+
+Validate `EncodingLimits` in field order before traversal. Retain
+`buffer_bytes` and expansion fields in the shared type but do not consume
+them. `max_depth` bounds `DataTree` container nesting with root-container
+depth 1; `max_total_bytes`, when `Val(n)`, bounds final UTF-8 output bytes;
+`max_item_bytes` bounds aggregate live canonical-object workspace. Render
+arrays directly into one final output allocation and buffer object members for
+sorting. Excluding caller-owned `DataTree` and the returned `String` after
+transfer, codec-owned live heap is at most
+`current_output_bytes + max_item_bytes + (256 * max_depth) + 65536` bytes.
+Return `Limit` before retaining crossing output or workspace bytes. The
+aggregate workspace is the sum of encoded keys, UTF-16 comparison keys,
+separators, and not-yet-emitted canonical child bytes across all simultaneously
+open nested objects; bound the aggregate, not each object independently. The
+reader/writer path buffers through `ObjectEnd`, rejects duplicate keys or an
+invalid value before accepting/emitting that buffered object, and follows the
+same terminal and allocator law. Whole-value and reader/writer bytes are
+identical for one event tree.
+
+Under the shared streaming surface, `json.writer(..., canonical: true)` uses
+the identical serializer, key comparator, domain checks, errors, and output
+bytes. (D-JSONCANON1=A)
+
+The input must be I-JSON. Bool and Null use their ordinary spellings. Text is
+preserved scalar-for-scalar: U+0008, U+0009, U+000A, U+000C, and U+000D use
+`\\b`, `\\t`, `\\n`, `\\f`, and `\\r`; other U+0000..U+001F use lowercase
+`\\u00xx`; quote and reverse solidus are escaped; every other scalar emits
+unchanged; slash never escapes. Reject invalid Unicode. Ordinary Jet `String`
+cannot construct a lone surrogate.
+
+Sort object keys recursively by unsigned UTF-16 code units of the raw,
+unescaped key, with the prefix-shorter key first. Use the RFC 8785 frozen
+ECMAScript `Number::toString` / ECMA-262 7.1.12.1 Note-2 shortest-
+round-tripping binary64 algorithm, verified against RFC 8785 Appendix B.
+`Float -0.0` emits `0`; finite `Float` uses that algorithm; NaN and either
+infinity reject `Unsupported` with reason
+`JCS cannot encode a non-finite Float`. Admit a `DataTree.Int` only when
+IEEE-754 roundTiesToEven conversion to binary64 represents the same
+mathematical integer: `9007199254740992` is admitted, while `9007199254740993`
+is not. Serialize an admitted integer with the same ECMAScript algorithm.
+Reject a non-representable integer with `Unsupported` and reason
+`JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text`.
+Reject Bytes with `Unsupported` and reason
+`JSON cannot encode Bytes; encode bytes as Text explicitly`. Reject duplicate
+keys with `Syntax` and reason `JCS requires unique object keys`. Do not use a
+locale, host formatter, Unicode normalization, decimal pre-rounding, or
+external crate. (D-JSONCANON1=A; I8)
+
+The breaking return and byte correction use edition `2027`; edition `2026`
+keeps its compatibility signature and prototype bytes. `jet fix` is the
+migration authority: it rewrites the canonical call and fallible handling,
+reports affected hashing/signing fixtures, and leaves an explicit limits
+argument only where the source already carried one. The beginner path is one
+`json.canonical(data)` call for ordinary interoperable `DataTree`; the expert
+path makes input domain, UTF-16 order, number algorithm, errors, buffering,
+bytes, and edition transition auditable. Both whole-value and reader/writer
+paths invoke one semantic writer. Independent evidence covers RFC 8785
+vectors, number and key-order boundaries, invalid values, limits, chunk
+boundaries, cross-tier byte parity, terminal errors, and edition migration.
+Compiler and runtime code remain std-only; new compiler diagnostics remain
+I4-gated, while runtime `EncodingError` text follows the shared law.
+
+```jet
+use core.encoding as encoding
 use core.encoding.json as json
 
 fn run() {
-    data := json.parse("{\"b\":-0.0,\"a\":1e30}")
-    print(json.canonical(data))
+    data :: json.parse("{\"b\":-0.0,\"a\":1e30}") ?? panic("parse")
+    canonical :: json.canonical(data) ?? panic("canonical")
+
+    print(canonical)
 }
 
 // {"a":1e+30,"b":0}
@@ -300,57 +822,168 @@ fn run() {
 // JSON Unsupported at byte 0, path $: JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text
 ```
 
-## D-ENC-CBOR-SURFACE1=A — Exact public CBOR verbs and deterministic encoding
+## CBOR binary interchange
 
-Ratified D-ENCBIN1=A selects CBOR (RFC 8949), native binary strings, the worked `to_bytes`/`decode<T>`/`to_bytes_canonical` spelling, and deterministic bytes for hashing. Ratified D-ENCSTREAM1=A requires the same core.encoding.cbor adapter identity for whole and reader/writer modes. Ratified D-ENC-DYN1 keeps DataTree closed to Object, Array, Int, Float, Text, Bool, and Null; there is no public DataTree.Bytes variant. This ballot fixes the exact whole-value surface without reopening those decisions.
+Use CBOR (RFC 8949) as the canonical binary interchange format. An IETF
+standard with a deterministic profile gives stable bytes for hashing, signing,
+and content-addressed stores, while native binary strings and a clean
+extension model outweigh MessagePack's ecosystem edge; one format preserves
+I8. The whole-value verbs are `parse`, typed `decode<T>`, `to_bytes`, and
+`to_bytes_canonical`; CBOR has no `to_string`. (D-ENCBIN1=A)
+```jet
+use core.crypto as crypto
+use core.encoding.cbor as cbor
 
-Option A exact namespace and verbs. Only core.encoding.cbor exports CBOROptions, CBORError, CBORErrorKind, parse, decode, to_bytes, and to_bytes_canonical; shared DataTree remains core.encoding.DataTree. `parse(bytes:[U8], options:cbor.CBOROptions{cbor.CBOROptions.safe()}) encoding.DataTree !cbor.CBORError` decodes one complete item to DataTree. `decode<T:Codable>(bytes:[U8], options:cbor.CBOROptions{cbor.CBOROptions.safe()}) T ![FieldError]` decodes through the same checked CBOR event/value engine directly into T. `to_bytes<T:Codable>(value:T) [U8] !cbor.CBORError` emits preferred interoperable CBOR. `to_bytes_canonical<T:Codable>(value:T) [U8] !cbor.CBORError` selects RFC 8949 Section 4.2.1 Core Deterministic Encoding in that same encoder. No public canonical-mode enum/flag exists; one hash/signature spelling has one byte law (I8). DataTree satisfies Codable, so both byte verbs accept DataTree without a second overload or encoder. There is no CBOR `to_string`: binary `parse`/`to_bytes` are the exact analogues of text `parse`/`to_string`.
+#Codable
+struct Tick { count: Int }
 
-Codable and DataTree law. Codable [U8] encodes as CBOR major type 2 and decode<[U8]> accepts major type 2; it never degrades to an integer array. Other Codable lists use major type 4, structs/maps use major type 5 with text keys, strings use major type 3, and scalar mappings follow their Jet types. parse into DataTree rejects a major-type-2 byte string as Unsupported because D-ENC-DYN1 has no lossless public DataTree case; callers that expect bytes use decode<[U8]> or a Codable field. parse also rejects tags, bignums outside Int, non-text map keys, duplicate text keys, undefined/unsupported simple values, and values outside DataTree, never coercing. decode<T> may accept only CBOR shapes that T's single Codable schema admits. Thus native binary strings and one closed DataTree algebra both remain honest.
+fn run() {
+    tick :: Tick{ count: 1 }
+    bytes :: cbor.to_bytes(tick) ?? panic("encode")
+    back :: cbor.decode<Tick>(bytes) ?? panic("decode")
+    hash :: crypto.sha256(cbor.to_bytes_canonical(tick) ?? panic("canonical"))
+    _ :: back
+    print(hash)
+}
+```
 
-CBOROptions is exactly {max_depth:Int,max_items:Int,max_bytes:Int,require_canonical:Bool}. safe() is {max_depth:256,max_items:1000000,max_bytes:1073741824,require_canonical:false}. Legal inclusive ranges are max_depth 1..4096, max_items 1..1000000000, max_bytes 0..1073741824. Validation follows field order before reading input. require_canonical false accepts every otherwise-supported RFC 8949 encoding, including valid Section 4.2.3 length-first map order as ordinary noncanonical input; true requires the one Section 4.2.1 Core deterministic form.
 
-Counter law: a root scalar has depth 0; a root array/map/indefinite string has depth 1; entering each nested array/map/indefinite string adds one. max_items counts each encoded data item exactly once: each scalar, array/map container, map key under the same scalar/container rule, map value under that rule, and each definite chunk inside an indefinite text/byte string; a map key has no additional key surcharge and break bytes add zero. A tag counts before rejection. max_bytes first bounds input length, then independently bounds peak live requested allocation. Requested allocation is counted by actual requested capacities before allocator calls: byte/text payload capacity in bytes, array capacity times size_of(DataTree), map capacity times size_of((String,DataTree)) plus key capacities, decode stack capacity times frame size, and error/path String capacities. Reallocation prospectively replaces old capacity charge with new; freeing subtracts it. Input slice storage and allocator metadata are excluded. Every counter and capacity product uses arbitrary-precision arithmetic; crossing returns Limit before allocation/retention, so overflow cannot wrap. Tests pin both logical accounting and a counting-allocator ceiling of max_bytes plus allocator metadata for the exact allocation sequence.
-
-CBORError is exactly {kind:cbor.CBORErrorKind,byte_offset:Int,path:String,reason:String}. CBORErrorKind is the closed enum Syntax, Truncated, Unsupported, Limit, TypeMismatch, TrailingData, NonCanonical. byte_offset is the zero-based input byte that begins the failing item, or input length for missing required bytes; encoder/type errors use 0. path grammar is unambiguous: root is `$`; an array index appends `[<unsigned-decimal>]` with no leading zero except 0; a text map key appends `[<JSON-string>]`, where JSON-string includes quotes and uses JSON escapes with lowercase `\u00xx`; examples are `$[0]`, `$["payload"]`, `$["a.b"]`, and `$["x\"y"]`. No bare `.key` form exists. Before a key decodes, the map path is its container prefix; otherwise path is the deepest known prefix. reason names the rejected major/additional value, target Codable expectation, limit, or canonical rule. parse/decode reject trailing bytes with TrailingData. No partial DataTree/T escapes; runtime failures are Core values, not compiler diagnostics. Wrong static argument/target types reuse existing Core type diagnostics; any new compiler diagnostic still requires Diagnostics.jet/Registry registration and tests/ui under I4.
-
-Default `to_bytes` is deterministic for one Jet value within one toolchain but
-promises only valid preferred CBOR interoperability, not cross-version hash
-identity: structs follow Codable field order and `DataTree` objects preserve
-their semantic order. It emits definite lengths, shortest integer/length
-arguments, UTF-8 text, direct byte strings, and preferred Float representation,
-and never emits tags or indefinite containers. `to_bytes_canonical` is the one
-hash/signature mechanism. It uses definite lengths, shortest integer/length
-arguments, preferred shortest Float width preserving the Jet Float value,
-canonical NaN 0xf97e00, preserved signed zero, and duplicate encoded-key
-rejection. RFC 8949 Section 4.2.1 Core ordering sorts map keys by pure unsigned
-bytewise order.
-
-Decoder canonical law. require_canonical checks original bytes, not a re-encoded approximation: true validates pure encoded-byte lexicographic Core ordering and rejects length-first-only ordering, indefinite lengths, non-shortest arguments, non-preferred floats/NaNs, duplicate keys, and every other Core-profile violation with NonCanonical at the first offending item. Normal parse/decode accept noncanonical but valid supported encodings and return the same semantic value. Neither mode accepts a semantic value outside the DataTree/Codable laws above.
-
-Compatibility follows the ratified release policy. Edition `2026` retains the
-legacy `encode` and DataTree-returning `decode` contract; the edition `2027`
-migration exposes the canonical `to_bytes` and `parse` names and the shared
-typed errors, and edition `2028` removes the deprecated entries. `jet fix` plus
-an explicit edition upgrade are the migration authority. There is no permanent
-alias, return-type-only overload, or second canonical encoder.
-
-CBORReader/Writer use D-ENCSTREAM-SURFACE1=A codec-native pull handles, the same DataEvent/Codable engine, field-by-field CBORError projection into shared EncodingError, and the same deterministic writer mode. CBOR reader/writer mode cannot bypass the DataTree, limits, error, or canonical laws. Only `json.writer` has the `canonical:` constructor argument; CBOR canonical bytes use `to_bytes_canonical`.
-
-Beginner pass: `to_bytes(value)` and typed `decode(bytes)` are the complete
-ordinary story; no mode object or CBOR vocabulary is required. Expert pass:
-parse to DataTree, exact typed errors/offsets/paths, bounded decoding,
-canonical validation, native bytes, and RFC deterministic output are explicit.
-Hybrid pass: parse, decode, default bytes, canonical bytes, and streams share
-one codec engine and one Codable mapping. No facade or proof-only path exists.
-
-Exact reader/writer error projection under D-ENCSTREAM-SURFACE1=A: CBORError Syntax maps to EncodingErrorKind.Syntax; Truncated to Truncated; Unsupported to Unsupported; Limit to Limit; TypeMismatch, TrailingData, and NonCanonical to Syntax. format is CBOR, byte_offset/path/reason copy exactly, line and column are None, and cause is None. Underlying FileReader/FileWriter IO bypasses CBORError and maps directly to EncodingErrorKind.IO with its handle-free EncodingCause. No CBORErrorKind maps to State; State is reserved for writer lifecycle/order misuse. Terminal clone/equality follows the shared reader/writer law.
-
-### Selected option: Format-native parse, decode, and byte verbs
-
-Export parse for DataTree, decode<T> for Codable, to_bytes for ordinary interchange, and to_bytes_canonical for RFC-stable bytes under the exact common law. Recommended: it honors the ratified examples, mirrors text codecs by medium rather than inventing strings for binary data, and gives beginners one obvious pair while keeping expert determinism explicit.
+The exact namespace is `core.encoding.cbor`. It exports `CBOROptions`,
+`CBORError`, `CBORErrorKind`, `parse`, `decode`, `to_bytes`, and
+`to_bytes_canonical`; shared `DataTree` remains `core.encoding.DataTree`.
+Use these current-signature forms:
 
 ```jet
+parse(bytes: [U8],
+      options: cbor.CBOROptions{cbor.CBOROptions.safe()})
+    -> encoding.DataTree !cbor.CBORError
+decode<T: Codable>(bytes: [U8],
+                   options: cbor.CBOROptions{cbor.CBOROptions.safe()})
+    -> T ![FieldError]
+to_bytes<T: Codable>(value: T) -> [U8] !cbor.CBORError
+to_bytes_canonical<T: Codable>(value: T) -> [U8] !cbor.CBORError
+```
+
+`parse` decodes one complete item to `DataTree`. Typed `decode<T>` uses the
+same checked CBOR event/value engine directly into `T`. `to_bytes` emits
+preferred interoperable CBOR; `to_bytes_canonical` selects RFC 8949 section
+4.2.1 Core Deterministic Encoding in that encoder. Do not add a canonical-mode
+enum or flag: one hash/signature spelling has one byte law. `DataTree`
+satisfies `Codable`, so both byte verbs accept it without another overload or
+encoder. There is no CBOR `to_string`; binary `parse` and `to_bytes` are the
+analogues of text `parse` and `to_string`. (D-ENC-CBOR-SURFACE1=A; I8)
+
+Map Codable `[U8]` to CBOR major type 2 and decode it back; never degrade it to
+an integer array. Other Codable lists use major type 4, structs/maps use major
+type 5 with text keys, strings use major type 3, and scalar mappings follow
+Jet types. `parse` into `DataTree` rejects a major-type-2 byte string as
+`Unsupported` because D-ENC-DYN1 has no lossless public `DataTree` case;
+callers needing bytes use `decode<[U8]>` or a Codable field. Reject tags,
+bignums outside `Int`, non-text map keys, duplicate text keys,
+undefined/unsupported simple values, and all values outside `DataTree`; never
+coerce. Typed `decode<T>` accepts only shapes admitted by `T`'s one Codable
+schema. (D-ENC-DYN1; D-ENC-CBOR-SURFACE1=A)
+
+`CBOROptions` is exactly
+`{max_depth:Int,max_items:Int,max_bytes:Int,require_canonical:Bool}`.
+`safe()` is
+`{max_depth:256,max_items:1000000,max_bytes:1073741824,
+require_canonical:false}`. Legal ranges are `1..4096`, `1..1000000000`, and
+`0..1073741824` for the first three fields. Validate in field order before
+reading input. `require_canonical: false` accepts every otherwise-supported
+RFC 8949 encoding, including valid section 4.2.3 length-first map order as
+ordinary noncanonical input; `true` requires section 4.2.1 Core form.
+
+A root scalar has depth 0; a root array, map, or indefinite string has depth
+1; entering each nested array, map, or indefinite string adds one.
+`max_items` counts each encoded data item exactly once: scalar and container
+items, map keys under the same scalar/container rule, map values, and each
+definite chunk inside an indefinite text or byte string. A map key has no
+additional surcharge and break bytes add zero. Count a tag before rejecting
+it.
+
+`max_bytes` first bounds input length and then independently bounds peak live
+requested allocation. Count actual requested capacities before allocator
+calls: byte/text payload capacity in bytes; array capacity times
+`size_of(DataTree)`; map capacity times `size_of((String,DataTree))` plus key
+capacities; decode-stack capacity times frame size; and error/path `String`
+capacities. A reallocation prospectively replaces its old capacity charge with
+the new one; freeing subtracts it. Exclude input-slice storage and allocator
+metadata. Use arbitrary-precision arithmetic for every counter and capacity
+product; return `Limit` before allocation or retention on a crossing, so
+integer overflow cannot wrap. Tests pin logical accounting and a
+counting-allocator ceiling of `max_bytes` plus allocator metadata for the exact
+allocation sequence.
+
+`CBORError` is exactly
+`{kind:cbor.CBORErrorKind,byte_offset:Int,path:String,reason:String}`.
+`CBORErrorKind` is the closed enum `Syntax`, `Truncated`, `Unsupported`,
+`Limit`, `TypeMismatch`, `TrailingData`, and `NonCanonical`. `byte_offset` is
+the zero-based byte beginning the failing item, or input length when required
+bytes are missing; encoder/type errors use 0. The path root is `$`; an array
+index appends `[<unsigned-decimal>]` with no leading zero except 0, and a text
+map key appends `[<JSON-string>]`, including quotes and JSON escapes with
+lowercase `\u00xx`. Examples are `$[0]`, `$["payload"]`, `$["a.b"]`, and
+`$["x\"y"]`; no bare `.key` form exists. Before a key decodes, the map path
+is its container prefix; otherwise use the deepest known prefix. The reason
+names the rejected major/additional value, target expectation, limit, or
+canonical rule. `parse` and `decode` reject trailing bytes with
+`TrailingData`. Do not return a partial tree or typed escape; runtime failures
+are Core values, not compiler diagnostics. Wrong static argument or target
+types reuse existing Core diagnostics; a new compiler diagnostic requires
+Diagnostics registration and I4 tests/UI.
+
+Default `to_bytes` is deterministic for one Jet value within one toolchain but
+promises only valid preferred-CBOR interoperability, not cross-version hash
+identity: structs follow Codable field order and `DataTree` objects preserve
+semantic order. Emit definite lengths, shortest integer and length arguments,
+UTF-8 text, direct byte strings, and preferred Float representation; never
+emit tags or indefinite containers. `to_bytes_canonical` is the one
+hash/signature mechanism. It emits definite lengths, shortest integer and
+length arguments, preferred shortest Float width preserving the Jet value,
+canonical NaN `0xf97e00`, preserved signed zero, and rejects duplicate encoded
+keys. RFC 8949 section 4.2.1 Core ordering sorts keys by pure unsigned
+bytewise order.
+
+When `require_canonical` is true, validate original bytes rather than a
+re-encoded approximation. Reject length-first-only ordering, indefinite
+lengths, non-shortest arguments, non-preferred floats or NaNs, duplicate keys,
+and every other Core-profile violation with `NonCanonical` at the first
+offending item. Normal parsing accepts noncanonical but valid supported
+encodings and returns the same semantic value. Neither mode accepts a value
+outside the `DataTree`/Codable laws.
+
+Edition `2026` retains legacy `encode` and DataTree-returning `decode`. Edition
+`2027` exposes canonical `to_bytes` and `parse` names and shared typed errors;
+edition `2028` removes deprecated entries. `jet fix` plus an explicit edition
+upgrade is the migration authority. There is no permanent alias,
+return-type-only overload, or second canonical encoder.
+
+CBOR reader/writer handles use the codec-native pull contract, the same
+`DataEvent`/Codable engine, field-by-field `CBORError` projection into shared
+`EncodingError`, and the same deterministic writer mode. Reader/writer mode
+cannot bypass the DataTree, limits, error, or canonical laws. Only
+`json.writer` has a `canonical:` constructor argument; CBOR canonical bytes
+use `to_bytes_canonical`. The beginner path is `to_bytes(value)` and typed
+`decode(bytes)`; the expert path exposes tree values, exact errors/offsets/
+paths, bounded decoding, canonical validation, native bytes, and RFC output.
+All paths share one engine and Codable mapping. (D-ENC-CBOR-SURFACE1=A;
+D-ENCSTREAM-SURFACE1=A)
+
+Project whole-value CBOR errors into the shared stream error law:
+`CBORError` `Syntax` maps to `EncodingErrorKind.Syntax`, `Truncated` to
+`Truncated`, `Unsupported` to `Unsupported`, and `Limit` to `Limit`.
+`TypeMismatch`, `TrailingData`, and `NonCanonical` map to `Syntax`. Copy
+format, `byte_offset`, path, and reason; line and column remain `None`, and
+cause remains `None`. Underlying file I/O bypasses `CBORError` and maps
+directly to `EncodingErrorKind.IO` with its handle-free `EncodingCause`. No
+`CBORErrorKind` maps to `State`; reserve `State` for writer lifecycle/order
+misuse. Terminal clone/equality follows the shared reader/writer law.
+(D-ENC-CBOR-SURFACE1=A; D-ENCSTREAM-SURFACE1=A)
+
+
+```jet
+use core.encoding as encoding
 use core.encoding.cbor as cbor
 
 #Codable
@@ -359,100 +992,206 @@ struct Packet { id: Int, payload: [U8] }
 struct Header { id: Int }
 
 fn run() {
-    packet := Packet{ id: 7, payload: [222, 173] }
-    bytes := cbor.to_bytes(packet)
-    copy := cbor.decode(bytes)
-    stable := cbor.to_bytes_canonical(packet)
-    data := cbor.parse(cbor.to_bytes(Header{ id: 7 }))
+    packet :: Packet{ id: 7, payload: [222, 173] }
+    bytes :: cbor.to_bytes(packet) ?? panic("encode")
+    copy :: cbor.decode<Packet>(bytes) ?? panic("decode")
+    stable :: cbor.to_bytes_canonical(packet) ?? panic("canonical")
+    data :: cbor.parse(cbor.to_bytes(Header{ id: 7 }) ?? panic("header"), cbor.CBOROptions.safe()) ?? panic("parse")
+    _ :: copy
+    _ :: stable
+    _ :: data
 
-    malformed := [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
-    failed := cbor.decode<Packet>(malformed)
+    malformed :: [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
+    failed :: cbor.decode<Packet>(malformed) ?? panic("expected failure")
+    _ :: failed
 }
 
 // Err([FieldError{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
 ```
 
-## D-ENCBASE-STRICT1=A — Canonical RFC 4648 decoder policy
+## Strict base encodings
 
-The strict decoder law below replaces backend-dependent decoding behavior. The
-encoders remain deterministic: standard base64 emits RFC 4648 padding,
-base64url emits no padding, and base32 emits uppercase RFC 4648 padding. The
-ballot adds no language syntax.
+Use deterministic RFC 4648 encoders: standard base64 emits padding,
+base64url emits no padding, and base32 emits uppercase padding. The strict
+decoder law is independent of backend behavior. In edition `2027`, strict
+base64, base64url, and base32 reject ASCII and non-ASCII whitespace, the other
+alphabet, lowercase base32, missing/excess/interior padding, impossible
+encoded lengths, and non-zero unused bits. Therefore
+`decode(encode(bytes))` succeeds and `encode(decode(text)) == text` for every
+accepted strict input. Encoders never wrap lines or gain policy flags.
+(D-ENCBASE-STRICT1=A)
+The common strict law also governs options A, B, and C's
+`decode_canonical` and `decode_url_canonical` functions. The allowance API
+below is the A surface; its named arguments are the only transport
+deviations.
 
-Common strict law for A, B, and C's `decode_canonical` / `decode_url_canonical` functions. `base64.encode` remains padded standard alphabet; strict `base64.decode` accepts exactly that canonical spelling. `base64.encode_url` remains unpadded URL alphabet; strict `base64.decode_url` accepts exactly that canonical spelling, including empty input, and rejects every '='. `base32.encode` remains uppercase and padded to eight characters; strict `base32.decode` accepts exactly that canonical spelling. All strict decoders reject ASCII whitespace, non-ASCII, the other alphabet, lowercase base32, missing/excess/interior padding, impossible encoded lengths, and non-zero unused bits. Thus `decode(encode(bytes))` succeeds and `encode(decode(text)) == text` for every accepted strict input. Encoders never wrap lines and never gain policy flags.
 
-Exact strict matrix: standard base64 accepts `Zg==`, `Zm8=`, `Zm9v`, and empty text; rejects `Zg`, `Zg===`, `Z=g=`, `Zg==\n`, URL `-`/`_`, and `Zh==`. Base64url accepts `Zg`, `Zm8`, `Zm9v`, and empty text; rejects `Zg=`, `Zg==`, whitespace, standard `+`/`/`, a length congruent to one modulo four, and `Zh`. Base32 accepts `MY======`, `MZXQ====`, `MZXW6===`, `MZXW6YQ=`, `MZXW6YTB`, and empty text; rejects `MY`, `my======`, `MY=======`, `M=Y=====`, `MY======\n`, `0`/`1` aliases, and `MZ======`. Strict padding counts follow RFC 4648 final quanta: base64 only zero, one, or two trailing '=' as required; base32 only zero, one, three, four, or six as required.
+The strict matrix is:
 
-Exact strict error contract for A, B, and C's canonical functions; exact allowance API for A. `core.encoding.base64` declares `pub fn encode(bytes: [U8]) String`, `pub fn decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}) [U8] !String`, `pub fn encode_url(bytes: [U8]) String`, and `pub fn decode_url(text: String, allow_whitespace: Bool{false}, allow_padding: Bool{false}) [U8] !String`. `core.encoding.base32` declares `pub fn encode(bytes: [U8]) String` and `pub fn decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}, allow_lowercase: Bool{false}) [U8] !String`. First failure returns `invalid <base64|base64url|base32> at byte <N>: <reason>`. N is zero-based byte offset in original UTF-8 input; EOF failures use original input byte length. Hex digits are uppercase. Reasons are exactly `ASCII whitespace is not allowed`, `byte 0xNN is not in the <standard base64|URL-safe base64|base32> alphabet`, `padding is not allowed`, `padding may appear only at the end`, `expected <N> padding characters`, `unexpected padding`, `encoded length cannot represent whole bytes`, or `non-zero unused bits`. Examples: `base64.decode("Zg")` -> `invalid base64 at byte 2: expected 2 padding characters`; `base64.decode("Zg==\n")` -> `invalid base64 at byte 4: ASCII whitespace is not allowed`; `base64.decode("Zh==")` -> `invalid base64 at byte 1: non-zero unused bits`; `base64.decode_url("Zg==")` -> `invalid base64url at byte 2: padding is not allowed`; `base32.decode("my======")` -> `invalid base32 at byte 0: byte 0x6D is not in the base32 alphabet`; `base32.decode("MZ======")` -> `invalid base32 at byte 1: non-zero unused bits`.
+- Standard base64 accepts `Zg==`, `Zm8=`, `Zm9v`, and empty text; it rejects
+  `Zg`, `Zg===`, `Z=g=`, `Zg==\n`, URL `-`/`_`, and `Zh==`.
+- Base64url accepts `Zg`, `Zm8`, `Zm9v`, and empty text; it rejects `Zg=`,
+  `Zg==`, whitespace, standard `+`/`/`, lengths congruent to one modulo four,
+  and `Zh`.
+- Base32 accepts `MY======`, `MZXQ====`, `MZXW6===`, `MZXW6YQ=`, `MZXW6YTB`,
+  and empty text; it rejects `MY`, `my======`, `MY=======`, `M=Y=====`,
+  `MY======\n`, `0`/`1` aliases, and `MZ======`.
 
-Allowance automaton for A. `allow_whitespace` recognizes only ASCII bytes 0x09, 0x0A, 0x0B, 0x0C, 0x0D, and 0x20, at any position including before, between, or after padding; it removes them while retaining an origin-offset map. Other Unicode whitespace remains a forbidden UTF-8 byte. `allow_lowercase` maps base32 a..z to A..Z after whitespace removal and accepts mixed case; it never maps 0/1 aliases. `allow_missing_padding` for standard base64 accepts either exact RFC padding or no '=' with cleaned data length modulo four 0, 2, or 3; modulo one fails at original EOF, partial/interior/excess padding still fails, and unused bits remain zero. Base32 `allow_missing_padding` analogously accepts exact RFC padding or no '=' with cleaned data length modulo eight 0, 2, 4, 5, or 7; remainders 1, 3, or 6 fail at EOF. Base64url is canonically unpadded; `allow_padding` additionally accepts exactly the RFC-required zero, one, or two trailing '=' for its data length, never partial/interior/excess padding. Combined options execute in this fixed order: scan original bytes left-to-right classifying selected-alphabet bytes, recognized '=' padding tokens, and allowed whitespace; return the first disallowed whitespace or byte that is neither in the selected alphabet nor '='; remove allowed whitespace while preserving origins; fold allowed base32 lowercase; validate every recognized '=' in the alphabet-specific padding phase and report the first offending original '=' offset; validate cleaned length/padding count at original EOF; validate unused bits at the original final data-symbol offset; decode. '=' is never reported as a non-alphabet byte: padding phase exclusively owns padding-not-allowed, interior, partial, and excess-padding errors. Thus options relax only named forms and never change error precedence or offsets. A shared std-only parser and table-driven RFC 4648 vectors must produce identical bytes/errors in AOT, `comptime`, `jet eval`, REPL, and `jet dev`; parity tests compare every option combination and malformed corpus case byte-for-byte.
+RFC 4648 final-quanta rules permit only zero, one, or two trailing `=` in
+base64 as required, and only zero, one, three, four, or six in base32 as
+required.
 
-Compatibility follows the ratified release policy. A stricter omitted-argument
-default is a breaking change and uses a major release plus edition `2027`.
-Edition `2026` uses one compatibility parser across AOT, comptime, `jet eval`,
-REPL, and `jet dev`; it accepts the historical union and returns the same bytes
-everywhere, never preserving backend drift. The strict law and named allowances
-apply in edition `2027`.
+The exact edition-2027 APIs are:
 
-Beginner pass: encoder output always decodes; default rejects ambiguous/corrupt text at the exact byte. Expert pass: A offers named, narrow interoperability controls without accepting unrelated damage; whole-program and comptime paths share identical policy. Hybrid pass: A keeps one decoder per alphabet, with strict defaults and explicit allowances on the same mechanical path rather than a second permissive codec family.
+```jet
+pub fn encode(bytes: [U8]) -> String
+pub fn decode(text: String,
+              allow_whitespace: Bool{false},
+              allow_missing_padding: Bool{false})
+    -> [U8] !String
+pub fn encode_url(bytes: [U8]) -> String
+pub fn decode_url(text: String,
+                  allow_whitespace: Bool{false},
+                  allow_padding: Bool{false})
+    -> [U8] !String
 
-### Selected option: Strict default with narrow named allowances
+pub fn encode(bytes: [U8]) -> String
+pub fn decode(text: String,
+              allow_whitespace: Bool{false},
+              allow_missing_padding: Bool{false},
+              allow_lowercase: Bool{false})
+    -> [U8] !String
+```
 
-Edition `2027` uses the common strict law. The same decoder accepts only the
-named transport deviations selected by its allowance arguments: whitespace,
-omitted standard/base32 padding, padded base64url, and lowercase base32. Every
-argument defaults false; wrong alphabets, malformed padding, impossible
-lengths, aliases, and non-zero unused bits remain errors. `jet fix` preserves
-named allowances when migrating edition `2026` input and reports data that no
-allowance can preserve.
+The first group belongs to `core.encoding.base64`; the second group belongs to
+`core.encoding.base32`. Return the first failure as
+`invalid <base64|base64url|base32> at byte <N>: <reason>`. `N` is the
+zero-based byte offset in original UTF-8 input; EOF failures use original input
+byte length. Hex digits are uppercase. Exact reasons are `ASCII whitespace is
+not allowed`, `byte 0xNN is not in the <standard base64|URL-safe base64|base32>
+alphabet`, `padding is not allowed`, `padding may appear only at the end`,
+`expected <N> padding characters`, `unexpected padding`, `encoded length
+cannot represent whole bytes`, and `non-zero unused bits`.
+
+Examples of the exact contract are:
+
+```text
+base64.decode("Zg")
+  -> invalid base64 at byte 2: expected 2 padding characters
+base64.decode("Zg==\n")
+  -> invalid base64 at byte 4: ASCII whitespace is not allowed
+base64.decode("Zh==")
+  -> invalid base64 at byte 1: non-zero unused bits
+base64.decode_url("Zg==")
+  -> invalid base64url at byte 2: padding is not allowed
+base32.decode("my======")
+  -> invalid base32 at byte 0: byte 0x6D is not in the base32 alphabet
+base32.decode("MZ======")
+  -> invalid base32 at byte 1: non-zero unused bits
+```
+
+Named allowances are the only accepted transport deviations. `allow_whitespace`
+recognizes only ASCII bytes `0x09`, `0x0A`, `0x0B`, `0x0C`, `0x0D`, and `0x20`
+at any position, including before, between, or after padding. Remove them
+while retaining an origin-offset map; other Unicode whitespace remains
+forbidden. `allow_lowercase` maps base32 `a..z` to `A..Z` after whitespace
+removal and accepts mixed case; it never maps `0`/`1` aliases.
+
+For standard base64, `allow_missing_padding` accepts exact RFC padding or no
+`=` with cleaned length modulo four equal to 0, 2, or 3; modulo one fails at
+original EOF, and partial/interior/excess padding and non-zero unused bits
+still fail. Base32 analogously accepts exact padding or no `=` with cleaned
+length modulo eight equal to 0, 2, 4, 5, or 7; remainders 1, 3, or 6 fail at
+EOF. Base64url is canonically unpadded; `allow_padding` additionally accepts
+exact RFC-required zero, one, or two trailing `=` for the data length, never
+partial/interior/excess padding.
+
+Apply options in this order: scan original bytes left-to-right, classifying
+selected-alphabet bytes, recognized `=` tokens, and allowed whitespace; return
+the first disallowed whitespace or byte that is neither in the alphabet nor
+`=`; remove allowed whitespace while preserving origins; fold allowed base32
+lowercase; validate every recognized `=` in the alphabet-specific padding
+phase and report the first offending original `=` offset; validate cleaned
+length and padding at original EOF; validate unused bits at the original final
+data-symbol offset; decode. Never report `=` as a non-alphabet byte: the
+padding phase owns padding-not-allowed, interior, partial, and excess-padding
+errors. Options relax only their named forms and never change error precedence
+or offsets.
+
+Use one std-only parser and table-driven RFC 4648 vectors across AOT,
+`comptime`, `jet eval`, REPL, and `jet dev`; parity tests compare every option
+combination and malformed corpus case byte-for-byte. Edition `2026` uses one
+compatibility parser across those tiers and accepts the historical union with
+the same bytes everywhere, never backend drift. A stricter omitted-argument
+default is a breaking change in edition `2027`; named strict defaults and
+allowances apply there. `jet fix` preserves named allowances while migrating
+edition-2026 input and reports data no allowance can preserve. The beginner
+path always round-trips encoder output and rejects ambiguous text at the exact
+byte; the expert path has narrow named interoperability controls on the same
+mechanical decoder, not a second permissive codec. (D-ENCBASE-STRICT1=A)
 
 ```jet
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-// Full edition-2027 signatures:
-// base64.decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}) [U8] !String
-// base64.decode_url(text: String, allow_whitespace: Bool{false}, allow_padding: Bool{false}) [U8] !String
-// base32.decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}, allow_lowercase: Bool{false}) [U8] !String
-raw := base64.decode("Zg==")             // [102]
-bad := base64.decode("Zg==\n")
-// Err("invalid base64 at byte 4: ASCII whitespace is not allowed")
+fn run() {
+    body :: "Zg=="
+    token :: "Zg=="
+    text :: "my======"
+    raw :: base64.decode("Zg==") ?? panic("decode")
+    print(raw.len())
+    bad :: base64.decode("Zg==\n") ?? panic("expected failure")
+    _ :: bad
+    // Err("invalid base64 at byte 4: ASCII whitespace is not allowed")
 
-mime := base64.decode(body, allow_whitespace: true)
-url := base64.decode_url(token, allow_padding: true)
-legacy_id := base32.decode(text, allow_lowercase: true, allow_missing_padding: true)
+    mime :: base64.decode(body, allow_whitespace: true) ?? panic("mime")
+    url :: base64.decode_url(token, allow_padding: true) ?? panic("url")
+    legacy_id :: base32.decode(text, allow_lowercase: true, allow_missing_padding: true) ?? panic("base32")
+    bytes :: base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true) ?? panic("base32")
+    _ :: mime
+    _ :: url
+    _ :: legacy_id
+    _ :: bytes
+}
 
-// `jet fix --edition 2027` preserves named relaxations, then audits forms no allowance can preserve.
-bytes := base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true)
+// `jet fix --edition=2027` preserves named relaxations, then audits forms no allowance can preserve.
 ```
 
-## D-BYTESDECODE1=A — Byte-to-text and hex decoder policy
+## Byte-to-text and hex
 
-`String.from_bytes` is strict: it returns its typed decode failure at the first
-invalid UTF-8 sequence and never substitutes text. `String.from_bytes_lossy`
-is the explicit lossy spelling; it replaces each invalid sequence with U+FFFD.
-The pair uses one Prelude implementation across every execution tier.
+Keep `String.from_bytes` strict: return a typed decode failure at the first
+invalid UTF-8 sequence and never substitute text. Keep
+`String.from_bytes_lossy` as the explicit lossy spelling; it replaces each
+invalid sequence with U+FFFD. Both use one Prelude implementation across
+execution tiers.
 
-`core.encoding.hex.decode` is strict and consumes exact input. It rejects
-surrounding or internal whitespace, odd-length text, and non-hex characters;
-it does not trim or silently repair input. These runtime parse/decode failures
-remain typed Core values, not compiler diagnostics. Executable examples and
-their goldens snapshot the observable rejection text.
+Keep `core.encoding.hex.decode` strict and exact. Reject surrounding or
+internal whitespace, odd-length text, and non-hex characters; do not trim or
+silently repair input. These runtime parse/decode failures are typed Core
+values, not compiler diagnostics. Executable examples and goldens snapshot
+the observable rejection text. (D-BYTESDECODE1=A)
 
-## Evidence anchors
+## Evidence and migration contracts
 
-Encoding claims use the external corpora under `tests/fixtures/encoding/` and
-their `MANIFEST.tsv` rows (URL, license, SHA-256); `tests/encoding_corpus.rs`
-verifies each manifest before use. Local hostile oracles are labeled `local`
-and are not independent RFC corpora.
+Use external encoding corpora under [`tests/fixtures/encoding`](../../tests/fixtures/encoding/)
+and their `MANIFEST.tsv` rows for URL, license, and SHA-256 metadata.
+[`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs) verifies each
+manifest before use. Label local hostile oracles `local`; they are not
+independent RFC corpora. Checked examples cover whole-value breadth, base
+allowances, reader/writer lifecycle, and shared types; their goldens are under
+[`examples/features/expected/serde`](../../examples/features/expected/serde/).
+The matched Python fixture is
+[`encoding_json_stream.py`](../../examples/features/serde/encoding_json_stream.py).
+It uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and
+`json.load` for the same canonical file round trip. The parity test must
+exercise the Jet fixture on AOT, resident JIT, and the forced interpreter;
+E0956 and E0953 are tier failures, not accepted parity results.
 
-Examples cover whole-value breadth, expert base allowances, reader/writer
-lifecycle, and shared types. Their checked goldens live under
-`examples/features/expected/serde/`.
 
-Static migration diagnostics **L2001** / **E2002** for `cbor.encode` are
-registered in `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the
-diagnostic registry, snapshotted in `tests/ui/cbor_encode_deprecated/` and
-`tests/ui/cbor_encode_removed/`, and exercised in
-`tests/encoding_edition.rs`. Runtime parse/decode failures remain typed Core
-values, not compiler diagnostics.
+Static migration diagnostics `L2001` and `E2002` for `cbor.encode` use
+[`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet), the
+diagnostic registry, snapshots in
+[`tests/ui/cbor_encode_deprecated`](../../tests/ui/cbor_encode_deprecated/) and
+[`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and
+[`tests/encoding_edition.rs`](../../tests/encoding_edition.rs). Runtime
+parse/decode failures remain typed Core values, not compiler diagnostics.

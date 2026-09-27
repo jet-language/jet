@@ -202,9 +202,9 @@ run "$umount" -l "$host_nix"
 test ! -e /nix/store
 export LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 if [ -n "$library_path" ]; then
-    exec "$loader" --library-path "$library_path" "$test_binary" "$test_name" --exact --nocapture
+    exec "$loader" --library-path "$library_path" "$test_binary" "$test_name" --exact --include-ignored --nocapture
 else
-    exec "$loader" "$test_binary" "$test_name" --exact --nocapture
+    exec "$loader" "$test_binary" "$test_name" --exact --include-ignored --nocapture
 fi
 "#;
 

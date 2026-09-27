@@ -1,0 +1,271 @@
+// Type grammar constructs JetFoundation Type variants directly. Type source
+// spans are returned separately because semantic Type intentionally carries no
+// parser locations.
+
+pub struct ParsedType {
+    pub ty: Type
+    pub span: Span
+}
+
+fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
+    if depth > 256 {
+        span :: parser_current(&state).span
+        parser_add_error(&state, span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
+        return ParsedType{ty: Type.Named("__jet_error"), span: span}
+    }
+
+    start :: parser_current(&state)
+    ty :: parser_parse_type_atom(&state, depth + 1)
+    if parser_current_kind(&state) == TOKEN_BANG {
+        parser_bump(&state)
+        error_type :: parser_parse_type_union(&state, depth + 1)
+        result := Type.Result(ok: ty.ty, err: error_type.ty)
+        return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
+    }
+
+    parser_parse_type_union_tail(&state, ty, depth + 1)
+}
+
+fn parser_parse_type_union(state: &JetParserState, depth: Int) -> ParsedType {
+    ty :: parser_parse_type_atom(&state, depth + 1)
+    parser_parse_type_union_tail(&state, ty, depth + 1)
+}
+
+fn parser_parse_type_union_tail(state: &JetParserState, first: ParsedType, depth: Int) -> ParsedType {
+    result := first
+    members := [Type]{}
+    loop parser_current_kind(&state) == TOKEN_PIPE {
+        parser_bump(&state)
+        next :: parser_parse_type_atom(&state, depth + 1)
+        if members.len() == 0 -> members.push(result.ty)
+        members.push(next.ty)
+        result.span.end = next.span.end
+    }
+    if members.len() > 0 -> result.ty = Type.Union(members: members)
+    result
+}
+
+fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
+    start :: parser_current(&state)
+    kind :: start.kind
+
+    if kind == TOKEN_QUESTION {
+        parser_bump(&state)
+        inner :: parser_parse_type_atom(&state, depth + 1)
+        ty := Type.Option(inner: inner.ty)
+        end := inner.span
+        if parser_current_kind(&state) == TOKEN_BANG {
+            parser_bump(&state)
+            err :: parser_parse_type_union(&state, depth + 1)
+            ty = Type.Result(ok: Type.Option(inner: inner.ty), err: err.ty)
+            end = err.span
+        }
+        return ParsedType{ty: ty, span: parser_cover(start.span, end)}
+    }
+    if kind == TOKEN_BANG {
+        parser_bump(&state)
+        err :: parser_parse_type_union(&state, depth + 1)
+        return ParsedType{ty: Type.Result(ok: Type.Named("Unit"), err: err.ty), span: parser_cover(start.span, err.span)}
+    }
+    if kind == TOKEN_STAR {
+        parser_bump(&state)
+        elem :: parser_parse_type_atom(&state, depth + 1)
+        return ParsedType{ty: Type.Apply(name: "Ptr", args: [Type]{elem.ty}), span: parser_cover(start.span, elem.span)}
+    }
+    if kind == TOKEN_KW_FN -> return parser_parse_function_type(&state, depth + 1)
+    if kind == TOKEN_LBRACKET -> return parser_parse_collection_type(&state, depth + 1)
+    if kind == TOKEN_LPAREN -> return parser_parse_tuple_type(&state, depth + 1)
+    if kind != TOKEN_IDENT && kind != TOKEN_SELF {
+        parser_add_error(&state, start.span, "expected a type, found `{start.payload.text}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `?String`, or `[U8]")
+        if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
+        return ParsedType{ty: Type.Named("__jet_error"), span: start.span}
+    }
+
+    parser_bump(&state)
+    name := start.payload.decoded
+    end := start.span
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        member :: parser_expect_name(&state, "after `.` in a type path")
+        name = "{name}.{member.payload.decoded}"
+        end = member.span
+    }
+    if parser_current_kind(&state) == TOKEN_LT {
+        return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
+    }
+    ty := parser_named_type(name)
+    ParsedType{ty: ty, span: parser_cover(start.span, end)}
+}
+
+fn parser_parse_collection_type(state: &JetParserState, depth: Int) -> ParsedType {
+    open :: parser_bump(&state)
+    first :: parser_parse_type(&state, depth + 1)
+    if parser_current_kind(&state) == TOKEN_COLON {
+        parser_bump(&state)
+        value :: parser_parse_type(&state, depth + 1)
+        close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the map value type")
+        return ParsedType{ty: Type.Map(key: first.ty, key_span: Val(first.span), value: value.ty), span: parser_cover(open.span, close.span)}
+    }
+    if parser_current_kind(&state) == TOKEN_HASH {
+        parser_bump(&state)
+        measure :: parser_parse_measure(&state, "length", depth + 1)
+        close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the fixed-list length")
+        return ParsedType{ty: Type.FixedList(elem: first.ty, len: measure), span: parser_cover(open.span, close.span)}
+    }
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the list element type")
+    ParsedType{ty: Type.List(element: first.ty), span: parser_cover(open.span, close.span)}
+}
+
+fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
+    open :: parser_bump(&state)
+    if parser_current_kind(&state) == TOKEN_RPAREN {
+        close :: parser_bump(&state)
+        return ParsedType{ty: Type.Named("Unit"), span: parser_cover(open.span, close.span)}
+    }
+    fields := [TypeTupleField]{}
+    loop {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
+            name :: parser_bump(&state)
+            parser_bump(&state)
+            ty :: parser_parse_type(&state, depth + 1)
+            fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
+        } else {
+            ty :: parser_parse_type(&state, depth + 1)
+            fields.push(TypeTupleField{name: "", ty: ty.ty})
+        }
+        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        if parser_current_kind(&state) != TOKEN_COMMA {
+            token :: parser_current(&state)
+            parser_add_error(&state, token.span, "expected `,` between tuple type members", "tuple types list their members in source order", "add a comma or close the tuple type")
+            break
+        }
+        parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+    }
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the tuple type")
+    if fields.len() == 1 && fields[0].name == "" -> return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
+    ParsedType{ty: Type.Tuple(fields: fields), span: parser_cover(open.span, close.span)}
+}
+
+fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType {
+    start :: parser_bump(&state)
+    parser_expect(&state, TOKEN_LPAREN, "`(` after `fn` in a function type")
+    params := [Type]{}
+    if parser_current_kind(&state) != TOKEN_RPAREN {
+        loop {
+            params.push(parser_parse_type(&state, depth + 1).ty)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                token :: parser_current(&state)
+                parser_add_error(&state, token.span, "expected `,` between function type parameters", "function types list parameter types in order", "add a comma or close the parameter list")
+                break
+            }
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after function type parameters")
+    returned := None
+    end := close.span
+    current_kind := parser_current_kind(&state)
+    if current_kind == TOKEN_ARROW || current_kind == TOKEN_UNIFIED_ARROW {
+        parser_bump(&state)
+        result :: parser_parse_type(&state, depth + 1)
+        returned = Val(result.ty)
+        end = result.span
+    }
+    ty := Type.Fn(params: params, ret: returned, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+    ParsedType{ty: ty, span: parser_cover(start.span, end)}
+}
+
+fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
+    parser_bump(&state)
+    args := [Type]{}
+    if !parser_type_close_here(&state) {
+        loop {
+            if (name == "Vec" | "Matrix") && parser_current_kind(&state) == TOKEN_IDENT {
+                measure_token :: parser_bump(&state)
+                args.push(Type.Measure(measure: Measure.Symbol(kind: "shape", name: measure_token.payload.decoded)))
+            } else {
+                args.push(parser_parse_type(&state, depth + 1).ty)
+            }
+            if parser_type_close_here(&state) -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                token :: parser_current(&state)
+                parser_add_error(&state, token.span, "expected `,` between type arguments", "generic type arguments are comma-separated", "add a comma or close the type arguments")
+                break
+            }
+            parser_bump(&state)
+            if parser_type_close_here(&state) -> break
+        }
+    }
+    if !parser_type_close_here(&state) {
+        token :: parser_current(&state)
+        parser_add_error(&state, token.span, "expected `>` after type arguments", "generic type arguments must be closed", "add `>`")
+        return ParsedType{ty: Type.Apply(name: name, args: args), span: parser_cover(prefix, token.span)}
+    }
+    close :: parser_type_gt_span(&state)
+    ty := parser_apply_named_type(name, args)
+    ParsedType{ty: ty, span: parser_cover(prefix, close)}
+}
+
+fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Measure {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_INT {
+        parser_bump(&state)
+        return Measure.Literal(kind: kind, value: token.payload.integer ?? 0)
+    }
+    if token.kind == TOKEN_IDENT {
+        parser_bump(&state)
+        return Measure.Symbol(kind: kind, name: token.payload.decoded)
+    }
+    if token.kind == TOKEN_LPAREN {
+        parser_bump(&state)
+        left :: parser_parse_measure(&state, kind, depth + 1)
+        op :: parser_current_kind(&state)
+        if op == TOKEN_PLUS || op == TOKEN_STAR {
+            parser_bump(&state)
+            right :: parser_parse_measure(&state, kind, depth + 1)
+            close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the measure expression")
+            rule := MeasureRule.Add
+            if op == TOKEN_STAR -> rule = MeasureRule.Mul
+            return Measure.Combined(kind: kind, rule: rule, left: left, right: right)
+        }
+        parser_expect(&state, TOKEN_RPAREN, "`)` after the measure")
+        return left
+    }
+    parser_add_error(&state, token.span, "expected a declared type measure", "type measures accept integer literals, names, and declared arithmetic", "write an integer or a module value parameter")
+    if token.kind != TOKEN_EOF -> parser_bump(&state)
+    Measure.Literal(kind: kind, value: 0)
+}
+
+fn parser_named_type(name: String) -> Type {
+    if name == {
+        "Int" -> Type.Int
+        "Float" | "F64" -> Type.Float
+        "F32" -> Type.Float32
+        "Bool" -> Type.Bool
+        "String" -> Type.String
+        "Char" -> Type.Char
+        "I8" -> Type.IntN(signed: true, bits: 8)
+        "I16" -> Type.IntN(signed: true, bits: 16)
+        "I32" -> Type.IntN(signed: true, bits: 32)
+        "I64" -> Type.IntN(signed: true, bits: 64)
+        "U8" -> Type.IntN(signed: false, bits: 8)
+        "U16" -> Type.IntN(signed: false, bits: 16)
+        "U32" -> Type.IntN(signed: false, bits: 32)
+        "U64" -> Type.IntN(signed: false, bits: 64)
+        "Shared" -> Type.Named(name)
+        else -> Type.Named(name)
+    }
+}
+
+fn parser_apply_named_type(name: String, args: [Type]) -> Type {
+    if name == "Shared" && args.len() == 1 -> return Type.Shared(inner: args[0])
+    if name == "Option" && args.len() == 1 -> return Type.Option(inner: args[0])
+    if name == "Result" && args.len() == 2 -> return Type.Result(ok: args[0], err: args[1])
+    if (name == "Vec" | "Matrix") && args.len() > 0 {
+        return Type.Apply(name: name, args: args)
+    }
+    Type.Apply(name: name, args: args)
+}

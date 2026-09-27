@@ -19,12 +19,12 @@ fn rewrap(reason: String) -> Base64Error !Never { Base64Error{reason: reason} }
 
 fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-c_url_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+C_ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+C_URL_ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
-pub fn encode(data: [U8]) -> String { encode_with(data, c_alphabet, true) }
+pub fn encode(data: [U8]) -> String { encode_with(data, C_ALPHABET, true) }
 
-pub fn encode_url(data: [U8]) -> String { encode_with(data, c_url_alphabet, false) }
+pub fn encode_url(data: [U8]) -> String { encode_with(data, C_URL_ALPHABET, false) }
 
 pub fn decode(text: String) -> [U8] !Base64Error { decode_with(text, false) }
 
@@ -49,13 +49,13 @@ pub fn a85encode(data: [U8]) -> String { ascii85_encode(data) }
 pub fn a85decode(text: String) -> [U8] !Base64Error { ascii85_decode(text) }
 
 /// RFC 1924 Base85.
-pub fn b85encode(data: [U8]) -> String !Base64Error { base85_encode(data, c_b85_alphabet, false) }
-pub fn b85decode(text: String) -> [U8] !Base64Error { base85_decode(text, c_b85_alphabet, false) }
+pub fn b85encode(data: [U8]) -> String !Base64Error { base85_encode(data, C_B85_ALPHABET, false) }
+pub fn b85decode(text: String) -> [U8] !Base64Error { base85_decode(text, C_B85_ALPHABET, false) }
 
 /// ZeroMQ Z85. Z85 intentionally requires complete 4-byte/5-character
 /// quanta; silently padding a key would change its value.
-pub fn z85encode(data: [U8]) -> String !Base64Error { base85_encode(data, c_z85_alphabet, true) }
-pub fn z85decode(text: String) -> [U8] !Base64Error { base85_decode(text, c_z85_alphabet, true) }
+pub fn z85encode(data: [U8]) -> String !Base64Error { base85_encode(data, C_Z85_ALPHABET, true) }
+pub fn z85decode(text: String) -> [U8] !Base64Error { base85_decode(text, C_Z85_ALPHABET, true) }
 
 pub fn encodebytes(data: [U8]) -> String {
     raw :: encode(data).bytes()
@@ -201,13 +201,13 @@ fn decode_with(text: String, url: Bool) -> [U8] !Base64Error {
 fn decode_table(url: Bool) -> [Int] !Never {
     table := [Int]{}
     loop _ in 0..<256 -> table.push(-1)
-    alphabet :: if url -> c_url_alphabet else -> c_alphabet
+    alphabet :: if url -> C_URL_ALPHABET else -> C_ALPHABET
     ab :: alphabet.bytes()
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     table
 }
 
-pub fn encode_url_padded(data: [U8]) -> String { encode_with(data, c_url_alphabet, true) }
+pub fn encode_url_padded(data: [U8]) -> String { encode_with(data, C_URL_ALPHABET, true) }
 
 pub fn decode_padded(text: String) -> [U8] !Base64Error { decode(text) }
 
@@ -240,8 +240,8 @@ pub fn is_base64(text: String) -> Bool {
     decode(text) == .Ok(_)
 }
 
-c_b85_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{{|}}~"
-c_z85_alphabet :: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{{}}@%$#"
+C_B85_ALPHABET :: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{{|}}~"
+C_Z85_ALPHABET :: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{{}}@%$#"
 
 fn ascii85_encode(data: [U8]) -> String {
     out := [U8]{}

@@ -554,7 +554,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Eq, "after the retired comptime name")?;
         }
         let value = self.expr()?;
-        self.expect(TokKind::Semi, "after a comptime value")?;
+        self.finish_stmt()?;
         Ok(ConstDef {
             span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
             name,

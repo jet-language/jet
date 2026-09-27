@@ -90,13 +90,14 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 )),
                 _ => None,
             };
+            let ty = let_binding_type(let_ty, &init.ty);
             let is_uninit = matches!(&init.kind, TExprKind::Uninit);
             let value = if is_uninit || alias_place.is_some() {
                 None
             } else {
-                Some(lower_expr(ctx, init)?)
+                let value = lower_expr(ctx, init)?;
+                Some(ctx.trait_box_value(value, &init.ty, &ty)?)
             };
-            let ty = let_binding_type(let_ty, &init.ty);
             let local = local_for_binding(name, kw);
             let place = if let Some((alias_place, mutable)) = alias_place {
                 ctx.bind_local_alias(&local, ty, alias_place, mutable)?
@@ -457,7 +458,18 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         } => {
             // Match regular assignment: evaluate the RHS before the indexed
             // place, whose receiver and index expressions may have effects.
+            let expected = match base.ty.without_user_tags() {
+                Type::Map { value, .. } => Some((**value).clone()),
+                Type::List(elem) | Type::FixedList { elem, .. } => Some((**elem).clone()),
+                _ => None,
+            };
+            let source = value.ty.clone();
             let value = lower_expr(ctx, value)?;
+            let value = if let Some(expected) = expected.as_ref() {
+                ctx.trait_box_value(value, &source, expected)?
+            } else {
+                value
+            };
             let place = ctx.lower_index_place(
                 base,
                 index,
@@ -754,7 +766,14 @@ fn maybe_copy(
     copy: bool,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     if copy {
-        ctx.emit("stmt.copy", Some(ty.clone()), MirOperation::Copy { value })
+        ctx.emit(
+            "stmt.copy",
+            Some(ty.clone()),
+            MirOperation::Copy {
+                value,
+                materialize_view: false,
+            },
+        )
     } else {
         Ok(value)
     }
@@ -1156,9 +1175,7 @@ fn lower_assign(
     clone_value: bool,
     line: u32,
 ) -> Result<(), LowerError> {
-    // A structured place can evaluate a receiver/index.  TIR's assignment
-    // emitter evaluates the RHS before that place, so retain the same order.
-    let place_ty = op.map(|_| assignment_place_type(ctx, place)).transpose()?;
+    let place_ty = assignment_place_type(ctx, place)?;
     let rhs = lower_expr(ctx, value)?;
     let rhs = maybe_copy(ctx, rhs, &value.ty, clone_value)?;
     let place_id = ctx.lower_place(place, MirAccess::Write)?;
@@ -1168,14 +1185,11 @@ fn lower_assign(
             Some(value.ty.clone()),
             MirOperation::ReadPlace(place_id),
         )?;
-        let place_ty = place_ty
-            .as_ref()
-            .ok_or_else(|| ctx.error(ctx.span(), "compound assignment missing place type"))?;
         let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
             ctx,
             op,
-            assignment_binary_overflow(op, place_ty, &value.ty),
-            place_ty,
+            assignment_binary_overflow(op, &place_ty, &value.ty),
+            &place_ty,
             &value.ty,
             &value.ty,
             line,
@@ -1191,7 +1205,7 @@ fn lower_assign(
             },
         )?
     } else {
-        rhs
+        ctx.trait_box_value(rhs, &value.ty, &place_ty)?
     };
     let owning_file_slot = ctx
         .places
@@ -1269,13 +1283,12 @@ fn lower_index_field_assign(
             },
         )?
     } else {
-        rhs
+        ctx.trait_box_value(rhs, &assign.value.ty, &assign.field_ty)?
     };
     let owning_file_slot = ctx
         .mir_type(&assign.field_ty)?
         .identity
         .is_some_and(|identity| ctx.is_core_file_owner(identity));
-    ctx.emit_file_owner_replacement(place)?;
     ctx.emit(
         "stmt.index-field.write",
         None,
@@ -2090,18 +2103,16 @@ fn bind_value(
 
 fn lower_enum_match(
     ctx: &mut LowerCtx,
-    scrutinee: &TExpr,
-    clone_subject: bool,
-    arms: &[TMatchArm],
-    else_body: Option<&[TStmt]>,
-    fallthrough: bool,
 ) -> Result<(), LowerError> {
     let mut subject = lower_expr(ctx, scrutinee)?;
     if clone_subject {
         subject = ctx.emit(
             "match.subject.copy",
             Some(scrutinee.ty.clone()),
-            MirOperation::Copy { value: subject },
+            MirOperation::Copy {
+                value: subject,
+                materialize_view: false,
+            },
         )?;
     }
     let join = ctx.new_block(ctx.span(), "match.join")?;
@@ -2703,7 +2714,10 @@ fn lower_transaction(
             let copied = ctx.emit(
                 &format!("transaction.snapshot.{index}.copy"),
                 Some(snapshot_ty.clone()),
-                MirOperation::Copy { value },
+                MirOperation::Copy {
+                    value,
+                    materialize_view: false,
+                },
             )?;
             (copied, snapshot_ty)
         };

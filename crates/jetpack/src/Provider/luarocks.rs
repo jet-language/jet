@@ -1250,6 +1250,7 @@ mod tests {
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = Store::realize_verified(
             &roots,
@@ -1288,6 +1289,7 @@ mod tests {
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let replay = Store::realize_verified(
             &roots,
@@ -1319,6 +1321,7 @@ mod tests {
             project_dir: Some(&project),
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         assert!(
             matches!(LuaRocksProvider.realize(&spec, &table, &hostile), Err(ProviderError::LuaRocks(reason)) if reason.contains("integrity changed"))

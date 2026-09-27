@@ -55,52 +55,6 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Refresh the lock witness on a verified cached Nix entry before the Store
-/// projects its receipt. Each package realization may extend the same project
-/// lock, so older entries can carry the digest from the lock state in which
-/// they were first recorded. The output and closure must verify against the
-/// current lock-backed expectation before this metadata-only refresh is
-/// allowed.
-fn refresh_stale_project_nix_entry(
-    roots: &Roots,
-    project: &Path,
-    spec: &RefSpec::RefSpec,
-    table: &RefSpec::SourceTable,
-    ctx: &Provider::Ctx<'_>,
-) -> Result<(), Store::RealizeError> {
-    let result = RuntimePolicy::with_project_lock(project, "nix-cache-reconciliation", || {
-        let Some(candidate) = Store::find_by_reference_read_only(roots, &spec.raw) else {
-            return Ok(());
-        };
-        let Ok(producer) = Store::ProducerRecord::decode(&candidate.producer_record) else {
-            return Ok(());
-        };
-        if producer.provider != "nix" {
-            return Ok(());
-        }
-        let Some(prepared) = producer.facts.get("nix.lock.digest") else {
-            return Ok(());
-        };
-        let Some(expectation) = Provider::cache_expectation(spec, table, ctx) else {
-            return Ok(());
-        };
-        if !Store::cache_candidate_matches(roots, &spec.raw, &expectation) {
-            return Ok(());
-        }
-        let current = Provider::project_lock_digest(Some(project))
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        if current == *prepared {
-            return Ok(());
-        }
-        let Some(hit) = Store::find_verified_by_reference(roots, &spec.raw, &expectation)? else {
-            return Ok(());
-        };
-        Store::refresh_lock_digest(roots, &hit.entry, &current)?;
-        Ok(())
-    })
-    .map_err(Store::RealizeError::Store);
-    result
-}
 
 /// Assemble the acquisition plan before provider realization. Nix narinfo is
 /// read here for its signed closure sizes; payload admission remains behind
@@ -157,7 +111,7 @@ pub(super) fn plan_downloads(
         if let Some(entry) = Store::find_by_reference_read_only(roots, &spec.raw).filter(|entry| {
             matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
                 && (!uses_nix
-                    || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some()))
+                    || Store::require_entry_catalog_permission(&entry, flags.local_nix_catalog.is_some()).is_ok())
         }) {
             plan.add_item(Provider::PlanItem {
                 package: spec.raw.clone(),
@@ -174,6 +128,7 @@ pub(super) fn plan_downloads(
             project_dir: project_dir.as_deref(),
             nix_index: None,
             nix_roots: Some(roots),
+            allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
         };
         // Do not resolve the closure just to decide whether a prompt is
         // needed. The identity candidate avoids that work on a warm path;
@@ -249,6 +204,7 @@ pub(super) fn plan_downloads(
         project_dir: project_dir.as_deref(),
         nix_index: nix_index_client.as_ref(),
         nix_roots: Some(roots),
+        allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
     };
     match Provider::plan_downloads(&pending, table, &ctx) {
         Ok(downloads) => {
@@ -416,6 +372,7 @@ pub(super) fn realize_ref_outcome(
             project_dir: project_dir.as_deref(),
             nix_index: None,
             nix_roots: Some(roots),
+            allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
         };
         Provider::cache_expectation(spec, table, &probe).is_none()
     } else {
@@ -436,10 +393,10 @@ pub(super) fn realize_ref_outcome(
     };
     let recorded_reuse = recorded_reuse.filter(|realized| {
         !uses_nix
-            || nix_catalog_cache_entry_matches(
+            || Store::require_entry_catalog_permission(
                 realized.metadata(),
                 flags.local_nix_catalog.is_some(),
-            )
+            ).is_ok()
     });
     // A Nix ref may reuse a Hangar copy only when the committed lock identity
     // and the complete closure both verify. A missing transitive object must
@@ -459,6 +416,7 @@ pub(super) fn realize_ref_outcome(
                 project_dir: project_dir.as_deref(),
                 nix_index: None,
                 nix_roots: None,
+                allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
             };
             Provider::cache_expectation(spec, table, &probe).is_some_and(|expectation| {
                 Store::cache_candidate_matches(roots, &spec.raw, &expectation)
@@ -482,14 +440,12 @@ pub(super) fn realize_ref_outcome(
                 project_dir.as_deref(),
             )
             .is_none());
-    // A reference the project lock already pins was realized here before, so a
-    // failure now is a damaged or incomplete closure, not an unknown package.
-    // Let it reach the indexed provider, which names the exact missing logical
-    // path (E1350), instead of answering with the generic "not in the hangar".
-    let locked_pin = project_dir
+    // A reference the project lock already pins was realized here before.
+    // Preserve that authority during verified reuse or authenticated repair.
+    let locked_nix = project_dir
         .as_deref()
-        .and_then(|project| Lock::nix_realization(project, &spec.raw))
-        .is_some();
+        .and_then(|project| Lock::nix_realization(project, &spec.raw));
+    let locked_pin = locked_nix.is_some();
     if flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
@@ -590,6 +546,7 @@ pub(super) fn realize_ref_outcome(
         project_dir: project_dir.as_deref(),
         nix_index: nix_index_client.as_ref(),
         nix_roots: Some(roots),
+        allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
     };
     // D-JPK-BUILDSCRIPT1: a Core Cargo action is an upstream executable hook,
     // even when its package manifest is locally reviewed. The exact staged
@@ -623,14 +580,7 @@ pub(super) fn realize_ref_outcome(
     let progress = live.as_deref().map(|live| live.progress_handle());
     let realize = || match recorded_reuse {
         Some(realized) => Ok(realized),
-        None => {
-            if scope == RealizeScope::Project {
-                if let Some(project) = ctx.project_dir {
-                    refresh_stale_project_nix_entry(roots, project, spec, table, &ctx)?;
-                }
-            }
-            Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
-        }
+        None => Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }),
     };
     let result = match progress {
         Some(progress) => Store::with_progress(progress, realize),
@@ -729,33 +679,10 @@ pub(super) fn realize_ref_outcome(
     }
 }
 
-fn nix_catalog_cache_entry_matches(entry: &Store::StoreEntry, local: bool) -> bool {
-    let expected = if local {
-        "local-unofficial"
-    } else {
-        "official-signed"
-    };
-    Store::ProducerRecord::decode(&entry.producer_record)
-        .ok()
-        .and_then(|producer| {
-            let local_native = local
-                && producer.provider == "jetpackage"
-                && producer
-                    .facts
-                    .get("source.kind")
-                    .is_some_and(|kind| kind == "local-unofficial-catalog");
-            if producer.provider == "nix" || local_native {
-                producer.facts.get("nix.index.tier").cloned()
-            } else {
-                None
-            }
-        })
-        .is_some_and(|tier| tier == expected)
-}
 
 fn nix_catalog_cache_matches(roots: &Roots, reference: &str, local: bool) -> bool {
     Store::find_by_reference_read_only(roots, reference)
-        .is_some_and(|entry| nix_catalog_cache_entry_matches(&entry, local))
+        .is_some_and(|entry| Store::require_entry_catalog_permission(&entry, local).is_ok())
 }
 
 fn nix_catalog_status(entry: &Store::StoreEntry) -> Option<String> {
@@ -873,7 +800,8 @@ pub(super) fn realize_adapter(
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
         nix_index: None,
-        nix_roots: None,
+        nix_roots: Some(roots),
+        allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
     };
     let expectation = match Provider::adapter_cache_expectation(plan, table, &ctx) {
         Ok(expectation) => expectation,

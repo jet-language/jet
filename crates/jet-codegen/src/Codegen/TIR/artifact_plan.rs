@@ -211,7 +211,7 @@ pub(super) struct TirForeignFact {
     pub span: Span,
     pub symbol: String,
     pub path: String,
-    pub params: Vec<TirParamFact>,
+    pub bridge_eligible: bool,
     /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
     pub raw_scalar_abi: bool,
     pub return_type: Option<Type>,
@@ -1170,7 +1170,7 @@ fn lower_foreign(
         span: function.span,
         symbol: function_key,
         path: function.rust_path.clone(),
-        params: lower_params(&function.params),
+        bridge_eligible: true,
         raw_scalar_abi: false,
         return_type: function.return_type.clone(),
         abi: function
@@ -1232,7 +1232,7 @@ fn lower_c_foreign(
         symbol: function.rust_path.clone(),
         path: function.rust_path.clone(),
         params: lower_params(&function.params),
-        raw_scalar_abi: false,
+        bridge_eligible: function.hidden_c_bridge_compatible_with_handles(handles),
         return_type: function.return_type.clone(),
         abi: function
             .abi
@@ -1282,7 +1282,7 @@ fn lower_inline_c_foreign(
         symbol: format!("jet_inline_{wrapper}"),
         path: wrapper,
         params: lower_params(&function.params),
-        raw_scalar_abi: true,
+        bridge_eligible: true,
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
         language,
@@ -1308,8 +1308,8 @@ fn lower_guest_import_foreign(
     module_alias: &str,
     target: TirArtifactTarget,
 ) -> Option<TirForeignFact> {
-    let import = crate::Sema::guest_import_function_signature(function)
-        .filter(|_| crate::Sema::guest_import_bridge_compatible(function))?;
+    let import = crate::Sema::guest_import_function_signature(function)?;
+    let bridge_eligible = crate::Sema::guest_import_bridge_compatible(function);
     let wrapper = crate::Sema::guest_import_wrapper_name(module_alias, &function.name);
     let wraps_default_failure = function
         .return_type
@@ -1325,7 +1325,7 @@ fn lower_guest_import_foreign(
         path: import.symbol,
         params: lower_params(&function.params),
         raw_scalar_abi: true,
-        return_type: function.return_type.clone(),
+        bridge_eligible,
         abi: "C".to_string(),
         language: "c".to_string(),
         applicability: target_applicability_for(target),
@@ -1451,9 +1451,7 @@ fn collect_items(
                 }
             }
             Item::CModule(c_module) => {
-                for function in c_module.functions.iter().filter(|function| {
-                    function.hidden_c_bridge_compatible_with_handles(&bundle.cffi.handle_facts)
-                }) {
+                for function in &c_module.functions {
                     facts.foreign.push(lower_c_foreign(
                         function,
                         module,
@@ -2037,4 +2035,147 @@ pub(super) fn lower_tir_artifact_facts_for_target(
         .push(lower_artifact_plan(bundle, target, &facts));
     facts.callbacks = lower_callbacks(bundle, &facts);
     facts
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AST::ExternFn;
+
+    fn param(name: &str, convention: AccessConvention, ty: Type) -> Param {
+        Param {
+            convention,
+            root: false,
+            name: name.to_string(),
+            name_span: Span::new(0, 0),
+            public_label: None,
+            zone: ParamZone::Either,
+            ty,
+            ty_span: Span::new(0, 0),
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+        }
+    }
+
+    fn foreign(name: &str, params: Vec<Param>, return_type: Option<Type>, generated: bool) -> ExternFn {
+        ExternFn {
+            abi: None,
+            name: name.to_string(),
+            name_span: Span::new(0, 0),
+            params,
+            return_type,
+            return_type_span: None,
+            rust_path: name.to_string(),
+            rust_path_span: Span::new(0, 0),
+            generated,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
+            effect_root: None,
+            undo: None,
+            close: None,
+            span: Span::new(0, 0),
+        }
+    }
+
+    fn handle(name: &str) -> FfiHandleFact {
+        FfiHandleFact {
+            lib: "fixture".to_string(),
+            typedef_name: name.to_string(),
+            jet_name: name.to_string(),
+            close: format!("{name}_close"),
+            close_source: FfiCloseSource::Conventional,
+            thread_safety: FfiThreadSafety::Safe,
+        }
+    }
+
+    #[test]
+    fn writeback_rows_reach_artifact_foreign_facts() {
+        let handles = vec![handle("HbFont"), handle("HbBuffer")];
+        let cases = vec![
+            foreign(
+                "edit_scalar",
+                vec![param("value", AccessConvention::Write, Type::Int)],
+                None,
+                false,
+            ),
+            foreign(
+                "edit_string",
+                vec![param("value", AccessConvention::Write, Type::String)],
+                Some(Type::String),
+                false,
+            ),
+            foreign(
+                "edit_handle",
+                vec![param(
+                    "font",
+                    AccessConvention::Write,
+                    Type::Named("HbFont".into()),
+                )],
+                None,
+                true,
+            ),
+            foreign(
+                "edit_mixed_handles",
+                vec![
+                    param("font", AccessConvention::Write, Type::Named("HbFont".into())),
+                    param("buffer", AccessConvention::Read, Type::Named("HbBuffer".into())),
+                ],
+                None,
+                true,
+            ),
+        ];
+
+        for function in &cases {
+            assert!(
+                function.hidden_c_bridge_compatible_with_handles(&handles),
+                "{} must use the resident writeback bridge",
+                function.name
+            );
+            let row = lower_c_foreign(
+                function,
+                "ffi_fixture",
+                "fixture",
+                &handles,
+                TirArtifactTarget::Cranelift,
+            );
+            assert_eq!(row.abi, "C");
+            assert_eq!(row.language, "c");
+            assert!(row.applicability.cranelift);
+            assert_eq!(row.params[0].access, TirAccess::Write);
+        }
+
+        let handle_row = lower_c_foreign(
+            &cases[2],
+            "ffi_fixture",
+            "fixture",
+            &handles,
+            TirArtifactTarget::Interpreter,
+        );
+        assert_eq!(handle_row.handle_key.as_deref(), Some("c::fixture::HbFont"));
+        assert!(handle_row.applicability.interpreter);
+        let typed_record = foreign(
+            "typed_record",
+            vec![param(
+                "coord",
+                AccessConvention::Read,
+                Type::Named("Coord".into()),
+            )],
+            Some(Type::Named("Coord".into())),
+            false,
+        );
+        let direct_row = lower_c_foreign(
+            &typed_record,
+            "ffi_fixture",
+            "fixture",
+            &handles,
+            TirArtifactTarget::RustAot,
+        );
+        assert!(!direct_row.bridge_eligible);
+        assert_eq!(direct_row.key, "ffi_fixture::typed_record");
+        assert_eq!(direct_row.symbol, "typed_record");
+        assert_eq!(direct_row.path, "typed_record");
+    }
+
 }

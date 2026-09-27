@@ -413,16 +413,16 @@ fn computed_constants_match_aot_default_and_interpreter() {
 }
 
 const ENUM_DISCRIMINANT_SOURCE: &str = r#"
-@base :: 7
-@step :: 3
+@BASE :: 7
+@STEP :: 3
 
 #Layout(c)
 enum WireCode {
     Explicit = 0
     Sparse = 9
     Negative = -7
-    Named = @base
-    Arithmetic = @base + @step * 2
+    Named = @BASE
+    Arithmetic = @BASE + @STEP * 2
     Shifted = 1 << 4
     ShiftedRight = 32 >> 3
     Implicit
@@ -432,8 +432,8 @@ fn run() {}
 "#;
 
 const ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST: &str = r#"
-@base :: 7
-@step :: 3
+@BASE :: 7
+@STEP :: 3
 
 #Layout(c)
 enum WireCode {
@@ -441,8 +441,8 @@ enum WireCode {
     Explicit = 0
     Sparse = 9
     Negative = -7
-    Named = @base
-    Arithmetic = @base + @step * 2
+    Named = @BASE
+    Arithmetic = @BASE + @STEP * 2
     Shifted = 1 << 4
     ShiftedRight = 32 >> 3
 }
@@ -487,10 +487,10 @@ const ENUM_DISCRIMINANT_DIAGNOSTICS: &[(&str, &str, &str, &str)] = &[
     (
         "overflow",
         r#"
-@max :: 9223372036854775807
+@MAX :: 9223372036854775807
 
 enum Bad {
-    TooWide = @max + 1
+    TooWide = @MAX + 1
 }
 
 fn run() {}

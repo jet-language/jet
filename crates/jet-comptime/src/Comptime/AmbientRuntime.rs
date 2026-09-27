@@ -15,7 +15,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::ComptimeInput;
 use crate::AST::{CtValue, Type};
 use crate::MIR::{
-    MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
+    MirCoreClosureKind, MirForeign, MirPreludeCall, MirPreludeCallId, MirRuntimeValue, MirSiteId,
 };
 
 pub type AmbientCoreCall = fn(
@@ -151,17 +151,59 @@ pub type AmbientMirHandle = fn(
     Span,
 ) -> Option<Result<AmbientMirHandleResult, Diagnostic>>;
 
-/// Native foreign callback for MIR execution. The selected foreign row carries
-/// the checked symbol, ABI, target applicability, and link/callback identity;
-/// the adapter receives only that row and runtime values.
-/// Native foreign callback for canonical MIR execution. The selected foreign
-/// row carries the checked symbol, ABI, target applicability, and link/callback
-/// identity; the adapter receives only that row and canonical MIR values.
+/// Result envelope for private MIR Prelude effect/control transport.
+///
+/// Value remains the ordinary route result. Effect and Control carry captured
+/// stream bytes rather than writing process IO; the evaluator owns appending
+/// them to its result state.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AmbientMirPreludeResult {
+    Value(MirRuntimeValue),
+    Effect {
+        value: MirRuntimeValue,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    Control {
+        value: MirRuntimeValue,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+        exit_code: i32,
+    },
+}
+
+/// Writeback produced by a checked native MIR foreign call.
+///
+/// `parameter` is the zero-based index in the original `MirForeign.params`
+/// vector. It is deliberately not a lowered slot or hidden-argument index:
+/// every native adapter reports the same source-checked argument identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AmbientMirExternWriteback {
+    pub parameter: usize,
+    pub value: MirRuntimeValue,
+}
+
+/// Lossless result of a checked native MIR foreign call.
+///
+/// Native adapters return the ordinary value and the post-call values of all
+/// checked writable parameters. The evaluator owns applying those values to
+/// its live places; this carrier never contains a frame address or native
+/// pointer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AmbientMirExternResult {
+    pub value: MirRuntimeValue,
+    pub writebacks: Vec<AmbientMirExternWriteback>,
+}
+
+/// Native callback for a checked MIR foreign route. The selected row carries
+/// its canonical signature and authority facts; adapters receive that row and
+/// canonical MIR values, then return the actual native result plus checked
+/// argument-index writebacks.
 pub type AmbientMirExternCall = fn(
     &MirForeign,
     Vec<MirRuntimeValue>,
     Span,
-) -> Option<Result<MirRuntimeValue, Diagnostic>>;
+) -> Option<Result<AmbientMirExternResult, Diagnostic>>;
 pub type AmbientWorkerContext = Arc<dyn Any + Send + Sync>;
 
 #[derive(Clone, Default)]
@@ -172,6 +214,7 @@ pub struct AmbientRuntimeSnapshot {
     extern_call: Option<AmbientExternCall>,
     mir_handle_call: Option<AmbientMirHandle>,
     mir_extern_call: Option<AmbientMirExternCall>,
+    mir_prelude_call: Option<AmbientMirPreludeCall>,
     worker_context: Option<AmbientWorkerContext>,
 }
 thread_local! {
@@ -181,6 +224,7 @@ thread_local! {
     static EXTERN_CALL: Cell<Option<AmbientExternCall>> = const { Cell::new(None) };
     static MIR_HANDLE_CALL: Cell<Option<AmbientMirHandle>> = const { Cell::new(None) };
     static MIR_EXTERN_CALL: Cell<Option<AmbientMirExternCall>> = const { Cell::new(None) };
+    static MIR_PRELUDE_CALL: Cell<Option<AmbientMirPreludeCall>> = const { Cell::new(None) };
     static WORKER_CONTEXT: RefCell<Option<AmbientWorkerContext>> = const { RefCell::new(None) };
     static PACKAGE_READ_CONTEXT: RefCell<Option<PackageReadContext>> = const { RefCell::new(None) };
 }
@@ -365,9 +409,39 @@ pub fn with_ambient_mir_extern<R>(
     body()
 }
 
-/// Return the callback currently installed for canonical MIR foreign calls.
-pub fn ambient_mir_extern_hook() -> Option<AmbientMirExternCall> {
-    MIR_EXTERN_CALL.with(|slot| slot.get())
+struct AmbientMirPreludeGuard(Option<AmbientMirPreludeCall>);
+
+impl Drop for AmbientMirPreludeGuard {
+    fn drop(&mut self) {
+        MIR_PRELUDE_CALL.with(|slot| slot.set(self.0));
+    }
+}
+
+/// Install the canonical MIR Prelude callback for the duration of `body`.
+pub fn with_ambient_mir_prelude<R>(
+    mir_prelude_call: Option<AmbientMirPreludeCall>,
+    body: impl FnOnce() -> R,
+) -> R {
+    let _previous =
+        AmbientMirPreludeGuard(MIR_PRELUDE_CALL.with(|slot| slot.replace(mir_prelude_call)));
+    body()
+}
+
+/// Invoke the selected canonical MIR Prelude callback, if one is installed.
+pub fn try_ambient_mir_prelude(
+    row: &MirPreludeCall,
+    args: Vec<MirRuntimeValue>,
+    result_ty: Option<crate::MIR::MirType>,
+    span: Span,
+) -> Option<Result<AmbientMirPreludeResult, Diagnostic>> {
+    MIR_PRELUDE_CALL
+        .with(|slot| slot.get())
+        .and_then(|hook| hook(row, args, result_ty, span))
+}
+
+/// Return the callback currently installed for canonical MIR Prelude calls.
+pub fn ambient_mir_prelude_hook() -> Option<AmbientMirPreludeCall> {
+    MIR_PRELUDE_CALL.with(|slot| slot.get())
 }
 
 struct AmbientMirHandleGuard(Option<AmbientMirHandle>);
@@ -410,6 +484,7 @@ pub fn ambient_runtime_snapshot() -> AmbientRuntimeSnapshot {
         extern_call: EXTERN_CALL.with(|slot| slot.get()),
         mir_handle_call: MIR_HANDLE_CALL.with(|slot| slot.get()),
         mir_extern_call: MIR_EXTERN_CALL.with(|slot| slot.get()),
+        mir_prelude_call: MIR_PRELUDE_CALL.with(|slot| slot.get()),
         worker_context: WORKER_CONTEXT.with(|slot| slot.borrow().clone()),
     }
 }
@@ -426,7 +501,9 @@ pub fn with_ambient_runtime_snapshot<R>(
             with_ambient_core_closure(snapshot.core_closure_call, || {
                 with_ambient_mir_handle(snapshot.mir_handle_call, || {
                     with_ambient_mir_extern(snapshot.mir_extern_call, || {
-                        with_ambient_worker_context(snapshot.worker_context, body)
+                        with_ambient_mir_prelude(snapshot.mir_prelude_call, || {
+                            with_ambient_worker_context(snapshot.worker_context, body)
+                        })
                     })
                 })
             })
@@ -507,7 +584,7 @@ pub fn try_mir_extern_call(
     foreign: &MirForeign,
     args: Vec<MirRuntimeValue>,
     span: Span,
-) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
     MIR_EXTERN_CALL
         .with(|slot| slot.get())
         .and_then(|hook| hook(foreign, args, span))

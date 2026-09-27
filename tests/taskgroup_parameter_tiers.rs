@@ -58,7 +58,7 @@ fn interpreter_runs_group_parameter_example() {
 
 #[test]
 fn comptime_accepts_group_parameter_example() {
-    let source = format!("{SOURCE}\n@folded :: 40 + 2\n\nfn show() {{ print(@folded) }}\n");
+    let source = format!("{SOURCE}\n@FOLDED :: 40 + 2\n\nfn show() {{ print(@FOLDED) }}\n");
     jet::compile(&source).expect("comptime and Group-parameter code must share the front end");
 }
 

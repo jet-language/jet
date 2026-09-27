@@ -126,7 +126,7 @@ fn check_operation(function: &MirFunction, operation: &MirOperation) -> Result<(
         | MirOperation::ReplacePlace { .. }
         | MirOperation::InitializeUninit { .. }
         | MirOperation::Copy { .. }
-        | MirOperation::Move { .. }
+        | MirOperation::TraitBox { .. }
         | MirOperation::Constant(_)
         | MirOperation::Unary { .. }
         | MirOperation::Binary { .. }

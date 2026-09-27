@@ -1,125 +1,88 @@
-# Jet — Zed
+# Jet for Zed
 
-Zed dev extension: generated Tree-sitter lexical highlighting plus `jet self lsp`
-for diagnostics, completion, hover, go-to-definition, rename, formatting
-(full/range/on-type), semantic tokens
-(full/range/delta), inlay hints, quick-fixes, document symbols, document
-links, code lenses, folding, selection ranges, call hierarchy, and type
-hierarchy.
+The Zed extension is **Jet** (`jet-lang`). It supplies Tree-sitter syntax
+highlighting and starts Jet's language server for diagnostics, completion,
+hover, navigation, rename, formatting, semantic tokens, inlay hints,
+quick-fixes, document links, folding, and run/test code lenses. The extension
+manifest is [`extension.toml`](extension.toml); its process capability invokes
+`jet self lsp`.
 
-## Language-server features
+## Prepare and install a dev extension
 
-| Area | Jet LSP 3.17 behavior |
-|---|---|
-| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range/on-type formatting, quick fixes |
-| Completion | Context-aware items, snippets, auto-import edits, signature help |
-| Navigation | Hover, definition, references, prepare-rename/rename, document and workspace symbols across workspace folders |
-| Structure | Folding, occurrence highlights, selection ranges, document links, run/test code lenses |
-| Semantics | Semantic tokens full/range/delta, inlay hints, call hierarchy, trait/type hierarchy |
-| Workspace | Multiple roots with folder add/remove notifications; `jet.impact` and `jet.budgetReports` commands |
+From the repository root:
 
-Every advertised feature maps to a named non-vacuous test in `tests/lsp.rs`.
-
-## Setup
-
-From the repo root:
-
-```bash
-nix develop -c cargo build                  # produces target/debug/jet
-nix develop -c editors/zed/install.sh       # syncs grammar, generates extension.toml
-```
-
-In Zed:
-
-1. Command palette → **zed: extensions**
-2. Remove any previous Jet dev extension (old id was `jet`, now `jet-lang`)
-3. **Add Dev Extension** (top right)
-4. Choose `editors/zed/` in this repo
-5. **zed: reload window**
-6. Open any `.jet` file
-
-In the language picker, look for **Jet** (capital J), not `jet`.
-
-This repo also ships `.zed/settings.json` so `.jet` files associate with Jet
-when you open the project in Zed.
-
-### Why `install.sh`?
-
-Zed tries to compile extension Rust when it finds `Cargo.toml` in the extension
-folder. That often fails with nix-only `rustc` (no `wasm32-wasip2` std) or when
-`rustup` is not on the GUI app's PATH. This repo prebuilds `extension.wasm`
-instead; the Rust sources live in `wasm-src/` so Zed skips compilation.
-
-If you have rustup and want to rebuild manually:
-
-```bash
-rustup target add wasm32-wasip2
+```sh
+scripts/agent/jet-env cargo build
 editors/zed/install.sh
 ```
 
-## How the extension finds the server
+In Zed, open **zed: extensions**, remove an older Jet dev extension if one is
+present, choose **Add Dev Extension**, select `editors/zed/`, and reload the
+window. The language picker entry is **Jet** with a capital J. The repository's
+`.zed/settings.json` associates `.jet` files with that language when the
+project is opened.
 
-The extension requests the exact approved command `jet self lsp`. Zed's
-worktree-trust gate must allow the language server before Zed starts it;
-restricted worktrees do not start this process. The extension does not call
+`install.sh` prepares two WebAssembly assets. It syncs the authoritative
+Tree-sitter sources from [`editors/tree-sitter`](../tree-sitter/) into the
+standalone `grammar-repo/`, builds `grammars/jet.wasm`, and prebuilds
+`extension.wasm` from [`wasm-src`](wasm-src/). Prebuilding avoids Zed trying
+to compile the extension root as a Rust project. If a rebuild is needed, use:
+
+```sh
+FORCE=1 editors/zed/install.sh
+```
+
+The script removes the generated `grammars/jet/` clone so Zed can fetch it
+from the local grammar repository during extension installation.
+
+## Server trust and discovery
+
+The extension requests one literal command:
+
+```text
+jet self lsp
+```
+
+Zed's worktree-trust gate controls whether this process can start. Restricted
+worktrees do not start the language server. The extension does not call
 `Worktree::which`, read an executable path from the worktree, or execute a
-worktree-provided `jet` binary. Build the compiler and put the trusted `jet`
-executable on the editor's environment `PATH` before opening a trusted project.
+worktree-provided `jet` binary; the command identity is fixed in
+[`wasm-src/src/lib.rs`](wasm-src/src/lib.rs). Put the trusted Jet executable on
+the editor process's `PATH` before opening a trusted project.
 
-`jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
-Rebuild with `cargo build` and reload Zed to pick up server changes.
+`jet self lsp` does not invoke `rustc`, so the plain executable produced by the
+repository build is sufficient. Rebuild it and reload Zed after changing the
+server.
 
 ## Native debugging
 
-The extension does not register a Jet DAP adapter. Zed extension API 0.7.0
-does not expose the trust and authorization hooks required by the native
-debugger, so the Zed extension ships language support only.
+This extension is language support only; it does not register a Jet DAP
+adapter. Use a terminal for native debugging:
 
-Use the terminal command `jet debug <file.jet>` for native debugging. The
-terminal and VS Code adapters expose Jet threads, stacks, scopes, nested
-values, and read-only evaluation. Use `--raw-frames` only for the clearly
-marked generated-Rust expert view. Zed DAP support needs a future extension
-API with the required trust and authorization hooks.
-
-## Verify
-
-```bash
-nix develop -c jet self lsp doctor
-nix develop -c cargo test --test lsp
-nix develop -c jet self lsp --bench
+```sh
+jet debug path/to/file.jet
 ```
 
-`--bench` reports cold, warm-hit, and warm-edit latency plus deterministic
-query-cache memory counters. Timings are measurements, not flaky wall-clock
-pass/fail assertions.
+The VS Code extension documents the DAP launch and attach configuration. Zed's
+extension API does not provide the trust and authorization hooks needed to
+safely add that adapter here.
 
-In Zed, open a file with `x :: 1` and expect a clean parse.
+## Grammar and focused checks
 
-## Grammar note
+Lexical grammar sources are in
+[`editors/tree-sitter`](../tree-sitter/), while the compiler's token vocabulary
+is defined in [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). The LSP
+semantic overlay refines live coloring for ownership markers, rules,
+decorators, and effect rows; it does not change compiler parsing.
 
-`grammars/jet.wasm` is prebuilt by `install.sh`. Authoritative grammar sources
-live in `editors/tree-sitter/`; `install.sh` syncs them into `grammar-repo/`,
-which Zed clones into `grammars/jet/` on install (that folder is removed by
-`install.sh` so checkout stays clean).
+Useful repository checks are:
 
-Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
-
-```bash
-nix develop -c cargo run --bin jet -- self devtools grammars
-nix develop -c cargo test --test grammar
+```sh
+scripts/agent/jet-env cargo test --test lsp
+scripts/agent/jet-env target/debug/jet self lsp doctor
+scripts/agent/jet-env target/debug/jet self lsp --bench
 ```
 
-The LSP semantic overlay refines live editor coloring for ownership (`~`, `^`,
-`&`), rules (`#Test`, `#Unsafe`), and effect rows (`-[]>`, `-[IO]>`).
-Retired or foreign spellings are not colored as live syntax.
-
-## Reinstall after changes
-
-```bash
-nix develop -c editors/zed/install.sh
-# To rebuild grammar or extension wasm from scratch:
-FORCE=1 nix develop -c editors/zed/install.sh
-```
-
-Remove and re-add the dev extension in Zed if the server or grammar did not
-refresh.
+The benchmark reports cold, warm-hit, and warm-edit measurements plus query
+cache counters. Its timings are measurements, not a wall-clock pass/fail
+contract.

@@ -91,7 +91,7 @@
 ] @keyword
 
 ; keyword.ownership: uninit
-; keyword.other: it self shared
+; keyword.other: @CLOSURE @FUNCTION @METHOD @PACKAGE @PHASE @PROGRAM @SOURCE @TYPE @TYPES @VALUE it prep self shared
 [
   "self"
 ] @keyword

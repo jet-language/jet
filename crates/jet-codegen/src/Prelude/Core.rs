@@ -2210,7 +2210,8 @@ fn jet_require_eq(
             &failure.detail,
         );
     }
-    let msg = format!("expected: {right_debug}, got: {left_debug}");
+    let msg =
+        jet_foundation::Outcome::jet_require_eq_message(&left_debug, &right_debug).to_string();
     jet_panic_rich(
         file, line, fn_name, src_line, col, caret_len, &msg, locals,
     );
@@ -2255,7 +2256,8 @@ fn jet_test_require_eq(
         jet_testing_clear_failure();
         Ok(())
     } else {
-        let msg = format!("expected: {right_debug}, got: {left_debug}");
+        let msg =
+            jet_foundation::Outcome::jet_require_eq_message(&left_debug, &right_debug).to_string();
         Err(jet_test_failure_message(
             file, line, fn_name, src_line, col, caret_len, &msg, locals,
         ))

@@ -1256,8 +1256,8 @@ fn run() {{ print(protect() ?? 0) }}
         let main = root.join("main.jet");
         let asset = root.join("message.txt");
         let source = concat!(
-            "@message :: embed_file(\"message.txt\")\n",
-            "fn run() { print(\"{@message}\") }\n"
+            "@MESSAGE :: embed_file(\"message.txt\")\n",
+            "fn run() { print(\"{@MESSAGE}\") }\n"
         );
         std::fs::write(&asset, "first").unwrap();
         std::fs::write(&main, source).unwrap();

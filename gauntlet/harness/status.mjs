@@ -120,6 +120,7 @@ function projectTier(tier, fallbackVerdict = null, metadata = null) {
     verdict,
   };
   copyDetails(record, output);
+  if (Object.hasOwn(record, "verification")) output.verification = record.verification;
   if (metadata) {
     for (const key of STAMP_KEYS) {
       if (metadata[key] != null) output[key] = metadata[key];
@@ -164,13 +165,17 @@ function sampleStats(runtime, field) {
 function decorateMetricValue(value, result, language, jetLanguage, metric, tier, structured = true) {
   const output = { ...asObject(value) };
   const field = SAMPLE_FIELDS[metric];
-  if (!field || Object.hasOwn(output, "stats")) return output;
-  const jetRuntime = !structured || tier === "aot"
-    ? result?.rows?.[jetLanguage]?.runtime
-    : result?.jet_tiers?.[tier]?.runtime;
-  const jet = sampleStats(jetRuntime, field);
-  const peer = sampleStats(result?.rows?.[language]?.runtime, field);
-  if (jet || peer) output.stats = { jet, peer };
+  if (field && !Object.hasOwn(output, "stats")) {
+    const jetRuntime = !structured || tier === "aot"
+      ? result?.rows?.[jetLanguage]?.runtime
+      : result?.jet_tiers?.[tier]?.runtime;
+    const jet = sampleStats(jetRuntime, field);
+    const peer = sampleStats(result?.rows?.[language]?.runtime, field);
+    if (jet || peer) output.stats = { jet, peer };
+  }
+  const jetTier = asObject(result?.jet_tiers?.[tier]);
+  if (Object.hasOwn(jetTier, "verification")) output.verification = jetTier.verification;
+  else delete output.verification;
   return output;
 }
 

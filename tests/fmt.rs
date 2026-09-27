@@ -68,10 +68,10 @@ fn type_alias_binding_sigils_are_canonical_and_idempotent() {
 #[test]
 fn fmt_preserves_module_declaration_and_function_source_order() {
     let source =
-        "message :: \"module global\"\n\nfn helper() Int {\n    return 42\n}\n\nfn run() {\n    print(message)\n    print(helper())\n}\n";
+        "MESSAGE :: \"module global\"\n\nfn helper() Int {\n    return 42\n}\n\nfn run() {\n    print(MESSAGE)\n    print(helper())\n}\n";
     let once = jet::format_source(source).expect("module globals should format");
     let message = once
-        .find("message ::")
+        .find("MESSAGE ::")
         .expect("module binding should remain");
     let helper = once.find("fn helper").expect("declaration should remain");
     assert!(
@@ -288,14 +288,14 @@ fn repr_c_enum_surface_is_stable() {
 
 #[test]
 fn computed_declaration_values_format_stably() {
-    let src = "@lanes :: 2\n@base :: 40\nstruct Frame { values: [Int#(@lanes * 2)] }\n#Layout(c, tag: U8) enum Code { First = @base + 1 Second }\n";
+    let src = "@LANES :: 2\n@BASE :: 40\nstruct Frame { values: [Int#(@LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = @BASE + 1 Second }\n";
     let once = jet::format_source(src).expect("computed declaration values should format");
     assert!(
-        once.contains("[Int#(@lanes * 2)]"),
+        once.contains("[Int#(@LANES * 2)]"),
         "fixed-list expression was lost:\n{once}"
     );
     assert!(
-        once.contains("First = @base + 1"),
+        once.contains("First = @BASE + 1"),
         "enum expression was lost:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted computed values should re-format");
@@ -2502,11 +2502,11 @@ fn fmt_keeps_parens_around_binary_receiver() {
 fn fmt_comptime_block_is_idempotent() {
     // D-META-STAGE1=B: `@ { … }` formatting
     // round-trips — the block keyword, brace, and body all survive a second fmt.
-    let src = r#"@limit :: 1000
+    let src = r#"@LIMIT :: 1000
 
 fn run() {
     @ {
-        @ratio :: @limit / 10
+        @ratio :: @LIMIT / 10
         if @ratio < 1 { panic("bad") }
     }
     print("ok")
@@ -4162,7 +4162,7 @@ fn external_module_format_remains_parseable_and_idempotent() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
-@size :: capacity
+@SIZE :: capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) U { return ~value } }
 module inner :: nested<T>
@@ -4257,10 +4257,10 @@ fn arrow_in_block_if_comment_does_not_create_inline_guard() {
 }
 #[test]
 fn fmt_output_callable_stability() {
-    let source = "app :: Output.Executable{ name: \"demo\", entry: start }\n\nfn start() {}\n";
+    let source = "APP :: Output.Executable{ name: \"demo\", entry: start }\n\nfn start() {}\n";
     let once = jet::format_source(source).expect("typed Output should format");
     for token in [
-        "app ::",
+        "APP ::",
         "Output.Executable{",
         "name: \"demo\"",
         "entry: start",
@@ -4406,11 +4406,11 @@ struct Widget {
     #Doc("display name") label: String
 }
 
-@limit :: 32
+@LIMIT :: 32
 
 #Inline
 fn hot(a: Int) Int {
-    return a * @limit
+    return a * @LIMIT
 }
 
 fn run() {
@@ -4424,7 +4424,7 @@ fn run() {
     for needle in [
         "#Codable",
         "#Doc(\"display name\") label: String",
-        "@limit :: 32",
+        "@LIMIT :: 32",
         "#Inline",
         "#Off print(\"off\")",
         "#Impure(\"reads the wall clock\") {",

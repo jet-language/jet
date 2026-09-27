@@ -118,6 +118,45 @@ async function jet_task_all_named(tasks, authoredFields, resultFields, resultCar
 pub(crate) fn dom_runtime_source() -> &'static str {
     DOM_RUNTIME
 }
+/// Raw canonical Web inputs for the Source Web emitter. This provider supplies
+/// neutral assets only; it does not inspect MIR or select/combine features.
+pub(crate) struct CanonicalWebRawAssets {
+    pub(crate) dom_runtime: &'static str,
+    pub(crate) execution_prelude: &'static str,
+    pub(crate) event_prelude: &'static str,
+    pub(crate) realtime_prelude: &'static str,
+    pub(crate) data_prelude: &'static str,
+    pub(crate) history_prelude: &'static str,
+    pub(crate) compute_prelude: &'static str,
+    pub(crate) raylib_prelude: &'static str,
+    pub(crate) game_prelude: &'static str,
+    pub(crate) task_group_prelude: &'static str,
+    pub(crate) runtime_stop_metadata: String,
+    pub(crate) game_default_frame_budget: i64,
+    pub(crate) game_frame_budget_error: &'static str,
+    pub(crate) harfbuzz_wasm: &'static [u8],
+    pub(crate) timezone_data: Vec<(String, Vec<u8>)>,
+}
+
+pub(crate) fn canonical_web_raw_assets() -> Result<CanonicalWebRawAssets, std::io::Error> {
+    Ok(CanonicalWebRawAssets {
+        dom_runtime: DOM_RUNTIME,
+        execution_prelude: JS_EXECUTION_PRELUDE,
+        event_prelude: JS_EVENT_PRELUDE,
+        realtime_prelude: JS_REALTIME_PRELUDE,
+        data_prelude: JS_DATA_PRELUDE,
+        history_prelude: JS_TESTING_HISTORY_PRELUDE,
+        compute_prelude: JS_COMPUTE_PRELUDE,
+        raylib_prelude: JS_RAYLIB_PRELUDE,
+        game_prelude: JS_GAME_PRELUDE,
+        task_group_prelude: JS_TASK_GROUP_PRELUDE,
+        runtime_stop_metadata: js_runtime_stop_metadata(),
+        game_default_frame_budget: jet_foundation::Game::JetGameFrameBudget::DEFAULT_HEADLESS_FRAMES,
+        game_frame_budget_error: jet_foundation::Game::JetGameFrameBudget::FRAME_BUDGET_ERROR,
+        harfbuzz_wasm: canonical_web_harfbuzz_bytes()?,
+        timezone_data: web_tzdb_files()?,
+    })
+}
 
 /// Assemble the JavaScript runtime shared by MIR Web emission.
 ///
@@ -173,9 +212,7 @@ pub(crate) fn shared_js_prelude(
 /// `jet_ui_web_harfbuzz_imports()` and supplies its low-level functions to app.wasm.
 /// Missing, malformed, or oversized artifacts fail web code generation rather
 /// than leaving a callback or metric approximation in the generated bundle.
-fn canonical_web_harfbuzz_asset() -> Result<String, std::io::Error> {
-    use std::fmt::Write as _;
-
+fn canonical_web_harfbuzz_bytes() -> Result<&'static [u8], std::io::Error> {
     const ARTIFACT_PATH: &str = "wasm/jet_harfbuzz.wasm";
     const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
     const BYTES: &[u8] = include_bytes!("../../../../site/assets/wasm/jet_harfbuzz.wasm");
@@ -189,7 +226,14 @@ fn canonical_web_harfbuzz_asset() -> Result<String, std::io::Error> {
             format!("invalid canonical HarfBuzz Wasm artifact: {ARTIFACT_PATH}"),
         ));
     }
-    let digest = jet_foundation::SHA256::sha256_hex(BYTES);
+    Ok(BYTES)
+}
+fn canonical_web_harfbuzz_asset() -> Result<String, std::io::Error> {
+    use std::fmt::Write as _;
+
+    const ARTIFACT_PATH: &str = "wasm/jet_harfbuzz.wasm";
+    let bytes = canonical_web_harfbuzz_bytes()?;
+    let digest = jet_foundation::SHA256::sha256_hex(bytes);
     let mut out = String::from(
         "\n// D-FOUND-PLATFORM1=A: the checked HarfBuzz bridge travels with the app.\n\
          const __jetCanonicalHarfBuzzWasmAsset = Object.freeze({path:",
@@ -198,7 +242,7 @@ fn canonical_web_harfbuzz_asset() -> Result<String, std::io::Error> {
     out.push_str(",sha256:");
     out.push_str(&json_quote(&digest));
     out.push_str(",bytes:new Uint8Array([");
-    for (index, byte) in BYTES.iter().enumerate() {
+    for (index, byte) in bytes.iter().enumerate() {
         if index != 0 {
             out.push(',');
         }

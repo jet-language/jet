@@ -1,0 +1,211 @@
+// Rust-shaped statements and their parser/semantic support records.
+
+pub enum Stmt {
+    Expr(expr: Expr)
+    Val(binding: Binding)
+    Assign(target: LValue, op: ?BinOp, op_span: Span, value: Expr)
+    Return(value: ?Expr, span: Span)
+    While(cond: Expr, body: [Stmt], span: Span, arrow_body: Bool, label: ?NamedSpan)
+    For(var: String, var_span: Span, var2: ?NamedSpan, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: ?NamedSpan, auto_vectorization: ?AutoVectorizationFacts)
+    Switch(subject: Expr, arms: [SwitchArm], else_body: ?[Stmt], span: Span)
+    Break(span: Span)
+    BreakValue(value: Expr, span: Span)
+    Continue(span: Span)
+    BreakLabel(name: String, span: Span)
+    BreakLabelValue(name: String, name_span: Span, value: Expr, span: Span)
+    ContinueLabel(name: String, span: Span)
+    Loop(body: [Stmt], span: Span, arrow_body: Bool, label: ?NamedSpan)
+    CountedLoop(init: Binding, cond: Expr, step: ?Stmt, body: [Stmt], span: Span, arrow_body: Bool, label: ?NamedSpan)
+    Unsafe(audit: ?String, audit_expr: ?Expr, body: [Stmt], span: Span)
+    Impure(reason: ?String, reason_expr: ?Expr, body: [Stmt], span: Span)
+    Reactive(body: [Stmt], span: Span)
+    Shield(body: [Stmt], span: Span)
+    Switched(marker: Marker, body: [Stmt], span: Span)
+    Region(name: String, name_span: Span, body: [Stmt], span: Span)
+    Policy(declarations: [PolicyDeclaration], body: [Stmt], span: Span)
+    TaskGroup(name: String, name_span: Span, limit: ?Expr, body: [Stmt], span: Span)
+    Layout(name: String, name_span: Span, body: [Stmt], span: Span)
+    AuthorityScope(caps: [NamedSpan], caps_span: Span, binding: ?NamedSpan, body: [Stmt], span: Span)
+    ComptimeIf(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: ?[Stmt], span: Span, selected_then: ?Bool)
+    ComptimeSwitch(subject: Expr, arms: [SwitchArm], else_body: ?[Stmt], span: Span)
+    ComptimeBlock(body: [Stmt], is_template_loop: Bool, span: Span)
+    ContextBlock(fields: [ContextField], body: [Stmt], span: Span)
+    Live(body: [Stmt], span: Span)
+    AssumeDet(reason: String, reason_expr: Expr, body: [Stmt], span: Span)
+    Transact(name: ?String, name_span: ?Span, body: [Stmt], implicit: Bool, span: Span)
+    Yield(value: Expr, span: Span)
+    ScopeMember(name: String, name_span: Span, args: [Expr], args_span: ?Span, body: [Stmt], dsl: Bool, dot_span: Span, span: Span)
+    DeferClose(close: Expr, span: Span)
+}
+
+pub struct IfStmt {
+    pub cond: Expr
+    pub then_body: [Stmt]
+    pub else_branch: ?ElseBranch
+    pub span: Span
+}
+
+pub enum ElseBranch {
+    ElseIf(branch: IfStmt)
+    Else(body: [Stmt])
+}
+
+pub struct SwitchArm {
+    pub cond: Expr
+    pub body: [Stmt]
+    pub span: Span
+}
+
+pub struct ContextField {
+    pub name: String
+    pub value: Expr
+    pub span: Span
+}
+
+pub struct PolicyDeclaration {
+    pub key: PolicyKey
+    pub value: PolicyValue
+    pub scope: PolicyScope
+    pub span: Span
+    pub target: ?Span
+    pub source: String
+}
+
+pub enum PolicyKey {
+    Unsafe
+    Impure
+    Nondeterministic
+    ScopedGc
+    ExplicitUnits
+    Copies
+    Sentries
+}
+
+pub enum PolicyValue {
+    Enabled
+    Limit(value: Int)
+    Forbid
+    Default
+    GateOnly
+    Obligations
+    Relaxed
+    PerSite
+    Track
+    Skip
+    Allow
+    On
+    Off
+    Explicit
+}
+
+pub enum PolicyScope {
+    Organization
+    Package
+    Module
+    Function
+    Block
+}
+
+pub enum ForKind {
+    Range(start: Expr, end: Expr, step: ?Expr, exclusive: Bool)
+    In(collection: Expr, step: ?Expr)
+}
+
+pub enum LValue {
+    Local(name: String, name_span: Span)
+    Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
+    Field(base: Expr, field: String, span: Span)
+}
+
+pub enum MetaField {
+    Category(value: Expr, span: Span)
+    Tunable(span: Span)
+    Maturity(value: Expr, span: Span)
+    Unknown(name: String, value: ?Expr, span: Span)
+}
+
+pub struct MetaAttr {
+    pub fields: [MetaField]
+    pub span: Span
+}
+
+pub struct MetaFacts {
+    pub category: ?String
+    pub tunable: Bool
+}
+
+pub struct Binding {
+    pub mutable: Bool
+    pub markers: [Marker]
+    pub reactive_upgrade: Bool
+    pub meta: ?MetaAttr
+    pub name: String
+    pub name_span: Span
+    pub sigil_span: ?Span
+    pub pattern: ?BindPattern
+    pub ty: ?Type
+    pub ty_span: ?Span
+    pub init: Expr
+    pub is_comptime: Bool
+    pub ct: ?CtValue
+    pub uninit: Bool
+    pub arena_view: Bool
+    pub string_view: Bool
+    pub gc_promotion: ?GcPromotion
+    pub gc_transferred: Bool
+}
+
+pub struct GcPromotion {
+    pub span: Span
+    pub scope: String
+    pub policy_provenance: String
+    pub reason: String
+    pub edges: [GcPromotionEdge]
+    pub collection_len: ?Int
+}
+
+pub struct GcPromotionEdge {
+    pub binding: String
+    pub slot: String
+    pub group: Int
+}
+
+pub struct Marker {
+    pub name: String
+    pub negated: Bool
+    pub name_span: Span
+    pub args: [MarkerCallArg]
+    pub arg_labels: [?CallLabel]
+    pub span: Span
+    pub ct: ?CtValue
+}
+
+pub struct AutoVectorizationFacts {
+    pub element_type: Type
+    pub no_aliasing: Bool
+    pub no_early_exit: Bool
+    pub effect_free_body: Bool
+    pub no_cross_iteration_deps: Bool
+}
+pub fn ast_binding(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: ?Span) -> Binding {
+    Binding{
+        mutable: mutable,
+        markers: [Marker]{},
+        reactive_upgrade: false,
+        meta: None,
+        name: name,
+        name_span: name_span,
+        sigil_span: sigil_span,
+        pattern: None,
+        ty: None,
+        ty_span: None,
+        init: init,
+        is_comptime: false,
+        ct: None,
+        uninit: false,
+        arena_view: false,
+        string_view: false,
+        gc_promotion: None,
+        gc_transferred: false,
+    }
+}

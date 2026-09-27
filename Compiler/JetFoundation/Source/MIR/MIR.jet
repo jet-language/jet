@@ -1,0 +1,3313 @@
+// Canonical semantic MIR. This graph contains checked types, ownership, values,
+// places, calls, functions and control flow; target adapters consume these facts
+// rather than recreating source-level policy.
+
+@MIR_SCHEMA_VERSION :: 6
+
+pub struct MirFunctionId { pub value: Int }
+pub struct MirBlockId { pub value: Int }
+pub struct MirValueId { pub value: Int }
+pub struct MirPlaceId { pub value: Int }
+pub struct MirLocalId { pub value: Int }
+pub struct MirOpId { pub value: Int }
+pub struct MirTypeId { pub value: Int }
+pub struct MirCoreCallId { pub value: Int }
+pub struct MirScopeId { pub value: Int }
+pub struct MirClosureId { pub value: Int }
+pub struct MirModuleId { pub value: Int }
+pub struct MirImportId { pub value: Int }
+pub struct MirTraitId { pub value: Int }
+pub struct MirImplId { pub value: Int }
+pub struct MirConstantId { pub value: Int }
+pub struct MirGcEditSiteId { pub value: Int }
+pub struct MirForeignId { pub value: Int }
+pub struct MirLinkUnitId { pub value: Int }
+pub struct MirCallbackId { pub value: Int }
+pub struct MirHandleId { pub value: Int }
+pub struct MirArtifactId { pub value: Int }
+pub struct MirHarnessId { pub value: Int }
+pub struct MirJobId { pub value: Int }
+pub struct MirTestId { pub value: Int }
+pub struct MirCoveragePointId { pub value: Int }
+pub struct MirTraitMethodId { pub value: Int }
+pub struct MirOutputCheckId { pub value: Int }
+pub struct MirDataPlanNodeId { pub value: Int }
+pub struct MirPreludeCallId { pub value: Int }
+pub struct MirFieldId { pub value: Int }
+pub struct MirSourceFileId { pub value: Int }
+pub struct MirSiteId { pub value: Int }
+
+// Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
+// on process hash seeds, allocation order, or a backend's naming scheme.
+pub fn stable_id(namespace: String, identity: String) -> Int {
+    mask := 0xffffffffffffffff
+    hash := 0xcbf29ce484222325
+    loop byte in namespace.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
+    hash = (hash * 0x100000001b3) & mask
+    loop byte in identity.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
+    if hash == 0 -> return 1
+    hash
+}
+
+pub fn mir_function_id(identity: String) -> MirFunctionId { MirFunctionId{value: stable_id("mir-function", identity)} }
+pub fn mir_type_id(identity: String) -> MirTypeId { MirTypeId{value: stable_id("mir-type", identity)} }
+pub fn mir_module_id(identity: String) -> MirModuleId { MirModuleId{value: stable_id("mir-module", identity)} }
+pub fn mir_trait_id(identity: String) -> MirTraitId { MirTraitId{value: stable_id("mir-trait", identity)} }
+pub fn mir_field_id(identity: String) -> MirFieldId { MirFieldId{value: stable_id("mir-field", identity)} }
+pub fn mir_source_file_id(identity: String) -> MirSourceFileId {
+    MirSourceFileId{value: stable_id("mir-source-file", identity)}
+}
+
+pub enum MirVisibility { Private Package Public }
+pub enum MirFunctionKind { Jet Foreign Test }
+pub enum MirSerdeCodec { Encode Decode }
+pub enum MirOperatorMarker { Commutative }
+pub enum MirScopeKind { Unsafe Impure Reactive Shield Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
+pub enum MirIndexKind { List FixedListProof Map Lane Pool }
+pub enum MirLoopSourceKind {
+    Plain
+    Chars
+    LinesFile
+    LinesStdin
+    LinesProcessStream
+    ChannelReceiver
+    EncodingReader(reader_type: String)
+    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String)
+}
+pub enum MirWebBucket { JS Wasm }
+pub enum MirOSTarget { Linux MacOS Windows }
+pub enum MirWebPartitionMarker { Wasm JS WasmExport }
+pub enum MirAccess { Read Write Move }
+pub enum MirOwnershipMode { Copy Owned Shared ReadBorrow WriteBorrow Move }
+pub enum MirDropKind { NoDrop Value Shared View ForeignHandle }
+
+pub struct MirOwnership {
+    pub mode: MirOwnershipMode
+    pub drop: MirDropKind
+    pub moved: Bool
+    pub last_use: Bool
+    pub gc_root: Bool
+}
+
+pub fn mir_copy_ownership() -> MirOwnership {
+    MirOwnership{mode: MirOwnershipMode.Copy, drop: MirDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
+}
+
+pub fn mir_owned_ownership() -> MirOwnership {
+    MirOwnership{mode: MirOwnershipMode.Owned, drop: MirDropKind.Value, moved: false, last_use: false, gc_root: false}
+}
+
+pub fn mir_ownership_from_access(access: MirAccess) -> MirOwnership {
+    if access == {
+        .Read -> MirOwnership{mode: MirOwnershipMode.ReadBorrow, drop: MirDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
+        .Write -> MirOwnership{mode: MirOwnershipMode.WriteBorrow, drop: MirDropKind.View, moved: false, last_use: false, gc_root: false}
+        .Move -> MirOwnership{mode: MirOwnershipMode.Move, drop: MirDropKind.Value, moved: false, last_use: true, gc_root: false}
+    }
+}
+
+pub enum MirMeasureRule { Add Mul Match }
+pub enum MirMeasure {
+    Literal(kind: String, value: Int)
+    SignedLiteral(kind: String, value: Int)
+    Symbol(kind: String, name: String)
+    Combined(kind: String, rule: MirMeasureRule, left: MirMeasure, right: MirMeasure)
+}
+
+pub fn mir_measure_kind(measure: MirMeasure) -> String {
+    if measure == {
+        .Literal(kind, _) -> kind
+        .SignedLiteral(kind, _) -> kind
+        .Symbol(kind, _) -> kind
+        .Combined(kind, _, _, _) -> kind
+    }
+}
+
+pub fn mir_measure_expression(measure: MirMeasure) -> String {
+    if measure == {
+        .Literal(_, value) -> "{value}"
+        .SignedLiteral(_, value) -> "{value}"
+        .Symbol(_, name) -> name
+        .Combined(_, rule, left, right) -> {
+            left_name := mir_measure_expression(left)
+            right_name := mir_measure_expression(right)
+            if rule == {
+                .Add -> "({left_name} + {right_name})"
+                .Mul -> "({left_name} * {right_name})"
+                .Match -> "match({left_name}, {right_name})"
+            }
+        }
+    }
+}
+
+pub fn mir_measure_literal_value(measure: MirMeasure) -> ?Int {
+    if measure == {
+        .Literal(_, value) -> Val(value)
+        .Combined(_, rule, left, right) -> {
+            if rule == {
+                .Add -> {
+                    a :: mir_measure_literal_value(left) ?? return None
+                    b :: mir_measure_literal_value(right) ?? return None
+                    Val(a + b)
+                }
+                .Mul -> {
+                    a :: mir_measure_literal_value(left) ?? return None
+                    b :: mir_measure_literal_value(right) ?? return None
+                    Val(a * b)
+                }
+                .Match -> None
+            }
+        }
+        else -> None
+    }
+}
+
+pub struct MirDimensionAxis { pub name: String, pub exponent: MirMeasure }
+pub struct MirDimension { pub axes: [MirDimensionAxis] }
+
+fn mir_measure_signed_value(measure: MirMeasure) -> ?Int {
+    if measure == {
+        .Literal(_, value) -> Val(value)
+        .SignedLiteral(_, value) -> Val(value)
+        .Combined(_, rule, left, right) -> {
+            if rule == {
+                .Add -> {
+                    a :: mir_measure_signed_value(left) ?? return None
+                    b :: mir_measure_signed_value(right) ?? return None
+                    Val(a + b)
+                }
+                .Mul -> {
+                    a :: mir_measure_signed_value(left) ?? return None
+                    b :: mir_measure_signed_value(right) ?? return None
+                    Val(a * b)
+                }
+                .Match -> None
+            }
+        }
+        else -> None
+    }
+}
+
+pub fn mir_dimension_identity(dimension: MirDimension) -> String {
+    parts := [String]{}
+    loop axis in dimension.axes {
+        exponent := mir_measure_signed_value(axis.exponent).map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
+        parts.push("{axis.name}:{exponent}")
+    }
+    parts.join(";")
+}
+
+pub fn mir_dimension_display_name(dimension: MirDimension) -> String {
+    parts := [String]{}
+    one := 1
+    loop axis in dimension.axes {
+        leaf := axis.name.split("::")
+        name :: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
+        exponent := mir_measure_signed_value(axis.exponent)
+        rendered := if {
+            exponent == Val(one) -> name
+            else -> {
+                exponent_name := exponent.map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
+                "{name}^{exponent_name}"
+            }
+        }
+        parts.push(rendered)
+    }
+    if parts.len() == 0 -> return "Scalar"
+    parts.join(" * ")
+}
+
+pub enum MirInternalTag {
+    CoreCryptoNominal
+    DeterministicClock
+    SystemClock
+    ExpiringSecretLoan
+    SharedGuardRead
+    SharedGuardEdit
+    TerminalFactSet
+    CppCallbackAbi
+    AllocatorView
+}
+
+pub enum MirTagMarker {
+    User(name: String)
+    Internal(internal_tag: MirInternalTag)
+}
+
+pub fn mir_tag_is_identity_bearing(marker: MirTagMarker) -> Bool {
+    marker == MirTagMarker.Internal(MirInternalTag.CoreCryptoNominal)
+}
+
+pub fn mir_tag_name(marker: MirTagMarker) -> String {
+    if marker == {
+        .User(name) -> name
+        .Internal(internal_tag) -> {
+            if internal_tag == {
+                .CoreCryptoNominal -> "core.crypto"
+                .DeterministicClock -> "clock.deterministic"
+                .SystemClock -> "clock.system"
+                .ExpiringSecretLoan -> "expiring_secret.loan"
+                .SharedGuardRead -> "shared_guard.read"
+                .SharedGuardEdit -> "shared_guard.edit"
+                .TerminalFactSet -> "terminal.fact_set"
+                .CppCallbackAbi -> "cpp.callback_abi"
+                .AllocatorView -> "allocator.view"
+            }
+        }
+    }
+}
+
+pub struct MirCallContractRow { pub label: String, pub zone: ParamZone }
+pub struct MirCallablePolicy { pub name: String, pub arguments: [String] }
+pub struct MirCallablePolicyChain { pub policies: [MirCallablePolicy] }
+pub struct MirCallMetadata {
+    pub names: [String]
+    pub defaults: [Bool]
+    pub variadic: [Bool]
+    pub conventions: [MirAccess]
+    pub policies: MirCallablePolicyChain
+}
+
+pub fn mir_call_metadata_is_variadic(metadata: MirCallMetadata) -> Bool {
+    loop variadic in metadata.variadic {
+        if variadic -> return true
+    }
+    false
+}
+
+pub struct MirNominalRef { pub id: MirTypeId, pub name: String }
+pub struct MirTraitRef { pub id: MirTraitId, pub name: String }
+
+pub fn mir_nominal_ref(name: String) -> MirNominalRef {
+    MirNominalRef{id: mir_type_id(name), name: name}
+}
+
+pub fn mir_trait_ref(name: String) -> MirTraitRef {
+    MirTraitRef{id: mir_trait_id(name), name: name}
+}
+
+pub struct MirFunctionSignature {
+    pub params: [MirType]
+    pub ret: ?MirType
+    pub effect_bound: ?[String]
+    pub param_contract: ?[MirCallContractRow]
+    pub call_metadata: ?MirCallMetadata
+    pub return_view_provenance: ?[MirViewProvenanceEntry]
+}
+
+pub enum MirScalarKind { Int Float Float32 Bool Char Pointer }
+pub enum MirAbi { Scalar(kind: MirScalarKind) Aggregate Sequence Function Nominal Dynamic Never }
+pub enum MirSize { Static(bytes: Int) Dynamic }
+pub struct MirLayout { pub abi: MirAbi, pub size: MirSize, pub align: MirSize }
+
+pub enum MirTypeKind {
+    Int
+    Float
+    Bool
+    String
+    Char
+    List(inner: MirType)
+    Map(key: MirType, value: MirType)
+    Shared(inner: MirType)
+    Option(inner: MirType)
+    Result(ok: MirType, err: MirType)
+    Fn(signature: MirFunctionSignature)
+    SendFn(params: [MirType], ret: ?MirType, conventions: [MirAccess])
+    Apply(name: MirNominalRef, args: [MirType])
+    TraitObject(bounds: [MirTraitRef])
+    Tuple(fields: [MirTupleField])
+    FixedList(elem: MirType, len: MirMeasure)
+    IntN(signed: Bool, bits: Int)
+    InlineRange(base: MirType, lo: Int, hi: Int)
+    Float32
+    Tagged(marker: MirTagMarker, inner: MirType)
+    Union(members: [MirType])
+    Quantity(base: MirType, dimension: MirDimension)
+    Measure(value: MirMeasure)
+}
+
+pub struct MirTupleField { pub name: String, pub ty: MirType }
+pub struct MirType { pub kind: MirTypeKind, pub identity: ?MirTypeId, pub layout: MirLayout }
+pub enum MirViewCopyKind { String List }
+
+pub fn mir_view_copy_symbol(kind: MirViewCopyKind) -> String {
+    if kind == MirViewCopyKind.String -> return "jet_string_view_copy"
+    "jet_view_copy"
+}
+
+pub fn mir_view_copy_kind(source: MirType) -> ?MirViewCopyKind {
+    if source.kind == {
+        .String -> return Val(MirViewCopyKind.String)
+        .List(_) | .FixedList(_, _) -> return Val(MirViewCopyKind.List)
+        .Tagged(_, inner) -> return mir_view_copy_kind(inner)
+        .Apply(name, args) -> {
+            if (name.name == "View" || name.name == "ViewMut") && args.len() == 1 {
+                inner := args[0]
+                if inner.kind == {
+                    .Apply(inner_name, inner_args) -> {
+                        if inner_args.len() == 0 && inner_name.name == "str" -> return Val(MirViewCopyKind.String)
+                    }
+                    else -> {}
+                }
+                return Val(MirViewCopyKind.List)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> Bool {
+    if target.kind == {.Tagged(_, inner) -> return mir_view_copy_target_matches(kind, inner)}
+    if target.kind == {
+        .Apply(name, args) -> {
+            if kind == MirViewCopyKind.String && args.len() == 0 && name.name == "String" -> return true
+            if kind == MirViewCopyKind.List && args.len() == 1 && name.name == "List" -> return true
+        }
+        else -> {}
+    }
+    if kind == MirViewCopyKind.String -> return target.kind == .String
+    if kind == MirViewCopyKind.List -> {
+        if target.kind == {.List(_) -> return true}
+    }
+    false
+}
+
+
+pub fn mir_type_layout(kind: MirTypeKind) -> MirLayout {
+    if kind == {
+        .Int -> MirLayout{abi: MirAbi.Scalar(MirScalarKind.Int), size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .Float -> mir_scalar_layout(MirScalarKind.Float, 8)
+        .Float32 -> mir_scalar_layout(MirScalarKind.Float32, 4)
+        .Bool -> mir_scalar_layout(MirScalarKind.Bool, 1)
+        .Char -> mir_scalar_layout(MirScalarKind.Char, 4)
+        .IntN(_, bits) -> mir_scalar_layout(MirScalarKind.Int, max(1, (bits + 7) / 8))
+        .InlineRange(base, _, _) -> base.layout
+        .Tagged(_, inner) -> inner.layout
+        .Quantity(base, _) -> base.layout
+        .Fn(_) -> MirLayout{abi: MirAbi.Function, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .SendFn(_, _, _) -> MirLayout{abi: MirAbi.Function, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .String -> MirLayout{abi: MirAbi.Sequence, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .FixedList(_, _) -> MirLayout{abi: MirAbi.Sequence, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .List(_) -> MirLayout{abi: MirAbi.Sequence, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .Map(_, _) -> MirLayout{abi: MirAbi.Sequence, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .Apply(name, args) -> {
+            if {
+                args.len() == 0 && name.name == "Never" -> MirLayout{abi: MirAbi.Never, size: MirSize.Static(0), align: MirSize.Static(1)}
+                is_atomic_apply(name.name, args) -> MirLayout{abi: MirAbi.Scalar(MirScalarKind.Int), size: MirSize.Static(8), align: MirSize.Static(8)}
+                else -> MirLayout{abi: MirAbi.Nominal, size: MirSize.Dynamic, align: MirSize.Static(8)}
+            }
+        }
+        .TraitObject(_) -> MirLayout{abi: MirAbi.Nominal, size: MirSize.Dynamic, align: MirSize.Static(8)}
+        .Option(_) -> mir_aggregate_layout()
+        .Result(_, _) -> mir_aggregate_layout()
+        .Tuple(_) -> mir_aggregate_layout()
+        .Union(_) -> mir_aggregate_layout()
+        .Shared(_) -> mir_aggregate_layout()
+        .Measure(_) -> MirLayout{abi: MirAbi.Dynamic, size: MirSize.Dynamic, align: MirSize.Static(8)}
+    }
+}
+
+fn mir_scalar_layout(kind: MirScalarKind, bytes: Int) -> MirLayout {
+    MirLayout{abi: MirAbi.Scalar(kind), size: MirSize.Static(bytes), align: MirSize.Static(min(bytes, 8))}
+}
+
+fn mir_aggregate_layout() -> MirLayout {
+    MirLayout{abi: MirAbi.Aggregate, size: MirSize.Dynamic, align: MirSize.Static(8)}
+}
+
+fn is_atomic_apply(name: String, args: [MirType]) -> Bool {
+    if !(name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")) || args.len() != 1 -> return false
+    if args[0].kind == {
+        .Bool -> true
+        .Int -> true
+        .IntN(signed, bits) -> (signed && bits == 32) || (!signed && (bits == 32 | 64))
+        else -> false
+    }
+}
+
+pub fn mir_type_from_kind(kind: MirTypeKind) -> MirType {
+    MirType{kind: kind, identity: None, layout: mir_type_layout(kind)}
+}
+
+pub fn mir_type_with_identity(ty: MirType, identity: MirTypeId) -> MirType {
+    MirType{kind: ty.kind, identity: Val(identity), layout: ty.layout}
+}
+
+pub fn mir_type_same_checked_type(left: MirType, right: MirType) -> Bool {
+    if left.identity != None && right.identity != None -> return left.identity == right.identity
+    mir_type_kind_same_identity(left, right)
+}
+
+fn mir_type_kind_same_identity(left: MirType, right: MirType) -> Bool {
+    if left.kind == {
+        .Tagged(marker, inner) -> {
+            if !mir_tag_is_identity_bearing(marker) {
+                if right.kind == {
+                    .Tagged(other_marker, other_inner) -> {
+                        if !mir_tag_is_identity_bearing(other_marker) -> return mir_type_same_checked_type(inner, other_inner)
+                    }
+                    else -> {}
+                }
+                return mir_type_kind_same_identity(inner, right)
+            }
+        }
+        else -> {}
+    }
+    if right.kind == {
+        .Tagged(marker, inner) -> {
+            if !mir_tag_is_identity_bearing(marker) -> return mir_type_kind_same_identity(left, inner)
+        }
+        else -> {}
+    }
+    same := if left.kind == {
+        .Int -> right.kind == MirTypeKind.Int
+        .Float -> right.kind == MirTypeKind.Float
+        .Bool -> right.kind == MirTypeKind.Bool
+        .String -> right.kind == MirTypeKind.String
+        .Char -> right.kind == MirTypeKind.Char
+        .Float32 -> right.kind == MirTypeKind.Float32
+        .List(inner) -> if right.kind == {
+            .List(other) -> mir_type_same_checked_type(inner, other)
+            else -> false
+        }
+        .Map(key, value) -> if right.kind == {
+            .Map(other_key, other_value) -> mir_type_same_checked_type(key, other_key) && mir_type_same_checked_type(value, other_value)
+            else -> false
+        }
+        .Shared(inner) -> if right.kind == {
+            .Shared(other) -> mir_type_same_checked_type(inner, other)
+            else -> false
+        }
+        .Option(inner) -> if right.kind == {
+            .Option(other) -> mir_type_same_checked_type(inner, other)
+            else -> false
+        }
+        .Result(ok, err) -> if right.kind == {
+            .Result(other_ok, other_err) -> mir_type_same_checked_type(ok, other_ok) && mir_type_same_checked_type(err, other_err)
+            else -> false
+        }
+        .Fn(signature) -> if right.kind == {
+            .Fn(other) -> mir_function_signature_identity_equal(signature, other)
+            else -> false
+        }
+        .SendFn(params, ret, conventions) -> if right.kind == {
+            .SendFn(other_params, other_ret, other_conventions) -> mir_type_array_identity_equal(params, other_params) && mir_optional_type_identity_equal(ret, other_ret) && conventions == other_conventions
+            else -> false
+        }
+        .Apply(name, args) -> if right.kind == {
+            .Apply(other_name, other_args) -> name.id == other_name.id && mir_type_array_identity_equal(args, other_args)
+            else -> false
+        }
+        .TraitObject(bounds) -> if right.kind == {
+            .TraitObject(other) -> mir_trait_ref_array_identity_equal(bounds, other)
+            else -> false
+        }
+        .Tuple(fields) -> if right.kind == {
+            .Tuple(other) -> mir_tuple_fields_identity_equal(fields, other)
+            else -> false
+        }
+        .FixedList(elem, len) -> if right.kind == {
+            .FixedList(other_elem, other_len) -> mir_type_same_checked_type(elem, other_elem) && len == other_len
+            else -> false
+        }
+        .IntN(signed, bits) -> if right.kind == {
+            .IntN(other_signed, other_bits) -> signed == other_signed && bits == other_bits
+            else -> false
+        }
+        .InlineRange(base, lo, hi) -> if right.kind == {
+            .InlineRange(other_base, other_lo, other_hi) -> lo == other_lo && hi == other_hi && mir_type_same_checked_type(base, other_base)
+            else -> false
+        }
+        .Tagged(marker, inner) -> if right.kind == {
+            .Tagged(other_marker, other_inner) -> marker == other_marker && mir_type_same_checked_type(inner, other_inner)
+            else -> false
+        }
+        .Union(members) -> if right.kind == {
+            .Union(other) -> mir_type_array_identity_equal(members, other)
+            else -> false
+        }
+        .Quantity(base, dimension) -> if right.kind == {
+            .Quantity(other_base, other_dimension) -> mir_type_same_checked_type(base, other_base) && dimension == other_dimension
+            else -> false
+        }
+        .Measure(value) -> if right.kind == {
+            .Measure(other) -> value == other
+            else -> false
+        }
+        else -> false
+    }
+    same
+}
+
+fn mir_type_array_identity_equal(left: [MirType], right: [MirType]) -> Bool {
+    if left.len() != right.len() -> return false
+    i := 0
+    loop ty in left {
+        if !mir_type_same_checked_type(ty, right[i]) -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn mir_optional_type_identity_equal(left: ?MirType, right: ?MirType) -> Bool {
+    if left == None -> return right == None
+    if right == None -> return false
+    left_type :: left ?? return false
+    right_type :: right ?? return false
+    mir_type_same_checked_type(left_type, right_type)
+}
+
+fn mir_trait_ref_array_identity_equal(left: [MirTraitRef], right: [MirTraitRef]) -> Bool {
+    if left.len() != right.len() -> return false
+    i := 0
+    loop item in left {
+        if item.id != right[i].id -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn mir_tuple_fields_identity_equal(left: [MirTupleField], right: [MirTupleField]) -> Bool {
+    if left.len() != right.len() -> return false
+    i := 0
+    loop field in left {
+        if field.name != right[i].name || !mir_type_same_checked_type(field.ty, right[i].ty) -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn mir_function_signature_identity_equal(left: MirFunctionSignature, right: MirFunctionSignature) -> Bool {
+    if !mir_type_array_identity_equal(left.params, right.params) || !mir_optional_type_identity_equal(left.ret, right.ret) -> return false
+    if !mir_call_contract_identity_equal(left.param_contract, right.param_contract) -> return false
+    if left.params.len() != right.params.len() -> return false
+    i := 0
+    loop _ in left.params {
+        if mir_signature_convention(left, i) != mir_signature_convention(right, i) -> return false
+        i = i + 1
+    }
+    left_variadic := mir_optional_call_metadata_is_variadic(left.call_metadata)
+    right_variadic := mir_optional_call_metadata_is_variadic(right.call_metadata)
+    if left_variadic != right_variadic -> return false
+    if !left_variadic -> return true
+    mir_variadic_identity_equal(left.call_metadata, right.call_metadata)
+}
+
+fn mir_signature_convention(signature: MirFunctionSignature, index: Int) -> MirAccess {
+    if signature.call_metadata != None {
+        metadata :: signature.call_metadata ?? return MirAccess.Read
+        if index < metadata.conventions.len() -> return metadata.conventions[index]
+    }
+    MirAccess.Read
+}
+
+fn mir_call_contract_identity_equal(left: ?[MirCallContractRow], right: ?[MirCallContractRow]) -> Bool {
+    if left == None -> return right == None
+    if right == None -> return false
+    left_rows := left ?? [MirCallContractRow]{}
+    right_rows := right ?? [MirCallContractRow]{}
+    if left_rows.len() != right_rows.len() -> return false
+    i := 0
+    loop row in left_rows {
+        if row.label != right_rows[i].label || row.zone != right_rows[i].zone -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn mir_optional_call_metadata_is_variadic(metadata: ?MirCallMetadata) -> Bool {
+    if metadata == None -> return false
+    value :: metadata ?? return false
+    mir_call_metadata_is_variadic(value)
+}
+
+fn mir_variadic_identity_equal(left: ?MirCallMetadata, right: ?MirCallMetadata) -> Bool {
+    left_metadata :: left ?? return false
+    right_metadata :: right ?? return false
+    if left_metadata.variadic.len() != right_metadata.variadic.len() -> return false
+    i := 0
+    loop item in left_metadata.variadic {
+        if item != right_metadata.variadic[i] -> return false
+        i = i + 1
+    }
+    true
+}
+
+pub fn mir_type_identity_key(ty: MirType) -> String {
+    identity :: ty.identity ?? return mir_type_canonical_key(ty)
+    "id:{identity.value}"
+}
+
+pub fn mir_type_canonical_key(ty: MirType) -> String {
+    kind := ty.kind
+    if kind == {
+        .Int -> return "Int"
+        .Float -> return "Float"
+        .Bool -> return "Bool"
+        .String -> return "String"
+        .Char -> return "Char"
+        .List(inner) -> return "List<{mir_type_canonical_key(inner)}>"
+        .Map(key, value) -> return "Map<{mir_type_canonical_key(key)},{mir_type_canonical_key(value)}>"
+        .Shared(inner) -> return "Shared<{mir_type_canonical_key(inner)}>"
+        .Option(inner) -> return "Option<{mir_type_canonical_key(inner)}>"
+        .Result(ok, err) -> return "Result<{mir_type_canonical_key(ok)},{mir_type_canonical_key(err)}>"
+        .Fn(signature) -> return mir_function_signature_canonical_key(signature)
+        .SendFn(params, ret, conventions) -> return mir_send_function_canonical_key(params, ret, conventions)
+        .Apply(name, args) -> return mir_applied_type_canonical_key(name, args)
+        .TraitObject(bounds) -> return mir_trait_object_canonical_key(bounds)
+        .Tuple(fields) -> return mir_tuple_canonical_key(fields)
+        .FixedList(elem, len) -> return "FixedList<{mir_type_canonical_key(elem)};{mir_measure_expression(len)}>"
+        .IntN(signed, bits) -> {
+            prefix := if signed -> "I" else -> "U"
+            return "{prefix}Int{bits}"
+        }
+        .InlineRange(base, lo, hi) -> return "Range<{mir_type_canonical_key(base)};{lo}..{hi}>"
+        .Float32 -> return "Float32"
+        .Tagged(marker, inner) -> {
+            if mir_tag_is_identity_bearing(marker) -> return "Tagged({mir_tag_name(marker)};{mir_type_canonical_key(inner)})"
+            return mir_type_canonical_key(inner)
+        }
+        .Union(members) -> return mir_union_canonical_key(members)
+        .Quantity(base, dimension) -> return "Quantity<{mir_type_canonical_key(base)};{mir_dimension_identity(dimension)}>"
+        .Measure(value) -> return "Measure({mir_measure_kind(value)}:{mir_measure_expression(value)})"
+        else -> return panic("unsupported MIR type kind in canonical key")
+    }
+}
+
+fn mir_function_signature_canonical_key(signature: MirFunctionSignature) -> String {
+    params := [String]{}
+    loop param in signature.params -> params.push(mir_type_canonical_key(param))
+    result := signature.ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
+    contract := [String]{}
+    contract_rows := signature.param_contract ?? [MirCallContractRow]{}
+    loop row in contract_rows -> contract.push("{row.label}:{param_zone_name(row.zone)}")
+    conventions := [String]{}
+    i := 0
+    loop _ in signature.params {
+        access := MirAccess.Read
+        if signature.call_metadata != None {
+            metadata :: signature.call_metadata ?? MirCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MirAccess]{}, policies: MirCallablePolicyChain{policies: [MirCallablePolicy]{}}}
+            if i < metadata.conventions.len() -> access = metadata.conventions[i]
+        }
+        conventions.push(mir_access_code(access))
+        i = i + 1
+    }
+    variadic := [String]{}
+    if signature.call_metadata != None {
+        metadata :: signature.call_metadata ?? MirCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MirAccess]{}, policies: MirCallablePolicyChain{policies: [MirCallablePolicy]{}}}
+        if {
+            mir_call_metadata_is_variadic(metadata) -> {
+                loop value in metadata.variadic {
+                    code := if value -> "1" else -> "0"
+                    variadic.push(code)
+                }
+            }
+            else -> {}
+        }
+    }
+    "Fn({params.join(",")})->{result};contract={contract.join(",")};conventions={conventions.join("")};variadic={variadic.join("")}"
+}
+
+fn mir_send_function_canonical_key(params: [MirType], ret: ?MirType, conventions: [MirAccess]) -> String {
+    names := [String]{}
+    loop param in params -> names.push(mir_type_canonical_key(param))
+    result := ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
+    access := [String]{}
+    loop item in conventions -> access.push(mir_access_code(item))
+    "SendFn({names.join(",")})->{result};conventions={access.join("")}"
+}
+
+fn mir_applied_type_canonical_key(name: MirNominalRef, args: [MirType]) -> String {
+    if args.len() == 0 -> return name.name
+    names := [String]{}
+    loop arg in args -> names.push(mir_type_canonical_key(arg))
+    "Apply({name.id.value})<{names.join(",")}>"
+}
+
+fn mir_trait_object_canonical_key(bounds: [MirTraitRef]) -> String {
+    ids := [String]{}
+    loop bound in bounds -> ids.push("{bound.id.value}")
+    "Trait({ids.join("+")})"
+}
+
+fn mir_tuple_canonical_key(fields: [MirTupleField]) -> String {
+    names := [String]{}
+    loop field in fields -> names.push("{field.name}:{mir_type_canonical_key(field.ty)}")
+    "Tuple({names.join(",")})"
+}
+
+fn mir_union_canonical_key(members: [MirType]) -> String {
+    names := [String]{}
+    loop member in members -> names.push(mir_type_canonical_key(member))
+    "Union({names.join("|")})"
+}
+
+fn mir_access_code(access: MirAccess) -> String {
+    if access == {
+        .Read -> "R"
+        .Write -> "W"
+        .Move -> "M"
+    }
+}
+
+pub fn mir_type_display_name(ty: MirType) -> String {
+    if ty.kind == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .List(inner) -> "[{mir_type_display_name(inner)}]"
+        .Map(key, value) -> "[{mir_type_display_name(key)}:{mir_type_display_name(value)}]"
+        .Shared(inner) -> "Shared<{mir_type_display_name(inner)}>"
+        .Option(inner) -> "?{mir_type_display_name(inner)}"
+        .Result(ok, err) -> mir_result_display_name(ok, err)
+        .Fn(signature) -> mir_function_signature_display_name(signature)
+        .SendFn(params, ret, _) -> {
+            names := [String]{}
+            loop param in params -> names.push(mir_type_display_name(param))
+            result := ret.map(value -> mir_type_display_name(value)) ?? "Unit"
+            "SendFn({names.join(", ")}) -> {result}"
+        }
+        .Apply(name, args) -> {
+            names := [String]{}
+            loop arg in args -> names.push(mir_type_display_name(arg))
+            "{name.name}<{names.join(", ")}>"
+        }
+        .TraitObject(bounds) -> {
+            names := [String]{}
+            loop bound in bounds -> names.push(bound.name)
+            names.join(" + ")
+        }
+        .Tuple(fields) -> {
+            names := [String]{}
+            loop field in fields -> names.push("{field.name}: {mir_type_display_name(field.ty)}")
+            "({names.join(", ")})"
+        }
+        .FixedList(elem, len) -> "[{mir_type_display_name(elem)}#{mir_measure_expression(len)}]"
+        .IntN(signed, bits) -> {
+            prefix := if signed -> "I" else -> "U"
+            "{prefix}{bits}"
+        }
+        .InlineRange(base, lo, hi) -> "{mir_type_display_name(base)}({lo}..{hi})"
+        .Float32 -> "F32"
+        .Tagged(marker, inner) -> {
+            if marker == {
+                .User(name) -> "#{name} {mir_type_display_name(inner)}"
+                .Internal(_) -> mir_type_display_name(inner)
+            }
+        }
+        .Union(members) -> {
+            names := [String]{}
+            loop member in members -> names.push(mir_type_display_name(member))
+            names.join(" | ")
+        }
+        .Quantity(base, dimension) -> "Quantity<{mir_dimension_display_name(dimension)}, {mir_type_display_name(base)}; {mir_dimension_identity(dimension)}>"
+        .Measure(value) -> mir_measure_expression(value)
+    }
+}
+
+fn mir_result_display_name(ok: MirType, err: MirType) -> String {
+    is_default_error := false
+    if err.kind == {
+        .Apply(name, args) -> is_default_error = args.len() == 0 && name.name == "Err"
+        else -> {}
+    }
+    if mir_type_is_unit(ok) {
+        if is_default_error -> return "!Err"
+        return "!{mir_type_display_name(err)}"
+    }
+    if !is_default_error -> return "{mir_type_display_name(ok)} !{mir_type_display_name(err)}"
+    mir_type_display_name(ok)
+}
+
+pub fn mir_function_signature_display_name(signature: MirFunctionSignature) -> String {
+    params := mir_signature_parameter_names(signature.params, signature.param_contract)
+    out := "fn({params})"
+    if signature.ret.map(value -> !mir_type_is_unit(value)) ?? false {
+        out = "{out} {signature.ret.map(value -> mir_type_display_name(value)) ?? ""}"
+    }
+    if signature.effect_bound != None -> out = "{out} -[{(signature.effect_bound ?? [String]{}).join(",")}]>"
+    out
+}
+
+fn mir_signature_parameter_names(params: [MirType], param_contract: ?[MirCallContractRow]) -> String {
+    names := [String]{}
+    contracts := param_contract ?? [MirCallContractRow]{}
+    label_only := ParamZone.LabelOnly
+    positional_only := ParamZone.PositionalOnly
+    i := 0
+    star_done := false
+    loop param in params {
+        zone := if i < contracts.len() -> Val(contracts[i].zone) else -> None
+        if zone == Val(label_only) && !star_done {
+            names.push("*")
+            star_done = true
+        }
+        label := if i < contracts.len() -> contracts[i].label else -> ""
+        if label == "" { names.push(mir_type_display_name(param)) } else { names.push("{label}: {mir_type_display_name(param)}") }
+        next_zone := if i + 1 < contracts.len() -> Val(contracts[i + 1].zone) else -> None
+        if zone == Val(positional_only) && next_zone != Val(positional_only) -> names.push("/")
+        i = i + 1
+    }
+    names.join(", ")
+}
+
+pub fn mir_type_is_integer(ty: MirType) -> Bool {
+    if ty.kind == {
+        .Int -> true
+        .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> mir_type_is_integer(base)
+        .Tagged(_, inner) -> mir_type_is_integer(inner)
+        else -> false
+    }
+}
+
+pub fn mir_type_is_float(ty: MirType) -> Bool {
+    if ty.kind == {
+        .Float -> true
+        .Float32 -> true
+        .Tagged(_, inner) -> mir_type_is_float(inner)
+        .Quantity(base, _) -> mir_type_is_float(base)
+        else -> false
+    }
+}
+
+pub fn mir_type_is_numeric(ty: MirType) -> Bool { mir_type_is_integer(ty) || mir_type_is_float(ty) }
+pub fn mir_type_has_valid_layout(ty: MirType) -> Bool { ty.layout == mir_type_layout(ty.kind) }
+pub fn mir_type_is_scalar(ty: MirType) -> Bool { ty.layout.abi == MirAbi.Scalar(MirScalarKind.Int) | MirAbi.Scalar(MirScalarKind.Float) | MirAbi.Scalar(MirScalarKind.Float32) | MirAbi.Scalar(MirScalarKind.Bool) | MirAbi.Scalar(MirScalarKind.Char) | MirAbi.Scalar(MirScalarKind.Pointer) }
+pub fn mir_type_is_unit(ty: MirType) -> Bool {
+    if ty.kind == {
+        .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
+        else -> false
+    }
+}
+
+pub enum MirFunctionForm {
+    TopLevel
+    Method(owner: MirType, self_access: ?MirAccess)
+    TraitMethod(owner: MirType, trait_ref: MirTraitRef, self_access: ?MirAccess, serde: ?MirSerdeCodec)
+}
+
+
+pub enum MirViewSource {
+    Receiver
+    Parameter(index: Int)
+    Static(module_path: String, name: String)
+}
+pub enum MirViewProjection { Field(name: String) Index Range }
+pub struct MirViewSourcePath { pub source: MirViewSource, pub projections: [MirViewProjection] }
+pub struct MirViewProvenance { pub sources: [MirViewSourcePath], pub mutable: Bool }
+pub struct MirViewProvenanceEntry { pub slot: [String], pub provenance: MirViewProvenance }
+
+pub struct MirEffectFacts {
+    pub direct: [String]
+    pub solved: [String]
+    pub call_edges: [String]
+    pub maximal: Bool
+    pub direct_spans: [MirNamedSpan]
+}
+pub struct MirNamedSpan { pub name: String, pub span: Span }
+
+pub enum MirFailureCarrier {
+    Infallible
+    Result(success: MirType, error: MirType)
+    Optional(value: MirType)
+    Diverges(value: MirType)
+}
+pub enum MirCallFallibility { Infallible Failure(failure: MirFailureCarrier) }
+pub struct MirTargetApplicability {
+    pub rust_aot: Bool
+    pub cranelift: Bool
+    pub interpreter: Bool
+    pub web: Bool
+}
+
+pub struct MirParam {
+    pub index: Int
+    pub name: String
+    pub span: Span
+    pub ty: MirType
+    pub access: MirAccess
+    pub ownership: MirOwnership
+    pub public_label: String
+    pub variadic: Bool
+    pub default_present: Bool
+}
+pub struct MirCaptureParam { pub slot: Int, pub name: String, pub span: Span, pub ty: MirType, pub access: MirAccess, pub ownership: MirOwnership }
+pub enum MirCaptureOperand { Value(value: MirValueId) Place(place: MirPlaceId) }
+pub struct MirLocal {
+    pub id: MirLocalId
+    pub name: String
+    pub span: Span
+    pub ty: MirType
+    pub place: MirPlaceId
+    pub mutable: Bool
+    pub ownership: MirOwnership
+    pub is_comptime: Bool
+    pub uninit: Bool
+    pub arena_view: Bool
+    pub string_view: Bool
+    pub gc_root: Bool
+}
+
+pub enum MirPlaceBase { Local(local: MirLocalId) Parameter(value: MirValueId) Capture(value: MirValueId) Temporary(value: MirValueId) Static(name: String) }
+pub enum MirProjection {
+    Field(field: MirFieldId, span: Span)
+    Index(kind: MirIndexKind, index: MirValueId, call: MirPreludeCallId, write_call: ?MirPreludeCallId, location: MirPanicLoc, context: ?MirPanicContext, span: Span)
+    Deref(span: Span)
+}
+pub struct MirPlace {
+    pub id: MirPlaceId
+    pub span: Span
+    pub ty: MirType
+    pub base: MirPlaceBase
+    pub projections: [MirProjection]
+    pub access: MirAccess
+    pub persist_key: ?String
+}
+pub struct MirValueFact { pub id: MirValueId, pub ty: MirType, pub span: Span, pub ownership: MirOwnership }
+pub struct MirScope { pub id: MirScopeId, pub kind: MirScopeKind, pub span: Span, pub name: ?String, pub deadline: ?MirValueId, pub facts: [MirScopeFact] }
+pub struct MirScopeFact { pub key: String, pub value: String }
+
+pub struct MirCallSignature { pub arity: Int, pub max_arity: Int, pub borrow_mask: [Bool] }
+pub enum MirPreludeFamily { MathBuiltin PreciseBuiltin BuiltinMethod HostBorrowCallback Overflow HandleMethod ClosureMethod ColumnarAccess StaticPrelude Host }
+pub enum MirPreludeAbi { Value Aggregate Control Effect }
+pub enum MirSymbol { Prelude(name: String) Runtime(name: String) }
+pub fn mir_symbol_name(symbol: MirSymbol) -> String {
+    if symbol == {
+        .Prelude(name) -> return name
+        .Runtime(name) -> return name
+    }
+}
+pub struct MirPreludeCall {
+    pub id: MirPreludeCallId
+    pub family: MirPreludeFamily
+    pub module_name: String
+    pub member: String
+    pub symbol: MirSymbol
+    pub signature: MirCallSignature
+    pub effect: ?Effect
+    pub fallibility: MirCallFallibility
+    pub abi: MirPreludeAbi
+    pub authority: ?MirAuthorityDecision
+    pub db_metadata: ?MirDbQueryMetadata
+}
+pub struct MirHostImportFact {
+    pub id: String
+    pub operation: String
+    pub required_right: String
+    pub parameter_type_ids: [String]
+    pub result_type_id: ?String
+}
+pub struct MirAuthorityDecision {
+    pub import: MirHostImportFact
+    pub authority_argument: ?Int
+    pub inherited: Bool
+}
+pub fn mir_authority_plugin_load() -> MirAuthorityDecision {
+    MirAuthorityDecision{
+        import: MirHostImportFact{
+            id: "core.plugin.authority",
+            operation: "core.plugin.host-import",
+            required_right: "FS.Read",
+            parameter_type_ids: [String]{"String", "Authority"},
+            result_type_id: Val("Plugin"),
+        },
+        authority_argument: Val(1),
+        inherited: false,
+    }
+}
+pub fn mir_authority_plugin_call() -> MirAuthorityDecision {
+    load := mir_authority_plugin_load()
+    MirAuthorityDecision{import: load.import, authority_argument: None, inherited: true}
+}
+pub struct MirDbTableFact { pub table_id: String, pub read: Bool, pub write: Bool }
+pub struct MirDbQueryMetadata {
+    pub source_file: MirSourceFileId
+    pub source_path: String
+    pub source_span: Span
+    pub statement_identity: String
+    pub table_facts: [MirDbTableFact]
+}
+
+pub enum MirItemRef { Type(id: MirTypeId) Trait(id: MirTraitId) Function(id: MirFunctionId) Constant(id: MirConstantId) Impl(id: MirImplId) Foreign(id: MirForeignId) Import(id: MirImportId) }
+pub enum MirImportKind { File(path: String) Module(path: String) Unqualified(module_id: MirModuleId, items: [MirImportItem]) }
+pub struct MirImportItem { pub original: String, pub local: String, pub item: MirItemRef }
+pub struct MirImport { pub id: MirImportId, pub module_id: MirModuleId, pub visibility: MirVisibility, pub alias: String, pub kind: MirImportKind, pub span: Span, pub version: ?String }
+pub struct MirModule { pub id: MirModuleId, pub key: String, pub name: String, pub path: String, pub source_file: MirSourceFileId, pub imports: [MirImportId], pub children: [MirModuleId], pub item_order: [MirItemRef] }
+pub struct MirSourceFile { pub id: MirSourceFileId, pub path: String, pub source: String }
+
+pub enum MirStructLayout { C CAligned(alignment: Int, target: Bool) Columnar }
+pub enum MirCEnumTag { CInt U8 I8 U16 I16 U32 I32 U64 I64 }
+pub struct MirShapeFieldNames {
+    pub text: String
+    pub json: ?String
+    pub cbor: ?String
+    pub csv: ?String
+    pub toml: ?String
+    pub yaml: ?String
+    pub xml: ?String
+    pub args: String
+    pub env: String
+    pub db: ?String
+    pub layout: ?String
+}
+pub struct MirLayoutAlignmentFact {
+    pub requested_alignment: Int
+    pub effective_alignment: Int
+    pub target_mode: Bool
+    pub target_profile: String
+    pub fact_identity: String
+}
+pub struct MirIntegerRange { pub lo: Int, pub hi: Int }
+pub enum MirSerdeAttributeKind { RenameAll Tag Untagged DenyUnknownFields }
+pub struct MirSerdeAttribute { pub kind: MirSerdeAttributeKind, pub value: ?String, pub span: Span }
+pub struct MirCliBinding { pub name: String, pub function: MirFunctionId, pub span: Span, pub markers: [String] }
+pub struct MirField {
+    pub id: MirFieldId
+    pub name: String
+    pub shape_names: MirShapeFieldNames
+    pub skip: Bool
+    pub ty: MirType
+    pub span: Span
+    pub public: Bool
+    pub package_public: Bool
+    pub computed: Bool
+    pub has_default: Bool
+    pub redact: Bool
+}
+pub struct MirFieldRow { pub id: MirFieldId, pub owner: MirTypeId, pub field: MirField }
+pub enum MirVariantPayload { Unit Single(value: MirType) Named(fields: [MirField]) }
+pub struct MirVariant { pub name: String, pub wire_name: String, pub span: Span, pub payload: MirVariantPayload, pub discriminant: ?Int }
+pub enum MirTypeDefKind {
+    Struct(fields: [MirField], methods: [MirFunctionId])
+    Enum(variants: [MirVariant], methods: [MirFunctionId])
+    Distinct(base: MirType, range: ?MirIntegerRange)
+    Alias(target: MirType)
+    UnitFamily(members: [String])
+}
+pub enum MirCompilerBuiltin { DefaultErr }
+pub struct MirTypeDef {
+    pub id: MirTypeId
+    pub module_id: MirModuleId
+    pub key: String
+    pub name: String
+    pub span: Span
+    pub public: Bool
+    pub package_public: Bool
+    pub generic_params: [MirGenericParam]
+    pub derives: [MirTraitId]
+    pub auto_derive_default: Bool
+    pub auto_printable: Bool
+    pub published_schema: Bool
+    pub single_use: Bool
+    pub must_use: Bool
+    pub layout: ?MirStructLayout
+    pub c_layout_tag: ?MirCEnumTag
+    pub enum_layout: ?LayoutFacts
+    pub layout_alignment: ?MirLayoutAlignmentFact
+    pub cli: ?MirCliEntry
+    pub serde: [MirSerdeAttribute]
+    pub cli_bindings: [MirCliBinding]
+    pub ownership: MirOwnershipMode
+    pub boxed_edges: [String]
+    pub compiler_builtin: ?MirCompilerBuiltin
+    pub kind: MirTypeDefKind
+}
+pub struct MirCoreOwner {
+    pub id: MirTypeId
+    pub nominal_id: MirTypeId
+    pub module_id: ?MirModuleId
+    pub key: String
+    pub name: String
+    pub ownership: MirOwnershipMode
+}
+pub enum MirCliValueKind { Bool Int Float String Path }
+pub enum MirCliDefault { TypeDefault Value(value: MirConstant) }
+pub enum MirCliInputShape {
+    Flag
+    Value(kind: MirCliValueKind, optional: Bool, default: ?MirCliDefault)
+}
+pub struct MirCliInput {
+    pub parameter: Int
+    pub name: String
+    pub label: String
+    pub ty: MirType
+    pub zone: ParamZone
+    pub flag: String
+    pub short: ?String
+    pub env: ?String
+    pub help: String
+    pub metavar: ?String
+    pub shape: MirCliInputShape
+    pub positional: ?Int
+    pub variadic: Bool
+}
+pub struct MirCliCommand {
+    pub name: String
+    pub description: ?String
+    pub function: MirFunctionId
+    pub receiver: ?MirTypeId
+    pub inputs: [MirCliInput]
+}
+pub struct MirCliEntry {
+    pub record_inputs: Bool
+    pub description: ?String
+    pub inputs: [MirCliInput]
+    pub commands: [MirCliCommand]
+    pub standard: Bool
+    pub version: ?String
+}
+pub struct MirGenericParam { pub name: String, pub bounds: [MirTraitRef] }
+pub struct MirAssociatedTypeDecl { pub name: String, pub span: Span }
+pub struct MirTraitMethod {
+    pub id: MirTraitMethodId
+    pub name: String
+    pub span: Span
+    pub self_access: ?MirAccess
+    pub params: [MirParam]
+    pub declared_return: ?MirType
+    pub return_type: MirType
+    pub failure: MirFailureCarrier
+    pub effects: MirEffectFacts
+    pub is_pure: Bool
+    pub return_view_provenance: ?[MirViewProvenanceEntry]
+    pub declared_return_view_provenance: ?[MirViewProvenanceEntry]
+    pub default: ?MirFunctionId
+}
+pub struct MirTraitDef { pub id: MirTraitId, pub module_id: MirModuleId, pub key: String, pub name: String, pub span: Span, pub visibility: MirVisibility, pub associated_types: [MirAssociatedTypeDecl], pub methods: [MirTraitMethod] }
+pub struct MirAssociatedTypeValue { pub name: String, pub ty: MirType, pub span: Span }
+pub struct MirImplDef {
+    pub id: MirImplId
+    pub module_id: MirModuleId
+    pub key: String
+    pub span: Span
+    pub self_type: MirType
+    pub trait_ref: ?MirTraitRef
+    pub associated_types: [MirAssociatedTypeValue]
+    pub methods: [MirFunctionId]
+    pub delegation: ?MirFieldId
+    pub compiler_generated: Bool
+    pub serde: ?MirSerdeCodec
+    pub operator_marker: ?MirOperatorMarker
+    pub operator_rhs: ?MirType
+    pub target_os: ?MirOSTarget
+    pub target_applicability: MirTargetApplicability
+}
+pub struct MirConstantDef { pub id: MirConstantId, pub module_id: MirModuleId, pub key: String, pub name: String, pub span: Span, pub visibility: MirVisibility, pub ty: MirType, pub is_storage: Bool, pub value: MirConstant }
+
+pub enum MirConstKey {
+    Int(value: Int)
+    String(value: String)
+    Bool(value: Bool)
+    Char(value: Int)
+    Tuple(fields: [MirConstKeyField])
+    Struct(type_name: String, fields: [MirConstKeyField])
+    Enum(type_name: String, variant: String)
+}
+pub struct MirConstKeyField { pub name: String, pub key: MirConstKey }
+pub struct MirConstField { pub name: String, pub value: MirConstant }
+pub struct MirConstEnumArg { pub name: ?String, pub value: MirConstant }
+pub enum MirConstReport { Clean(ty: MirType) Told(value: MirConstant) }
+pub enum MirConstant {
+    Int(value: Int, width: ?MirIntegerWidth, spelling: ?String)
+    Float(value: Float, f32: Bool, spelling: ?String)
+    Bool(value: Bool)
+    Char(value: Int)
+    String(value: String)
+    Bytes(value: [U8])
+    Unit
+    BigInt(decimal: String)
+    List(values: [MirConstant])
+    Map(entries: [MirConstMapEntry])
+    Struct(type_name: String, fields: [MirConstField])
+    Enum(type_name: String, variant: String, args: [MirConstEnumArg])
+    Present(value: MirConstant)
+    Failed(report: MirConstReport)
+}
+pub struct MirIntegerWidth { pub signed: Bool, pub bits: Int }
+pub struct MirConstMapEntry { pub key: MirConstKey, pub value: MirConstant }
+
+pub struct MirPanicLoc { pub file: MirSourceFileId, pub line: Int, pub column: Int }
+pub struct MirPanicLocal { pub name: String, pub local: MirLocalId }
+pub struct MirPanicContext { pub function: String, pub source_line: String, pub caret: Int, pub locals: [MirPanicLocal] }
+pub enum MirStringFormat {
+    Display
+    Debug
+    Pretty
+    Fixed(digits: Int)
+    Grouped(digits: Int)
+    Hex(digits: Int)
+    Pad(width: Int, fill: String)
+    PadLeft(width: Int, fill: String)
+    Sci(digits: Int)
+    Percent(digits: Int)
+    Bin
+    Oct
+    Unit(format: MirUnitFormat)
+}
+pub enum MirUnitFormat { Symbol Name Bare }
+pub enum MirStringPartKind {
+    Literal(text: String)
+    Interpolation(value: MirValueId, format: MirStringFormat)
+}
+pub struct MirStringPart { pub kind: MirStringPartKind }
+pub struct MirPhiIncoming { pub block: MirBlockId, pub value: MirValueId }
+pub struct MirMapEntry { pub key: MirValueId, pub value: MirValueId }
+pub struct MirCallArg {
+    pub value: MirValueId
+    pub place: ?MirPlaceId
+    pub access: MirAccess
+    pub span: Span
+    pub label: ?String
+    pub source_index: ?Int
+    pub binder_slot: ?Int
+    pub spread: Bool
+    pub implicit_clone: Bool
+    pub shared_auto_clone: Bool
+    pub owned_last_use: Bool
+    pub authority_boundary: Bool
+    pub fn_coercion: ?MirFnCoercion
+    pub widen_fixed_to_list: Bool
+    pub widen_to_union: ?MirUnionCoercion
+    pub box_as_trait: ?MirTypeId
+}
+pub struct MirFnCoercion { pub ty: MirType, pub already_boxed: Bool }
+pub struct MirUnionCoercion { pub union: MirTypeId, pub variant: String }
+pub enum MirPreludeTypeArg {
+    Type(ty: MirType)
+    HostUsize
+}
+
+pub enum MirComponentTypeDescriptor {
+    Int
+    Float
+    Bool
+    String
+    List(inner: MirComponentTypeDescriptor)
+    Option(inner: MirComponentTypeDescriptor)
+    Result(ok: MirComponentTypeDescriptor, err: MirComponentTypeDescriptor)
+    Record(name: String, fields: [MirComponentTypeField])
+}
+pub struct MirComponentTypeField {
+    pub index: Int
+    pub name: String
+    pub ty: MirComponentTypeDescriptor
+}
+pub struct MirComponentSignatureDescriptor {
+    pub params: [MirComponentTypeDescriptor]
+    pub result: MirComponentTypeDescriptor
+}
+
+pub enum MirTextHoleKind {
+    Text
+    Int
+    Float
+    Bool
+    InlineRange(lo: Int, hi: Int)
+}
+pub enum MirTextPatternPart {
+    Literal(value: String)
+    Hole(kind: MirTextHoleKind, ty: MirTypeId, span: Span)
+}
+pub enum MirBinaryPatternPart {
+    Literal(bytes: [U8])
+    Bits(width: U8, ty: MirTypeId, little: Bool, span: Span)
+    Rest(ty: MirTypeId, span: Span)
+}
+pub enum MirStructExtra { HttpRequestParams }
+pub enum MirLayoutCompareOp { Equal LessEqual GreaterEqual }
+pub enum MirRequireKind { Require RequireEq Panic }
+pub enum MirHttpMethod { Get Post Put Delete Patch Head Options }
+pub enum MirAllocatorKind { Arena Bump Pool Fixed }
+pub enum MirTaskGroupKind { All Any Race }
+pub enum MirSelectKind { Start Receive After Wait }
+pub enum MirCoreClosureKind {
+    Spawn
+    Realtime
+    Serve
+    OnInterrupt
+    Guard
+    OnCommit
+    OnRollback
+    ReactiveDerived
+    ReactiveEffect
+    UiMount
+    UiAction
+    UiTextInputOnDrop
+    UiPreview(
+        playground: Bool,
+        source_file: String,
+        source_span: Span,
+        source_start_line: Int,
+        source_start_column: Int,
+        source_end_line: Int,
+        source_end_column: Int,
+        build_id: String,
+        revision: String
+    )
+}
+pub enum MirGcEditKind { Clear Pop RemoveIndex InsertIndex Prepend Additive Plain EdgeSlot }
+pub enum MirTypedHeadKind { SQL HTML Sh URL Path DateTime }
+pub enum MirRegisterWidth { U8 U16 U32 U64 }
+pub enum MirHardwareOp {
+    RegisterRead(profile_id: String, block: String, register: String, width: MirRegisterWidth)
+    RegisterWrite(profile_id: String, block: String, register: String, width: MirRegisterWidth)
+    DmaStart(profile_id: String, channel: String, buffer_ty: MirType)
+    DmaWait(profile_id: String, channel: String, buffer_ty: MirType)
+}
+pub struct MirReflectField {
+    pub name: String
+    pub type_name: String
+    pub path: String
+    pub value: MirValueId
+}
+
+pub enum MirResourceAccessMode { Read Write Move }
+pub enum MirResourceIdentity { Named(name: String) Unknown }
+pub enum MirResourceRegion {
+    Whole
+    Bytes(start: Int, length: Int)
+    Unknown
+}
+pub struct MirResourceLayout {
+    pub size: Int
+    pub align: Int
+    pub layout: String
+    pub device: String
+}
+pub struct MirResourceAccess {
+    pub resource: MirResourceIdentity
+    pub mode: MirResourceAccessMode
+    pub region: MirResourceRegion
+    pub layout: ?MirResourceLayout
+    pub temporary: Bool
+}
+pub enum MirFrameCompletion {
+    Synchronous
+    Pending(token: String)
+    Event(token: String)
+}
+pub struct MirFrameOperation {
+    pub name: String
+    pub source_index: Int
+    pub accesses: [MirResourceAccess]
+    pub completion: MirFrameCompletion
+    pub completion_provider: ?String
+    pub external_effect: Bool
+}
+pub struct MirFrameDependency {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub reason: String
+}
+pub struct MirFrameTransfer {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub from_device: String
+    pub to_device: String
+}
+pub struct MirFrameReuse {
+    pub previous_resource: String
+    pub next_resource: String
+    pub previous_last_use: Int
+    pub next_first_use: Int
+    pub legal: Bool
+    pub reason: String
+}
+pub struct MirFrameRetention {
+    pub resource: String
+    pub operation: Int
+    pub owner: String
+    pub completion_token: ?String
+    pub completed: Bool
+}
+pub struct MirFrameSchedule {
+    pub operations: [MirFrameOperation]
+    pub dependencies: [MirFrameDependency]
+    pub transfers: [MirFrameTransfer]
+    pub reuse: [MirFrameReuse]
+    pub retentions: [MirFrameRetention]
+    pub conservative: [String]
+}
+
+pub enum MirCallee { User(function: MirFunctionId) Associated(function: MirFunctionId, owner: MirType) TraitMethod(method: MirTraitMethodId, trait_ref: MirTraitRef, receiver: MirType) Method(function: MirFunctionId, owner: MirType) Core(call: MirCoreCallId) Prelude(call: MirPreludeCallId) Foreign(id: MirForeignId) Indirect(value: MirValueId) }
+pub enum MirUnaryOp { Neg Not }
+pub enum MirBinaryOp { Add Sub Mul Div FloorDiv Mod Rem Pow BitAnd BitOr BitXor Shl Shr Eq Ne Lt Gt Le Ge Compare And Or }
+pub enum MirBinaryDispatch { Primitive Prelude(call: MirPreludeCallId, location: ?MirPanicLoc) }
+pub enum MirBinaryOverflow { Unchecked Trap }
+pub enum MirConversion { Transparent NumericCast SendFn Prelude(call: MirPreludeCallId, location: MirPanicLoc, fallibility: MirCallFallibility) }
+pub struct MirEnumArg { pub field: ?MirFieldId, pub value: MirValueId, pub boxed: Bool }
+pub enum MirSemanticOp {
+    DataEntriesToMap(call: MirPreludeCallId, local: MirLocalId)
+    MathBuiltin(type_id: MirTypeId, call: MirPreludeCallId, args: [MirValueId])
+    PreciseBuiltin(type_id: MirTypeId, call: MirPreludeCallId, args: [MirValueId])
+    Print(call: MirPreludeCallId, value: MirValueId)
+    AmbientInput(call: MirPreludeCallId, prompt: ?MirValueId)
+    RequireStop(
+        call: MirPreludeCallId,
+        kind: MirRequireKind,
+        condition: ?MirValueId,
+        location: MirPanicLoc,
+        context: MirPanicContext,
+        values: [MirValueId],
+        always_stops: Bool
+    )
+    LayoutCompare(call: MirPreludeCallId, op: MirLayoutCompareOp, left: MirValueId, right: MirValueId)
+    ReflectOf(type_name: String, path: String, display: MirValueId, fields: [MirReflectField])
+    LayoutLiteral(inner: MirValueId)
+    StructLiteral(
+        type_id: MirTypeId,
+        fields: [MirFieldValue],
+        extra: ?MirStructExtra,
+        trait_coercion: ?MirTypeId,
+        boxed_fields: [MirFieldId]
+    )
+    CellGuardProject(
+        map_call: MirPreludeCallId,
+        split_call: ?MirPreludeCallId,
+        guard: MirValueId,
+        paths: [[MirFieldId]],
+        editable: Bool,
+        edit_paths_disjoint: Bool
+    )
+    SharedGuardMap(call: MirPreludeCallId, guard: MirValueId, path: [MirFieldId], editable: Bool)
+    SharedGuardSplit(
+        call: MirPreludeCallId,
+        map_call: MirPreludeCallId,
+        guard: MirValueId,
+        first: [MirFieldId],
+        second: [MirFieldId],
+        editable: Bool
+    )
+    SharedGuardWait(call: MirPreludeCallId, guard: MirValueId, condition: MirValueId, predicate: MirValueId)
+    ConditionNotify(call: MirPreludeCallId, condition: MirValueId, all: Bool)
+    AllocNew(call: MirPreludeCallId, kind: MirAllocatorKind, inline_size: ?Int, args: [MirCallArg])
+    ColumnarRead(base: MirValueId, index: MirValueId, column: MirFieldId, column_index: Int, accessor: MirPreludeCallId)
+    StaticPreludeCall(
+        call: MirPreludeCallId,
+        args: [MirCallArg],
+        owner_type_args: [MirPreludeTypeArg],
+        type_args: [MirType]
+    )
+    DecodeUnder(call: MirPreludeCallId, segment: MirValueId, inner: MirValueId)
+    HardwareCall(
+        call: MirPreludeCallId,
+        op: MirHardwareOp,
+        receiver: ?MirValueId,
+        args: [MirCallArg]
+    )
+    BuiltinMethod(
+        call: MirPreludeCallId,
+        receiver: MirValueId,
+        receiver_place: ?MirPlaceId,
+        args: [MirValueId],
+        aggregate_fields: ?[MirFieldId]
+    )
+    OptionLift2(call: MirPreludeCallId, function: MirValueId, left: MirValueId, right: MirValueId)
+    ClosureMethod(receiver: MirValueId, args: [MirCallArg], call: MirPreludeCallId)
+    HostBorrowCallback(callable: MirValueId, params: [MirType])
+    TextPatternMatch(call: MirPreludeCallId, subject: MirValueId, parts: [MirTextPatternPart])
+    BinaryPatternMatch(call: MirPreludeCallId, subject: MirValueId, parts: [MirBinaryPatternPart])
+    CursorTakePattern(receiver: MirValueId, receiver_place: MirPlaceId, parts: [MirTextPatternPart])
+    ReaderTakePattern(receiver: MirValueId, receiver_place: MirPlaceId, parts: [MirBinaryPatternPart])
+    NumericMethod(call: MirPreludeCallId, receiver: MirValueId)
+    NumericBinaryMethod(call: MirPreludeCallId, receiver: MirValueId, argument: MirValueId)
+    OverflowOption(call: MirPreludeCallId, left: MirValueId, right: MirValueId, location: ?MirPanicLoc)
+    HandleMethod(
+        call: MirPreludeCallId,
+        receiver: MirValueId,
+        args: [MirValueId],
+        frame_schedule: ?MirFrameSchedule,
+        frame_schedule_derivation: ?MirDerivationRef
+    )
+    PluginInvoke(
+        call: MirPreludeCallId,
+        handle: MirValueId,
+        export_name: String,
+        signature: MirComponentSignatureDescriptor,
+        args: [MirValueId]
+    )
+    HttpRouterRegister(
+        call: MirPreludeCallId,
+        receiver: MirValueId,
+        path: MirValueId,
+        handler: MirValueId,
+        method: MirHttpMethod,
+        handler_param_names: [String],
+        contract_json: String,
+        location: MirPanicLoc
+    )
+    CoreClosureCall(
+        call: MirPreludeCallId,
+        kind: MirCoreClosureKind,
+        values: [MirValueId],
+        closure: ?MirValueId,
+        site: MirSiteId,
+        label: String
+    )
+    TaskGroup(call: MirPreludeCallId, kind: MirTaskGroupKind, tasks: [MirValueId])
+    Select(call: MirPreludeCallId, kind: MirSelectKind, values: [MirValueId])
+    PolicyFunction(policy: MirValueId, values: [MirValueId])
+    InterruptFunction(interrupt: MirValueId, values: [MirValueId])
+    CarrierFact(call: MirPreludeCallId, receiver: MirValueId, field: MirFieldId, notes: Bool)
+    GcEdit(
+        call: MirPreludeCallId,
+        root: MirValueId,
+        edges: [MirValueId],
+        edit: MirValueId,
+        index: ?MirValueId,
+        kind: MirGcEditKind,
+        site: MirGcEditSiteId
+    )
+    TypedTextInterp(
+        call: MirPreludeCallId,
+        kind: MirTypedHeadKind,
+        literals: [String],
+        holes: [MirValueId],
+        trusted_html: [Bool]
+    )
+    CCallback(call: MirPreludeCallId, callback: MirCallbackId, lambda: MirValueId)
+    HostCall(call: MirPreludeCallId, args: [MirCallArg])
+}
+
+
+pub enum MirOperation {
+    Parameter(index: Int, name: String)
+    Capture(slot: Int)
+    Global(name: String)
+    Phi(incoming: [MirPhiIncoming])
+    ReadPlace(place: MirPlaceId)
+    MovePlace(place: MirPlaceId)
+    WritePlace(place: MirPlaceId, value: MirValueId)
+    ReplacePlace(place: MirPlaceId, value: MirValueId)
+    InitializeUninit(place: MirPlaceId)
+    Copy(value: MirValueId, materialize_view: Bool)
+    Move(value: MirValueId)
+    Constant(value: MirConstant)
+    Unary(op: MirUnaryOp, value: MirValueId)
+    Binary(op: MirBinaryOp, dispatch: MirBinaryDispatch, overflow: MirBinaryOverflow, left: MirValueId, right: MirValueId)
+    BuildString(parts: [MirStringPart])
+    BuildList(values: [MirValueId], trait_coercion: ?MirTypeId)
+    BuildMap(entries: [MirMapEntry])
+    EnumIs(subject: MirValueId, owner: MirTypeId, variant: String)
+    EnumPayload(subject: MirValueId, owner: MirTypeId, variant: String, index: Int)
+    OptionIsSome(subject: MirValueId)
+    OptionValue(subject: MirValueId)
+    ResultIsOk(subject: MirValueId)
+    ResultValue(subject: MirValueId, ok: Bool)
+    PatternCapture(matched: MirValueId, index: Int)
+    PatternMatched(matched: MirValueId)
+    ProjectMembers(base: MirValueId, members: [MirFieldId])
+    Index(call: MirPreludeCallId, base: MirValueId, index: MirValueId, kind: MirIndexKind, access: MirAccess, location: MirPanicLoc, context: MirPanicContext)
+    Slice(call: MirPreludeCallId, base: MirValueId, start: MirValueId, end: MirValueId, range: ?MirValueId, location: MirPanicLoc)
+    Range(start: MirValueId, end: MirValueId, exclusive: Bool)
+    Field(base: MirValueId, field: MirFieldId)
+    Struct(type_id: MirTypeId, fields: [MirFieldValue])
+    Enum(type_id: MirTypeId, variant: String, args: [MirEnumArg])
+    Tuple(type_id: MirTypeId, fields: [MirFieldValue])
+    Present(value: MirValueId)
+    Convert(value: MirValueId, parameters: [MirValueId], target: MirType, conversion: MirConversion)
+    TraitBox(value: MirValueId, target: MirTypeId)
+    Absent
+    ResultOk(value: MirValueId)
+    ResultErr(value: MirValueId)
+    Call(callee: MirCallee, args: [MirCallArg], type_args: [MirType])
+    IndirectCall(callee: MirValueId, args: [MirCallArg], type_args: [MirType])
+    Closure(function: MirFunctionId, captures: [MirCaptureOperand], facts: MirCaptureFacts)
+    PtrFromAddr(address: MirValueId, element: MirType)
+    Deref(value: MirValueId)
+    RawAddressOf(place: MirPlaceId)
+    AddressOf(place: MirPlaceId, access: MirAccess)
+    CoreCall(call: MirCoreCallId, route: MirPreludeCallId, args: [MirCallArg], type_args: [MirType], fallibility: MirCallFallibility, data_plan: ?MirDataPlan)
+    AttachTag(value: MirValueId, tag: ?String)
+    Todo(call: MirPreludeCallId, location: MirPanicLoc, expected_type: ?MirType)
+    Never(reason: String)
+    Semantic(operation: MirSemanticOp)
+    LoopRangeInit(call: MirPreludeCallId, start: MirValueId, end: MirValueId, step: ?MirValueId, exclusive: Bool)
+    LoopRangeHasNext(call: MirPreludeCallId, cursor: MirValueId)
+    LoopRangeValue(call: MirPreludeCallId, cursor: MirValueId)
+    LoopRangeAdvance(call: MirPreludeCallId, cursor: MirValueId)
+    LoopIterInit(call: MirPreludeCallId, collection: MirValueId, step: ?MirValueId, by_value: Bool, source_kind: MirLoopSourceKind)
+    LoopIterHasNext(call: MirPreludeCallId, cursor: MirValueId)
+    LoopIterValue(call: MirPreludeCallId, cursor: MirValueId)
+    LoopIterAdvance(call: MirPreludeCallId, cursor: MirValueId)
+    ScopeEnter(scope: MirScopeId, test_member: ?MirTestScopeMember)
+    ScopeExit(scope: MirScopeId)
+    Drop(value: MirValueId, kind: MirDropKind)
+}
+pub struct MirFieldValue { pub field: MirFieldId, pub value: MirValueId }
+pub struct MirCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String] }
+pub enum MirTestScopeMember { ExpectFail(expected_code: ?String) Timeout(duration: MirValueId) Skip(whole_test: Bool) Measure }
+pub enum MirDataPlanOperation { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Collect }
+pub enum MirDataPlanSourceKind { Table Series Csv Json Jsonl Parquet Arrow Loader CsvReader JsonReader }
+pub enum MirDataPlanStreamMode { Bounded(batch_rows: ?Int) Materialized(reason: String) }
+pub enum MirDataPlanPhysicalOperator { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Batch Materialize }
+
+pub const MIR_DATA_PLAN_SCHEMA_VERSION = 1
+pub struct MirDataPlan {
+    pub schema_version: Int
+    pub source: MirDataPlanSourceKind
+    pub logical: [MirDataPlanNode]
+    pub physical: [MirDataPlanPhysicalNode]
+    pub output: MirDataPlanNodeId
+    pub source_span: Span
+}
+pub struct MirDataPlanNode { pub id: MirDataPlanNodeId, pub operation: MirDataPlanOperation, pub inputs: [MirDataPlanNodeId], pub source: ?MirDataPlanSourceKind, pub row_type: MirType, pub columns: [MirDataPlanColumn], pub callable: ?MirDataPlanCallable, pub stream: MirDataPlanStreamMode, pub span: Span }
+pub struct MirDataPlanColumn { pub name: String, pub ty: MirType, pub nullable: Bool }
+pub struct MirDataPlanCallable { pub label: String, pub parameter: MirType, pub result: MirType, pub span: Span }
+pub struct MirDataPlanPhysicalNode { pub logical: MirDataPlanNodeId, pub operator: MirDataPlanPhysicalOperator, pub stream: MirDataPlanStreamMode, pub reason: String }
+
+pub struct MirInstruction { pub id: MirOpId, pub span: Span, pub source_line: ?Int, pub result: ?MirValueId, pub ty: ?MirType, pub operation: MirOperation }
+pub struct MirBasicBlock { pub id: MirBlockId, pub span: Span, pub instructions: [MirInstruction], pub terminator: MirTerminator }
+pub struct MirSwitchArm { pub condition: MirValueId, pub target: MirBlockId, pub span: Span }
+pub enum MirTerminator {
+    Jump(target: MirBlockId)
+    Branch(condition: MirValueId, then_target: MirBlockId, else_target: MirBlockId)
+    Switch(subject: MirValueId, arms: [MirSwitchArm], otherwise: MirBlockId)
+    Return(value: ?MirValueId)
+    Yield(value: MirValueId, resume: MirBlockId)
+    Break(target: MirBlockId, value: ?MirValueId)
+    Continue(target: MirBlockId)
+    Unreachable(reason: String)
+}
+pub enum MirDropEdge { Normal Return Failure(target: MirBlockId) Unwind(target: MirBlockId) }
+pub struct MirDropAction { pub place: MirPlaceId, pub edge: MirDropEdge, pub span: Span }
+
+pub struct MirKernelFacts { pub bounds: Bool, pub alias_free: Bool, pub captures: Bool, pub race_free: Bool, pub barriers_uniform: Bool, pub control_flow: Bool }
+pub struct MirGeneratorFacts { pub item: MirType }
+pub struct MirUnsafeGate { pub file: String, pub line: Int, pub reason: String, pub enabled: Bool, pub fenced: Bool }
+pub struct MirWebParamField { pub field: String, pub parameter: String, pub ty: MirType }
+pub struct MirWebParamReconstruction { pub local: String, pub ty: MirType, pub fields: [MirWebParamField] }
+pub enum MirOptimizationPassId { LegalityVerification UnreachableBlockElimination CfgSimplification ExactConstantFolding BoundsCheckElimination DeadPureValueElimination CanonicalLoopFacts }
+pub enum MirDecisionKind { Tier Inline Vectorize Parallel Copy Bounds Deopt Unreachable LoopInvariant }
+pub enum MirDecisionDisposition { Accepted Rejected Selected NotAttempted Unavailable }
+pub enum MirOptimizationRejection { MissingProof MayTrap HasEffects HasEarlyExit MayAlias CrossIterationDependency DynamicTripCount UnknownCopyCost ScalarBoundary ObservableLayout OwnershipObligation UnsupportedOperation }
+pub enum MirOptimizationDecision { Eligible Rejected(reason: MirOptimizationRejection) }
+pub enum MirDerivationMethod { StaticDerivation FormalProof RecordedExecution SampledAgreement ExternalAssumption }
+pub enum MirDerivationDisposition { Current Stale Expired Redacted Unavailable Unsupported BudgetExhausted Unknown }
+pub struct MirDerivationRef { pub id: String }
+pub struct MirDecisionIdentity {
+    pub source: String
+    pub configuration: String
+    pub profile: String
+    pub target: String
+    pub implementation: String
+    pub artifact: String
+    pub run: String
+}
+pub struct MirDecisionEdit { pub span: Span, pub replacement: String }
+pub struct MirDecisionRow {
+    pub id: Int
+    pub kind: MirDecisionKind
+    pub disposition: MirDecisionDisposition
+    pub function: ?MirFunctionId
+    pub function_name: String
+    pub span: Span
+    pub rule: String
+    pub reason: String
+    pub producer: String
+    pub evidence: String
+    pub edit: ?MirDecisionEdit
+    pub derivation: ?MirDerivationRef
+    pub identity: ?MirDecisionIdentity
+    pub evidence_method: ?MirDerivationMethod
+    pub derivation_disposition: ?MirDerivationDisposition
+}
+pub enum MirLoopForm { Unconditional Counted Iterator }
+pub enum MirCopyCost { NoCopy PerIteration(count: Int) Unknown }
+pub struct MirLoopFact {
+    pub header: MirBlockId
+    pub body: ?MirBlockId
+    pub exit: ?MirBlockId
+    pub form: MirLoopForm
+    pub trip_count: ?Int
+    pub copy_cost: MirCopyCost
+    pub canonical: Bool
+    pub span: Span
+    pub decision: MirOptimizationDecision
+}
+pub struct MirBoundsFact {
+    pub operation: MirOpId
+    pub place: ?MirPlaceId
+    pub index: ?MirValueId
+    pub kind: MirIndexKind
+    pub proven: Bool
+    pub elided: Bool
+    pub failure_preserved: Bool
+    pub span: Span
+}
+pub enum MirVectorRule { Elementwise FieldAccess ConditionalAccumulate EarlyExitSearch Reduction }
+pub enum MirVectorLayout { Flat AosStrided ColumnarDirect }
+pub enum MirVectorAccessRoot { Place(id: MirPlaceId) Value(id: MirValueId) }
+pub struct MirVectorAccess {
+    pub root: MirVectorAccessRoot
+    pub field: ?MirFieldId
+    pub layout: MirVectorLayout
+    pub column_index: ?Int
+}
+pub enum MirFixedReductionTree { AdjacentPairsThenRoot }
+pub struct MirFixedReductionOrder {
+    pub lanes: Int
+    pub seed_lane: Int
+    pub tree: MirFixedReductionTree
+}
+pub struct MirFixedReductionFact {
+    pub accumulator: MirPlaceId
+    pub addend: MirValueId
+    pub seed: MirValueId
+    pub condition: ?MirValueId
+    pub source_operations: [MirOpId]
+    pub exit: MirBlockId
+    pub order: MirFixedReductionOrder
+}
+pub struct MirVectorFact {
+    pub loop_header: MirBlockId
+    pub cursor: ?MirValueId
+    pub body_blocks: [MirBlockId]
+    pub advance_block: ?MirBlockId
+    pub rule: MirVectorRule
+    pub accesses: [MirVectorAccess]
+    pub layout: MirVectorLayout
+    pub element_type: ?MirType
+    pub packed: Bool
+    pub lane_width: ?Int
+    pub no_aliasing: Bool
+    pub no_early_exit: Bool
+    pub effect_free_body: Bool
+    pub no_cross_iteration_dependencies: Bool
+    pub fixed_reduction: ?MirFixedReductionFact
+    pub span: Span
+    pub decision: MirOptimizationDecision
+}
+pub struct MirFusionFact {
+    pub first_loop: MirBlockId
+    pub second_loop: MirBlockId
+    pub packed: Bool
+    pub same_iteration_domain: Bool
+    pub no_aliasing: Bool
+    pub effect_free: Bool
+    pub no_cross_iteration_dependencies: Bool
+    pub span: Span
+    pub decision: MirOptimizationDecision
+}
+pub enum MirAccelerationTransform { TransientColumnCopy PooledParallelChunks }
+pub struct MirAccelerationProof {
+    pub source_proven: Bool
+    pub independent_iterations: Bool
+    pub no_aliasing: Bool
+    pub no_cross_iteration_dependencies: Bool
+    pub no_early_exit: Bool
+    pub effect_free_body: Bool
+    pub ownership_safe: Bool
+    pub failure_order_preserved: Bool
+}
+pub struct MirAccelerationWorkloadFacts { pub nested_reuse: Bool, pub single_pass: Bool }
+pub struct MirAccelerationFact {
+    pub loop_header: MirBlockId
+    pub transform: MirAccelerationTransform
+    pub workload: MirAccelerationWorkloadFacts
+    pub proof: MirAccelerationProof
+    pub span: Span
+}
+pub struct MirOptimizationFacts {
+    pub pure: Bool
+    pub replayable: Bool
+    pub diverges: Bool
+    pub inline: Bool
+    pub inline_always: Bool
+    pub gc_return: Bool
+    pub gc_scope: Bool
+    pub kernel: Bool
+    pub auto_vectorizable: Bool
+    pub no_aliasing: Bool
+    pub no_early_exit: Bool
+    pub no_cross_iteration_dependencies: Bool
+    pub derived_from_digest: ?String
+    pub decision_rows: [MirDecisionRow]
+    pub pass_ids: [MirOptimizationPassId]
+    pub loop_facts: [MirLoopFact]
+    pub bounds_facts: [MirBoundsFact]
+    pub vector_facts: [MirVectorFact]
+    pub checked_vector_facts: [MirVectorFact]
+    pub fusion_facts: [MirFusionFact]
+    pub acceleration_facts: [MirAccelerationFact]
+}
+pub fn mir_empty_optimization_facts() -> MirOptimizationFacts {
+    MirOptimizationFacts{
+        pure: false,
+        replayable: false,
+        diverges: false,
+        inline: false,
+        inline_always: false,
+        gc_return: false,
+        gc_scope: false,
+        kernel: false,
+        auto_vectorizable: false,
+        no_aliasing: false,
+        no_early_exit: false,
+        no_cross_iteration_dependencies: false,
+        derived_from_digest: None,
+        decision_rows: [MirDecisionRow]{},
+        pass_ids: [MirOptimizationPassId]{},
+        loop_facts: [MirLoopFact]{},
+        bounds_facts: [MirBoundsFact]{},
+        vector_facts: [MirVectorFact]{},
+        checked_vector_facts: [MirVectorFact]{},
+        fusion_facts: [MirFusionFact]{},
+        acceleration_facts: [MirAccelerationFact]{},
+    }
+}
+
+pub struct MirFunction {
+    pub id: MirFunctionId
+    pub module_id: MirModuleId
+    pub source_file: MirSourceFileId
+    pub key: String
+    pub module_name: String
+    pub name: String
+    pub span: Span
+    pub kind: MirFunctionKind
+    pub form: MirFunctionForm
+    pub visibility: MirVisibility
+    pub target_applicability: MirTargetApplicability
+    pub web_bucket: ?MirWebBucket
+    pub web_marker: ?MirWebPartitionMarker
+    pub generic_params: [MirGenericParam]
+    pub capture_params: [MirCaptureParam]
+    pub params: [MirParam]
+    pub declared_return: ?MirType
+    pub return_type: MirType
+    pub failure: MirFailureCarrier
+    pub effects: MirEffectFacts
+    pub captures: ?MirCaptureFacts
+    pub generator: ?MirGeneratorFacts
+    pub optimization: MirOptimizationFacts
+    pub is_unsafe: Bool
+    pub unsafe_gate: ?MirUnsafeGate
+    pub is_pure: Bool
+    pub memo_bound: ?Int
+    pub memo_unbounded: Bool
+    pub is_reactive: Bool
+    pub reactive_upgrades: [String]
+    pub is_inline: Bool
+    pub is_inline_always: Bool
+    pub is_scalar: Bool
+    pub kernel_proof: ?MirKernelFacts
+    pub gc_return: Bool
+    pub return_view_provenance: ?[MirViewProvenanceEntry]
+    pub web_param_reconstructions: [MirWebParamReconstruction]
+    pub blocks: [MirBasicBlock]
+    pub entry: MirBlockId
+    pub locals: [MirLocal]
+    pub values: [MirValueFact]
+    pub places: [MirPlace]
+    pub scopes: [MirScope]
+    pub drops: [MirDropAction]
+    pub foreign_language: ?String
+}
+
+pub fn mir_terminator_targets(terminator: MirTerminator) -> [MirBlockId] {
+    if terminator == {
+        .Jump(target) -> return [MirBlockId]{target}
+        .Branch(_, then_target, else_target) -> return [MirBlockId]{then_target, else_target}
+        .Switch(_, arms, otherwise) -> {
+            targets := [MirBlockId]{}
+            loop arm in arms -> targets.push(arm.target)
+            targets.push(otherwise)
+            return targets
+        }
+        .Yield(_, resume) -> return [MirBlockId]{resume}
+        .Break(target, _) -> return [MirBlockId]{target}
+        .Continue(target) -> return [MirBlockId]{target}
+        else -> return [MirBlockId]{}
+    }
+}
+
+pub fn mir_terminator_value_uses(terminator: MirTerminator) -> [MirValueId] {
+    if terminator == {
+        .Branch(condition, _, _) -> return [MirValueId]{condition}
+        .Switch(subject, arms, _) -> {
+            values := [MirValueId]{subject}
+            loop arm in arms -> values.push(arm.condition)
+            return values
+        }
+        .Return(value) -> {
+            value_id :: value ?? return [MirValueId]{}
+            return [MirValueId]{value_id}
+        }
+        .Break(_, value) -> {
+            value_id :: value ?? return [MirValueId]{}
+            return [MirValueId]{value_id}
+        }
+        .Yield(value, _) -> return [MirValueId]{value}
+        else -> return [MirValueId]{}
+    }
+}
+
+pub enum MirOperationUseKind { Value Place }
+pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] {
+    uses := [MirValueId]{}
+    if operation == {
+        .Phi(rows) -> {
+            loop row in rows -> uses.push(row.value)
+        }
+        .WritePlace(_, value) -> uses.push(value)
+        .ReplacePlace(_, value) -> uses.push(value)
+        .Copy(value, _) -> uses.push(value)
+        .TraitBox(value, _) -> uses.push(value)
+        .Move(value) -> uses.push(value)
+        .Unary(_, value) -> uses.push(value)
+        .Binary(_, _, _, left, right) -> {
+            uses.push(left)
+            uses.push(right)
+        }
+        .BuildString(parts) -> {
+            loop part in parts {
+                if part.kind == {
+                    .Literal(_) -> {}
+                    .Interpolation(value, _) -> uses.push(value)
+                }
+            }
+        }
+        .BuildList(values, _) -> {
+            loop value in values -> uses.push(value)
+        }
+        .BuildMap(entries) -> {
+            loop entry in entries {
+                uses.push(entry.key)
+                uses.push(entry.value)
+            }
+        }
+        .EnumIs(subject, _, _) -> uses.push(subject)
+        .EnumPayload(subject, _, _, _) -> uses.push(subject)
+        .OptionIsSome(subject) -> uses.push(subject)
+        .OptionValue(subject) -> uses.push(subject)
+        .ResultIsOk(subject) -> uses.push(subject)
+        .ResultValue(subject, _) -> uses.push(subject)
+        .PatternCapture(matched, _) -> uses.push(matched)
+        .PatternMatched(matched) -> uses.push(matched)
+        .ProjectMembers(base, _) -> uses.push(base)
+        .Index(_, base, index, _, _, _, _) -> {
+            uses.push(base)
+            uses.push(index)
+        }
+        .Slice(_, base, start, end, range, _) -> {
+            uses.push(base)
+            uses.push(start)
+            uses.push(end)
+            if range != None {
+                value :: range ?? return uses
+                uses.push(value)
+            }
+        }
+        .Range(start, end, _) -> {
+            uses.push(start)
+            uses.push(end)
+        }
+        .Field(base, _) -> uses.push(base)
+        .Struct(_, fields) -> {
+            loop field in fields -> uses.push(field.value)
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args -> uses.push(arg.value)
+        }
+        .Tuple(_, fields) -> {
+            loop field in fields -> uses.push(field.value)
+        }
+        .Present(value) -> uses.push(value)
+        .Convert(value, parameters, _, _) -> {
+            uses.push(value)
+            loop parameter in parameters -> uses.push(parameter)
+        }
+        .ResultOk(value) -> uses.push(value)
+        .ResultErr(value) -> uses.push(value)
+        .Call(_, args, _) -> {
+            loop arg in args -> uses.push(arg.value)
+        }
+        .IndirectCall(callee, args, _) -> {
+            uses.push(callee)
+            loop arg in args -> uses.push(arg.value)
+        }
+        .PtrFromAddr(address, _) -> uses.push(address)
+        .Deref(value) -> uses.push(value)
+        .CoreCall(_, _, args, _, _, _) -> {
+            loop arg in args -> uses.push(arg.value)
+        }
+        .AttachTag(value, _) -> uses.push(value)
+        .LoopRangeInit(_, start, end, step, _) -> {
+            uses.push(start)
+            uses.push(end)
+            if step != None {
+                value :: step ?? return uses
+                uses.push(value)
+            }
+        }
+        .LoopRangeHasNext(_, cursor) -> uses.push(cursor)
+        .LoopRangeValue(_, cursor) -> uses.push(cursor)
+        .LoopRangeAdvance(_, cursor) -> uses.push(cursor)
+        .LoopIterInit(_, collection, step, _, _) -> {
+            uses.push(collection)
+            if step != None {
+                value :: step ?? return uses
+                uses.push(value)
+            }
+        }
+        .LoopIterHasNext(_, cursor) -> uses.push(cursor)
+        .LoopIterValue(_, cursor) -> uses.push(cursor)
+        .LoopIterAdvance(_, cursor) -> uses.push(cursor)
+        .Drop(value, _) -> uses.push(value)
+        .ScopeEnter(_, member) -> {
+            if member != None {
+                scope :: member ?? return uses
+                if scope == {
+                    .Timeout(duration) -> uses.push(duration)
+                    else -> {}
+                }
+            }
+        }
+        .Semantic(semantic) -> {
+            loop value in mir_semantic_op_value_uses(semantic) -> uses.push(value)
+        }
+        else -> {}
+    }
+    uses
+}
+
+pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
+    uses := [MirValueId]{}
+    if operation == {
+        .DataEntriesToMap(_, _) -> {}
+        .MathBuiltin(_, _, args)
+        | .PreciseBuiltin(_, _, args)
+        | .TaskGroup(_, _, args)
+        | .Select(_, _, args) -> {
+            loop value in args -> uses.push(value)
+        }
+        .Print(_, value) | .LayoutLiteral(value) -> uses.push(value)
+        .AmbientInput(_, prompt) -> {
+            if prompt != None {
+                value :: prompt ?? return uses
+                uses.push(value)
+            }
+        }
+        .RequireStop(_, _, condition, _, _, values, _) -> {
+            if condition != None {
+                value :: condition ?? return uses
+                uses.push(value)
+            }
+            loop value in values -> uses.push(value)
+        }
+        .LayoutCompare(_, _, left, right) -> {
+            uses.push(left)
+            uses.push(right)
+        }
+        .ReflectOf(_, _, display, fields) -> {
+            uses.push(display)
+            loop field in fields -> uses.push(field.value)
+        }
+        .OptionLift2(_, function, left, right) -> {
+            uses.push(function)
+            uses.push(left)
+            uses.push(right)
+        }
+        .StructLiteral(_, fields, _, _, _) -> {
+            loop field in fields -> uses.push(field.value)
+        }
+        .CellGuardProject(_, _, guard, _, _, _)
+        | .SharedGuardMap(_, guard, _, _)
+        | .SharedGuardSplit(_, _, guard, _, _, _) -> uses.push(guard)
+        .SharedGuardWait(_, guard, condition, _) -> {
+            uses.push(guard)
+            uses.push(condition)
+        }
+        .ConditionNotify(_, condition, _) -> uses.push(condition)
+        .AllocNew(_, _, _, args) -> {
+            loop arg in args -> uses.push(arg.value)
+        }
+        .ColumnarRead(base, index, _, _, _) -> {
+            uses.push(base)
+            uses.push(index)
+        }
+        .StaticPreludeCall(_, args, _, _) | .HostCall(_, args) -> {
+            loop arg in args -> uses.push(arg.value)
+        }
+        .DecodeUnder(_, segment, inner) -> {
+            uses.push(segment)
+            uses.push(inner)
+        }
+        .HardwareCall(_, _, receiver, args) -> {
+            if receiver != None {
+                value :: receiver ?? return uses
+                uses.push(value)
+            }
+            loop arg in args -> uses.push(arg.value)
+        }
+        .BuiltinMethod(_, receiver, _, args, _) -> {
+            uses.push(receiver)
+            loop arg in args -> uses.push(arg)
+        }
+        .HandleMethod(_, receiver, args, _, _) -> {
+            uses.push(receiver)
+            loop arg in args -> uses.push(arg)
+        }
+        .PluginInvoke(_, handle, _, _, args) -> {
+            uses.push(handle)
+            loop arg in args -> uses.push(arg)
+        }
+        .HttpRouterRegister(_, receiver, path, handler, _, _, _, _) -> {
+            uses.push(receiver)
+            uses.push(path)
+            uses.push(handler)
+        }
+        .TextPatternMatch(_, subject, _)
+        | .BinaryPatternMatch(_, subject, _) -> {
+            uses.push(subject)
+        }
+        .CursorTakePattern(receiver, _, _)
+        | .ReaderTakePattern(receiver, _, _) -> {
+            uses.push(receiver)
+        }
+        .ClosureMethod(receiver, args, _) -> {
+            uses.push(receiver)
+            loop arg in args -> uses.push(arg.value)
+        }
+        .HostBorrowCallback(callable, _) -> {
+            uses.push(callable)
+        }
+        .PolicyFunction(policy, values)
+        | .InterruptFunction(policy, values) -> {
+            uses.push(policy)
+            loop value in values -> uses.push(value)
+        }
+        .NumericMethod(_, receiver) -> {
+            uses.push(receiver)
+        }
+        .NumericBinaryMethod(_, receiver, argument)
+        | .OverflowOption(_, receiver, argument, _) -> {
+            uses.push(receiver)
+            uses.push(argument)
+        }
+        .CoreClosureCall(_, _, values, closure, _, _) -> {
+            loop value in values -> uses.push(value)
+            if closure != None {
+                value :: closure ?? return uses
+                uses.push(value)
+            }
+        }
+        .CarrierFact(_, receiver, _, _) -> {
+            uses.push(receiver)
+        }
+        .GcEdit(_, root, edges, edit, index, _, _) -> {
+            uses.push(root)
+            loop edge in edges -> uses.push(edge)
+            uses.push(edit)
+            if index != None {
+                value :: index ?? return uses
+                uses.push(value)
+            }
+        }
+        .TypedTextInterp(_, _, _, holes, _) -> {
+            loop hole in holes -> uses.push(hole)
+        }
+        .CCallback(_, _, lambda) -> {
+            uses.push(lambda)
+        }
+    }
+    uses
+}
+
+pub fn mir_semantic_op_place_uses(operation: MirSemanticOp) -> [MirPlaceId] {
+    if operation == {
+        .BuiltinMethod(_, _, receiver_place, _, _) -> {
+            if receiver_place == None -> return [MirPlaceId]{}
+            place :: receiver_place ?? return [MirPlaceId]{}
+            [MirPlaceId]{place}
+        }
+        else -> [MirPlaceId]{}
+    }
+}
+
+pub fn mir_operation_place_uses(operation: MirOperation) -> [MirPlaceId] {
+    if operation == {
+        .ReadPlace(place) -> [MirPlaceId]{place}
+        .MovePlace(place) -> [MirPlaceId]{place}
+        .WritePlace(place, _) -> [MirPlaceId]{place}
+        .ReplacePlace(place, _) -> [MirPlaceId]{place}
+        .InitializeUninit(place) -> [MirPlaceId]{place}
+        .RawAddressOf(place) -> [MirPlaceId]{place}
+        .AddressOf(place, _) -> [MirPlaceId]{place}
+        .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)
+        else -> [MirPlaceId]{}
+    }
+}
+
+pub fn mir_call_arg_type_uses(args: [MirCallArg]) -> [MirTypeId] {
+    uses := [MirTypeId]{}
+    loop arg in args {
+        if arg.fn_coercion != None {
+            coercion :: arg.fn_coercion ?? return uses
+            if coercion.ty.identity != None {
+                type_id :: coercion.ty.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+        if arg.widen_to_union != None {
+            coercion :: arg.widen_to_union ?? return uses
+            uses.push(coercion.union)
+        }
+        if arg.box_as_trait != None {
+            type_id :: arg.box_as_trait ?? return uses
+            uses.push(type_id)
+        }
+    }
+    uses
+}
+
+pub fn mir_failure_type_uses(failure: MirFailureCarrier) -> [MirTypeId] {
+    uses := [MirTypeId]{}
+    if failure == {
+        .Infallible -> {}
+        .Result(success, error) -> {
+            if success.identity != None {
+                type_id :: success.identity ?? return uses
+                uses.push(type_id)
+            }
+            if error.identity != None {
+                type_id :: error.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+        .Optional(value) | .Diverges(value) -> {
+            if value.identity != None {
+                type_id :: value.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+    }
+    uses
+}
+
+pub fn mir_call_fallibility_type_uses(fallibility: MirCallFallibility) -> [MirTypeId] {
+    if fallibility == {
+        .Infallible -> [MirTypeId]{}
+        .Failure(failure) -> mir_failure_type_uses(failure)
+    }
+}
+
+pub fn mir_data_plan_type_uses(plan: MirDataPlan) -> [MirTypeId] {
+    uses := [MirTypeId]{}
+    loop node in plan.logical {
+        if node.row_type.identity != None {
+            type_id :: node.row_type.identity ?? return uses
+            uses.push(type_id)
+        }
+        loop column in node.columns {
+            if column.ty.identity != None {
+                type_id :: column.ty.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+        if node.callable != None {
+            callable :: node.callable ?? return uses
+            if callable.parameter.identity != None {
+                type_id :: callable.parameter.identity ?? return uses
+                uses.push(type_id)
+            }
+            if callable.result.identity != None {
+                type_id :: callable.result.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+    }
+    uses
+}
+
+pub fn mir_semantic_op_type_uses(operation: MirSemanticOp) -> [MirTypeId] {
+    uses := [MirTypeId]{}
+    if operation == {
+        .MathBuiltin(type_id, _, _) | .PreciseBuiltin(type_id, _, _) -> uses.push(type_id)
+        .StructLiteral(type_id, _, _, trait_coercion, _) -> {
+            uses.push(type_id)
+            if trait_coercion != None {
+                trait_id :: trait_coercion ?? return uses
+                uses.push(trait_id)
+            }
+        }
+        .StaticPreludeCall(_, args, owner_type_args, type_args) -> {
+            loop type_id in mir_call_arg_type_uses(args) -> uses.push(type_id)
+            loop type_arg in owner_type_args {
+                if type_arg == {
+                    .Type(ty) -> {
+                        if ty.identity != None {
+                            type_id :: ty.identity ?? return uses
+                            uses.push(type_id)
+                        }
+                    }
+                    .HostUsize -> {}
+                }
+            }
+            loop ty in type_args {
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+        }
+        .HardwareCall(_, _, _, args)
+        | .ClosureMethod(_, args, _)
+        | .HostCall(_, args) -> {
+            loop type_id in mir_call_arg_type_uses(args) -> uses.push(type_id)
+        }
+        .HostBorrowCallback(_, params) -> {
+            loop ty in params {
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+        }
+        .TextPatternMatch(_, _, parts)
+        | .CursorTakePattern(_, _, parts) -> {
+            loop part in parts {
+                if part == {
+                    .Hole(_, type_id, _) -> uses.push(type_id)
+                    .Literal(_) -> {}
+                }
+            }
+        }
+        .BinaryPatternMatch(_, _, parts)
+        | .ReaderTakePattern(_, _, parts) -> {
+            loop part in parts {
+                if part == {
+                    .Bits(_, type_id, _, _) | .Rest(type_id, _) -> uses.push(type_id)
+                    .Literal(_) -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+    uses
+}
+
+pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] {
+    uses := [MirTypeId]{}
+    if operation == {
+        .Struct(type_id, _) | .Enum(type_id, _, _) | .Tuple(type_id, _) -> {
+            uses.push(type_id)
+        }
+        .EnumIs(_, owner, _) | .EnumPayload(_, owner, _, _) -> {
+            uses.push(owner)
+        }
+        .Convert(_, _, target, conversion) -> {
+            if target.identity != None {
+                type_id :: target.identity ?? return uses
+                uses.push(type_id)
+            }
+            if conversion == {
+                .Prelude(_, _, fallibility) -> {
+                    loop type_id in mir_call_fallibility_type_uses(fallibility) -> uses.push(type_id)
+                }
+                .Transparent | .NumericCast | .SendFn -> {}
+            }
+        }
+        .TraitBox(_, target) -> uses.push(target)
+        .Call(callee, args, type_args) -> {
+            loop type_id in mir_call_arg_type_uses(args) -> uses.push(type_id)
+            loop ty in type_args {
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+            if callee == {
+                .Associated(_, owner) | .Method(_, owner) -> {
+                    if owner.identity != None {
+                        type_id :: owner.identity ?? return uses
+                        uses.push(type_id)
+                    }
+                }
+                .TraitMethod(_, _, receiver) -> {
+                    if receiver.identity != None {
+                        type_id :: receiver.identity ?? return uses
+                        uses.push(type_id)
+                    }
+                }
+                else -> {}
+            }
+        }
+        .IndirectCall(_, args, type_args) -> {
+            loop type_id in mir_call_arg_type_uses(args) -> uses.push(type_id)
+            loop ty in type_args {
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+        }
+        .CoreCall(_, _, args, type_args, fallibility, data_plan) -> {
+            loop type_id in mir_call_arg_type_uses(args) -> uses.push(type_id)
+            loop ty in type_args {
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+            loop type_id in mir_call_fallibility_type_uses(fallibility) -> uses.push(type_id)
+            if data_plan != None {
+                plan :: data_plan ?? return uses
+                loop type_id in mir_data_plan_type_uses(plan) -> uses.push(type_id)
+            }
+        }
+        .PtrFromAddr(_, element) -> {
+            if element.identity != None {
+                type_id :: element.identity ?? return uses
+                uses.push(type_id)
+            }
+        }
+        .Todo(_, _, expected_type) -> {
+            if expected_type != None {
+                ty :: expected_type ?? return uses
+                if ty.identity != None {
+                    type_id :: ty.identity ?? return uses
+                    uses.push(type_id)
+                }
+            }
+        }
+        .Semantic(semantic) -> {
+            loop type_id in mir_semantic_op_type_uses(semantic) -> uses.push(type_id)
+        }
+        else -> {}
+    }
+    uses
+}
+
+pub fn mir_semantic_op_prelude_calls(operation: MirSemanticOp) -> [MirPreludeCallId] {
+    calls := [MirPreludeCallId]{}
+    if operation == {
+        .Print(call, _)
+        | .AmbientInput(call, _)
+        | .RequireStop(call, _, _, _, _, _, _)
+        | .DataEntriesToMap(call, _)
+        | .LayoutCompare(call, _, _, _)
+        | .SharedGuardMap(call, _, _, _)
+        | .SharedGuardWait(call, _, _, _)
+        | .ConditionNotify(call, _, _)
+        | .AllocNew(call, _, _, _)
+        | .DecodeUnder(call, _, _)
+        | .OptionLift2(call, _, _, _)
+        | .MathBuiltin(_, call, _)
+        | .PreciseBuiltin(_, call, _)
+        | .StaticPreludeCall(call, _, _, _)
+        | .HardwareCall(call, _, _, _)
+        | .BuiltinMethod(call, _, _, _, _)
+        | .ClosureMethod(_, _, call)
+        | .NumericMethod(call, _)
+        | .NumericBinaryMethod(call, _, _)
+        | .OverflowOption(call, _, _, _)
+        | .HandleMethod(call, _, _, _, _)
+        | .PluginInvoke(call, _, _, _, _)
+        | .HttpRouterRegister(call, _, _, _, _, _, _, _)
+        | .CoreClosureCall(call, _, _, _, _, _)
+        | .TaskGroup(call, _, _)
+        | .Select(call, _, _)
+        | .HostCall(call, _)
+        | .TextPatternMatch(call, _, _)
+        | .BinaryPatternMatch(call, _, _) -> {
+            calls.push(call)
+        }
+        .CarrierFact(call, _, _, _)
+        | .GcEdit(call, _, _, _, _, _, _)
+        | .TypedTextInterp(call, _, _, _, _)
+        | .CCallback(call, _, _) -> {
+            calls.push(call)
+        }
+        .CellGuardProject(map_call, split_call, _, _, _, _) -> {
+            calls.push(map_call)
+            if split_call != None {
+                call :: split_call ?? return calls
+                calls.push(call)
+            }
+        }
+        .SharedGuardSplit(call, map_call, _, _, _, _) -> {
+            calls.push(call)
+            calls.push(map_call)
+        }
+        else -> {}
+    }
+    calls
+}
+
+pub fn mir_operation_prelude_calls(operation: MirOperation) -> [MirPreludeCallId] {
+    calls := [MirPreludeCallId]{}
+    if operation == {
+        .Call(callee, _, _) -> {
+            if callee == {
+                .Prelude(call) -> calls.push(call)
+                else -> {}
+            }
+        }
+        .CoreCall(_, route, _, _, _, _)
+        | .Todo(route, _, _)
+        | .Index(route, _, _, _, _, _, _)
+        | .Slice(route, _, _, _, _, _)
+        | .LoopRangeInit(route, _, _, _, _)
+        | .LoopRangeHasNext(route, _)
+        | .LoopRangeValue(route, _)
+        | .LoopRangeAdvance(route, _)
+        | .LoopIterInit(route, _, _, _, _)
+        | .LoopIterHasNext(route, _)
+        | .LoopIterValue(route, _)
+        | .LoopIterAdvance(route, _) -> calls.push(route)
+        .Convert(_, _, _, conversion) -> {
+            if conversion == {
+                .Prelude(call, _, _) -> calls.push(call)
+                else -> {}
+            }
+        }
+        .Binary(_, dispatch, _, _, _) -> {
+            if dispatch == {
+                .Prelude(call, _) -> calls.push(call)
+                else -> {}
+            }
+        }
+        .Semantic(semantic) -> {
+            loop call in mir_semantic_op_prelude_calls(semantic) -> calls.push(call)
+        }
+        else -> {}
+    }
+    calls
+}
+
+pub struct MirTypeDefRow { pub definition: MirTypeDef }
+pub enum MirRuntimePartId {
+    Gc
+    Event
+    Realtime
+    EmbeddedHardware
+    Ui
+    Devtools
+    Gtk
+    Apps
+    Email
+    Game
+    Files
+    Interrupt
+    FsRuntime
+    Process
+    Crypto
+    Math
+    Encoding
+    Data
+    Fmt
+    DataFmt
+    Compute
+    Http
+    WebSocket
+    Browser
+    Args
+    Reflect
+    AuthTokens
+    AuthSession
+    Sync
+    Services
+    Mod
+}
+pub enum MirForeignLanguage { C Cpp Rust Assembly }
+pub enum MirForeignAbi { C CUnwind System Stdcall Fastcall Vectorcall Rust Platform(name: String) }
+pub enum MirLinkArtifactKind { Object StaticLibrary DynamicLibrary Framework GeneratedSource }
+pub struct MirLinkArtifact { pub kind: MirLinkArtifactKind, pub path: String }
+pub struct MirLinkUnit {
+    pub id: MirLinkUnitId
+    pub crate_spec: String
+    pub cache_identity: String
+    pub target_applicability: MirTargetApplicability
+    pub artifacts: [MirLinkArtifact]
+    pub dependency_dirs: [String]
+    pub link_closure: [MirLinkUnitId]
+}
+pub struct MirCallbackAdapter {
+    pub id: MirCallbackId
+    pub symbol: String
+    pub function: MirFunctionId
+    pub params: [MirParam]
+    pub return_type: ?MirType
+    pub abi: MirForeignAbi
+    pub managed: Bool
+    pub plan_digest: ?String
+    pub callback_identity: ?String
+}
+pub struct MirCImportLink { pub importing_module: String, pub scope: ?String, pub alias: String, pub target_module: String }
+pub struct MirCLib { pub lib: String, pub module_name: String }
+pub struct MirCOverlayOverride { pub lib: String, pub generated_symbol: String, pub overlay_symbol: String }
+pub struct MirCloseAdapter { pub lib: String, pub handle_type: String, pub raw_function: String, pub adapter_function: String }
+pub enum MirFfiEvidenceBasis { Proved Enforced Contained Trusted Unknown }
+pub struct MirFfiBoundaryObligation {
+    pub name: String
+    pub basis: MirFfiEvidenceBasis
+    pub checker: String
+    pub assumptions: [String]
+    pub coverage_digest: String
+}
+pub struct MirFfiBoundaryFacts {
+    pub schema: String
+    pub digest: String
+    pub language: String
+    pub library: String
+    pub effect_root: String
+    pub effects: String
+    pub source_authority: String
+    pub artifact_coverage_digest: String
+    pub loaded_artifact: String
+    pub transitive_dependencies: ?[String]
+    pub reachable_callbacks: ?[String]
+    pub compiler_flags: ?[String]
+    pub target: String
+    pub generator: String
+    pub obligations: [MirFfiBoundaryObligation]
+}
+pub struct MirCffiFacts {
+    pub import_links: [MirCImportLink]
+    pub libs: [MirCLib]
+    pub overlay_overrides: [MirCOverlayOverride]
+    pub boundaries: [MirFfiBoundaryFacts]
+    pub direct_links: [String]
+    pub transitive_links: [String]
+    pub close_adapters: [MirCloseAdapter]
+}
+pub enum MirHandleOwnership { Owned Shared Borrowed }
+pub struct MirHandlePayload { pub library: String, pub typedef_name: String, pub close: String }
+pub enum MirFfiCloseSource { Conventional Overlay }
+pub enum MirFfiThreadSafety { Unspecified Safe Unsafe }
+pub struct MirHandleLifecycle {
+    pub id: MirHandleId
+    pub ty: MirType
+    pub ownership: MirHandleOwnership
+    pub payload: MirHandlePayload
+    pub close: ?MirFunctionId
+    pub close_foreign: ?MirForeignId
+    pub undo: ?MirFunctionId
+    pub send: Bool
+    pub sync: Bool
+    pub close_source: ?MirFfiCloseSource
+    pub thread_safety: ?MirFfiThreadSafety
+}
+pub struct MirForeign {
+    pub id: MirForeignId
+    pub module_id: MirModuleId
+    pub key: String
+    pub module_name: String
+    pub name: String
+    pub span: Span
+    pub symbol: String
+    pub path: String
+    pub params: [MirParam]
+    pub raw_scalar_abi: Bool
+    pub bridge_eligible: Bool
+    pub return_type: ?MirType
+    pub foreign_abi: MirForeignAbi
+    pub foreign_language: MirForeignLanguage
+    pub target_applicability: MirTargetApplicability
+    pub effects: MirEffectFacts
+    pub callback_transport: ?String
+    pub callback_plan_digest: ?String
+    pub callback_identity: ?String
+    pub link: ?MirLinkUnitId
+    pub callback: ?MirCallbackId
+    pub handle: ?MirHandleId
+    pub close_function: ?MirFunctionId
+    pub close_foreign: ?MirForeignId
+    pub undo_function: ?MirFunctionId
+}
+
+pub enum MirJobScope { Dev Ship Internal }
+pub enum MirJobSchedule {
+    Duration(nanos: Int)
+    WallClockTime(hour: Int, minute: Int)
+}
+pub enum MirJobDispatch { Direct Spawn Scheduled }
+pub enum MirJobSkip { Always(reason: String) UnlessPlatform(platform: String) }
+pub enum MirJobCachePolicy { Uncached Local Shared }
+pub struct MirJobLimit { pub name: String, pub value: String }
+pub struct MirJob {
+    pub id: MirJobId
+    pub function: MirFunctionId
+    pub name: String
+    pub doc: ?String
+    pub scope: MirJobScope
+    pub schedule: ?MirJobSchedule
+    pub inputs: [MirCliInput]
+    pub dispatch: MirJobDispatch
+    pub after: [String]
+    pub parallel: Int
+    pub packages: [String]
+    pub working_directory: ?String
+    pub input_paths: [String]
+    pub output_paths: [String]
+    pub skip: ?MirJobSkip
+    pub cache: MirJobCachePolicy
+    pub limits: [MirJobLimit]
+}
+pub enum MirTestKind { Unit Property }
+pub struct MirTestCase {
+    pub id: MirTestId
+    pub function: MirFunctionId
+    pub name: String
+    pub span: Span
+    pub kind: MirTestKind
+    pub contract_generated: Bool
+    pub eligibility: ?MirFunctionId
+    pub parameters: [MirParam]
+    pub faults: [String]
+    pub expected_failure: Bool
+    pub generation_unavailable_reason: ?String
+}
+pub struct MirOutputCheck { pub id: MirOutputCheckId, pub name: String, pub function: MirFunctionId }
+pub struct MirCoveragePoint { pub id: MirCoveragePointId, pub function: MirFunctionId, pub block: MirBlockId, pub span: Span }
+pub enum MirHarnessKind { Test Fuzz Coverage }
+pub struct MirHarnessPlan {
+    pub id: MirHarnessId
+    pub kind: MirHarnessKind
+    pub tests: [MirTestId]
+    pub output_checks: [MirOutputCheck]
+    pub selected_test: ?MirTestId
+    pub coverage_points: [MirCoveragePoint]
+    pub command_override: Bool
+}
+pub enum MirNameVisibility { Private Package Public }
+pub struct MirNameModule { pub alias: String, pub path: String, pub package: String }
+pub struct MirNameDeclaration {
+    pub module_index: Int
+    pub name: String
+    pub path: String
+    pub kind: String
+    pub span: Span
+    pub visibility: MirNameVisibility
+}
+pub struct MirNameAlias {
+    pub module_index: Int
+    pub name: String
+    pub target: String
+    pub target_module: ?Int
+    pub span: Span
+    pub visibility: MirNameVisibility
+}
+pub struct MirNameReference {
+    pub module_path: String
+    pub kind: String
+    pub def_span: Span
+    pub semantic_identity: ?String
+}
+pub enum MirStructureFactKind { Liveness Lifecycle ImportEdge }
+pub struct MirStructureFact {
+    pub kind: MirStructureFactKind
+    pub subject: String
+    pub source: String
+    pub span: Span
+    pub status: String
+    pub detail: String
+    pub gate: ?String
+}
+pub struct MirNameFacts {
+    pub modules: [MirNameModule]
+    pub declarations: [MirNameDeclaration]
+    pub aliases: [MirNameAlias]
+    pub references: [MirNameReference]
+    pub structure_facts: [MirStructureFact]
+}
+
+pub struct MirSchemaMigrationPlan {
+    pub type_name: String
+    pub historical_shapes: [[String]]
+    pub steps: [MirSchemaMigrationStep]
+}
+pub struct MirSchemaMigrationStep {
+    pub from_shape: String
+    pub to_shape: String
+    pub ops: [MirSchemaMigrationOp]
+}
+pub enum MirSchemaMigrationOp {
+    Rename(from_key: String, to_key: String)
+    Remove(key: String)
+    Add(key: String, type_name: String, default_fn: String)
+    Change(key: String, from_type: String, to_type: String, converter_fn: String)
+}
+
+pub enum MirArtifactKind {
+    NativeExecutable
+    NativeLibrary
+    SandboxPlugin
+    WebApplication
+    TestExecutable
+    FuzzExecutable
+    TestOverride
+}
+pub enum MirArtifactTarget { RustAot Cranelift Interpreter Web }
+pub enum MirArtifactBuildMode { Dev Release Test Fuzz Coverage }
+pub enum MirEntryKind { Library Command App Service Test }
+pub enum MirEntryOutput { NoOutput ReturnValue StandardOutput ExitStatus }
+pub struct MirExport { pub symbol: String, pub function: MirFunctionId, pub abi: MirForeignAbi }
+pub struct MirEntrySpec {
+    pub kind: MirEntryKind
+    pub function: ?MirFunctionId
+    pub cli: ?MirCliEntry
+    pub output: MirEntryOutput
+    pub initialize_environment: Bool
+    pub initialize_gc: Bool
+    pub serves_until_stopped: Bool
+    pub package_version: String
+}
+pub struct MirArtifactPlan {
+    pub id: MirArtifactId
+    pub kind: MirArtifactKind
+    pub name: String
+    pub target: MirArtifactTarget
+    pub mode: MirArtifactBuildMode
+    pub modules: [MirModuleId]
+    pub links: [MirLinkUnitId]
+    pub jobs: [MirJobId]
+    pub runtime_parts: [MirRuntimePartId]
+    pub exports: [MirExport]
+    pub provider_identity: String
+    pub closure_identity: String
+    pub artifact_identity: String
+    pub entry: ?MirEntrySpec
+    pub harness: ?MirHarnessId
+}
+
+pub struct MirByteSize { pub bytes: Int }
+pub enum MirRegisterWidth { U8 U16 U32 U64 }
+pub enum MirTargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
+pub struct MirSvdProvenance { pub source: String, pub sha256: String }
+pub struct MirTargetRegisterFact {
+    pub name: String
+    pub offset: Int
+    pub width: MirRegisterWidth
+    pub access: MirTargetRegisterAccessMode
+    pub volatile: Bool
+}
+pub struct MirTargetRegisterBlockFact {
+    pub name: String
+    pub base: Int
+    pub size: MirByteSize
+    pub registers: [MirTargetRegisterFact]
+}
+pub enum MirTargetRegisterOperation { Read Write }
+pub struct MirTargetRegisterAccessFact {
+    pub block: String
+    pub register: String
+    pub operation: MirTargetRegisterOperation
+    pub width: MirRegisterWidth
+}
+pub struct MirTargetInterruptFact {
+    pub name: String
+    pub vector: Int
+    pub forbidden_effects: [String]
+    pub bounded: Bool
+}
+pub struct MirTargetInterruptHandlerFact {
+    pub interrupt: String
+    pub handler: String
+    pub effects: [String]
+    pub forbidden_effects: [String]
+    pub bounded: Bool
+}
+pub enum MirTargetDmaOwnership { Borrowed Transfer }
+pub struct MirTargetDmaChannelFact {
+    pub name: String
+    pub channel: Int
+    pub transfer_width: MirRegisterWidth
+    pub ownership: MirTargetDmaOwnership
+    pub max_transfer_bytes: ?Int
+}
+pub enum MirTargetDmaOperation { Start Wait UseBuffer }
+pub enum MirTargetDmaOwner { Cpu Device }
+pub struct MirTargetDmaOperationFact {
+    pub channel: String
+    pub buffer: String
+    pub operation: MirTargetDmaOperation
+    pub owner: MirTargetDmaOwner
+}
+pub enum MirTargetHardwareUnresolvedReference {
+    RegisterBlock(block: String)
+    Register(block: String, register: String)
+    DmaChannel(channel: String)
+    Interrupt(interrupt: String)
+}
+pub struct MirTargetHardwareFacts {
+    pub svd: ?MirSvdProvenance
+    pub register_blocks: [MirTargetRegisterBlockFact]
+    pub interrupts: [MirTargetInterruptFact]
+    pub dma_channels: [MirTargetDmaChannelFact]
+}
+pub struct MirTargetHardwareUse {
+    pub register_accesses: [MirTargetRegisterAccessFact]
+    pub interrupt_handlers: [MirTargetInterruptHandlerFact]
+    pub dma_operations: [MirTargetDmaOperationFact]
+    pub unresolved_references: [MirTargetHardwareUnresolvedReference]
+}
+pub enum MirTargetProgrammerAdapter { Emulator ProbeRs OpenOcd }
+pub struct MirTargetProgrammerFacts {
+    pub adapter: MirTargetProgrammerAdapter
+    pub executable: String
+    pub chip: ?String
+    pub interface: ?String
+    pub config: [String]
+    pub speed_khz: ?Int
+    pub reset: Bool
+    pub machine: ?String
+    pub cpu: ?String
+}
+
+pub struct MirLayoutSupportFacts {
+    pub proven: Bool
+    pub alignments: [Int]
+    pub max_size: ?Int
+    pub max_address: ?Int
+    pub abi: ?String
+    pub provenance: String
+}
+pub struct MirLayoutCapabilityFacts {
+    pub fact_version: String
+    pub target_profile: String
+    pub execution_modes: [String]
+    pub backend: String
+    pub toolchain: String
+    pub linker: String
+    pub allocator_provider: String
+    pub type_representation: MirLayoutSupportFacts
+    pub stack_placement: MirLayoutSupportFacts
+    pub global_placement: MirLayoutSupportFacts
+    pub heap_allocator: MirLayoutSupportFacts
+    pub foreign_by_value_abi: MirLayoutSupportFacts
+}
+pub enum MirMemoryKind { Flash Ram Mmio Reserved }
+pub enum MirMemoryAccess { R Rw Rx Rwx }
+pub struct MirMemoryRegion {
+    pub name: String
+    pub origin: Int
+    pub size: MirByteSize
+    pub kind: MirMemoryKind
+    pub access: MirMemoryAccess
+}
+pub enum MirLinkerInput {
+    HostedDefault
+    Unspecified
+    Generated
+    File(path: String, sha256: String)
+}
+pub struct MirProviderAbi { pub calling_convention: String, pub version: String }
+pub struct MirProviderLimits {
+    pub max_request_bytes: ?Int
+    pub max_response_bytes: ?Int
+    pub max_calls: ?Int
+}
+pub struct MirProviderContract {
+    pub provider: String
+    pub sha256: String
+    pub provenance: String
+    pub abi: MirProviderAbi
+    pub limits: MirProviderLimits
+}
+pub enum MirAllocatorPolicy {
+    HostedDefault
+    Unspecified
+    NoAllocator
+    Provider(provider: MirProviderContract)
+    Fixed(region: String, size: MirByteSize)
+    Counting(cap: ?MirByteSize)
+}
+pub enum MirPanicPolicy {
+    HostedDefault
+    Unspecified
+    Abort
+    Report(provider: MirProviderContract)
+}
+pub enum MirClockPolicy { HostedDefault Unspecified NoClock Provider(provider: MirProviderContract) }
+pub enum MirEntropyPolicy { HostedDefault Unspecified NoEntropy Provider(provider: MirProviderContract) }
+pub enum MirSchedulerPolicy {
+    HostedDefault
+    Unspecified
+    NoScheduler
+    Cooperative(provider: MirProviderContract)
+    InterruptDriven(provider: MirProviderContract)
+    BoardRuntime(provider: MirProviderContract)
+}
+pub enum MirMmioPolicy { HostedDefault Unspecified NoMmio Provider(provider: MirProviderContract) }
+pub enum MirByteSinkPolicy {
+    HostedDefault
+    Unspecified
+    NoByteSink
+    Provider(read: ?MirProviderContract, write: ?MirProviderContract, report: ?MirProviderContract)
+}
+pub enum MirStartupPolicy {
+    HostedDefault
+    Unspecified
+    Generated(provider: MirProviderContract)
+}
+pub struct MirAuditPolicy { pub build_artifact: Bool, pub dossier_lens: Bool }
+pub struct MirTargetMachine {
+    pub name: String
+    pub triple: String
+    pub layout: MirLayoutCapabilityFacts
+    pub no_os: Bool
+    pub memory: [MirMemoryRegion]
+    pub linker: MirLinkerInput
+    pub allocator: MirAllocatorPolicy
+    pub panic: MirPanicPolicy
+    pub mmio: MirMmioPolicy
+    pub wall_clock: MirClockPolicy
+    pub monotonic_clock: MirClockPolicy
+    pub zone_data: MirClockPolicy
+    pub sleep: MirClockPolicy
+    pub entropy: MirEntropyPolicy
+    pub scheduler: MirSchedulerPolicy
+    pub byte_sink: MirByteSinkPolicy
+    pub startup: MirStartupPolicy
+    pub startup_entry: String
+    pub startup_vectors: String
+    pub startup_abi: MirProviderAbi
+    pub startup_placement: String
+    pub hardware: MirTargetHardwareFacts
+    pub programmers: [MirTargetProgrammerFacts]
+    pub audit: MirAuditPolicy
+}
+pub enum MirRuntimeLayer { Core Alloc Std }
+pub struct MirTargetDossier {
+    pub machine: ?MirTargetMachine
+    pub layer: MirRuntimeLayer
+    pub provider_identity: String
+    pub closure_identity: String
+    pub linker_identity: String
+    pub tier_identity: String
+    pub compiler_identity: String
+    pub environment_identity: String
+    pub dependency_identity: String
+}
+
+pub enum MirAppRenderMode { Csr Ssr Ssg Stream Island }
+pub enum MirAppRenderFactMode { Static Server ServerStream ServerIsland Client }
+pub enum MirAppCacheFact { Unspecified Immutable Revalidate Private }
+pub struct MirAppPendingBoundaryId { pub value: Int }
+pub enum MirAppHydrationTrigger { Immediate ClientLoad ClientIdle ClientVisible Manual }
+pub struct MirAppResumeCapture { pub name: String, pub ty: String, pub serializable: Bool }
+pub struct MirAppResumePayload { pub captures: [MirAppResumeCapture], pub serializable: Bool }
+pub struct MirAppIslandFact {
+    pub identity: String
+    pub hydration_trigger: MirAppHydrationTrigger
+    pub resume_payload: MirAppResumePayload
+}
+pub struct MirAppRenderFacts {
+    pub mode: MirAppRenderFactMode
+    pub reason: [String]
+    pub effects: [String]
+    pub interactive: Bool
+    pub loader: ?String
+    pub form: ?String
+    pub cache: MirAppCacheFact
+    pub override_mode: ?MirAppRenderFactMode
+    pub pending_boundary_id: ?MirAppPendingBoundaryId
+    pub island: ?MirAppIslandFact
+}
+pub struct MirAppRouteField {
+    pub name: String
+    pub ty: String
+    pub codec: String
+    pub required: Bool
+    pub default: ?String
+}
+pub struct MirAppRouteLoader {
+    pub handler: String
+    pub data_type: String
+    pub dependency: String
+    pub preload: Bool
+    pub cache_identity: String
+}
+pub struct MirAppRouteBoundaries { pub pending: ?String, pub not_found: ?String, pub error: ?String }
+pub struct MirAppRoute {
+    pub path: String
+    pub handler: String
+    pub route_identity: String
+    pub path_params: [MirAppRouteField]
+    pub search_params: [MirAppRouteField]
+    pub search_codec: String
+    pub loader: ?MirAppRouteLoader
+    pub boundaries: MirAppRouteBoundaries
+    pub precedence: String
+    pub render: MirAppRenderMode
+    pub render_facts: MirAppRenderFacts
+    pub provenance: String
+    pub span_start: Int
+    pub span_end: Int
+}
+pub struct MirAppAction {
+    pub name: String
+    pub handler: String
+    pub kind: String
+    pub preload: Bool
+    pub input_type: String
+    pub output_type: String
+    pub error_type: String
+    pub endpoint: String
+    pub method: String
+    pub csrf: String
+    pub effects: [String]
+    pub middleware: [String]
+    pub provenance: String
+    pub span_start: Int
+    pub span_end: Int
+}
+pub struct MirAppMount {
+    pub prefix: String
+    pub handler: String
+    pub effects: [String]
+    pub security: [String]
+    pub provenance: String
+    pub span_start: Int
+    pub span_end: Int
+}
+pub struct MirAppRoutesFrom { pub root: String, pub span_start: Int, pub span_end: Int }
+pub struct MirAppPolicy {
+    pub security: [String]
+    pub assets: [String]
+    pub split: [String]
+    pub cache: [String]
+    pub a11y: [String]
+    pub adapters: [String]
+}
+pub struct MirAppQueryFact { pub key: String, pub footprint: String, pub source: String, pub kind: String }
+pub struct MirAppStoreFact { pub name: String, pub source: String, pub kind: String, pub history_limit: String }
+pub struct MirAppFormFieldFact {
+    pub name: String
+    pub ty: String
+    pub required: Bool
+    pub default: ?String
+    pub label: String
+    pub control: String
+    pub wire_name: String
+}
+pub struct MirAppFormFact {
+    pub name: String
+    pub model: String
+    pub action: String
+    pub input_type: String
+    pub output_type: String
+    pub error_type: String
+    pub endpoint: String
+    pub method: String
+    pub csrf: String
+    pub effects: [String]
+    pub fields: [MirAppFormFieldFact]
+    pub middleware: [String]
+    pub provenance: String
+    pub span_start: Int
+    pub span_end: Int
+}
+pub struct MirAppGraph {
+    pub entry_file: String
+    pub routes: [MirAppRoute]
+    pub actions: [MirAppAction]
+    pub forms: [MirAppFormFact]
+    pub queries: [MirAppQueryFact]
+    pub stores: [MirAppStoreFact]
+    pub mounts: [MirAppMount]
+    pub routes_from: [MirAppRoutesFrom]
+    pub policy: MirAppPolicy
+    pub hydration: String
+    pub shared_tir: Bool
+}
+pub struct MirModelOutputFact {
+    pub package: String
+    pub output: String
+    pub signature_name: ?String
+    pub package_version: String
+    pub license: String
+    pub package_root: String
+    pub fields: [String:String]
+}
+
+pub struct MirPackageFacts {
+    pub project_root: String
+    pub edition: String
+    pub runtime_parts: [MirRuntimePartId]
+    pub uses_arrow: Bool
+    pub active_os: String
+    pub inferred_layer: String
+    pub allocator: String
+    pub package_version: String
+    pub artifact_target: ?MirArtifactTarget
+    pub target_dossier: MirTargetDossier
+    pub web_app: ?MirAppGraph
+    pub model_outputs: [MirModelOutputFact]
+    pub authority_needs: [String]
+    pub hardware_use: MirTargetHardwareUse
+    pub hardware_profile: ?MirTargetHardwareFacts
+    pub hardware_profile_id: String
+    pub hardware_capabilities: [String]
+    pub hardware_setups: [MirHardwareSetup]
+}
+pub enum MirHardwareSetup {
+    DmaConfigure(profile_id: String, channel: String, transfer_width: MirRegisterWidth, ownership: MirTargetDmaOwnership)
+    InterruptBind(profile_id: String, interrupt: String, vector: Int, handler_symbol: String, forbidden_effects: [String])
+}
+pub struct MirCoreCall {
+    pub id: MirCoreCallId
+    pub key: String
+    pub module_name: String
+    pub member: String
+    pub receiver_types: [String]
+    pub arity: Int
+    pub max_arity: Int
+    pub borrow_mask: [Bool]
+    pub fallibility: CoreCallFallibility
+    pub effect_kind: ?Effect
+    pub effect_leaf: ?String
+    pub sink_class: ?SinkClass
+    pub pure_route: CoreCallPureRoute
+    pub interpreter_route: CoreCallInterpreterRoute
+    pub symbol: CoreCallSymbol
+    pub coverage_bits: Int
+    pub aot_direct: Bool
+    pub jit_direct: Bool
+    pub jit_symbol: ?String
+    pub marker: ?CoreMarkerApplication
+}
+pub struct MirFunctionRow { pub function: MirFunction }
+pub enum MirErasureReason { CompileTimeOnly Disabled ExpandedBeforeLowering SemanticIndexOnly }
+pub struct MirUnreachable { pub construct: String, pub span: Span, pub reason: MirErasureReason }
+
+// Backend-neutral semantic graph used by lowering and all MIR consumers. Native
+// artifact/provider activation records remain in their owning backend adapters.
+pub struct MirProgram {
+    pub cffi: MirCffiFacts
+    pub schema_version: Int
+    pub package_identity: String
+    pub facts: MirPackageFacts
+    pub names: MirNameFacts
+    pub modules: [MirModule]
+    pub imports: [MirImport]
+    pub types: [MirTypeDef]
+    pub traits: [MirTraitDef]
+    pub core_owners: [MirCoreOwner]
+    pub impls: [MirImplDef]
+    pub constants: [MirConstantDef]
+    pub fields: [MirFieldRow]
+    pub source_files: [MirSourceFile]
+    pub functions: [MirFunction]
+    pub foreign: [MirForeign]
+    pub links: [MirLinkUnit]
+    pub callbacks: [MirCallbackAdapter]
+    pub handles: [MirHandleLifecycle]
+    pub jobs: [MirJob]
+    pub tests: [MirTestCase]
+    pub harnesses: [MirHarnessPlan]
+    pub artifacts: [MirArtifactPlan]
+    pub core_calls: [MirCoreCall]
+    pub prelude_calls: [MirPreludeCall]
+    pub type_instances: [MirType]
+    pub codec_migrations: [String:MirSchemaMigrationPlan]
+    pub unreachable: [MirUnreachable]
+}

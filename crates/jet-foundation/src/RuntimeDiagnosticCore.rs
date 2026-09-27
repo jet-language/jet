@@ -20,6 +20,40 @@ pub struct JetRuntimeStopContext<'a> {
     pub caret_len: u32,
     pub expected_type: &'a str,
 }
+/// Canonical omitted-message policy for checked `require`.
+///
+/// `None` is the omitted message; an explicitly empty string remains empty.
+pub fn jet_require_message(message: Option<&str>) -> &str {
+    message.unwrap_or("condition failed")
+}
+
+/// Allocation-free expected/got carrier for checked `require_eq`.
+pub struct JetRequireEqMessage<'a> {
+    left_debug: &'a dyn fmt::Display,
+    right_debug: &'a dyn fmt::Display,
+}
+
+impl fmt::Display for JetRequireEqMessage<'_> {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            out,
+            "expected: {}, got: {}",
+            self.right_debug,
+            self.left_debug
+        )
+    }
+}
+
+pub fn jet_require_eq_message<'a>(
+    left_debug: &'a dyn fmt::Display,
+    right_debug: &'a dyn fmt::Display,
+) -> JetRequireEqMessage<'a> {
+    JetRequireEqMessage {
+        left_debug,
+        right_debug,
+    }
+}
+
 
 pub fn jet_write_diagnostic_template(
     out: &mut dyn fmt::Write,

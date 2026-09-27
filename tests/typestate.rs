@@ -23,15 +23,15 @@ impl Settlement {
     #State(Settled) fn report(self) String -[]> { return "settled" }
 }
 
-@state_info :: Settlement.reflect()
+@STATE_INFO :: Settlement.reflect()
 
 fn run() {
     item := Settlement.begin()
     item = item.approve()
     item = item.settle()
     print(item.report())
-    print(@state_info.states[2].terminal)
-    print(@state_info.states[2].reachable ?? false)
+    print(@STATE_INFO.states[2].terminal)
+    print(@STATE_INFO.states[2].reachable ?? false)
 }
 "#;
 

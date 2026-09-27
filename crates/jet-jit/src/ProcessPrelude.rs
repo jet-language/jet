@@ -637,6 +637,45 @@ pub(crate) mod process_prelude {
     ) -> Result<Option<String>, IOError> {
         jet_process_stream_next_line(reader)
     }
+    /// Send-safe owner for a process output reader.  The ordinary process
+    /// Prelude keeps an `Rc<RefCell<...>>` because a child binding is
+    /// thread-affine; Source loop cursors need the same reader lease behind a
+    /// scheduler-safe mutex once the checked owner has been adopted.
+    pub(crate) type SourceProcessReader =
+        std::sync::Arc<std::sync::Mutex<Option<std::io::BufReader<ProcessReader>>>>;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum SourceProcessStreamKind {
+        Stdout,
+        Stderr,
+    }
+
+    pub(crate) fn source_take_process_stream(
+        child: &ProcessChild,
+        stream: SourceProcessStreamKind,
+    ) -> Result<SourceProcessReader, String> {
+        let reader = match stream {
+            SourceProcessStreamKind::Stdout => child.stdout.borrow_mut().take(),
+            SourceProcessStreamKind::Stderr => child.stderr.borrow_mut().take(),
+        };
+        reader
+            .map(|reader| std::sync::Arc::new(std::sync::Mutex::new(Some(reader))))
+            .ok_or_else(|| "process output stream is already moved or closed".to_string())
+    }
+
+    pub(crate) fn source_process_stream_next_line(
+        reader: &SourceProcessReader,
+    ) -> Result<Option<String>, IOError> {
+        let mut reader = reader.lock().map_err(|_| {
+            IOError::other(
+                IOOperation::Read,
+                None,
+                "process output reader lock is poisoned",
+            )
+        })?;
+        jet_process_child_read_line(&mut *reader)
+    }
+
 
     pub(crate) fn terminal_session_resize(
         session: &TerminalSession,

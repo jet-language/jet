@@ -7,10 +7,12 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirForeign, MirForeignAbi,
-    MirForeignLanguage, MirHandleId, MirHandleToken, MirProgram, MirRuntimeValue, MirScalarKind,
-    MirStructLayout, MirType, MirTypeDefKind, MirTypeId, MirTypeKind,
+    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign,
+    MirForeignAbi, MirForeignLanguage, MirHandleId, MirHandleToken, MirProgram, MirRuntimeValue,
+    MirScalarKind, MirStructLayout, MirType, MirTypeDefKind, MirTypeId, MirTypeKind,
+    MirVariantPayload,
 };
+use jet_codegen::Comptime::{AmbientMirExternResult, AmbientMirExternWriteback};
 use jet_rt::JetVal;
 use std::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::{HashMap, HashSet};
@@ -152,6 +154,9 @@ enum ParamAbi {
     String,
     Handle,
     List,
+    /// Checked `#[repr(C)]` nominal records use byte storage and a generated
+    /// typed C trampoline; they are never collapsed into an integer carrier.
+    Record,
     /// Managed callback start rows are loaded through their typed callback
     /// helper, never through a uniform `*_cabi` call.
     Callback,
@@ -166,9 +171,10 @@ enum RetAbi {
     String,
     Handle,
     List,
+    /// A checked C record returned by value, copied from the trampoline's
+    /// owned byte buffer before the bridge frees it.
+    Record,
 }
-
-#[derive(Clone)]
 struct FfiRecordField {
     name: String,
     ty: MirType,
@@ -182,7 +188,32 @@ struct FfiRecordDesc {
     size: usize,
     align: usize,
     fields: Vec<FfiRecordField>,
+    /// Present for checked C enums. Payload enums use the record carrier;
+    /// unit-only enums retain their scalar carrier but still use this
+    /// descriptor to validate native discriminants.
+    enum_info: Option<FfiEnumDesc>,
 }
+
+#[derive(Clone)]
+struct FfiEnumVariantDesc {
+    name: String,
+    discriminant: i64,
+    payload: MirVariantPayload,
+    offset: usize,
+    size: usize,
+    align: usize,
+    stride: usize,
+    field_offsets: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct FfiEnumDesc {
+    tag: MirCEnumTag,
+    tag_size: usize,
+    has_payload: bool,
+    variants: Vec<FfiEnumVariantDesc>,
+}
+
 
 type JitNativeCallback = unsafe extern "C" fn(*mut c_void, i64);
 type JitCallbackStart =
@@ -191,17 +222,20 @@ type JitCallbackStart =
 #[derive(Clone)]
 struct FfiEntrySpec {
     wrapper_name: String,
-    params: Vec<ParamAbi>,
+    /// Checked opaque-handle identity for each original parameter slot.
+    /// `None` is deliberate for scalar/string/list carriers; this must not
+    /// collapse mixed handle rows to the foreign return-handle identity.
+    param_handles: Vec<Option<MirHandleId>>,
     param_types: Vec<MirType>,
     param_access: Vec<MirAccess>,
     ret: RetAbi,
     ret_type: Option<MirType>,
     handle: Option<MirHandleId>,
     close_handle: Option<MirHandleId>,
-}
 
 #[derive(Clone)]
 struct FfiEntry {
+    param_handles: Vec<Option<MirHandleId>>,
     params: Vec<ParamAbi>,
     param_types: Vec<MirType>,
     param_access: Vec<MirAccess>,
@@ -276,6 +310,9 @@ impl FfiHandleRegistry {
 
     fn raw(&self, id: i64) -> Option<i64> {
         self.by_id.get(&id).and_then(MirHandleToken::raw)
+    }
+    fn handle_id(&self, id: i64) -> Option<MirHandleId> {
+        self.by_id.get(&id).map(MirHandleToken::handle_id)
     }
 
     fn take(&mut self, id: i64) -> Option<(MirHandleId, i64)> {
@@ -415,12 +452,17 @@ impl JitCallbackState {
             MirForeignTarget::Cranelift,
         )
         .map_err(|error| error.what.clone())
-        .and_then(|value| match value {
-            MirRuntimeValue::Int(0) => Ok(()),
-            MirRuntimeValue::Int(status) => Err(format!(
-                "native callback shutdown acknowledged with status {status}"
-            )),
-            _ => Err("native callback shutdown returned a non-integer status".to_string()),
+        .and_then(|result| {
+            if !result.writebacks.is_empty() {
+                return Err("native callback shutdown returned writable parameters".to_string());
+            }
+            match result.value {
+                MirRuntimeValue::Int(0) => Ok(()),
+                MirRuntimeValue::Int(status) => Err(format!(
+                    "native callback shutdown acknowledged with status {status}"
+                )),
+                _ => Err("native callback shutdown returned a non-integer status".to_string()),
+            }
         });
         if let Err(error) = native_result {
             self.quarantine(error.clone());
@@ -586,6 +628,12 @@ fn ffi_handle_raw(id: i64) -> Option<i64> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .raw(id)
+}
+fn ffi_handle_id(id: i64) -> Option<MirHandleId> {
+    FFI_HANDLES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .handle_id(id)
 }
 
 fn take_ffi_handle(id: i64) -> Option<(MirHandleId, i64)> {
@@ -868,6 +916,9 @@ fn target_applicable(foreign: &MirForeign, target: MirArtifactTarget) -> bool {
     }
 }
 pub(crate) fn bridge_wrapper_name(foreign: &MirForeign) -> String {
+    if foreign.key.starts_with("jet_ffi_guest") {
+        return foreign.key.clone();
+    }
     match foreign.foreign_language {
         // C, C++, and assembly bodies are compiled into the prepared bridge
         // cdylib and exported under the `jet_ffi_` trampoline name; only Rust
@@ -903,29 +954,63 @@ fn bridge_path(
     })
 }
 
-fn mir_foreign_handle_type(
-    program: &MirProgram,
-    foreign: &MirForeign,
-    ty: &MirType,
-) -> bool {
-    let Some(handle_id) = foreign.handle else {
-        return false;
-    };
-    program.handles.iter().any(|handle| {
-        handle.id == handle_id
-            && (handle.ty.same_checked_type(ty)
-                || matches!(
-                    (&handle.ty.kind(), &ty.kind()),
-                    (MirTypeKind::Apply { name: left, .. }, MirTypeKind::Apply { name: right, .. })
-                        if left.id == right.id
-                ))
+/// Resolve a nominal MIR type against the checked lifecycle rows. Never infer
+/// opacity from the nominal shape alone: unclassified records retain their
+/// typed CModule route.
+fn mir_handle_id_for_type(program: &MirProgram, ty: &MirType) -> Option<MirHandleId> {
+    program.handles.iter().find_map(|handle| {
+        (handle.ty.same_checked_type(ty)
+            || matches!(
+                (&handle.ty.kind(), &ty.kind()),
+                (MirTypeKind::Apply { name: left, .. }, MirTypeKind::Apply { name: right, .. })
+                    if left.id == right.id
+            ))
+        .then_some(handle.id)
     })
+}
+
+fn mir_foreign_handle_type(program: &MirProgram, ty: &MirType) -> bool {
+    mir_handle_id_for_type(program, ty).is_some()
+}
+fn mir_type_identity(ty: &MirType) -> Option<MirTypeId> {
+    ty.identity.or_else(|| match ty.kind() {
+        MirTypeKind::Apply { name, .. } => Some(name.id),
+        _ => None,
+    })
+}
+
+fn mir_enum_desc<'a>(
+    ty: &MirType,
+    records: &'a HashMap<MirTypeId, FfiRecordDesc>,
+) -> Option<&'a FfiEnumDesc> {
+    let id = mir_type_identity(ty)?;
+    records.get(&id)?.enum_info.as_ref()
+}
+
+fn mir_record_type(
+    ty: &MirType,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+) -> bool {
+    mir_type_identity(ty).and_then(|id| records.get(&id)).is_some_and(|record| {
+        record
+            .enum_info
+            .as_ref()
+            .is_none_or(|enum_info| enum_info.has_payload)
+    })
+}
+
+fn mir_scalar_enum_type(
+    ty: &MirType,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+) -> bool {
+    mir_enum_desc(ty, records).is_some_and(|enum_info| !enum_info.has_payload)
 }
 
 fn mir_bridge_specs(
     program: &MirProgram,
     artifact: &jet_foundation::MIR::MirArtifactPlan,
 ) -> Result<Vec<FfiEntrySpec>, BindError> {
+    let records = record_descriptors(program)?;
     let mut specs = Vec::new();
     for foreign in &program.foreign {
         let in_module = artifact.modules.contains(&foreign.module_id);
@@ -935,19 +1020,15 @@ fn mir_bridge_specs(
         if !(in_module || in_link) || !target_applicable(foreign, artifact.target) {
             continue;
         }
-        if matches!(
-            foreign.callback_transport.as_deref(),
-            Some("managed" | "managed-close" | "emit-task")
-        ) {
-            continue;
-        }
         let params = foreign
             .params
             .iter()
             .map(|parameter| {
                 mir_param_abi(
                     &parameter.ty,
-                    mir_foreign_handle_type(program, foreign, &parameter.ty),
+                    mir_foreign_handle_type(program, &parameter.ty),
+                    !foreign.bridge_eligible && mir_record_type(&parameter.ty, &records),
+                    mir_scalar_enum_type(&parameter.ty, &records),
                 )
                 .ok_or_else(|| {
                     BindError::Message(format!(
@@ -957,6 +1038,11 @@ fn mir_bridge_specs(
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let param_handles = foreign
+            .params
+            .iter()
+            .map(|parameter| mir_handle_id_for_type(program, &parameter.ty))
+            .collect::<Vec<_>>();
         let param_types = foreign
             .params
             .iter()
@@ -968,12 +1054,21 @@ fn mir_bridge_specs(
             .map(|parameter| parameter.access)
             .collect::<Vec<_>>();
         let ret_type = foreign.return_type.clone();
-        let ret = mir_ret_abi(
+        mir_ret_abi(
             foreign.return_type.as_ref(),
             foreign
                 .return_type
                 .as_ref()
-                .is_some_and(|ty| mir_foreign_handle_type(program, foreign, ty)),
+                .is_some_and(|ty| mir_foreign_handle_type(program, ty)),
+            !foreign.bridge_eligible
+                && foreign
+                    .return_type
+                    .as_ref()
+                    .is_some_and(|ty| mir_record_type(ty, &records)),
+            foreign
+                .return_type
+                .as_ref()
+                .is_some_and(|ty| mir_scalar_enum_type(ty, &records)),
         )
         .ok_or_else(|| {
             BindError::Message(format!(
@@ -994,11 +1089,15 @@ fn mir_bridge_specs(
         specs.push(FfiEntrySpec {
             wrapper_name: bridge_wrapper_name(foreign),
             params,
+            param_handles,
             param_types,
             param_access,
             ret,
             ret_type,
-            handle: foreign.handle,
+            handle: foreign
+                .return_type
+                .as_ref()
+                .and_then(|ty| mir_handle_id_for_type(program, ty)),
             close_handle,
         });
     }
@@ -1006,6 +1105,7 @@ fn mir_bridge_specs(
     specs.dedup_by(|left, right| {
         left.wrapper_name == right.wrapper_name
             && left.params == right.params
+            && left.param_handles == right.param_handles
             && left
                 .param_types
                 .iter()
@@ -1086,6 +1186,13 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                         }
                         Some((align_up(offset, align)?, align))
                     }
+                    MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some() => {
+                        let bytes = definition.enum_layout.as_ref()?.bytes?;
+                        Some((
+                            usize::try_from(bytes.size).ok()?,
+                            usize::try_from(bytes.alignment).ok()?.max(1),
+                        ))
+                    }
                     MirTypeDefKind::Distinct { base, .. } => {
                         layout_for_type(base, defs, memo, active)
                     }
@@ -1105,6 +1212,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
             | MirTypeKind::Quantity { base, .. } => {
                 layout_for_type(base, defs, memo, active)
             }
+            MirTypeKind::Int => Some((8, 8)),
             _ => {
                 let size = match ty.layout.size {
                     jet_foundation::MIR::MirSize::Static(size) => usize::try_from(size).ok()?,
@@ -1173,8 +1281,246 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                 size,
                 align,
                 fields: descriptor_fields,
+                enum_info: None,
             },
         );
+    }
+
+    for definition in &program.types {
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            continue;
+        };
+        let Some(tag) = definition.c_layout_tag else {
+            continue;
+        };
+        let Some(layout) = definition.enum_layout.as_ref() else {
+            return Err(BindError::Message(format!(
+                "jit ffi: C enum `{}` has no checked target layout facts",
+                definition.name
+            )));
+        };
+        let Some(bytes) = layout.bytes else {
+            return Err(BindError::Message(format!(
+                "jit ffi: C enum `{}` has unknown target layout facts",
+                definition.name
+            )));
+        };
+        if layout.fields.len() != variants.len() {
+            return Err(BindError::Message(format!(
+                "jit ffi: C enum `{}` layout facts do not cover every variant",
+                definition.name
+            )));
+        }
+        let size = usize::try_from(bytes.size).map_err(|_| {
+            BindError::Message(format!(
+                "jit ffi: C enum `{}` has an unrepresentable size",
+                definition.name
+            ))
+        })?;
+        let align = usize::try_from(bytes.alignment)
+            .ok()
+            .filter(|alignment| alignment.is_power_of_two() && *alignment <= isize::MAX as usize)
+            .ok_or_else(|| {
+                BindError::Message(format!(
+                    "jit ffi: C enum `{}` has an invalid checked alignment",
+                    definition.name
+                ))
+            })?;
+        if bytes.stride != bytes.size {
+            return Err(BindError::Message(format!(
+                "jit ffi: C enum `{}` has unsupported non-unit stride facts",
+                definition.name
+            )));
+        }
+        let tag_size = match tag {
+            MirCEnumTag::CInt => 4,
+            MirCEnumTag::U8 | MirCEnumTag::I8 => 1,
+            MirCEnumTag::U16 | MirCEnumTag::I16 => 2,
+            MirCEnumTag::U32 | MirCEnumTag::I32 => 4,
+            MirCEnumTag::U64 | MirCEnumTag::I64 => 8,
+        };
+        let mut enum_variants = Vec::with_capacity(variants.len());
+        let mut has_payload = false;
+        for (variant, fact) in variants.iter().zip(&layout.fields) {
+            if fact.name != variant.name {
+                return Err(BindError::Message(format!(
+                    "jit ffi: C enum `{}` has stale facts for variant `{}`",
+                    definition.name, variant.name
+                )));
+            }
+            let offset = fact.offset.and_then(|value| usize::try_from(value).ok());
+            let variant_size = fact.size.and_then(|value| usize::try_from(value).ok());
+            let variant_align = fact
+                .alignment
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|alignment| alignment.is_power_of_two() && *alignment <= isize::MAX as usize);
+            let stride = fact.stride.and_then(|value| usize::try_from(value).ok());
+            let (offset, variant_size, variant_align, stride) =
+                match (offset, variant_size, variant_align, stride) {
+                    (Some(offset), Some(size), Some(align), Some(stride)) => {
+                        (offset, size, align, stride)
+                    }
+                    _ => {
+                        return Err(BindError::Message(format!(
+                            "jit ffi: C enum `{}` has unknown facts for variant `{}`",
+                            definition.name, variant.name
+                        )));
+                    }
+                };
+            let mut field_offsets = Vec::new();
+            match &variant.payload {
+                MirVariantPayload::Unit => {
+                    if offset != 0 || variant_size != tag_size || stride != tag_size {
+                        return Err(BindError::Message(format!(
+                            "jit ffi: C enum `{}` unit variant `{}` disagrees with its tag facts",
+                            definition.name, variant.name
+                        )));
+                    }
+                }
+                MirVariantPayload::Single(payload) => {
+                    has_payload = true;
+                    let (payload_size, payload_align) = layout_for_type(
+                        payload,
+                        &program.types,
+                        &mut memo,
+                        &mut HashSet::new(),
+                    )
+                    .ok_or_else(|| {
+                        BindError::Message(format!(
+                            "jit ffi: C enum `{}` variant `{}` has an unknown payload layout",
+                            definition.name, variant.name
+                        ))
+                    })?;
+                    if payload_size != variant_size
+                        || payload_align != variant_align
+                        || stride != payload_size
+                    {
+                        return Err(BindError::Message(format!(
+                            "jit ffi: C enum `{}` variant `{}` payload facts disagree with its checked type",
+                            definition.name, variant.name
+                        )));
+                    }
+                    field_offsets.push(0);
+                }
+                MirVariantPayload::Named(payload_fields) => {
+                    has_payload = true;
+                    let mut payload_offset = 0usize;
+                    let mut payload_alignment = 1usize;
+                    for field in payload_fields {
+                        let (field_size, field_align) = layout_for_type(
+                            &field.ty,
+                            &program.types,
+                            &mut memo,
+                            &mut HashSet::new(),
+                        )
+                        .ok_or_else(|| {
+                            BindError::Message(format!(
+                                "jit ffi: C enum `{}` variant `{}` has an unknown field layout",
+                                definition.name, variant.name
+                            ))
+                        })?;
+                        let field_offset = align_up(payload_offset, field_align).ok_or_else(|| {
+                            BindError::Message(format!(
+                                "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+                                definition.name, variant.name
+                            ))
+                        })?;
+                        field_offsets.push(field_offset);
+                        payload_offset = field_offset.checked_add(field_size).ok_or_else(|| {
+                            BindError::Message(format!(
+                                "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+                                definition.name, variant.name
+                            ))
+                        })?;
+                        payload_alignment = payload_alignment.max(field_align);
+                    }
+                    let payload_size = align_up(payload_offset, payload_alignment).ok_or_else(|| {
+                        BindError::Message(format!(
+                            "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+                            definition.name, variant.name
+                        ))
+                    })?;
+                    if payload_size != variant_size
+                        || payload_alignment != variant_align
+                        || stride != payload_size
+                    {
+                        return Err(BindError::Message(format!(
+                            "jit ffi: C enum `{}` variant `{}` field facts disagree with its checked layout",
+                            definition.name, variant.name
+                        )));
+                    }
+                }
+            }
+            let discriminant = variant.discriminant.ok_or_else(|| {
+                BindError::Message(format!(
+                    "jit ffi: C enum `{}` variant `{}` has no checked discriminant",
+                    definition.name, variant.name
+                ))
+            })?;
+            enum_variants.push(FfiEnumVariantDesc {
+                name: variant.name.clone(),
+                discriminant,
+                payload: variant.payload.clone(),
+                offset,
+                size: variant_size,
+                align: variant_align,
+                stride,
+                field_offsets,
+            });
+        }
+        descriptors.insert(
+            definition.id,
+            FfiRecordDesc {
+                id: definition.id,
+                name: definition.name.clone(),
+                size,
+                align,
+                fields: Vec::new(),
+                enum_info: Some(FfiEnumDesc {
+                    tag,
+                    tag_size,
+                    has_payload,
+                    variants: enum_variants,
+                }),
+            },
+        );
+        memo.insert(definition.id, (size, align));
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for definition in &program.types {
+            if descriptors.contains_key(&definition.id) {
+                continue;
+            }
+            let base = match &definition.kind {
+                MirTypeDefKind::Distinct { base, .. } => Some(base),
+                MirTypeDefKind::Alias { target } => Some(target),
+                _ => None,
+            };
+            let Some(base) = base else {
+                continue;
+            };
+            let Some(base_id) = mir_type_identity(base) else {
+                continue;
+            };
+            let Some(base_descriptor) = descriptors.get(&base_id).cloned() else {
+                continue;
+            };
+            descriptors.insert(
+                definition.id,
+                FfiRecordDesc {
+                    id: definition.id,
+                    name: definition.name.clone(),
+                    size: base_descriptor.size,
+                    align: base_descriptor.align,
+                    fields: base_descriptor.fields,
+                    enum_info: base_descriptor.enum_info,
+                },
+            );
+            changed = true;
+        }
     }
     Ok(descriptors)
 }
@@ -1448,6 +1794,7 @@ fn load_cdylib(
                 entry.wrapper_name.clone(),
                 FfiEntry {
                     params: entry.params.clone(),
+                    param_handles: entry.param_handles.clone(),
                     param_types: entry.param_types.clone(),
                     param_access: entry.param_access.clone(),
                     ret: entry.ret,
@@ -1642,11 +1989,17 @@ fn runtime_string_arg(
             span,
         )),
         Some(MirRuntimeValue::String(value)) => Ok(value.clone()),
+        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} contains a native-owned payload"),
+            span,
+        )),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not a String"),
             span,
         )),
+
     }
 }
 
@@ -1666,6 +2019,11 @@ fn runtime_int_arg(
         Some(MirRuntimeValue::BigInt(value)) => {
             value.parse::<i64>().map_err(|_| ffi_int_range_diag(span))
         }
+        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} contains a native-owned payload"),
+            span,
+        )),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not an Int"),
@@ -1680,6 +2038,7 @@ fn runtime_handle_arg(
     wrapper: &str,
     span: Span,
     target: MirForeignTarget,
+    expected_handle: Option<MirHandleId>,
 ) -> Result<i64, Diagnostic> {
     let value = match args.get(index) {
         Some(MirRuntimeValue::Moved) => {
@@ -1693,6 +2052,13 @@ fn runtime_handle_arg(
         Some(MirRuntimeValue::BigInt(value)) => {
             value.parse::<i64>().map_err(|_| ffi_int_range_diag(span))?
         }
+        Some(MirRuntimeValue::NativeOwned(_)) => {
+            return Err(ffi_diag(
+                wrapper,
+                format!("argument {index} contains a native-owned payload"),
+                span,
+            ));
+        }
         _ => {
             return Err(ffi_diag(
                 wrapper,
@@ -1703,6 +2069,22 @@ fn runtime_handle_arg(
     };
     if matches!(target, MirForeignTarget::Interpreter) {
         return Ok(value);
+    }
+    let actual_handle = ffi_handle_id(value).ok_or_else(|| {
+        ffi_diag(
+            wrapper,
+            format!("argument {index} is not a live opaque handle token"),
+            span,
+        )
+    })?;
+    if let Some(expected_handle) = expected_handle {
+        if actual_handle != expected_handle {
+            return Err(ffi_diag(
+                wrapper,
+                format!("argument {index} has the wrong checked handle type"),
+                span,
+            ));
+        }
     }
     ffi_handle_raw(value).ok_or_else(|| {
         ffi_diag(
@@ -1766,6 +2148,11 @@ fn runtime_float_arg(
             span,
         )),
         Some(MirRuntimeValue::Float { value, .. }) => Ok(*value),
+        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} contains a native-owned payload"),
+            span,
+        )),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not a Float"),
@@ -1787,6 +2174,11 @@ fn runtime_bool_arg(
             span,
         )),
         Some(MirRuntimeValue::Bool(value)) => Ok(*value),
+        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} contains a native-owned payload"),
+            span,
+        )),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not a Bool"),
@@ -1848,6 +2240,7 @@ fn type_size_align(
             let id = ty.identity.or(Some(nominal.id))?;
             records.get(&id).map(|record| (record.size, record.align))
         }
+        MirTypeKind::Int => Some((8, 8)),
         MirTypeKind::InlineRange { base, .. }
         | MirTypeKind::Tagged { inner: base, .. }
         | MirTypeKind::Quantity { base, .. } => type_size_align(base, records),
@@ -1864,6 +2257,297 @@ fn type_size_align(
         }
     }
 }
+fn enum_tag_is_signed(tag: MirCEnumTag) -> bool {
+    matches!(
+        tag,
+        MirCEnumTag::CInt
+            | MirCEnumTag::I8
+            | MirCEnumTag::I16
+            | MirCEnumTag::I32
+            | MirCEnumTag::I64
+    )
+}
+
+fn enum_tag_value_valid(tag: MirCEnumTag, tag_size: usize, value: i64) -> bool {
+    let Some(bits) = tag_size.checked_mul(8) else {
+        return false;
+    };
+    if bits == 0 || bits > 64 {
+        return false;
+    }
+    if enum_tag_is_signed(tag) {
+        if bits == 64 {
+            true
+        } else {
+            let minimum = -(1i64 << (bits - 1));
+            let maximum = (1i64 << (bits - 1)) - 1;
+            (minimum..=maximum).contains(&value)
+        }
+    } else {
+        value >= 0 && (bits == 64 || (value as u64) <= ((1u64 << bits) - 1))
+    }
+}
+
+fn write_enum_tag(
+    bytes: &mut [u8],
+    enum_info: &FfiEnumDesc,
+    value: i64,
+    wrapper: &str,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if bytes.len() < enum_info.tag_size {
+        return Err(ffi_diag(wrapper, "enum storage is shorter than its checked tag", span));
+    }
+    if !enum_tag_value_valid(enum_info.tag, enum_info.tag_size, value) {
+        return Err(ffi_diag(
+            wrapper,
+            "enum discriminant does not fit its checked C tag",
+            span,
+        ));
+    }
+    let raw = value as u64;
+    bytes[..enum_info.tag_size].copy_from_slice(&raw.to_ne_bytes()[..enum_info.tag_size]);
+    Ok(())
+}
+
+fn read_enum_tag(
+    bytes: &[u8],
+    enum_info: &FfiEnumDesc,
+    wrapper: &str,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    if bytes.len() < enum_info.tag_size {
+        return Err(ffi_diag(wrapper, "native enum storage is shorter than its checked tag", span));
+    }
+    let mut raw_bytes = [0u8; 8];
+    raw_bytes[..enum_info.tag_size].copy_from_slice(&bytes[..enum_info.tag_size]);
+    let raw = u64::from_ne_bytes(raw_bytes);
+    let bits = enum_info.tag_size * 8;
+    let value = if enum_tag_is_signed(enum_info.tag) {
+        if bits == 64 {
+            raw as i64
+        } else if raw & (1u64 << (bits - 1)) != 0 {
+            (raw | (!0u64 << bits)) as i64
+        } else {
+            raw as i64
+        }
+    } else {
+        i64::try_from(raw).map_err(|_| {
+            ffi_diag(
+                wrapper,
+                "native enum tag is outside the checked discriminant range",
+                span,
+            )
+        })?
+    };
+    Ok(value)
+}
+
+fn enum_variant_by_name<'a>(
+    enum_info: &'a FfiEnumDesc,
+    name: &str,
+    wrapper: &str,
+    span: Span,
+) -> Result<&'a FfiEnumVariantDesc, Diagnostic> {
+    enum_info
+        .variants
+        .iter()
+        .find(|variant| variant.name == name)
+        .ok_or_else(|| ffi_diag(wrapper, format!("unknown C enum variant `{name}`"), span))
+}
+
+fn enum_variant_by_discriminant<'a>(
+    enum_info: &'a FfiEnumDesc,
+    discriminant: i64,
+    wrapper: &str,
+    span: Span,
+) -> Result<&'a FfiEnumVariantDesc, Diagnostic> {
+    enum_info
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == discriminant)
+        .ok_or_else(|| {
+            ffi_diag(
+                wrapper,
+                "native C enum discriminant is invalid",
+                span,
+            )
+        })
+}
+
+fn encode_enum_bytes_at(
+    value: &MirRuntimeValue,
+    enum_info: &FfiEnumDesc,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+    bytes: &mut [u8],
+    wrapper: &str,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let (variant_name, args, scalar_discriminant) = match value {
+        MirRuntimeValue::Enum {
+            variant, args, ..
+        } => (variant.as_str(), args.as_slice(), None),
+        MirRuntimeValue::Int(discriminant) if !enum_info.has_payload => {
+            ("", &[][..], Some(*discriminant))
+        }
+        MirRuntimeValue::NativeOwned(_) => {
+            return Err(ffi_diag(
+                wrapper,
+                "native-owned payload cannot cross the C bridge",
+                span,
+            ));
+        }
+        _ => {
+            return Err(ffi_diag(
+                wrapper,
+                "received a non-enum value for a checked C enum",
+                span,
+            ))
+        }
+    };
+    let variant = if let Some(discriminant) = scalar_discriminant {
+        enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?
+    } else {
+        enum_variant_by_name(enum_info, variant_name, wrapper, span)?
+    };
+    let discriminant = scalar_discriminant.unwrap_or(variant.discriminant);
+    write_enum_tag(bytes, enum_info, discriminant, wrapper, span)?;
+    let payload_end = variant.offset.checked_add(variant.size).ok_or_else(|| {
+        ffi_diag(wrapper, "enum payload offset overflowed its checked C layout", span)
+    })?;
+    let payload = bytes.get_mut(variant.offset..payload_end).ok_or_else(|| {
+        ffi_diag(wrapper, "enum payload exceeds its checked C layout", span)
+    })?;
+    if !matches!(&variant.payload, MirVariantPayload::Unit) {
+        payload.fill(0);
+    }
+    match &variant.payload {
+        MirVariantPayload::Unit => {
+            if !args.is_empty() {
+                return Err(ffi_diag(
+                    wrapper,
+                    "unit C enum variant received a payload",
+                    span,
+                ));
+            }
+        }
+        MirVariantPayload::Single(payload_ty) => {
+            if args.len() != 1 || args[0].0.is_some() {
+                return Err(ffi_diag(
+                    wrapper,
+                    "single-payload C enum variant has the wrong argument shape",
+                    span,
+                ));
+            }
+            let field_bytes = encode_bytes(&args[0].1, payload_ty, records, wrapper, span)?;
+            let field_offset = *variant.field_offsets.first().ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload has no checked field offset", span)
+            })?;
+            let end = field_offset.checked_add(field_bytes.len()).ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+            })?;
+            payload
+                .get_mut(field_offset..end)
+                .ok_or_else(|| ffi_diag(wrapper, "C enum payload field exceeds its layout", span))?
+                .copy_from_slice(&field_bytes);
+        }
+        MirVariantPayload::Named(payload_fields) => {
+            if args.len() != payload_fields.len() {
+                return Err(ffi_diag(
+                    wrapper,
+                    "named C enum variant has the wrong argument count",
+                    span,
+                ));
+            }
+            for ((field, argument), field_offset) in payload_fields
+                .iter()
+                .zip(args)
+                .zip(&variant.field_offsets)
+            {
+                if argument.0.as_deref() != Some(field.name.as_str()) {
+                    return Err(ffi_diag(
+                        wrapper,
+                        format!("C enum payload is missing field `{}`", field.name),
+                        span,
+                    ));
+                }
+                let field_bytes = encode_bytes(&argument.1, &field.ty, records, wrapper, span)?;
+                let end = field_offset.checked_add(field_bytes.len()).ok_or_else(|| {
+                    ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+                })?;
+                payload
+                    .get_mut(*field_offset..end)
+                    .ok_or_else(|| {
+                        ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+                    })?
+                    .copy_from_slice(&field_bytes);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn decode_enum_bytes(
+    bytes: &[u8],
+    enum_info: &FfiEnumDesc,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+    enum_name: &str,
+    wrapper: &str,
+    span: Span,
+) -> Result<MirRuntimeValue, Diagnostic> {
+    let discriminant = read_enum_tag(bytes, enum_info, wrapper, span)?;
+    let variant = enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?;
+    let payload_end = variant.offset.checked_add(variant.size).ok_or_else(|| {
+        ffi_diag(wrapper, "enum payload offset overflowed its checked C layout", span)
+    })?;
+    let payload = bytes.get(variant.offset..payload_end).ok_or_else(|| {
+        ffi_diag(wrapper, "enum payload exceeds its checked C layout", span)
+    })?;
+    let mut args = Vec::new();
+    match &variant.payload {
+        MirVariantPayload::Unit => {}
+        MirVariantPayload::Single(payload_ty) => {
+            let field_offset = *variant.field_offsets.first().ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload has no checked field offset", span)
+            })?;
+            let (field_size, _) = type_size_align(payload_ty, records).ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload field has no static layout", span)
+            })?;
+            let end = field_offset.checked_add(field_size).ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+            })?;
+            let field_bytes = payload.get(field_offset..end).ok_or_else(|| {
+                ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+            })?;
+            args.push((
+                None,
+                decode_bytes(field_bytes, payload_ty, records, wrapper, span)?,
+            ));
+        }
+        MirVariantPayload::Named(payload_fields) => {
+            for (field, field_offset) in payload_fields.iter().zip(&variant.field_offsets) {
+                let (field_size, _) = type_size_align(&field.ty, records).ok_or_else(|| {
+                    ffi_diag(wrapper, "C enum payload field has no static layout", span)
+                })?;
+                let end = field_offset.checked_add(field_size).ok_or_else(|| {
+                    ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+                })?;
+                let field_bytes = payload.get(*field_offset..end).ok_or_else(|| {
+                    ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+                })?;
+                args.push((
+                    Some(field.name.clone()),
+                    decode_bytes(field_bytes, &field.ty, records, wrapper, span)?,
+                ));
+            }
+        }
+    }
+    Ok(MirRuntimeValue::Enum {
+        type_name: enum_name.to_string(),
+        variant: variant.name.clone(),
+        args,
+    })
+}
 
 fn value_int(
     value: &MirRuntimeValue,
@@ -1876,6 +2560,11 @@ fn value_int(
             .parse::<i64>()
             .map_err(|_| ffi_int_range_diag(span)),
         MirRuntimeValue::Moved => Err(ffi_diag(wrapper, "received a moved value", span)),
+        MirRuntimeValue::NativeOwned(_) => Err(ffi_diag(
+            wrapper,
+            "native-owned payload cannot cross the C bridge",
+            span,
+        )),
         _ => Err(ffi_diag(wrapper, "received a non-integer value", span)),
     }
 }
@@ -1907,6 +2596,13 @@ fn encode_bytes_at(
     wrapper: &str,
     span: Span,
 ) -> Result<(), Diagnostic> {
+    if matches!(value, MirRuntimeValue::NativeOwned(_)) {
+        return Err(ffi_diag(
+            wrapper,
+            "native-owned payload cannot cross the C bridge",
+            span,
+        ));
+    }
     let write_uint = |bytes: &mut [u8], value: u64| {
         let raw = value.to_ne_bytes();
         bytes.copy_from_slice(&raw[..bytes.len()]);
@@ -1942,6 +2638,39 @@ fn encode_bytes_at(
         | MirTypeKind::Tagged { inner: base, .. }
         | MirTypeKind::Quantity { base, .. } => {
             encode_bytes_at(value, base, records, bytes, wrapper, span)?
+        MirTypeKind::FixedList { elem, .. } => {
+            let MirRuntimeValue::List(values) = value else {
+                return Err(ffi_diag(wrapper, "received a non-list fixed array", span));
+            };
+            let (element_size, _) = type_size_align(elem, records).ok_or_else(|| {
+                ffi_diag(wrapper, "fixed-array element has no static C layout", span)
+            })?;
+            if element_size == 0 || bytes.len() % element_size != 0 {
+                return Err(ffi_diag(
+                    wrapper,
+                    "fixed-array C layout is not element-aligned",
+                    span,
+                ));
+            }
+            let expected_len = bytes.len() / element_size;
+            if values.len() != expected_len {
+                return Err(ffi_diag(
+                    wrapper,
+                    "fixed-array value count does not match its checked C layout",
+                    span,
+                ));
+            }
+            for (index, field_value) in values.iter().enumerate() {
+                let start = index * element_size;
+                encode_bytes_at(
+                    field_value,
+                    elem,
+                    records,
+                    &mut bytes[start..start + element_size],
+                    wrapper,
+                    span,
+                )?;
+            }
         }
         MirTypeKind::Apply { name: nominal, .. } => {
             let id = ty.identity.or(Some(nominal.id)).ok_or_else(|| {
@@ -1954,6 +2683,9 @@ fn encode_bytes_at(
                     span,
                 )
             })?;
+            if let Some(enum_info) = descriptor.enum_info.as_ref() {
+                return encode_enum_bytes_at(value, enum_info, records, bytes, wrapper, span);
+            }
             let MirRuntimeValue::Struct { fields, .. } = value else {
                 return Err(ffi_diag(wrapper, "received a non-record value", span));
             };
@@ -2066,6 +2798,23 @@ fn decode_bytes(
         | MirTypeKind::Quantity { base, .. } => {
             decode_bytes(bytes, base, records, wrapper, span)
         }
+        MirTypeKind::FixedList { elem, .. } => {
+            let (element_size, _) = type_size_align(elem, records).ok_or_else(|| {
+                ffi_diag(wrapper, "fixed-array element has no static C layout", span)
+            })?;
+            if element_size == 0 || bytes.len() % element_size != 0 {
+                return Err(ffi_diag(
+                    wrapper,
+                    "fixed-array C layout is not element-aligned",
+                    span,
+                ));
+            }
+            bytes
+                .chunks_exact(element_size)
+                .map(|chunk| decode_bytes(chunk, elem, records, wrapper, span))
+                .collect::<Result<Vec<_>, _>>()
+                .map(MirRuntimeValue::List)
+        }
         MirTypeKind::Apply { name: nominal, .. } => {
             let id = ty.identity.or(Some(nominal.id)).ok_or_else(|| {
                 ffi_diag(wrapper, "record has no checked type identity", span)
@@ -2077,7 +2826,9 @@ fn decode_bytes(
                     span,
                 )
             })?;
-            let mut fields = Vec::with_capacity(descriptor.fields.len());
+            if let Some(enum_info) = descriptor.enum_info.as_ref() {
+                return decode_enum_bytes(bytes, enum_info, records, &descriptor.name, wrapper, span);
+            }
             for field in &descriptor.fields {
                 let (_, field_size) = type_size_align(&field.ty, records)
                     .map(|(size, _)| (field.offset, size))
@@ -2136,6 +2887,27 @@ fn prepare_runtime_call(
                     span,
                 ));
             }
+            ParamAbi::Record => {
+                let (size, align) = type_size_align(ty, records).ok_or_else(|| {
+                    ffi_diag(wrapper, "record parameter has no static C layout", span)
+                })?;
+                let bytes = encode_bytes(value, ty, records, wrapper, span)?;
+                if bytes.len() != size {
+                    return Err(ffi_diag(
+                        wrapper,
+                        "record parameter encoding does not match its checked C layout",
+                        span,
+                    ));
+                }
+                let data = FfiStorage::from_bytes(&bytes, align);
+                let ptr = data.as_ptr();
+                storage.push(data);
+                slots.push(FfiSlot {
+                    value: 0,
+                    ptr,
+                    len: size,
+                });
+            }
             ParamAbi::List => {
                 let MirTypeKind::List(inner) = ty.kind() else {
                     return Err(ffi_diag(wrapper, "list carrier has a non-list type", span));
@@ -2166,9 +2938,13 @@ fn prepare_runtime_call(
             }
             ParamAbi::String => {
                 let value = runtime_string_arg(args, index, wrapper, span)?;
-                let data = FfiStorage::from_bytes(value.as_bytes(), 1);
+                let mut bytes = value.into_bytes();
+                let len = bytes.len();
+                if *access == MirAccess::Write {
+                    bytes.push(0);
+                }
+                let data = FfiStorage::from_bytes(&bytes, 1);
                 let ptr = data.as_ptr();
-                let len = data.len;
                 storage.push(data);
                 slots.push(FfiSlot {
                     value: 0,
@@ -2177,7 +2953,14 @@ fn prepare_runtime_call(
                 });
             }
             ParamAbi::Handle => {
-                let raw = runtime_handle_arg(args, index, wrapper, span, target)?;
+                let raw = runtime_handle_arg(
+                    args,
+                    index,
+                    wrapper,
+                    span,
+                    target,
+                    entry.param_handles.get(index).copied().flatten(),
+                )?;
                 slots.push(FfiSlot {
                     value: raw as u64,
                     ptr: std::ptr::null_mut(),
@@ -2199,38 +2982,80 @@ fn prepare_runtime_call(
                         len: 0,
                     });
                 } else {
-                    let bits = match ty.kind() {
-                        MirTypeKind::Float => {
-                            let MirRuntimeValue::Float { value, .. } = value else {
-                                return Err(ffi_diag(wrapper, "argument is not a Float", span));
-                            };
-                            value.to_bits()
-                        }
-                        MirTypeKind::Float32 => {
-                            let MirRuntimeValue::Float { value, .. } = value else {
-                                return Err(ffi_diag(wrapper, "argument is not a Float", span));
-                            };
-                            (*value as f32).to_bits() as u64
-                        }
-                        MirTypeKind::Bool => {
-                            let MirRuntimeValue::Bool(value) = value else {
-                                return Err(ffi_diag(wrapper, "argument is not a Bool", span));
-                            };
-                            u64::from(*value)
-                        }
-                        MirTypeKind::Int
-                        | MirTypeKind::IntN { .. }
-                        | MirTypeKind::InlineRange { .. }
-                        | MirTypeKind::Tagged { .. }
-                        | MirTypeKind::Quantity { .. } => {
-                            value_int(value, wrapper, span)? as u64
-                        }
-                        _ => {
+                    let bits = if let Some(enum_info) = mir_enum_desc(ty, records) {
+                        if enum_info.has_payload {
                             return Err(ffi_diag(
                                 wrapper,
-                                "parameter has no scalar C representation",
+                                "payload C enum has no scalar representation",
                                 span,
-                            ))
+                            ));
+                        }
+                        let discriminant = match value {
+                            MirRuntimeValue::Enum { variant, args, .. } => {
+                                if !args.is_empty() {
+                                    return Err(ffi_diag(
+                                        wrapper,
+                                        "unit C enum variant received a payload",
+                                        span,
+                                    ));
+                                }
+                                enum_variant_by_name(enum_info, variant, wrapper, span)?
+                                    .discriminant
+                            }
+                            MirRuntimeValue::Int(value) => {
+                                enum_variant_by_discriminant(enum_info, *value, wrapper, span)?;
+                                *value
+                            }
+                            MirRuntimeValue::NativeOwned(_) => {
+                                return Err(ffi_diag(
+                                    wrapper,
+                                    "native-owned payload cannot cross the C bridge",
+                                    span,
+                                ));
+                            }
+                            _ => {
+                                return Err(ffi_diag(
+                                    wrapper,
+                                    "argument is not a checked C enum value",
+                                    span,
+                                ))
+                            }
+                        };
+                        discriminant as u64
+                    } else {
+                        match ty.kind() {
+                            MirTypeKind::Float => {
+                                let MirRuntimeValue::Float { value, .. } = value else {
+                                    return Err(ffi_diag(wrapper, "argument is not a Float", span));
+                                };
+                                value.to_bits()
+                            }
+                            MirTypeKind::Float32 => {
+                                let MirRuntimeValue::Float { value, .. } = value else {
+                                    return Err(ffi_diag(wrapper, "argument is not a Float", span));
+                                };
+                                (*value as f32).to_bits() as u64
+                            }
+                            MirTypeKind::Bool => {
+                                let MirRuntimeValue::Bool(value) = value else {
+                                    return Err(ffi_diag(wrapper, "argument is not a Bool", span));
+                                };
+                                u64::from(*value)
+                            }
+                            MirTypeKind::Int
+                            | MirTypeKind::IntN { .. }
+                            | MirTypeKind::InlineRange { .. }
+                            | MirTypeKind::Tagged { .. }
+                            | MirTypeKind::Quantity { .. } => {
+                                value_int(value, wrapper, span)? as u64
+                            }
+                            _ => {
+                                return Err(ffi_diag(
+                                    wrapper,
+                                    "parameter has no scalar C representation",
+                                    span,
+                                ))
+                            }
                         }
                     };
                     slots.push(FfiSlot {
@@ -2256,7 +3081,35 @@ fn decode_runtime_result(
 ) -> Result<MirRuntimeValue, Diagnostic> {
     match entry.ret {
         RetAbi::Unit => Ok(MirRuntimeValue::Unit),
-        RetAbi::Int => Ok(runtime_int_result(out.value as i64)),
+        RetAbi::Int => {
+            let Some(ty) = entry.ret_type.as_ref() else {
+                return Ok(runtime_int_result(out.value as i64));
+            };
+            let Some(id) = mir_type_identity(ty) else {
+                return Ok(runtime_int_result(out.value as i64));
+            };
+            let Some(descriptor) = state.records.get(&id) else {
+                return Ok(runtime_int_result(out.value as i64));
+            };
+            let Some(enum_info) = descriptor.enum_info.as_ref() else {
+                return Ok(runtime_int_result(out.value as i64));
+            };
+            if enum_info.has_payload {
+                return Err(ffi_diag(
+                    wrapper,
+                    "payload C enum has no scalar return carrier",
+                    span,
+                ));
+            }
+            let discriminant =
+                read_enum_tag(&out.value.to_ne_bytes(), enum_info, wrapper, span)?;
+            let variant = enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?;
+            Ok(MirRuntimeValue::Enum {
+                type_name: descriptor.name.clone(),
+                variant: variant.name.clone(),
+                args: Vec::new(),
+            })
+        }
         RetAbi::Float => {
             let value = if entry
                 .ret_type
@@ -2296,6 +3149,26 @@ fn decode_runtime_result(
             String::from_utf8(bytes)
                 .map(MirRuntimeValue::String)
                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
+        }
+        RetAbi::Record => {
+            let ty = entry
+                .ret_type
+                .as_ref()
+                .ok_or_else(|| ffi_diag(wrapper, "record result has no type", span))?;
+            let (size, _) = type_size_align(ty, &state.records).ok_or_else(|| {
+                ffi_diag(wrapper, "record result has no static C layout", span)
+            })?;
+            if out.ptr.is_null() || out.len != size {
+                release_cabi_buffer(state.free_fn, out.ptr, out.len);
+                return Err(ffi_diag(
+                    wrapper,
+                    "returned record buffer does not match its checked C layout",
+                    span,
+                ));
+            }
+            let bytes = unsafe { std::slice::from_raw_parts(out.ptr, out.len) }.to_vec();
+            release_cabi_buffer(state.free_fn, out.ptr, out.len);
+            decode_bytes(&bytes, ty, &state.records, wrapper, span)
         }
         RetAbi::List => {
             let MirTypeKind::List(inner) = entry
@@ -2342,6 +3215,166 @@ fn decode_runtime_result(
         }
     }
 }
+fn decode_runtime_writebacks(
+    state: &FfiState,
+    entry: &FfiEntry,
+    args: &[MirRuntimeValue],
+    slots: &[FfiSlot],
+    storage: &[FfiStorage],
+    wrapper: &str,
+    span: Span,
+) -> Result<Vec<AmbientMirExternWriteback>, Diagnostic> {
+    let mut storage_index = 0usize;
+    let mut writebacks = Vec::new();
+    for (index, ((abi, ty), access)) in entry
+        .params
+        .iter()
+        .zip(&entry.param_types)
+        .zip(&entry.param_access)
+        .enumerate()
+    {
+        match abi {
+            ParamAbi::Record => {
+                let current_storage = storage_index;
+                storage_index += 1;
+                if *access != MirAccess::Write {
+                    continue;
+                }
+                let bytes = storage
+                    .get(current_storage)
+                    .map(FfiStorage::as_bytes)
+                    .ok_or_else(|| ffi_diag(wrapper, "mutable record storage is missing", span))?;
+                let value = decode_bytes(bytes, ty, &state.records, wrapper, span)?;
+                writebacks.push(AmbientMirExternWriteback {
+                    parameter: index,
+                    value,
+                });
+            }
+            ParamAbi::List => {
+                let current_storage = storage_index;
+                storage_index += 1;
+                if *access != MirAccess::Write {
+                    continue;
+                }
+                let MirTypeKind::List(inner) = ty.kind() else {
+                    return Err(ffi_diag(wrapper, "list carrier has a non-list type", span));
+                };
+                let (element_size, _) =
+                    type_size_align(inner, &state.records).ok_or_else(|| {
+                        ffi_diag(
+                            wrapper,
+                            "mutable list element has no static C layout",
+                            span,
+                        )
+                    })?;
+                let slot = slots.get(index).copied().ok_or_else(|| {
+                    ffi_diag(wrapper, "mutable list slot is missing", span)
+                })?;
+                let bytes = storage
+                    .get(current_storage)
+                    .map(FfiStorage::as_bytes)
+                    .ok_or_else(|| ffi_diag(wrapper, "mutable list storage is missing", span))?;
+                let mut values = Vec::with_capacity(slot.len);
+                for element_index in 0..slot.len {
+                    let start = element_index.checked_mul(element_size).ok_or_else(|| {
+                        ffi_diag(
+                            wrapper,
+                            "mutable list length overflowed its C layout",
+                            span,
+                        )
+                    })?;
+                    let end = start.checked_add(element_size).ok_or_else(|| {
+                        ffi_diag(wrapper, "mutable list element range overflowed", span)
+                    })?;
+                    let element = bytes.get(start..end).ok_or_else(|| {
+                        ffi_diag(
+                            wrapper,
+                            "mutable list storage is shorter than its count",
+                            span,
+                        )
+                    })?;
+                    values.push(decode_bytes(
+                        element,
+                        inner,
+                        &state.records,
+                        wrapper,
+                        span,
+                    )?);
+                }
+                writebacks.push(AmbientMirExternWriteback {
+                    parameter: index,
+                    value: MirRuntimeValue::List(values),
+                });
+            }
+            ParamAbi::String => {
+                let current_storage = storage_index;
+                storage_index += 1;
+                if *access != MirAccess::Write {
+                    continue;
+                }
+                let bytes = storage
+                    .get(current_storage)
+                    .map(FfiStorage::as_bytes)
+                    .ok_or_else(|| ffi_diag(wrapper, "mutable String storage is missing", span))?;
+                let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+                let value = String::from_utf8(bytes[..end].to_vec())
+                    .map_err(|_| ffi_diag(wrapper, "native mutable String is not UTF-8", span))?;
+                writebacks.push(AmbientMirExternWriteback {
+                    parameter: index,
+                    value: MirRuntimeValue::String(value),
+                });
+            }
+            ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool
+                if *access == MirAccess::Write =>
+            {
+                let current_storage = storage_index;
+                storage_index += 1;
+                let bytes = storage
+                    .get(current_storage)
+                    .map(FfiStorage::as_bytes)
+                    .ok_or_else(|| ffi_diag(wrapper, "mutable scalar storage is missing", span))?;
+                writebacks.push(AmbientMirExternWriteback {
+                    parameter: index,
+                    value: decode_bytes(bytes, ty, &state.records, wrapper, span)?,
+                });
+            }
+            ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {}
+            ParamAbi::Handle => {
+                if *access == MirAccess::Write {
+                    let value = args.get(index).cloned().ok_or_else(|| {
+                        ffi_diag(wrapper, "mutable handle argument is missing", span)
+                    })?;
+                    if !matches!(value, MirRuntimeValue::Int(_)) {
+                        return Err(ffi_diag(
+                            wrapper,
+                            "mutable handle argument is not an integer token carrier",
+                            span,
+                        ));
+                    }
+                    // A writable opaque handle lends its native pointee. The
+                    // native call cannot replace the managed token; return
+                    // the original carrier so ownership and identity remain
+                    // unchanged while the pointee mutation stays in place.
+                    writebacks.push(AmbientMirExternWriteback {
+                        parameter: index,
+                        value,
+                    });
+                }
+            }
+            ParamAbi::Callback => {
+                if *access == MirAccess::Write {
+                    return Err(ffi_diag(
+                        wrapper,
+                        "managed callback write parameter has no checked carrier",
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(writebacks)
+}
+
 
 fn call_runtime_inner(
     wrapper: &str,
@@ -2349,7 +3382,7 @@ fn call_runtime_inner(
     ret_f32: bool,
     span: Span,
     target: MirForeignTarget,
-) -> Result<MirRuntimeValue, Diagnostic> {
+) -> Result<AmbientMirExternResult, Diagnostic> {
     let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(state) = state.as_ref() else {
         return Err(ffi_diag(wrapper, "has no prepared bridge", span));
@@ -2368,7 +3401,7 @@ fn call_runtime_inner(
             span,
         ));
     }
-    let (slots, _storage) =
+    let (slots, storage) =
         prepare_runtime_call(args, entry, &state.records, wrapper, span, target)?;
     let mut out = FfiSlot {
         value: 0,
@@ -2377,8 +3410,10 @@ fn call_runtime_inner(
     };
     call_uniform(state, wrapper, entry, &slots, &mut out, span)?;
     let value = decode_runtime_result(state, entry, &out, wrapper, span, target, ret_f32)?;
+    let writebacks =
+        decode_runtime_writebacks(state, entry, args, &slots, &storage, wrapper, span)?;
     retire_handle_args(args, &entry.params, entry.close_handle, target);
-    Ok(value)
+    Ok(AmbientMirExternResult { value, writebacks })
 }
 fn managed_callback_type(ty: &MirType) -> bool {
     let MirTypeKind::Fn(signature) = ty.kind() else {
@@ -2395,9 +3430,20 @@ fn managed_callback_type(ty: &MirType) -> bool {
         )
 }
 
-fn mir_param_abi(ty: &MirType, is_handle: bool) -> Option<ParamAbi> {
+fn mir_param_abi(
+    ty: &MirType,
+    is_handle: bool,
+    is_record: bool,
+    is_scalar_enum: bool,
+) -> Option<ParamAbi> {
     if managed_callback_type(ty) {
         return Some(ParamAbi::Callback);
+    }
+    if is_record {
+        return Some(ParamAbi::Record);
+    }
+    if is_scalar_enum {
+        return Some(ParamAbi::Int);
     }
     if is_handle && matches!(ty.kind(), MirTypeKind::Apply { .. }) {
         return Some(ParamAbi::Handle);
@@ -2422,10 +3468,21 @@ fn mir_param_abi(ty: &MirType, is_handle: bool) -> Option<ParamAbi> {
     }
 }
 
-fn mir_ret_abi(ty: Option<&MirType>, is_handle: bool) -> Option<RetAbi> {
+fn mir_ret_abi(
+    ty: Option<&MirType>,
+    is_handle: bool,
+    is_record: bool,
+    is_scalar_enum: bool,
+) -> Option<RetAbi> {
     let Some(ty) = ty else {
         return Some(RetAbi::Unit);
     };
+    if is_record {
+        return Some(RetAbi::Record);
+    }
+    if is_scalar_enum {
+        return Some(RetAbi::Int);
+    }
     if is_handle && matches!(ty.kind(), MirTypeKind::Apply { .. }) {
         return Some(RetAbi::Handle);
     }
@@ -2495,13 +3552,32 @@ fn validate_mir_bridge(
             span,
         ));
     }
+    let state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(state) = state.as_ref() else {
+        return Err(ffi_diag(&wrapper, "has no prepared bridge", span));
+    };
+    let Some(entry) = state.by_wrapper.get(&wrapper) else {
+        return Err(ffi_diag(
+            &wrapper,
+            "is not bound in the prepared bridge",
+            span,
+        ));
+    };
     let expected_params = foreign
         .params
         .iter()
-        .map(|parameter| {
+        .enumerate()
+        .map(|(index, parameter)| {
             mir_param_abi(
                 &parameter.ty,
-                foreign.handle.is_some() && matches!(parameter.ty.kind(), MirTypeKind::Apply { .. }),
+                entry
+                    .param_handles
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .is_some(),
+                !foreign.bridge_eligible && mir_record_type(&parameter.ty, &state.records),
+                mir_scalar_enum_type(&parameter.ty, &state.records),
             )
             .ok_or_else(|| {
                 ffi_diag(
@@ -2514,13 +3590,20 @@ fn validate_mir_bridge(
         .collect::<Result<Vec<_>, _>>()?;
     let expected_ret = mir_ret_abi(
         foreign.return_type.as_ref(),
-        foreign
-            .handle
-            .is_some()
+        entry.handle.is_some()
             && foreign
                 .return_type
                 .as_ref()
                 .is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Apply { .. })),
+        !foreign.bridge_eligible
+            && foreign
+                .return_type
+                .as_ref()
+                .is_some_and(|ty| mir_record_type(ty, &state.records)),
+        foreign
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| mir_scalar_enum_type(ty, &state.records)),
     )
     .ok_or_else(|| {
         ffi_diag(
@@ -2529,17 +3612,6 @@ fn validate_mir_bridge(
             span,
         )
     })?;
-    let state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
-    let Some(state) = state.as_ref() else {
-        return Err(ffi_diag(&wrapper, "has no prepared bridge", span));
-    };
-    let Some(entry) = state.by_wrapper.get(&wrapper) else {
-        return Err(ffi_diag(
-            &wrapper,
-            "is not bound in the prepared bridge",
-            span,
-        ));
-    };
     let expected_access = foreign
         .params
         .iter()
@@ -2560,6 +3632,7 @@ fn validate_mir_bridge(
         || !same_types
         || entry.ret != expected_ret
         || !same_ret_type
+        || entry.param_handles.len() != foreign.params.len()
     {
         return Err(ffi_diag(
             &wrapper,
@@ -2579,7 +3652,7 @@ fn call_mir_foreign_for_target(
     args: Vec<MirRuntimeValue>,
     span: Span,
     target: MirForeignTarget,
-) -> Result<MirRuntimeValue, Diagnostic> {
+) -> Result<AmbientMirExternResult, Diagnostic> {
     let wrapper = bridge_wrapper_name(foreign);
     let ret_f32 = validate_mir_bridge(foreign, span, target)?;
     if args.len() != foreign.params.len() {
@@ -2597,7 +3670,7 @@ pub(crate) fn ambient_mir_extern_call(
     foreign: &MirForeign,
     args: Vec<MirRuntimeValue>,
     span: Span,
-) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
     Some(call_mir_foreign_for_target(
         foreign,
         args,
@@ -2611,7 +3684,7 @@ pub(crate) fn ambient_mir_extern_call_cranelift(
     foreign: &MirForeign,
     args: Vec<MirRuntimeValue>,
     span: Span,
-) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
     Some(call_mir_foreign_for_target(
         foreign,
         args,
@@ -2676,6 +3749,96 @@ fn heap_cell_to_runtime(
             let descriptor = records
                 .get(&id)
                 .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
+            if let Some(enum_info) = descriptor.enum_info.as_ref() {
+                let fields = if enum_info.has_payload {
+                    match cell {
+                        JetVal::Record(fields) => fields.clone(),
+                        JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
+                            .clone_record_values(*handle)
+                            .ok_or_else(|| "enum record handle is invalid".to_string())?,
+                        _ => return Err(format!("expected enum record for `{}`", nominal.name)),
+                    }
+                } else {
+                    Vec::new()
+                };
+                let discriminant = if enum_info.has_payload {
+                    let Some(JetVal::Int(discriminant)) = fields.first() else {
+                        return Err(format!(
+                            "enum `{}` has no integer discriminant carrier",
+                            nominal.name
+                        ));
+                    };
+                    *discriminant
+                } else {
+                    match cell {
+                        JetVal::Int(discriminant) => *discriminant,
+                        _ => {
+                            return Err(format!(
+                                "expected integer enum carrier for `{}`",
+                                nominal.name
+                            ))
+                        }
+                    }
+                };
+                let variant = enum_info
+                    .variants
+                    .iter()
+                    .find(|variant| variant.discriminant == discriminant)
+                    .ok_or_else(|| {
+                        format!(
+                            "native enum `{}` has invalid discriminant {}",
+                            nominal.name, discriminant
+                        )
+                    })?;
+                let payload_cells = fields.get(1..).unwrap_or(&[]);
+                let mut args = Vec::new();
+                match &variant.payload {
+                    MirVariantPayload::Unit => {
+                        if !payload_cells.is_empty() {
+                            return Err(format!(
+                                "unit enum variant `{}` has a payload",
+                                variant.name
+                            ));
+                        }
+                    }
+                    MirVariantPayload::Single(payload_ty) => {
+                        if payload_cells.len() != 1 {
+                            return Err(format!(
+                                "enum variant `{}` has the wrong payload count",
+                                variant.name
+                            ));
+                        }
+                        args.push((
+                            None,
+                            heap_cell_to_runtime(
+                                heap,
+                                &payload_cells[0],
+                                payload_ty,
+                                records,
+                            )?,
+                        ));
+                    }
+                    MirVariantPayload::Named(payload_fields) => {
+                        if payload_cells.len() != payload_fields.len() {
+                            return Err(format!(
+                                "enum variant `{}` has the wrong payload count",
+                                variant.name
+                            ));
+                        }
+                        for (field, payload_cell) in payload_fields.iter().zip(payload_cells) {
+                            args.push((
+                                Some(field.name.clone()),
+                                heap_cell_to_runtime(heap, payload_cell, &field.ty, records)?,
+                            ));
+                        }
+                    }
+                }
+                return Ok(MirRuntimeValue::Enum {
+                    type_name: descriptor.name.clone(),
+                    variant: variant.name.clone(),
+                    args,
+                });
+            }
             let fields = match cell {
                 JetVal::Record(fields) => fields.clone(),
                 JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
@@ -2698,6 +3861,7 @@ fn heap_cell_to_runtime(
                 fields: out,
             })
         }
+        MirTypeKind::FixedList { elem, .. } => heap_cells_to_runtime(heap, cell, elem, records),
         MirTypeKind::List(inner) => {
             let JetVal::List(values) = cell else {
                 return Err(format!("nested list `{}` is not a boxed list", ty.canonical_key()));
@@ -2709,6 +3873,40 @@ fn heap_cell_to_runtime(
                 .map(MirRuntimeValue::List)
         }
         _ => Err(format!("type `{}` cannot cross the C bridge", ty.canonical_key())),
+    }
+}
+
+fn heap_cells_to_runtime(
+    heap: &jet_rt::JetArena,
+    carrier: &JetVal,
+    inner: &MirType,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+) -> Result<MirRuntimeValue, String> {
+    match carrier {
+        JetVal::IntList(values) => values
+            .iter()
+            .map(|value| heap_cell_to_runtime(heap, &JetVal::Int(*value), inner, records))
+            .collect::<Result<Vec<_>, _>>()
+            .map(MirRuntimeValue::List),
+        JetVal::List(values) => values
+            .iter()
+            .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+            .collect::<Result<Vec<_>, _>>()
+            .map(MirRuntimeValue::List),
+        JetVal::UninitList {
+            values,
+            initialized,
+        } => {
+            if initialized.iter().any(|initialized| !initialized) {
+                return Err("list contains uninitialized elements".to_string());
+            }
+            values
+                .iter()
+                .map(|value| heap_cell_to_runtime(heap, value, inner, records))
+                .collect::<Result<Vec<_>, _>>()
+                .map(MirRuntimeValue::List)
+        }
+        _ => Err("fixed-array cell does not contain a list".to_string()),
     }
 }
 
@@ -2756,6 +3954,12 @@ fn heap_arg_to_runtime(
         ParamAbi::Callback => {
             Err("managed callback arguments require the callback registration adapter".to_string())
         }
+        ParamAbi::Record => {
+            let cell = heap
+                .clone_value(value)
+                .ok_or_else(|| "record handle is invalid".to_string())?;
+            heap_cell_to_runtime(heap, &cell, ty, records)
+        }
         ParamAbi::Int | ParamAbi::Handle => heap
             .int_to_i64(value)
             .map(MirRuntimeValue::Int)
@@ -2794,6 +3998,9 @@ fn heap_runtime_to_jetval(
     ty: &MirType,
     records: &HashMap<MirTypeId, FfiRecordDesc>,
 ) -> Result<JetVal, String> {
+    if matches!(value, MirRuntimeValue::NativeOwned(_)) {
+        return Err("native-owned payload cannot cross the C bridge".to_string());
+    }
     match ty.kind() {
         MirTypeKind::Int
         | MirTypeKind::IntN { .. }
@@ -2830,6 +4037,94 @@ fn heap_runtime_to_jetval(
             let descriptor = records
                 .get(&id)
                 .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
+            if let Some(enum_info) = descriptor.enum_info.as_ref() {
+                let MirRuntimeValue::Enum {
+                    variant: variant_name,
+                    args,
+                    ..
+                } = value
+                else {
+                    return Err(format!("native result is not enum `{}`", nominal.name));
+                };
+                let variant = enum_info
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == variant_name.as_str())
+                    .ok_or_else(|| {
+                        format!(
+                            "native result has unknown enum variant `{}`",
+                            variant_name
+                        )
+                    })?;
+                if !enum_tag_value_valid(
+                    enum_info.tag,
+                    enum_info.tag_size,
+                    variant.discriminant,
+                ) {
+                    return Err(format!(
+                        "enum variant `{}` has an invalid checked discriminant",
+                        variant.name
+                    ));
+                }
+                if !enum_info.has_payload {
+                    if !args.is_empty() {
+                        return Err(format!(
+                            "unit enum variant `{}` has a payload",
+                            variant.name
+                        ));
+                    }
+                    return Ok(JetVal::Int(variant.discriminant));
+                }
+                let mut cells = vec![JetVal::Int(variant.discriminant)];
+                match &variant.payload {
+                    MirVariantPayload::Unit => {
+                        if !args.is_empty() {
+                            return Err(format!(
+                                "unit enum variant `{}` has a payload",
+                                variant.name
+                            ));
+                        }
+                    }
+                    MirVariantPayload::Single(payload_ty) => {
+                        let Some((field, payload)) = args.first() else {
+                            return Err(format!(
+                                "enum variant `{}` is missing its payload",
+                                variant.name
+                            ));
+                        };
+                        if field.is_some() || args.len() != 1 {
+                            return Err(format!(
+                                "enum variant `{}` has the wrong payload shape",
+                                variant.name
+                            ));
+                        }
+                        cells.push(heap_runtime_to_jetval(heap, payload, payload_ty, records)?);
+                    }
+                    MirVariantPayload::Named(payload_fields) => {
+                        if args.len() != payload_fields.len() {
+                            return Err(format!(
+                                "enum variant `{}` has the wrong payload count",
+                                variant.name
+                            ));
+                        }
+                        for (field, (name, payload)) in payload_fields.iter().zip(args) {
+                            if name.as_deref() != Some(field.name.as_str()) {
+                                return Err(format!(
+                                    "enum variant `{}` is missing field `{}`",
+                                    variant.name, field.name
+                                ));
+                            }
+                            cells.push(heap_runtime_to_jetval(
+                                heap,
+                                payload,
+                                &field.ty,
+                                records,
+                            )?);
+                        }
+                    }
+                }
+                return Ok(JetVal::RecordRef(heap.alloc_record_values(cells)));
+            }
             let MirRuntimeValue::Struct { fields, .. } = value else {
                 return Err(format!("native result is not record `{}`", nominal.name));
             };
@@ -2844,6 +4139,16 @@ fn heap_runtime_to_jetval(
                 cells.push(heap_runtime_to_jetval(heap, field_value, &field.ty, records)?);
             }
             Ok(JetVal::RecordRef(heap.alloc_record_values(cells)))
+        }
+        MirTypeKind::FixedList { elem, .. } => {
+            let MirRuntimeValue::List(values) = value else {
+                return Err(format!("native result is not fixed array `{}`", ty.canonical_key()));
+            };
+            values
+                .iter()
+                .map(|value| heap_runtime_to_jetval(heap, value, elem, records))
+                .collect::<Result<Vec<_>, _>>()
+                .map(JetVal::List)
         }
         MirTypeKind::List(inner) => {
             let MirRuntimeValue::List(values) = value else {
@@ -2965,6 +4270,81 @@ fn heap_restore_list(
     }
     Ok(())
 }
+fn heap_restore_writeback(
+    heap: &mut jet_rt::JetArena,
+    args_list: i64,
+    parameter: usize,
+    original_arg: i64,
+    abi: ParamAbi,
+    ty: &MirType,
+    value: MirRuntimeValue,
+    records: &HashMap<MirTypeId, FfiRecordDesc>,
+) -> Result<(), String> {
+    match abi {
+        ParamAbi::Record => {
+            let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
+            if let Some(JetVal::RecordRef(old_record)) = heap.clone_value(original_arg) {
+                if let JetVal::RecordRef(new_record) = &cell {
+                    if heap.record_assign_from(old_record, *new_record).is_some() {
+                        return Ok(());
+                    }
+                }
+            }
+            let slots = heap
+                .list_values_mut(args_list)
+                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+            let slot = slots
+                .get_mut(parameter)
+                .ok_or_else(|| "mutable record argument index is out of range".to_string())?;
+            *slot = cell;
+            Ok(())
+        }
+        ParamAbi::List => {
+            let MirTypeKind::List(inner) = ty.kind() else {
+                return Err("mutable list writeback has a non-list type".to_string());
+            };
+            let MirRuntimeValue::List(values) = value else {
+                return Err("mutable list writeback is not a list".to_string());
+            };
+            heap_restore_list(heap, original_arg, inner, &values, records)
+        }
+        ParamAbi::String => {
+            let MirRuntimeValue::String(value) = value else {
+                return Err("mutable String writeback is not a String".to_string());
+            };
+            let handle = heap.alloc_string(value);
+            let slots = heap
+                .list_values_mut(args_list)
+                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+            let slot = slots
+                .get_mut(parameter)
+                .ok_or_else(|| "mutable String argument index is out of range".to_string())?;
+            *slot = JetVal::Int(handle);
+            Ok(())
+        }
+        ParamAbi::Handle => {
+            let same = matches!(value, MirRuntimeValue::Int(value) if value == original_arg);
+            if same {
+                Ok(())
+            } else {
+                Err("mutable handle writeback changed its checked token".to_string())
+            }
+        }
+        ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {
+            let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
+            let slots = heap
+                .list_values_mut(args_list)
+                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
+            let slot = slots
+                .get_mut(parameter)
+                .ok_or_else(|| "mutable scalar argument index is out of range".to_string())?;
+            *slot = cell;
+            Ok(())
+        }
+        ParamAbi::Callback => Err("managed callback writeback is not supported".to_string()),
+    }
+}
+
 
 fn heap_result_value(
     heap: &mut jet_rt::JetArena,
@@ -2980,6 +4360,34 @@ fn heap_result_value(
         MirRuntimeValue::Bool(value) => Ok(i64::from(value)),
         MirRuntimeValue::Char(value) => Ok(i64::from(value as u32)),
         MirRuntimeValue::String(value) => Ok(heap.alloc_string(value)),
+        MirRuntimeValue::Struct { type_name, fields } => {
+            let Some(ret_type) = entry.ret_type.as_ref() else {
+                return Err("native record result has no type".to_string());
+            };
+            let record = MirRuntimeValue::Struct { type_name, fields };
+            match heap_runtime_to_jetval(heap, &record, ret_type, records)? {
+                JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
+                _ => Err("native record result did not produce a record handle".to_string()),
+            }
+        }
+        MirRuntimeValue::Enum {
+            type_name,
+            variant,
+            args,
+        } => {
+            let Some(ret_type) = entry.ret_type.as_ref() else {
+                return Err("native enum result has no type".to_string());
+            };
+            let enum_value = MirRuntimeValue::Enum {
+                type_name,
+                variant,
+                args,
+            };
+            match heap_runtime_to_jetval(heap, &enum_value, ret_type, records)? {
+                JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
+                _ => Err("native enum result did not produce a valid carrier".to_string()),
+            }
+        }
         MirRuntimeValue::List(values) => {
             let Some(ret_type) = entry.ret_type.as_ref() else {
                 return Err("native list result has no list type".to_string());
@@ -3007,6 +4415,9 @@ fn heap_result_value(
                 Ok(heap.alloc_list_values(cells))
             }
         }
+        MirRuntimeValue::NativeOwned(_) => {
+            Err("native bridge returned a native-owned payload".to_string())
+        }
         MirRuntimeValue::Moved => Err("native bridge returned a moved value".to_string()),
         _ => Err("native bridge returned an unsupported value".to_string()),
     }
@@ -3022,6 +4433,7 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             .into_iter()
             .map(|value| match value {
                 JetVal::Int(value) => Some(value),
+                JetVal::RecordRef(value) => Some(value),
                 JetVal::Float(value) => Some(value.to_bits() as i64),
                 JetVal::Bool(value) => Some(i64::from(value)),
                 JetVal::Char(value) => Some(i64::from(value as u32)),
@@ -3072,163 +4484,17 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             return 0;
         }
     };
-    let list_bindings = {
-        let mut storage_index = 0usize;
-        let mut bindings = Vec::new();
-        for (index, ((abi, _), access)) in entry
-            .params
-            .iter()
-            .zip(&entry.param_types)
-            .zip(&entry.param_access)
-            .enumerate()
-        {
-            match abi {
-                ParamAbi::List => {
-                    if *access == MirAccess::Write {
-                        bindings.push((index, storage_index));
-                    }
-                    storage_index += 1;
-                }
-                ParamAbi::String => storage_index += 1,
-                ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool
-                    if *access == MirAccess::Write =>
-                {
-                    storage_index += 1;
-                }
-                ParamAbi::Int
-                | ParamAbi::Float
-                | ParamAbi::Bool
-                | ParamAbi::Handle
-                | ParamAbi::Callback => {}
-            }
-        }
-        bindings
-    };
-    let bridge_result = {
-        let state_guard = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        match state_guard.as_ref() {
-            None => Err(ffi_diag(&name, "has no prepared bridge", Span::new(0, 0))),
-            Some(state) => {
-                let prepared = prepare_runtime_call(
-                    &runtime_args,
-                    &entry,
-                    &state.records,
-                    &name,
-                    Span::new(0, 0),
-                    MirForeignTarget::Cranelift,
-                );
-                match prepared {
-                    Ok((slots, storage)) => {
-                        let mut out = FfiSlot {
-                            value: 0,
-                            ptr: std::ptr::null_mut(),
-                            len: 0,
-                        };
-                        let result = call_uniform(
-                            state,
-                            &name,
-                            &entry,
-                            &slots,
-                            &mut out,
-                            Span::new(0, 0),
-                        )
-                        .and_then(|()| {
-                            let value = decode_runtime_result(
-                                state,
-                                &entry,
-                                &out,
-                                &name,
-                                Span::new(0, 0),
-                                MirForeignTarget::Cranelift,
-                                entry.ret_type.as_ref().is_some_and(|ty| {
-                                    matches!(ty.kind(), MirTypeKind::Float32)
-                                }),
-                            )?;
-                            let mut writebacks = Vec::new();
-                            for (param_index, storage_index) in &list_bindings {
-                                let ty = &entry.param_types[*param_index];
-                                let MirTypeKind::List(inner) = ty.kind() else {
-                                    return Err(ffi_diag(
-                                        &name,
-                                        "list binding has a non-list type",
-                                        Span::new(0, 0),
-                                    ));
-                                };
-                                let (element_size, _) =
-                                    type_size_align(inner, &state.records).ok_or_else(|| {
-                                        ffi_diag(
-                                            &name,
-                                            "mutable list element has no static C layout",
-                                            Span::new(0, 0),
-                                        )
-                                    })?;
-                                let slot = slots[*param_index];
-                                let bytes = storage
-                                    .get(*storage_index)
-                                    .map(FfiStorage::as_bytes)
-                                    .ok_or_else(|| {
-                                        ffi_diag(
-                                            &name,
-                                            "mutable list storage is missing",
-                                            Span::new(0, 0),
-                                        )
-                                    })?;
-                                let mut values = Vec::with_capacity(slot.len);
-                                for index in 0..slot.len {
-                                    let start =
-                                        index.checked_mul(element_size).ok_or_else(|| {
-                                            ffi_diag(
-                                                &name,
-                                                "mutable list length overflowed its C layout",
-                                                Span::new(0, 0),
-                                            )
-                                        })?;
-                                    let end = start.checked_add(element_size).ok_or_else(|| {
-                                        ffi_diag(
-                                            &name,
-                                            "mutable list element range overflowed",
-                                            Span::new(0, 0),
-                                        )
-                                    })?;
-                                    let element = bytes.get(start..end).ok_or_else(|| {
-                                        ffi_diag(
-                                            &name,
-                                            "mutable list storage is shorter than its count",
-                                            Span::new(0, 0),
-                                        )
-                                    })?;
-                                    values.push(decode_bytes(
-                                        element,
-                                        inner,
-                                        &state.records,
-                                        &name,
-                                        Span::new(0, 0),
-                                    )?);
-                                }
-                                writebacks.push((
-                                    *param_index,
-                                    entry.param_types[*param_index].clone(),
-                                    values,
-                                ));
-                            }
-                            retire_handle_args(
-                                &runtime_args,
-                                &entry.params,
-                                entry.close_handle,
-                                MirForeignTarget::Cranelift,
-                            );
-                            Ok((value, writebacks))
-                        });
-                        let _storage = storage;
-                        result
-                    }
-                    Err(error) => Err(error),
-                }
-            }
-        }
-    };
-    let (value, writebacks) = match bridge_result {
-        Ok(value) => value,
+    let bridge_result = call_runtime_inner(
+        &name,
+        &runtime_args,
+        entry.ret_type.as_ref().is_some_and(|ty| {
+            matches!(ty.kind(), MirTypeKind::Float32)
+        }),
+        Span::new(0, 0),
+        MirForeignTarget::Cranelift,
+    );
+    let result = match bridge_result {
+        Ok(result) => result,
         Err(error) if error.code == "E3014" => {
             Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(FFI_RUNTIME_PANIC));
             return 0;
@@ -3243,17 +4509,47 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
         }
     };
     Concurrency::with_runtime_mut(|rt| {
-        for (param_index, ty, values) in writebacks {
-            let MirTypeKind::List(inner) = ty.kind() else {
-                continue;
+        for writeback in result.writebacks {
+            let parameter = writeback.parameter;
+            let Some(abi) = entry.params.get(parameter).copied() else {
+                rt.set_host_fault(&format!(
+                    "jit ffi: `{name}` writeback parameter index is out of range"
+                ));
+                return 0;
             };
-            let list = argv[param_index];
-            if let Err(error) = heap_restore_list(&mut rt.heap, list, inner, &values, &records) {
+            if entry.param_access.get(parameter) != Some(&MirAccess::Write) {
+                rt.set_host_fault(&format!(
+                    "jit ffi: `{name}` writeback targets a non-writable parameter"
+                ));
+                return 0;
+            }
+            let Some(ty) = entry.param_types.get(parameter) else {
+                rt.set_host_fault(&format!(
+                    "jit ffi: `{name}` writeback type is missing"
+                ));
+                return 0;
+            };
+            let Some(original_arg) = argv.get(parameter).copied() else {
+                rt.set_host_fault(&format!(
+                    "jit ffi: `{name}` writeback argument is missing"
+                ));
+                return 0;
+            };
+            if let Err(error) = heap_restore_writeback(
+                &mut rt.heap,
+                args,
+                parameter,
+                original_arg,
+                abi,
+                ty,
+                writeback.value,
+                &records,
+            ) {
                 rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
                 return 0;
             }
         }
-        match heap_result_value(&mut rt.heap, value, &entry, &records) {
+        match heap_result_value(&mut rt.heap, result.value, &entry, &records) {
             Ok(value) => value,
             Err(error) => {
                 rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
@@ -3407,9 +4703,19 @@ fn jet_jit_ffi_emit_task(wrapper_handle: i64, value: i64) -> i64 {
             Span::new(0, 0),
             MirForeignTarget::Cranelift,
         ) {
-            Ok(MirRuntimeValue::Int(value)) => value,
+            Ok(result) if result.writebacks.is_empty() => match result.value {
+                MirRuntimeValue::Int(value) => value,
+                _ => {
+                    Concurrency::set_task_trap(
+                        "managed callback emit returned a non-integer value",
+                    );
+                    0
+                }
+            },
             Ok(_) => {
-                Concurrency::set_task_trap("managed callback emit returned a non-integer value");
+                Concurrency::set_task_trap(
+                    "managed callback emit returned an unexpected writable parameter",
+                );
                 0
             }
             Err(error) => {
@@ -3492,3 +4798,255 @@ host_fns! {
     atomic_observe: "jet_atomic_observe" => jet_atomic_observe: sig_atomic_load;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    unsafe extern "C" fn test_clear_panic_hook() {}
+
+    unsafe extern "C" fn test_take_failure() -> i8 {
+        0
+    }
+
+    fn test_state() -> FfiState {
+        FfiState {
+            handle: std::ptr::null_mut(),
+            clear_panic_hook_fn: test_clear_panic_hook,
+            free_fn: None,
+            take_failure_fn: test_take_failure,
+            by_wrapper: HashMap::new(),
+            close_by_handle: HashMap::new(),
+            records: HashMap::new(),
+            arrow_provider_lease: None,
+        }
+    }
+
+    fn test_entry() -> FfiEntry {
+        let int = MirType::from_kind(MirTypeKind::Int);
+        let list = MirType::from_kind(MirTypeKind::List(Box::new(int.clone())));
+        FfiEntry {
+            params: vec![
+                ParamAbi::Int,
+                ParamAbi::Int,
+                ParamAbi::List,
+                ParamAbi::String,
+                ParamAbi::Handle,
+            ],
+            param_handles: vec![None; 5],
+            param_types: vec![
+                int.clone(),
+                int.clone(),
+                list,
+                MirType::from_kind(MirTypeKind::String),
+                int,
+            ],
+            param_access: vec![
+                MirAccess::Read,
+                MirAccess::Write,
+                MirAccess::Write,
+                MirAccess::Write,
+                MirAccess::Write,
+            ],
+            ret: RetAbi::Unit,
+            ret_type: None,
+            handle: None,
+            close_handle: None,
+            ptr: std::ptr::null(),
+            callback_start: None,
+        }
+    }
+    unsafe extern "C" fn test_uniform_writeback(
+        args: *const FfiSlot,
+        argc: usize,
+        out: *mut FfiSlot,
+    ) -> i32 {
+        let args = unsafe { std::slice::from_raw_parts(args, argc) };
+        unsafe {
+            (args[1].ptr as *mut i64).write(23);
+            for (index, value) in [4i64, 5].iter().copied().enumerate() {
+                (args[2].ptr as *mut i64).add(index).write(value);
+            }
+            std::ptr::copy_nonoverlapping(b"new\0".as_ptr(), args[3].ptr, 4);
+            (*out).value = 0;
+            (*out).ptr = std::ptr::null_mut();
+            (*out).len = 0;
+        }
+        0
+    }
+
+    #[test]
+    fn native_uniform_abi_invocation_returns_indexed_writebacks() {
+        let mut state = test_state();
+        let mut entry = test_entry();
+        entry.ptr = test_uniform_writeback as *const ();
+        state
+            .by_wrapper
+            .insert("test_generated_out".to_string(), entry);
+        *FFI_STATE.lock().unwrap_or_else(|error| error.into_inner()) = Some(state);
+        let result = call_runtime_inner(
+            "test_generated_out",
+            &[
+                MirRuntimeValue::Int(3),
+                MirRuntimeValue::Int(7),
+                MirRuntimeValue::List(vec![
+                    MirRuntimeValue::Int(1),
+                    MirRuntimeValue::Int(2),
+                ]),
+                MirRuntimeValue::String("old".to_string()),
+                MirRuntimeValue::Int(42),
+            ],
+            false,
+            Span::new(0, 0),
+            MirForeignTarget::Interpreter,
+        );
+        *FFI_STATE.lock().unwrap_or_else(|error| error.into_inner()) = None;
+        let result = result.expect("uniform native ABI fixture must return");
+        assert_eq!(
+            result.writebacks,
+            vec![
+                AmbientMirExternWriteback {
+                    parameter: 1,
+                    value: MirRuntimeValue::Int(23),
+                },
+                AmbientMirExternWriteback {
+                    parameter: 2,
+                    value: MirRuntimeValue::List(vec![
+                        MirRuntimeValue::Int(4),
+                        MirRuntimeValue::Int(5),
+                    ]),
+                },
+                AmbientMirExternWriteback {
+                    parameter: 3,
+                    value: MirRuntimeValue::String("new".to_string()),
+                },
+                AmbientMirExternWriteback {
+                    parameter: 4,
+                    value: MirRuntimeValue::Int(42),
+                },
+            ]
+        );
+    }
+
+
+    #[test]
+    fn native_writeback_decode_covers_scalar_list_string_and_indexed_handle_carriers() {
+        let state = test_state();
+        let entry = test_entry();
+        for target in [MirForeignTarget::Interpreter, MirForeignTarget::Cranelift] {
+            let handle_arg = if matches!(target, MirForeignTarget::Cranelift) {
+                register_ffi_handle(MirHandleId(0xfeed), 42)
+            } else {
+                42
+            };
+            let args = vec![
+                MirRuntimeValue::Int(3),
+                MirRuntimeValue::Int(7),
+                MirRuntimeValue::List(vec![
+                    MirRuntimeValue::Int(1),
+                    MirRuntimeValue::Int(2),
+                ]),
+                MirRuntimeValue::String("old".to_string()),
+                MirRuntimeValue::Int(handle_arg),
+            ];
+            let (slots, mut storage) = prepare_runtime_call(
+                &args,
+                &entry,
+                &state.records,
+                "test_writeback",
+                Span::new(0, 0),
+                target,
+            )
+            .expect("test arguments have checked carriers");
+            assert_eq!(storage.len(), 3);
+            storage[0].as_bytes_mut()[..8].copy_from_slice(&23i64.to_ne_bytes());
+
+            for (index, value) in [4i64, 5].iter().copied().enumerate() {
+                let start = index * 8;
+                storage[1].as_bytes_mut()[start..start + 8]
+                    .copy_from_slice(&value.to_ne_bytes());
+            }
+            storage[2].as_bytes_mut().copy_from_slice(b"new\0");
+
+            let writebacks = decode_runtime_writebacks(
+                &state,
+                &entry,
+                &args,
+                &slots,
+                &storage,
+                "test_writeback",
+                Span::new(0, 0),
+            )
+            .expect("native storage mutations decode losslessly");
+            assert_eq!(
+                writebacks,
+                vec![
+                    AmbientMirExternWriteback {
+                        parameter: 1,
+                        value: MirRuntimeValue::Int(23),
+                    },
+                    AmbientMirExternWriteback {
+                        parameter: 2,
+                        value: MirRuntimeValue::List(vec![
+                            MirRuntimeValue::Int(4),
+                            MirRuntimeValue::Int(5),
+                        ]),
+                    },
+                    AmbientMirExternWriteback {
+                        parameter: 3,
+                        value: MirRuntimeValue::String("new".to_string()),
+                    },
+                    AmbientMirExternWriteback {
+                        parameter: 4,
+                        value: MirRuntimeValue::Int(handle_arg),
+                    },
+                ]
+            );
+            if matches!(target, MirForeignTarget::Cranelift) {
+                assert_eq!(take_ffi_handle(handle_arg), Some((MirHandleId(0xfeed), 42)));
+            }
+        }
+    }
+
+    #[test]
+    fn native_handle_registry_distinguishes_reused_raw_instances() {
+        let handle = MirHandleId(0xbeef);
+        let first = register_ffi_handle(handle, 17);
+        assert_eq!(take_ffi_handle(first), Some((handle, 17)));
+        let second = register_ffi_handle(handle, 17);
+        assert_ne!(first, second);
+        assert_eq!(ffi_handle_raw(second), Some(17));
+        assert_eq!(take_ffi_handle(second), Some((handle, 17)));
+    }
+    #[test]
+    fn native_handle_registry_validates_each_parameter_type() {
+        let expected = MirHandleId(0x1111);
+        let other = MirHandleId(0x2222);
+        let token = register_ffi_handle(expected, 17);
+        let args = [MirRuntimeValue::Int(token)];
+        assert_eq!(
+            runtime_handle_arg(
+                &args,
+                0,
+                "test_handle_types",
+                Span::new(0, 0),
+                MirForeignTarget::Cranelift,
+                Some(expected),
+            )
+            .unwrap(),
+            17
+        );
+        assert!(
+            runtime_handle_arg(
+                &args,
+                0,
+                "test_handle_types",
+                Span::new(0, 0),
+                MirForeignTarget::Cranelift,
+                Some(other),
+            )
+            .is_err()
+        );
+        assert_eq!(take_ffi_handle(token), Some((expected, 17)));
+    }
+}

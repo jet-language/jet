@@ -1,56 +1,96 @@
 # Issue tracker: Tower
 
-Tower is the durable work ledger for this repository. Use the non-serve CLI for card operations. Never hand-edit `plugins/tower/.tower/`.
+Tower is Jet's durable work ledger. This page records the repository's card
+vocabulary and the commands that address it. The executable command reference
+is [`plugins/tower/skills/tower/SKILL.md`](../../../plugins/tower/skills/tower/SKILL.md);
+the board policy is [`plugins/tower/AGENTS.md`](../../../plugins/tower/AGENTS.md).
+Use the non-serve CLI for card operations. Never edit
+`plugins/tower/.tower/*.json` by hand. Card text uses the
+[Jet vocabulary](../vocabulary.md) for language terms.
+
+## Start with the CLI
+
+From the repository root, use the vendored command:
 
 ```sh
 alias tower='node plugins/tower/tower.mjs'
 tower help
 ```
 
-The board data is in `plugins/tower/.tower/`. Only the owner starts `tower serve --open`. Agents never start a second server. Full board mechanics live in `plugins/tower/skills/tower/SKILL.md` and `plugins/tower/AGENTS.md`.
+Only the owner starts `tower serve`. Agents use the non-serve CLI against the
+main board and do not start a second server. Tower validates writes, takes the
+board lock, keeps backups, and records revisions.
 
-## Card operations
+## Work with cards
 
-- **Create:** `tower card add --title "..." --body "..." --kind bug|feature --add-tag needs-triage --by <me>`. Use `--file payload.json` or `--file -` for multi-line bodies.
-- **Read:** `tower card show '#N' --json`. Reads fall through to the archive after retirement.
-- **List:** `tower card list --json` with `--lane`, `--phase`, `--epoch`, `--track`, `--kind`, `--tag <name>`, `--untagged`, or `--parent '#N'`.
-- **Log:** `tower card update '#N' --log "..." --by <me>`.
-- **Triage tags:** add or remove tags with `--add-tag` and `--remove-tag`.
-- **Questions:** `tower question ask --card '#N' --text "..." --by <me>`.
-- **Messages:** `tower message add '#N' --text "..." --by <me>`. Use a message for an update that needs no answer, not a question or ballot.
-- **Tooling friction:** `tower papercut add --by <me> --text "..." [--card '#N']`. Log only a deterministic, repeatable in-repository tooling fault that is not already logged and is not a Jet defect.
-- **Blockers:** `tower card update '#N' --blockedBy '#1,#2' --by <me>`.
-- **Claim:** `tower brief '#N' --agent <me>` or `tower card claim '#N' --by <me>`.
-- **Close:** the orchestrator runs `tower card update '#N' --phase done --by <me>` only after integrated focused evidence and a fresh query showing `done`.
-- **Won't fix:** `tower card update '#N' --add-tag wontfix --phase frozen --by owner`, or delete an unpromoted idea.
+Use one homed card for each incomplete stream. Put the implementable plan,
+dependencies, owner gates, complete cutover, and observable criteria on that
+card. Keep work state in Tower rather than in a second task list or a durable
+status document.
 
-Card numbers are stable handles, like GitHub issue numbers. An intake item that is not yet a card belongs in Ideas (`tower idea list|add|promote`).
+| Operation | Command |
+|---|---|
+| Create a bug card | `tower card add --title "..." --body "..." --kind bug --add-tag needs-triage --by <agent>` |
+| Create a feature card | `tower card add --title "..." --body "..." --kind feature --add-tag needs-triage --by <agent>` |
+| Read a card | `tower card show '#N' --json` |
+| List cards | `tower card list --json` |
+| Filter cards | `tower card list --json --lane <lane> --phase <phase> --tag <tag>` |
+| Log an update | `tower card update '#N' --log "..." --by <agent>` |
+| Add or remove a triage tag | `tower card update '#N' --add-tag <tag> --remove-tag <tag> --by <agent>` |
+| Ask a question | `tower question ask '#N' --text "..." --by <agent>` |
+| Add a message | `tower message add '#N' --text "..." --by <agent>` |
+| Record a tooling papercut | `tower papercut add --card '#N' --text "..." --by <agent>` |
+| Record blockers | `tower card update '#N' --blocked-by '#1,#2' --by <agent>` |
+| Claim a card | `tower brief '#N' --agent <agent>` |
 
-## Card contract
+Use `--file payload.json` or `--file -` when a card body or update needs
+multiple lines. A card number is a stable handle, like a GitHub issue number.
+An intake item that is not yet a card belongs in Ideas:
+`tower idea list`, `tower idea add`, and `tower idea promote`.
 
-Every incomplete stream has one homed card in an epoch, sidequest, or frozen state. Put the implementable plan, dependencies, owner gates, complete cutover, and observable criteria on the card. Keep work state in Tower, not in a parallel task list or a durable status document. Close each card as soon as its integrated criteria are proven; milestone review is a separate later gate.
+The orchestrator closes a card only after integrated focused evidence proves its
+criteria. The close operation is:
 
-## Messages to the owner
+```sh
+tower card update '#N' --phase done --by <orchestrator>
+```
 
-Write every Tower message in ELI5 language: explain it for someone who does not know the compiler or the task. Start with what changed or what is still broken. Use short sentences, explain any needed technical term, and say what happens next. Keep exact commands, error codes, and evidence paths after the explanation. Do not weaken the facts or call unchecked work finished.
+Read the card back and confirm `done`. To decline work, the owner uses:
 
-Messages use light blue. Finished-card notices use blue. Owner-check pills, counts, and indicators use gold. Decision ballots use red. When decisions and owner checks are both waiting, show their counts separately so each keeps its own color.
+```sh
+tower card update '#N' --add-tag wontfix --phase frozen --by owner
+```
+
+## Messages and questions
+
+Write Tower messages in ELI5 language. Start with what changed or what is
+broken, use short sentences, define technical terms, and put exact commands,
+error codes, and evidence paths after the explanation. A message reports an
+update; a question asks for an answer; an owner decision uses the ballot path.
+Do not call unchecked work finished.
 
 ## Pull requests
 
-External GitHub pull requests are not triage queue items. Collaborator delivery work uses Tower cards, not GitHub Issues.
+External GitHub pull requests are not the triage queue. Collaborator delivery
+work uses Tower cards, not GitHub Issues. When a skill says to publish to the
+issue tracker, create a Tower card. When it says to fetch a ticket, read the
+card and its linked decisions with the Tower CLI.
 
-## Skill wording
+## Wayfinder maps
 
-When a skill says “publish to the issue tracker,” create a Tower card, normally with `--add-tag ready-for-agent` when the work is fully specified. When it says “fetch the relevant ticket,” run `tower card show '#N' --json` and read linked decisions or questions from `tower brief '#N' --no-claim --json`.
+A Wayfinder map is one parent card with child cards:
 
-## Wayfinder map
+- Tag the map `wayfinder:map`. Its body holds Destination, Notes,
+  Decisions-so-far, Fog, and Out of scope.
+- Set a child's parent to the map card and tag it
+  `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or
+  `wayfinder:task`.
+- Use Tower's native `blockedBy` relationship. A child is unblocked only when
+  every blocker is done or its blocking decision is ratified.
+- Claim work with `tower brief '#N' --agent <agent>` as the session's first
+  board write.
+- Resolve a child by recording its answer, setting its phase to `done`, and
+  adding a one-line gist and link to the map's Decisions-so-far.
 
-`/wayfinder` uses one map card and child tickets:
-
-- **Map:** tag the card `wayfinder:map`; its body holds Destination, Notes, Decisions-so-far, Fog, and Out of scope.
-- **Child:** set `parentId` to the map card's ID and tag it `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or `wayfinder:task`.
-- **Blocking:** use Tower's native `blockedBy`; a ticket is unblocked when every blocker is `done` or its blocking decision is ratified.
-- **Frontier:** list open children, drop blocked or claimed items, and choose the first remaining item in map or `workOrder` order.
-- **Claim:** `tower brief '#N' --agent <me>` is the session's first write.
-- **Resolve:** log the answer, set `--phase done`, then append a one-line gist and link to the map's Decisions-so-far.
+Triage tags and delivery phases are separate concepts; use
+[`triage-labels.md`](triage-labels.md) for their exact mapping.

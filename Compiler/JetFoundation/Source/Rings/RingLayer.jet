@@ -1,0 +1,443 @@
+// Canonical runtime-layer and semantic Prelude-closure facts ported from RingLayer.rs.
+// Module names classify conservatively; namespace spelling alone never adds a
+// dependency beyond the checked closure table below.
+
+pub struct JetRingLayerFact {
+    pub key: String
+    pub layer: MirRuntimeLayer
+}
+
+struct JetRingDependencyRow {
+    module_name: String
+    dependencies: [String]
+}
+
+fn jet_ring_dependency_rows() -> [JetRingDependencyRow] {
+    [JetRingDependencyRow]{
+        JetRingDependencyRow{module_name: "app", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.devtools", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.archive.gzip", dependencies: [String]{"core.archive"}},
+        JetRingDependencyRow{module_name: "core.archive.zstd", dependencies: [String]{"core.archive"}},
+        JetRingDependencyRow{module_name: "core.args", dependencies: [String]{"core.process"}},
+        JetRingDependencyRow{module_name: "core.auth", dependencies: [String]{"core.crypto", "core.net"}},
+        JetRingDependencyRow{module_name: "core.compiler", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.compiler.lang", dependencies: [String]{"core.compiler"}},
+        JetRingDependencyRow{module_name: "core.collections.set", dependencies: [String]{"core.collections"}},
+        JetRingDependencyRow{module_name: "core.compute", dependencies: [String]{"core.math", "core.text.fmt"}},
+        JetRingDependencyRow{module_name: "core.compute.solve", dependencies: [String]{"core.compute", "core.math"}},
+        JetRingDependencyRow{module_name: "core.crypto", dependencies: [String]{"core", "core.files", "core.files.path"}},
+        JetRingDependencyRow{module_name: "core.crypto.expert", dependencies: [String]{"core.crypto"}},
+        JetRingDependencyRow{module_name: "core.crypto.random", dependencies: [String]{"core.crypto"}},
+        JetRingDependencyRow{module_name: "core.crypto.uuid", dependencies: [String]{"core.crypto"}},
+        JetRingDependencyRow{module_name: "core.crypto.vault", dependencies: [String]{"core.crypto"}},
+        JetRingDependencyRow{module_name: "core.data", dependencies: [String]{"core.encoding", "core.files"}},
+        JetRingDependencyRow{module_name: "core.data.arrow", dependencies: [String]{"core.data", "core.encoding"}},
+        JetRingDependencyRow{module_name: "core.data.loader", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.stream", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.plot", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.sketch", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.sketch.cms", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.sketch.hll", dependencies: [String]{"core.data", "core.math"}},
+        JetRingDependencyRow{module_name: "core.data.sketch.reservoir", dependencies: [String]{"core.data"}},
+        JetRingDependencyRow{module_name: "core.data.sketch.tdigest", dependencies: [String]{"core.data", "core.math"}},
+        JetRingDependencyRow{module_name: "core.db", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.email", dependencies: [String]{"core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"}},
+        JetRingDependencyRow{module_name: "core.encoding", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.encoding.base32", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.encoding.base64", dependencies: [String]{"core.encoding", "core.encoding.hex", "core.encoding.base32"}},
+        JetRingDependencyRow{module_name: "core.encoding.binary", dependencies: [String]{"core.math"}},
+        JetRingDependencyRow{module_name: "core.encoding.cbor", dependencies: [String]{"core.encoding", "core.math"}},
+        JetRingDependencyRow{module_name: "core.encoding.csv", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.encoding.hex", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.encoding.ini", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.encoding.json", dependencies: [String]{"core.encoding", "core.math"}},
+        JetRingDependencyRow{module_name: "core.encoding.jsonl", dependencies: [String]{"core.encoding", "core.encoding.json"}},
+        JetRingDependencyRow{module_name: "core.encoding.toml", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.encoding.xml", dependencies: [String]{"core.encoding"}},
+        JetRingDependencyRow{module_name: "core.event", dependencies: [String]{"core.mem"}},
+        JetRingDependencyRow{module_name: "core.files", dependencies: [String]{"core.text", "core.sys"}},
+        JetRingDependencyRow{module_name: "core.encoding.yaml", dependencies: [String]{"core.encoding", "core.encoding.json"}},
+        JetRingDependencyRow{module_name: "core.files.path", dependencies: [String]{"core.files"}},
+        JetRingDependencyRow{module_name: "core.game.raylib", dependencies: [String]{"core.game"}},
+        JetRingDependencyRow{module_name: "core.http", dependencies: [String]{"core.net"}},
+        JetRingDependencyRow{module_name: "core.http.client", dependencies: [String]{"core.http"}},
+        JetRingDependencyRow{module_name: "core.http.server", dependencies: [String]{"core.http"}},
+        JetRingDependencyRow{module_name: "core.io", dependencies: [String]{"core.files"}},
+        JetRingDependencyRow{module_name: "core.math.random", dependencies: [String]{"core.math"}},
+        JetRingDependencyRow{module_name: "core.math.combinatorics", dependencies: [String]{"core.math"}},
+        JetRingDependencyRow{module_name: "core.math.stats", dependencies: [String]{"core.math", "core.math.random"}},
+        JetRingDependencyRow{module_name: "core.mem", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.mod", dependencies: [String]{"core.compiler", "core.files"}},
+        JetRingDependencyRow{module_name: "core.net.tls", dependencies: [String]{"core.crypto.random", "core.net"}},
+        JetRingDependencyRow{module_name: "core.net.url", dependencies: [String]{"core.net.mime"}},
+        JetRingDependencyRow{module_name: "core.net.ws", dependencies: [String]{"core.net", "core.net.url"}},
+        JetRingDependencyRow{module_name: "core.prelude", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.process", dependencies: [String]{"core.files", "core.sys", "core.text"}},
+        JetRingDependencyRow{module_name: "core.reactive", dependencies: [String]{"core.mem"}},
+        JetRingDependencyRow{module_name: "core.reactive.loadable", dependencies: [String]{"core.reactive"}},
+        JetRingDependencyRow{module_name: "core.reflect", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.regex", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.service", dependencies: [String]{"core.net", "core.tasks"}},
+        JetRingDependencyRow{module_name: "core.sync", dependencies: [String]{"core.data", "core.tasks"}},
+        JetRingDependencyRow{module_name: "core.sys", dependencies: [String]{"core.files"}},
+        JetRingDependencyRow{module_name: "core.tasks", dependencies: [String]{"core.time"}},
+        JetRingDependencyRow{module_name: "core.term", dependencies: [String]{"core.files"}},
+        JetRingDependencyRow{module_name: "core.testing", dependencies: [String]{"core.files", "core.math.random", "core.time"}},
+        JetRingDependencyRow{module_name: "core.text", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.text.fmt", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.text.html", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.text.wrap", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.text.parse", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.time", dependencies: [String]{"core"}},
+        JetRingDependencyRow{module_name: "core.time.calendar", dependencies: [String]{"core.time"}},
+        JetRingDependencyRow{module_name: "core.ui", dependencies: [String]{"core.text"}},
+        JetRingDependencyRow{module_name: "core.tui", dependencies: [String]{"core.ui"}},
+        JetRingDependencyRow{module_name: "core.ui.host.clipboard", dependencies: [String]{"core.ui.host"}},
+        JetRingDependencyRow{module_name: "core.ui.host.ime", dependencies: [String]{"core.ui.host"}},
+        JetRingDependencyRow{module_name: "core.ui.host.drag_drop", dependencies: [String]{"core.ui.host"}},
+        JetRingDependencyRow{module_name: "core.ui.host.shortcuts", dependencies: [String]{"core.ui.host"}},
+        JetRingDependencyRow{module_name: "core.ui.host.accessibility", dependencies: [String]{"core.ui.host"}},
+        JetRingDependencyRow{module_name: "core.units", dependencies: [String]{"core.math"}},
+        JetRingDependencyRow{module_name: "core.watcher", dependencies: [String]{"core.files"}},
+        JetRingDependencyRow{module_name: "core.web", dependencies: [String]{"core.http", "core.web.forms"}},
+        JetRingDependencyRow{module_name: "core.web.browser", dependencies: [String]{"core.web", "core.files"}},
+        JetRingDependencyRow{module_name: "core.web.devserver", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.forms", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.query", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.router", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.storage", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.storage.local", dependencies: [String]{"core.web.storage"}},
+        JetRingDependencyRow{module_name: "core.web.storage.session", dependencies: [String]{"core.web.storage"}},
+        JetRingDependencyRow{module_name: "core.web.store", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.table", dependencies: [String]{"core.web"}},
+        JetRingDependencyRow{module_name: "core.web.virtual", dependencies: [String]{"core.web"}},
+    }
+}
+
+fn jet_ring_is_namespace_only(module_name: String) -> Bool {
+    module_name == "core.mem.scope" || module_name == "core.net.mime" || module_name == "core.net.url" || module_name == "core.time.expiring"
+}
+
+fn jet_ring_is_closure_marker(usage: String) -> Bool {
+    usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
+}
+
+fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int {
+    if layer == {
+        .Core -> 0
+        .Alloc -> 1
+        .Std -> 2
+    }
+}
+
+pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String {
+    if layer == {
+        .Core -> "core"
+        .Alloc -> "alloc"
+        .Std -> "hosted"
+    }
+}
+
+pub fn jet_ring_parse_manifest_layer(value: String) -> ?MirRuntimeLayer {
+    trimmed := value.trim()
+    if trimmed == {
+        "core" -> Val(MirRuntimeLayer.Core)
+        "alloc" -> Val(MirRuntimeLayer.Alloc)
+        "hosted" -> Val(MirRuntimeLayer.Std)
+        else -> None
+    }
+}
+
+fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer {
+    if module_name == "core" || module_name == "core.prelude" || module_name == "core.math" || module_name == "core.units" || module_name == "core.perf" || module_name == "core.mem.scope" -> return MirRuntimeLayer.Core
+    if module_name == "core.mem" || module_name == "core.math.random" || module_name == "core.crypto" || module_name == "core.crypto.random" || module_name == "core.crypto.uuid" || module_name == "core.crypto.vault" || module_name == "core.encoding" || module_name == "core.encoding.json" || module_name == "core.encoding.jsonl" || module_name == "core.encoding.csv" || module_name == "core.encoding.toml" || module_name == "core.encoding.yaml" || module_name == "core.encoding.xml" || module_name == "core.encoding.cbor" || module_name == "core.encoding.hex" || module_name == "core.encoding.base64" || module_name == "core.encoding.base32" || module_name == "core.text" || module_name == "core.text.fmt" || module_name == "core.reflect" || module_name == "core.compiler" || module_name == "core.game" || module_name == "core.reactive.loadable" || module_name == "core.event" || module_name == "core.compute" || module_name == "core.compute.solve" || module_name == "core.time.expiring" || module_name == "core.reactive" || module_name == "core.data" || module_name == "core.data.plot" || module_name == "core.data.sketch.hll" || module_name == "core.data.sketch.tdigest" || module_name == "core.data.sketch.cms" || module_name == "core.data.sketch.reservoir" || module_name == "core.log" || module_name == "core.regex" || module_name == "core.net.url" || module_name == "core.net.mime" -> return MirRuntimeLayer.Alloc
+    MirRuntimeLayer.Std
+}
+
+pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer {
+    jet_ring_layer_of_module(module_name)
+}
+
+fn jet_ring_helper_layer(module_name: String, helper: String) -> ?MirRuntimeLayer {
+    if helper.len() == 0 -> return None
+    if module_name == "core.math" || module_name == "core.units" || module_name == "core.perf" || module_name == "core.mem.scope" -> return Val(MirRuntimeLayer.Core)
+    if module_name == "core.mem" {
+        if helper == "Ptr" || helper == "from_addr" || helper == "volatile_read" || helper == "volatile_write" || helper == "address_of" || helper == "pin" || helper == "Pin" -> return Val(MirRuntimeLayer.Core)
+    }
+    if module_name == "core.text" {
+        if helper == "Cursor" || helper == "caseless_eq" || helper == "display_width" || helper == "scalar_count" || helper == "byte_count" || helper == "is_alphabetic" || helper == "is_numeric" || helper == "is_whitespace" || helper == "is_ascii" || helper == "starts_any" || helper == "ends_any" -> return Val(MirRuntimeLayer.Core)
+    }
+    if module_name == "core.time" {
+        if helper == "from_unix_ms" || helper == "from_unix_seconds" || helper == "from_unix_microseconds" || helper == "from_unix_nanoseconds" || helper == "from_timestamp" || helper == "days_in_month" || helper == "is_leap_year" || helper == "period" || helper == "period_days" || helper == "period_months" || helper == "period_years" || helper == "utc" -> return Val(MirRuntimeLayer.Core)
+    }
+    if module_name == "core.net" {
+        if helper == "ip_addr" || helper == "ip_to_string" || helper == "ip_is_ipv4" || helper == "socket_addr" || helper == "socket_addr_parse" || helper == "socket_host" || helper == "socket_port" || helper == "socket_to_string" || helper == "error_operation" || helper == "error_address" || helper == "error_name" || helper == "error_message" || helper == "error_os_code" -> return Val(MirRuntimeLayer.Alloc)
+    }
+    if module_name == "core.net.url" || module_name == "core.net.mime" -> return Val(MirRuntimeLayer.Alloc)
+    if module_name == "core.files" {
+        if helper == "typed_head" || helper == "path_from" || helper == "path_join" || helper == "path_parent" || helper == "path_extension" || helper == "path_stem" || helper == "path_normalize" -> return Val(MirRuntimeLayer.Alloc)
+    }
+    if module_name == "core.crypto" {
+        if helper == "__nominal__" || helper == "Secret" || helper == "SigningKey" || helper == "VerifyKey" || helper == "X25519SecretKey" || helper == "X25519PublicKey" || helper == "SharedSecret" || helper == "Signature" || helper == "Digest256" || helper == "Digest512" || helper == "sha256" || helper == "blake3" || helper == "sha512" || helper == "constant_time_equal_bytes" || helper == "constant_time_equal" || helper == "verify" || helper == "sign" -> return Val(MirRuntimeLayer.Core)
+        if helper == "file_seal" || helper == "file_open" -> return Val(MirRuntimeLayer.Std)
+    }
+    if module_name == "core.archive" {
+        if helper == "zip_decompress" || helper == "crc32" || helper == "adler32" || helper == "deflate" || helper == "inflate" || helper == "zip_names_json" || helper == "tar_names_json" -> return Val(MirRuntimeLayer.Alloc)
+    }
+    if module_name == "core.email" {
+        if helper == "Address" || helper == "Message" || helper == "Attachment" || helper == "Envelope" || helper == "RecipientPolicy" || helper == "Limits" || helper == "address" || helper == "attachment" || helper == "message" || helper == "envelope" || helper == "serialize" -> return Val(MirRuntimeLayer.Alloc)
+    }
+    None
+}
+
+pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer {
+    if usage.starts_with("core::") {
+        bytes := usage.bytes()
+        rest := String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
+        if rest == "json" || rest == "bytes" -> return MirRuntimeLayer.Alloc
+        if rest == "from_bytes" || rest == "from_bytes_lossy" -> return MirRuntimeLayer.Core
+        return MirRuntimeLayer.Std
+    }
+    parts := usage.split("::")
+    module_name := parts[0]
+    helper := ""
+    if parts.len() > 1 {
+        helper_parts := [String]{}
+        index := 1
+        loop index < parts.len() {
+            helper_parts.push(parts[index])
+            index += 1
+        }
+        helper = helper_parts.join("::")
+    }
+    jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
+}
+
+fn jet_ring_dependency_keys(usage: String) -> [String] {
+    parts := usage.split("::")
+    module_name := parts[0]
+    helper := ""
+    if parts.len() > 1 {
+        helper_parts := [String]{}
+        index := 1
+        loop index < parts.len() {
+            helper_parts.push(parts[index])
+            index += 1
+        }
+        helper = helper_parts.join("::")
+    }
+    dependencies := [String]{}
+    loop row in jet_ring_dependency_rows() {
+        if row.module_name == module_name {
+            loop dependency in row.dependencies -> jet_ring_insert_string(&dependencies, dependency)
+            break
+        }
+    }
+    if helper.len() > 0 && module_name != "core" -> jet_ring_insert_string(&dependencies, module_name)
+    if usage == "core::json" -> jet_ring_insert_string(&dependencies, "core.encoding.json")
+    if usage == "core::bytes" -> jet_ring_insert_string(&dependencies, "core.encoding")
+    if usage == "core.crypto::file_seal" || usage == "core.crypto::file_open" -> jet_ring_insert_string(&dependencies, "core.files")
+    if !jet_ring_is_namespace_only(module_name) {
+        module_parts := module_name.split(".")
+        if module_parts.len() > 1 {
+            parent_parts := [String]{}
+            index := 0
+            loop index + 1 < module_parts.len() {
+                parent_parts.push(module_parts[index])
+                index += 1
+            }
+            parent := parent_parts.join(".")
+            if parent.starts_with("core") -> jet_ring_insert_string(&dependencies, parent)
+        }
+    }
+    dependencies
+}
+
+fn jet_ring_insert_string(rows: &[String], value: String) {
+    index := 0
+    loop index < rows.len() {
+        if rows[index] == value -> return
+        if value < rows[index] -> break
+        index += 1
+    }
+    rows.push(value)
+    cursor := rows.len() - 1
+    loop cursor > index {
+        rows[cursor] = rows[cursor - 1]
+        cursor -= 1
+    }
+    rows[index] = value
+}
+
+fn jet_ring_has_string(rows: [String], value: String) -> Bool {
+    loop row in rows {
+        if row == value -> return true
+    }
+    false
+}
+
+fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MirRuntimeLayer) {
+    index := 0
+    loop index < rows.len() {
+        if rows[index].key == key -> return
+        if key < rows[index].key -> break
+        index += 1
+    }
+    rows.push(JetRingLayerFact{key: key, layer: layer})
+    cursor := rows.len() - 1
+    loop cursor > index {
+        rows[cursor] = rows[cursor - 1]
+        cursor -= 1
+    }
+    rows[index] = JetRingLayerFact{key: key, layer: layer}
+}
+
+pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] {
+    pending := [String]{}
+    loop root in roots {
+        if !jet_ring_is_closure_marker(root) -> jet_ring_insert_string(&pending, root)
+    }
+    closure := [JetRingLayerFact]{}
+    loop pending.len() > 0 {
+        current := pending[0]
+        index := 1
+        loop index < pending.len() {
+            pending[index - 1] = pending[index]
+            index += 1
+        }
+        _ := pending.pop()
+        already_classified := false
+        loop row in closure {
+            if row.key == current -> already_classified = true
+        }
+        if already_classified -> next
+        jet_ring_insert_layer_fact(&closure, current, jet_ring_core_usage_layer(current))
+        loop dependency in jet_ring_dependency_keys(current) {
+            if !jet_ring_has_string(pending, dependency) {
+                found := false
+                loop row in closure {
+                    if row.key == dependency -> found = true
+                }
+                if !found -> jet_ring_insert_string(&pending, dependency)
+            }
+        }
+    }
+    closure
+}
+
+pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] {
+    keys := [String]{}
+    loop row in jet_ring_classify_prelude_closure(roots) -> keys.push(row.key)
+    keys
+}
+
+pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MirRuntimeLayer {
+    layer := MirRuntimeLayer.Core
+    loop row in jet_ring_classify_prelude_closure(roots) {
+        if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
+    }
+    layer
+}
+
+fn jet_ring_usage_matches(used_core: [String], prefixes: [String]) -> Bool {
+    loop usage in used_core {
+        loop prefix in prefixes {
+            if usage == prefix || usage.starts_with("{prefix}::") || usage.starts_with("{prefix}.") -> return true
+        }
+    }
+    false
+}
+
+fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int {
+    if part == {
+        .Gc -> 0
+        .Event -> 1
+        .Realtime -> 2
+        .EmbeddedHardware -> 3
+        .Ui -> 4
+        .Devtools -> 5
+        .Gtk -> 6
+        .Apps -> 7
+        .Email -> 8
+        .Game -> 9
+        .Files -> 10
+        .Interrupt -> 11
+        .FsRuntime -> 12
+        .Process -> 13
+        .Crypto -> 14
+        .Math -> 15
+        .Encoding -> 16
+        .Data -> 17
+        .Fmt -> 18
+        .DataFmt -> 19
+        .Compute -> 20
+        .Http -> 21
+        .WebSocket -> 22
+        .Browser -> 23
+        .Args -> 24
+        .Reflect -> 25
+        .AuthTokens -> 26
+        .AuthSession -> 27
+        .Sync -> 28
+        .Services -> 29
+        .Mod -> 30
+    }
+}
+
+fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartId) {
+    order := jet_ring_runtime_part_order(part)
+    index := 0
+    loop index < rows.len() {
+        if rows[index] == part -> return
+        if order < jet_ring_runtime_part_order(rows[index]) -> break
+        index += 1
+    }
+    rows.push(part)
+    cursor := rows.len() - 1
+    loop cursor > index {
+        rows[cursor] = rows[cursor - 1]
+        cursor -= 1
+    }
+    rows[index] = part
+}
+
+pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MirRuntimePartId] {
+    parts := [MirRuntimePartId]{}
+    if jet_ring_usage_matches(used_core, [String]{"core.event"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Event)
+    if jet_ring_usage_matches(used_core, [String]{"core.rt", "core.realtime"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Realtime)
+    if jet_ring_usage_matches(used_core, [String]{"core.hardware", "core.embedded", "core.board", "core.device"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.EmbeddedHardware)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.font", "core.web", "app", "core.args"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Ui)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.devtools", "core.web", "app"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Devtools)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui::gtk_backend", "core.ui.gtk_backend"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Gtk)
+    if jet_ring_usage_matches(used_core, [String]{"app", "core.web", "core.http", "core.http.client", "core.http.server", "core.web.devserver", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Apps)
+    if jet_ring_usage_matches(used_core, [String]{"core.email"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Email)
+    if jet_ring_usage_matches(used_core, [String]{"core.game", "core.game.raylib", "core.raylib"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Game)
+    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Files)
+    if jet_ring_usage_matches(used_core, [String]{"core.sys::on_interrupt", "core.sys.on_interrupt", "core.process::on_signal", "core.process.on_signal"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Interrupt)
+    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process", "core.args", "core.testing", "core.perf", "core.mem.scope"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.FsRuntime)
+    if jet_ring_usage_matches(used_core, [String]{"core.crypto"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Crypto)
+    if jet_ring_usage_matches(used_core, [String]{"core.math", "core.math.random", "core.time", "core.time.expiring", "core.units"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Math)
+    if jet_ring_usage_matches(used_core, [String]{"core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Encoding)
+    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding.csv"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Data)
+    if jet_ring_usage_matches(used_core, [String]{"core.text.fmt"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Fmt)
+    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.DataFmt)
+    if jet_ring_usage_matches(used_core, [String]{"core.compute"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Compute)
+    if jet_ring_usage_matches(used_core, [String]{"core.http", "core.http.client", "core.http.server", "core.web", "core.web.devserver"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Http)
+    if jet_ring_usage_matches(used_core, [String]{"core.net.ws", "app", "core.web", "core.db", "core.http", "core.http.client", "core.http.server", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.WebSocket)
+    if jet_ring_usage_matches(used_core, [String]{"core.web.browser", "core.web", "core.web.storage", "core.web.storage.local", "core.web.storage.session"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Browser)
+    if jet_ring_usage_matches(used_core, [String]{"core.args"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Args)
+    if jet_ring_usage_matches(used_core, [String]{"core.reflect", "core.compiler.lang"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Reflect)
+    if jet_ring_usage_matches(used_core, [String]{"core.auth"}) || jet_ring_has_runtime_part(parts, MirRuntimePartId.Crypto) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.AuthTokens)
+    if jet_ring_usage_matches(used_core, [String]{"core.auth", "app", "core.web"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.AuthSession)
+    if jet_ring_usage_matches(used_core, [String]{"core.sync", "app", "core.web", "core.db"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Sync)
+    if jet_ring_usage_matches(used_core, [String]{"core.service", "core.jobs"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Services)
+    if jet_ring_usage_matches(used_core, [String]{"core.mod"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Mod)
+    parts
+}
+
+fn jet_ring_has_runtime_part(parts: [MirRuntimePartId], part: MirRuntimePartId) -> Bool {
+    loop item in parts {
+        if item == part -> return true
+    }
+    false
+}

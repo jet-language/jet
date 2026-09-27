@@ -151,7 +151,7 @@ dependencies to compiler policy.
 [`Source/lib.rs::run_compiler_work`](../../Source/lib.rs) installs the root's
 `Compiler::eval_core_call_with_type` callback around work. The inward
 [`jet_driver::run_compiler_work`](../../crates/jet-driver/src/lib.rs) carries
-the ambient callbacks onto the
+the ambient callbacks and scoped terminator driver onto the
 [`CompilerStack`](../../crates/jet-foundation/src/CompilerStack.rs) worker and
 installs the MIR evaluator. Nested entries reuse that worker. The root callback
 provides the read-only `core.compiler` queries and checked `core.build` queries;
@@ -182,10 +182,12 @@ This tests the host boundary, not a Jet implementation of a compiler pass.
 
 #### Terminator-pass crossing
 
-Tower #3581 specifies the first bounded replacement at
-[`Lexer/Terminators.rs`](../../crates/jet-lexer/src/Lexer/Terminators.rs):
-`insert_terminators` and its decision helpers, reached by `lex`, `lex_config`
-and `lex_generated` after raw scanning. Its private input is source bytes plus
+The staged replacement in
+[`Lexer/Terminators.jet`](../../Compiler/JetLexer/Source/Lexer/Terminators.jet)
+owns `insert_terminators` policy and all its decision helpers (Tower #3581).
+The [Rust adapter](../../crates/jet-lexer/src/Lexer/Terminators.rs) is reached
+by `lex`, `lex_config` and `lex_generated` after raw scanning.
+Its private input is source bytes plus
 exhaustive indexed raw-token facts, including the existing Unicode-uppercase
 primitive. Its output is ordered `InsertSemi`/`SplitHeader` events. Jet owns
 the insertion and split-header decisions; the host validates bounds/order,
@@ -194,13 +196,21 @@ The raw scanner and parser are outside that pass. Keeping payload ownership
 on the host avoids encoding a second token model or copying compiler objects
 across a supposed stable ABI.
 
-Bootstrap must produce the candidate's checked MIR through the Rust reference
-before installing the scoped private lexer driver. That driver must reach the
-actual Loader/parser/compiler path and evaluate through the existing evaluator.
-A candidate failure is a failure, never permission to fall back to Rust policy.
-This specifies a crossing; it does not install a Jet terminator implementation.
-The pass's own-source, differential, mutation and execution-tier witnesses
-belong to #3581, independently of this host-boundary witness.
+The private bootstrap adapter in
+[`selfhost_terminators`](../../tests/selfhost_terminators.rs) produces checked,
+optimized MIR through the Rust reference before installing the candidate.
+Inside that explicit scope, the actual Loader/parser/compiler path invokes
+`evaluate_mir_function_with_config`; the Driver and Loader carry the callback
+across their worker-thread boundaries and restore the previous driver on
+return or unwind. Evaluator, callback or event-ABI failure is an internal
+failure, never permission to retry through Rust policy.
+
+Outside the scope, the default compiler still uses the retained Rust reference.
+This is a Jet-authored terminator pass interpreted by the retained host, not a
+complete Jet lexer, a default CLI cutover, or a self-hosting/performance claim.
+The bounded manifest, own-source comparison, six mutation witnesses and
+same-pass AOT/default/interpreter/awaited-web golden live with that adapter;
+their executable results, not this explanation, establish parity.
 
 The subsequent self-host proof homes remain separate obligations: #814 is the
 pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,

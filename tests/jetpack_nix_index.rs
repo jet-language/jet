@@ -28,39 +28,60 @@ fn project(scratch: &Scratch) {
     fs::write(
         scratch.join(".jet/lock"),
         format!(
-            "version = 1\n\n[[source_channel]]\nname = \"nixpkgs\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{REVISION}\"\n\n[root]\ndependencies = []\n"
+            "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{REVISION}\"\n\n[root]\ndependencies = []\n"
         ),
     )
     .expect("project lock");
+    fs::write(
+        scratch.join("env.jet"),
+        "module env.dev {\n    sources: { jetpack: NixOS/nixpkgs/nixpkgs-unstable@github }\n    packages: [jetpack.ripgrep]\n}\n",
+    ).expect("project environment");
 }
 
-fn build(project: &Scratch, root: &Scratch, offline: bool) -> std::process::Output {
+fn isolated_jetpack(project: &Scratch, root: &Scratch) -> std::process::Command {
+    let temporary = root.join("tmp");
+    fs::create_dir_all(&temporary).expect("private command temporary directory");
     let mut command = jetpack();
     command
-        .args(["build", "ripgrep@nixpkgs", "--no-color"])
+        .env_clear()
         .current_dir(&project.path)
+        .env("PATH", "")
+        .env("HOME", root.join("home"))
+        .env("XDG_DATA_HOME", root.join("home/data"))
+        .env("XDG_STATE_HOME", root.join("home/state"))
+        .env("XDG_CACHE_HOME", root.join("home/cache"))
+        .env("XDG_CONFIG_HOME", root.join("home/config"))
+        .env("XDG_RUNTIME_DIR", root.join("run"))
+        .env("TMPDIR", &temporary)
+        .env("TMP", &temporary)
+        .env("TEMP", &temporary)
         .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "");
+        .env("JETPACK_SHARED_CAS", root.join("hangar/cas"))
+        .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
+    command
+}
+
+fn prepare(project: &Scratch, root: &Scratch, offline: bool) -> std::process::Output {
+    let mut command = isolated_jetpack(project, root);
+    command.args(["env", "--env", "dev", "--prep", "--trust", "--yes", "--no-color"]);
     if offline {
         command.arg("--offline");
     }
-    command.output().expect("run index-backed Nix build")
+    command.output().expect("prepare index-backed Nix environment")
 }
 
 fn package_entry(root: &Scratch) -> Store::StoreEntry {
     Store::list_checked(&Store::Roots::at(root.path.clone()))
         .expect("list Hangar")
         .into_iter()
-        .find(|entry| entry.reference == "ripgrep@nixpkgs" && entry.version == "15.2.0")
+        .find(|entry| entry.reference == "ripgrep@jetpack" && entry.version == "15.2.0")
         .expect("realized ripgrep package entry")
 }
 
-fn make_writable(path: &Path) {
+fn make_directories_writable(path: &Path) {
     let metadata = fs::symlink_metadata(path).expect("inspect Hangar object");
-    if metadata.is_dir() {
-        for child in fs::read_dir(path).expect("read Hangar object") {
-            make_writable(&child.expect("Hangar object child").path());
-        }
+    if !metadata.is_dir() {
+        return;
     }
     let mut permissions = metadata.permissions();
     #[cfg(unix)]
@@ -70,7 +91,10 @@ fn make_writable(path: &Path) {
     }
     #[cfg(not(unix))]
     permissions.set_readonly(false);
-    fs::set_permissions(path, permissions).expect("make Hangar object writable");
+    fs::set_permissions(path, permissions).expect("make Hangar directory writable");
+    for child in fs::read_dir(path).expect("read Hangar object") {
+        make_directories_writable(&child.expect("Hangar object child").path());
+    }
 }
 
 #[test]
@@ -81,7 +105,7 @@ fn index_backed_nixpkgs_records_complete_closure_and_both_proofs() {
     server.install(&hangar_root.path);
     project(&project_root);
 
-    let output = build(&project_root, &hangar_root, false);
+    let output = prepare(&project_root, &hangar_root, false);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -145,7 +169,7 @@ fn static_publication_resolves_signed_index_and_nix_objects() {
     server.install(&hangar_root.path);
     project(&project_root);
 
-    let output = build(&project_root, &hangar_root, false);
+    let output = prepare(&project_root, &hangar_root, false);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -264,11 +288,17 @@ fn index_backed_nixpkgs_reuses_closure_offline_after_network_removal() {
     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
     server.install(&hangar_root.path);
     project(&project_root);
-    assert!(build(&project_root, &hangar_root, false).status.success());
+    let initial = prepare(&project_root, &hangar_root, false);
+    assert!(
+        initial.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&initial.stdout),
+        String::from_utf8_lossy(&initial.stderr),
+    );
 
     server.reset_counts();
     server.stop_network();
-    let output = build(&project_root, &hangar_root, true);
+    let output = prepare(&project_root, &hangar_root, true);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -288,9 +318,22 @@ fn index_backed_nixpkgs_repairs_only_missing_transitive_object() {
     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
     server.install(&hangar_root.path);
     project(&project_root);
-    assert!(build(&project_root, &hangar_root, false).status.success());
+    let initial = prepare(&project_root, &hangar_root, false);
+    assert!(
+        initial.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&initial.stdout),
+        String::from_utf8_lossy(&initial.stderr),
+    );
 
     let roots = Store::Roots::at(hangar_root.path.clone());
+    let original = package_entry(&hangar_root);
+    let original_lock = fs::read(project_root.join(".jet/lock")).unwrap();
+    let expectation = Store::CacheExpectation {
+        identity: original.cache_identity.clone(),
+        owned_output: None,
+        allow_unsigned_local: true,
+    };
     let deleted_path = Store::list_checked(&roots)
         .expect("list before deletion")
         .into_iter()
@@ -300,25 +343,54 @@ fn index_backed_nixpkgs_repairs_only_missing_transitive_object() {
                 .then_some(entry.out)
         })
         .expect("runtime Hangar object");
-    make_writable(Path::new(&deleted_path));
+    make_directories_writable(Path::new(&deleted_path));
     fs::remove_dir_all(&deleted_path).expect("delete one transitive Hangar object");
+    let mut forged_entry = original.clone();
+    let mut forged_producer = ProducerRecord::decode(&original.producer_record).unwrap();
+    forged_producer.facts.insert(
+        "nix.cache.closure.receipt.sha256".into(), format!("sha256-{}", "d".repeat(64)),
+    );
+    forged_entry.producer_record = forged_producer.encode();
+    assert!(!Store::verify_cache_entry(
+        &roots, &forged_entry, "ripgrep@jetpack", &expectation,
+    ).policy, "a re-checksummed producer must not replace the original WAL-bound repair authority");
 
     server.reset_counts();
     server.stop_network();
-    let offline = build(&project_root, &hangar_root, true);
-    assert_eq!(offline.status.code(), Some(2));
+    let offline = prepare(&project_root, &hangar_root, true);
+    assert_eq!(
+        offline.status.code(),
+        Some(1),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&offline.stdout),
+        String::from_utf8_lossy(&offline.stderr)
+    );
     let offline_stderr = String::from_utf8_lossy(&offline.stderr);
     assert!(offline_stderr.contains("E1350"), "stderr: {offline_stderr}");
     assert!(
-        offline_stderr.contains(RUNTIME_PATH),
-        "offline error must name the missing reference: {offline_stderr}"
+        offline_stderr.contains("ripgrep@jetpack"),
+        "offline error must name the affected locked package: {offline_stderr}"
     );
     assert_eq!(server.count("/nix-cache-info"), 0);
     assert_eq!(server.object_request_count(RUNTIME_PATH), 0);
 
     server.reset_counts();
     server.start_network();
-    let repaired = build(&project_root, &hangar_root, false);
+    let mut tampered = jetpack::Lock::parse(std::str::from_utf8(&original_lock).unwrap()).unwrap();
+    tampered.packages.iter_mut().find_map(|package| package.nix_closure.as_mut())
+        .unwrap().index_authority = "d".repeat(64);
+    fs::write(project_root.join(".jet/lock"), jetpack::Lock::write(&tampered)).unwrap();
+    let rejected = prepare(&project_root, &hangar_root, false);
+    assert_eq!(rejected.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("E1350"));
+    assert_eq!(server.count("/nix-cache-info"), 0);
+    assert_eq!(server.object_request_count(&server.root_store_path), 0);
+    assert_eq!(server.object_request_count(LIB_PATH), 0);
+    assert_eq!(server.object_request_count(RUNTIME_PATH), 0);
+    assert!(!Path::new(&deleted_path).exists());
+    assert_eq!(package_entry(&hangar_root).producer_record, original.producer_record);
+    fs::write(project_root.join(".jet/lock"), &original_lock).unwrap();
+    let repaired = prepare(&project_root, &hangar_root, false);
     assert!(
         repaired.status.success(),
         "stdout: {}\nstderr: {}",
@@ -329,6 +401,12 @@ fn index_backed_nixpkgs_repairs_only_missing_transitive_object() {
     assert_eq!(server.object_request_count(LIB_PATH), 0);
     assert_eq!(server.object_request_count(RUNTIME_PATH), 2);
     assert_eq!(server.count("/nix-cache-info"), 1);
+    let after = package_entry(&hangar_root);
+    assert_eq!(after.producer_record, original.producer_record);
+    assert_eq!(after.envelope, original.envelope);
+    assert_eq!(after.named_outputs, original.named_outputs);
+    assert_eq!(fs::read(project_root.join(".jet/lock")).unwrap(), original_lock);
+    assert!(Store::verify_cache_entry(&roots, &after, "ripgrep@jetpack", &expectation).trusted());
 }
 
 #[test]
@@ -338,7 +416,13 @@ fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
     server.install(&hangar_root.path);
     project(&project_root);
-    assert!(build(&project_root, &hangar_root, false).status.success());
+    let initial = prepare(&project_root, &hangar_root, false);
+    assert!(
+        initial.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&initial.stdout),
+        String::from_utf8_lossy(&initial.stderr),
+    );
 
     let roots = Store::Roots::at(hangar_root.path.clone());
     let (runtime_output, runtime_digest) = Store::list_checked(&roots)
@@ -351,7 +435,7 @@ fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
         })
         .expect("runtime Hangar object");
     let runtime_output = Path::new(&runtime_output);
-    make_writable(runtime_output);
+    make_directories_writable(runtime_output);
     let corruption = runtime_output.join("share/doctor-corruption");
     fs::write(&corruption, b"drift").expect("corrupt runtime object");
 
@@ -360,36 +444,47 @@ fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
         .join("stage/nix-cache-999999999-1/payload");
     fs::create_dir_all(&stale_stage).expect("create stale admission stage");
     fs::write(stale_stage.join("bytes"), b"stale").expect("write stale admission stage");
-    let orphan_cas = roots.hangar_dir().join("cas/orphan");
+    let orphan_cas = roots.hangar_dir().join("cas/.unreferenced");
     fs::create_dir_all(orphan_cas.parent().expect("CAS parent")).expect("create CAS pool");
     fs::write(&orphan_cas, b"orphan").expect("write orphan CAS entry");
 
-    let mut doctor = jetpack();
+    let cas_locks = roots.hangar_dir().join("cas/.locks");
+    assert!(cas_locks.is_dir(), "admission did not create the CAS lock namespace");
+    #[cfg(unix)]
+    let cas_lock_identity = {
+        use std::os::unix::fs::MetadataExt as _;
+        let metadata = fs::metadata(&cas_locks).unwrap();
+        (metadata.dev(), metadata.ino())
+    };
+    let live_payload = fs::read_dir(roots.hangar_dir().join("cas"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_file() && fs::read(path).unwrap() == b"runtime")
+        .expect("live runtime payload in the private CAS");
+    #[cfg(unix)]
+    let live_payload_identity = {
+        use std::os::unix::fs::MetadataExt as _;
+        let metadata = fs::metadata(&live_payload).unwrap();
+        (metadata.dev(), metadata.ino())
+    };
+    let mut doctor = isolated_jetpack(&project_root, &hangar_root);
     let read_only = doctor
         .args(["hangar", "doctor", "--no-color"])
-        .current_dir(&project_root.path)
-        .env("JETPACK_ROOT", &hangar_root.path)
         .output()
         .expect("run read-only Hangar doctor");
     assert_eq!(read_only.status.code(), Some(1));
-    assert_jetos_stderr_snapshot_normalized(
-        "hangar_doctor_findings",
-        &String::from_utf8_lossy(&read_only.stderr),
-        &[(runtime_digest.as_str(), "<runtime-digest>")],
-    );
     assert!(corruption.exists(), "read-only doctor changed object bytes");
     assert!(
         stale_stage.parent().expect("stage parent").exists(),
         "read-only doctor removed staging"
     );
     assert!(orphan_cas.exists(), "read-only doctor removed CAS entry");
+    assert_eq!(fs::read(&live_payload).unwrap(), b"runtime");
 
     server.reset_counts();
-    let mut repair = jetpack();
+    let mut repair = isolated_jetpack(&project_root, &hangar_root);
     let repaired = repair
         .args(["hangar", "doctor", "--repair", "--no-color"])
-        .current_dir(&project_root.path)
-        .env("JETPACK_ROOT", &hangar_root.path)
         .output()
         .expect("run repairing Hangar doctor");
     assert!(
@@ -398,15 +493,20 @@ fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
         String::from_utf8_lossy(&repaired.stdout),
         String::from_utf8_lossy(&repaired.stderr)
     );
-    assert_jetos_stderr_snapshot_normalized(
-        "hangar_doctor_repair",
-        &String::from_utf8_lossy(&repaired.stderr),
-        &[(runtime_digest.as_str(), "<runtime-digest>")],
-    );
     assert!(server.object_request_count(RUNTIME_PATH) > 0);
     assert!(!stale_stage.parent().expect("stage parent").exists());
     assert!(!orphan_cas.exists());
     assert!(!corruption.exists());
+    assert_eq!(fs::read(&live_payload).unwrap(), b"runtime");
+    assert!(cas_locks.is_dir(), "repair removed the live CAS lock namespace");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let metadata = fs::metadata(&cas_locks).unwrap();
+        assert_eq!((metadata.dev(), metadata.ino()), cas_lock_identity);
+        let metadata = fs::metadata(&live_payload).unwrap();
+        assert_eq!((metadata.dev(), metadata.ino()), live_payload_identity);
+    }
     assert_eq!(
         jetpack::Envelope::try_output_hash_of_in_hangar(
             &runtime_output.to_string_lossy(),
@@ -415,5 +515,15 @@ fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
         )
         .expect("rehash repaired runtime"),
         runtime_digest
+    );
+    assert_jetos_stderr_snapshot_normalized(
+        "hangar_doctor_findings",
+        &String::from_utf8_lossy(&read_only.stderr),
+        &[(runtime_digest.as_str(), "<runtime-digest>")],
+    );
+    assert_jetos_stderr_snapshot_normalized(
+        "hangar_doctor_repair",
+        &String::from_utf8_lossy(&repaired.stderr),
+        &[(runtime_digest.as_str(), "<runtime-digest>")],
     );
 }

@@ -1,0 +1,25 @@
+// Shared Source projection of the package ReleaseDevtoolsPolicy.  Host policy
+// parsing remains native; Driver folds the exact fields into these rows before
+// handing them to Codegen or Web publication.
+pub enum JetReleaseInspect { Local ReadOnly None }
+pub enum JetReleaseDevtoolsEndpoint { Absent ReadOnly }
+pub enum JetReleaseDevtoolsAuthentication { BearerToken }
+pub enum JetReleaseDevtoolsAuthority { LoopbackOrAllowlist }
+pub enum JetReleaseDevtoolsPublication { SiteGated }
+pub struct JetReleaseDevtoolsNetwork { pub address: String, pub prefix: Int }
+pub struct JetReleaseDevtoolsDeployment {
+    pub enabled: Bool
+    pub token: ?String
+    pub allowlist: [JetReleaseDevtoolsNetwork]
+}
+pub struct JetReleaseDevtoolsPolicy {
+    pub inspect: ?JetReleaseInspect
+    pub endpoint: JetReleaseDevtoolsEndpoint
+    pub authentication: JetReleaseDevtoolsAuthentication
+    pub authority: JetReleaseDevtoolsAuthority
+    pub publication: JetReleaseDevtoolsPublication
+    pub local_rail: Bool
+    pub panel_code: Bool
+    pub stream_code: Bool
+    pub deployment: JetReleaseDevtoolsDeployment
+}

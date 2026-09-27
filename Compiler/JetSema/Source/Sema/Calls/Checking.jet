@@ -1,0 +1,402 @@
+// Type-check and lower one already-resolved call binding.
+//
+// Binding owns declaration order; this file owns expression checking and the
+// one-way conversion to TCallArg. It never materializes a Type-only default:
+// Registration must provide the original expression through
+// SemaCallDefaultValue first.
+
+struct SemaCallTypedArguments {
+    pub values: [TExpr]
+    pub slots: [Int]
+    pub required_types: [Type]
+}
+
+fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment) -> Type {
+    graph :: environment.registration_graph ?? return ty
+    sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+}
+
+fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Bool {
+    if environment.registration_graph != None {
+        graph :: environment.registration_graph ?? return None
+        return sema_type_assignable_in_graph_with_generics(graph, required, offered, environment.module_identity, environment.generic_params)
+    }
+    Val(sema_type_assignable(required, offered))
+}
+
+fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Type {
+    required_resolved := sema_call_resolved_type(required, environment)
+    if required_resolved != {
+        .TraitObject(_) -> return None
+    }
+    offered_resolved := sema_call_resolved_type(offered, environment)
+    if offered_resolved == {
+        .TraitObject(_) -> return None
+    }
+    compatible :: sema_call_type_assignable(required_resolved, offered_resolved, environment) ?? return None
+    if compatible -> return Val(required_resolved)
+    None
+}
+
+pub fn sema_call_registration_defaults(graph: SemaRegistrationGraph, binding: SemaCallBinding) -> ?[SemaCallDefaultValue] {
+    defaults := [SemaCallDefaultValue]{}
+    index := 0
+    loop index < binding.default_refs.len() {
+        reference :: binding.default_refs[index]
+        expression :: sema_registration_resolve_default(graph, reference) ?? return None
+        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+        index += 1
+    }
+    Val(defaults)
+}
+
+fn sema_call_param_optional_for_check(param: SemaCallParam) -> Bool {
+    param.variadic || param.default != None || param.default_ref != None
+}
+
+fn sema_call_default_ref_equal(left: FunctionDefaultRef, right: FunctionDefaultRef) -> Bool {
+    left.source_file == right.source_file && left.owner_key == right.owner_key && left.parameter_index == right.parameter_index && left.span.start == right.span.start && left.span.end == right.span.end
+}
+
+fn sema_call_default_expression(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> ?Expr {
+    index := 0
+    loop index < defaults.len() {
+        candidate :: defaults[index]
+        if sema_call_default_ref_equal(reference, candidate.reference) -> return Val(candidate.expression)
+        index += 1
+    }
+    None
+}
+
+fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [BinderRef] {
+    refs := [BinderRef]{}
+    index := 0
+    loop index < parameter {
+        ty := sema_call_parameter_type(params[index])
+        if ty != None {
+            value :: ty ?? return refs
+            refs.push(BinderRef{name: params[index].name, slot: index, ty: value})
+        }
+        index += 1
+    }
+    refs
+}
+
+fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, span: Span) -> CallArg {
+    result := arg
+    result.flags.source_index = Val(source_index)
+    result.flags.binder_slot = Val(parameter)
+    result.flags.binder_site = Val(span.start)
+    result.flags.binder_label = Val(param.label)
+    result
+}
+
+fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaCallParam, params: [SemaCallParam], span: Span) -> CallArg {
+    flags := ast_empty_call_arg_flags()
+    flags.binder_slot = Val(parameter)
+    flags.binder_site = Val(span.start)
+    flags.binder_label = Val(param.label)
+    flags.binder_refs = sema_call_make_binder_refs(params, parameter)
+    CallArg{convention: param.convention, expr: value, span: span, flags: flags, label: None, spread: false}
+}
+
+// Fill only metadata defaults whose original expressions Registration resolved.
+// The returned binding keeps source indices stable for evaluation-order lowering.
+pub fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], defaults: [SemaCallDefaultValue], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    if binding.default_refs.len() == 0 -> return Val(binding)
+    ref_index := 0
+    loop ref_index < binding.default_refs.len() {
+        reference :: binding.default_refs[ref_index]
+        if sema_call_default_expression(reference, defaults) == None {
+            diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
+            return None
+        }
+        ref_index += 1
+    }
+    rewritten := [CallArg]{}
+    source_index := 0
+    loop source_index < binding.sources.len() {
+        source :: binding.sources[source_index]
+        if source == {
+            .Written(original_index) -> {
+                if original_index < 0 || original_index >= args.len() {
+                    diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
+                    return None
+                }
+                parameter := if original_index < binding.slots.len() -> binding.slots[original_index] else -> -1
+                if parameter < 0 || parameter >= params.len() {
+                    diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
+                    return None
+                }
+                rewritten.push(sema_call_mark_materialized_written(args[original_index], original_index, parameter, params[parameter], call_span))
+            }
+            .Default(parameter) -> {
+                if parameter < 0 || parameter >= params.len() {
+                    diagnostics.push(sema_error("E0906", call_span, "a default argument refers to an invalid parameter", "default metadata must point into the owning declaration", "repair the registered FunctionDefaultRef"))
+                    return None
+                }
+                reference :: params[parameter].default_ref ?? {
+                    diagnostics.push(sema_error("E0906", call_span, "a default argument lost its source reference", "metadata defaults are identified by FunctionDefaultRef", "register the declaration's original default expression"))
+                    return None
+                }
+                expression :: sema_call_default_expression(reference, defaults) ?? {
+                    diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
+                    return None
+                }
+                rewritten.push(sema_call_make_materialized_default(expression, parameter, params[parameter], params, call_span))
+            }
+        }
+        source_index += 1
+    }
+    if rewritten.len() != binding.sources.len() {
+        diagnostics.push(sema_error("E0104", call_span, "the call binding did not produce one value per declaration slot", "a successful call has to account for every written value and resolved default", "check the callable declaration and its default metadata"))
+        return None
+    }
+    loop args.len() > 0 -> _ := args.pop()
+    loop value in rewritten -> args.push(value)
+    result := binding
+    result.rewrote = true
+    result
+}
+
+fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg: CallArg) -> Int {
+    if arg.flags.binder_slot != None -> return arg.flags.binder_slot ?? -1
+    if source == {
+        .Written(index) -> if index >= 0 && index < binding.slots.len() -> return binding.slots[index]
+        .Default(parameter) -> return parameter
+    }
+    -1
+}
+
+fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool {
+    if left.root_key != right.root_key || left.projections.len() != right.projections.len() -> return false
+    index := 0
+    loop index < left.projections.len() {
+        if left.projections[index] != right.projections[index] -> return false
+        index += 1
+    }
+    true
+}
+
+fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding, args: [CallArg]) -> ?Expr {
+    index := 0
+    loop index < args.len() {
+        source :: binding.sources[index]
+        if sema_call_bound_slot(binding, source, args[index]) == parameter -> return Val(args[index].expr)
+        index += 1
+    }
+    None
+}
+
+pub fn sema_call_return_view_facts(signature: Type, receiver: ?Expr, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [SemaCallReturnViewFact] {
+    provenance := None
+    if signature == {
+        .Fn(_, _, _, _, _, return_view_provenance) -> provenance = return_view_provenance
+        else -> return [SemaCallReturnViewFact]{}
+    }
+    map :: provenance ?? return [SemaCallReturnViewFact]{}
+    facts := [SemaCallReturnViewFact]{}
+    entry_index := 0
+    loop entry_index < map.entries.len() {
+        entry :: map.entries[entry_index]
+        places := [SemaOwnershipPlace]{}
+        source_index := 0
+        loop source_index < entry.value.sources.len() {
+            source_path :: entry.value.sources[source_index]
+            source_expr := None
+            if source_path.source == {
+                .Receiver -> source_expr = receiver
+                .Parameter(parameter) -> source_expr = sema_call_return_view_parameter_expr(parameter, binding, args)
+                .Static(_, _) -> {}
+            }
+            if source_expr != None {
+                expression :: source_expr ?? Expr.Unit(span)
+                source_places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
+                place_index := 0
+                loop place_index < source_places.len() {
+                    place := sema_ownership_append_view_source_projections(source_places[place_index], source_path.projections, span)
+                    duplicate := false
+                    for existing in places {
+                        if sema_call_view_place_equal(existing, place) -> duplicate = true
+                    }
+                    if !duplicate -> places.push(place)
+                    place_index += 1
+                }
+            }
+            source_index += 1
+        }
+        access := AccessConvention.Read
+        if entry.value.mutable -> access = AccessConvention.Write
+        facts.push(SemaCallReturnViewFact{
+            slot: entry.slot,
+            access: access,
+            places: places,
+            sources: entry.value.sources,
+        })
+        entry_index += 1
+    }
+    facts
+}
+
+
+
+
+
+
+
+fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if binding.sources.len() != args.len() {
+        diagnostics.push(sema_error("E0104", span, "the call binding and written arguments disagree", "a checked call must have one source row for every argument value", "resolve callable defaults before checking the call"))
+        return false
+    }
+    seen := [Bool]{}
+    index := 0
+    loop index < params.len() {
+        seen.push(false)
+        index += 1
+    }
+    valid := true
+    index = 0
+    loop index < binding.sources.len() {
+        slot := sema_call_bound_slot(binding, binding.sources[index], args[index])
+        if {
+            slot < 0 || slot >= params.len() -> valid = false
+            else -> seen[slot] = true
+        }
+        index += 1
+    }
+    if !valid {
+        diagnostics.push(sema_call_arity_diagnostic(callee, params.len(), args.len(), false, span))
+    }
+    missing := 0
+    index = 0
+    loop index < params.len() {
+        if !seen[index] && !sema_call_param_optional_for_check(params[index]) {
+            diagnostics.push(sema_error("E0766", span, "this call to `{callee}` is missing `{params[index].label}`", "the parameter has no default, so every call has to supply it", "add the missing argument"))
+            missing += 1
+        }
+        index += 1
+    }
+    if missing > 0 -> valid = false
+    valid
+}
+
+fn sema_call_is_scalar(ty: Type) -> Bool {
+    if ty == {
+        .Int -> true
+        .IntN(_, _) -> true
+        .Float -> true
+        .Float32 -> true
+        .Bool -> true
+        .Char -> true
+        else -> false
+    }
+}
+
+fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: CallArg, decision: SemaCallConventionDecision) -> Diagnostic {
+    if decision == SemaCallConventionDecision.RequiresWrite -> return sema_error("E0202", arg.span, "parameter `{param.name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`", "write `&` before the argument")
+    if decision == SemaCallConventionDecision.RejectsMove -> return sema_error("E0203", arg.span, "a value was passed with the move marker `^` to a parameter that does not consume", "only a move parameter accepts a moved value", "remove the move marker `^`")
+    sema_error("E0209", arg.span, "implicit clone of `{param.name}`", "`{callee}` takes ownership and this argument is not marked as a move", "write the move marker `^`, or copy the value explicitly")
+}
+
+fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: ?SemaRegistrationCallableAbi) -> ?Bool {
+    if parameter.convention == AccessConvention.Move -> return Val(true)
+    callable_abi :: abi ?? return None
+    parameter_type :: sema_call_parameter_type(parameter) ?? return None
+    Val(sema_registration_callback_boundary_param(callable_abi, parameter_type))
+}
+
+
+fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], abi: ?SemaRegistrationCallableAbi, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> ?SemaCallTypedArguments {
+    if !sema_call_validate_binding(callee, params, binding, args, span, &diagnostics) -> return None
+    values := [TExpr]{}
+    slots := [Int]{}
+    required_types := [Type]{}
+    index := 0
+    loop index < args.len() {
+        slot := sema_call_bound_slot(binding, binding.sources[index], args[index])
+        if slot < 0 || slot >= params.len() -> return None
+        parameter :: params[slot]
+        required_declared :: sema_call_parameter_type(parameter) ?? {
+            diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
+            return None
+        }
+        required := sema_call_resolved_type(required_declared, environment)
+        decision := sema_call_argument_convention(parameter, args[index])
+        if report_conventions && decision != SemaCallConventionDecision.Accepted {
+            diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
+            return None
+        }
+        checked_argument := if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        value :: checked_argument ?? return None
+        compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
+        if !compatible {
+            diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
+            return None
+        }
+        values.push(value)
+        slots.push(slot)
+        required_types.push(required)
+        index += 1
+    }
+    Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types})
+}
+
+fn sema_call_widen_union(required: Type, offered: Type) -> ?Type {
+    if required == {
+        .Union(members) -> {
+            index := 0
+            loop index < members.len() {
+                if type_identity_equal(members[index], offered) -> return Val(required)
+                index += 1
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], args: &[CallArg], environment: SemaScopeEnvironment) -> [TCallArg] {
+    lowered := [TCallArg]{}
+    index := 0
+    loop index < typed.values.len() {
+        value :: typed.values[index]
+        arg :: args[index]
+        param :: params[typed.slots[index]]
+        required := if index < typed.required_types.len() -> typed.required_types[index] else -> sema_call_resolved_type(sema_call_parameter_type(param) ?? value.ty, environment)
+        widen_to_vec := false
+        if required == {.List(_) -> if value.ty == {.FixedList(_, _) -> widen_to_vec = true}}
+        widen_to_union := sema_call_widen_union(required, value.ty)
+        lowered.push(TCallArg{
+            value: value,
+            template_items: [SymbolId]{},
+            borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
+            mut_borrow: param.convention == AccessConvention.Write,
+            clone: arg.flags.implicit_clone || arg.flags.shared_auto_clone,
+            arc_clone: false,
+            fn_coerce: None,
+            widen_to_vec: widen_to_vec,
+            widen_to_union: widen_to_union,
+            box_as_trait: sema_call_box_as_trait(required, value.ty, environment),
+            label: arg.label.map((label) -> label.name),
+            spread: arg.spread,
+        })
+        index += 1
+    }
+    lowered
+}
+
+pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?[TCallArg] {
+    typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
+    Val(sema_call_lower_bound_arguments(typed, params, args, environment))
+}
+
+// This path runs Ownership after expression typing and before lowering. The
+// ownership hook may mark implicit_clone on the source arg, so lowering must
+// happen only after it accepts and completes.
+pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: ?SemaRegistrationCallableAbi, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?[TCallArg] {
+    typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
+    ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return None
+    Val(sema_call_lower_bound_arguments(typed, params, args, environment))
+}

@@ -641,6 +641,29 @@ pub(crate) struct JitCallableSlot {
     pub raw_pair: Option<unsafe extern "C" fn(i64, i64, i64) -> i64>,
     pub raw_many: Option<unsafe extern "C" fn(i64, *const i64) -> i64>,
 }
+
+/// Executable target metadata for a checked MIR closure. The function pointer
+/// is installed only after the resident module is finalized; captures retain
+/// their canonical descriptor identities so invocation marshalling can rebuild
+/// the normal environment record rather than inventing an opaque callable.
+#[derive(Clone)]
+pub(crate) struct JitClosureTarget {
+    pub(crate) function: MirFunctionId,
+    pub(crate) fn_ptr: i64,
+    pub(crate) capture_type_ids: Vec<u64>,
+}
+
+/// Invocation-only native carrier metadata. The record is a physical sentinel
+/// owned by the current run heap; its token and epoch make stale/reused integer
+/// handles fail closed before the retained native root is exposed.
+#[derive(Clone)]
+pub(crate) struct JitInvocationNativeCarrier {
+    pub(crate) epoch: u64,
+    pub(crate) type_id: u64,
+    pub(crate) token: i64,
+    pub(crate) record: i64,
+    pub(crate) root: MirNativeOwned,
+}
 /// Resident transaction state. The compiler still owns transaction scope and
 /// commit placement; this arena only carries the checked callback slots across
 /// the scalar JIT ABI.
@@ -1746,6 +1769,153 @@ pub(crate) fn install_program_type_descriptors(
         .flat_map(|function| runtime_type_descriptors_for_function(function))
         .filter(|descriptor| !existing.contains(&descriptor.id));
     runtime.install_type_descriptors(extras);
+}
+/// Retain exact private-trait descriptors for Cranelift's typed native
+/// interface bridge.  The descriptor is keyed by the checked trait/method and
+/// receiver type, never by an erased object address.
+pub(crate) fn install_native_interface_methods(
+    runtime: &mut JitRuntime,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    functions: &[&MirFunction],
+) -> Result<(), String> {
+    runtime.native_interface_methods.clear();
+    runtime.clear_invocation_carriers();
+    let registered_descriptors =
+        match crate::SourceInterfaces::active_binding_descriptors(program, artifact) {
+            Ok(descriptors) => descriptors,
+            Err(crate::SourceInterfaces::NativeInterfaceError::MissingBinding) => Vec::new(),
+            Err(error) => {
+                return Err(format!("native interface binding metadata is invalid: {error}"));
+            }
+        };
+    let mut registered = HashMap::new();
+    for descriptor in registered_descriptors {
+        let receiver_type_id = runtime_type_id(&descriptor.identity.receiver_type)
+            .ok_or_else(|| "native interface receiver has no runtime type identity".to_string())?;
+        let key = (
+            descriptor.identity.trait_ref.id.0,
+            descriptor.identity.method_id.0,
+            receiver_type_id,
+        );
+        let checked = crate::SourceInterfaces::NativeInterfaceMethod {
+            identity: descriptor.identity,
+            signature: descriptor.signature,
+        };
+        if registered.insert(key, checked.clone()).is_some_and(|previous| previous != checked) {
+            return Err("active native interface descriptors are ambiguous".to_string());
+        }
+    }
+    for function in functions {
+        for instruction in function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let MirOperation::Call {
+                callee:
+                    MirCallee::TraitMethod {
+                        method,
+                        trait_ref,
+                        receiver: checked_receiver_type,
+                    },
+                args,
+                ..
+            } = &instruction.operation
+            else {
+                continue;
+            };
+            let receiver = args.first().ok_or_else(|| {
+                format!(
+                    "native interface call in `{}` has no checked receiver",
+                    function.key
+                )
+            })?;
+            let receiver_type = checked_receiver_type.clone();
+            if !matches!(receiver_type.kind(), MirTypeKind::TraitObject(_)) {
+                continue;
+            }
+            let receiver_type_id = runtime_type_id(&receiver_type)
+                .ok_or_else(|| "native interface receiver has no runtime type identity".to_string())?;
+            let key = (trait_ref.id.0, method.0, receiver_type_id);
+            let Some(checked) = registered.get(&key).cloned() else {
+                continue;
+            };
+            if &checked.identity.receiver_type != &receiver_type {
+                return Err(format!(
+                    "registered native interface receiver type for `{}`::{method:?} disagrees with MIR",
+                    trait_ref.name
+                ));
+            }
+            let expected_args = checked
+                .signature
+                .parameters
+                .len()
+                .checked_add(1)
+                .ok_or_else(|| "native interface signature argument count overflow".to_string())?;
+            if args.len() != expected_args
+                || receiver.access != checked.signature.receiver_access
+                || args[1..]
+                    .iter()
+                    .zip(&checked.signature.parameters)
+                    .any(|(argument, parameter)| argument.access != parameter.access)
+            {
+                return Err(format!(
+                    "registered native interface `{}`::{method:?} disagrees with MIR call shape",
+                    trait_ref.name
+                ));
+            }
+            if runtime
+                .native_interface_methods
+                .insert(key, checked.clone())
+                .is_some_and(|previous| previous != checked)
+            {
+                return Err(format!(
+                    "native interface metadata for `{}`::{method:?} is ambiguous",
+                    trait_ref.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Install the exact active native function-value signatures for this artifact.
+/// Callable roots are resolved by the active binding set, so the explicit
+/// registration key never becomes a raw JIT word or a synthetic MIR ID.
+pub(crate) fn install_native_callable_methods(
+    runtime: &mut JitRuntime,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> Result<(), String> {
+    runtime.native_callable_methods.clear();
+    let execution = program
+        .execution_identity(Some(artifact))
+        .map_err(|error| format!("native callable artifact identity is invalid: {error}"))?;
+    let descriptors = crate::SourceInterfaces::active_callable_descriptors()
+        .map_err(|error| format!("native callable binding metadata is invalid: {error}"))?;
+    for descriptor in descriptors {
+        if descriptor.identity.execution != execution || descriptor.identity.artifact != artifact {
+            return Err("native callable binding belongs to a different artifact".to_string());
+        }
+        let type_id = runtime_type_id(&descriptor.identity.callable_type)
+            .ok_or_else(|| "native callable has no runtime type identity".to_string())?;
+        let checked = crate::SourceInterfaces::NativeCallableSignature::checked(
+            &descriptor.identity.callable_type,
+        )
+        .map_err(|error| format!("native callable signature is invalid: {error}"))?;
+        if descriptor.signature != checked {
+            return Err("native callable binding signature disagrees with its callable type".to_string());
+        }
+        if runtime
+            .native_callable_methods
+            .insert(type_id, descriptor.signature.clone())
+            .is_some_and(|previous| previous != descriptor.signature)
+        {
+            return Err("native callable signatures for one MIR type are ambiguous".to_string());
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn runtime_type_descriptors_for_function(
@@ -2907,10 +3077,30 @@ pub(crate) struct JitRuntime {
     pub(crate) default_error_type: Option<u64>,
     /// Concrete nominal type identity for each heap record promoted to a
     /// trait object. The Cranelift call site uses this side table to select
-    /// the checked impl method without changing record field layout.
+    /// checked impl methods without changing record field layout.
     pub(crate) trait_object_types: HashMap<i64, MirTypeId>,
-    /// Exact checked payload types used by the JIT DMA marshalling boundary.
-    pub(crate) dma_types: HashMap<String, MirType>,
+    /// Invocation-only native binding records. The key is a resident heap
+    /// record handle; the retained root never enters persistent serialization.
+    pub(crate) native_interface_carriers: HashMap<i64, JitInvocationNativeCarrier>,
+    /// Canonical Shared handles for native-owned roots. Each value points to
+    /// the physical sentinel record stored inside the Shared state, preserving
+    /// both Shared aliasing and the root's Arc identity across recursive
+    /// codec passes.
+    pub(crate) native_shared_carriers: HashMap<i64, JitInvocationNativeCarrier>,
+    /// Current run generation for invocation-only carrier records.
+    pub(crate) invocation_carrier_epoch: u64,
+    pub(crate) next_invocation_carrier_token: i64,
+    /// Finalized MIR closure targets used to rebuild the executable callable
+    /// ABI for ordinary Source closures crossing an invocation boundary.
+    pub(crate) jit_closure_targets: HashMap<u64, JitClosureTarget>,
+    pub(crate) jit_closure_targets_by_ptr: HashMap<i64, JitClosureTarget>,
+    pub(crate) native_interface_methods:
+        HashMap<(u64, u64, u64), crate::SourceInterfaces::NativeInterfaceMethod>,
+    /// Checked native function-value signatures keyed by callable MIR type
+    /// identity. The active carrier root resolves the explicit registration
+    /// key and object; the JIT never serializes that key as a raw word.
+    pub(crate) native_callable_methods:
+        HashMap<u64, crate::SourceInterfaces::NativeCallableSignature>,
     /// Owned contiguous carriers retained by transfer token until wait.
     pub(crate) dma_transfers: HashMap<i64, JitPinnedDma>,
     /// Canonical source-wire iterable hook table for this resident module.
@@ -3263,6 +3453,69 @@ fn hardware_ownership_tag(
     }
 }
 impl JitRuntime {
+    /// Install the finalized function target used by ordinary closure
+    /// marshalling. Replacements retire the old pointer mapping so a stale
+    /// executable handle cannot be reconstructed after hot reload.
+    pub(crate) fn install_jit_closure_target(
+        &mut self,
+        function: MirFunctionId,
+        fn_ptr: i64,
+        capture_type_ids: Vec<u64>,
+    ) {
+        if let Some(previous) = self.jit_closure_targets.insert(
+            function.0,
+            JitClosureTarget {
+                function,
+                fn_ptr,
+                capture_type_ids: capture_type_ids.clone(),
+            },
+        ) {
+            self.jit_closure_targets_by_ptr.remove(&previous.fn_ptr);
+        }
+        self.jit_closure_targets_by_ptr.insert(
+            fn_ptr,
+            JitClosureTarget {
+                function,
+                fn_ptr,
+                capture_type_ids,
+            },
+        );
+    }
+
+    pub(crate) fn clear_invocation_carriers(&mut self) {
+        self.native_interface_carriers.clear();
+        self.native_shared_carriers.clear();
+        self.trait_object_types.clear();
+        self.invocation_carrier_epoch = self.invocation_carrier_epoch.wrapping_add(1).max(1);
+        self.next_invocation_carrier_token = 1;
+    }
+
+    pub(crate) fn alloc_invocation_carrier_record(&mut self) -> Result<(i64, u64, i64), String> {
+        let token = self.next_invocation_carrier_token;
+        self.next_invocation_carrier_token = token
+            .checked_add(1)
+            .ok_or_else(|| "too many invocation native carriers".to_string())?;
+        let record = self.heap.alloc_record(1);
+        self.heap
+            .record_set_int(record, 0, token)
+            .ok_or_else(|| "invocation native carrier record allocation failed".to_string())?;
+        Ok((record, self.invocation_carrier_epoch, token))
+    }
+
+    pub(crate) fn carrier_record_is_live(
+        &self,
+        raw: i64,
+        carrier: &JitInvocationNativeCarrier,
+        type_id: u64,
+    ) -> bool {
+        carrier.epoch == self.invocation_carrier_epoch
+            && carrier.type_id == type_id
+            && carrier.record == raw
+            && self.trait_object_types.get(&raw) == Some(&MirTypeId(type_id))
+            && self.heap.record_len(raw) == Some(1)
+            && self.heap.record_get_int(raw, 0) == Some(carrier.token)
+    }
+
     pub(crate) fn clock_new_manual(&mut self, seed: i64) -> i64 {
         self.clocks.push(clock_rt::jet_std_clock_new(seed));
         self.clocks.len() as i64
@@ -4041,6 +4294,7 @@ pub(crate) struct ResidentModule {
     pub(crate) module: JITModule,
     pub(crate) host: HostFns,
     pub(crate) main_id: FuncId,
+    pub(crate) typed_entry_id: Option<FuncId>,
     pub(crate) main_returns_result: bool,
     pub(crate) main_returns_app: bool,
     pub(crate) main_serves_app: bool,
@@ -4373,6 +4627,18 @@ struct PersistDecodeState {
     active: HashSet<(u64, i64)>,
     nodes: usize,
     skip_computed: bool,
+    /// `true` only for the in-memory invocation ABI. Persistent storage keeps
+    /// rejecting closures and native-owned capabilities.
+    invocation: bool,
+}
+
+impl PersistDecodeState {
+    fn for_invocation() -> Self {
+        Self {
+            invocation: true,
+            ..Self::default()
+        }
+    }
 }
 
 impl PersistDecodeState {
@@ -4417,9 +4683,19 @@ impl PersistDecodeState {
 #[derive(Default)]
 struct PersistEncodeState {
     nodes: usize,
+    /// `true` only for the in-memory invocation ABI. Persistent storage keeps
+    /// rejecting closures and native-owned capabilities.
+    invocation: bool,
 }
 
 impl PersistEncodeState {
+    fn for_invocation() -> Self {
+        Self {
+            invocation: true,
+            ..Self::default()
+        }
+    }
+
     fn enter(&mut self, depth: usize) -> Result<(), String> {
         if depth > PERSIST_MAX_DEPTH {
             return Err("persistent value exceeds the descriptor depth limit".to_string());
@@ -4843,6 +5119,215 @@ fn persist_decode_slot(
     }
 }
 
+fn native_binding_type_allowed(rt: &JitRuntime, type_id: u64) -> bool {
+    rt.native_interface_methods.values().any(|method| {
+        runtime_type_id(&method.identity.receiver_type) == Some(type_id)
+            || method
+                .signature
+                .parameters
+                .iter()
+                .any(|parameter| runtime_type_id(&parameter.ty) == Some(type_id))
+            || runtime_type_id(&method.signature.return_type) == Some(type_id)
+    }) || rt.native_callable_methods.contains_key(&type_id)
+}
+
+fn native_carrier_descriptor(descriptor: &RuntimeTypeDescriptor) -> bool {
+    matches!(
+        descriptor.kind,
+        RuntimeValueKind::Handle | RuntimeValueKind::Shared | RuntimeValueKind::Closure
+    )
+}
+
+fn encode_native_interface_carrier(
+    rt: &mut JitRuntime,
+    root: &MirNativeOwned,
+    type_id: u64,
+) -> Result<i64, String> {
+    let (record, epoch, token) = rt.alloc_invocation_carrier_record()?;
+    rt.trait_object_types
+        .insert(record, MirTypeId(type_id));
+    rt.native_interface_carriers.insert(
+        record,
+        JitInvocationNativeCarrier {
+            epoch,
+            type_id,
+            token,
+            record,
+            root: root.clone(),
+        },
+    );
+    Ok(record)
+}
+
+fn encode_native_shared_carrier(
+    rt: &mut JitRuntime,
+    root: &MirNativeOwned,
+    type_id: u64,
+) -> Result<i64, String> {
+    if let Some((handle, carrier)) = rt.native_shared_carriers.iter().find(|(_, carrier)| {
+        carrier.type_id == type_id
+            && carrier.root.identity() == root.identity()
+            && rt.carrier_record_is_live(carrier.record, carrier, type_id)
+            && Memory::shared_value(rt, *handle) == Some(carrier.record)
+    }) {
+        return Ok(*handle);
+    }
+    let (record, epoch, token) = rt.alloc_invocation_carrier_record()?;
+    rt.trait_object_types
+        .insert(record, MirTypeId(type_id));
+    let handle = Memory::shared_alloc_for_persist(rt, record);
+    rt.native_shared_carriers.insert(
+        handle,
+        JitInvocationNativeCarrier {
+            epoch,
+            type_id,
+            token,
+            record,
+            root: root.clone(),
+        },
+    );
+    Ok(handle)
+}
+
+fn decode_native_invocation_value(
+    rt: &JitRuntime,
+    raw: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    type_id: u64,
+) -> Result<Option<MirRuntimeValue>, String> {
+    if !native_carrier_descriptor(descriptor) {
+        return Ok(None);
+    }
+    if descriptor.kind == RuntimeValueKind::Shared {
+        let Some(carrier) = rt.native_shared_carriers.get(&raw).cloned() else {
+            return Ok(None);
+        };
+        if !rt.carrier_record_is_live(carrier.record, &carrier, type_id)
+            || Memory::shared_value(rt, raw) != Some(carrier.record)
+        {
+            return Err("native Shared carrier is no longer live".to_string());
+        }
+        return Ok(Some(MirRuntimeValue::NativeOwned(carrier.root)));
+    }
+    let Some(carrier) = rt.native_interface_carriers.get(&raw).cloned() else {
+        return Ok(None);
+    };
+    if !rt.carrier_record_is_live(raw, &carrier, type_id) {
+        return Err("native binding carrier is no longer live".to_string());
+    }
+    Ok(Some(MirRuntimeValue::NativeOwned(carrier.root)))
+}
+
+fn encode_executable_closure(
+    rt: &mut JitRuntime,
+    closure: &MirRuntimeClosure,
+    state: &mut PersistEncodeState,
+    depth: usize,
+) -> Result<i64, String> {
+    let target = rt
+        .jit_closure_targets
+        .get(&closure.function.0)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "ordinary closure target {:?} has no finalized executable ABI",
+                closure.function
+            )
+        })?;
+    if target.capture_type_ids.len() != closure.captures.len() {
+        return Err(format!(
+            "ordinary closure {:?} capture arity changed",
+            closure.function
+        ));
+    }
+    let mut slots = Vec::with_capacity(closure.captures.len());
+    for (capture, type_id) in closure
+        .captures
+        .iter()
+        .zip(target.capture_type_ids.iter().copied())
+    {
+        let descriptor = rt
+            .runtime_type_descriptor(type_id)
+            .cloned()
+            .ok_or_else(|| format!("closure capture type {type_id} is unavailable"))?;
+        slots.push(persist_encode_slot(
+            rt,
+            capture,
+            &descriptor,
+            state,
+            depth + 1,
+        )?);
+    }
+    let (env, has_env) = if slots.is_empty() {
+        (0, false)
+    } else {
+        (rt.heap.alloc_record_cells(slots), true)
+    };
+    Ok(bind_jit_callable(
+        rt,
+        target.fn_ptr,
+        env,
+        has_env,
+    ))
+}
+
+fn decode_executable_closure(
+    rt: &mut JitRuntime,
+    raw: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    state: &mut PersistDecodeState,
+    depth: usize,
+) -> Result<MirRuntimeValue, String> {
+    let slot = jit_callable_slot(rt, raw)
+        .ok_or_else(|| "ordinary closure handle is invalid".to_string())?;
+    let target = rt
+        .jit_closure_targets_by_ptr
+        .get(&slot.fn_ptr)
+        .cloned()
+        .ok_or_else(|| "ordinary closure target is not registered".to_string())?;
+    if target.capture_type_ids.is_empty() {
+        if slot.has_env {
+            return Err("ordinary closure has an unexpected capture environment".to_string());
+        }
+        return Ok(MirRuntimeValue::Closure(MirRuntimeClosure {
+            function: target.function,
+            captures: Vec::new(),
+        }));
+    }
+    if !slot.has_env {
+        return Err("ordinary closure lost its capture environment".to_string());
+    }
+    let slots = rt
+        .heap
+        .clone_record_values(slot.env)
+        .ok_or_else(|| "ordinary closure environment is not a live record".to_string())?;
+    if slots.len() != target.capture_type_ids.len() {
+        return Err("ordinary closure environment layout changed".to_string());
+    }
+    let mut captures = Vec::with_capacity(slots.len());
+    for (slot, type_id) in slots
+        .iter()
+        .zip(target.capture_type_ids.iter().copied())
+    {
+        let capture_descriptor = rt
+            .runtime_type_descriptor(type_id)
+            .cloned()
+            .ok_or_else(|| format!("closure capture type {type_id} is unavailable"))?;
+        captures.push(persist_decode_slot(
+            rt,
+            slot,
+            &capture_descriptor,
+            state,
+            depth + 1,
+        )?);
+    }
+    let _ = descriptor;
+    Ok(MirRuntimeValue::Closure(MirRuntimeClosure {
+        function: target.function,
+        captures,
+    }))
+}
+
 fn persist_decode_raw(
     rt: &mut JitRuntime,
     raw: i64,
@@ -4850,7 +5335,27 @@ fn persist_decode_raw(
     state: &mut PersistDecodeState,
     depth: usize,
 ) -> Result<MirRuntimeValue, String> {
+    let native_carrier_raw = if descriptor.kind == RuntimeValueKind::Shared {
+        rt.native_shared_carriers.contains_key(&raw)
+    } else {
+        native_carrier_descriptor(descriptor)
+            && rt.native_interface_carriers.contains_key(&raw)
+    };
+    if !state.invocation && native_carrier_raw {
+        return Err("native invocation carrier cannot enter persistent storage".to_string());
+    }
     let tracked = state.enter(descriptor, raw, depth)?;
+    if state.invocation {
+        if let Some(value) = decode_native_invocation_value(rt, raw, descriptor, descriptor.id)? {
+            state.leave(descriptor, raw, tracked);
+            return Ok(value);
+        }
+        if descriptor.kind == RuntimeValueKind::Closure && raw < 0 {
+            let value = decode_executable_closure(rt, raw, descriptor, state, depth)?;
+            state.leave(descriptor, raw, tracked);
+            return Ok(value);
+        }
+    }
     let kind = persist_effective_kind(descriptor);
     let value = match kind {
         RuntimeValueKind::Unit => Ok(MirRuntimeValue::Unit),
@@ -5152,8 +5657,36 @@ fn persist_encode_raw(
     depth: usize,
 ) -> Result<i64, String> {
     state.enter(depth)?;
+    if state.invocation {
+        match value {
+            MirRuntimeValue::NativeOwned(root) => {
+                if !native_binding_type_allowed(rt, descriptor.id) {
+                    return Err(
+                        "native-owned value has no checked native binding carrier type".to_string(),
+                    );
+                }
+                if !native_carrier_descriptor(descriptor) {
+                    return Err(format!(
+                        "native-owned value cannot inhabit checked `{}` carrier",
+                        descriptor.name
+                    ));
+                }
+                return if descriptor.kind == RuntimeValueKind::Shared {
+                    encode_native_shared_carrier(rt, root, descriptor.id)
+                } else {
+                    encode_native_interface_carrier(rt, root, descriptor.id)
+                };
+            }
+            MirRuntimeValue::Closure(closure)
+                if descriptor.kind == RuntimeValueKind::Closure =>
+            {
+                return encode_executable_closure(rt, closure, state, depth);
+            }
+            _ => {}
+        }
+    }
     let kind = persist_effective_kind(descriptor);
-    match kind {
+    let value = match kind {
         RuntimeValueKind::Unit => match value {
             MirRuntimeValue::Unit => Ok(0),
             _ => Err(format!("persistent `{}` expects unit", descriptor.name)),
@@ -5251,7 +5784,8 @@ fn persist_encode_raw(
                 descriptor.name
             ),
         ),
-    }
+    };
+    value
 }
 /// Marshal one local `Cell` payload through the same checked descriptor codec
 /// used by the resident persistence/history boundaries.  Cell deliberately
@@ -5266,7 +5800,7 @@ pub(crate) fn decode_jit_cell_value(
         .runtime_type_descriptor(type_id)
         .cloned()
         .ok_or_else(|| format!("Cell value descriptor {type_id} is unavailable"))?;
-    let mut state = PersistDecodeState::default();
+    let mut state = PersistDecodeState::for_invocation();
     persist_decode_raw(rt, raw, &descriptor, &mut state, 0)
 }
 
@@ -5283,10 +5817,9 @@ pub(crate) fn encode_jit_cell_value(
         .runtime_type_descriptor(type_id)
         .cloned()
         .ok_or_else(|| format!("Cell value descriptor {type_id} is unavailable"))?;
-    let mut state = PersistEncodeState::default();
+    let mut state = PersistEncodeState::for_invocation();
     persist_encode_raw(rt, value, &descriptor, &mut state, 0)
 }
-
 
 fn persist_text(rt: &JitRuntime, handle: i64) -> Option<String> {
     rt.heap
@@ -7610,8 +8143,8 @@ fn jet_jit_require_eq(
             rt.set_host_fault("MIR require_eq right debug value has an invalid handle");
             return 0;
         };
-        rt.heap
-            .alloc_string(format!("expected: {right}, got: {left}"))
+        let message = jet_foundation::Outcome::jet_require_eq_message(&left, &right).to_string();
+        rt.heap.alloc_string(message)
     });
     jet_jit_rich_panic(file, line, fn_name, src_line, col, caret, msg, locals)
 }
@@ -7642,8 +8175,8 @@ fn jet_jit_test_require_eq(
             rt.set_host_fault("MIR require_eq right debug value has an invalid handle");
             return 0;
         };
-        rt.heap
-            .alloc_string(format!("expected: {right}, got: {left}"))
+        let message = jet_foundation::Outcome::jet_require_eq_message(&left, &right).to_string();
+        rt.heap.alloc_string(message)
     });
     jet_jit_test_failure_result(file, line, fn_name, src_line, col, caret, msg, locals)
 }
@@ -8093,6 +8626,443 @@ fn jet_jit_trait_object_type(record: i64) -> i64 {
             .unwrap_or(-1)
     })
 }
+fn native_binding_carrier_is_live(rt: &JitRuntime, raw: i64, type_id: u64) -> bool {
+    let shared = rt
+        .runtime_type_descriptor(type_id)
+        .is_some_and(|descriptor| descriptor.kind == RuntimeValueKind::Shared);
+    if shared {
+        return rt
+            .native_shared_carriers
+            .get(&raw)
+            .is_some_and(|carrier| {
+                rt.carrier_record_is_live(carrier.record, carrier, type_id)
+                    && Memory::shared_value(rt, raw) == Some(carrier.record)
+            });
+    }
+    rt.native_interface_carriers
+        .get(&raw)
+        .is_some_and(|carrier| rt.carrier_record_is_live(raw, carrier, type_id))
+}
+
+fn jet_jit_native_interface_is_carrier(
+    trait_id: i64,
+    method_id: i64,
+    receiver_type_id: i64,
+    receiver: i64,
+) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = (trait_id as u64, method_id as u64, receiver_type_id as u64);
+        let Some(method) = rt.native_interface_methods.get(&key).cloned() else {
+            return 0;
+        };
+        let raw = if method.signature.receiver_access == MirAccess::Write {
+            match native_interface_read_write_word(receiver, &method.identity.receiver_type) {
+                Ok(raw) => raw,
+                Err(_) => return 0,
+            }
+        } else {
+            receiver
+        };
+        i8::from(native_binding_carrier_is_live(rt, raw, receiver_type_id as u64))
+    })
+}
+
+fn jet_jit_native_callable_is_carrier(callable_type_id: i64, callable: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.native_callable_methods.contains_key(&(callable_type_id as u64))
+                && native_binding_carrier_is_live(rt, callable, callable_type_id as u64),
+        )
+    })
+}
+
+fn native_interface_read_write_word(
+    address: i64,
+    ty: &MirType,
+) -> Result<i64, String> {
+    if address == 0 {
+        return Err("native interface write argument has a null place".to_string());
+    }
+    let carrier = super::types_meta::clif_ty_from_mir(ty)
+        .ok_or_else(|| "native interface write argument has no checked ABI".to_string())?;
+    // The address is produced by the checked MIR place lowering immediately
+    // before the host call; it is not retained after this invocation.
+    unsafe {
+        if carrier == types::I8 {
+            Ok(i64::from(std::ptr::read(address as *const u8)))
+        } else if carrier == types::I32 {
+            Ok(i64::from(std::ptr::read(address as *const u32)))
+        } else if carrier == types::I64 {
+            Ok(std::ptr::read(address as *const i64))
+        } else if carrier == types::F32 {
+            Ok(i64::from(std::ptr::read(address as *const u32)))
+        } else if carrier == types::F64 {
+            Ok(std::ptr::read(address as *const u64) as i64)
+        } else {
+            Err(format!("native interface write ABI {carrier} is unsupported"))
+        }
+    }
+}
+
+fn native_interface_write_word(address: i64, ty: &MirType, raw: i64) -> Result<(), String> {
+    if address == 0 {
+        return Err("native interface writeback has a null place".to_string());
+    }
+    let carrier = super::types_meta::clif_ty_from_mir(ty)
+        .ok_or_else(|| "native interface writeback has no checked ABI".to_string())?;
+    unsafe {
+        if carrier == types::I8 {
+            std::ptr::write(address as *mut u8, raw as u8);
+        } else if carrier == types::I32 {
+            std::ptr::write(address as *mut u32, raw as u32);
+        } else if carrier == types::I64 {
+            std::ptr::write(address as *mut i64, raw);
+        } else if carrier == types::F32 {
+            std::ptr::write(address as *mut f32, f32::from_bits(raw as u32));
+        } else if carrier == types::F64 {
+            std::ptr::write(address as *mut f64, f64::from_bits(raw as u64));
+        } else {
+            return Err(format!("native interface writeback ABI {carrier} is unsupported"));
+        }
+    }
+    Ok(())
+}
+
+struct NativeInterfaceWriteback {
+    address: i64,
+    ty: MirType,
+    index: usize,
+}
+
+struct PreparedNativeInterfaceCall {
+    method: crate::SourceInterfaces::NativeInterfaceMethod,
+    receiver: MirRuntimeValue,
+    carrier: MirNativeOwned,
+    arguments: Vec<crate::SourceInterfaces::NativeInterfaceArgument>,
+    writebacks: Vec<NativeInterfaceWriteback>,
+}
+
+fn prepare_native_interface_call(
+    rt: &mut JitRuntime,
+    trait_id: i64,
+    method_id: i64,
+    receiver_type_id: i64,
+    receiver: i64,
+    argument_buffer: i64,
+) -> Result<PreparedNativeInterfaceCall, String> {
+    let key = (
+        trait_id as u64,
+        method_id as u64,
+        receiver_type_id as u64,
+    );
+    let method = rt
+        .native_interface_methods
+        .get(&key)
+        .cloned()
+        .ok_or_else(|| "native interface call has no checked method descriptor".to_string())?;
+    if runtime_type_id(&method.identity.receiver_type) != Some(receiver_type_id as u64) {
+        return Err(
+            "native interface receiver type identity disagrees with checked metadata".to_string(),
+        );
+    }
+    let argument_count = rt
+        .heap
+        .record_len(argument_buffer)
+        .ok_or_else(|| "native interface argument carrier is not a live checked record".to_string())?;
+    let expected_count = i64::try_from(method.signature.parameters.len())
+        .map_err(|_| "native interface checked signature has too many parameters".to_string())?;
+    if argument_count != expected_count {
+        return Err(
+            "native interface argument carrier length disagrees with checked signature".to_string(),
+        );
+    }
+    let receiver = decode_jit_cell_value(rt, receiver, receiver_type_id as u64)
+        .map_err(|_| "native interface receiver carrier failed checked decoding".to_string())?;
+    let MirRuntimeValue::NativeOwned(carrier) = receiver.clone() else {
+        return Err("native interface receiver is not a retained native-owned carrier".to_string());
+    };
+    let mut arguments = Vec::with_capacity(method.signature.parameters.len());
+    let mut writebacks = Vec::new();
+    for (index, parameter) in method.signature.parameters.iter().enumerate() {
+        let index_raw = i64::try_from(index)
+            .map_err(|_| "native interface checked signature index exceeds i64".to_string())?;
+        let raw = rt
+            .heap
+            .record_get_int(argument_buffer, index_raw)
+            .ok_or_else(|| {
+                "native interface argument carrier contains an invalid word".to_string()
+            })?;
+        let (value_raw, writeback) = if parameter.access == MirAccess::Write {
+            let value_raw = native_interface_read_write_word(raw, &parameter.ty)
+                .map_err(|_| "native interface writable argument place is invalid".to_string())?;
+            writebacks.push(NativeInterfaceWriteback {
+                address: raw,
+                ty: parameter.ty.clone(),
+                index,
+            });
+            (value_raw, true)
+        } else {
+            (raw, false)
+        };
+        let type_id = runtime_type_id(&parameter.ty)
+            .ok_or_else(|| "native interface argument has no runtime type identity".to_string())?;
+        let value = decode_jit_cell_value(rt, value_raw, type_id)
+            .map_err(|_| "native interface argument failed checked decoding".to_string())?;
+        arguments.push(crate::SourceInterfaces::NativeInterfaceArgument {
+            index,
+            ty: parameter.ty.clone(),
+            access: parameter.access,
+            value,
+            writeback,
+        });
+    }
+    Ok(PreparedNativeInterfaceCall {
+        method,
+        receiver,
+        carrier,
+        arguments,
+        writebacks,
+    })
+}
+
+fn finish_native_interface_call(
+    rt: &mut JitRuntime,
+    prepared: PreparedNativeInterfaceCall,
+    completion: crate::SourceInterfaces::NativeInterfaceCompletion,
+) -> i64 {
+    let (outcome, call) = completion.into_parts();
+    for writeback in prepared.writebacks {
+        let Some(argument) = call.argument(writeback.index) else {
+            rt.set_host_fault("native interface completion lost a writable argument");
+            return 0;
+        };
+        let type_id = match runtime_type_id(&writeback.ty) {
+            Some(type_id) => type_id,
+            None => {
+                rt.set_host_fault("native interface writeback has no runtime type identity");
+                return 0;
+            }
+        };
+        let raw = match encode_jit_cell_value(rt, &argument.value, type_id) {
+            Ok(raw) => raw,
+            Err(error) => {
+                rt.set_host_fault(error);
+                return 0;
+            }
+        };
+        if let Err(error) = native_interface_write_word(writeback.address, &writeback.ty, raw) {
+            rt.set_host_fault(error);
+            return 0;
+        }
+    }
+    match outcome {
+        Ok(value) => {
+            let Some(type_id) = runtime_type_id(&prepared.method.signature.return_type) else {
+                rt.set_host_fault("native interface result has no runtime type identity");
+                return 0;
+            };
+            match encode_jit_cell_value(rt, &value, type_id) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    rt.set_host_fault(error);
+                    0
+                }
+            }
+        }
+        Err(error) => {
+            rt.set_host_fault(error.to_string());
+            0
+        }
+    }
+}
+
+fn jet_jit_native_interface_call(
+    trait_id: i64,
+    method_id: i64,
+    receiver_type_id: i64,
+    receiver: i64,
+    argument_buffer: i64,
+) -> i64 {
+    let prepared = match Concurrency::with_runtime_mut(|rt| {
+        prepare_native_interface_call(
+            rt,
+            trait_id,
+            method_id,
+            receiver_type_id,
+            receiver,
+            argument_buffer,
+        )
+    }) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_host_fault(error));
+            return 0;
+        }
+    };
+    let completion = crate::SourceInterfaces::dispatch_active_for_carrier(
+        prepared.method.identity.clone(),
+        prepared.method.signature.clone(),
+        prepared.method.signature.receiver_access,
+        prepared.receiver.clone(),
+        prepared.carrier.clone(),
+        prepared.arguments,
+        jet_foundation::Diagnostics::Span::new(0, 0),
+    );
+    Concurrency::with_runtime_mut(|rt| finish_native_interface_call(rt, prepared, completion))
+}
+
+struct PreparedNativeCallableCall {
+    signature: crate::SourceInterfaces::NativeCallableSignature,
+    carrier: MirNativeOwned,
+    arguments: Vec<crate::SourceInterfaces::NativeInterfaceArgument>,
+    writebacks: Vec<NativeInterfaceWriteback>,
+}
+
+fn prepare_native_callable_call(
+    rt: &mut JitRuntime,
+    callable_type_id: i64,
+    callable: i64,
+    argument_buffer: i64,
+) -> Result<PreparedNativeCallableCall, String> {
+    let type_id = callable_type_id as u64;
+    let signature = rt
+        .native_callable_methods
+        .get(&type_id)
+        .cloned()
+        .ok_or_else(|| "native callable has no checked signature descriptor".to_string())?;
+    let argument_count = rt
+        .heap
+        .record_len(argument_buffer)
+        .ok_or_else(|| "native callable argument carrier is not a live checked record".to_string())?;
+    let expected_count = i64::try_from(signature.parameters.len())
+        .map_err(|_| "native callable checked signature has too many parameters".to_string())?;
+    if argument_count != expected_count {
+        return Err(
+            "native callable argument carrier length disagrees with checked signature".to_string(),
+        );
+    }
+    let callable_value = decode_jit_cell_value(rt, callable, type_id)
+        .map_err(|_| "native callable carrier failed checked decoding".to_string())?;
+    let MirRuntimeValue::NativeOwned(carrier) = callable_value else {
+        return Err("native callable is not a retained native-owned carrier".to_string());
+    };
+    let mut arguments = Vec::with_capacity(signature.parameters.len());
+    let mut writebacks = Vec::new();
+    for (index, parameter) in signature.parameters.iter().enumerate() {
+        let index_raw = i64::try_from(index)
+            .map_err(|_| "native callable checked signature index exceeds i64".to_string())?;
+        let raw = rt
+            .heap
+            .record_get_int(argument_buffer, index_raw)
+            .ok_or_else(|| "native callable argument carrier contains an invalid word".to_string())?;
+        let (value_raw, writeback) = if parameter.access == MirAccess::Write {
+            let value_raw = native_interface_read_write_word(raw, &parameter.ty)
+                .map_err(|_| "native callable writable argument place is invalid".to_string())?;
+            writebacks.push(NativeInterfaceWriteback {
+                address: raw,
+                ty: parameter.ty.clone(),
+                index,
+            });
+            (value_raw, true)
+        } else {
+            (raw, false)
+        };
+        let type_id = runtime_type_id(&parameter.ty)
+            .ok_or_else(|| "native callable argument has no runtime type identity".to_string())?;
+        let value = decode_jit_cell_value(rt, value_raw, type_id)
+            .map_err(|_| "native callable argument failed checked decoding".to_string())?;
+        arguments.push(crate::SourceInterfaces::NativeInterfaceArgument {
+            index,
+            ty: parameter.ty.clone(),
+            access: parameter.access,
+            value,
+            writeback,
+        });
+    }
+    Ok(PreparedNativeCallableCall {
+        signature,
+        carrier,
+        arguments,
+        writebacks,
+    })
+}
+
+fn finish_native_callable_call(
+    rt: &mut JitRuntime,
+    prepared: PreparedNativeCallableCall,
+    completion: crate::SourceInterfaces::NativeCallableCompletion,
+) -> i64 {
+    let (outcome, call) = completion.into_parts();
+    for writeback in prepared.writebacks {
+        let Some(argument) = call.argument(writeback.index) else {
+            rt.set_host_fault("native callable completion lost a writable argument");
+            return 0;
+        };
+        let Some(type_id) = runtime_type_id(&writeback.ty) else {
+            rt.set_host_fault("native callable writeback has no runtime type identity");
+            return 0;
+        };
+        let raw = match encode_jit_cell_value(rt, &argument.value, type_id) {
+            Ok(raw) => raw,
+            Err(error) => {
+                rt.set_host_fault(error);
+                return 0;
+            }
+        };
+        if let Err(error) = native_interface_write_word(writeback.address, &writeback.ty, raw) {
+            rt.set_host_fault(error);
+            return 0;
+        }
+    }
+    match (prepared.signature.return_type, outcome) {
+        (Some(ty), Ok(value)) => {
+            let Some(type_id) = runtime_type_id(&ty) else {
+                rt.set_host_fault("native callable result has no runtime type identity");
+                return 0;
+            };
+            match encode_jit_cell_value(rt, &value, type_id) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    rt.set_host_fault(error);
+                    0
+                }
+            }
+        }
+        (None, Ok(MirRuntimeValue::Unit)) => 0,
+        (None, Ok(_)) => {
+            rt.set_host_fault("native callable returned a value for a unit signature");
+            0
+        }
+        (_, Err(error)) => {
+            rt.set_host_fault(error.to_string());
+            0
+        }
+    }
+}
+
+fn jet_jit_native_callable_call(
+    callable_type_id: i64,
+    callable: i64,
+    argument_buffer: i64,
+) -> i64 {
+    let prepared = match Concurrency::with_runtime_mut(|rt| {
+        prepare_native_callable_call(rt, callable_type_id, callable, argument_buffer)
+    }) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_host_fault(error));
+            return 0;
+        }
+    };
+    let completion = crate::SourceInterfaces::dispatch_active_callable_for_carrier(
+        prepared.signature.clone(),
+        prepared.carrier.clone(),
+        prepared.arguments,
+        jet_foundation::Diagnostics::Span::new(0, 0),
+    );
+    Concurrency::with_runtime_mut(|rt| finish_native_callable_call(rt, prepared, completion))
+}
+
 
 fn jet_jit_struct_assign(dst: i64, src: i64) {
     with_runtime_mut(|rt| {
@@ -14928,6 +15898,26 @@ host_fns! {
         let mut sig_trait_object_type = Signature::new(cc);
         sig_trait_object_type.params.push(AbiParam::new(types::I64));
         sig_trait_object_type.returns.push(AbiParam::new(types::I64));
+        let mut sig_native_interface_call = Signature::new(cc);
+        sig_native_interface_call
+            .params
+            .extend([AbiParam::new(types::I64); 5]);
+        sig_native_interface_call.returns.push(AbiParam::new(types::I64));
+        let mut sig_native_callable_call = Signature::new(cc);
+        sig_native_callable_call
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_native_callable_call.returns.push(AbiParam::new(types::I64));
+        let mut sig_native_interface_is_carrier = Signature::new(cc);
+        sig_native_interface_is_carrier
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_native_interface_is_carrier.returns.push(AbiParam::new(types::I8));
+        let mut sig_native_callable_is_carrier = Signature::new(cc);
+        sig_native_callable_is_carrier
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_native_callable_is_carrier.returns.push(AbiParam::new(types::I8));
         let mut sig_struct_assign = Signature::new(cc);
         sig_struct_assign.params.push(AbiParam::new(types::I64));
         sig_struct_assign.params.push(AbiParam::new(types::I64));
@@ -15396,6 +16386,10 @@ host_fns! {
     struct_new: "jet_jit_struct_new" => jet_jit_struct_new: sig_struct_new;
     trait_object_tag: "jet_jit_trait_object_tag" => jet_jit_trait_object_tag: sig_trait_object_tag;
     trait_object_type: "jet_jit_trait_object_type" => jet_jit_trait_object_type: sig_trait_object_type;
+    native_interface_call: "jet_jit_native_interface_call" => jet_jit_native_interface_call: sig_native_interface_call;
+    native_callable_call: "jet_jit_native_callable_call" => jet_jit_native_callable_call: sig_native_callable_call;
+    native_interface_is_carrier: "jet_jit_native_interface_is_carrier" => jet_jit_native_interface_is_carrier: sig_native_interface_is_carrier;
+    native_callable_is_carrier: "jet_jit_native_callable_is_carrier" => jet_jit_native_callable_is_carrier: sig_native_callable_is_carrier;
     struct_assign: "jet_jit_struct_assign" => jet_jit_struct_assign: sig_struct_assign;
     struct_get_i64: "jet_jit_struct_get_i64" => jet_jit_struct_get_i64: sig_struct_get_i64;
     struct_get_f64: "jet_jit_struct_get_f64" => jet_jit_struct_get_f64: sig_struct_get_f64;

@@ -1,167 +1,161 @@
-# Compatibility & release policy (ratified)
+# Release and compatibility policy
 
-This is the compatibility contract for enterprise adoption. Decisions
-D-REL1 through D-REL5 ratify the rules below.
+This page is the contract for package authors, toolchain maintainers, and registry
+operators. It covers the pre-1.0 boundary, the owner-declared post-1.0 rules,
+and release-facing CLI behavior. Executable truth lives in
+`crates/jet-pkg-model/src/Manifest.rs`, `crates/jet-foundation/src/ExitCodes.rs`,
+and the release fixtures under `tests/release/`.
 
-## Glossary first
+## Compatibility boundary
 
-- **Compiler** — the `jet` binary. Versioned with normal SemVer (D-REL1).
-- **Edition** — a per-project opt-in to a specific era of Jet *syntax*
-  (D-REL3), written `edition: "2026"` in `package.jet`. A toolchain supports a
-  fixed set of editions and prints them in `jet --version`.
-- **Epoch** — a descriptive era label. It is **never** encoded into the
-  compiler version (D-REL2); the owner bumps the version manually.
-- **Registry protocol** — the versioned index format the compiler speaks to a
-  package registry, independent of the compiler's own version.
+Until the owner declares the compatibility boundary for a qualified 1.0
+release, Jet is a greenfield pre-1.0 toolchain. Breaking changes are allowed;
+there is no compatibility obligation for an existing source form until the
+owner makes that declaration. The rules below are the ratified policy that
+applies after that declaration, not evidence that a release is ready.
 
-## Compatibility levels — what may change
+The executable banner reports the release disposition from
+`manifest::current_release_status` in
+`crates/jet-pkg-model/src/Manifest.rs`. A version string, command existence, or
+local telemetry observation cannot promote a capability or make the post-1.0
+promise active.
+
+## Versions and editions
+
+- **Compiler** — the `jet` binary, versioned with normal SemVer (D-REL1).
+- **Edition** — a project-selected era of Jet syntax (D-REL3), written as
+  `edition: "2026"` in `package.jet`. A toolchain supports a fixed set and
+  advertises it in `jet --version`.
+- **Epoch** — a descriptive era label, never encoded in the compiler version
+  (D-REL2). The owner bumps the version manually.
+- **Registry protocol** — the versioned index format spoken by a compiler and a
+  package registry, independent of the compiler version.
+
+After the owner declaration, the compatibility levels are:
 
 | Level | What may change | Migration |
-|-------|-----------------|-----------|
-| **Patch** (`x.y.Z`) | Bug fixes; diagnostic *text* fixes. No behavior a correct program relied on. | none |
-| **Minor** (`x.Y.0`) | Additive only: new std items, new diagnostics, new editions. Existing code keeps compiling. | none |
-| **Major** (`X.0.0`) | Breaking changes, gated behind a new **edition**. Old editions keep working. | opt-in edition bump + `jet fix` |
-| **Epoch** | Pure storytelling. No compiler-version meaning (D-REL2). | n/a |
-| **Edition** | The unit of opt-in syntax compatibility. A project pins one; the toolchain refuses an edition it doesn't ship (E2001). | `jet fix` + edition bump |
+|---|---|---|
+| **Patch** (`x.y.Z`) | Bug fixes and diagnostic text fixes; no behavior on which a correct program relied. | None. |
+| **Minor** (`x.Y.0`) | Additive changes only: new standard-library items, diagnostics, or editions. Existing code keeps compiling. | None. |
+| **Major** (`X.0.0`) | Breaking changes, gated behind a new edition. Old editions keep working. | Explicit edition bump and `jet fix`. |
+| **Epoch** | A descriptive story label, with no compiler-version meaning (D-REL2). | None. |
+| **Edition** | The opt-in unit of syntax compatibility. A project pins one; an unsupported edition is E2001. | `jet fix` followed by an explicit edition bump. |
 
-External versioning is **normal SemVer, forever** (D-REL1). Epoch numbers are
-not encoded into the version (D-REL2); version bumps are the owner's manual call.
+Compiler versions use normal SemVer after the boundary (D-REL1), and epoch
+numbers remain outside the version (D-REL2).
 
-## Backward-compatibility guarantee
+## Post-1.0 guarantee
 
-Post-1.0, code that compiles in edition *N* keeps compiling on every later
-toolchain that still supports edition *N*. New syntax that would break old code
-lands only behind a *newer* edition; pinning an older edition opts out of it.
-A toolchain advertises the editions it supports in `jet --version`.
+Once the owner declares the boundary, code that compiles in edition *N* keeps
+compiling on every later toolchain that still supports edition *N*. New syntax
+that would break old code lands only behind a newer edition; pinning an older
+edition opts out of it. The supported-edition list in `jet --version` is the
+machine-visible statement of which editions a toolchain accepts.
 
-### Current release state (owner mandate)
-
-Jet is currently a **prerelease** toolchain. The package/compiler SemVer is
-independent of that release identity: `1.0.0` in build metadata does not mean
-that 1.0 has shipped. Breaking changes remain allowed before 1.0, and the
-post-1.0 compatibility promise below is not active yet. Present readiness and
-capability claims must come from current evidence, not from the version string
-or from the existence of a command.
-
-The executable source for this distinction is
-`crates/jet-pkg-model/src/Manifest.rs::current_release_status`. Both
-`jet version` and `jet --version` render its banner. `jet inspect claims
---json` projects the bounded `manifest.capability_relation.rows` source and
-reports the same prerelease identity/disposition; local telemetry reports are
-diagnostic observations only and never release truth.
-
-The future policy remains ratified and unchanged. It becomes active only after
-the owner accepts a qualified 1.0 candidate; planned policy text is not
-evidence that the candidate is ready.
-
-Foreign-language command acceptance is not a release-capability claim. The
-current census keeps Ada/Pascal at the binder/manual-output boundary until
-real source conversion is demonstrated; C/C++ source import remains
-unavailable. Those dispositions belong to their existing migration/import
-owners and are not promoted by this version banner or by a telemetry report.
-
-Each counted census row retains its capability identity, execution mode,
-disposition, owner link, and candidate identity. A row without current evidence
-stays non-passing (`planned`, `implemented-unqualified`, `failed`, `stale`, or
-`unavailable`) instead of disappearing from the denominator.
-
-
-### Enterprise LTS calendar (D-ADOPT-LTS1=A)
-
-D-ADOPT-LTS1 was ratified on 2026-08-01. Jet starts one LTS line each year.
-Each line has twelve months of active support and twenty-four months of
-maintenance support, for thirty-six months total. At most three LTS lines may
-overlap.
-
-Active support covers security, critical compiler and runtime correctness,
-supported-host and toolchain breakage, and severe performance regressions. It
-does not add language behavior. Maintenance support covers security and
-critical data-loss, memory-safety, type-safety, and miscompilation fixes.
-
-The public calendar must give six months' notice for a calendar change and
-must not shorten a live LTS line. An LTS line keeps the editions and hosts it
-advertised. Dropping either before EOL needs the existing security or safety
-exception process and a migration notice. The latest stable release and every
-live LTS line receive applicable security fixes.
-
-The enterprise adoption pack carries the calendar in
-[`adoption/release/calendar.json`](../../adoption/release/calendar.json). Its
-policy fields contain the ratified values; dates and edition/host matrices are
-published only when fixed, and the pack never invents support claims.
-
-### Environment safety correction (D-ENV-MUTATE1)
-
-`core.sys` mutations change Jet's locked logical environment rather than the
-host process environment. A later `core.sys.get` observes the write, and every
-`core.process` child inherits it. Foreign code that calls libc `getenv` or reads
-the Windows environment block after a Jet mutation sees the original host
-value. This is the ratified narrow safety exception to the compatibility
-promise: mutating a process-global host environment while foreign threads may
-read it cannot meet Jet's memory-safety guarantee. Pass changed values to
-foreign APIs explicitly. Existing editions keep `core.sys.set ()`; changing
-its fallible `!EnvError` signature requires a major release and edition opt-in.
-
-## Deprecation policy + migration window
+## Deprecation and migration
 
 The public lifecycle is one ladder: `_name` is internal, `pub _name` is
 soft-public, `pub` is stable, and `#Deprecated` is the retiring rung for a
 stable public item. A named removal edition is the final delta.
 
-1. A public item is marked **deprecated** with
-   `#Deprecated(since: "1.2", use: "parse", removed_in: "2028")`. `since:` names
-   the deprecation version or edition, `use:` names the replacement, and the
-   optional `removed_in:` names the removal edition.
-2. While the project's edition is before the named removal edition, the item
-   still compiles and emits **L2001** (a lint). The consumer warning carries the
-   replacement and `jet fix` performs the plain replacement rename. For a
-   qualified replacement such as `cbor.to_bytes`, the edit replaces the used
-   member with `to_bytes`.
+1. Mark a public item with
+   `#Deprecated(since: "1.2", use: "parse", removed_in: "2028")`. `since:`
+   names the deprecation version or edition, `use:` names the replacement, and
+   `removed_in:` names the removal edition when supplied.
+2. Before the named removal edition, the item still compiles and emits L2001.
+   The warning carries the replacement, and `jet fix` performs the plain
+   replacement rename. For a qualified replacement such as `cbor.to_bytes`,
+   the edit replaces the used member with `to_bytes`.
 3. `removed_in:` is dormant until editions own removal. Before that edition it
-   has no effect beyond the warning text; at or after it, use becomes **E2002**
-   and names the replacement. Without `removed_in:`, the item remains
-   warning-only.
+   affects only warning text; at or after it, use becomes E2002 and names the
+   replacement. Without `removed_in:`, the item remains warning-only.
 4. Core declarations without Jet source use the same marker metadata on their
    ordinary declaration rows. User items and Core migrations therefore share
-   the L2001/E2002 renderer. The former duplicate Core-only deprecation tables
-   are retired; there is one lifecycle source.
+   one L2001/E2002 renderer.
 
-## Migration authority (D-REL5)
+D-REL5 permits source rewriting only through **`jet fix`** or an explicit
+edition upgrade, and only on explicit request. No tool silently migrates
+source. D-REL4 supplies no LTS branch before the compatibility boundary; the
+LTS window begins at GA.
 
-Only **`jet fix`** and an explicit **edition upgrade** may rewrite a user's
-code, and only on explicit request. No tool silently migrates source. There is
-no LTS branch pre-GA (D-REL4); the LTS window is set at GA.
+## Single-file and generated-code rules
 
-## The single-file exemption
+Single-file `jet run file.jet` has no edition marker and uses the toolchain's
+newest stable edition (E2-V4). Editions are a project-manifest concept; the
+single-file path needs no manifest.
 
-Single-file `jet run file.jet` carries **no** edition marker and always uses the
-toolchain's newest stable edition (E2-V4). Editions are a project-manifest
-concept; the single-file path stays sacred — no manifest required.
+Rust source emitted by the Jet compiler carries no additional license
+obligation from the compiler. The generated code is the user's output, under
+the project's chosen license and the terms of its own dependencies; using Jet
+adds no copyleft or attribution term to that output.
 
-## Generated-code license
+## Enterprise LTS
 
-Rust source emitted by the Jet compiler carries **no additional license
-obligation from the compiler**. The compiler is a translator: the generated
-code is yours, under whatever license you choose for your project. Using Jet to
-build a program imposes no copyleft, attribution, or other term on that
-program's output beyond what your own dependencies require.
+D-ADOPT-LTS1 was ratified on 2026-08-01. Jet starts one LTS line each year.
+Each line has twelve months of active support and twenty-four months of
+maintenance support, thirty-six months total, with at most three lines
+overlapping.
 
-## TLS security gate (D-TLS1)
+Active support covers security, critical compiler and runtime correctness,
+supported-host and toolchain breakage, and severe performance regressions; it
+does not add language behavior. Maintenance support covers security and
+critical data-loss, memory-safety, type-safety, and miscompilation fixes.
 
-D-TLS1 makes `https://` work by default for the client path
-(`core.net.fetch` and `core.http.client`) through the rustls bridge and system
-certificate roots. Replacing that default requires an external security audit
-and an interop battery against rustls and OpenSSL test vectors. Advanced client
-configuration lives under `core.net.tls`; server TLS is the D-TLSSERVE1 named
-option `Server.serve(addr, mux, tls: Server.tls(cert, key))`.
+The public calendar gives six months' notice for a calendar change and never
+shortens a live line. An LTS line keeps its advertised editions and hosts.
+Dropping either before EOL requires the existing security or safety exception
+process and a migration notice. The latest stable release and every live LTS
+line receive applicable security fixes. The adoption pack carries the policy
+calendar at `adoption/release/calendar.json`; dates and edition/host matrices
+are published only when fixed.
 
-## `jet version` / `jet --version` contract (E2-D1)
+## Runtime compatibility boundaries
 
-Both version entry points render the same deterministic banner
-(golden-tested in `tests/release_gates.rs`). The banner preserves the compiler
-SemVer while making current state explicit:
+### Process environment (D-ENV-MUTATE1)
 
+`core.sys` mutations change Jet's locked logical environment, not the host
+process environment. A later `core.sys.get` observes the write, and every
+`core.process` child inherits it. Foreign code that calls libc `getenv` or
+reads the Windows environment block after a Jet mutation sees the original
+host value. Pass changed values to foreign APIs explicitly: mutating a
+process-global environment while foreign threads may read it cannot meet Jet's
+memory-safety guarantee. Existing editions keep `core.sys.set ()`; changing its
+fallible `!EnvError` signature requires a major release and edition opt-in.
+
+### TLS security gate (D-TLS1)
+
+For `core.net.fetch` and the client path in `core.http.client`, `https://`
+works by default through the rustls bridge and system certificate roots.
+Replacing that default requires an external security audit and an interop
+battery against rustls and OpenSSL test vectors. Server TLS is an explicit
+named option on `core.http.server`:
+
+```text
+use core.http.server as server
+
+fn run() {
+    cert := "server.crt"
+    key := "server.key"
+    mux :: server.mux()
+    server.serve(
+        "127.0.0.1:0",
+        mux,
+        tls: server.tls(cert, key)
+    ) ?? return
+}
 ```
-Jet 1.0.0
+
+The `tls:` label is part of the API; an unlabeled third argument is rejected.
+
+## Version banner
+
+`jet version` and `jet --version` render the same deterministic banner. The
+SemVer and release state come from `manifest::version_banner`; the exact output
+is golden-tested in `tests/release/version_banner.txt` and
+`tests/release_gates.rs`:
+
+```text
+Jet 0.1.0
 release status: prerelease
 release disposition: current
 release readiness: not-ready
@@ -170,46 +164,38 @@ supported editions: 2026, 2027, 2028 (newest: 2028)
 registry protocol: v1
 ```
 
-The `1.0 compatibility policy` line describes ratified future law, not a
-shipped promise. A version string or banner cannot make a release ready.
-`jet inspect claims --json` is the machine-readable release-claim projection;
-it consumes one bounded `manifest.capability_relation.rows` source and must
-remain fail-closed for missing, stale, unavailable, failed, or unqualified
-rows. Telemetry reports may describe observations but do not qualify release
-readiness.
+The `1.0 compatibility policy` line describes future law, not a shipped
+promise. `jet inspect claims --json` is the machine-readable release-claim
+projection; it consumes the bounded `manifest.capability_relation.rows`
+source and remains fail-closed for missing, stale, unavailable, failed, or
+unqualified rows. Telemetry reports observations only.
 
-## Exit-code table (E2-M3, extends E2-M2)
+## Exit codes
 
-`jet` returns a stable, documented exit code so shells and CI gates can branch
-on the outcome without parsing text. The numbers never change meaning. The
-single source of truth is `crates/jet-foundation/src/ExitCodes.rs`.
+`jet` returns stable documented exit codes so shells and CI can branch without
+parsing text. The single source of truth is
+`crates/jet-foundation/src/ExitCodes.rs`.
 
-| Code | Name           | Meaning                                                |
-|------|----------------|--------------------------------------------------------|
-| 0    | `OK`           | success                                                |
-| 1    | `USER_ERROR`   | an unhandled entry error report, or a driver-reported user problem |
-| 2    | `USAGE`        | the command line itself was wrong (unknown command, missing/invalid argument or flag) |
-| 70   | `RUNTIME_PANIC`| a built program breached or stopped at runtime (`panic`, `require`, an index fault, or another program-side fault); emitted by the Prelude boundary |
-| 101  | `ICE`          | Jet's own compiler defect (invariant I2): rustc rejected generated code, or the compiler hit an impossible state — never a user-program exit |
+| Code | Name | Meaning |
+|---:|---|---|
+| 0 | `OK` | Success. |
+| 1 | `USER_ERROR` | An unhandled entry error report or a driver-reported user problem. |
+| 2 | `USAGE` | The command line was wrong: an unknown command or a missing, invalid, or unknown argument/flag. |
+| 70 | `RUNTIME_PANIC` | A built program stopped at runtime through `panic`, `require`, an index fault, or another program-side fault; emitted by the Prelude boundary. |
+| 101 | `ICE` | Jet's own compiler defect: rustc rejected generated code or the compiler reached an impossible state (invariant I2), never a user-program exit. |
 
-`USER_ERROR` (1) and `USAGE` (2) are deliberately distinct: "my program has a
-bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
+`USER_ERROR` (1) and `USAGE` (2) stay distinct: the former means the program
+or its inputs failed, while the latter means the `jet` invocation was wrong.
 
-## Where this is enforced
+## Enforcement map
 
-- `edition:` field — parsed in `crates/jet-pkg-model/src/Manifest.rs`, surfaced on
-  `manifest::PackageMeta`, recorded in `crates/jet-foundation/src/Syntax.rs` (`MANIFEST_FIELD_EDITION`,
-  D-REL3).
-- Current release source — `manifest::current_release_status` in
-  `crates/jet-pkg-model/src/Manifest.rs`; the `jet version` and
-  `jet --version` banners use it.
-- Release-claim census — `jet inspect claims --json` projects
-  `manifest.capability_relation.rows`; telemetry reports are not release
-  evidence.
-- Supported editions — `manifest::SUPPORTED_EDITIONS`; the check is
-  `manifest::check_edition_support` (E2001), called from
-  `crates/jet-driver/src/Loader.rs`.
-- Banner — `manifest::version_banner`.
-- Diagnostics — E2001/E2002/L2001 in
-  `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the diagnostic registry,
-  snapshotted in `tests/release/`.
+- `edition:` is parsed in `crates/jet-pkg-model/src/Manifest.rs`, surfaced on
+  `manifest::PackageMeta`, and recorded in `crates/jet-foundation/src/Syntax.rs`
+  as `MANIFEST_FIELD_EDITION` (D-REL3).
+- Supported editions are `manifest::SUPPORTED_EDITIONS`; E2001 comes from
+  `manifest::check_edition_support`, called by `crates/jet-driver/src/Loader.rs`.
+- The banner is `manifest::version_banner`; release status is
+  `manifest::current_release_status` in `crates/jet-pkg-model/src/Manifest.rs`.
+- E2001, E2002, and L2001 are registered in
+  `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the Foundation
+  diagnostic registry, with release snapshots under `tests/release/`.

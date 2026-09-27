@@ -26,11 +26,10 @@ pub fn boot_mir_eval() {
 /// never nests worker threads — on either side of that seam.
 ///
 /// The worker is a different thread, so thread-local state a caller
-/// established does not follow it. The comptime ambient hooks are the one
-/// piece of such state installed *around* a compiler entry point
-/// (`Comptime::with_ambient`), so they are carried across explicitly. Every
-/// other compiler thread-local is established inside the work itself, from
-/// bundle facts (`PackageEdition`), or is a per-thread cache.
+/// established does not follow it. Comptime ambient hooks and the scoped
+/// terminator-pass driver are carried across explicitly. Other compiler
+/// thread-locals are established inside the work, from bundle facts
+/// (`PackageEdition`), or are per-thread caches.
 ///
 /// Values and panics propagate unchanged: a panic is re-raised with
 /// `resume_unwind`, so the ICE path and the diagnostics a caller catches keep
@@ -40,9 +39,12 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
         return work();
     }
     let (ambient_core_call, ambient_handle, ambient_extern_call) = Comptime::ambient_hooks();
+    let terminator_driver = Lexer::terminator_driver();
     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
         boot_mir_eval();
-        Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, work)
+        Lexer::with_terminator_driver(terminator_driver, || {
+            Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, work)
+        })
     })
 }
 

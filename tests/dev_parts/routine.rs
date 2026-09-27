@@ -4543,20 +4543,20 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     }
 
     let source = r#"
-@f32_nan :: F32.NAN
-@f32_inf :: F32.INFINITY
-@f32_neg_inf :: F32.NEG_INFINITY
-@f64_nan :: Float.NAN
-@f64_inf :: Float.INFINITY
-@f64_neg_inf :: Float.NEG_INFINITY
+@F32_NAN :: F32.NAN
+@F32_INF :: F32.INFINITY
+@F32_NEG_INF :: F32.NEG_INFINITY
+@F64_NAN :: Float.NAN
+@F64_INF :: Float.INFINITY
+@F64_NEG_INF :: Float.NEG_INFINITY
 
 fn run() {
-    print(@f32_nan)
-    print(@f32_inf)
-    print(@f32_neg_inf)
-    print(@f64_nan)
-    print(@f64_inf)
-    print(@f64_neg_inf)
+    print(@F32_NAN)
+    print(@F32_INF)
+    print(@F32_NEG_INF)
+    print(@F64_NAN)
+    print(@F64_INF)
+    print(@F64_NEG_INF)
 }
 "#;
     let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);

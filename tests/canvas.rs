@@ -5203,7 +5203,7 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
     assert!(targeted.contains("\"op\":\"add_target\""), "{targeted}");
     let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(
-        manifest.contains("app :: Output.Executable{ name: \"app\", entry: run }"),
+        manifest.contains("APP :: Output.Executable{ name: \"app\", entry: run }"),
         "{manifest}"
     );
     assert!(
@@ -5308,7 +5308,7 @@ fn canvas_project_transactions_create_package_from_workspace() {
     let manifest = fs::read_to_string(dir.join("packages/tools/package.jet")).unwrap();
     assert!(manifest.contains("name: \"tools\""), "{manifest}");
     assert!(
-        manifest.contains("tools :: Output.Executable"),
+        manifest.contains("TOOLS :: Output.Executable"),
         "{manifest}"
     );
     assert!(
@@ -6918,7 +6918,7 @@ fn canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc() {
 fn canvas_reconstructs_checked_output_callable_from_semindex() {
     let path = write_fixture(
         "output_callable",
-        "app :: Output.Executable{ name: \"demo\", entry: launch }\n\nfn launch() { print(\"ok\") }\n",
+        "APP :: Output.Executable{ name: \"demo\", entry: launch }\n\nfn launch() { print(\"ok\") }\n",
     );
     let graph = jet::Canvas::graph_json_for_file(&path).expect("Output Canvas graph");
     let identity = format!(

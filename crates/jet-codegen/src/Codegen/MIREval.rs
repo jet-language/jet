@@ -49,7 +49,7 @@ use jet_foundation::MIR::{
     MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSourceFileId, MirStringPart, MirTagMarker,
     MirInternalTag, MirTaskGroupKind, MirTerminator, MirTestScopeMember, MirTextHoleKind,
     MirTextPatternPart, MirTraitMethodId, MirTraitRef, MirType, MirTypeDefKind, MirTypeKind,
-    MirUnaryOp, MirValueId, MirVariantPayload,
+    MirUnaryOp, MirValueId, MirVariantPayload, MirViewCopyKind, mir_view_copy_kind,
 };
 #[allow(dead_code, unused_imports)]
 mod mir_ui_kernel {
@@ -90,6 +90,11 @@ mod mir_measurement_prelude {
 mod mir_string_bytes_semantics {
     include!("../Prelude/Core/StringBytes.rs");
 }
+#[allow(dead_code)]
+mod mir_view_copy {
+    include!("../Prelude/Core/ViewCopy.rs");
+}
+
 mod mir_http_request_target {
     include!("../Prelude/Core/HttpRequestTarget.rs");
 }
@@ -1261,6 +1266,12 @@ fn mir_sql_binding(
         variant: variant.to_string(),
         args: payload.map_or_else(Vec::new, |value| vec![(None, value)]),
     };
+    if mir_value_contains_native_owned(value) {
+        return Err(mir_error_at(
+            "MIR SQL binding cannot carry a private native runtime resource",
+            span,
+        ));
+    }
     if mir_value_contains_moved(value) {
         return Err(mir_error_at("MIR value was moved", span));
     }
@@ -1320,6 +1331,59 @@ pub type MirEvalKey = jet_foundation::MIR::MirConstKey;
 pub use jet_foundation::MIR::{
     MirRuntimeClosure as MirClosureValue, MirRuntimeValue as MirEvalValue,
 };
+fn mir_eval_materialize_view(
+    value: MirEvalValue,
+    source_ty: &MirType,
+    result_ty: Option<&MirType>,
+    span: Span,
+) -> Result<MirEvalValue, Diagnostic> {
+    let kind = mir_view_copy_kind(source_ty).ok_or_else(|| {
+        mir_error_at(
+            &format!(
+                "MIR view materialization source `{}` has no canonical copy kernel",
+                source_ty.display_name()
+            ),
+            span,
+        )
+    })?;
+    if let Some(result_ty) = result_ty {
+        if !kind.target_matches(result_ty) {
+            return Err(mir_error_at(
+                &format!(
+                    "MIR view materialization `{}` has destination `{}`",
+                    kind.symbol(),
+                    result_ty.display_name()
+                ),
+                span,
+            ));
+        }
+    }
+
+    match kind {
+        MirViewCopyKind::String => {
+            let MirEvalValue::String(value) = value else {
+                return Err(mir_error_at(
+                    "MIR string view materialization received a non-string value",
+                    span,
+                ));
+            };
+            Ok(MirEvalValue::String(mir_view_copy::jet_string_view_copy(&value)))
+        }
+        MirViewCopyKind::List => match value {
+            MirEvalValue::List(values) => {
+                Ok(MirEvalValue::List(mir_view_copy::jet_view_copy(&values)))
+            }
+            MirEvalValue::Bytes(values) => {
+                Ok(MirEvalValue::Bytes(mir_view_copy::jet_view_copy(&values)))
+            }
+            _ => Err(mir_error_at(
+                "MIR list view materialization received a non-sequence value",
+                span,
+            )),
+        },
+    }
+}
+
 
 const MIR_HTTP_HANDLER_TOKEN_TYPE: &str = "__JetHttpHandler";
 
@@ -1661,6 +1725,7 @@ fn fragment_context<'a>(
     distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &'a HashMap<String, crate::AST::Type>,
     unit_families: &'a [crate::AST::UnitFamilyDef],
+    target_layout: jet_foundation::Layout::TargetLayout,
 ) -> crate::Codegen::TIR::MirFragmentContext<'a> {
     crate::Codegen::TIR::MirFragmentContext {
         funcs,
@@ -1677,6 +1742,7 @@ fn fragment_context<'a>(
         distinct_ranges,
         distinct_bases,
         unit_families,
+        target_layout,
     }
 }
 
@@ -1801,6 +1867,7 @@ fn eval_expr_bridge(
         request.distinct_ranges,
         request.distinct_bases,
         request.unit_families,
+        jet_foundation::Layout::TargetLayout::host(),
     );
     let (program, function) = crate::Codegen::TIR::lower_mir_fragment_expr(request.expr, &context)
         .map_err(|error| mir_error_at(&error.message, error.span))?;
@@ -1854,6 +1921,7 @@ fn eval_block_bridge<'a, 'debug>(
         request.distinct_ranges,
         request.distinct_bases,
         request.unit_families,
+        jet_foundation::Layout::TargetLayout::host(),
     );
     let (program, function) =
         crate::Codegen::TIR::lower_mir_fragment_block(request.stmts, &context)
@@ -4791,6 +4859,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if runtime_contains_moved(&value) {
                     continue;
                 }
+                if let RuntimeValue::SharedGuard(guard) = &value {
+                    if let Err(error) = guard.close(span) {
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                    continue;
+                }
                 if let Err(error) = self.invoke_callback_args(value, Vec::new(), span) {
                     if first_error.is_none() {
                         first_error = Some(error);
@@ -4833,6 +4909,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         for place in guards.into_iter().rev() {
             let value = self.move_place(frame_index, place, span)?;
             if runtime_contains_moved(&value) {
+                continue;
+            }
+            if let RuntimeValue::SharedGuard(guard) = &value {
+                guard.close(span)?;
                 continue;
             }
             let _ = self.invoke_callback_args(value, Vec::new(), span)?;
@@ -6408,11 +6488,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
             MirOperation::WritePlace { place, value }
             | MirOperation::ReplacePlace { place, value } => {
-                let is_scope_guard =
-                    self.value_type(frame_index, *value, span)?.nominal_name() == Some("ScopeGuard");
+                let value_ty = self.value_type(frame_index, *value, span)?;
+                let is_scope_guard = value_ty.nominal_name() == Some("ScopeGuard");
+                let is_shared_guard = mir_is_shared_guard_type(value_ty);
                 let value = self.transfer_value(frame_index, *value, span)?;
                 self.write_place(frame_index, *place, value, span)?;
-                if is_scope_guard {
+                if is_scope_guard || is_shared_guard {
                     if let Some(scope) = self.frames[frame_index].scopes.last().copied() {
                         let guards = self.frames[frame_index]
                             .scope_guards
@@ -6430,17 +6511,33 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
-            MirOperation::Copy { value } => {
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
+                let source_ty = self.value_type(frame_index, *value, span)?.clone();
                 let mut value = self.value(frame_index, *value, span)?;
                 if let RuntimeValue::Address(address) = &value {
                     let address = address.clone();
                     require_address_access(&address, MirAccess::Read, span)?;
                     value = self.read_place(address.frame, address.place, span)?;
                 }
+                if *materialize_view {
+                    let RuntimeValue::Data(data) = value else {
+                        return Err(mir_error_at(
+                            "MIR view materialization received a non-data runtime value",
+                            span,
+                        ));
+                    };
+                    value = RuntimeValue::Data(mir_eval_materialize_view(data, &source_ty, result_ty, span)?);
+                }
                 fork_runtime_value_owners(&mut value);
                 Ok(value)
             }
             MirOperation::Move { value } => {
+                self.take_value(frame_index, *value, span)
+            }
+            MirOperation::TraitBox { value, .. } => {
                 self.take_value(frame_index, *value, span)
             }
             MirOperation::Constant(constant) => mir_constant_to_runtime(constant, span),
@@ -7037,9 +7134,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 match value {
                     RuntimeValue::SharedGuard(guard) => self.deref_shared_guard(guard, span),
                     RuntimeValue::SharedCell(cell) => {
-                        if let Some(storage) = &cell.guard.storage {
-                            storage.refresh_scalar_shadow(span)?;
-                        }
+                        prepare_shared_cell_access(&cell, span)?;
                         Ok(RuntimeValue::Data(shared_payload_read(
                             &cell.guard.payload,
                             &cell.path,
@@ -7619,6 +7714,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MirOperation::Drop { value, kind } => {
                 let value_ty = self.value_type(frame_index, *value, span)?;
                 let is_scope_guard = value_ty.nominal_name() == Some("ScopeGuard");
+                let is_shared_guard = mir_is_shared_guard_type(value_ty);
                 let is_db_lease = value_ty.nominal_name() == Some("DbLease");
                 let removed = self.frames[frame_index].values.remove(value);
                 if let Some(removed) = removed {
@@ -7628,7 +7724,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     if runtime_contains_moved(&removed) {
                         return Ok(RuntimeValue::Data(MirEvalValue::Unit));
                     }
-                    if is_scope_guard {
+                    if is_shared_guard {
+                        let RuntimeValue::SharedGuard(guard) = removed else {
+                            return Err(mir_error_at(
+                                "MIR SharedGuard drop has the wrong runtime carrier",
+                                span,
+                            ));
+                        };
+                        guard.close(span)?;
+                    } else if is_scope_guard {
                         if !matches!(
                             &removed,
                             RuntimeValue::Closure(_) | RuntimeValue::Data(MirEvalValue::Closure(_))
@@ -9234,10 +9338,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 guard,
                 condition,
                 predicate,
-            } => self.eval_prelude_values(
+            } => self.eval_shared_guard_wait(
                 frame_index,
                 *call,
-                &[*guard, *condition, *predicate],
+                *guard,
+                *condition,
+                *predicate,
                 result_ty,
                 span,
             ),
@@ -9245,16 +9351,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 call,
                 condition,
                 all,
-            } => {
-                let condition = runtime_to_data(self.value(frame_index, *condition, span)?, span)?;
-                self.eval_prelude(
-                    *call,
-                    vec![condition, MirEvalValue::Bool(*all)],
-                    result_ty,
-                    span,
-                )
-                .map(RuntimeValue::Data)
-            }
+            } => self.eval_condition_notify(
+                frame_index,
+                *call,
+                *condition,
+                *all,
+                result_ty,
+                span,
+            ),
             MirSemanticOp::AllocNew {
                 call,
                 kind,
@@ -9555,6 +9659,29 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         values.into_iter().next().expect("checked Shared.new arity"),
                         span,
                     );
+                }
+                if route.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                    && route.module == "::jet_std::JetCondition"
+                    && route.member == "new"
+                {
+                    if route.symbol.name() != "jet_std::JetCondition::new"
+                        || route.abi != jet_foundation::MIR::MirPreludeAbi::Value
+                        || !matches!(
+                            &route.fallibility,
+                            jet_foundation::MIR::MirCallFallibility::Infallible
+                        )
+                        || !args.is_empty()
+                        || !type_args.is_empty()
+                        || !owner_type_args.is_empty()
+                    {
+                        return Err(mir_error_at(
+                            "MIR Condition.new has a non-canonical Prelude route",
+                            span,
+                        ));
+                    }
+                    return Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
+                        shared_protocol::JetConditionProtocol::new(),
+                    )));
                 }
                 if route.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
                     && route.module == "::jet_std::JetCell"
@@ -11125,8 +11252,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     None
                 } else {
                     let message = match diagnostics.as_slice() {
-                        [] => "condition failed".to_string(),
-                        [MirEvalValue::String(message)] => message.clone(),
+                        [] => jet_foundation::Outcome::jet_require_message(None).to_string(),
+                        [MirEvalValue::String(message)] => jet_foundation::Outcome::jet_require_message(Some(message)).to_string(),
                         [_] => return Err(mir_error_at("MIR require message is not String", span)),
                         _ => unreachable!("MIR require arity was validated above"),
                     };
@@ -11140,11 +11267,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     let [left, right] = diagnostics.as_slice() else {
                         unreachable!("MIR require_eq arity was validated above")
                     };
-                    Some(format!(
-                        "expected: {}, got: {}",
-                        mir_show(right),
-                        mir_show(left)
-                    ))
+                    let left_debug = mir_show(left);
+                    let right_debug = mir_show(right);
+                    Some(
+                        jet_foundation::Outcome::jet_require_eq_message(&left_debug, &right_debug)
+                            .to_string(),
+                    )
                 }
             }
             MirRequireKind::Panic => {
@@ -11842,10 +11970,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 mir_error_at("MIR SharedGuard has no active protocol state", span)
             })?;
         let state = map_shared_guard_state(state, path, editable, span)?;
+        let lease = target.lease.clone().ok_or_else(|| {
+            mir_error_at("MIR SharedGuard has no canonical lease", span)
+        })?;
+        let handle = lease.new_handle();
         let mapped = Rc::new(MirSharedGuard {
             state: Some(state),
             payload: target.payload.clone(),
             storage: target.storage.clone(),
+            lease: Some(lease),
+            handle: Some(handle),
         });
         let _ = result_ty;
         let names = self.shared_guard_path_names(&mapped, span)?;
@@ -11913,15 +12047,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             map_shared_guard_state(first_state, &first[common + 1..], editable, span)?;
         let second_state =
             map_shared_guard_state(second_state, &second[common + 1..], editable, span)?;
+        let lease = target.lease.clone().ok_or_else(|| {
+            mir_error_at("MIR SharedGuard has no canonical lease", span)
+        })?;
+        let first_handle = lease.new_handle();
+        let second_handle = lease.new_handle();
         let first_guard = Rc::new(MirSharedGuard {
             state: Some(first_state),
             payload: target.payload.clone(),
             storage: target.storage.clone(),
+            lease: Some(lease.clone()),
+            handle: Some(first_handle),
         });
         let second_guard = Rc::new(MirSharedGuard {
             state: Some(second_state),
             payload: target.payload.clone(),
             storage: target.storage.clone(),
+            lease: Some(lease),
+            handle: Some(second_handle),
         });
         let first_names = self.shared_guard_path_names(&first_guard, span)?;
         let second_names = self.shared_guard_path_names(&second_guard, span)?;
@@ -11933,6 +12076,95 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             (field_ids[1], RuntimeValue::SharedGuard(second_guard)),
         ]))
     }
+    fn eval_shared_guard_wait(
+        &mut self,
+        frame_index: usize,
+        call: MirPreludeCallId,
+        guard: MirValueId,
+        condition: MirValueId,
+        predicate: MirValueId,
+        _result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        self.ensure_shared_guard_route(call, span)?;
+        let RuntimeValue::SharedGuard(guard) = self.value(frame_index, guard, span)? else {
+            return Err(mir_error_at(
+                "MIR SharedGuard wait requires an opaque RuntimeValue guard",
+                span,
+            ));
+        };
+        // Canonical `JetSharedGuard::wait` returns `Result<(), String>`: an
+        // invalid guard traps, a read guard reports edit-required before the
+        // predicate runs, and an interrupted park reports cancellation.
+        let state = guard
+            .state
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| mir_error_at(shared_protocol::JET_SHARED_GUARD_INVALID, span))?;
+        let lease = guard
+            .lease
+            .clone()
+            .ok_or_else(|| mir_error_at("MIR SharedGuard has no canonical lease", span))?;
+        if let Err(message) = mir_shared_guard_wait_capability(state.as_ref(), span)? {
+            return Ok(mir_pattern_result(Err(message.to_string())));
+        }
+        let condition = mir_condition_protocol(self.value(frame_index, condition, span)?, span)?;
+        let predicate = self.value(frame_index, predicate, span)?;
+        loop {
+            let cell = self.deref_shared_guard(guard.clone(), span)?;
+            let result = self.invoke_callback(predicate.clone(), cell, span)?;
+            let ready = match runtime_to_data(result, span)? {
+                MirEvalValue::Bool(ready) => ready,
+                _ => return Err(mir_error_at("MIR SharedGuard wait predicate is not Bool", span)),
+            };
+            if ready {
+                return Ok(mir_pattern_result(Ok(MirEvalValue::Unit)));
+            }
+            let waiter: Arc<dyn shared_protocol::JetConditionWaiter> =
+                Arc::new(MirSharedConditionWaiter {
+                    slot: crate::scheduler::ParkSlot::new(),
+                });
+            if let Err(message) = lease.wait_once(state.as_ref(), &condition, waiter, span)? {
+                return Ok(mir_pattern_result(Err(message.to_string())));
+            }
+        }
+    }
+
+    fn eval_condition_notify(
+        &mut self,
+        frame_index: usize,
+        call: MirPreludeCallId,
+        condition: MirValueId,
+        all: bool,
+        _result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let row = self.prelude_row(call, span)?;
+        let (member, symbol) = if all {
+            ("notify_all", "jet_std::JetCondition::notify_all")
+        } else {
+            ("notify_one", "jet_std::JetCondition::notify_one")
+        };
+        if row.family != jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            || row.module != "core.shared_guard"
+            || row.member != member
+            || row.symbol.name() != symbol
+            || row.abi != jet_foundation::MIR::MirPreludeAbi::Value
+        {
+            return Err(mir_error_at(
+                "MIR Condition route has a non-canonical Prelude row",
+                span,
+            ));
+        }
+        let condition = mir_condition_protocol(self.value(frame_index, condition, span)?, span)?;
+        if all {
+            shared_protocol::jet_shared_condition_notify_all(&condition);
+        } else {
+            shared_protocol::jet_shared_condition_notify_one(&condition);
+        }
+        Ok(RuntimeValue::Data(MirEvalValue::Unit))
+    }
+
 
     fn ensure_shared_guard_route(
         &self,
@@ -11989,9 +12221,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             ));
         }
-        if let Some(storage) = &guard.storage {
-            storage.refresh_scalar_shadow(span)?;
-        }
         let path = self.shared_guard_path_names(&guard, span)?;
         let _ = shared_payload_read(&guard.payload, &path, span)?;
         Ok(RuntimeValue::SharedCell(Rc::new(MirSharedCell {
@@ -12031,6 +12260,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 state: None,
                 payload: storage.payload.clone(),
                 storage: Some(storage),
+                lease: None,
+                handle: None,
             }),
             path: Vec::new(),
         })))
@@ -12231,40 +12462,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         editable: bool,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        storage.refresh_scalar_shadow(span)?;
-        if !editable && storage.scalar.is_some() {
-            let guard = Rc::new(MirSharedGuard {
-                state: None,
-                payload: storage.payload.clone(),
-                storage: Some(storage.clone()),
-            });
-            let cell = RuntimeValue::SharedCell(Rc::new(MirSharedCell {
-                guard,
-                path: Vec::new(),
-            }));
-            return self.invoke_callback(callback, cell, span);
-        }
         let state = storage.acquire_guard(editable, span)?;
+        let (lease, handle) = MirSharedGuardLease::root(storage.clone(), &state, editable);
+        storage.sync_transfer_shadow(span)?;
         let guard = Rc::new(MirSharedGuard {
-            state: Some(state),
+            state: Some(state.clone()),
             payload: storage.payload.clone(),
-            storage: Some(storage.clone()),
+            storage: Some(storage),
+            lease: Some(lease),
+            handle: Some(handle),
         });
         let cell = RuntimeValue::SharedCell(Rc::new(MirSharedCell {
-            guard,
+            guard: guard.clone(),
             path: Vec::new(),
         }));
-        let result = self.invoke_callback(callback, cell, span)?;
-        if editable {
-            storage.commit_scalar_shadow(span)?;
-            let value = storage
-                .payload
-                .try_borrow()
-                .map_err(|_| mir_error_at("MIR Shared payload is already mutably borrowed", span))?
-                .clone();
-            storage.sync_transfer(&value);
+        let result = self.invoke_callback(callback, cell, span);
+        let close = guard.close(span);
+        drop(state);
+        match (result, close) {
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+            (Ok(result), Ok(())) => Ok(result),
         }
-        Ok(result)
     }
 
     fn eval_shared_projection(
@@ -12273,26 +12492,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         callback: RuntimeValue,
         span: Span,
     ) -> Result<Rc<MirSharedSnapshot>, Diagnostic> {
-        storage.refresh_scalar_shadow(span)?;
-        let permit = shared_protocol::jet_shared_acquire(&storage.protocol, false, || false)
-            .ok_or_else(|| mir_error_at("MIR Shared capture protocol acquisition failed", span))?;
+        let state = storage.acquire_guard(false, span)?;
+        let (lease, handle) = MirSharedGuardLease::root(storage.clone(), &state, false);
+        storage.sync_transfer_shadow(span)?;
         let revision = storage.revision.load(Ordering::Acquire);
-        let state = if storage.scalar.is_some() {
-            None
-        } else {
-            Some(storage.acquire_guard(false, span)?)
-        };
         let guard = Rc::new(MirSharedGuard {
-            state,
+            state: Some(state.clone()),
             payload: storage.payload.clone(),
             storage: Some(storage.clone()),
+            lease: Some(lease),
+            handle: Some(handle),
         });
         let cell = RuntimeValue::SharedCell(Rc::new(MirSharedCell {
-            guard,
+            guard: guard.clone(),
             path: Vec::new(),
         }));
-        let projected = self.invoke_callback(callback, cell, span)?;
-        drop(permit);
+        let projected_result = self.invoke_callback(callback, cell, span);
+        let close = guard.close(span);
+        let projected = match (projected_result, close) {
+            (Err(error), _) => return Err(error),
+            (Ok(_), Err(error)) => return Err(error),
+            (Ok(projected), Ok(())) => projected,
+        };
         Ok(Rc::new(MirSharedSnapshot {
             owner: storage,
             revision,
@@ -12591,9 +12812,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let RuntimeValue::SharedCell(cell) = value else {
             return Ok(value);
         };
-        if let Some(storage) = &cell.guard.storage {
-            storage.refresh_scalar_shadow(span)?;
-        }
+        prepare_shared_cell_access(&cell, span)?;
         Ok(RuntimeValue::Data(shared_payload_read(
             &cell.guard.payload,
             &cell.path,
@@ -13052,7 +13271,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 };
-                if !Rc::ptr_eq(&storage, &snapshot.owner) {
+                if !storage.same_physical_owner(&snapshot.owner) {
                     return Ok(revision_error("WrongOwner"));
                 }
                 if !snapshot.valid.load(Ordering::Acquire)
@@ -13084,13 +13303,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     drop(permit);
                     return Ok(self.shared_revision_result("Ok", Some(MirEvalValue::Bool(false))));
                 }
-                if let Some(scalar) = &storage.scalar {
-                    let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
-                    scalar.store(bits);
-                } else {
-                    *storage.payload.try_borrow_mut().map_err(|_| {
-                        mir_error_at("MIR Shared payload is already borrowed", span)
-                    })? = value;
+                if let Err(error) = storage.publish_at_revision(value, next, span) {
+                    drop(permit);
+                    return Err(error);
                 }
                 snapshot.valid.store(false, Ordering::Release);
                 storage.revision.store(next, Ordering::Release);
@@ -13128,10 +13343,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 let editable = member == "Shared.guard_edit";
                 let state = storage.acquire_guard(editable, span)?;
+                let (lease, handle) =
+                    MirSharedGuardLease::root(storage.clone(), &state, editable);
+                storage.sync_transfer_shadow(span)?;
                 Ok(RuntimeValue::SharedGuard(Rc::new(MirSharedGuard {
                     state: Some(state),
                     payload: storage.payload.clone(),
                     storage: Some(storage),
+                    lease: Some(lease),
+                    handle: Some(handle),
                 })))
             }
             _ => Err(mir_error_at(
@@ -13414,6 +13634,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
         debug: bool,
     ) -> Option<String> {
+        if mir_value_contains_native_owned(value) {
+            return None;
+        }
         let ty = substitute_print_type(ty, substitutions);
         if let Some(def) = self.native_printable_type_def(&ty) {
             let nested_substitutions = self.native_print_substitutions(def, &ty);
@@ -15171,6 +15394,48 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
     }
 
+    fn materialize_ambient_prelude_result(
+        &mut self,
+        result: crate::Comptime::AmbientMirPreludeResult,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let append = |target: &mut String, bytes: Vec<u8>, stream: &str| {
+            let text = String::from_utf8(bytes).map_err(|_| {
+                mir_error_at(
+                    &format!("MIR native Prelude {stream} capture is not UTF-8"),
+                    span,
+                )
+            })?;
+            target.push_str(&text);
+            Ok::<(), Diagnostic>(())
+        };
+        match result {
+            crate::Comptime::AmbientMirPreludeResult::Value(value) => {
+                Ok(RuntimeValue::Data(value))
+            }
+            crate::Comptime::AmbientMirPreludeResult::Effect {
+                value,
+                stdout,
+                stderr,
+            } => {
+                append(&mut self.stdout, stdout, "stdout")?;
+                append(&mut self.stderr, stderr, "stderr")?;
+                Ok(RuntimeValue::Data(value))
+            }
+            crate::Comptime::AmbientMirPreludeResult::Control {
+                value,
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                append(&mut self.stdout, stdout, "stdout")?;
+                append(&mut self.stderr, stderr, "stderr")?;
+                self.exit_code = exit_code;
+                Ok(RuntimeValue::Data(value))
+            }
+        }
+    }
+
     fn eval_prelude_runtime(
         &mut self,
         call: MirPreludeCallId,
@@ -15178,7 +15443,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         result_ty: Option<&MirType>,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        let row = self.prelude_row(call, span)?;
+        let row = self.prelude_row(call, span)?.clone();
         let view_range = row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && row.module == "core.builtin"
             && matches!(row.member.as_str(), "view_new" | "view_mut_new");
@@ -15192,6 +15457,33 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ),
                 span,
             ));
+        }
+        let native_args = args
+            .iter()
+            .cloned()
+            .map(|value| {
+                let value = self.materialize_runtime(value, span)?;
+                runtime_to_data(value, span)
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>();
+        if let Ok(native_args) = native_args {
+            let result_type = result_ty.cloned();
+            if let Some(result) = crate::Comptime::try_ambient_mir_prelude(
+                &row,
+                native_args.clone(),
+                result_type.clone(),
+                span,
+            ) {
+                return result.and_then(|result| self.materialize_ambient_prelude_result(result, span));
+            }
+            if let Some(result) = crate::Codegen::NativePreludeBridge::dispatch(
+                &row,
+                native_args,
+                result_type,
+                span,
+            ) {
+                return result.and_then(|result| self.materialize_ambient_prelude_result(result, span));
+            }
         }
         let member = row.member.clone();
         if matches!(
@@ -18713,10 +19005,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.runtime_to_ct(value, span)
             }
             RuntimeValue::SharedCell(cell) => {
+                if let Some(state) = cell.guard.state.as_ref() {
+                    if !state.held() {
+                        return Err(mir_error_at(
+                            shared_protocol::JET_SHARED_GUARD_INVALID,
+                            span,
+                        ));
+                    }
+                }
                 let storage = cell.guard.storage.as_ref().ok_or_else(|| {
                     mir_error_at("MIR Shared value has no transferable storage", span)
                 })?;
                 Ok(mir_runtime_owner_value(MirSharedTransfer {
+                    protocol: storage.protocol.clone(),
+                    scalar: storage.scalar.clone(),
+                    revision: storage.revision.clone(),
                     payload: storage.transfer.clone(),
                     path: cell.path.clone(),
                 }))
@@ -18970,6 +19273,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .foreign
             .iter()
             .find(|foreign| foreign.id == id)
+            .cloned()
             .ok_or_else(|| {
                 mir_error_at("MIR foreign call ID has no canonical foreign row", span)
             })?;
@@ -19010,18 +19314,122 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let args = args
-            .into_iter()
-            .map(|value| match value {
-                RuntimeValue::ForeignHandle { token } => token
-                    .raw()
-                    .map(MirEvalValue::Int)
-                    .ok_or_else(|| mir_error_at("MIR foreign handle was moved", span)),
-                value => runtime_to_data(value, span),
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
-        match crate::Comptime::try_ambient_mir_extern_call(foreign, args, span) {
-            Some(Ok(value)) => {
+        let mut write_places = Vec::new();
+        let mut runtime_args = Vec::with_capacity(args.len());
+        for (index, value) in args.into_iter().enumerate() {
+            match value {
+                RuntimeValue::ForeignHandle { token } => {
+                    let raw = token
+                        .raw()
+                        .ok_or_else(|| mir_error_at("MIR foreign handle was moved", span))?;
+                    runtime_args.push(MirEvalValue::Int(raw));
+                }
+                RuntimeValue::Address(address) if address.access == MirAccess::Write => {
+                    let current = self.read_place(address.frame, address.place, span)?;
+                    match current {
+                        RuntimeValue::ForeignHandle { token } => {
+                            let raw = token
+                                .raw()
+                                .ok_or_else(|| mir_error_at("MIR foreign handle was moved", span))?;
+                            write_places.push((index, address, Some(token)));
+                            runtime_args.push(MirEvalValue::Int(raw));
+                        }
+                        current => {
+                            write_places.push((index, address, None));
+                            runtime_args.push(runtime_to_data(current, span)?);
+                        }
+                    }
+                }
+                RuntimeValue::Address(address) => {
+                    runtime_args.push(runtime_to_data(
+                        self.read_place(address.frame, address.place, span)?,
+                        span,
+                    )?);
+                }
+                value => runtime_args.push(runtime_to_data(value, span)?),
+            }
+        }
+        for (index, parameter) in foreign.params.iter().enumerate() {
+            if parameter.access == MirAccess::Write
+                && !write_places
+                    .iter()
+                    .any(|(write_index, _, _)| *write_index == index)
+            {
+                return Err(mir_error_at(
+                    "MIR writable foreign parameter has no live place",
+                    span,
+                ));
+            }
+        }
+        match crate::Comptime::try_ambient_mir_extern_call(&foreign, runtime_args, span) {
+            Some(Ok(result)) => {
+                let mut seen = vec![false; foreign.params.len()];
+                let mut validated_writebacks =
+                    Vec::with_capacity(result.writebacks.len());
+                for writeback in result.writebacks {
+                    let index = writeback.parameter;
+                    if index >= foreign.params.len() {
+                        return Err(mir_error_at(
+                            "MIR foreign provider returned an out-of-range writeback",
+                            span,
+                        ));
+                    }
+                    if foreign.params[index].access != MirAccess::Write {
+                        return Err(mir_error_at(
+                            "MIR foreign provider returned a writeback for a read-only parameter",
+                            span,
+                        ));
+                    }
+                    if seen[index] {
+                        return Err(mir_error_at(
+                            "MIR foreign provider returned a duplicate writeback",
+                            span,
+                        ));
+                    }
+                    let Some((_, address, handle)) =
+                        write_places.iter().find(|(parameter, _, _)| *parameter == index)
+                    else {
+                        return Err(mir_error_at(
+                            "MIR foreign provider returned a writeback without a live place",
+                            span,
+                        ));
+                    };
+                    if let Some(token) = handle {
+                        let raw = token
+                            .raw()
+                            .ok_or_else(|| mir_error_at("MIR foreign handle was moved", span))?;
+                        if writeback.value != MirEvalValue::Int(raw) {
+                            return Err(mir_error_at(
+                                "MIR foreign provider changed a writable opaque handle token",
+                                span,
+                            ));
+                        }
+                    }
+                    validated_writebacks.push((
+                        address.clone(),
+                        handle.clone(),
+                        writeback.value,
+                    ));
+                    seen[index] = true;
+                }
+                for (index, _, _) in &write_places {
+                    if !seen[*index] {
+                        return Err(mir_error_at(
+                            "MIR foreign provider omitted a writable parameter writeback",
+                            span,
+                        ));
+                    }
+                }
+                for (address, handle, value) in validated_writebacks {
+                    if handle.is_none() {
+                        self.write_place(
+                            address.frame,
+                            address.place,
+                            RuntimeValue::Data(value),
+                            span,
+                        )?;
+                    }
+                }
                 for token in close_tokens {
                     let _ = token.take_raw();
                 }
@@ -19033,7 +19441,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         == Some(*handle)
                 });
                 if let Some(handle) = return_handle {
-                    match value {
+                    match result.value {
                         MirEvalValue::Int(raw) => Ok(RuntimeValue::ForeignHandle {
                             token: MirHandleToken::new(handle, raw),
                         }),
@@ -19043,7 +19451,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         )),
                     }
                 } else {
-                    Ok(RuntimeValue::Data(value))
+                    Ok(RuntimeValue::Data(result.value))
                 }
             }
             Some(Err(error)) => Err(error),
@@ -19105,15 +19513,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )),
             };
         }
-        let close_foreign = lifecycle.close_foreign.or_else(|| {
-            self.program
-                .foreign
-                .iter()
-                .find(|foreign| {
-                    foreign.handle == Some(handle) && foreign.name == lifecycle.payload.close
-                })
-                .map(|foreign| foreign.id)
-        });
+        let close_foreign = lifecycle.close_foreign;
         let close_function = lifecycle.close;
         if let Some(close) = close_foreign {
             let foreign = self
@@ -19127,7 +19527,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 vec![MirEvalValue::Int(raw)],
                 span,
             ) {
-                Some(Ok(_)) => Ok(()),
+                Some(Ok(result)) if result.writebacks.is_empty() => Ok(()),
+                Some(Ok(_)) => Err(mir_error_at(
+                    "MIR handle close returned writable parameter changes",
+                    span,
+                )),
                 Some(Err(error)) => Err(error),
                 None => Err(mir_error_at(
                     "MIR handle close has no interpreter ambient host binding",
@@ -21806,9 +22210,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         arg.span,
                     )
                 })?;
-            if !matches!(target.kind(), MirTypeKind::TraitObject(_)) {
+            if !matches!(target.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
                 return Err(mir_error_at(
-                    "MIR trait coercion target is not a trait object",
+                    "MIR trait coercion target is not a single-trait object",
                     arg.span,
                 ));
             }
@@ -22594,9 +22998,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     Ok((RuntimeValue::Moved, value))
                 }
                 RuntimeValue::SharedCell(cell) if rest.is_empty() => {
-                    if let Some(storage) = &cell.guard.storage {
-                        storage.refresh_scalar_shadow(span)?;
-                    }
+                    prepare_shared_cell_access(&cell, span)?;
                     let value = RuntimeValue::Data(shared_payload_read(
                         &cell.guard.payload,
                         &cell.path,
@@ -22884,9 +23286,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.read_place(address.frame, address.place, span)
                 }
                 RuntimeValue::SharedCell(cell) => {
-                    if let Some(storage) = &cell.guard.storage {
-                        storage.refresh_scalar_shadow(span)?;
-                    }
+                    prepare_shared_cell_access(&cell, span)?;
                     Ok(RuntimeValue::Data(shared_payload_read(
                         &cell.guard.payload,
                         &cell.path,
@@ -23191,9 +23591,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     Ok(RuntimeValue::Address(address))
                 }
                 RuntimeValue::SharedCell(cell) => {
-                    if let Some(storage) = &cell.guard.storage {
-                        storage.refresh_scalar_shadow(span)?;
-                    }
+                    prepare_shared_cell_access(&cell, span)?;
                     let mut nested = cell.as_ref().clone();
                     nested.path.push(name.clone());
                     for step in rest {
@@ -24664,6 +25062,9 @@ struct ValueAlias {
 #[derive(Clone)]
 #[allow(dead_code)]
 struct MirSharedTransfer {
+    protocol: Arc<shared_protocol::JetSharedProtocol>,
+    scalar: Option<Arc<shared_protocol::JetSharedAtomic>>,
+    revision: Arc<AtomicU64>,
     payload: Arc<Mutex<MirEvalValue>>,
     path: Vec<String>,
 }
@@ -24789,11 +25190,154 @@ impl MirSharedTransaction {
     }
 }
 
+struct MirSharedGuardLease {
+    storage: Rc<MirSharedStorage>,
+    permit: Arc<shared_protocol::JetSharedPermit>,
+    editable: bool,
+    handles: Cell<usize>,
+    released: Cell<bool>,
+    /// The current edit epoch has not been published to the cross-task
+    /// carrier yet. An edit lease starts dirty so closing it always publishes
+    /// once, matching the native root lease commit.
+    dirty: Cell<bool>,
+}
+
+struct MirSharedGuardHandle {
+    lease: Rc<MirSharedGuardLease>,
+    closed: Cell<bool>,
+}
+
+impl MirSharedGuardLease {
+    fn root(
+        storage: Rc<MirSharedStorage>,
+        state: &Arc<shared_protocol::JetSharedGuardState>,
+        editable: bool,
+    ) -> (Rc<Self>, Rc<MirSharedGuardHandle>) {
+        let lease = Rc::new(Self {
+            storage,
+            permit: state.permit_arc(),
+            editable,
+            handles: Cell::new(0),
+            released: Cell::new(false),
+            dirty: Cell::new(editable),
+        });
+        let handle = lease.new_handle();
+        (lease, handle)
+    }
+
+    fn new_handle(self: &Rc<Self>) -> Rc<MirSharedGuardHandle> {
+        self.handles.set(self.handles.get().saturating_add(1));
+        Rc::new(MirSharedGuardHandle {
+            lease: self.clone(),
+            closed: Cell::new(false),
+        })
+    }
+
+    fn mark_edited(&self) {
+        self.dirty.set(true);
+    }
+
+    /// Publish the pending edit epoch (payload, scalar shadow, revision) while
+    /// the edit permit is held. A clean epoch is never published twice.
+    fn publish(&self, span: Span) -> Result<(), Diagnostic> {
+        if !self.editable || !self.dirty.get() || !self.permit.held() {
+            return Ok(());
+        }
+        self.storage.commit_guard_shadow(span)?;
+        self.dirty.set(false);
+        Ok(())
+    }
+
+    /// One canonical `SharedGuard.wait` park step. Other tasks may read or
+    /// edit the cell once the permit is released, so the pending epoch is
+    /// published first; the local view is refreshed only after reacquisition.
+    /// `Ok(Err(message))` is the checked wait outcome; an invalid guard traps.
+    fn wait_once(
+        &self,
+        state: &shared_protocol::JetSharedGuardState,
+        condition: &Arc<shared_protocol::JetConditionProtocol>,
+        waiter: Arc<dyn shared_protocol::JetConditionWaiter>,
+        span: Span,
+    ) -> Result<Result<(), &'static str>, Diagnostic> {
+        if let Err(message) = mir_shared_guard_wait_capability(state, span)? {
+            return Ok(Err(message));
+        }
+        self.publish(span)?;
+        match shared_protocol::jet_shared_guard_wait_once(Some(state), Some(condition), waiter) {
+            Ok(()) => self.storage.sync_transfer_shadow(span).map(Ok),
+            Err(error) if error.traps() => Err(mir_error_at(error.message(), span)),
+            Err(error) => Ok(Err(error.message())),
+        }
+    }
+
+    fn close_handle(&self, span: Span) -> Result<(), Diagnostic> {
+        if self.released.get() {
+            return Ok(());
+        }
+        let remaining = self.handles.get().saturating_sub(1);
+        self.handles.set(remaining);
+        if remaining != 0 {
+            return Ok(());
+        }
+        let result = self.publish(span);
+        self.permit.release();
+        self.released.set(true);
+        result
+    }
+}
+
+/// Split the canonical wait capability check into the trap (invalid guard)
+/// and the checked `Err` outcome (edit required).
+fn mir_shared_guard_wait_capability(
+    state: &shared_protocol::JetSharedGuardState,
+    span: Span,
+) -> Result<Result<(), &'static str>, Diagnostic> {
+    match shared_protocol::jet_shared_guard_require_edit(state) {
+        Ok(()) => Ok(Ok(())),
+        Err(message) if message == shared_protocol::JET_SHARED_GUARD_INVALID => {
+            Err(mir_error_at(message, span))
+        }
+        Err(message) => Ok(Err(message)),
+    }
+}
+
+impl Drop for MirSharedGuardLease {
+    fn drop(&mut self) {
+        if !self.released.get() {
+            let _ = self.close_handle(Span::new(0, 0));
+        }
+    }
+}
+
+impl MirSharedGuardHandle {
+    fn close(&self, span: Span) -> Result<(), Diagnostic> {
+        if self.closed.replace(true) {
+            return Ok(());
+        }
+        self.lease.close_handle(span)
+    }
+}
+
+impl Drop for MirSharedGuardHandle {
+    fn drop(&mut self) {
+        let _ = self.close(Span::new(0, 0));
+    }
+}
+
 #[derive(Clone)]
 struct MirSharedGuard {
     state: Option<Arc<shared_protocol::JetSharedGuardState>>,
     payload: Rc<RefCell<MirEvalValue>>,
     storage: Option<Rc<MirSharedStorage>>,
+    lease: Option<Rc<MirSharedGuardLease>>,
+    handle: Option<Rc<MirSharedGuardHandle>>,
+}
+impl MirSharedGuard {
+    fn close(&self, span: Span) -> Result<(), Diagnostic> {
+        self.handle
+            .as_ref()
+            .map_or(Ok(()), |handle| handle.close(span))
+    }
 }
 
 impl std::fmt::Debug for MirSharedGuard {
@@ -24811,6 +25355,59 @@ struct MirSharedCell {
     guard: Rc<MirSharedGuard>,
     path: Vec<String>,
 }
+fn prepare_shared_cell_access(cell: &MirSharedCell, span: Span) -> Result<(), Diagnostic> {
+    if let Some(state) = cell.guard.state.as_ref() {
+        if !state.held() {
+            return Err(mir_error_at(
+                shared_protocol::JET_SHARED_GUARD_INVALID,
+                span,
+            ));
+        }
+        return Ok(());
+    }
+    if let Some(storage) = &cell.guard.storage {
+        storage.refresh_transfer_shadow(span)?;
+    }
+    Ok(())
+}
+fn mir_condition_protocol(
+    value: RuntimeValue,
+    span: Span,
+) -> Result<Arc<shared_protocol::JetConditionProtocol>, Diagnostic> {
+    let RuntimeValue::Ambient(value) = value else {
+        return Err(mir_error_at(
+            "MIR Condition value has no canonical Prelude owner",
+            span,
+        ));
+    };
+    mir_runtime_owner::<Arc<shared_protocol::JetConditionProtocol>>(&value)
+        .cloned()
+        .ok_or_else(|| mir_error_at("MIR Condition value has the wrong owner", span))
+}
+
+struct MirSharedConditionWaiter {
+    slot: Arc<crate::scheduler::ParkSlot>,
+}
+
+impl shared_protocol::JetConditionWaiter for MirSharedConditionWaiter {
+    fn park(&self) -> Result<(), ()> {
+        crate::scheduler::jet_scheduler_yield("Shared condition", &self.slot, None);
+        Ok(())
+    }
+
+    fn wake(&self) {
+        self.slot.wake();
+    }
+
+    /// Canonical parity with CoreLib's scheduler waiter: a cancelled task or an
+    /// expired wait point reports cancellation even when a pending notification
+    /// skips the park and the protocol goes straight to reacquisition.
+    fn interrupted(&self) -> bool {
+        crate::scheduler::jet_scheduler_wait_point_interrupted()
+    }
+}
+
+
 
 fn mir_shared_scalar_parts(
     value: &MirEvalValue,
@@ -24914,18 +25511,47 @@ impl MirSharedStorage {
     }
 
     #[allow(dead_code)]
-    fn from_transfer(transfer: Arc<Mutex<MirEvalValue>>) -> Rc<Self> {
-        let value = transfer
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        Rc::new(Self {
-            protocol: shared_protocol::JetSharedProtocol::new(),
-            scalar: None,
-            revision: Arc::new(AtomicU64::new(0)),
+    fn from_transfer(
+        transfer: MirSharedTransfer,
+        span: Span,
+    ) -> Result<Rc<Self>, Diagnostic> {
+        let MirSharedTransfer {
+            protocol,
+            scalar,
+            revision,
+            payload: transfer_payload,
+            ..
+        } = transfer;
+        // Handle construction must remain nonblocking; each operation refreshes
+        // the local view after acquiring the canonical Shared permit.
+        let value = if let Some(scalar) = &scalar {
+            mir_shared_scalar_value(scalar.kind(), scalar.load(), span)?
+        } else {
+            transfer_payload
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone()
+        };
+        Ok(Rc::new(Self {
+            protocol,
+            scalar,
+            revision,
             payload: Rc::new(RefCell::new(value)),
-            transfer,
-        })
+            transfer: transfer_payload,
+        }))
+    }
+    fn same_physical_owner(&self, other: &Self) -> bool {
+        if !Arc::ptr_eq(&self.protocol, &other.protocol)
+            || !Arc::ptr_eq(&self.revision, &other.revision)
+            || !Arc::ptr_eq(&self.transfer, &other.transfer)
+        {
+            return false;
+        }
+        match (&self.scalar, &other.scalar) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
     }
 
     fn sync_transfer(&self, value: &MirEvalValue) {
@@ -24933,6 +25559,31 @@ impl MirSharedStorage {
             .transfer
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = value.clone();
+    }
+
+    /// Refresh the interpreter-local view from the canonical cross-machine
+    /// payload. Callers holding a Shared guard/permit use this directly.
+    fn sync_transfer_shadow(&self, span: Span) -> Result<(), Diagnostic> {
+        if self.scalar.is_some() {
+            return self.refresh_scalar_shadow(span);
+        }
+        let value = self
+            .transfer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        *self
+            .payload
+            .try_borrow_mut()
+            .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? = value;
+        Ok(())
+    }
+
+    /// Refresh a transferred view under the canonical Shared read permit.
+    fn refresh_transfer_shadow(&self, span: Span) -> Result<(), Diagnostic> {
+        let _permit = shared_protocol::jet_shared_acquire(&self.protocol, false, || false)
+            .ok_or_else(|| mir_error_at("MIR Shared read protocol acquisition failed", span))?;
+        self.sync_transfer_shadow(span)
     }
 
     fn next_revision(&self, span: Span) -> Result<u64, Diagnostic> {
@@ -24952,6 +25603,11 @@ impl MirSharedStorage {
         if let Some(scalar) = &self.scalar {
             let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
             scalar.store(bits);
+            *self
+                .payload
+                .try_borrow_mut()
+                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? =
+                value.clone();
         } else {
             *self
                 .payload
@@ -24965,11 +25621,12 @@ impl MirSharedStorage {
     }
 
     fn read(&self, span: Span) -> Result<MirEvalValue, Diagnostic> {
+        let _permit = shared_protocol::jet_shared_acquire(&self.protocol, false, || false)
+            .ok_or_else(|| mir_error_at("MIR Shared read protocol acquisition failed", span))?;
         if let Some(scalar) = &self.scalar {
             return mir_shared_scalar_value(scalar.kind(), scalar.load(), span);
         }
-        let _permit = shared_protocol::jet_shared_acquire(&self.protocol, false, || false)
-            .ok_or_else(|| mir_error_at("MIR Shared read protocol acquisition failed", span))?;
+        self.sync_transfer_shadow(span)?;
         self.payload
             .try_borrow()
             .map(|value| value.clone())
@@ -24980,41 +25637,23 @@ impl MirSharedStorage {
         let _permit = shared_protocol::jet_shared_acquire(&self.protocol, true, || false)
             .ok_or_else(|| mir_error_at("MIR Shared edit protocol acquisition failed", span))?;
         let next = self.next_revision(span)?;
-        if let Some(scalar) = &self.scalar {
-            let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
-            scalar.store(bits);
-        } else {
-            *self
-                .payload
-                .try_borrow_mut()
-                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? =
-                value.clone();
-        }
-        self.sync_transfer(&value);
-        self.revision.store(next, Ordering::Release);
-        Ok(())
+        self.publish_at_revision(value, next, span)
     }
 
     fn replace(&self, value: MirEvalValue, span: Span) -> Result<MirEvalValue, Diagnostic> {
         let _permit = shared_protocol::jet_shared_acquire(&self.protocol, true, || false)
             .ok_or_else(|| mir_error_at("MIR Shared edit protocol acquisition failed", span))?;
         let next = self.next_revision(span)?;
-        if let Some(scalar) = &self.scalar {
-            let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
-            let previous = mir_shared_scalar_value(scalar.kind(), scalar.swap(bits), span)?;
-            self.sync_transfer(&value);
-            self.revision.store(next, Ordering::Release);
-            return Ok(previous);
-        }
-        let mut payload = self
-            .payload
-            .try_borrow_mut()
-            .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))?;
-        let next_value = value.clone();
-        let previous = std::mem::replace(&mut *payload, value);
-        drop(payload);
-        self.sync_transfer(&next_value);
-        self.revision.store(next, Ordering::Release);
+        let previous = if let Some(scalar) = &self.scalar {
+            mir_shared_scalar_value(scalar.kind(), scalar.load(), span)?
+        } else {
+            self.sync_transfer_shadow(span)?;
+            self.payload
+                .try_borrow()
+                .map(|value| value.clone())
+                .map_err(|_| mir_error_at("MIR Shared payload is already mutably borrowed", span))?
+        };
+        self.publish_at_revision(value, next, span)?;
         Ok(previous)
     }
 
@@ -25025,6 +25664,7 @@ impl MirSharedStorage {
         let value = if let Some(scalar) = &self.scalar {
             mir_shared_scalar_value(scalar.kind(), scalar.load(), span)?
         } else {
+            self.sync_transfer_shadow(span)?;
             self.payload
                 .try_borrow()
                 .map(|value| value.clone())
@@ -25055,17 +25695,17 @@ impl MirSharedStorage {
         Ok(())
     }
 
-    fn commit_scalar_shadow(&self, span: Span) -> Result<(), Diagnostic> {
-        let Some(scalar) = &self.scalar else {
-            return Ok(());
-        };
+    fn commit_guard_shadow(&self, span: Span) -> Result<(), Diagnostic> {
         let next = self.next_revision(span)?;
         let value = self
             .payload
             .try_borrow()
+            .map(|value| value.clone())
             .map_err(|_| mir_error_at("MIR Shared payload is already mutably borrowed", span))?;
-        let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
-        scalar.store(bits);
+        if let Some(scalar) = &self.scalar {
+            let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
+            scalar.store(bits);
+        }
         self.sync_transfer(&value);
         self.revision.store(next, Ordering::Release);
         Ok(())
@@ -26363,6 +27003,39 @@ enum MoveStep {
     Deref,
 }
 
+fn mir_value_contains_native_owned(value: &MirEvalValue) -> bool {
+    match value {
+        MirEvalValue::NativeCursor(_) | MirEvalValue::NativeOwned(_) => true,
+        MirEvalValue::List(values) => values.iter().any(mir_value_contains_native_owned),
+        MirEvalValue::Map(values) => values
+            .iter()
+            .any(|(_, value)| mir_value_contains_native_owned(value)),
+        MirEvalValue::Struct { fields, .. } => fields
+            .iter()
+            .any(|(_, value)| mir_value_contains_native_owned(value)),
+        MirEvalValue::Enum { args, .. } => args
+            .iter()
+            .any(|(_, value)| mir_value_contains_native_owned(value)),
+        MirEvalValue::Present(value) | MirEvalValue::FailedTold(value) => {
+            mir_value_contains_native_owned(value)
+        }
+        MirEvalValue::Closure(closure) => closure
+            .captures
+            .iter()
+            .any(mir_value_contains_native_owned),
+        MirEvalValue::Int(_)
+        | MirEvalValue::BigInt(_)
+        | MirEvalValue::Float { .. }
+        | MirEvalValue::Bool(_)
+        | MirEvalValue::Char(_)
+        | MirEvalValue::String(_)
+        | MirEvalValue::Bytes(_)
+        | MirEvalValue::Absent { .. }
+        | MirEvalValue::Moved
+        | MirEvalValue::Unit => false,
+    }
+}
+
 fn mir_value_contains_moved(value: &MirEvalValue) -> bool {
     match value {
         MirEvalValue::Moved => true,
@@ -26388,6 +27061,8 @@ fn mir_value_contains_moved(value: &MirEvalValue) -> bool {
         | MirEvalValue::String(_)
         | MirEvalValue::Bytes(_)
         | MirEvalValue::Absent { .. }
+        | MirEvalValue::NativeCursor(_)
+        | MirEvalValue::NativeOwned(_)
         | MirEvalValue::Unit => false,
     }
 }
@@ -27005,6 +27680,11 @@ fn write_shared_cell(
         .ok_or_else(|| mir_error_at("MIR SharedCell has no active protocol state", span))?;
     shared_protocol::jet_shared_guard_require_edit(state)
         .map_err(|message| mir_error_at(message, span))?;
+    let lease = cell
+        .guard
+        .lease
+        .as_ref()
+        .ok_or_else(|| mir_error_at("MIR SharedGuard edit has no canonical lease", span))?;
     let mut root = cell
         .guard
         .payload
@@ -27016,7 +27696,10 @@ fn write_shared_cell(
         .cloned()
         .map(PathStep::Field)
         .collect::<Vec<_>>();
-    replace_path(&mut root, &path, replacement, span)
+    replace_path(&mut root, &path, replacement, span)?;
+    drop(root);
+    lease.mark_edited();
+    Ok(())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MirTimeKind {
@@ -27928,14 +28611,17 @@ fn ct_contains_runtime_owner(value: &CtValue) -> bool {
 
 fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnostic> {
     if let Some(transfer) = mir_runtime_owner::<MirSharedTransfer>(&value).cloned() {
-        let storage = MirSharedStorage::from_transfer(transfer.payload);
+        let path = transfer.path.clone();
+        let storage = MirSharedStorage::from_transfer(transfer, span)?;
         return Ok(RuntimeValue::SharedCell(Rc::new(MirSharedCell {
             guard: Rc::new(MirSharedGuard {
                 state: None,
                 payload: storage.payload.clone(),
                 storage: Some(storage),
+                lease: None,
+                handle: None,
             }),
-            path: transfer.path,
+            path,
         })));
     }
     if ct_contains_runtime_owner(&value) {
@@ -27948,11 +28634,16 @@ fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnosti
 fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diagnostic> {
     match value {
         RuntimeValue::Moved => Err(mir_error_at("MIR value was moved", span)),
+        RuntimeValue::Data(value) if mir_value_contains_native_owned(&value) => {
+            Err(mir_error_at(
+                "MIR value contains a private native runtime resource and is not materializable",
+                span,
+            ))
+        }
         RuntimeValue::Data(value) if mir_value_contains_moved(&value) => {
             Err(mir_error_at("MIR value was moved", span))
         }
         RuntimeValue::Data(value) => Ok(value),
-        RuntimeValue::Absent { element } => Ok(MirEvalValue::Absent { element }),
         RuntimeValue::Ambient(value) => {
             let Some(view) = mir_runtime_owner::<MirAllocatorView>(&value) else {
                 return Err(mir_error_at(
@@ -28346,9 +29037,7 @@ fn project_field_id_named(
     span: Span,
 ) -> Result<RuntimeValue, Diagnostic> {
     if let RuntimeValue::SharedCell(cell) = value {
-        if let Some(storage) = &cell.guard.storage {
-            storage.refresh_scalar_shadow(span)?;
-        }
+        prepare_shared_cell_access(&cell, span)?;
         let mut path = cell.path.clone();
         path.push(name.to_string());
         return Ok(RuntimeValue::Data(shared_payload_read(
@@ -28491,6 +29180,7 @@ fn replace_path(
                 return Err(mir_error_at(
                     &format!("MIR field `{name}` is not present"),
                     span,
+
                 ));
             };
             replace_path(value, &path[1..], replacement, span)
@@ -28616,6 +29306,14 @@ fn mir_values_equal(left: &MirEvalValue, right: &MirEvalValue) -> bool {
                 .unwrap_or(false)
         }
         _ => left == right,
+    }
+}
+
+fn mir_is_shared_guard_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } => mir_is_shared_guard_type(inner),
+        MirTypeKind::Apply { name, .. } => name.name == crate::Syntax::TYPE_SHARED_GUARD,
+        _ => false,
     }
 }
 
@@ -29115,8 +29813,10 @@ fn mir_show(value: &MirEvalValue) -> String {
         }
         MirEvalValue::Present(value) => format!("Present({})", mir_show(value)),
         MirEvalValue::FailedTold(value) => format!("FailedTold({})", mir_show(value)),
-        MirEvalValue::Absent { .. } => "Absent".to_string(),
         MirEvalValue::Unit => "()".to_string(),
+        MirEvalValue::NativeCursor(_) | MirEvalValue::NativeOwned(_) => {
+            "<native-runtime-resource>".to_string()
+        }
         MirEvalValue::Closure(closure) => format!("<closure {:?}>", closure.function),
     }
 }
@@ -29236,4 +29936,707 @@ fn mir_error_at(message: &str, span: Span) -> Diagnostic {
 #[allow(dead_code)]
 mod mir_fixed_arithmetic {
     include!("../Prelude/Core/FixedArithmetic.rs");
+}
+
+#[cfg(test)]
+mod shared_transfer_tests {
+    use super::*;
+
+    fn span() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn struct_value(number: i64) -> MirEvalValue {
+        MirEvalValue::Struct {
+            type_name: "TransferPayload".to_string(),
+            fields: vec![("number".to_string(), MirEvalValue::Int(number))],
+        }
+    }
+    fn direct_edit_guard(storage: &Rc<MirSharedStorage>) -> Rc<MirSharedGuard> {
+        let state = storage.acquire_guard(true, span()).expect("edit guard");
+        let (lease, handle) = MirSharedGuardLease::root(storage.clone(), &state, true);
+        Rc::new(MirSharedGuard {
+            state: Some(state),
+            payload: storage.payload.clone(),
+            storage: Some(storage.clone()),
+            lease: Some(lease),
+            handle: Some(handle),
+        })
+    }
+
+    #[test]
+    fn task_machine_transfer_preserves_shared_identity_and_updates() {
+        let span = span();
+        let source = MirSharedStorage::new(struct_value(1));
+        let transfer = MirSharedTransfer {
+            protocol: source.protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let task_value = mir_runtime_owner_value(transfer);
+        let peer_value = runtime_from_ct(task_value, span).expect("task handoff");
+        let RuntimeValue::SharedCell(peer_cell) = peer_value else {
+            panic!("task handoff did not restore a SharedCell");
+        };
+        let peer = peer_cell
+            .guard
+            .storage
+            .as_ref()
+            .expect("restored SharedCell storage")
+            .clone();
+
+        assert!(Arc::ptr_eq(&source.protocol, &peer.protocol));
+        assert!(Arc::ptr_eq(&source.revision, &peer.revision));
+        assert!(Arc::ptr_eq(&source.transfer, &peer.transfer));
+
+        source
+            .set(struct_value(2), span)
+            .expect("source publication");
+        assert_eq!(peer.read(span).expect("peer refresh"), struct_value(2));
+
+        peer.set(struct_value(3), span)
+            .expect("peer publication");
+        assert_eq!(source.read(span).expect("source refresh"), struct_value(3));
+    }
+
+    #[test]
+    fn transferred_shared_snapshot_observes_stale_revision() {
+        let span = span();
+        let source = MirSharedStorage::new(MirEvalValue::Int(7));
+        let snapshot = source.snapshot(span).expect("snapshot");
+        let transfer = MirSharedTransfer {
+            protocol: source.protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let peer = MirSharedStorage::from_transfer(transfer, span).expect("peer storage");
+        assert!(source.same_physical_owner(&peer));
+        peer.set(MirEvalValue::Int(8), span)
+            .expect("peer publication");
+
+        assert_ne!(
+            source.revision.load(Ordering::Acquire),
+            snapshot.revision,
+            "a peer publication must invalidate an older revision ticket"
+        );
+        assert_eq!(source.read(span).expect("source refresh"), MirEvalValue::Int(8));
+    }
+
+    #[test]
+    fn scalar_direct_guard_close_publishes_and_stales_snapshot() {
+        let span = span();
+        let source = MirSharedStorage::new(MirEvalValue::Int(1));
+        let snapshot = source.snapshot(span).expect("snapshot");
+        let transfer = MirSharedTransfer {
+            protocol: source.protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let peer = MirSharedStorage::from_transfer(transfer, span).expect("peer storage");
+        let guard = direct_edit_guard(&source);
+        let cell = MirSharedCell {
+            guard: guard.clone(),
+            path: Vec::new(),
+        };
+        write_shared_cell(&cell, RuntimeValue::Data(MirEvalValue::Int(2)), span)
+            .expect("guard write");
+        guard.close(span).expect("guard close");
+        assert!(!guard.state.as_ref().expect("guard state").held());
+        assert_eq!(source.read(span).expect("source read"), MirEvalValue::Int(2));
+        assert_eq!(peer.read(span).expect("peer read"), MirEvalValue::Int(2));
+        assert_ne!(source.revision.load(Ordering::Acquire), snapshot.revision);
+    }
+
+    #[test]
+    fn structured_direct_guard_close_publishes_and_stales_snapshot() {
+        let span = span();
+        let source = MirSharedStorage::new(struct_value(1));
+        let snapshot = source.snapshot(span).expect("snapshot");
+        let transfer = MirSharedTransfer {
+            protocol: source.protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let peer = MirSharedStorage::from_transfer(transfer, span).expect("peer storage");
+        let guard = direct_edit_guard(&source);
+        let cell = MirSharedCell {
+            guard: guard.clone(),
+            path: Vec::new(),
+        };
+        write_shared_cell(&cell, RuntimeValue::Data(struct_value(2)), span)
+            .expect("root guard write");
+        let field = MirSharedCell {
+            guard: guard.clone(),
+            path: vec!["number".to_string()],
+        };
+        prepare_shared_cell_access(&field, span).expect("guard read");
+        assert_eq!(
+            shared_payload_read(&field.guard.payload, &field.path, span)
+                .expect("field read"),
+            MirEvalValue::Int(2)
+        );
+        write_shared_cell(&field, RuntimeValue::Data(MirEvalValue::Int(3)), span)
+            .expect("field guard write");
+        prepare_shared_cell_access(&field, span).expect("successive guard read");
+        assert_eq!(
+            shared_payload_read(&field.guard.payload, &field.path, span)
+                .expect("successive field read"),
+            MirEvalValue::Int(3)
+        );
+        guard.close(span).expect("guard close");
+
+        assert!(!guard.state.as_ref().expect("guard state").held());
+        assert_eq!(source.read(span).expect("source read"), struct_value(3));
+        assert_eq!(peer.read(span).expect("peer read"), struct_value(3));
+        assert_ne!(source.revision.load(Ordering::Acquire), snapshot.revision);
+        assert!(prepare_shared_cell_access(&field, span).is_err());
+    }
+
+    struct IndependentWaiter {
+        parked: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        thread: Mutex<Option<std::thread::Thread>>,
+    }
+
+    impl shared_protocol::JetConditionWaiter for IndependentWaiter {
+        fn park(&self) -> Result<(), ()> {
+            *self.thread.lock().unwrap() = Some(std::thread::current());
+            if let Some(sender) = self.parked.lock().unwrap().take() {
+                sender.send(()).map_err(|_| ())?;
+            }
+            std::thread::park();
+            Ok(())
+        }
+
+        fn wake(&self) {
+            if let Some(thread) = self.thread.lock().unwrap().take() {
+                thread.unpark();
+            }
+        }
+    }
+
+    #[test]
+    fn independent_wait_releases_and_reacquires_edit_guard() {
+        let protocol = shared_protocol::JetSharedProtocol::new();
+        let condition = shared_protocol::JetConditionProtocol::new();
+        let guard = shared_protocol::jet_shared_guard_acquire(&protocol, true, || false)
+            .expect("edit guard");
+        let (parked_tx, parked_rx) = std::sync::mpsc::channel();
+        let waiter = Arc::new(IndependentWaiter {
+            parked: Mutex::new(Some(parked_tx)),
+            thread: Mutex::new(None),
+        });
+        let worker_guard = guard.clone();
+        let worker_condition = condition.clone();
+        let worker_waiter = waiter.clone();
+        let worker = std::thread::spawn(move || {
+            shared_protocol::jet_shared_guard_wait_once(
+                Some(worker_guard.as_ref()),
+                Some(&worker_condition),
+                worker_waiter,
+            )
+        });
+
+        parked_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("waiter released the guard permit before parking");
+        let independent = shared_protocol::jet_shared_acquire(&protocol, false, || false)
+            .expect("independent read while guard waits");
+        drop(independent);
+        condition.notify_one();
+        assert!(
+            worker.join().expect("waiter thread").is_ok(),
+            "guard wait should reacquire its edit permit"
+        );
+        assert!(guard.held());
+    }
+
+    struct ImmediateWaiter;
+
+    impl shared_protocol::JetConditionWaiter for ImmediateWaiter {
+        fn park(&self) -> Result<(), ()> {
+            Ok(())
+        }
+
+        fn wake(&self) {}
+    }
+
+    fn guard_wait_step(
+        guard: &MirSharedGuard,
+        condition: &Arc<shared_protocol::JetConditionProtocol>,
+        waiter: Arc<dyn shared_protocol::JetConditionWaiter>,
+    ) -> Result<Result<(), &'static str>, Diagnostic> {
+        let state = guard.state.as_ref().expect("guard state");
+        let lease = guard.lease.as_ref().expect("guard lease");
+        lease.wait_once(state.as_ref(), condition, waiter, span())
+    }
+
+    #[test]
+    fn guard_wait_publishes_pending_edit_before_release_and_refreshes_after_reacquire() {
+        let span = span();
+        let source = MirSharedStorage::new(struct_value(1));
+        let snapshot = source.snapshot(span).expect("snapshot");
+        let condition = shared_protocol::JetConditionProtocol::new();
+        let transfer = MirSharedTransfer {
+            protocol: source.protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let (parked_tx, parked_rx) = std::sync::mpsc::channel();
+        let (closed_tx, closed_rx) = std::sync::mpsc::channel::<()>();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let waiter = Arc::new(IndependentWaiter {
+            parked: Mutex::new(Some(parked_tx)),
+            thread: Mutex::new(None),
+        });
+        let peer_condition = condition.clone();
+        let peer_task = std::thread::spawn(move || {
+            let peer_span = Span::new(0, 0);
+            let peer = MirSharedStorage::from_transfer(transfer, peer_span)
+                .expect("peer storage");
+            parked_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("waiter released the edit permit before parking");
+            let during_wait = peer.read(peer_span).expect("peer read during wait");
+            peer.set(struct_value(3), peer_span)
+                .expect("peer publication during wait");
+            shared_protocol::jet_shared_condition_notify_one(&peer_condition);
+            closed_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .expect("guard closed");
+            let after_close = peer.read(peer_span).expect("peer read after close");
+            observed_tx.send((during_wait, after_close)).unwrap();
+        });
+
+        let guard = direct_edit_guard(&source);
+        let cell = MirSharedCell {
+            guard: guard.clone(),
+            path: Vec::new(),
+        };
+        write_shared_cell(&cell, RuntimeValue::Data(struct_value(2)), span)
+            .expect("guard write");
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            0,
+            "a held edit stays local until the guard releases its permit"
+        );
+        let outcome = guard_wait_step(&guard, &condition, waiter).expect("wait step");
+        assert_eq!(outcome, Ok(()));
+        assert!(
+            guard.state.as_ref().expect("guard state").held(),
+            "wait reacquired the edit permit"
+        );
+        assert_eq!(
+            shared_payload_read(&guard.payload, &[], span).expect("local view"),
+            struct_value(3),
+            "reacquisition refreshes the local view from the peer publication"
+        );
+        assert_eq!(source.revision.load(Ordering::Acquire), 2);
+        write_shared_cell(&cell, RuntimeValue::Data(struct_value(4)), span)
+            .expect("post-wait guard write");
+        guard.close(span).expect("guard close");
+        closed_tx.send(()).unwrap();
+        let (during_wait, after_close) = observed_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("peer observations");
+        peer_task.join().expect("peer thread");
+        assert_eq!(
+            during_wait,
+            struct_value(2),
+            "the pending edit was published before the wait released the permit"
+        );
+        assert_eq!(after_close, struct_value(4));
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            3,
+            "wait publication, peer publication, and close each publish one epoch"
+        );
+        assert_ne!(snapshot.revision, source.revision.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn guard_wait_does_not_republish_a_clean_epoch_and_mapped_edits_share_the_lease() {
+        let span = span();
+        let source = MirSharedStorage::new(struct_value(1));
+        let condition = shared_protocol::JetConditionProtocol::new();
+        let guard = direct_edit_guard(&source);
+        let lease = guard.lease.clone().expect("guard lease");
+        let root_state = guard.state.clone().expect("guard state");
+        let mapped_state = shared_protocol::jet_shared_guard_map(&root_state, 0, true)
+            .expect("mapped edit state");
+        let mapped = Rc::new(MirSharedGuard {
+            state: Some(mapped_state),
+            payload: guard.payload.clone(),
+            storage: guard.storage.clone(),
+            lease: Some(lease.clone()),
+            handle: Some(lease.new_handle()),
+        });
+        // Mapping consumes the parent projection; the MIR `Drop` of the moved
+        // parent closes its handle while the mapped guard keeps the lease.
+        assert!(!root_state.held());
+        assert!(root_state.permit().held());
+        guard.close(span).expect("consumed parent handle close");
+        assert!(
+            root_state.permit().held(),
+            "closing the consumed parent handle keeps the shared lease permit"
+        );
+        assert!(
+            guard_wait_step(&guard, &condition, Arc::new(ImmediateWaiter)).is_err(),
+            "waiting through the consumed parent projection traps"
+        );
+        let field = MirSharedCell {
+            guard: mapped.clone(),
+            path: vec!["number".to_string()],
+        };
+        write_shared_cell(&field, RuntimeValue::Data(MirEvalValue::Int(2)), span)
+            .expect("mapped guard write");
+        assert_eq!(source.revision.load(Ordering::Acquire), 0);
+
+        let outcome = guard_wait_step(&mapped, &condition, Arc::new(ImmediateWaiter))
+            .expect("first wait step");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            1,
+            "the wait published the mapped edit through the shared lease"
+        );
+        assert_eq!(
+            source
+                .transfer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone(),
+            struct_value(2)
+        );
+        assert_eq!(
+            shared_payload_read(&mapped.payload, &field.path, span).expect("mapped view"),
+            MirEvalValue::Int(2),
+            "reacquisition keeps the published edit in the local view"
+        );
+        let outcome = guard_wait_step(&mapped, &condition, Arc::new(ImmediateWaiter))
+            .expect("second wait step");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            1,
+            "a second wait without edits does not republish the epoch"
+        );
+        mapped.close(span).expect("mapped guard close");
+        assert!(!root_state.permit().held());
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            1,
+            "closing without further edits does not republish the epoch"
+        );
+        assert_eq!(source.read(span).expect("source read"), struct_value(2));
+
+        let guard = direct_edit_guard(&source);
+        let cell = MirSharedCell {
+            guard: guard.clone(),
+            path: Vec::new(),
+        };
+        let outcome = guard_wait_step(&guard, &condition, Arc::new(ImmediateWaiter))
+            .expect("fresh guard wait step");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(source.revision.load(Ordering::Acquire), 2);
+        write_shared_cell(&cell, RuntimeValue::Data(struct_value(5)), span)
+            .expect("post-wait guard write");
+        guard.close(span).expect("guard close");
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            3,
+            "an edit after the wait opens a new epoch that close publishes"
+        );
+        assert_eq!(source.read(span).expect("source read"), struct_value(5));
+    }
+
+    #[test]
+    fn guard_wait_reports_edit_required_and_traps_on_a_released_guard() {
+        let span = span();
+        let source = MirSharedStorage::new(MirEvalValue::Int(1));
+        let condition = shared_protocol::JetConditionProtocol::new();
+        let state = source.acquire_guard(false, span).expect("read guard");
+        let (lease, handle) = MirSharedGuardLease::root(source.clone(), &state, false);
+        let read_guard = Rc::new(MirSharedGuard {
+            state: Some(state.clone()),
+            payload: source.payload.clone(),
+            storage: Some(source.clone()),
+            lease: Some(lease),
+            handle: Some(handle),
+        });
+        let outcome = guard_wait_step(&read_guard, &condition, Arc::new(ImmediateWaiter))
+            .expect("read guard wait is a checked outcome, not a trap");
+        assert_eq!(outcome, Err(shared_protocol::JET_SHARED_GUARD_EDIT_REQUIRED));
+        assert!(state.held(), "a rejected wait keeps the read permit");
+        assert_eq!(source.revision.load(Ordering::Acquire), 0);
+        read_guard.close(span).expect("read guard close");
+        assert!(!state.held());
+
+        let guard = direct_edit_guard(&source);
+        guard.close(span).expect("edit guard close");
+        assert_eq!(source.revision.load(Ordering::Acquire), 1);
+        assert!(
+            guard_wait_step(&guard, &condition, Arc::new(ImmediateWaiter)).is_err(),
+            "waiting on a released guard traps"
+        );
+        assert_eq!(
+            source.revision.load(Ordering::Acquire),
+            1,
+            "a trapped wait does not publish"
+        );
+    }
+    #[test]
+    fn independent_task_transfer_wait_keeps_permit_until_channel_release() {
+        let source = MirSharedStorage::new(struct_value(1));
+        let protocol = source.protocol.clone();
+        let (item_tx, item_rx) = std::sync::mpsc::channel();
+        let (waiting_tx, waiting_rx) = std::sync::mpsc::channel();
+        let (a_done_tx, a_done_rx) = std::sync::mpsc::channel();
+        let (b_done_tx, b_done_rx) = std::sync::mpsc::channel();
+        let a_protocol = protocol.clone();
+        let a = std::thread::spawn(move || {
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(1);
+            let permit = shared_protocol::jet_shared_acquire(
+                &a_protocol,
+                true,
+                || std::time::Instant::now() >= deadline,
+            );
+            let Some(permit) = permit else {
+                a_done_tx.send(false).unwrap();
+                return;
+            };
+            waiting_tx.send(()).unwrap();
+            let received = item_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .is_ok();
+            drop(permit);
+            a_done_tx.send(received).unwrap();
+        });
+
+        waiting_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("task A acquired its permit before waiting");
+        let transfer = MirSharedTransfer {
+            protocol: protocol.clone(),
+            scalar: source.scalar.clone(),
+            revision: source.revision.clone(),
+            payload: source.transfer.clone(),
+            path: Vec::new(),
+        };
+        let b = std::thread::spawn(move || {
+            let peer = MirSharedStorage::from_transfer(transfer, Span::new(0, 0))
+                .expect("task B restored the Shared handle");
+            item_tx.send(()).unwrap();
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(2);
+            let permit = shared_protocol::jet_shared_acquire(
+                &peer.protocol,
+                true,
+                || std::time::Instant::now() >= deadline,
+            );
+            b_done_tx.send(permit.is_some()).unwrap();
+            drop(permit);
+        });
+
+        assert_eq!(
+            a_done_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .expect("task A resumed and released its permit"),
+            true
+        );
+        assert_eq!(
+            b_done_rx
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .expect("task B completed its permit attempt"),
+            true
+        );
+        a.join().expect("task A thread");
+        b.join().expect("task B thread");
+    }
+}
+
+/// End-to-end `SharedGuard.wait` regressions through the real MIR dispatcher:
+/// source -> sema -> checked MIR (Interpreter target) -> `evaluate_mir_program`.
+/// They fail if `MirSemanticOp::SharedGuardWait` bypasses the semantic route
+/// (wrong result carrier breaks `??`, a missed predicate check or a discarded
+/// held edit parks forever and trips the timeout).
+#[cfg(test)]
+mod shared_guard_wait_program_tests {
+    use super::*;
+
+    /// Predicate already holds at entry: the wait must return the `Result`
+    /// carrier without parking, and the predicate must observe the held
+    /// (unpublished) edit rather than a refreshed carrier value.
+    const READY_BEFORE_WAIT: &str = "\
+struct State {
+    ready: Bool
+    ticket: Int
+}
+
+fn take_ticket(state: Shared<State>, changed: Condition) -> Int {
+    guard :: state.guard_edit()
+    guard.value.ticket = 4
+    guard.wait(changed, value -> value.ready && value.ticket == 4) ?? return 0
+    guard.value.ticket += 1
+    return guard.value.ticket
+}
+
+fn run() {
+    state := shared State{ready: true, ticket: 0}
+    changed := Condition.new()
+    print(\"ticket={take_ticket(state, changed)}\")
+    print(\"published={state.ticket}\")
+}
+";
+
+    /// Edited guard waits; the peer task must observe the pending edit while
+    /// the waiter is parked, and the waiter must see the peer's publication
+    /// after reacquisition. Either scheduling order converges on one line.
+    const EDIT_WAIT_PEER_CYCLE: &str = "\
+struct State {
+    ready: Bool
+    ticket: Int
+}
+
+fn waiter(state: Shared<State>, changed: Condition, started: Condition) -> Int {
+    guard :: state.guard_edit()
+    guard.value.ticket = 2
+    started.notify_all()
+    guard.wait(changed, value -> value.ready) ?? return 0
+    guard.value.ticket += 1
+    return guard.value.ticket
+}
+
+fn peer(state: Shared<State>, changed: Condition, started: Condition) -> Int {
+    guard :: state.guard_edit()
+    guard.wait(started, value -> value.ticket == 2) ?? return 0
+    seen :: guard.value.ticket
+    guard.value.ready = true
+    changed.notify_all()
+    return seen
+}
+
+fn run() {
+    state := shared State{ready: false, ticket: 0}
+    changed := Condition.new()
+    started := Condition.new()
+    task.group workers {
+        pending :: task waiter(state, changed, started)
+        seen :: peer(state, changed, started)
+        ticket :: pending.join() ?? panic(\"waiter failed\")
+        print(\"seen={seen} ticket={ticket}\")
+    }
+}
+";
+
+    fn checked_run_bundle(src: &str) -> crate::AST::ProgramBundle {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let mut prog = crate::Parser::parse(&toks).expect("parse failed");
+        let mut bundle = crate::AST::ProgramBundle {
+            entry: 0,
+            project_root: std::path::PathBuf::from("."),
+            modules: vec![crate::AST::LoadedModule {
+                path: std::path::PathBuf::from("test.jet"),
+                display: "test.jet".to_string(),
+                alias: "main".to_string(),
+                imports: std::mem::take(&mut prog.imports),
+                items: std::mem::take(&mut prog.items),
+                script_body: std::mem::take(&mut prog.script_body),
+                block_spans: std::mem::take(&mut prog.block_spans),
+                source: src.to_string(),
+                web_target_ceiling: prog.web_target_ceiling,
+                pub_file: prog.pub_file,
+                no_prelude: prog.no_prelude,
+                default_target: prog.default_target,
+                html_path: prog.html_path.clone(),
+                policy_declarations: prog.policy_declarations.clone(),
+                user_policy_declarations: prog.user_policy_declarations.clone(),
+                rule_facts: std::mem::take(&mut prog.rule_facts),
+            }],
+            devtools_registry: crate::AST::DevtoolsRegistry::default(),
+            parse_teaching: Vec::new(),
+            used_core: std::collections::HashSet::new(),
+            ffi_callback_fns: std::collections::HashSet::new(),
+            cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(),
+            name_ledger: crate::AST::NameLedger::default(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: std::collections::HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
+            dep_roots: std::collections::HashMap::new(),
+            package_guarantees: Default::default(),
+            program_allocator: Default::default(),
+            active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
+            edition: "2027".to_string(),
+        };
+        install_mir_bridge();
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "sema errors: {diags:?}"
+        );
+        bundle
+    }
+
+    /// Run `src` through the MIR interpreter on its own thread so a wait that
+    /// parks forever fails the test instead of hanging it.
+    fn interpret_stdout(src: &'static str) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("shared-guard-wait-program".into())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let outcome = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+                    let bundle = checked_run_bundle(src);
+                    let request = jet_foundation::MIR::MirArtifactRequest::new(
+                        MirArtifactTarget::Interpreter,
+                        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+                    );
+                    let (program, artifact) =
+                        crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                            .map_err(|error| format!("MIR lowering failed: {error:?}"))?;
+                    evaluate_mir_program_with_config(&program, artifact, &MirEvalConfig::default())
+                        .map(|result| result.stdout)
+                        .map_err(|error| format!("{:?}", error.into_diagnostic()))
+                });
+                let _ = tx.send(outcome);
+            })
+            .expect("interpreter thread");
+        rx.recv_timeout(std::time::Duration::from_secs(30))
+            .expect("SharedGuard.wait program parked forever or the interpreter panicked")
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    #[test]
+    fn mir_shared_guard_wait_returns_result_and_checks_predicate_before_parking() {
+        assert_eq!(
+            interpret_stdout(READY_BEFORE_WAIT),
+            "ticket=5\npublished=5\n"
+        );
+    }
+
+    #[test]
+    fn mir_shared_guard_wait_publishes_held_edit_to_peer_and_refreshes_on_reacquire() {
+        assert_eq!(
+            interpret_stdout(EDIT_WAIT_PEER_CYCLE),
+            "seen=2 ticket=3\n"
+        );
+    }
 }

@@ -771,14 +771,14 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static @limit :: 10
+#Static @LIMIT :: 10
 
 fn show(n: Int) {
     print(n)
 }
 
 fn run() {
-    show(@limit)
+    show(@LIMIT)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -2762,6 +2762,115 @@ fn run() {
         out.rust.contains("(*__jet_index_edit) = 7i64"),
         "{}",
         out.rust
+    );
+}
+
+#[test]
+fn named_write_windows_forward_to_helpers_and_mutate_owners() {
+    let src = r#"
+struct Slot { value: Int }
+
+fn bump(value: &Int, amount: Int) {
+    value += amount
+}
+
+fn inspect(first: Slot, second: Slot) {
+    print(first.value + second.value)
+}
+
+fn run() {
+    whole := 1
+    whole_window :: &whole
+    bump(&whole_window, 2)
+
+    slot := Slot{ value: 3 }
+    field_window :: &slot.value
+    bump(&field_window, 4)
+
+    values := [5, 6]
+    index_window :: &values[0]
+    bump(&index_window, 6)
+
+    read_slot := Slot{ value: 9 }
+    read_window :: &read_slot
+    inspect(read_window, read_window)
+
+    print(whole)
+    print(slot.value)
+    print(values[0])
+}
+"#;
+    jet::compile(src).expect("named write windows must forward to helpers");
+    let expected = "3\n7\n11\n18\n";
+    assert!(
+        common::have_rustc(),
+        "named write-window forwarding requires the AOT proof toolchain"
+    );
+    tir_support::assert_tiers_agree("named_write_window_forward", src, expected);
+    tir_support::assert_awaited_web_tier("named_write_window_forward", src, expected);
+}
+
+#[test]
+fn named_write_window_calls_keep_alias_and_read_view_checks() {
+    let overlapping = r#"
+fn both(first: &Int, second: Int) {
+    first += second
+}
+
+fn run() {
+    value := 1
+    window :: &value
+    both(&window, value)
+}
+"#;
+    let diags = jet::compile(overlapping).expect_err("same-call named-window alias must fail");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected E0204 for an overlapping named-window call: {diags:?}"
+    );
+
+    let read_view = r#"
+fn bump(value: &Int) {
+    value += 1
+}
+
+fn run() {
+    values := [1, 2]
+    read :: values[0]
+    bump(&read)
+}
+"#;
+    let diags = jet::compile(read_view).expect_err("a read view cannot enter a write helper");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0212"),
+        "expected E0212 for a write through a read view: {diags:?}"
+    );
+}
+
+#[test]
+fn named_write_window_call_preserves_scoped_loan_rejection() {
+    let src = r#"
+fn bump(value: &Int) {
+    value += 1
+}
+
+fn run() {
+    values := [1]
+    task.group g {
+        edit :: &values[0]
+        child :: task { edit }
+        bump(&edit)
+    }
+}
+"#;
+    let diags = jet::compile(src).expect_err("a scoped loan must outlive the named write call");
+    let diagnostic = diags
+        .iter()
+        .find(|diag| diag.code == "E1101")
+        .expect("expected the scoped-loan diagnostic");
+    assert!(
+        diagnostic.what.contains("cannot be passed with write access"),
+        "the protected call change must be the reported action: {diagnostic:?}"
     );
 }
 

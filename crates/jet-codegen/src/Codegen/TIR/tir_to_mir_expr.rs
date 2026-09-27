@@ -83,6 +83,7 @@ fn lower_carrier_payload(
                 },
             );
         }
+        return ctx.trait_box_value(value, &inner.ty, expected);
     }
     Ok(value)
 }
@@ -1866,6 +1867,10 @@ pub(super) fn lower_expr(
             extra,
             as_trait,
         } => {
+            let owner_ty = match as_trait {
+                Some((_, concrete)) => Type::Named(concrete.clone()),
+                None => expr.ty.clone(),
+            };
             let owner = match as_trait {
                 Some((_, concrete)) => ctx.type_id_for(concrete)?,
                 None => ctx.field_owner_id_for_type(&expr.ty)?,
@@ -1873,7 +1878,11 @@ pub(super) fn lower_expr(
             let lowered_fields = fields
                 .iter()
                 .map(|(name, value, _)| {
-                    Ok((ctx.field_id_for(owner, name)?, ctx.lower_child(value)?))
+                    let expected = ctx.checked_field_type(&owner_ty, name)?;
+                    let source = value.ty.clone();
+                    let lowered = ctx.lower_child(value)?;
+                    let lowered = ctx.trait_box_value(lowered, &source, &expected)?;
+                    Ok((ctx.field_id_for(owner, name)?, lowered))
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?;
             let extra = extra.as_ref().map(|extra| match extra {
@@ -2122,7 +2131,7 @@ pub(super) fn lower_expr(
             payload,
         } => {
             let type_id = ctx.type_id_for(enum_type)?;
-            let args = lower_enum_payload(ctx, enum_type, variant, payload)?;
+            let args = lower_enum_payload(ctx, enum_type, &expr.ty, variant, payload)?;
             ctx.emit(
                 "enum-payload",
                 Some(expr.ty.clone()),
@@ -2326,10 +2335,11 @@ pub(super) fn lower_expr(
             let fields = fields
                 .iter()
                 .map(|(name, value)| {
-                    Ok((
-                        ctx.field_id_for_type(&expr.ty, name)?,
-                        ctx.lower_child(value)?,
-                    ))
+                    let expected = ctx.checked_field_type(&expr.ty, name)?;
+                    let source = value.ty.clone();
+                    let lowered = ctx.lower_child(value)?;
+                    let lowered = ctx.trait_box_value(lowered, &source, &expected)?;
+                    Ok((ctx.field_id_for_type(&expr.ty, name)?, lowered))
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?;
             ctx.emit(
@@ -2342,9 +2352,21 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::MapLit(entries) => {
+            let (expected_key, expected_value) = match expr.ty.without_user_tags() {
+                Type::Map { key, value, .. } => ((**key).clone(), (**value).clone()),
+                _ => (Type::Int, Type::Int),
+            };
             let entries = entries
                 .iter()
-                .map(|(key, value)| Ok((ctx.lower_child(key)?, ctx.lower_child(value)?)))
+                .map(|(key, value)| {
+                    let key_source = key.ty.clone();
+                    let value_source = value.ty.clone();
+                    let key = ctx.lower_child(key)?;
+                    let value = ctx.lower_child(value)?;
+                    let key = ctx.trait_box_value(key, &key_source, &expected_key)?;
+                    let value = ctx.trait_box_value(value, &value_source, &expected_value)?;
+                    Ok((key, value))
+                })
                 .collect::<Result<Vec<_>, LowerError>>()?;
             ctx.emit(
                 "map-literal",
@@ -2498,11 +2520,27 @@ pub(super) fn lower_expr(
                 },
             )
         }
-        TExprKind::Clone(inner)
-        | TExprKind::ExplicitCopy(inner)
-        | TExprKind::MaterializeView(inner) => {
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
             let value = ctx.lower_child(inner)?;
-            ctx.emit("copy", Some(expr.ty.clone()), MirOperation::Copy { value })
+            ctx.emit(
+                "copy",
+                Some(expr.ty.clone()),
+                MirOperation::Copy {
+                    value,
+                    materialize_view: false,
+                },
+            )
+        }
+        TExprKind::MaterializeView(inner) => {
+            let value = ctx.lower_child(inner)?;
+            ctx.emit(
+                "copy.materialize-view",
+                Some(expr.ty.clone()),
+                MirOperation::Copy {
+                    value,
+                    materialize_view: true,
+                },
+            )
         }
         TExprKind::Borrow { place, mutable } => {
             let place = ctx.lower_place(
@@ -4168,7 +4206,8 @@ pub(super) fn lower_expr(
                 Some(target @ (Type::Result { .. } | Type::Option(_))) if target != &expr.ty => {
                     lower_try_value(ctx, value, &expr.ty, target, None, &TTryConvert::None, None)
                 }
-                _ => Ok(value),
+                Some(target) => ctx.trait_box_value(value, target, &expr.ty),
+                None => Ok(value),
             }
         }
         TExprKind::ExternCall { symbol, args, .. } => {
@@ -4525,6 +4564,16 @@ fn lower_option_lift2(
             "checked Option.lift2 right operand is not optional",
         ));
     };
+    let called_ty = match function.ty.without_user_tags() {
+        Type::Fn { ret: Some(ret), .. } => (**ret).clone(),
+        Type::Fn { ret: None, .. } => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+        _ => {
+            return Err(ctx.error(
+                ctx.span(),
+                "checked Option.lift2 function has no function type",
+            ));
+        }
+    };
     let function = ctx.lower_child(function)?;
     let left = ctx.lower_child(left)?;
     let right = ctx.lower_child(right)?;
@@ -4568,9 +4617,9 @@ fn lower_option_lift2(
         Some((**right_inner).clone()),
         MirOperation::OptionValue { subject: right },
     )?;
-    let called = ctx.emit(
+    let called_raw = ctx.emit(
         "option-lift2-call",
-        Some((**result_inner).clone()),
+        Some(called_ty.clone()),
         MirOperation::IndirectCall {
             callee: function,
             args: vec![
@@ -4580,6 +4629,7 @@ fn lower_option_lift2(
             type_args: Vec::new(),
         },
     )?;
+    let called = ctx.trait_box_value(called_raw, &called_ty, result_inner)?;
     let present = ctx.emit(
         "option-lift2-present",
         Some(expr.ty.clone()),
@@ -4636,12 +4686,11 @@ fn lower_option_zip(
     let Type::Tuple(fields) = elem_ty.without_user_tags() else {
         return Err(ctx.error(ctx.span(), "checked Option.zip result has no tuple fields"));
     };
-    if fields.len() != 2
-        || fields[0].1.as_ref() != left_inner.as_ref()
-        || fields[1].1.as_ref() != right_inner.as_ref()
-    {
+    if fields.len() != 2 {
         return Err(ctx.error(ctx.span(), "checked Option.zip tuple shape is inconsistent"));
     }
+    let left_target = fields[0].1.as_ref().clone();
+    let right_target = fields[1].1.as_ref().clone();
     let tuple_ty = elem_ty.clone();
     let owner = ctx.mir_type(&tuple_ty)?.identity.ok_or_else(|| {
         ctx.error(
@@ -4667,11 +4716,19 @@ fn lower_option_zip(
 
     let mut incoming = Vec::with_capacity(3);
     ctx.switch_to(left_present);
-    let left_value = ctx.emit(
+    let left_source_ty = (**left_inner).clone();
+    let left_value_raw = ctx.emit(
         "option-zip-left-value",
-        Some((**left_inner).clone()),
+        Some(left_source_ty.clone()),
         MirOperation::OptionValue { subject: left },
     )?;
+    let left_value = ctx.trait_box_value(left_value_raw, &left_source_ty, &left_target)?;
+    if left_value == left_value_raw && left_source_ty != left_target {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked Option.zip left tuple field has no coercion fact",
+        ));
+    }
     let right_condition = ctx.emit(
         "option-zip-right-condition",
         Some(Type::Bool),
@@ -4686,11 +4743,19 @@ fn lower_option_zip(
     });
 
     ctx.switch_to(both_present);
-    let right_value = ctx.emit(
+    let right_source_ty = (**right_inner).clone();
+    let right_value_raw = ctx.emit(
         "option-zip-right-value",
-        Some((**right_inner).clone()),
+        Some(right_source_ty.clone()),
         MirOperation::OptionValue { subject: right },
     )?;
+    let right_value = ctx.trait_box_value(right_value_raw, &right_source_ty, &right_target)?;
+    if right_value == right_value_raw && right_source_ty != right_target {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked Option.zip right tuple field has no coercion fact",
+        ));
+    }
     let tuple_fields = vec![
         (ctx.field_id_for_type(&tuple_ty, &fields[0].0)?, left_value),
         (ctx.field_id_for_type(&tuple_ty, &fields[1].0)?, right_value),
@@ -5142,7 +5207,7 @@ fn lower_if_expr(
     ctx.lower_nested_stmts(then_body)?;
     if !ctx.is_terminated() {
         let value = ctx.lower_child(then_value)?;
-        let source = ctx.current_block();
+        let value = ctx.trait_box_value(value, &then_value.ty, &expr.ty)?;
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
             incoming.push((source, value));
@@ -5153,6 +5218,7 @@ fn lower_if_expr(
     ctx.lower_nested_stmts(else_body)?;
     if !ctx.is_terminated() {
         let value = ctx.lower_child(else_value)?;
+        let value = ctx.trait_box_value(value, &else_value.ty, &expr.ty)?;
         let source = ctx.current_block();
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
@@ -5211,6 +5277,7 @@ fn lower_result_handler(
     ctx.lower_nested_stmts(ok_body)?;
     if !ctx.is_terminated() {
         let value = ctx.lower_child(ok_value)?;
+        let value = ctx.trait_box_value(value, &ok_value.ty, &expr.ty)?;
         let from = ctx.current_block();
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
@@ -5230,6 +5297,7 @@ fn lower_result_handler(
     ctx.lower_nested_stmts(err_body)?;
     if !ctx.is_terminated() {
         let value = ctx.lower_child(err_value)?;
+        let value = ctx.trait_box_value(value, &err_value.ty, &expr.ty)?;
         let from = ctx.current_block();
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
@@ -5238,6 +5306,7 @@ fn lower_result_handler(
     }
     ctx.switch_to(terminal_block);
     let value = ctx.lower_child(terminal)?;
+    let value = ctx.trait_box_value(value, &terminal.ty, &expr.ty)?;
     let from = ctx.current_block();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
@@ -5397,10 +5466,21 @@ fn lower_try_value(
         let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
         let _ = emit_static_call(ctx, &unit_ty, reset_route, Vec::new())?;
     }
+    let success_ty = if is_result {
+        input_ty
+            .unwrap_result()
+            .map(|(ok, _)| ok.clone())
+            .ok_or_else(|| ctx.error(ctx.span(), "checked try result has no success type"))?
+    } else {
+        input_ty
+            .unwrap_option()
+            .cloned()
+            .ok_or_else(|| ctx.error(ctx.span(), "checked try option has no success type"))?
+    };
     let success = if is_result {
         ctx.emit(
             "try-result-value",
-            Some(result.clone()),
+            Some(success_ty.clone()),
             MirOperation::ResultValue {
                 subject: input,
                 ok: true,
@@ -5409,10 +5489,11 @@ fn lower_try_value(
     } else {
         ctx.emit(
             "try-option-value",
-            Some(result.clone()),
+            Some(success_ty.clone()),
             MirOperation::OptionValue { subject: input },
         )?
     };
+    let success = ctx.trait_box_value(success, &success_ty, result)?;
     let success_source = ctx.current_block();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
@@ -5787,20 +5868,32 @@ fn lower_or_fallback_expr(
         });
         None
     } else if carrier == "option" {
-        Some(ctx.emit(
+        let success_ty = value
+            .ty
+            .unwrap_option()
+            .cloned()
+            .ok_or_else(|| ctx.error(ctx.span(), "checked fallback option has no value type"))?;
+        let success = ctx.emit(
             "or-fallback-option-value",
-            Some(expr.ty.clone()),
+            Some(success_ty.clone()),
             MirOperation::OptionValue { subject: value_id },
-        )?)
+        )?;
+        Some(ctx.trait_box_value(success, &success_ty, &expr.ty)?)
     } else {
-        Some(ctx.emit(
+        let success_ty = value
+            .ty
+            .unwrap_result()
+            .map(|(ok, _)| ok.clone())
+            .ok_or_else(|| ctx.error(ctx.span(), "checked fallback result has no success type"))?;
+        let success = ctx.emit(
             "or-fallback-result-value",
-            Some(expr.ty.clone()),
+            Some(success_ty.clone()),
             MirOperation::ResultValue {
                 subject: value_id,
                 ok: true,
             },
-        )?)
+        )?;
+        Some(ctx.trait_box_value(success, &success_ty, &expr.ty)?)
     };
     let source = ctx.current_block();
     if !ctx.is_terminated() {
@@ -5900,12 +5993,19 @@ fn lower_fallback_block(
                     return Ok(None);
                 }
             }
-            Ok(Some(ctx.lower_child(value)?))
+            let source_ty = value.ty.clone();
+            let value = ctx.lower_child(value)?;
+            Ok(Some(ctx.trait_box_value(value, &source_ty, &expr.ty)?))
         }
         super::TOrFallback::Return(value) => {
+            let expected = ctx.function.ret.clone().unwrap_or_else(|| expr.ty.clone());
             let value = value
                 .as_deref()
-                .map(|value| ctx.lower_child(value))
+                .map(|value| {
+                    let source_ty = value.ty.clone();
+                    let value = ctx.lower_child(value)?;
+                    ctx.trait_box_value(value, &source_ty, &expected)
+                })
                 .transpose()?;
             ctx.terminate_with_cleanup(MirTerminator::Return { value }, 0)?;
             Ok(None)
@@ -6031,7 +6131,8 @@ fn lower_extern_arg(
 
 fn lower_enum_payload(
     ctx: &mut LowerCtx,
-    enum_type: &str,
+    enum_name: &str,
+    owner_ty: &Type,
     variant: &str,
     payload: &TEnumPayload,
 ) -> Result<Vec<MirEnumArg>, LowerError> {
@@ -6039,10 +6140,12 @@ fn lower_enum_payload(
         TEnumPayload::Unit => Ok(Vec::new()),
         TEnumPayload::Positional(args) => args
             .iter()
-            .map(|arg| {
+            .enumerate()
+            .map(|(index, arg)| {
+                let expected = ctx.enum_payload_type_for(owner_ty, variant, index)?;
                 Ok(MirEnumArg {
                     field: None,
-                    value: lower_enum_arg(ctx, arg)?,
+                    value: lower_enum_arg(ctx, arg, Some(&expected))?,
                     boxed: arg.boxed,
                 })
             })
@@ -6050,12 +6153,14 @@ fn lower_enum_payload(
         TEnumPayload::Named(args) => {
             let mut lowered = Vec::with_capacity(args.len());
             for (name, arg) in args {
-                let (field, order) = ctx.enum_named_payload_field(enum_type, variant, name)?;
+                let (field, order) =
+                    ctx.enum_named_payload_field(enum_name, variant, name)?;
+                let expected = ctx.enum_payload_type_for(owner_ty, variant, order)?;
                 lowered.push((
                     order,
                     MirEnumArg {
                         field: Some(field),
-                        value: lower_enum_arg(ctx, arg)?,
+                        value: lower_enum_arg(ctx, arg, Some(&expected))?,
                         boxed: arg.boxed,
                     },
                 ));
@@ -6064,7 +6169,9 @@ fn lower_enum_payload(
             if lowered.windows(2).any(|pair| pair[0].0 == pair[1].0) {
                 return Err(ctx.error(
                     ctx.span(),
-                    format!("duplicate checked enum field in `{enum_type}::{variant}`"),
+                    format!(
+                        "duplicate checked enum field in `{enum_name}::{variant}`"
+                    ),
                 ));
             }
             Ok(lowered.into_iter().map(|(_, arg)| arg).collect())
@@ -6075,8 +6182,12 @@ fn lower_enum_payload(
 fn lower_enum_arg(
     ctx: &mut LowerCtx,
     arg: &TEnumArg,
+    expected: Option<&Type>,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    lower_cloned_value(ctx, &arg.value, arg.clone)
+    let value = lower_cloned_value(ctx, &arg.value, arg.clone)?;
+    expected
+        .map(|expected| ctx.trait_box_value(value, &arg.value.ty, expected))
+        .unwrap_or(Ok(value))
 }
 fn lower_conversion_int(
     ctx: &mut LowerCtx,
@@ -6339,7 +6450,10 @@ fn lower_cloned_value(
         ctx.emit(
             "cloned-value",
             Some(value.ty.clone()),
-            MirOperation::Copy { value: value_id },
+            MirOperation::Copy {
+                value: value_id,
+                materialize_view: false,
+            },
         )?
     } else {
         value_id
@@ -8666,12 +8780,13 @@ fn lower_numeric_method(
     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
     let conversion = matches!(
         op,
-        TNumericOp::CheckedIntToFloat { .. }
+        TNumericOp::FloatNarrow { .. }
+            | TNumericOp::InlineRange { .. }
+            | TNumericOp::CheckedIntToFloat { .. }
             | TNumericOp::CheckedIntToFixed { .. }
             | TNumericOp::TryFrom { .. }
-            | TNumericOp::FloatToInt { .. }
-            | TNumericOp::FloatNarrow { .. }
-            | TNumericOp::InlineRange { .. }
+            | TNumericOp::ToString
+            | TNumericOp::ToShow
     );
     if conversion {
         if matches!(
@@ -8684,7 +8799,10 @@ fn lower_numeric_method(
             return ctx.emit(
                 "proven-range-conversion",
                 Some(expr.ty.clone()),
-                MirOperation::Copy { value: receiver },
+                MirOperation::Copy {
+                    value: receiver,
+                    materialize_view: false,
+                },
             );
         }
         let route = super::distinct_conversion_route(

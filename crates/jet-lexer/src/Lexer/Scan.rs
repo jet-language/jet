@@ -98,6 +98,24 @@ impl<'a> Lexer<'a> {
             })
             .is_some_and(|token| matches!(&token.kind, TokKind::Dot | TokKind::QuestionDot))
     }
+    fn significant_lookbehind<const N: usize>(toks: &[Token]) -> [Option<&Token>; N] {
+        let mut lookbehind: [Option<&Token>; N] = [None; N];
+        let mut count = 0;
+        for token in toks.iter().rev() {
+            if matches!(
+                &token.kind,
+                TokKind::LineComment(_) | TokKind::BlockComment(_)
+            ) {
+                continue;
+            }
+            if count == N {
+                break;
+            }
+            lookbehind[count] = Some(token);
+            count += 1;
+        }
+        lookbehind
+    }
 
     /// D-BOUND-RAW1=A: the quote immediately follows the opening brace of a
     /// typed head body. Only that body's literal substream changes the
@@ -112,53 +130,54 @@ impl<'a> Lexer<'a> {
     /// cannot reach this rule. The `Dot` arm reads the retired spelling and
     /// leaves with the rest of the migration shim.
     fn starts_typed_head_body(toks: &[Token]) -> bool {
-        let significant = toks
-            .iter()
-            .filter(|token| {
-                !matches!(
-                    token.kind,
-                    TokKind::LineComment(_) | TokKind::BlockComment(_)
-                )
-            })
-            .collect::<Vec<_>>();
-        significant.len() >= 2
-            && matches!(significant[significant.len() - 1].kind, TokKind::LBrace)
-            && match &significant[significant.len() - 2].kind {
-                TokKind::Dot => true,
-                TokKind::Ident(name) => name.starts_with(|first: char| first.is_ascii_uppercase()),
-                _ => false,
+        let [last, previous] = Self::significant_lookbehind::<2>(toks);
+        matches!(
+            last.map(|token| &token.kind),
+            Some(TokKind::LBrace)
+        ) && match previous.map(|token| &token.kind) {
+            Some(TokKind::Dot) => true,
+            Some(TokKind::Ident(name)) => {
+                name.starts_with(|first: char| first.is_ascii_uppercase())
             }
+            _ => false,
+        }
     }
 
     /// D-BYTELIT1=B: `[U8]{ "..." }` and `[U8#N]{ "..." }` use the same
     /// quoted token as ordinary text, but their body grammar owns `\xNN`.
     fn starts_byte_typed_lit_body(toks: &[Token]) -> bool {
-        let significant = toks
-            .iter()
-            .filter(|token| {
-                !matches!(
-                    token.kind,
-                    TokKind::LineComment(_) | TokKind::BlockComment(_)
-                )
-            })
-            .collect::<Vec<_>>();
-        let len = significant.len();
-        if len < 4
-            || !matches!(significant[len - 1].kind, TokKind::LBrace)
-            || !matches!(significant[len - 2].kind, TokKind::RBracket)
-        {
+        let lookbehind = Self::significant_lookbehind::<6>(toks);
+        if !matches!(
+            lookbehind[0].map(|token| &token.kind),
+            Some(TokKind::LBrace)
+        ) || !matches!(
+            lookbehind[1].map(|token| &token.kind),
+            Some(TokKind::RBracket)
+        ) {
             return false;
         }
-        let is_u8 =
-            |token: &Token| matches!(&token.kind, TokKind::Ident(name) if name == Syntax::TYPE_U8);
-        let base = len - 4;
-        if matches!(significant[base].kind, TokKind::LBracket) && is_u8(significant[base + 1]) {
+        let is_u8 = |token: Option<&Token>| {
+            matches!(
+                token,
+                Some(token)
+                    if matches!(&token.kind, TokKind::Ident(name) if name == Syntax::TYPE_U8)
+            )
+        };
+        if matches!(
+            lookbehind[3].map(|token| &token.kind),
+            Some(TokKind::LBracket)
+        ) && is_u8(lookbehind[2])
+        {
             return true;
         }
-        len >= 6
-            && matches!(significant[len - 6].kind, TokKind::LBracket)
-            && is_u8(significant[len - 5])
-            && matches!(significant[len - 4].kind, TokKind::Hash)
+        matches!(
+            lookbehind[5].map(|token| &token.kind),
+            Some(TokKind::LBracket)
+        ) && is_u8(lookbehind[4])
+            && matches!(
+                lookbehind[3].map(|token| &token.kind),
+                Some(TokKind::Hash)
+            )
     }
 
     fn starts_inline_foreign_body(toks: &[Token]) -> bool {
@@ -946,6 +965,62 @@ multiline :: Path.{"""
             strings[2].as_slice(),
             [StrTokPart::Lit(text)] if text == "\\logs\\app"
         ));
+    }
+
+    #[test]
+    fn typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads() {
+        let prefix_count = 128;
+        let mut source = String::new();
+        for index in 0..prefix_count {
+            source.push_str(&format!("prefix{index} :: \"prefix\"; "));
+        }
+        source.push_str(
+            r#"
+ordinary :: "\n"
+raw_dot :: Regex /* block */ . // line comment
+{ /* block */ "\n" }
+raw_name :: Regex /* block */ { // line comment
+"\n" }
+ordinary_lower :: regex /* block */ { /* block */ "\n" }
+incomplete_raw :: Regex /* block */ . /* block */ "\n"
+byte :: [ /* block */ U8 // line comment
+] /* block */ { /* block */ "\x41" }
+byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block */ { /* block */ "\x42" }
+"#,
+        );
+        let (tokens, diagnostics) = lex_raw(&source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let strings = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokKind::Str(parts) => Some(parts),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(strings.len(), prefix_count + 7);
+        let tail = &strings[prefix_count..];
+        assert!(matches!(
+            tail[0].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\n"
+        ));
+        assert!(matches!(
+            tail[1].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\\n"
+        ));
+        assert!(matches!(
+            tail[2].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\\n"
+        ));
+        assert!(matches!(
+            tail[3].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\n"
+        ));
+        assert!(matches!(
+            tail[4].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\n"
+        ));
+        assert!(matches!(tail[5].as_slice(), [StrTokPart::Byte(0x41)]));
+        assert!(matches!(tail[6].as_slice(), [StrTokPart::Byte(0x42)]));
     }
 
     #[test]

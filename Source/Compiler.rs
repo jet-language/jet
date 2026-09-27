@@ -1,7 +1,7 @@
 //! Public read-only front-end toolkit API (D-FRONTENDAPI1=A).
 
 use crate::Comptime::DevSink;
-use crate::Diagnostics::{span_line_col, Diagnostic, Severity, Span};
+use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
 use crate::AST::{CtKey, CtReport, CtValue, Type};
 use crate::{Lexer, Parser, AST};
@@ -2216,11 +2216,15 @@ pub fn lex_source(src: &str) -> LexedSource {
         Ok((source, _)) => Lexer::lex(&source),
         Err(error) => (Vec::new(), vec![error.diagnostic()]),
     };
+    let positions = SourcePositionIndex::new(src);
     LexedSource {
         api_version: API_VERSION,
         schema_version: SCHEMA_VERSION,
         source: src.to_string(),
-        tokens: tokens.iter().map(|token| token_view(src, token)).collect(),
+        tokens: tokens
+            .iter()
+            .map(|token| token_view(src, token, &positions))
+            .collect(),
         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
     }
 }
@@ -2666,9 +2670,88 @@ impl SemIndexView {
     }
 }
 
-fn token_view(src: &str, token: &Token) -> TokenView {
-    let start = line_col(src, token.span.start);
-    let end = line_col(src, token.span.end);
+const POSITION_CHECKPOINT_BYTES: usize = 1024;
+
+#[derive(Debug, Clone, Copy)]
+struct PositionCheckpoint {
+    offset: usize,
+    line: usize,
+    column: usize,
+}
+
+struct SourcePositionIndex {
+    checkpoints: Vec<PositionCheckpoint>,
+}
+
+impl SourcePositionIndex {
+    /// Sample byte offsets instead of retaining one position per byte. A
+    /// lookup does a binary search followed by a bounded UTF-8 scan.
+    fn new(src: &str) -> Self {
+        let capacity = (src.len() / POSITION_CHECKPOINT_BYTES).saturating_add(2);
+        let mut checkpoints = Vec::with_capacity(capacity);
+        let mut line = 1;
+        let mut column = 1;
+        checkpoints.push(PositionCheckpoint {
+            offset: 0,
+            line,
+            column,
+        });
+
+        let mut next_checkpoint = POSITION_CHECKPOINT_BYTES;
+        for (offset, ch) in src.char_indices() {
+            while offset >= next_checkpoint {
+                checkpoints.push(PositionCheckpoint {
+                    offset,
+                    line,
+                    column,
+                });
+                next_checkpoint = next_checkpoint.saturating_add(POSITION_CHECKPOINT_BYTES);
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        if checkpoints.last().map(|checkpoint| checkpoint.offset) != Some(src.len()) {
+            checkpoints.push(PositionCheckpoint {
+                offset: src.len(),
+                line,
+                column,
+            });
+        }
+
+        SourcePositionIndex { checkpoints }
+    }
+
+    fn line_col(&self, src: &str, offset: usize) -> LineCol {
+        let checkpoint_index = self
+            .checkpoints
+            .binary_search_by_key(&offset, |checkpoint| checkpoint.offset)
+            .unwrap_or_else(|index| index.saturating_sub(1));
+        let checkpoint = self.checkpoints[checkpoint_index];
+        let bytes_after_checkpoint = offset.saturating_sub(checkpoint.offset);
+        let mut line = checkpoint.line;
+        let mut column = checkpoint.column;
+        for (relative, ch) in src[checkpoint.offset..].char_indices() {
+            if relative >= bytes_after_checkpoint {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        LineCol { line, column }
+    }
+}
+
+fn token_view(src: &str, token: &Token, positions: &SourcePositionIndex) -> TokenView {
+    let start = positions.line_col(src, token.span.start);
+    let end = positions.line_col(src, token.span.end);
     TokenView {
         kind: token_kind_name(&token.kind),
         text: token_text(src, token),
@@ -2785,11 +2868,6 @@ fn token_text(src: &str, token: &Token) -> String {
     } else {
         String::new()
     }
-}
-
-fn line_col(src: &str, offset: usize) -> LineCol {
-    let (line, column) = span_line_col(src, offset);
-    LineCol { line, column }
 }
 
 fn token_kind_name(kind: &TokKind) -> &'static str {

@@ -236,6 +236,24 @@ mod Memory;
 mod Mod;
 mod ProcessPrelude;
 mod enc_stream;
+/// Invocation-scoped Source resource owners and the native loop producer
+/// bridge.  The module is public so the Foundation Source bootstrap can use
+/// the typed capability boundary without reaching the JIT's legacy integer
+/// handle tables.
+pub mod SourceResources;
+/// Session-local generic transport for retained Source callback payloads.
+/// Semantic evaluation and logical Source/Eval state remain owned by the
+/// generated compiler callback pump.
+pub mod SourceCallbacks;
+/// Invocation-scoped native implementations of private MIR traits.
+pub mod SourceInterfaces;
+pub use SourceCallbacks::{
+    SourceCallbackCleanup, SourceCallbackDrainStatus, SourceCallbackEnqueueError,
+    SourceCallbackError, SourceCallbackEvent, SourceCallbackId, SourceCallbackInvocation,
+    SourceCallbackLease, SourceCallbackRegisterError, SourceCallbackRelease,
+    SourceCallbackReply, SourceCallbackReplyError, SourceCallbackRequestId,
+    SourceCallbackResponder, SourceCallbackRetireError, SourceCallbackSession,
+};
 mod host_seam;
 mod net_http_rt;
 pub(crate) use jet_codegen::fault_injection;
@@ -474,6 +492,17 @@ mod trace;
 #[path = "jit/types_meta.rs"]
 pub(crate) mod types_meta;
 
+/// Source-owned deopt activation. Generated private Runner code installs the
+/// evaluator callback and a frame-state scope around one backend invocation;
+/// nested Source/JIT calls restore both outer activations on scope exit.
+pub use deopt::{
+    dispatch_source_deopt, frame_schema, last_snapshot, push_source_deopt_frame_scope,
+    push_source_deopt_scope, source_entry_deopt_request, take_source_deopt_result_with_output,
+    with_source_deopt_scope,
+    MirFrameSnapshot, MirFrameValue, SourceDeoptFrameScope, SourceDeoptReply,
+    SourceDeoptRequest, SourceDeoptScope, SourceExecutionGuard, SourceExecutionRetirement,
+};
+
 // `Concurrency.rs` (a real sibling module, not an include! fragment) reaches
 // `JitRuntime` via `super::JitRuntime` — keep that path alive at crate root.
 pub(crate) use runtime_host::JitRuntime;
@@ -499,7 +528,10 @@ pub use api_debug::{
     resident_jit_safe_program, resident_jit_safe_program_detail, run_resident_strict_for_test,
     try_compile_debug_aot, try_compile_program, DebugAotObject, ResidentJitSafety,
 };
-pub use backend::CraneliftBackend;
+pub use backend::{
+    execute_source_entry, retire_source_entry, CraneliftBackend, SourceDeoptError,
+    SourceDeoptRun, SourceEntryExecution, SourceExecutionRetirementError, SourceExecutionTier,
+};
 pub use Ffi::set_bridge_cdylib;
 /// Bind the prepared native bridge before interpreter MIR execution.
 ///

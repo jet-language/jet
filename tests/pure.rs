@@ -148,12 +148,12 @@ fn run() {
 #[test]
 fn comptime_named_authority_scope_compiles() {
     let src = r#"
-@answer :: 42
+@ANSWER :: 42
 fn run() {
     @ {
         #FX(authority: IO) {}
     }
-    print("{@answer}")
+    print("{@ANSWER}")
 }
 "#;
     let output = jet::compile(src).expect("comptime should accept named #FX");

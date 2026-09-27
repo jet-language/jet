@@ -1,0 +1,191 @@
+// Parser state and token access. The lexer supplies canonical token IDs,
+// byte spans, exact spelling, nested string token streams, and diagnostics.
+
+pub struct JetParserState {
+    pub tokens: [Token]
+    pub position: Int
+    pub diagnostics: [Diagnostic]
+    pub source_end: Int
+    pub block_spans: [Span]
+    pub pending_type_gt: Bool
+    pub pending_type_gt_span: Span
+    pub result_handler_depth: Int
+}
+
+pub struct ParsedBlock {
+    pub span: Span
+    pub statements: [Stmt]
+    pub tail: ?Expr
+}
+
+fn parser_synthetic_token(kind: Int, span: Span) -> Token {
+    Token{
+        kind: kind,
+        span: span,
+        payload: TokenPayload{
+            text: "",
+            decoded: "",
+            integer: None,
+            decimal: None,
+            suffix: "",
+            interpolations: 0,
+            string_parts: [StringPart]{},
+        },
+    }
+}
+
+fn parser_is_trivia(kind: Int) -> Bool {
+    kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
+}
+
+fn parser_skip_trivia(state: &JetParserState) {
+    loop state.position >= 0 && state.position < state.tokens.len() && parser_is_trivia(state.tokens[state.position].kind) -> state.position += 1
+}
+
+fn parser_current(state: &JetParserState) -> Token {
+    if state.pending_type_gt {
+        return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start + 1, end: state.pending_type_gt_span.end})
+    }
+    parser_skip_trivia(&state)
+    if state.position < 0 || state.position >= state.tokens.len() {
+        return parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
+    }
+    state.tokens[state.position]
+}
+
+fn parser_lookahead_forward(state: JetParserState, start: Int, skip: Int) -> Token {
+    index := start
+    remaining := skip
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if !parser_is_trivia(kind) {
+            if remaining == 0 -> return state.tokens[index]
+            remaining -= 1
+        }
+        index += 1
+    }
+    parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
+}
+
+fn parser_lookahead(state: &JetParserState, offset: Int) -> Token {
+    seek_offset := offset
+    if state.pending_type_gt {
+        if seek_offset == 0 -> return parser_current(&state)
+        if seek_offset > 0 -> return parser_lookahead_forward(state, state.position, seek_offset - 1)
+        if seek_offset == -1 -> return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.start + 1})
+        seek_offset += 1
+    }
+    parser_skip_trivia(&state)
+    if seek_offset >= 0 -> return parser_lookahead_forward(state, state.position, seek_offset)
+    index := state.position - 1
+    remaining := -seek_offset
+    loop index >= 0 {
+        kind :: state.tokens[index].kind
+        if !parser_is_trivia(kind) {
+            remaining -= 1
+            if remaining == 0 -> return state.tokens[index]
+        }
+        index -= 1
+    }
+    parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
+}
+
+fn parser_current_kind(state: &JetParserState) -> Int {
+    parser_current(&state).kind
+}
+
+fn parser_kind_at(state: &JetParserState, offset: Int) -> Int {
+    if offset == 0 -> return parser_current_kind(&state)
+    parser_lookahead(&state, offset).kind
+}
+
+fn parser_bump(state: &JetParserState) -> Token {
+    if state.pending_type_gt {
+        token :: parser_current(&state)
+        state.pending_type_gt = false
+        return token
+    }
+    token :: parser_current(&state)
+    if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
+    token
+}
+
+fn parser_type_close_here(state: &JetParserState) -> Bool {
+    if state.pending_type_gt -> return true
+    kind := parser_current(&state).kind
+    kind == TOKEN_GT || kind == TOKEN_SHR
+}
+
+fn parser_take_type_close(state: &JetParserState) -> Span {
+    token :: parser_current(&state)
+    if state.pending_type_gt {
+        state.pending_type_gt = false
+        return token.span
+    }
+    if token.kind == TOKEN_SHR {
+        state.position += 1
+        state.pending_type_gt = true
+        state.pending_type_gt_span = token.span
+        return Span{start: token.span.start, end: token.span.start + 1}
+    }
+    if token.kind == TOKEN_GT -> return parser_bump(&state).span
+    token.span
+}
+
+fn parser_cover(left: Span, right: Span) -> Span {
+    Span{start: left.start, end: right.end}
+}
+
+fn parser_add_error_code(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+    state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
+}
+
+fn parser_add_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+    parser_add_error_code(&state, "E0003", span, what, why, fix)
+}
+
+fn parser_expect(state: &JetParserState, kind: Int, context: String) -> Token {
+    if parser_current_kind(&state) == kind -> return parser_bump(&state)
+    token :: parser_current(&state)
+    parser_add_error(
+        &state,
+        token.span,
+        "expected {context}, found `{token.payload.text}`",
+        "the parser needs the expected token to keep the surrounding syntax unambiguous",
+        "write the expected token here",
+    )
+    parser_synthetic_token(kind, token.span)
+}
+
+fn parser_expect_name(state: &JetParserState, context: String) -> Token {
+    if parser_current_kind(&state) == TOKEN_IDENT -> return parser_bump(&state)
+    token :: parser_current(&state)
+    parser_add_error(
+        &state,
+        token.span,
+        "expected a name {context}, found `{token.payload.text}`",
+        "declarations and member paths are built from identifier tokens",
+        "write an identifier here",
+    )
+    parser_synthetic_token(TOKEN_IDENT, token.span)
+}
+
+fn parser_skip_semicolons(state: &JetParserState) {
+    loop parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+}
+
+fn parser_recover_statement(state: &JetParserState) {
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF || kind == TOKEN_RBRACE -> break
+        if kind == TOKEN_SEMI {
+            parser_bump(&state)
+            break
+        }
+        parser_bump(&state)
+    }
+}
+
+fn parser_type_gt_span(state: &JetParserState) -> Span {
+    parser_take_type_close(&state)
+}

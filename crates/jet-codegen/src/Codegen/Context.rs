@@ -279,6 +279,11 @@ pub(crate) struct Cx {
     /// value directly. They do not use the hidden Jet `Result` carrier.
     /// Keys use the emitted module/function path (`__jet_module::function`).
     pub(crate) direct_c_functions: HashSet<String>,
+    /// Canonical checked foreign identity for each source-level foreign call
+    /// spelling.  The value is the Tir/MIR foreign row key, never a bridge
+    /// wrapper name, so direct CModule calls resolve to typed `MirForeign`
+    /// rows instead of falling through to a user-function lookup.
+    pub(crate) foreign_call_keys: HashMap<String, String>,
     /// Opaque C handle nominal names whose ABI is a raw pointer at native
     /// boundaries. This is bundle metadata, not a source-level type heuristic.
     pub(crate) opaque_handles: HashSet<String>,
@@ -1329,6 +1334,30 @@ impl Cx {
         }
         self.foreign_type_identity("", name)
     }
+
+    /// Resolve the owner spelling used by method metadata. Local method tables
+    /// are registered by their source leaf, while canonical receiver types may
+    /// carry the NameLedger identity; imported method tables use that identity
+    /// directly. Keep this one checked distinction in the shared lookup path.
+    pub(crate) fn method_metadata_name(&self, name: &str, method: &str) -> String {
+        let exact = (name.to_string(), method.to_string());
+        if self.method_sigs.contains_key(&exact) {
+            return name.to_string();
+        }
+        if let Some((leaf, _)) = self
+            .local_type_identities
+            .iter()
+            .find(|(_, identity)| identity.as_str() == name)
+        {
+            let local = (leaf.clone(), method.to_string());
+            if self.method_sigs.contains_key(&local) {
+                return leaf.clone();
+            }
+        }
+        self.imported_type_metadata_name(name)
+            .unwrap_or_else(|| name.to_string())
+    }
+
 
     /// Resolve a source-facing type spelling to the ordinary distinct-type
     /// entry. This is used only for backend representation facts; checked-text
@@ -4417,6 +4446,49 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
         })
         .flatten()
         .collect();
+    cx.foreign_call_keys.clear();
+    for (foreign_module_idx, foreign_module) in bundle.modules.iter().enumerate() {
+        let identity = module_identity(bundle, foreign_module_idx);
+        let rust_module = mangle(&foreign_module.alias);
+        for item in &foreign_module.items {
+            match item {
+                Item::CModule(c_module) => {
+                    for function in &c_module.functions {
+                        let key = format!("{identity}::{}", function.name);
+                        cx.foreign_call_keys
+                            .insert(format!("{rust_module}::{}", function.name), key.clone());
+                        if foreign_module_idx == module_idx {
+                            cx.foreign_call_keys.insert(function.name.clone(), key);
+                        }
+                    }
+                }
+                Item::ExternRust(block) => {
+                    for function in &block.functions {
+                        let key = format!("{identity}::{}", function.rust_path);
+                        cx.foreign_call_keys
+                            .insert(format!("{rust_module}::{}", function.name), key.clone());
+                        if foreign_module_idx == module_idx {
+                            cx.foreign_call_keys.insert(function.name.clone(), key);
+                        }
+                    }
+                }
+                Item::Func(function)
+                    if crate::Sema::guest_import_function_signature(function).is_some() =>
+                {
+                    let wrapper = crate::Sema::guest_import_wrapper_name(
+                        &foreign_module.alias,
+                        &function.name,
+                    );
+                    cx.foreign_call_keys
+                        .insert(format!("{rust_module}::{}", function.name), wrapper.clone());
+                    if foreign_module_idx == module_idx {
+                        cx.foreign_call_keys.insert(function.name.clone(), wrapper);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     cx.local_type_names
         .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
     register_imported_methods(cx, bundle, module_idx);
@@ -5203,6 +5275,7 @@ pub(crate) fn build_cx_items(
         trait_method_traits: HashMap::new(),
         operator_methods: HashMap::new(),
         direct_c_functions: HashSet::new(),
+        foreign_call_keys: HashMap::new(),
         opaque_handles: HashSet::new(),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),

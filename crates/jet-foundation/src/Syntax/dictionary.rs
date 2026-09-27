@@ -242,7 +242,7 @@ fn meaning(token: &str, kind: SyntaxDictionaryKind) -> String {
 
 fn example(token: &str, kind: SyntaxDictionaryKind) -> String {
     match token {
-        super::COMPTIME_MARK => "@limit :: 1000".to_string(),
+        super::COMPTIME_MARK => "@LIMIT :: 1000".to_string(),
         super::SIGIL_BIND_IMMUT => "answer :: 42".to_string(),
         super::MARKER_LIVE => "#Live { input() }".to_string(),
         super::OP_UNIFIED_ARROW => "fn twice(n: Int) Int -> n * 2".to_string(),

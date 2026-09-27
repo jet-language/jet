@@ -7,7 +7,7 @@
 use jet_foundation::SHA256::sha256_hex;
 use jet_foundation::Layout::TargetLayout;
 use jet_foundation::MIR::{
-    MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
+    mir_view_copy_kind, MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
     MirBinaryOp, MirBinaryPatternPart, MirCallee, MirCaptureOperand, MirConstant, MirConstKey,
     MirConstReport, MirCoreClosureKind, MirCliDefault, MirCliEntry, MirCliInputShape, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
     MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
@@ -566,7 +566,7 @@ fn check_operation_types(
         | MirOperation::ReplacePlace { .. }
         | MirOperation::InitializeUninit { .. }
         | MirOperation::Copy { .. }
-        | MirOperation::Move { .. }
+        | MirOperation::TraitBox { .. }
         | MirOperation::Constant(_)
         | MirOperation::Unary { .. }
         | MirOperation::Binary { .. }
@@ -2673,11 +2673,36 @@ fn js_operation_expression(
             let transferred = js_value_transfer_expression(program, function, *id)?;
             js_write_place_expression(program, function, *place, &transferred)?
         }
-        MirOperation::Copy { value: id } => {
+        MirOperation::Copy {
+            value: id,
+            materialize_view,
+        } => {
             let ty = mir_function_value_type(function, *id)?;
-            js_copy_expression(program, ty, value(*id))
+            if *materialize_view {
+                let kind = mir_view_copy_kind(ty).ok_or_else(|| MirWebError::InvalidMir {
+                    message: format!(
+                        "MIR view materialization source `{}` has no canonical copy kernel",
+                        ty.display_name()
+                    ),
+                })?;
+                if let Some(target) = result_type {
+                    if !kind.target_matches(target) {
+                        return Err(MirWebError::InvalidMir {
+                            message: format!(
+                                "MIR view materialization `{}` has destination `{}`",
+                                kind.symbol(),
+                                target.display_name()
+                            ),
+                        });
+                    }
+                }
+                format!("{}({})", kind.symbol(), value(*id))
+            } else {
+                js_copy_expression(program, ty, value(*id))
+            }
         }
         MirOperation::Move { value: id } => js_move_value_expression(*id),
+        MirOperation::TraitBox { value: id, .. } => js_move_value_expression(*id),
         MirOperation::Constant(constant) => js_constant_expression(program, constant)?,
         MirOperation::Unary { op, value: id } => js_unary_expression(*op, &value(*id)),
         MirOperation::Binary { op, dispatch, left, right } => {
@@ -3840,7 +3865,7 @@ fn js_semantic_expression(
                         });
                     };
                     let message = match ids.as_slice() {
-                        [] => js_string("condition failed"),
+                        [] => js_string(jet_foundation::Outcome::jet_require_message(None)),
                         [message] => value(*message),
                         _ => {
                             return Err(MirWebError::InvalidMir {
@@ -5236,22 +5261,12 @@ fn js_function_stack_context(
     program: &MirProgram,
     function: &MirFunction,
 ) -> Result<(String, u32, String), MirWebError> {
-    let module = program
-        .modules
-        .iter()
-        .find(|module| module.id == function.module_id)
-        .ok_or_else(|| MirWebError::InvalidMir {
-            message: format!(
-                "MIR function {} references missing module {}",
-                function.id.0, function.module_id.0
-            ),
-        })?;
     let file = program
         .source_files
         .iter()
-        .find(|file| file.id == module.source_file)
+        .find(|file| file.id == function.source_file)
         .ok_or_else(|| MirWebError::InvalidMir {
-            message: format!("MIR source file {} is missing", module.source_file.0),
+            message: format!("MIR source file {} is missing", function.source_file.0),
         })?;
     let (line, _) = jet_foundation::Diagnostics::span_line_col(&file.source, function.span.start);
     let source_line = file
@@ -6077,6 +6092,7 @@ fn emit_js_copy_type_facts(out: &mut String, program: &MirProgram) {
     }
     out.push_str("]);\n");
 }
+
 
 fn js_copy_expression(program: &MirProgram, ty: &MirType, expression: String) -> String {
     let key = js_copy_type_key(program, ty);

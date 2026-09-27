@@ -30,11 +30,11 @@ struct Ring {
     tail: Int
 }
 
-@size :: Ring.@layout.size
-@alignment :: Ring.@layout.alignment
+@SIZE :: Ring.@layout.size
+@ALIGNMENT :: Ring.@layout.alignment
 
 fn run() {
-    print("{@size}:{@alignment}")
+    print("{@SIZE}:{@ALIGNMENT}")
 }
 "#;
     let expected = format!(

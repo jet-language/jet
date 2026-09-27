@@ -49,13 +49,13 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .notebook
         .add_cell(
             CellKind::Jet,
-            "fn comptime_reader() Int { return @future_answer }",
+            "fn comptime_reader() Int { return @FUTURE_ANSWER }",
         )
         .id
         .clone();
     let comptime_answer = kernel
         .notebook
-        .add_cell(CellKind::Jet, "@future_answer :: 42")
+        .add_cell(CellKind::Jet, "@FUTURE_ANSWER :: 42")
         .id
         .clone();
     let caller = kernel

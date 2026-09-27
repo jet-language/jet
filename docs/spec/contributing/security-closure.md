@@ -1,28 +1,31 @@
 # Security closure
 
-Tower owns remediation plans and closure status. Retained scan bundles are
-dated evidence. Do not maintain a second inventory, exclusion table, or
-acceptance checklist here.
+Use this procedure to close a security-scan request without making the scan a
+second work ledger. Tower owns remediation plans, criteria, and closure state.
+A retained scan bundle is dated evidence. The governing project rules are in
+[`AGENTS.md`](../../../AGENTS.md), and the owning Tower card is the source for
+the request's exact scope and acceptance evidence.
 
-## Prepare and scan
+## Prepare the request
 
-Use a clean commit after the relevant remediation has its independent proof.
-Record the bound revision, inventory, exclusions, and required outputs on the
-owning Tower card. Do not truncate, widen, or silently skip part of the scope
-to make a scan pass.
+Start from a clean commit after the relevant remediation has its independent
+proof. Record the bound revision, inventory, exclusions, and required outputs
+on the owning Tower card. Do not truncate, widen, or silently skip part of the
+requested scope to make a scan pass.
 
 Run one fresh Standard prompt-only Codex Security scan against that request,
-then complete that same scan. Previous reports are evidence to retain, not
-input findings to recycle. If the host cannot honor the request, stop the scan
-slice and record the missing prerequisite in Tower.
+then complete that same scan. Treat earlier reports as retained evidence, not
+as findings to recycle into the new request. If the host cannot honor the
+request, stop the scan slice and record the missing prerequisite in Tower.
 
-## Validate and retain evidence
+## Keep the evidence together
 
-Keep the request, inventory, canonical outputs, report, and receipt together
-under the approved audit location. Record acceptance evidence on the owning
-Tower card; a scan does not automatically close remediation cards.
+Store the request, inventory, canonical outputs, report, and receipt together
+under the approved audit location. Record the acceptance evidence on the
+owning Tower card. A scan produces evidence; it does not automatically close a
+remediation card.
 
 Never hand-edit a canonical scan document or finalize a sealed bundle twice. A
 missing report, non-zero finding, changed identity, or incomplete coverage is
-not closure. A valid historical reconciliation alone does not prove a fresh
-external scan.
+not closure. A historical reconciliation can explain prior work, but it does
+not prove a fresh external scan.

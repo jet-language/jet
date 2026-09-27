@@ -1,0 +1,307 @@
+// Pure Prelude dispatch. The row and symbol are checked before any route body is
+// selected; route names are only used after the canonical MIR row is found.
+
+fn jet_eval_route_is_exact_integer_member(member: String) -> Bool {
+    member == "add" || member == "sub" || member == "mul" || member == "div" || member == "rem" || member == "floor_div" || member == "mod" || member == "pow" || member == "shl" || member == "shr" || member == "bit_and" || member == "bit_or" || member == "bit_xor" || member == "div_euclid" || member == "rem_euclid"
+}
+fn jet_eval_route_exact_integer_symbol(member: String, symbol: String) -> Bool {
+    if member == "add" -> return symbol == "jet_std::jet_int_add"
+    if member == "sub" -> return symbol == "jet_std::jet_int_sub"
+    if member == "mul" -> return symbol == "jet_std::jet_int_mul"
+    if member == "div" -> return symbol == "jet_std::jet_int_div"
+    if member == "rem" -> return symbol == "jet_std::jet_int_rem"
+    if member == "floor_div" -> return symbol == "jet_std::jet_int_floor_div"
+    if member == "mod" -> return symbol == "jet_std::jet_int_mod"
+    if member == "pow" -> return symbol == "jet_std::jet_int_pow"
+    if member == "shl" -> return symbol == "jet_std::jet_int_shl"
+    if member == "shr" -> return symbol == "jet_std::jet_int_shr"
+    if member == "bit_and" -> return symbol == "jet_std::jet_int_bit_and"
+    if member == "bit_or" -> return symbol == "jet_std::jet_int_bit_or"
+    if member == "bit_xor" -> return symbol == "jet_std::jet_int_bit_xor"
+    if member == "div_euclid" -> return symbol == "jet_std::jet_int_div_euclid"
+    if member == "rem_euclid" -> return symbol == "jet_std::jet_int_rem_euclid"
+    false
+}
+fn jet_eval_route_fixed_symbol(parts: [String], symbol: String) -> Bool {
+    if parts.len() != 3 -> return false
+    mode := if parts[1] == "checked_policy" -> "trap" else -> parts[1]
+    symbol == "jet_{parts[0]}_{mode}_{parts[2]}"
+}
+
+
+
+fn jet_eval_route_ascii_case(text: String, upper: Bool) -> String {
+    bytes := text.bytes()
+    loop index in 0..<bytes.len() {
+        code := Int.from_u8(bytes[index])
+        if {
+            upper -> {
+                if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
+            }
+            else -> {
+                if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
+            }
+        }
+    }
+    String.from_bytes(bytes) ?? text
+}
+
+fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+    if jet_eval_route_is_exact_integer(left) && jet_eval_route_is_exact_integer(right) -> return jet_eval_route_exact_order(left, right, &machine, span)
+    if left == {
+        .Float(left_number, _) -> {
+            if right == {
+                .Float(right_number, _) -> {
+                    if left_number != left_number || right_number != right_number {
+                        jet_eval_source_fail(&machine, span, "comparison with NaN")
+                        return None
+                    }
+                    if left_number < right_number -> return Val(-1)
+                    if left_number > right_number -> return Val(1)
+                    return Val(0)
+                }
+            }
+        }
+    }
+    if left == {
+        .String(left_text) -> {
+            if right == {
+                .String(right_text) -> {
+                    if left_text < right_text -> return Val(-1)
+                    if left_text > right_text -> return Val(1)
+                    return Val(0)
+                }
+            }
+        }
+    }
+    if left == {
+        .Char(left_char) -> {
+            if right == {
+                .Char(right_char) -> {
+                    if left_char < right_char -> return Val(-1)
+                    if left_char > right_char -> return Val(1)
+                    return Val(0)
+                }
+            }
+        }
+    }
+    if left == {
+        .Bool(left_flag) -> {
+            if right == {
+                .Bool(right_flag) -> {
+                    if left_flag == right_flag -> return Val(0)
+                    if !left_flag -> return Val(-1)
+                    return Val(1)
+                }
+            }
+        }
+    }
+    jet_eval_compiler_fail(&machine, span, "comparison route received incompatible values")
+    None
+}
+
+fn jet_eval_route_compare(member: String, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if args.len() != 2 {
+        jet_eval_compiler_fail(&machine, span, "comparison route requires two operands")
+        return None
+    }
+    if member == "eq" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(args[0] == args[1])))
+    if member == "ne" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(args[0] != args[1])))
+    order :: jet_eval_route_order(args[0], args[1], &machine, span) ?? return None
+    if member == "lt" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order < 0)))
+    if member == "gt" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order > 0)))
+    if member == "le" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order <= 0)))
+    if member == "ge" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order >= 0)))
+    if member == "compare" {
+        variant := if {
+            order < 0 -> "Less"
+            order > 0 -> "Greater"
+            else -> "Equal"
+        }
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Enum("Ordering", variant, [TComptimeEnumArg]{})))
+    }
+    jet_eval_compiler_fail(&machine, span, "unknown comparison route member")
+    None
+}
+
+fn jet_eval_route_parse_integer(text: String, radix: Int) -> ?TComptimeValue {
+    if radix < 2 || radix > 36 -> return None
+    raw := text
+    negative := raw.starts_with("-")
+    if negative -> raw = raw.slice(1, raw.len())
+    if raw == "" -> return None
+    value := 0
+    loop byte in raw.bytes() {
+        code := Int.from_u8(byte)
+        digit := if {
+            code >= 48 && code <= 57 -> code - 48
+            code >= 65 && code <= 90 -> code - 55
+            code >= 97 && code <= 122 -> code - 87
+            else -> -1
+        }
+        if digit < 0 || digit >= radix -> return None
+        value = value * radix + digit
+    }
+    if negative -> value = 0 - value
+    Val(TComptimeValue.Int(value))
+}
+
+
+fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MirCallFallibility, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if member == "string_ascii_lower" || member == "string_ascii_upper" {
+        if args.len() != 1 {
+            jet_eval_compiler_fail(&machine, span, "ASCII string route requires one String")
+            return None
+        }
+        text :: jet_eval_route_string(args[0]) ?? {
+            jet_eval_compiler_fail(&machine, span, "ASCII string route requires one String")
+            return None
+        }
+        output := jet_eval_route_ascii_case(text, member == "string_ascii_upper")
+        return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.String(output)), fallibility))
+    }
+    if member == "string_starts_with" {
+        if args.len() != 2 {
+            jet_eval_compiler_fail(&machine, span, "String.starts_with route requires two Strings")
+            return None
+        }
+        text :: jet_eval_route_string(args[0]) ?? {
+            jet_eval_compiler_fail(&machine, span, "String.starts_with route requires two Strings")
+            return None
+        }
+        prefix :: jet_eval_route_string(args[1]) ?? {
+            jet_eval_compiler_fail(&machine, span, "String.starts_with route requires two Strings")
+            return None
+        }
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(text.starts_with(prefix))))
+    }
+    if member == "string_from_bytes" || member == "string_from_bytes_lossy" {
+        if args.len() != 1 {
+            jet_eval_compiler_fail(&machine, span, "String.from_bytes route requires one buffer")
+            return None
+        }
+        bytes := [U8]{}
+        handled := false
+        if args[0] == {.Bytes(values) -> {
+            bytes = values
+            handled = true
+        }}
+        if args[0] == {.List(values) -> {
+            handled = true
+            loop value in values {
+                number :: jet_eval_route_int_value(value, &machine, span) ?? return None
+                if number < 0 || number > 255 -> return jet_eval_route_told_failure("byte value is outside U8", fallibility)
+                bytes.push(U8{number})
+            }
+        }}
+        if !handled {
+            jet_eval_compiler_fail(&machine, span, "String.from_bytes route requires Bytes or List")
+            return None
+        }
+        decoded := String.from_bytes(bytes)
+        if decoded != None -> return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.String(decoded ?? "")), fallibility))
+        if member == "string_from_bytes_lossy" -> return jet_eval_route_not_supported(&machine, span, "lossy UTF-8 decoding")
+        jet_eval_route_told_failure("invalid UTF-8", fallibility)
+    }
+    if member == "int_parse" {
+        if args.len() != 1 -> return jet_eval_route_told_failure("invalid integer text", fallibility)
+        text :: jet_eval_route_string(args[0]) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
+        parsed :: Int.parse(text)
+        if parsed == None -> return jet_eval_route_told_failure("invalid integer text", fallibility)
+        return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.Int(parsed ?? 0)), fallibility))
+    }
+    if member == "int_from_radix" {
+        if args.len() != 2 -> return jet_eval_route_told_failure("invalid integer text", fallibility)
+        text :: jet_eval_route_string(args[0]) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
+        radix :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
+        parsed :: jet_eval_route_parse_integer(text, radix) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
+        return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(parsed), fallibility))
+    }
+    if member == "list_count" {
+        if args.len() != 2 {
+            jet_eval_compiler_fail(&machine, span, "list_count route requires a List and value")
+            return None
+        }
+        items :: jet_eval_route_list(args[0]) ?? {
+            jet_eval_compiler_fail(&machine, span, "list_count route requires a List and value")
+            return None
+        }
+        count := 0
+        loop item in items {
+            if item == args[1] -> count += 1
+        }
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(count)))
+    }
+    if member == "len" || member == "len_string" {
+        if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "length without a receiver")
+        value := args[0]
+        if value == {.List(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))}
+        if value == {.Bytes(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))}
+        if value == {.Map(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))}
+        if value == {.String(text) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(text.chars().len())))}
+        return jet_eval_route_not_supported(&machine, span, "length of this value")
+    }
+    if member == "is_empty" {
+        if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "is_empty without a receiver")
+        value := args[0]
+        if value == {.List(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))}
+        if value == {.Bytes(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))}
+        if value == {.Map(values) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))}
+        if value == {.String(text) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(text.len() == 0)))}
+        return jet_eval_route_not_supported(&machine, span, "is_empty on this value")
+    }
+    if member == "first" || member == "last" {
+        if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "first/last without a receiver")
+        values :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "first/last on a non-list")
+        if values.len() == 0 -> return jet_eval_route_told_failure("list is empty", fallibility)
+        index := if member == "first" -> 0 else -> values.len() - 1
+        return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(values[index]), fallibility))
+    }
+    if member == "contains" {
+        if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "contains without a receiver")
+        if args[0] == {.List(values) -> {
+            found := false
+            loop value in values {
+                if value == args[1] -> found = true
+            }
+            return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(found)))
+        }}
+        return jet_eval_route_not_supported(&machine, span, "contains on this value")
+    }
+    if member == "bytes" {
+        if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "String.bytes without a receiver")
+        if args[0] == {.String(text) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bytes(text.bytes())))}
+        return jet_eval_route_not_supported(&machine, span, "String.bytes on this value")
+    }
+    if member == "compare" || member == "eq" || member == "ne" || member == "lt" || member == "gt" || member == "le" || member == "ge" -> return jet_eval_route_compare(member, args, &machine, span)
+    if member == "bit_count" || member == "int_bit_count" -> return jet_eval_route_bit_count(args, &machine, span)
+    if member == "string_split" || member == "iter_to_list" || member == "iter_collect" -> return jet_eval_route_not_supported(&machine, span, "stream-producing builtin route")
+    jet_eval_route_not_supported(&machine, span, "Prelude builtin {member}")
+}
+
+
+fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+    row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
+    if !jet_eval_route_signature_prelude(row, args.len(), &machine, span) -> return None
+    if row.abi == MirPreludeAbi.Control || row.abi == MirPreludeAbi.Effect -> return jet_eval_route_not_supported(&machine, span, "effectful or control Prelude route")
+    if row.module_name == "core.prelude" && row.member == "keep" {
+        symbol := mir_symbol_name(row.symbol)
+        if symbol != "jet_keep" || args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "invalid core.prelude.keep ABI")
+        return jet_eval_copy_value(args[0], &machine, span)
+    }
+    symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
+    data :: jet_eval_route_args(args, &machine, span) ?? return None
+    if row.family == MirPreludeFamily.Overflow && row.module_name == "core.numeric" && jet_eval_route_is_exact_integer_member(row.member) && jet_eval_route_exact_integer_symbol(row.member, symbol) -> return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
+    if row.family == MirPreludeFamily.Overflow {
+        fixed :: jet_eval_route_fixed_member(row.member)
+        if fixed != None && jet_eval_route_fixed_symbol(fixed ?? [String]{}, symbol) -> return jet_eval_route_fixed_host(row, args, &machine, result_ty, span)
+    }
+    if row.family == MirPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && symbol == "jet_int_compare" -> return jet_eval_route_exact_compare_member_host(row.member, args, &machine, result_ty, span)
+    if row.family == MirPreludeFamily.BuiltinMethod || row.family == MirPreludeFamily.MathBuiltin -> return jet_eval_route_builtin(row.member, data, row.fallibility, &machine, span)
+    if row.family == MirPreludeFamily.PreciseBuiltin {
+        if jet_eval_route_precise_operator(row.module_name, row.member) && jet_eval_route_precise_symbol(row.module_name, row.member, symbol) -> return jet_eval_host_row(&machine, row, args, result_ty, span)
+        return jet_eval_route_not_supported(&machine, span, "PreciseBuiltin route has no canonical numeric adapter")
+    }
+    if row.family == MirPreludeFamily.StaticPrelude && symbol.starts_with("jet_") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
+    jet_eval_route_not_supported(&machine, span, "Prelude route {row.module_name}.{row.member}")
+}

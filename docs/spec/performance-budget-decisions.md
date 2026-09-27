@@ -2,225 +2,842 @@
 
 Vocabulary: [Jet vocabulary](vocabulary.md).
 
-This document is the durable current law for ten ratified performance-budget decisions. SURFACE1, BASELINE1, GRAMMAR1, REPORT1, OUTPUT1, GAMEMIGRATE1, PROVIDER1, and INTEGRATION1 selected A; BENCHMIGRATE1 selected B; COMPILE1 selected C. Later implementation must preserve this law as one evaluator and one report model; illustrative text from rejected options is not law.
+This record explains the durable performance-budget contracts: the declaration
+surface, typed metrics, evidence and baseline math, command behavior, provider
+boundary, integration points, prototype retirement, and cost transparency. It
+is for language, tooling, and benchmark authors. The executable vocabulary is
+in [`jetpack_config.rs`](../../crates/jet-foundation/src/Syntax/jetpack_config.rs);
+report math is in [`PerformanceBudget.rs`](../../crates/jet-foundation/src/PerformanceBudget.rs);
+the command, provider, and store boundaries are in
+[`CmdBudget.rs`](../../Source/CmdBudget.rs),
+[`BudgetProviders.rs`](../../Source/BudgetProviders.rs), and
+[`BudgetStore.rs`](../../Source/BudgetStore.rs). The performance matrix and
+measurement manifests are [`gauntlet/matrix.json`](../../gauntlet/matrix.json)
+and [`gauntlet/measurement-manifest.json`](../../gauntlet/measurement-manifest.json).
+The checked-in declaration examples are
+[`examples/performance/receipts/hello/src/run.jet`](../../examples/performance/receipts/hello/src/run.jet)
+and
+[`examples/performance/receipts/http_ready/src/run.jet`](../../examples/performance/receipts/http_ready/src/run.jet).
 
-## Declaration surface and baseline policy
+Provider protocol coverage is exercised in
+[`tests/performance_budget_providers.rs`](../../tests/performance_budget_providers.rs).
 
-**D-PERFBUDGET-SURFACE1=A — Role modules.** Performance budgets are typed facts declared under `module perf.<role> { budgets: [Budget{ ... }] }`. The role belongs to its containing package. A budget's typed scope attaches it to its package, environment, service, scene, test, or target; role names do not create implicit attachments. Build, test, dev, prove, dossier, and CI consume the same facts. No manifest field, marker, external policy file, shorthand parser, or second enforcement engine exists.
+The ten budget decisions retain these ratified outcomes. Each ID is a
+citation; the outcome is the selected option and its durable rule.
 
-**D-PERFBUDGET-BASELINE1=A — Pinned baseline artifacts.** Statistical budgets use named pinned baseline history carrying exact hardware, OS, target, profile, toolchain, provider, workload, trend window, samples, and confidence policy. Checks never mutate baseline state. Only the explicit, plan-first update command may advance a named head, under the report, comparison, confirmation, and CAS law below. Absolute deterministic gates do not borrow statistical baseline semantics. Missing, mismatched, stale, zero, or unavailable evidence never silently passes.
+| Decision | Outcome | Durable choice |
+|---|---:|---|
+| `D-PERFBUDGET-SURFACE1` | A | Typed role modules are the one declaration surface. |
+| `D-PERFBUDGET-BASELINE1` | A | Statistical evidence uses pinned named baseline artifacts. |
+| `D-PERFBUDGET-GRAMMAR1` | A | Budgets use a typed list, closed vocabulary, and exact semantics. |
+| `D-PERFBUDGET-REPORT1` | A | Reports and baseline updates use canonical bytes and atomic manifests. |
+| `D-PERFBUDGET-OUTPUT1` | A | Commands expose source diagnostics, quiet summaries, JSON, and stable exits. |
+| `D-PERFBUDGET-BENCHMIGRATE1` | B | The legacy helper is deleted without source transformation. |
+| `D-PERFBUDGET-GAMEMIGRATE1` | A | Game fields map exactly to typed scene budgets and probes. |
+| `D-PERFBUDGET-PROVIDER1` | A | Measurement uses an in-process typed provider registry. |
+| `D-PERFBUDGET-INTEGRATION1` | A | Each owning command refreshes evidence and all readers share one report. |
+| `D-PERFBUDGET-COMPILE1` | C | Compile latency uses typed project workloads and compiler probes. |
 
-## D-PERFBUDGET-GRAMMAR1=A — Typed performance budget grammar and semantics
+`D-COSTLAW1=A` is the related cost-transparency decision. The shared typed
+budget requirement is `D-WD14=B`; the plan-first CLI mutation law is
+`D-FE-CLI1`. The diagnostic copy and fixture law is identified as `I4`, and
+prototype retirement is the `I8` migration gate. Rejected alternatives are
+illustrative only; one evaluator, one report model, and one canonical fact
+remain the consequence of these choices.
 
-D-WD14=B already requires typed budgets shared by build, test, dev, prove, dossier, and CI. D-PERFBUDGET-SURFACE1=A already places declarations in module perf.<role>. D-PERFBUDGET-BASELINE1=A already requires pinned baseline artifacts and explicit update/check commands. This syntax-group ballot does not reopen those choices; it chooses the user-typeable grammar, unit suffixes, and checked BudgetSpec semantics only.
+## Performance gate
 
-Role attachment: perf is a reserved role namespace. Every module perf.<role> belongs to its containing package; <role> is a policy-group identity, not an implicit service/target attachment. Each Budget.scope attaches the fact. Package means the containing package. Env, Service, Scene, Test, and Target carry a name resolved to one canonical identity in the loaded package graph; unqualified names resolve only inside the containing package, while imported identities use their canonical package-qualified form. Missing or ambiguous attachments are compile-time errors.
+Jet must satisfy the strict comparator in
+[AGENTS.md](../../AGENTS.md#strict-performance-gate) for every required cell
+and metric. For each cell `c`, metric `m`, and matched peer `p`, compare the
+same workload and tier with `Jet/p`:
 
-Budget identity is containing package + perf role + name. Names are unique across the merged role. The effective collision key is scope identity + metric/percentile + provider identity + applicability. Two entries with intersecting applicability and the same effective key are rejected even when names differ; disjoint target/profile partitions are allowed. Module merging is source-order independent.
+| Peer | Strict win | Permitted parity | Loss |
+|---|---:|---:|---:|
+| Rust | `< 1.00` | `<= 1.05` (measurement noise, not a win) | `> 1.05` |
+| Any non-Rust peer | `< 1.00` | none | `>= 1.00` |
 
-Closed scopes: Package, Env(name), Service(name), Scene(name), Test(name), Target(name). Closed providers: BuildArtifact(target), CompilerFacts, AllocationProbe(name), BenchMeasurement(name), ServiceProbe(name), SceneProbe(name), and CompilerProbe(Clean|NoChange|Edit(name)). Provider defaults exist only when unambiguous: BinarySize/ArtifactSize with Target may infer BuildArtifact(target); with Package they may infer the containing package primary artifact only when exactly one exists; compiler structural metrics infer CompilerFacts; BenchTime with Test may infer the same named BenchMeasurement. Every other case requires provider. Provider identity is part of every measurement/report fact.
+The comparator is per cell and per metric. Averages cannot hide a losing cell;
+a missing, wrong, unavailable, uncovered, mismatched, or inconclusive result
+cannot pass. The reason is that a single required regression is a real user
+cost. The consequence is that a performance card, milestone, dashboard, or
+release gate remains open until every required comparison is valid and passes;
+semantics, diagnostics, determinism, safety, and I9 parity are never traded
+for a score.
 
-Closed deterministic metrics and legal scope/provider: BinarySize and ArtifactSize use Bytes and Package/Target + BuildArtifact; GeneratedUnsafe, PublicApiItems, DependencyCount, EffectCount use Count and Package/Target + CompilerFacts; AllocationCount/AllocationBytes use Count/Bytes and Test/Service/Scene + an explicit AllocationProbe. They are statistical unless the probe pins one finite named workload, exact input bytes, warmup count, measured iteration count, allocator implementation/version, process isolation, an exact event/byte counting rule, and identical integer results across repeated runs; only that complete workload law makes the metric deterministic and permits Absolute. Closed statistical metrics: StartupTime uses Duration and Target/Service/Scene; FrameTime(percentile) uses Duration and Scene/Test; Latency(percentile) and Throughput use Duration/Rate and Service/Test; MemoryHighWater uses Bytes and Target/Service/Scene/Test; BenchTime(percentile) uses Duration per iteration and Test; ServiceReadiness uses Duration, Service, and ServiceProbe only; CompileTime(percentile) uses Duration, Target, and CompilerProbe. ServiceReadiness begins when the named probe starts its service and ends at that probe's declared ready event; it is not inferred from process spawn or an arbitrary log line. Percentile is P50/P90/P95/P99/P999. Invalid metric/scope/provider combinations are compile-time errors.
+The required foundations are numerics (`numerics.float-kernel`,
+`numerics.fft`, `numerics.tensor-map`, `numerics.int-kernel`), text
+(`text.kernel`, `text.regex-kernel`, `text.regex-find-all-large`,
+`text.report-cli`, `text.script`), files (`files.script`,
+`files.orchestration`), concurrency (`concurrency.app`,
+`concurrency.service`), networking (`netserv.client`, `netserv.service`),
+build time, and run time. The critical-area cells are web
+(`webfront.widget`, `webfront.app`), CLI and scripts (`cli.app`,
+`text.report-cli`, `text.script`, `formats.csv-cli`, `files.script`), data
+analysis (`formats.csv-cli`, `numerics.script`, `numerics.notebook`), backend
+services (`concurrency.service`, `netserv.service`), and embedded
+(`embedded.kernel`, `embedded.data`). Games, AI/ML applications, and GUI
+applications become required only when Jet ships a first-party battery for the
+area. A niche without that battery cannot support a niche-win claim.
 
-## D-PERFBUDGET-COMPILE1=C — Typed project compile workloads
+The gauntlet manifest requires the declared Jet tiers and peer rows for each
+mode, and records explicit structural reasons for metrics that do not apply.
 
-Compile latency is an opt-in statistical metric in the shared BudgetSpec,
-provider, baseline, report, diagnostic, and command path. Its closed spelling is
+The report contract requires Jet `aot` and `run` tiers, permits `dev`, and
+uses `aot` and `run` for peer ratios; mode-specific tier sets stay in the
+manifest.
+The manifest and gate encode this policy; prose is not evidence. Historical
+receipts remain immutable evidence under their recorded policy and never
+weaken this gate. A performance-motivated spelling also requires a paired
+two-program cell against the plain spelling it replaces. The pair must
+preserve behavior and output and must show a strict surface/plain win before
+ratification; the pair belongs in the canonical manifest, and a loss remains
+carded. This prevents a fast-looking surface, an easier workload, or a
+favorable average from becoming an unsupported language promise.
+
+## One declaration surface
+
+Declare budgets as typed facts in a role module:
+
+```jet
+module perf.<role> {
+    budgets: [Budget{ ... }]
+}
+```
+
+The role is a policy-group identity owned by its containing package. It does
+not attach a budget to a service or target. `Budget.scope` attaches the fact
+to a package, environment, service, scene, test, or target. Build, test, dev,
+prove, dossier, and CI consume the same facts. No manifest field, marker,
+external policy file, shorthand parser, alias, or second enforcement engine
+may create a parallel policy. This gives beginners one ordinary declaration
+while keeping the expert contract in the same `BudgetSpec`
+(`D-PERFBUDGET-SURFACE1`, `D-WD14`).
+
+`perf` is a reserved top-level role namespace, and `<role>` is one nonempty
+lowercase `snake_case` segment. Every module role belongs to its containing
+package. `Package`, `Env(name)`, `Service(name)`, `Scene(name)`, `Test(name)`,
+and `Target(name)` are the closed scopes. A named attachment resolves to one
+canonical identity in the loaded package graph: an unqualified name searches
+only its containing package, and an imported identity uses its canonical
+package-qualified name rather than an import alias. The same kind and package
+rules apply to environment, service, scene, bench, and target names. Missing,
+ambiguous, wrong-kind, wrong-case, or wrong-package attachments are
+compile-time errors. The reason is that a role name alone must not silently
+change the workload being measured.
+
+A budget identity is containing package, role, and name. Names are unique in
+the merged role. The effective collision key is scope identity,
+metric/percentile, provider identity, and applicability. Entries with
+intersecting applicability and the same key are rejected even when their
+names differ; disjoint target/profile partitions are allowed. Module merging
+is independent of source order. Every `BudgetSpec` retains source spans for
+the module, complete entry, name, scope, metric, provider,
+comparison/baseline, limit/value, enforcement, and every target/profile
+selector so a diagnostic can point to the violated rule
+(`D-PERFBUDGET-GRAMMAR1`).
+
+## Metrics, providers, and values
+
+This grammar choice does not reopen the shared-fact requirement, the role
+surface, or pinned-baseline/update ownership from `D-WD14`,
+`D-PERFBUDGET-SURFACE1`, and `D-PERFBUDGET-BASELINE1`; it selects only the
+user-typeable grammar, unit suffixes, and checked BudgetSpec semantics.
+
+The vocabulary is closed. Providers are `BuildArtifact(target)`,
+`CompilerFacts`, `AllocationProbe(name)`, `BenchMeasurement(name)`,
+`ServiceProbe(name)`, `SceneProbe(name)`, and
+`CompilerProbe(Clean|NoChange|Edit(name))`. A provider is inferred only when
+unambiguous: `BinarySize` or `ArtifactSize` with `Target` may infer
+`BuildArtifact(target)`; the package scope may infer the containing package's
+primary artifact only when exactly one exists; structural compiler metrics
+infer `CompilerFacts`; and `BenchTime` with `Test` may infer the same-named
+`BenchMeasurement`. Every other combination requires an explicit provider,
+and provider identity remains part of each measurement and report fact.
+
+| Metric family | Metrics and constraints |
+|---|---|
+| Deterministic facts | `BinarySize`, `ArtifactSize` use `Bytes` with `Package`/`Target` and `BuildArtifact`; `GeneratedUnsafe`, `PublicApiItems`, `DependencyCount`, and `EffectCount` use `Count` with `Package`/`Target` and `CompilerFacts`. |
+| Allocation facts | `AllocationCount` and `AllocationBytes` use `Count`/`Bytes`, `Test`/`Service`/`Scene`, and an explicit `AllocationProbe`. They remain statistical unless one finite named workload pins exact input bytes, warmups, measured iterations, allocator implementation/version, process isolation, an exact event/byte rule, and identical integer results on repeated runs. Only that complete contract permits `Absolute`. |
+| Statistical facts | `StartupTime` uses `Duration` with `Target`/`Service`/`Scene`; `FrameTime(percentile)` uses `Duration` with `Scene`/`Test`; `Latency(percentile)` and `Throughput` use `Duration`/`Rate` with `Service`/`Test`; `MemoryHighWater` uses `Bytes` with `Target`/`Service`/`Scene`/`Test`; `BenchTime(percentile)` uses `Duration` per iteration with `Test`; `ServiceReadiness` uses `Duration`, `Service`, and `ServiceProbe`; `CompileTime(percentile)` uses `Duration`, `Target`, and `CompilerProbe`. |
+| Scene facts | `SceneAssetBytes` is lower-is-better; `DrawCalls(percentile)` is lower-is-better and uses `Count`. Both use the scene migration law below. |
+
+`ServiceReadiness` starts when its named probe starts the service and ends at
+the probe's declared ready event. Process spawn or an arbitrary log line is not
+a readiness event. Percentiles are exactly `P50`, `P90`, `P95`, `P99`, and
+`P999`. Invalid metric/scope/provider pairs are compile-time errors.
+
+The value families are `Duration` (`ns`, `us`, `ms`, `s`), `Bytes` (`B`,
+`KiB`, `MiB`, `GiB`), `Percent` (`pct`), nonnegative integer `Count`, and
+`Rate{ count: Int, per: Duration }`. These suffixes are reserved in
+`Syntax.rs`. Source quantities normalize to unsigned integer nanoseconds,
+bytes, counts, or exact rate rationals. Overflow, fractional bytes or counts,
+negative values, NaN, infinity, and runtime expressions are rejected. The
+same typed values feed beginner and expert forms; a metric-key mini-language
+or shorthand parser would create a second semantic path
+(`D-PERFBUDGET-GRAMMAR1`).
+
+`Absolute` is only for deterministic facts and compares directly.
+`AbsoluteFrom(baseline)` is a statistical SLA with an absolute `AtMost` or
+`AtLeast` limit whose trials, hardware, and confidence policy come from the
+pinned baseline. `RelativeTo(baseline)` uses `RegressionAtMost` or
+`ImprovementAtLeast` with a percentage limit. Statistical metrics use
+`AbsoluteFrom` or `RelativeTo`; deterministic metrics use `Absolute`. A
+baseline-relative limit with `Absolute`/`AbsoluteFrom`, or an absolute limit
+with `RelativeTo`, is rejected.
+
+Lower-is-better metrics are `BinarySize`, `ArtifactSize`, `GeneratedUnsafe`,
+`PublicApiItems`, `DependencyCount`, `EffectCount`, `AllocationCount`,
+`AllocationBytes`, `StartupTime`, `FrameTime`, `Latency`, `MemoryHighWater`,
+`BenchTime`, `ServiceReadiness`, `SceneAssetBytes`, `DrawCalls`, and
+`CompileTime`. `Throughput` alone is higher-is-better. `AtMost` is legal only
+for lower-is-better metrics and `AtLeast` only for higher-is-better metrics;
+regression and improvement use the same fixed direction, never a provider's
+interpretation. Deterministic budgets must use `Fail`; statistical budgets may
+use `Fail` or `Warn`, and `Warn` changes only policy outcome, not measurement.
+Defaults are `Fail`, `Package`, and `Current`; comparison and provider defaults
+exist only under the unambiguous rules above.
+
+Deterministic gates do not borrow statistical baseline semantics. Missing,
+mismatched, stale, zero, or unavailable evidence never silently passes
+(`D-PERFBUDGET-BASELINE1`).
+
+Relative arithmetic is exact. `1pct` is 100 basis points, and source permits
+at most two fractional decimal places (`0.25pct` is 25 basis points). Integer
+quantities and reduced `Rate` rationals are compared without rounding. For a
+lower-is-better regression, `bad_delta = max(current - baseline, 0)`; for a
+higher-is-better regression, `bad_delta = max(baseline - current, 0)`. The
+regression passes when
+`bad_delta * 10000 <= baseline * limit_basis_points`. Improvement swaps the
+good direction and uses `>=`. Rate rationals are cross-multiplied. A zero
+baseline is unavailable, including `0` versus `0`; it never passes. The
+implementation uses a standard-library arbitrary-precision unsigned
+calculation, and every absolute comparison uses normalized integers or exact
+rationals (`D-PERFBUDGET-GRAMMAR1`).
+
+## Applicability and compile workloads
+
+`BudgetApplies{ targets, profiles }` selects `Current`, `All`, or
+`Only(nonempty list)` on each axis. `Current` records the one resolved target
+class/triple and profile for the invocation; `All` covers every supported
+context. Target selectors are `Class(Native|Web|Freestanding|Plugin|OSImage)`
+and `Triple("canonical-triple")`. Profile selectors are `.Dev`, `.Release`,
+`.Small`, `.Test`, `.Bench`, or `Named(text)`. Named text is nonempty lowercase
+`snake_case`, cannot equal a built-in case-insensitively, and resolves uniquely
+to a declared containing-package profile. Cross-package profiles use
+`<dependency-package>::<profile>` with the resolved dependency name, never an
+import alias. Unknown, ambiguous, wrong-case, wrong-package, and reserved
+values reject; an empty `Only` is invalid, and it does not mean `All`.
+Triples are canonical.
+
+Classes and triples independently contribute to the target union, so a triple
+need not belong to a listed class. Profile selectors also form a union, and
+the two axes form their Cartesian product. Two budgets overlap only when both
+their target sets and profile sets intersect; analysis expands
+classes/triples/profiles symbolically, with `Current` intersecting only the
+invocation's resolved context. A non-applicable budget remains a checked
+declared fact with `notSelected` rather than disappearing. The reason is that
+selection must be auditable and collision analysis must not depend on the
+order in which a command visits contexts.
+
+Compile latency is opt-in and uses the shared BudgetSpec, provider, baseline,
+report, diagnostic, and command path. Its only metric spelling is
 `CompileTime(.P50|.P90|.P95|.P99|.P999)` with
 `CompilerProbe(.Clean)`, `CompilerProbe(.NoChange)`, or
-`CompilerProbe(.Edit("name"))`. An edit name resolves to one typed
-`CompilerWorkload.Edit{ target: "...", patch: "..." }` entry in the owning
-performance role. The provider applies that exact patch to a copied source
-tree; it never infers an edit from a timestamp or ambient cache file.
+`CompilerProbe(.Edit("name"))`. The name resolves to one typed
+`CompilerWorkload.Edit{ target: "...", patch: "..." }` in the owning role.
+The provider applies that exact patch to a copied source tree; it never
+infers an edit from a timestamp or ambient cache file.
 
-Every candidate records source-tree and patch identities, cache scenario,
-compiler/Core digests, target, profile, backend, linker, host, one fixed
-warmup, twenty samples, process CPU-time variance, peak RSS, workload bytes, edit bytes,
-and resident-compiler phase totals. The built-in `dev` profile measures the
-production Cranelift JIT lens; optimized `release` measures the rustc AOT lens.
-Missing or changed inputs, unsupported targets,
-incompatible identities, partial timing artifacts, unsupported profiles,
-provider crashes, and deadlines are unavailable evidence or operation failures;
-they never become a pass. The resident fixture accepts the built-in `dev`,
-`release`, `debug`, `ci`, and `small` profiles plus profiles declared in the
-project's `package.jet`; unknown profiles reject before measurement. Ordinary
-projects do not measure anything until they declare a compile budget.
+Each compile candidate records source-tree and patch identities, cache
+scenario, compiler/Core digests, target, profile, backend, linker, host, one
+fixed warmup, twenty samples, process CPU-time variance, peak RSS, workload
+bytes, edit bytes, and resident-compiler phase totals. The `dev` profile uses
+the production Cranelift JIT lens; optimized `release` uses the rustc AOT
+lens. Missing or changed inputs, unsupported targets, incompatible
+identities, partial timing, unsupported profiles, provider crashes, and
+deadlines are unavailable evidence or operation failures, never passes. The
+resident fixture accepts `dev`, `release`, `debug`, `ci`, and `small`, plus
+profiles declared in `package.jet`; unknown profiles reject before
+measurement. A project without a compile budget does not acquire compile
+measurements (`D-PERFBUDGET-COMPILE1`).
 
-Value families: Duration suffixes ns/us/ms/s; Bytes suffixes B/KiB/MiB/GiB; Percent suffix pct; Count is a nonnegative integer; Rate is Rate{ count: Int, per: Duration }. These suffixes are reserved in Syntax.rs. Source quantities normalize exactly to unsigned integer ns, bytes, count, or rate rational. Overflow, fractional bytes/counts, negative values, NaN/infinity, and runtime expressions are rejected.
+Baseline IDs are nonempty slash-separated lowercase kebab-case segments, each
+matching `[a-z0-9]+(?:-[a-z0-9]+)*`. Empty or dot segments, whitespace,
+uppercase, leading/trailing slashes, and package qualifiers are invalid. A
+well-formed ID is declaration-valid without consulting mutable history. A
+missing pinned generation is an unavailable execution result and enters the
+bootstrap/update path; it is not a compile error and never passes silently.
+Compile-time rejection covers duplicate identity, overlapping effective keys,
+bad attachment or provider/metric/scope, unit/direction/comparison mismatch,
+invalid applicability, deterministic `Warn`, malformed baseline ID, and
+nonconstant or overflowing values.
 
-Comparison law has three non-overlapping variants. Absolute is for deterministic facts and compares directly. AbsoluteFrom(baseline) is a statistical SLA with an absolute AtMost/AtLeast value, but obtains trials/hardware/confidence policy from the pinned baseline. RelativeTo(baseline) uses RegressionAtMost/ImprovementAtLeast Percent. Statistical metrics must use AbsoluteFrom or RelativeTo; deterministic metrics must use Absolute. A baseline-relative limit with Absolute/AbsoluteFrom, or an absolute limit with RelativeTo, is rejected.
+## Typed declaration example
 
-Direction and enforcement is closed: lower-is-better metrics are BinarySize, ArtifactSize, GeneratedUnsafe, PublicApiItems, DependencyCount, EffectCount, AllocationCount, AllocationBytes, StartupTime, FrameTime, Latency, MemoryHighWater, BenchTime, ServiceReadiness, and CompileTime. Throughput alone is higher-is-better. AtMost is legal only for lower-is-better; AtLeast only for higher-is-better. RegressionAtMost and ImprovementAtLeast use that same enumerated bad/good direction; providers cannot reverse it. Deterministic budgets must Fail. Statistical budgets may Fail or Warn; Warn changes result policy only, never measurement. Defaults are enforcement Fail, scope Package, and applicability Current. Comparison/provider have defaults only where rules above make them unique.
-
-Relative math is exact. pct stores integer basis points: 1pct = 100 basis points; source allows at most two fractional decimal places, so 0.25pct = 25. Baseline and current normalize to nonnegative integer base units or an exact reduced Rate rational. For lower-is-better regression, bad_delta=max(current-baseline,0); for higher-is-better, bad_delta=max(baseline-current,0). Regression passes iff bad_delta * 10000 <= baseline * limit_basis_points. Improvement swaps good direction and uses >=. Rate rationals cross-multiply before this comparison. Operations use a std-only arbitrary-precision unsigned implementation; no rounding occurs. A zero baseline makes every relative result unavailable, including 0 versus 0; it never passes. Absolute comparisons use normalized integers/rationals with no rounding.
-
-Applicability is BudgetApplies{ targets, profiles }. Each axis is Current, All, or Only(nonempty list). Current means the one resolved target class/triple or profile of this invocation, recorded in the fact. All means every supported context. Only lists target selectors Class(Native/Web/Freestanding/Plugin/OSImage) or Triple("canonical-triple") and profiles Dev/Release/Small/Test/Bench/Named(text). Built-ins are exactly .Dev/.Release/.Small/.Test/.Bench. Named text is nonempty lowercase snake_case, cannot equal a built-in case-insensitively, and resolves uniquely to a declared containing-package profile; cross-package profiles use `<dependency-package>::<profile>` with the resolved dependency name, never an import alias. Unknown, ambiguous, wrong-case, wrong-package, and reserved values reject. An empty Only is invalid; there is no empty-means-all rule. A Triple must be canonical. Class and Triple selectors independently contribute to the targets union; a triple need not belong to any listed class. Selectors inside profiles Only are also a union; an entry applies to the Cartesian product of those two sets. Overlap/collision means both target-set intersection and profile-set intersection are nonempty; analysis expands classes/triples/profiles symbolically; Current overlaps the current invocation only. Non-applicable budgets remain checked declared facts with notSelected status.
-
-Every BudgetSpec retains spans for module, whole entry, name, scope, metric, provider, comparison/baseline, limit/value, enforcement, and each target/profile selector. Baseline ids are nonempty slash-separated lowercase kebab-case segments (`[a-z0-9]+(?:-[a-z0-9]+)*` each), with no empty/dot segment, whitespace, uppercase, leading/trailing slash, or package qualifier. Only malformed baseline ids are compile-time errors; a well-formed id is declaration-valid without consulting mutable stored history. During check/report execution, a well-formed id with no pinned generation is an unavailable result and enters the downstream baseline bootstrap/update flow; it is never a compile error and never silently passes. REPORT1 and OUTPUT1 below pin unavailable status, enforcement outcome, command, and artifact generation. Compile-time rejection covers duplicate identity, overlapping effective key, bad attachment, bad provider/metric/scope, unit/direction/comparison mismatch, invalid applicability, deterministic Warn, malformed baseline id, and nonconstant/overflow value. OUTPUT1 below pins final diagnostic codes and copy.
-
-Beginner: name+metric+limit covers a package/compiler deterministic gate when provider/comparison are unambiguous; defaults are Fail and Current. Expert: exact attachment, provider, percentile, absolute SLA or relative trend, baseline, enforcement, target class/triple, and profile are typed fields. Hybrid: omitted fields elaborate to the same BudgetSpec; no shorthand parser or second policy engine.
-
-I8 migration gate: the legacy `bench_budget` output and game budgets are separate prototypes. The ratified BENCHMIGRATE1 and GAMEMIGRATE1 laws below remove both before #241 closes. No retired benchmark claim marker, alias, adapter, dormant parser, or second enforcement path may survive.
-
-Compatibility: no perf namespace or BudgetSpec/Report implementation exists. Ratification adds perf, Budget/BudgetApplies/enums, KiB/MiB/GiB/pct suffixes, parser/sema facts, and syntax reconciliation. Projects without perf modules are unchanged. OUTPUT1 below governs command spelling and copy.
-
-Implementation must use the ratified provider, integration, and prototype-retirement laws below. No alias, adapter, dormant parser, or second enforcement path may ship.
-
-A gives beginners a real deterministic gate with one ordinary literal while preserving exact provider, SLA/trend, target/triple, profile, source, collision, and arithmetic semantics for experts through the same BudgetSpec. Integrated closure summary: Direction is closed, not provider-defined. Lower-is-better is BinarySize, ArtifactSize, GeneratedUnsafe, PublicApiItems, DependencyCount, EffectCount, AllocationCount, AllocationBytes, StartupTime, FrameTime, Latency, MemoryHighWater, BenchTime, and ServiceReadiness; Throughput alone is higher-is-better. AtMost/AtLeast and regression/improvement use exactly that direction. AllocationCount/AllocationBytes are statistical unless AllocationProbe pins one finite named workload, exact input bytes, warmup and measured iteration counts, allocator implementation/version, process isolation, exact event/byte counting, and identical integer results across repeats; only that deterministic contract permits Absolute. Target selectors in Only are a union: each Class and Triple independently adds members, so a triple need not belong to a listed class; profiles likewise union, and the axes form a Cartesian product. `perf` is a lowercase reserved top-level role namespace; module perf.<role> requires one nonempty lowercase snake_case role segment. Built-in profiles are exactly .Dev/.Release/.Small/.Test/.Bench. Named(text) requires nonempty lowercase snake_case, may not case-insensitively equal a built-in, and must resolve uniquely to a declared containing-package profile; cross-package identity is `<dependency-package>::<profile>` using the resolved dependency name, never an import alias. The same dependency-qualified resolution law applies to Env/Service/Scene/Bench/Target names; wrong kind, casing, package, absence, or ambiguity rejects. Baseline ids are nonempty slash-separated lowercase kebab-case segments (`[a-z0-9]+(?:-[a-z0-9]+)*` each), with no empty/dot segment, whitespace, uppercase, leading/trailing slash, or package qualifier; malformed ids reject at compile time; well-formed ids remain valid declarations, while a missing pinned generation is runtime unavailable and uses the downstream bootstrap/report gate. I8 close gate is mandatory for both prototypes: D-PERFBUDGET-BENCHMIGRATE1 maps every bench_budget fact/result to BudgetSpec and removes its parser/facts/output/enforcement; a paired owner decision does the same for every game budget through Scene/SceneProbe. Unmappable semantics remain owner-gated; no alias, adapter, dormant parser, or second enforcement path may survive.
-
-The later GAMEMIGRATE1 law extends the lower-is-better list with
-`SceneAssetBytes` and `DrawCalls`. The later BENCHMIGRATE1 law supersedes the
-older mapping language above: it deletes `bench_budget` without source
-transformation after recording the retirement ledger.
-
-Selected surface: **Typed Budget list with defaults**. budgets is a list of Budget literals. Every field maps directly to one BudgetSpec axis; omitted fields elaborate under the exact defaults above. Metric/unit/direction/provider errors are rejected before reports exist. Recommended: ordinary Jet values provide a small beginner form and the full expert contract without a metric-key mini-language.
-
-Selected example:
+The checked-in performance receipts use `perf.receipt`, the `hello` and
+`http_ready` targets, the `BuildArtifact` and `ServiceProbe` providers, and
+the baseline name `card-2142/linux-x86-64-dev`. This excerpt keeps the
+beginner deterministic form and the same typed syntax used by statistical
+facts:
 
 ```jet
-module perf.cli {
-    budgets: [
-        Budget{
-            name: "binary",
-            scope: .Target("cli"),
-            metric: .BinarySize,
-            limit: .AtMost(2MiB),
-            applies: BudgetApplies{
-                targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
-                profiles: .Only([.Release]),
-            },
-        },
-        Budget{
-            name: "parse-throughput",
-            scope: .Test("parse-large"),
-            metric: .Throughput,
-            provider: .BenchMeasurement("parse-large"),
-            comparison: .RelativeTo("ci/linux-x64"),
-            limit: .RegressionAtMost(3pct),
-            enforcement: .Warn,
-        },
-    ]
+module perf.receipt {
+    budgets: [Budget]{{name: "binary", scope: .Target("hello"), metric: .BinarySize, provider: .BuildArtifact("hello"), comparison: .Absolute, limit: .AtMost(1MiB), applies: BudgetApplies{
+        targets: .Only([.Class(.Native)]),
+        profiles: .Only([.Dev])
+    }}, {name: "startup", scope: .Target("hello"), metric: .StartupTime, provider: .BuildArtifact("hello"), comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"), limit: .AtMost(50ms), applies: BudgetApplies{
+        targets: .Only([.Class(.Native)]),
+        profiles: .Only([.Dev])
+    }}}
 }
-
-// Illustrative UX only:
-// checked 2 performance budgets: 1 deterministic hard gate, 1 statistical warning
 ```
 
-## D-PERFBUDGET-REPORT1=A — Canonical performance reports and baseline updates
+A beginner can provide name, metric, and limit when provider and comparison
+are unambiguous. An expert can provide attachment, provider, percentile,
+absolute SLA or trend, baseline, enforcement, target/triple, and profile.
+Omitted fields elaborate to the same BudgetSpec; there is no second truth.
 
-Define the portable BudgetReport artifact, exact comparison law, baseline selection, and explicit update contract for D-WD14 typed performance budgets. This decision depends on ratified D-PERFBUDGET-GRAMMAR1; implementation must consume its ratified metric, direction, comparison, enforcement, unit, applicability, provider, and baseline-id vocabulary byte-for-byte. Exact human/JSON CLI rendering, diagnostic codes and What/Why/Fix copy, exit codes, measurement-provider protocols, remote attestation/signing, and dev/build/CI/prove/dossier integration remain downstream owner gates.
+This is the selected typed Budget-list surface with defaults: every field
+maps to one BudgetSpec axis, and metric, unit, direction, and provider errors
+are rejected before a report exists. Projects without a `perf` module remain
+unchanged.
 
-Shared wire law. BudgetReport and AcceptanceAudit are shared A-canonical JSON objects; BudgetReport is exactly {schema:Text="jet.budget-report",version:Int=1,report_id:Hex64,content:ReportContent}. AcceptanceAudit is exactly {audit_id:Hex64,accepted_at:RFC3339UTC,kind:"pass"|"bootstrap"|"exception",actor_label:Text="local",reason:?Text,flags:{bootstrap:Bool,accept_regression:Bool},prior_state_id:?Hex64,prior_head_report_id:?Hex64,report_id:Hex64}. Plain `jet budget update` writes kind pass, reason null, both flags false. `--bootstrap --reason R` writes kind bootstrap, normalized R, bootstrap true, accept_regression false. `--accept-regression --reason R` writes kind exception, normalized R, bootstrap false, accept_regression true. Every other combination rejects. actor_label is literal `local`, never username/environment/CLI input or authenticity. audit_id hashes the canonical audit without audit_id plus LF; report_id hashes ReportContent plus LF. Selected manifest is {schema:"jet.budget-manifest",version:1,manifest_id:Hex64,content:ManifestContent}; manifest_id hashes content plus LF. Hashes prove integrity/linkage only; signing, identity, attestation stay separately gated.
+## Evidence and canonical reports
 
-A-canonical JSON is UTF-8 without BOM; exactly one LF terminator; no insignificant whitespace; object keys sorted by unsigned UTF-8 bytes; arrays in the semantic orders stated below; quote, reverse-solidus, backspace, form-feed, LF, CR, and tab use the two-byte JSON escapes, other U+0000..U+001F controls use lowercase `\u00xx`, and every other Unicode scalar is emitted directly; unpaired surrogates are rejected. Integers are arbitrary-precision signed decimal with shortest form, no leading zero or negative zero; booleans/null are lowercase; floats are forbidden; duplicate/unknown/missing keys are rejected. Hash input is precisely the canonical content bytes including its LF, not the wrapper. Hex64 is 64 lowercase hexadecimal characters. RFC3339UTC is YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ with exactly nine fractional digits. Readers re-encode and byte-compare before trusting an artifact.
+A report must be portable, self-describing, and reproducible from retained
+inputs. `D-PERFBUDGET-REPORT1` depends on the grammar's metric, direction,
+comparison, enforcement, unit, applicability, provider, and baseline-ID bytes.
+Presentation, diagnostics, exits, provider protocols, remote attestation,
+and integration have their own laws below; they cannot reinterpret the report
+vocabulary.
 
-ReportContent is exactly {subject, toolchain, evidence_id, measurements, summary, privacy}. subject is {target_id: Text, member_sources: [{path: WorkspacePath, sha256: Hex64}], target_triple: Text, target_class: Text, profile: Text, artifact: {sha256:Hex64,bytes:Int}|null, measured_start: RFC3339UTC, measured_end: RFC3339UTC}; member_sources sort by path bytes then hash. toolchain is {jet_version: Text, compiler_build_id: Text, stdlib_id: Text, runner_id: Text, digest: Hex64}; digest hashes the A-canonical first four fields plus LF, and compatible reports require equality of every field and digest, not merely a major version. privacy is {schema: Int=1, workspace_paths_only: Bool=true, retained: [Text], excluded: [Text]}; both arrays sort by UTF-8 bytes. summary is {outcome: "pass"|"warn"|"fail", pass: Int, warn: Int, fail: Int}. Providers are measurement-local because one invocation may combine CompilerFacts, BuildArtifact, probes, and benchmark providers; there is no report-global provider field. No other fields exist.
+### Canonical wire objects
 
-WorkspacePath is nonempty slash-separated UTF-8 relative text normalized to NFC; no empty, dot, dot-dot, absolute, backslash, NUL/control, drive, URI, percent-decoding, or symlink-resolved host path is legal. Reports exclude hostname, username, absolute paths, environment values, repository remotes, IP/MAC/serial identifiers, raw source, command lines, actor labels, and acceptance reasons. Audit reason is null for plain pass; bootstrap/exception reason must be explicit UTF-8 NFC, trimmed, control/newline-free, 1..512 scalars. UI warns it is checked-in text. actor_label is fixed `local`; neither enters reports, contexts, fingerprints, or evidence ids.
+`BudgetReport` is exactly
+`{schema:Text="jet.budget-report",version:Int=1,report_id:Hex64,content:ReportContent}`.
+`AcceptanceAudit` is exactly
+`{audit_id:Hex64,accepted_at:RFC3339UTC,kind:"pass"|"bootstrap"|"exception",actor_label:Text="local",reason:?Text,flags:{bootstrap:Bool,accept_regression:Bool},prior_state_id:?Hex64,prior_head_report_id:?Hex64,report_id:Hex64}`.
+Plain `jet budget update` writes `kind=pass`, a null reason, and both flags
+false. `--bootstrap --reason R` writes `kind=bootstrap`, normalized `R`,
+`bootstrap=true`, and `accept_regression=false`.
+`--accept-regression --reason R` writes `kind=exception`, normalized `R`,
+`bootstrap=false`, and `accept_regression=true`. Every other combination
+rejects. `actor_label` is the literal `local`; it never comes from a user,
+environment, or CLI value. `audit_id` hashes the canonical audit without
+`audit_id` plus LF, and `report_id` hashes ReportContent plus LF.
 
-Rational is exactly {num:Int,den:Int}, gcd-reduced, den>0, zero {0,1}; Quantity is Rational with num>=0. Duration/bytes/count use den=1; Rate is reduced count-per-base-duration. Metric is {name:Text,percentile:"p50"|"p90"|"p95"|"p99"|"p999"|null}. Provider is {kind,identity,version,isolation,cpu_arch,cpu_model,logical_cpus,memory_bytes,os,kernel,power_governor,hardware_fingerprint}; identity is resolved resolved provider-protocol payload or empty only for CompilerFacts; fingerprint hashes preceding fields plus LF. MeasurementPolicy is {min_candidate_samples,min_baseline_samples,baseline_generations,bootstrap_resamples,lower_rank,upper_rank,stale_after_seconds,trend_generations}. V1 seed is exactly {20,20,5,10000,250,9750,2592000,5} in that field order. Statistical bootstrap stores it; later reports copy newest compatible policy byte-identically. AbsoluteFrom and RelativeTo consume stored policy; deterministic Absolute has policy null.
+The selected manifest is exactly
+`{schema:"jet.budget-manifest",version:1,manifest_id:Hex64,content:ManifestContent}`;
+`manifest_id` hashes content plus LF. Hashes prove integrity and linkage only;
+signing, identity, and attestation require separate owner gates.
 
-HistorySelection is {state_id:Hex64,report_ids:[Hex64]} newest-first and carries no statistical policy. StatisticalBaseline is {history:HistorySelection,pooled_samples:[Quantity],statistics:Statistics,policy:MeasurementPolicy}. measurements sorts by budget_id then source and contains Measurement {budget_id,budget_spec:BudgetSpecCanonical,budget_spec_sha256,source,metric,target_class,unit,direction,provider,comparison,enforcement,context_key,policy,samples,statistics,history,baseline,decision}. Deterministic Absolute has policy/statistics/baseline null and history optional for trend. Statistical has policy/statistics; baseline is null only at bootstrap/unavailable, and history equals baseline.history when present. Statistics is {count,sorted_samples,p50,p90,p95,p99,p999,mean,mad}. Trend is {label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:?Rational}, inputs oldest-first/index-aligned. Decision is {evidence,reason,point,lower95,upper95,trend,policy_outcome}. Comparison is exactly absolute {kind,limit:Quantity,direction}, absolute_from {kind,baseline,limit:Quantity,direction}, or relative_to {kind,baseline,limit_basis_points,goal,direction}. Unknown/missing/extra fields reject.
+A-canonical JSON is UTF-8 without BOM with exactly one LF terminator, no
+insignificant whitespace, and object keys sorted by unsigned UTF-8 bytes.
+Arrays use their semantic order. `"`, `\\`, backspace, form-feed, LF, CR,
+and tab use their two-byte JSON escapes; other controls use lowercase
+`\\u00xx`, and every other Unicode scalar is emitted directly. Unpaired
+surrogates are rejected. Integers are arbitrary-precision signed decimal in
+shortest form, with no leading zero or negative zero; booleans and null are
+lowercase; floats are forbidden; duplicate, unknown, and missing keys reject.
+Hash input is canonical content including its LF, not a wrapper. `Hex64` is
+64 lowercase hexadecimal characters. `RFC3339UTC` is
+`YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`. Readers re-encode and byte-compare before
+trusting an artifact.
 
-BudgetSpec hash law. BudgetSpecCanonical is exactly {package_id,perf_role,name,scope,metric:Metric,provider:{kind,identity},comparison,enforcement,applies:{targets,profiles}}. comparison already contains its normalized absolute Quantity or relative basis-point limit; no duplicate limit exists. Defaults are present; BaselineName bytes unchanged; resolved target/profile identities deduplicate and sort. Spans/comments/source order/import aliases/sugar are absent. budget_spec_sha256 hashes embedded BudgetSpecCanonical canonical bytes plus LF; readers recompute it. This is the only hash input.
+`ReportContent` is exactly `{subject, toolchain, evidence_id, measurements,
+summary, privacy}`. `subject` contains `target_id`, and sorted
+`member_sources:[{path:WorkspacePath,sha256:Hex64}]` (path bytes, then hash),
+`target_triple`,
+`target_class`, `profile`, `artifact:{sha256:Hex64,bytes:Int}|null`, and
+`measured_start`/`measured_end`. `toolchain` contains `jet_version`,
+`compiler_build_id`, `stdlib_id`, `runner_id`, and a digest over its first
+four fields plus LF; compatible reports require every field and digest to
+match, not just a major version. `summary` is
+`{outcome:"pass"|"warn"|"fail",pass:Int,warn:Int,fail:Int}`.
+`privacy` is `{schema:Int=1,workspace_paths_only:Bool=true,retained:[Text],excluded:[Text]}`
+with both arrays sorted by UTF-8 bytes. Providers are measurement-local, not
+a report-global field, because one invocation can combine compiler facts,
+artifacts, probes, and benchmark providers. No other fields exist.
 
-evidence_id breaks seed circularity. Hash canonical {subject,toolchain,measurements} after replacing each history/baseline/decision with null while retaining embedded BudgetSpec/hash, metric/percentile, provider, comparison, context, policy, samples, statistics, plus LF. It precedes selection/resampling/trend/outcomes/summary/report_id/acceptance. context_key hashes domain `jet-budget-context-v1\0` plus u64-BE-length-framed target_id, metric name, percentile-or-empty, target_class/triple/profile, every toolchain field, and every measurement provider field/fingerprint. No fallback exists.
+`WorkspacePath` is nonempty, slash-separated, relative UTF-8 text normalized
+to NFC. Empty, dot, dot-dot, absolute, backslash, NUL/control, drive, URI,
+percent-decoding, and symlink-resolved host paths are illegal. Reports exclude
+hostnames, usernames, absolute paths, environment values, repository remotes,
+IP/MAC/serial identifiers, raw source, command lines, actor labels, and
+acceptance reasons. Plain-pass audit reason is null; bootstrap and exception
+reasons are explicit NFC UTF-8, trimmed, free of controls/newlines, and 1–512
+scalars. The UI warns that the text is checked in. `actor_label` enters no
+report, context, fingerprint, or evidence ID.
 
-Evidence law. Deterministic has one Quantity sample, null statistics/policy/baseline, direct Absolute, and optional history for trend. Statistical counts/window/resamples/ranks/staleness/trend length come from stored policy. Samples retain acquisition order; sorted samples use exact cross-multiplication. nearest-rank p(q)=sorted[ceil(q*n)-1], including p999. mean=sum/n; MAD=p50 exact deviations from p50. Estimator E is selected Metric.percentile when present, otherwise p50. Arbitrary-precision rational operations reduce every step; no float/rounding decides.
+### Measurement and evidence model
 
-Bootstrap law. Resample candidate n and baseline m independently with replacement for policy.bootstrap_resamples. Replicates are 0..N-1; each starts block 0. Block b is SHA-256(domain || evidence_id || context_key || ordered baseline report ids || u64-be replicate || u64-be b). Consume four consecutive u64 words in digest byte order, candidate draws first then baseline. For population k reject word >= floor(2^64/k)*k; rejection consumes it. After four words increment b; accepted index=word mod k. AbsoluteFrom consumes candidate only; RelativeTo candidate then baseline. Each replicate computes selected estimator. Sort statistics; one-based policy ranks select bounds. point uses unresampled estimators.
+A `Rational` is exactly `{num:Int,den:Int}`, gcd-reduced with `den>0` and
+zero `{0,1}`. A `Quantity` is a nonnegative Rational. Durations, bytes, and
+counts have denominator one; Rate is a reduced count-per-base-duration.
+`Metric` is `{name:Text,percentile:"p50"|"p90"|"p95"|"p99"|"p999"|null}`.
+`Provider` is `{kind,identity,version,isolation,cpu_arch,cpu_model,logical_cpus,memory_bytes,os,kernel,power_governor,hardware_fingerprint}`;
+identity is the resolved provider-protocol payload, or empty only for
+`CompilerFacts`, and the fingerprint hashes preceding fields plus LF.
 
-Absolute uses exact Quantity comparison: AtMost passes iff sample<=limit; AtLeast iff sample>=limit. AbsoluteFrom uses candidate bootstrap only, while the exact baseline still supplies compatible provider/toolchain/trial policy: AtMost statistic is E_candidate-limit; pass iff upper95<=0, regression iff lower95>0, else inconclusive. AtLeast statistic is limit-E_candidate with the same rule. RelativeTo first computes B=baseline estimator and C=candidate estimator; B=0 is unavailable. For RegressionAtMost, bad_delta=max(C-B,0) when lower is better and max(B-C,0) when higher is better, and statistic=(bad_delta*10000/B)-limit_basis_points. For ImprovementAtLeast, good_delta=max(B-C,0) when lower is better and max(C-B,0) when higher is better, and statistic=limit_basis_points-(good_delta*10000/B). Each bootstrap replicate recomputes B, C, delta, and exact reduced rational; pass iff upper95<=0, regression iff lower95>0, otherwise inconclusive. This is exactly the ratified grammar's directional rational law expressed as a confidence distribution.
+`MeasurementPolicy` is
+`{min_candidate_samples,min_baseline_samples,baseline_generations,bootstrap_resamples,lower_rank,upper_rank,stale_after_seconds,trend_generations}`.
+The v1 seed is `{20,20,5,10000,250,9750,2592000,5}` in that field order.
+Statistical bootstrap stores it; later compatible reports copy the policy
+byte-for-byte. `AbsoluteFrom` and `RelativeTo` consume stored policy;
+deterministic `Absolute` has null policy, statistics, and baseline.
 
-Trend is informational and never changes policy. Statistical uses policy.trend_generations; deterministic uses exactly five. Use accepted exact-context generations oldest-to-newest; fewer than three yields insufficient with persisted available ids/estimators and null score. For every i<j compute direction-normalized slope (E_i-E_j)/(j-i) lower-is-better or (E_j-E_i)/(j-i) higher-is-better. score is exact nearest-rank p50: positive improving, zero stable, negative regressing. Persist ids, estimators, score. Deterministic E is sole sample; statistical E is selected percentile.
+`HistorySelection` is `{state_id:Hex64,report_ids:[Hex64]}` in newest-first
+order and carries no statistical policy. `StatisticalBaseline` is
+`{history:HistorySelection,pooled_samples:[Quantity],statistics:Statistics,policy:MeasurementPolicy}`.
+Measurements sort by budget ID then source and contain
+`{budget_id,budget_spec:BudgetSpecCanonical,budget_spec_sha256,source,metric,target_class,unit,direction,provider,comparison,enforcement,context_key,policy,samples,statistics,history,baseline,decision}`.
+Deterministic Absolute has null policy/statistics/baseline and optional history
+for trend. Statistical measurements have policy/statistics; baseline is null
+only for bootstrap or unavailable evidence, and otherwise its history equals
+`baseline.history`.
 
-Evidence and enforcement are separate. Evidence pass maps to policy pass. With enforcement fail, regression, inconclusive, or unavailable maps to fail. With enforcement warn, those three map to warn. D-PERFBUDGET-GRAMMAR1 forbids warn for deterministic metrics and has no observe level; this ballot adds neither. Report summary counts policy outcomes and uses fail > warn > pass precedence.
+`Statistics` is
+`{count,sorted_samples,p50,p90,p95,p99,p999,mean,mad}`. `Trend` is
+`{label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:?Rational}`
+with oldest-first, index-aligned inputs. `Decision` is
+`{evidence,reason,point,lower95,upper95,trend,policy_outcome}`. Comparison is
+exactly one of `absolute {kind,limit:Quantity,direction}`, `absolute_from
+{kind,baseline,limit:Quantity,direction}`, or `relative_to
+{kind,baseline,limit_basis_points,goal,direction}`. Unknown, missing, or extra
+fields reject.
 
-Baseline-name measurement selection. For CLI name N, statistical measurement matches only if its comparison baseline bytes equal N. Deterministic Absolute has no embedded name: with existing N it matches only prior compatible same budget_id/BudgetSpec hash/context; first `--bootstrap` explicitly associates it. Candidate must be nonempty; every measurement must match N; budget_ids unique. Zero matches, any unmatched, duplicate, or deterministic non-bootstrap without prior match rejects. Multiple matches are accepted atomically, never first-match. Bootstrap may associate multiple deterministic measurements only under this all-match law.
+`BudgetSpecCanonical` is exactly
+`{package_id,perf_role,name,scope,metric:Metric,provider:{kind,identity},comparison,enforcement,applies:{targets,profiles}}`.
+Defaults are explicit; baseline bytes are unchanged; resolved target/profile
+identities are deduplicated and sorted. Spans, comments, source order, import
+aliases, and sugar are absent. `budget_spec_sha256` hashes these embedded
+canonical bytes plus LF; no other hash input is valid.
 
-Per measurement, compatible history requires exact schema/context/BudgetSpec/Metric percentile/unit/direction/comparison/target/toolchain/Provider/privacy. Statistical selects policy.baseline_generations; deterministic trend selects five. Container order controls newest-first. Staleness uses audit.accepted_at and policy seconds or deterministic 2592000; future timestamp is unavailable. Plain update requires all pass. Bootstrap requires deterministic direct pass, AbsoluteFrom candidate-only confidence pass with stored v1 policy, and permits RelativeTo unavailable seed with v1 policy. Exception requires at least one regression/inconclusive and every item pass/regression/inconclusive; any unavailable/corrupt/mismatch rejects all. Whole report commits atomically.
+`evidence_id` breaks seed circularity. Hash canonical
+`{subject,toolchain,measurements}` after replacing history, baseline, and
+decision with null while retaining the embedded BudgetSpec/hash, metric and
+percentile, provider, comparison, context, policy, samples, and statistics,
+plus LF. It precedes selection, resampling, trend, outcomes, summary,
+`report_id`, and acceptance. `context_key` hashes domain
+`jet-budget-context-v1\0`, u64-BE-length-framed `target_id`, metric name,
+percentile-or-empty, target class/triple/profile, every toolchain field, and
+every measurement provider field/fingerprint. There is no fallback context.
 
-BaselineName is byte-identical to ratified D-PERFBUDGET-GRAMMAR1: a nonempty slash-separated ASCII string whose every segment matches `[a-z0-9]+(?:-[a-z0-9]+)*`, with no empty/dot segment, whitespace, uppercase, leading/trailing slash, or package qualifier. It is used byte-for-byte as path segments: no Unicode normalization, case folding, percent decode, encoded separator, backslash, drive, NUL, or control form is accepted. Measurement never updates.
+Deterministic evidence has one Quantity sample, null statistics/policy/baseline,
+direct Absolute, and optional history for trend. Statistical counts, windows,
+resamples, ranks, staleness, and trend length come from stored policy. Samples
+retain acquisition order; sorted samples use exact cross-multiplication.
+Nearest-rank `p(q)=sorted[ceil(q*n)-1]`, including p999; `mean=sum/n`; MAD
+uses exact deviations from p50. Estimator `E` is the selected percentile or p50
+when no percentile is selected. Arbitrary-precision rational operations reduce
+every step; no float or rounding decides a result.
 
-Selected manifest law. ManifestContent is exactly {name:BaselineName, head_report_id:Hex64, generations:[Generation]}; generations are oldest-to-newest and Generation is exactly {report_id:Hex64, audit:AcceptanceAudit}. head_report_id equals the last generation report_id; audit.report_id equals its generation report_id; audit.prior_state_id equals predecessor manifest_id M0 and prior_head_report_id equals its head, or both are null at bootstrap. No deletion/reordering is a valid update. Update reads verified manifest_id M0, writes the report object with create-new, then under the per-name exclusive lock re-reads and requires the same M0 (or absent for bootstrap), writes a canonical same-directory temporary manifest, fsyncs it, atomically replaces the named manifest, then fsyncs its directory. If object create-new returns EEXIST, update reads the existing file, requires canonical/hash-valid bytes exactly equal to the candidate bytes, and reuses it idempotently; any mismatch is corruption and aborts without overwrite. A changed head aborts and leaves the verified object unreferenced. Recovery ignores and reports incomplete temporary manifests; the last hash-valid named manifest remains authoritative. `jet budget gc` is the only collector: under one global GC/update exclusion lock it verifies every manifest, marks every referenced report_id, and removes only valid unreferenced report objects whose filesystem modification time is older than 24 hours; corrupt/unknown files are reported and retained. Startup never deletes evidence.
+For each bootstrap replicate, resample candidate `n` and baseline `m`
+independently with replacement. Replicates are `0..N-1`, each starts at block
+zero. Block `b` is
+`SHA-256(domain || evidence_id || context_key || ordered baseline report ids || u64-be replicate || u64-be b)`.
+Consume four consecutive u64 words in digest byte order, candidate draws first
+and baseline draws second. For population `k`, reject words at or above
+`floor(2^64/k)*k`, consuming rejected words; after four words increment `b`,
+and use `word mod k` for an accepted index. `AbsoluteFrom` consumes candidate
+samples only; `RelativeTo` consumes candidate then baseline. Each replicate
+computes the selected estimator, and one-based stored ranks select bounds;
+`point` uses unresampled estimators.
 
-Reader recomputation law. After canonical/wrapper hash checks, readers recompute and require equality for toolchain digest, provider fingerprints, embedded BudgetSpec hashes, context keys, candidate/pooled Statistics, evidence_id, SHA stream/point/bounds/evidence/outcome, Trend from persisted ids/estimators, summary/counts, report_id, audit ids, and container hashes/chains/CAS links. With referenced objects available they also reconstruct pooled samples/trend estimators; standalone reports verify math over persisted inputs but claim no unhashed provenance. Any mismatch or missing required object is corruption/unavailable, never normalization.
+`Absolute` passes `AtMost` exactly when sample ≤ limit and `AtLeast` exactly
+when sample ≥ limit. `AbsoluteFrom` bootstraps the candidate while the exact
+baseline supplies compatible provider, toolchain, and trial policy. For
+`AtMost`, the statistic is `E_candidate - limit`: upper95 ≤ 0 passes, lower95
+> 0 regresses, and otherwise the result is inconclusive. `AtLeast` uses
+`limit - E_candidate` with the same bounds. `RelativeTo` computes baseline
+estimator `B` and candidate estimator `C`; `B=0` is unavailable. For
+`RegressionAtMost`, bad delta is `max(C-B,0)` for lower-is-better and
+`max(B-C,0)` for higher-is-better, with statistic
+`(bad_delta*10000/B)-limit_basis_points`. For `ImprovementAtLeast`, good delta
+is `max(B-C,0)` for lower-is-better and `max(C-B,0)` for higher-is-better,
+with statistic `limit_basis_points-(good_delta*10000/B)`. Every replicate
+recomputes these values as exact reduced rationals; the same bounds classify
+pass, regression, or inconclusive. This is the budget-baseline comparison,
+not a substitute for the per-cell peer gate above.
 
-Filesystem law for every option. Root is `.jet/perf/baselines`; names cannot escape it. Open each existing component without following symlinks and reject symlink/reparse traversal. Artifacts are checked-in, non-secret policy: on POSIX create artifact directories/files as 0755/0644 subject to umask, and create lock/temporary state as 0700/0600; on Windows use inherited repository ACLs for artifacts and current-user temporary/lock ACLs. Existing artifact permissions are not authenticity or confidentiality evidence and do not invalidate a hash-valid check. Locks must be advisory-exclusive across Jet processes. Update/GC require create-new, no-follow/reparse checks, same-filesystem atomic replace, file and directory durability, and reliable locks; if the platform/filesystem cannot provide any property, mutation returns unavailable and performs no policy change. Read-only check may operate only on fully canonical, hash-valid artifacts. Other platforms must define equivalent guarantees in a later gate before enabling mutation.
+Trend is informational and never changes policy. Statistical trend uses
+`policy.trend_generations`; deterministic trend uses exactly five. Select
+accepted exact-context generations oldest-to-newest. Fewer than three produces
+`insufficient`, retaining available IDs and estimators with null score. For
+each `i<j`, the direction-normalized slope is `(E_i-E_j)/(j-i)` for
+lower-is-better or `(E_j-E_i)/(j-i)` for higher-is-better. Its exact
+nearest-rank p50 score is positive for improving, zero for stable, and
+negative for regressing. Persist IDs, estimators, and score.
 
-Beginner: one checked-in name yields pass/warn/fail without statistics jargon. Expert: exact samples, rational math, seed inputs, contexts, generations, and integrity links reproduce every result. Hybrid: both consume the same report and history; no simple-mode truth exists.
+Evidence and enforcement are separate. Evidence pass maps to policy pass.
+With `Fail`, regression, inconclusive, or unavailable maps to fail; with
+`Warn`, those outcomes map to warn. Deterministic metrics cannot use `Warn`,
+and there is no observe level. Report summaries count policy outcomes with
+fail > warn > pass precedence.
 
-Selected surface: **Immutable objects plus named atomic manifest**. Store each canonical report create-new at `.jet/perf/baselines/objects/<report_id>.json`; store each BaselineName as its canonical manifest under `.jet/perf/baselines/names/<segments>.json`. The shared manifest/CAS/audit/GC/filesystem law above is normative. Rollback is a new audited generation selecting an existing object, never history rewrite. Recommended: immutable evidence plus a small movable policy head preserves integrity and reproducibility while keeping one beginner-facing name. Tradeoff: low-level tooling sees objects and manifests, and explicit GC follows reachability.
+### Baseline selection and storage
 
-Selected example:
+For CLI baseline name `N`, each statistical measurement must have comparison
+baseline bytes equal to `N`. A deterministic `Absolute` has no embedded name:
+with an existing `N`, it matches only a compatible prior budget ID, BudgetSpec
+hash, and context; the first `--bootstrap` explicitly associates it. A
+candidate is nonempty, every measurement matches `N`, and budget IDs are
+unique. Zero matches, an unmatched or duplicate measurement, or a deterministic
+non-bootstrap without a prior match rejects. Multiple matches are accepted
+atomically, never by first match.
+
+Compatible history requires exact schema, context, BudgetSpec, metric
+percentile, unit, direction, comparison, target, toolchain, provider, and
+privacy. Statistical selection uses `policy.baseline_generations`; deterministic
+trend uses five. Container order controls newest-first history. Staleness uses
+`audit.accepted_at` and policy seconds, or 2,592,000 seconds for deterministic
+facts; a future timestamp is unavailable. Plain update requires every item to
+pass. Bootstrap requires deterministic direct pass, candidate-only confidence
+pass for AbsoluteFrom under the stored v1 policy, and permits a RelativeTo
+unavailable seed under that policy. An exception requires at least one
+regression/inconclusive and every item to be pass/regression/inconclusive;
+unavailable, corrupt, or mismatched evidence rejects the whole update. The
+report commits atomically.
+
+A baseline name is the grammar's nonempty slash-separated ASCII lowercase
+kebab-case name. It is also used byte-for-byte as path segments: Unicode
+normalization, case folding, percent decoding, encoded separators, backslashes,
+drives, NULs, and controls are rejected. Measurement never updates a
+baseline.
+
+`ManifestContent` is exactly
+`{name:BaselineName,head_report_id:Hex64,generations:[Generation]}`.
+Generations are oldest-to-newest, and `Generation` is
+`{report_id:Hex64,audit:AcceptanceAudit}`. The head equals the last generation;
+the audit report ID equals that generation; and its prior state/head point to
+the predecessor manifest and head, or both are null for bootstrap. Deletion and
+reordering are invalid. Update verifies manifest ID `M0`, creates the report
+object, takes the per-name exclusive lock, re-reads and checks `M0` (or absence
+for bootstrap), writes a canonical same-directory temporary manifest, fsyncs,
+atomically replaces the named manifest, and fsyncs its directory. An existing
+object is reusable only when canonical, hash-valid, and byte-identical; any
+mismatch aborts without overwrite. A changed head aborts and leaves the
+verified object unreferenced. Incomplete temporary manifests are reported and
+ignored; the last hash-valid named manifest remains authoritative.
+
+`jet budget gc` is the only collector. Under one global GC/update exclusion
+lock it verifies every manifest, marks every referenced report, and removes
+only valid unreferenced report objects whose filesystem modification time is
+older than 24 hours. Corrupt or unknown files are reported and retained;
+startup never deletes evidence.
+
+Readers recompute and require equality for toolchain digests, provider
+fingerprints, embedded BudgetSpec hashes, context keys, candidate/pooled
+statistics, `evidence_id`, every SHA stream/point/bounds/evidence/outcome,
+trend from persisted IDs/estimators, summaries/counts, report and audit IDs,
+and container hashes/chains/CAS links. With referenced objects they also
+reconstruct pooled samples and trend estimators. Standalone reports verify
+math over persisted inputs but claim no unhashed provenance. Missing or
+mismatched data is corruption or unavailable evidence, never normalization.
+
+The storage root is `.jet/perf/baselines`, and names cannot escape it. Open
+existing components without following symlinks and reject symlink/reparse
+traversal. On POSIX, artifact directories/files use 0755/0644 subject to
+umask, while locks and temporary state use 0700/0600. Windows artifacts use
+inherited repository ACLs and temporary/lock state uses current-user ACLs.
+Existing permissions are neither authenticity nor confidentiality evidence and
+do not invalidate hash-valid artifacts. Locks are advisory-exclusive across
+Jet processes. Update and GC require create-new, no-follow/reparse checks,
+same-filesystem atomic replacement, file and directory durability, and reliable
+locks. If a platform cannot provide those guarantees, mutation returns
+unavailable without changing policy; read-only checks may use only canonical,
+hash-valid artifacts.
+
+The selected storage surface is immutable objects plus a named atomic manifest:
+canonical reports are create-new objects at
+`.jet/perf/baselines/objects/<report_id>.json`, and each baseline name is a
+manifest at `.jet/perf/baselines/names/<segments>.json`. Rollback is a new
+audited generation selecting an existing object, never a history rewrite. A
+single checked-in name keeps the beginner path simple while immutable
+measurements, exact samples, contexts, and integrity links preserve expert
+reproduction.
 
 ```jet
-jet budget update --baseline release/x86-linux
+jet budget update --baseline card-2142/linux-x86-64-dev
 # writes objects/<report_id>.json create-new
-# CAS-advances names/release/x86-linux.json
+# advances names/card-2142/linux-x86-64-dev.json by CAS
 jet budget gc
-# deletes only verified unreferenced objects older than 24h under global lock
+# removes only verified, unreferenced objects older than 24h under the global lock
 ```
 
-## D-PERFBUDGET-OUTPUT1=A — Performance budget commands, output, diagnostics, and exits
+## Commands, diagnostics, and exits
 
-Dependencies and atomic amendment. D-PERFBUDGET-GRAMMAR1 owns declarations/BudgetSpec semantics. D-PERFBUDGET-REPORT1 owns reports, evidence math, baseline containers/audits, and writes. This decision owns commands/presentation/diagnostics/CI/exits and, atomically with every option, amends REPORT1 bootstrap eligibility and linkage. `--bootstrap` is permitted exactly when the selected BaselineName has no usable compatible generation because history is absent or its otherwise-compatible newest generation is stale. With absent history, bootstrap creates the first generation; AcceptanceAudit.prior_state_id and prior_head_report_id are null, HistorySelection is empty, and the new report becomes head. With stale history, bootstrap does not reset, replace, delete, or hide history: under the per-name lock it verifies and CAS-rechecks manifest M0, appends exactly one Generation to M0.generations, makes the new report head, sets the new audit prior_state_id=M0.manifest_id and prior_head_report_id=M0.head_report_id, and preserves every prior generation byte-for-byte. Each affected measurement persists HistorySelection.state_id=M0.manifest_id and compatible stale report ids selected newest-first under the normal baseline_generations/trend window, including M0.head_report_id first; baseline remains null because stale evidence is not pooled into the bootstrap decision. The audit kind is bootstrap, flags are {bootstrap:true,accept_regression:false}, and reason is required. Bootstrap remains forbidden for corrupt, noncanonical, identity/context/BudgetSpec/toolchain/provider/privacy-incompatible, future-dated, or otherwise invalid history. If REPORT1 is ratified first, this outcome supersedes its bootstrap-eligibility sentence and its rule that bootstrap audit prior links are always null; absent-history behavior stays unchanged and every other REPORT1 law remains. This decision does not create another evaluator/report schema.
+The grammar owns declarations and BudgetSpec semantics. The report decision
+owns report bytes, evidence math, baselines, audits, and storage. The output
+decision owns command validation, confirmation, projection, ordering,
+diagnostics, fixtures, annotations, and exits. `--bootstrap` is allowed only
+when the selected baseline has no usable compatible generation because history
+is absent or its newest otherwise-compatible generation is stale. Absent
+history creates the first generation with null prior IDs, empty history, and
+the new report as head. Stale history does not reset or delete it; the new
+report is an audited generation of the same name (`D-PERFBUDGET-OUTPUT1`).
 
-Exact command surface. `jet budget check [--json] [--verbose] [--annotations auto|none|github]` checks every applicable BudgetSpec for the current resolved target/profile, obtains each statistical BaselineName from its declaration, writes the canonical BudgetReport to `.jet/perf/reports/<report_id>.json`, and never mutates baseline state. `jet budget update --baseline <BaselineName> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--annotations auto|none|github]` measures/checks once, applies REPORT1's exact all-measurements-match rule for that BaselineName, prints a plan, and only then advances the selected container. --bootstrap and --accept-regression are mutually exclusive. --reason is required with either and rejected without either. -y and --yes are identical. Repeated flags, missing values, unknown flags/subcommands, invalid BaselineName bytes, or illegal combinations are USAGE. There is no `budget report`, implicit update, force, accept-unavailable, or compatibility alias.
+The command surface is:
 
-Report artifact write. Check/update materialize canonical REPORT1 bytes at `.jet/perf/reports/<report_id>.json`, where filename is exactly the verified lowercase Hex64 id. Open `.jet`, `perf`, and `reports` component-by-component without following symlinks/reparse points; reject escape, wrong owner/type, or non-directory. Create artifact directories as POSIX 0755 subject to umask (Windows inherited repository ACL), same-directory random temp as create-new 0600/current-user ACL, write all bytes, fsync/FlushFileBuffers the temp, then install with an atomic no-replace primitive and fsync the directory. If no reliable no-follow, no-replace, file durability, or directory durability exists, return E2908 before claiming a report. Destination EEXIST is idempotent only after no-follow open, canonical reparse, hash verification, and byte-for-byte equality; equal reuses, any mismatch is E2908 corruption and never overwrites. Incomplete temps are never reports; a later run may remove only its own validated `.tmp-<pid>-<nonce>` file under the locked reports directory. Final artifacts are 0644 subject to umask/current repository ACL because privacy law makes them non-secret checked-in evidence.
+```text
+jet budget check [--json] [--verbose] [--quiet] [--annotations auto|none|github]
+jet budget update --baseline <BaselineName> [--bootstrap|--accept-regression]
+    [--reason <text>] [-y|--yes] [--json] [--verbose] [--quiet]
+    [--annotations auto|none|github]
+```
 
-Mutation gate follows ratified D-FE-CLI1 exactly. Every update prints a plan before mutation. Interactive human mode asks `Apply? [y/N]`; only y/yes applies. N/EOF prints `plan cancelled; no baseline changed` and exits OK. Non-TTY without -y/--yes prints the deterministic plan plus `plan only; pass -y or --yes to apply in a non-interactive shell`, performs no write, and exits OK, matching existing Jetpack plan-only behavior. JSON mode never prompts: without -y/--yes it returns the plan with applied:false and exits OK; with either flag it applies. A rejected evidence set prints no apply prompt because no valid plan exists.
+`check` evaluates every applicable BudgetSpec for the resolved target/profile,
+reads each statistical baseline from its declaration, writes the canonical
+report to `.jet/perf/reports/<report_id>.json`, and never mutates baseline
+state. `update` measures/checks once, applies the all-measurements-match law
+for its baseline, prints a plan, and advances the selected manifest only after
+confirmation. `--bootstrap` and `--accept-regression` are mutually exclusive;
+`--reason` is required with either and is rejected otherwise. `--quiet`
+suppresses only the trailing pass/fail recap; it does not change evaluation,
+diagnostics, report creation, or baseline mutation.
 
-Consequence-scaled output. Check is baseline/policy/source read-only but evidence-artifact-producing: report creation/reuse is its declared additive, content-addressed output, so it needs no confirmation and never pretends to be a zero-write query. Short work prints no transient progress; its final summary names the persisted report id and is the compact completed ledger. Long provider/build/measurement work uses the shared dependency-chain live region and promotes completed rows into the ledger. `--verbose` additionally prints `+ report <id> <path>` for create or `~ report <id> <path> (verified reuse)`. TTY redraw ends before any diagnostic. Non-TTY/NO_COLOR is deterministic append-only text. Update is policy-consequential and always uses the +/~/- plan renderer; v1 update normally prints `+ report <id>` when a new object will be created or `~ report <id> (verified reuse)` for idempotent reuse, then `~ baseline <name> <old-head-or-none> -> <report-id>`. Finished apply rows correspond one-for-one to plan rows. --verbose adds all applicable pass rows, report path/id, context/toolchain/provider fingerprints, selected baseline report ids, point/bounds/trend, and whether an object was created or reused; it never changes evaluation.
+Check and update install canonical report bytes at
+`.jet/perf/reports/<report_id>.json`, with the verified lowercase Hex64 as the
+filename. Open `.jet`, `perf`, and `reports` component by component without
+following symlinks or reparse points; reject escapes, wrong types, and wrong
+owners. Create directories with POSIX 0755 subject to umask (inherited
+repository ACLs on Windows), create a same-directory random temporary file as
+0600/current-user ACL, write all bytes, fsync or `FlushFileBuffers`, install
+with an atomic no-replace primitive, and fsync the directory. If a platform
+cannot provide no-follow, no-replace, file durability, or directory
+durability, return E2908 before claiming a report. Destination EEXIST is
+idempotent only after the existing object passes the exact canonical/hash
+checks.
 
-Common ordering, status, and failure_kind. Results sort by class then budget_id UTF-8: (1) policy fail from regression/inconclusive, (2) policy fail from non-stale unavailable, (3) policy fail from stale, (4) policy warn, (5) pass. Overall status is first present mapped fail, unavailable, stale, warn, pass: fail > unavailable > stale > warn > pass. Unavailable/stale under Warn remains warn. failure_kind is budget for class 1, evidence for class 2/3, null for warn/pass. A compiler-front-end stop is status fail/compiler; provider protocol/execution, report/container/write/CAS/permission failure is fail/tool. Provider unavailable before measurement is ordinary evidence. Tool/compiler failure never prints a budget-result summary as though measurement completed.
+Every update prints a plan before mutation. Interactive human mode asks
+`Apply? [y/N]`; only `y` or `yes` applies. N/EOF prints
+`plan cancelled; no baseline changed` and exits OK. Non-TTY without `-y` or
+`--yes` prints the deterministic plan plus
+`plan only; pass -y or --yes to apply in a non-interactive shell`, performs no
+write, and exits OK. JSON never prompts: without `-y`/`--yes` it returns the
+plan with `applied:false` and exits OK; with either flag it applies. Rejected
+evidence prints no apply prompt because there is no valid plan.
 
-Exact terminal copy. Define `count(n,"budget","budgets")` as `1 budget` when n=1 and `<n> budgets` otherwise; likewise warning/warnings, result/results, baseline/baselines. Zero-valued segments are omitted. Clean: `budgets: <count(P,budget,budgets)> passed · report <12-char-id>`. Warn: `budgets: [<count(P,budget,budgets)> passed · ]<count(W,warning,warnings)> · report <id>`. Budget failure: `budgets failed: <count(F,budget,budgets)> failed[ · <count(W,warning,warnings)>] · report <id>`. Unavailable: `budgets unavailable: <count(U,result,results)> unavailable[ · <count(W,warning,warnings)>] · report <id>`. Stale: `budgets stale: <count(S,baseline,baselines)> stale[ · <count(W,warning,warnings)>] · report <id>`. Bracketed segment appears only when positive; punctuation/spaces shown are exact. E2907 headline is `performance budget <name> regressed` or `performance budget <name> is inconclusive`; E2906 is `performance budget <name> has no usable evidence`; E2908 is operation-neutral `performance budget operation failed`. Tool failure ends `budget command failed before a valid report was produced` when report is null, or `budget command failed · report <id> was not accepted` otherwise. Compiler failure prints only canonical compiler diagnostics. When an option emits a source diagnostic, it uses canonical Jet frame plus exact What/Why/Fix. Human output is stderr only; stdout empty; color never carries meaning.
+Check may create or reuse a content-addressed report without confirmation;
+that additive artifact is not described as a zero-write query. Short work
+prints no transient progress and names the persisted report ID in its final
+summary. Long provider/build/measurement work uses the shared dependency-chain
+live region and promotes completed rows into the ledger. `--verbose` adds
+`+ report <id> <path>` for creation or `~ report <id> <path> (verified reuse)`.
+Update uses the `+`/`~`/`-` plan renderer: `+ report <id>` for a new object or
+`~ report <id> (verified reuse)`, followed by
+`~ baseline <name> <old-head-or-none> -> <report-id>`. Applied rows correspond
+one-for-one with plan rows. Verbose output adds applicable pass rows, report
+path/ID, context/toolchain/provider fingerprints, selected baseline report IDs,
+point/bounds/trend, and create/reuse information without changing evaluation.
+TTY redraw ends before diagnostics; non-TTY and `NO_COLOR` output is
+append-only and deterministic.
 
-JSON mode begins only after the entire command line validates. Every USAGE failure—including unknown command/flag, missing/invalid value, repeated flag, or illegal combination, whether `--json` appears before or after it—uses the canonical human usage diagnostic on stderr, leaves stdout empty, and exits 2; USAGE never emits the budget JSON schema. After validation establishes JSON mode, every compiler/tool/result outcome is captured: stdout is exactly one A-canonical object plus LF, stderr empty, with no ANSI/progress/human diagnostic/annotation. Schema is exactly {schema:"jet.budget-command",version:1,command:"check"|"update",status:"pass"|"warn"|"stale"|"unavailable"|"fail",failure_kind:null|"budget"|"evidence"|"compiler"|"tool"|"ice",exit_code:Int,applied:Bool,report:BudgetReport|null,report_path:WorkspacePath|null,plan:Plan|null,results:[Result],diagnostics:[Diagnostic]}. BudgetReport, BudgetSpecCanonical, Metric, Quantity, Rational, Trend, BaselineName, Hex64, and WorkspacePath are exactly REPORT1 types, not open extension points. Plan is exactly {baseline:BaselineName,rows:[PlanRow],requires_confirmation:Bool}; check always has plan null, while update has one Plan after valid evidence and null before it. PlanRow is exactly {operation:"create"|"reuse"|"advance",artifact:"report"|"baseline",path:WorkspacePath,id:Hex64,from_id:Hex64|null,to_id:Hex64}. Report create/reuse rows use id=to_id=report_id and from_id=null; baseline advance uses id=to_id=report_id and from_id=prior head or null. Rows are report then baseline. requires_confirmation is true exactly when human interactive confirmation remains, false for -y/--yes and JSON/non-TTY plan-only. Result is exactly {budget_id:Text,status:"pass"|"warn"|"stale"|"unavailable"|"fail",evidence:"pass"|"regression"|"inconclusive"|"unavailable",stale:Bool,enforcement:"warn"|"fail",source:{path:WorkspacePath,line:Int,column:Int},metric:Metric,unit:Text,direction:"lower_is_better"|"higher_is_better",comparison:{kind:"absolute",limit:Quantity,direction:"AtMost"|"AtLeast"}|{kind:"absolute_from",baseline:BaselineName,limit:Quantity,direction:"AtMost"|"AtLeast"}|{kind:"relative_to",baseline:BaselineName,limit_basis_points:Int,goal:"RegressionAtMost"|"ImprovementAtLeast",direction:"AtMost"|"AtLeast"},point:Rational|null,lower95:Rational|null,upper95:Rational|null,trend:{label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:Rational|null}|null,baseline_report_ids:[Hex64],reason:Text,diagnostic_code:null|"E2906"|"E2907"}. direction is REPORT1 Measurement.direction byte-for-byte and describes estimator improvement orientation only; comparison.direction remains REPORT1 comparison-limit vocabulary AtMost/AtLeast at its existing nested placement. stale is true exactly when REPORT1 found otherwise-compatible evidence older than its staleness window; that Result keeps evidence unavailable. Fail enforcement maps it to status stale; Warn enforcement maps it to status warn while stale remains true. Non-stale results set stale false. baseline_report_ids preserve REPORT1 newest-first history order; point/bounds/trend and reason are persisted REPORT1 decision values, never recomputed by renderer. Diagnostic is exactly {severity:"warning"|"error",phase:"compiler"|"tool",code:Text,message:Text,why:Text,fix:Text,source:{path:WorkspacePath,line:Int,column:Int,end_line:Int,end_column:Int}|null}. The compiler translator maps every canonical front-end diagnostic—not only E2903..E2905—field-for-field: severity/code/What/Why/Fix/source become JSON fields, absent range ends equal starts, related notes append to why separated by LF in compiler emission order, status fail, failure_kind compiler, exit 1, report/plan null, results empty. Tool diagnostics map directly. Result arrays use common ordering; diagnostics follow result order then original compiler order. Unknown/missing/extra fields reject. No diagnostic text is parsed back from rendered stderr.
+### Results and human output
 
-Exit law reuses Source/ExitCodes.rs. OK=0: pass, warning-only, cancelled plan, non-TTY/JSON plan-only, successful/idempotent mutation. USER_ERROR=1: budget/evidence/compiler/tool failure. USAGE=2: command/flag/argument/combination error. RUNTIME_PANIC=70 never comes from budget tooling. ICE=101 only impossible invariant/rustc exposure; never malformed source, bad data, unavailable provider, or statistical outcome. JSON failure_kind distinguishes shared exit 1; human copy distinguishes by diagnostic/summary. Signals remain OS behavior.
+Results sort by class and UTF-8 budget ID: policy failure from
+regression/inconclusive, policy failure from non-stale unavailable evidence,
+policy failure from stale evidence, policy warning, then pass. Overall
+`status` precedence is fail > unavailable > stale > warn > pass. Under `Warn`,
+unavailable and stale remain warning policy outcomes. `failure_kind` is
+`budget` for the first class, `evidence` for the next two, and null for warn
+or pass. A compiler-front-end stop is `fail/compiler`; provider protocol or
+execution, report/container, write, CAS, or permission failure is `fail/tool`.
+Provider unavailability before measurement is ordinary evidence. Tool/compiler
+failure never prints a budget-result summary as if measurement completed.
 
-Compiler-versus-tool diagnostic boundary. E2903 invalid Budget declaration/value/unit/direction/comparison/applicability, E2904 duplicate/overlapping effective key, and E2905 unresolved scope/profile/target/provider are compiler front-end diagnostics before measurement. E2906 evidence missing/mismatched/zero/stale/provider-unavailable and E2907 regression/inconclusive are budget-tool diagnostics after valid BudgetSpec; E2907 severity follows Warn/Fail. E2908 is operation-neutral for corrupt/canonical-mismatch report/container, provider protocol/execution failure, CAS/permission/filesystem/report-write refusal, or disallowed update; its What is always `performance budget operation failed`, never baseline-specific. Tool diagnostics never come from rustc. Existing compiler diagnostics remain canonical or translate structurally in JSON.
+The terminal copy is exact. Define
+`count(n,"budget","budgets")` as `1 budget` for one and `<n> budgets`
+otherwise; apply the same rule to warning/warnings, result/results, and
+baseline/baselines. Omit zero-valued segments:
 
-I4 copy and tests. E2903 What `performance budget <name> is not valid`; Why one violated grammar rule/typed value; Fix one legal form. E2904 What `performance budgets <a> and <b> overlap`; Why effective key/intersection; Fix remove or disjoint applicability. E2905 What `performance budget <name> cannot resolve <attachment>`; Why zero/multiple canonical matches; Fix qualified identity/provider. E2906 What `performance budget <name> has no usable evidence`; Why exact missing/mismatch/zero/provider-unavailable/stale duration; Fix provider correction or bootstrap only when absent/stale eligible. E2907 What regression/inconclusive headline; Why estimator/bound/limit/confidence/direction/baseline ids; Fix improve, inspect, or explicit exception. E2908 What `performance budget operation failed`; Why names operation and canonical/provider/CAS/permission/durability refusal; Fix retries/remedies named cause, never force.
+```text
+budgets: <count(P,budget,budgets)> passed · report <12-char-id>
+budgets: [<count(P,budget,budgets)> passed · ]<count(W,warning,warnings)> · report <id>
+budgets failed: <count(F,budget,budgets)> failed[ · <count(W,warning,warnings)>] · report <id>
+budgets unavailable: <count(U,result,results)> unavailable[ · <count(W,warning,warnings)>] · report <id>
+budgets stale: <count(S,baseline,baselines)> stale[ · <count(W,warning,warnings)>] · report <id>
+```
 
-Ratification reserves six codes and requires six diagnostics.md summary rows, six detailed What/Why/Fix rows, and these six reviewed snapshots before emission: `tests/ui/perf_budget_e2903_invalid.stderr`, `perf_budget_e2904_overlap.stderr`, `perf_budget_e2905_unresolved.stderr`, `perf_budget_e2906_unavailable.stderr`, `perf_budget_e2907_regression.stderr`, `perf_budget_e2908_operation.stderr`, with paired `.jet` fixtures or tool-fixture drivers in the UI harness. E2906/E2907 each also need warning-severity snapshots; E2906 stale has a separate golden transcript. Human/JSON/GitHub forms receive golden tests. No required snapshot means that code does not ship.
+The bracketed segment appears only when positive. E2907's headline is
+`performance budget <name> regressed` or
+`performance budget <name> is inconclusive`; E2906 is
+`performance budget <name> has no usable evidence`; E2908 is the operation-
+neutral `performance budget operation failed`. A tool failure ends
+`budget command failed before a valid report was produced` when the report is
+null, or `budget command failed · report <id> was not accepted` otherwise.
+Compiler failure prints only canonical compiler diagnostics. A source
+diagnostic uses the canonical Jet frame and exact What/Why/Fix. Human output
+is stderr only, stdout is empty, and color carries no meaning.
 
-CI annotations. --annotations default auto; JSON forces none. Human auto selects github only when GITHUB_ACTIONS bytes equal lowercase `true`; explicit github/none overrides. Emit after each human source diagnostic, one line to stderr exactly `::<level> file=<file>,line=<line>,col=<col>,title=<title>::<message>`. Property order is file,line,col,title. level is error for policy fail/tool error, warning for Warn. file is WorkspacePath; line/col positive decimal; title raw text is `Jet <code>`. message raw text is `<message>\nWhy: <why>\nFix: <fix>`. Encode UTF-8, then escape each property value by replacing `%` -> `%25`, CR -> `%0D`, LF -> `%0A`, `:` -> `%3A`, `,` -> `%2C`, in that order; message replaces `%`, CR, LF in that order and does not escape colon/comma. ASCII workflow punctuation shown remains literal; other UTF-8 bytes remain unchanged. No annotations without source, for pass, or compiler diagnostics already owned by compiler CI bridge. Other CI uses text/JSON; no vendor guessing.
+### JSON, diagnostics, and CI annotations
 
-Beginner pass: `jet budget check` either stays quiet-green or gives one source-linked What/Why/Fix and the next command. Expert pass: --verbose, canonical report, exact JSON, explicit annotations, baseline plan, exceptional reason, fingerprints, confidence, trend, and stable exits are available. Hybrid pass: every surface renders the same BudgetReport/result ordering; JSON, annotations, and human text never independently evaluate policy.
+JSON mode begins only after the whole command line validates. Every usage
+failure, including an unknown command/flag, missing or invalid value, repeated
+flag, or illegal combination with `--json` before or after it, uses the
+canonical human usage diagnostic on stderr, leaves stdout empty, and exits 2.
+Usage never emits the budget JSON schema. Once JSON mode is established,
+stdout is exactly one A-canonical object plus LF, stderr is empty, and no ANSI,
+progress, human diagnostic, or annotation is emitted.
 
-Selected surface: **Source-native diagnostics plus quiet summary**. Recommended. Default hides passing rows, shows warnings/failures as canonical source diagnostics, and ends with one summary. Long work and mutations reuse consequence-scaled progress/plan law. JSON and optional CI annotations render the same ordered results. Best beginner correction path while preserving full expert audit.
+The command object is exactly
 
-Selected example:
+```text
+{schema:"jet.budget-command",version:1,command:"check"|"update",
+ status:"pass"|"warn"|"stale"|"unavailable"|"fail",
+ failure_kind:null|"budget"|"evidence"|"compiler"|"tool"|"ice",
+ exit_code:Int,applied:Bool,report:BudgetReport|null,
+ report_path:WorkspacePath|null,plan:Plan|null,results:[Result],
+ diagnostics:[Diagnostic]}
+```
 
-```jet
+`BudgetReport`, `BudgetSpecCanonical`, `Metric`, `Quantity`, `Rational`,
+`Trend`, `BaselineName`, `Hex64`, and `WorkspacePath` are the REPORT1 types,
+not extension points. `Plan` is exactly
+`{baseline:BaselineName,rows:[PlanRow],requires_confirmation:Bool}`. Check has
+null plan; update has one after valid evidence and null before it.
+`PlanRow` is exactly
+`{operation:"create"|"reuse"|"advance",artifact:"report"|"baseline",path:WorkspacePath,id:Hex64,from_id:Hex64|null,to_id:Hex64}`.
+Rows are report then baseline; report rows use `id=to_id=report_id` and null
+`from_id`, and baseline advance uses the prior head or null as `from_id`.
+`requires_confirmation` is true only for remaining interactive human
+confirmation, and false for `-y`/`--yes`, JSON, and non-TTY plan-only mode.
+
+A `Result` is exactly
+`{budget_id:Text,status:"pass"|"warn"|"stale"|"unavailable"|"fail",evidence:"pass"|"regression"|"inconclusive"|"unavailable",stale:Bool,enforcement:"warn"|"fail",source:{path:WorkspacePath,line:Int,column:Int},metric:Metric,unit:Text,direction:"lower_is_better"|"higher_is_better",comparison:{kind:"absolute",limit:Quantity,direction:"AtMost"|"AtLeast"}|{kind:"absolute_from",baseline:BaselineName,limit:Quantity,direction:"AtMost"|"AtLeast"}|{kind:"relative_to",baseline:BaselineName,limit_basis_points:Int,goal:"RegressionAtMost"|"ImprovementAtLeast",direction:"AtMost"|"AtLeast"},point:Rational|null,lower95:Rational|null,upper95:Rational|null,trend:{label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:Rational|null}|null,baseline_report_ids:[Hex64],reason:Text,diagnostic_code:null|"E2906"|"E2907"}`.
+`direction` is the REPORT1 measurement direction and describes estimator
+orientation only; nested comparison direction remains `AtMost`/`AtLeast`.
+`stale` is true exactly when REPORT1 finds otherwise-compatible evidence older
+than its staleness window, and that result retains evidence-unavailable.
+`Fail` enforcement maps it to stale; `Warn` maps it to warn while retaining
+`stale=true`. Non-stale results set false. `baseline_report_ids` preserve
+REPORT1 newest-first history order. Point, bounds, trend, and reason are
+persisted decision values, never renderer calculations.
+
+The diagnostic code is null, E2906, or E2907 as shown above. Result arrays use
+the common ordering. `Diagnostic` is exactly
+`{severity:"warning"|"error",phase:"compiler"|"tool",code:Text,message:Text,why:Text,fix:Text,source:{path:WorkspacePath,line:Int,column:Int,end_line:Int,end_column:Int}|null}`.
+
+The compiler translator maps every canonical front-end diagnostic field for
+field, not only E2903–E2905; absent range ends equal starts, related notes
+append to `why` with LF in compiler order, and the outcome is
+`fail/compiler`, exit 1, null report/plan, and empty results. Tool diagnostics
+map directly. Unknown, missing, and extra fields reject. No diagnostic text is
+parsed back from rendered stderr.
+
+### Exit law
+
+The exit mapping reuses [`crates/jet-foundation/src/ExitCodes.rs`](../../crates/jet-foundation/src/ExitCodes.rs): OK=0 covers pass,
+warning-only output, cancelled plans, non-TTY/JSON plan-only output, and
+successful or idempotent mutation. USER_ERROR=1 covers budget, evidence,
+compiler, and tool failure. USAGE=2 covers command, flag, argument, and
+combination errors. RUNTIME_PANIC=70 never comes from budget tooling. ICE=101
+is reserved for an impossible invariant or rustc exposure; malformed source,
+bad data, unavailable providers, and statistical outcomes are not ICEs.
+JSON `failure_kind` distinguishes the shared exit 1; human copy distinguishes
+the diagnostic or summary. Signals retain OS behavior.
+
+Compiler diagnostics are E2903 for invalid declarations/values/units/
+directions/comparisons/applicability, E2904 for duplicate or overlapping
+effective keys, and E2905 for unresolved scope/profile/target/provider before
+measurement. E2906 covers missing, mismatched, zero, stale, or unavailable
+evidence; E2907 covers regression or inconclusive evidence after a valid
+BudgetSpec; E2907 severity follows Warn/Fail. E2908 covers corrupt or
+non-canonical artifacts, provider protocol/execution failures,
+CAS/permission/filesystem/report-write refusal, and disallowed updates. Its
+What is always `performance budget operation failed`, never a
+baseline-specific message. Tool diagnostics never come from rustc.
+
+The `I4` copy is:
+
+| Code | What | Why | Fix |
+|---|---|---|---|
+| E2903 | `performance budget <name> is not valid` | One violated grammar rule or typed value | One legal form |
+| E2904 | `performance budgets <a> and <b> overlap` | Effective key and applicability intersection | Remove the overlap or make applicability disjoint |
+| E2905 | `performance budget <name> cannot resolve <attachment>` | Zero or multiple canonical matches | Qualify the identity or provider |
+| E2906 | `performance budget <name> has no usable evidence` | Exact missing/mismatch/zero/provider-unavailable/stale reason | Correct the provider or bootstrap only when absent/stale evidence is eligible |
+| E2907 | Regression or inconclusive headline | Estimator, bound, limit, confidence, direction, and baseline IDs | Improve, inspect, or record an explicit exception |
+| E2908 | `performance budget operation failed` | Named operation and canonical/provider/CAS/permission/durability refusal | Correct the named cause and retry; never force |
+
+The six codes require summary and detailed What/Why/Fix rows in `diagnostics.md`
+and reviewed snapshots
+`tests/ui/perf_budget_e2903_invalid.stderr`,
+`perf_budget_e2904_overlap.stderr`, `perf_budget_e2905_unresolved.stderr`,
+`perf_budget_e2906_unavailable.stderr`, `perf_budget_e2907_regression.stderr`,
+and `perf_budget_e2908_operation.stderr`, paired with `.jet` fixtures or
+tool-fixture drivers. E2906 and E2907 also require warning snapshots, E2906
+stale has a separate golden transcript, and human/JSON/GitHub forms receive
+golden tests. No required snapshot means that code does not ship.
+
+`--annotations` defaults to `auto`; JSON forces `none`. Human `auto` selects
+GitHub only when `GITHUB_ACTIONS` bytes equal lowercase `true`; explicit
+`github` or `none` overrides. After each human source diagnostic, emit this
+single stderr line:
+
+```text
+::<level> file=<file>,line=<line>,col=<col>,title=<title>::<message>
+```
+
+Property order is file,line,col,title. `level` is error for policy fail/tool
+error and warning for Warn; title is raw `Jet <code>`. The raw message is
+`<message>\nWhy: <why>\nFix: <fix>`. Encode UTF-8, then escape property values
+in order `%` → `%25`, CR → `%0D`, LF → `%0A`, `:` → `%3A`, `,` → `%2C`.
+Escape message `%`, CR, and LF in that order; do not escape its colon/comma.
+Other UTF-8 bytes remain unchanged. Do not annotate rows without source, pass
+rows, or compiler diagnostics already owned by the compiler CI bridge.
+
+The beginner path is quiet green output or one source-linked What/Why/Fix and a
+next command. The expert path exposes verbose reports, exact JSON,
+annotations, plans, reasons, fingerprints, confidence, trend, and stable
+exits. Every surface renders the same ordered report; JSON, annotations, and
+human text never independently evaluate policy. This is the selected
+source-native-diagnostics-plus-quiet-summary surface (`D-FE-CLI1`,
+`D-PERFBUDGET-OUTPUT1`).
+
+For example, the checked-in `http_ready` receipt can identify the named
+`readiness` budget and its `card-2142/linux-x86-64-dev` baseline without
+changing the diagnostic contract:
+
+```text
 jet budget check
-# Error [E2907]: performance budget api-p99 regressed
-#   --> perf/checkout.jet:14:9
-#     |
-#  14 |         name: "api-p99",
-#     |         ^^^^
-#  Why: p99 upper95 6.2ms exceeds the 5ms AtMost limit using baseline reports 91d2c4aa and a03f58be.
-#  Fix: reduce p99 below 5ms, inspect `jet budget check --verbose`, or accept explicitly with `jet budget update --baseline ci/linux-x64 --accept-regression --reason "approved memory tradeoff"`.
-# budgets failed: 1 budget failed · report 8bdb1120b90a
+# Error [E2907]: performance budget readiness regressed
+#   --> <workspace>/run.jet:<line>:<column>
+#  Why: the selected estimator exceeds its AtMost limit using the pinned baseline.
+#  Fix: improve readiness, inspect `jet budget check --verbose`, or accept explicitly with
+#       `jet budget update --baseline card-2142/linux-x86-64-dev --accept-regression --reason "approved tradeoff"
+# budgets failed: 1 budget failed · report <12-char-id>
 ```
 
-## D-PERFBUDGET-BENCHMIGRATE1=B — Delete the legacy helper without source transformation
+## Prototype retirement
 
-Typed `BudgetSpec` remains. Every first-party `bench_budget` use is removed mechanically, with a retirement ledger that records how its name, body, and `max_ns` intent map to the replacement. Fixed warmups/trials, floating mean and standard deviation, stderr/environment rendering, and Bool return behavior are explicitly retired rather than copied into the new model. The old helper, parser, facts, output, and evaluator are deleted. External calls receive the ordinary unresolved-member diagnostic. There is no migration command, compatibility alias, teaching parser, adapter, or second evaluator.
+The `I8` gate keeps one typed evaluator. `D-PERFBUDGET-BENCHMIGRATE1=B`
+removes every first-party `bench_budget` use with a retirement ledger that
+maps its name, body, and `max_ns` intent to BudgetSpec. Fixed warmups/trials,
+floating mean and standard deviation, stderr/environment rendering, and Bool
+return behavior are retired rather than copied. The helper, parser, facts,
+output, and evaluator are deleted; external calls receive the ordinary
+unresolved-member diagnostic. No retired benchmark claim marker, migration
+command, compatibility alias, teaching parser, adapter, dormant parser, or
+second evaluator survives.
 
-## D-PERFBUDGET-GAMEMIGRATE1=A — Exact game-budget migration
+The cutover deletes the helper without source transformation.
 
-The closed metric set adds `SceneAssetBytes` and `DrawCalls(percentile)`. Game fields map exactly: `frame_ms` to `FrameTime(.P99)` in nanoseconds, `memory_mb` to `MemoryHighWater` in MiB, `asset_kb` to `SceneAssetBytes` in KiB, and `draw_calls` to `DrawCalls(.P99)` as Count. Each uses `AbsoluteFrom` and `AtMost`. One `SceneProbe` pins backend build, target, device, replay/input, scene-ready event, 120 warmup frames, 600 measured frames, viewport, and settings; it defines the sample stream and max/percentile estimators. The entire former `Game.Budgets` declaration, display, and evaluator path is deleted. Old uses receive ordinary unresolved diagnostics; no alias or second engine survives.
-
-### Prototype retirement ledger
+`D-PERFBUDGET-GAMEMIGRATE1=A` maps game fields exactly. The game migration
+uses the closed metrics `SceneAssetBytes` and `DrawCalls(percentile)`:
+`frame_ms` maps to `FrameTime(.P99)` in nanoseconds, `memory_mb` maps to
+`MemoryHighWater` in MiB, `asset_kb` maps to `SceneAssetBytes` in KiB, and
+`draw_calls` maps to `DrawCalls(.P99)` as Count. Each uses `AbsoluteFrom` and
+`AtMost`. One
+`SceneProbe` pins backend build, target, device, replay/input, scene-ready
+event, 120 warmup frames, 600 measured frames, viewport, and settings; it
+defines the sample stream and max/percentile estimators. The former
+`Game.Budgets` declaration, display, and evaluator path are deleted; no alias
+or second engine survives. Old uses receive ordinary unresolved diagnostics.
 
 | Former fact | Canonical replacement | Retired behavior |
 |---|---|---|
-| `bench_budget("parse", 5_000_000, body)` name and body | `#Test("parse") { .measure { body } }` plus a `.Test("parse")` / `.BenchMeasurement("parse")` `Budget` | Helper Bool return, fixed 3/10 sampling, floating mean/deviation, environment-controlled stderr |
+| `bench_budget("parse", 5_000_000, body)` name and body | `#Test("parse") { .measure { body } }` plus a `.Test("parse")` / `.BenchMeasurement("parse")` Budget | Helper Bool return, fixed 3/10 sampling, floating mean/deviation, environment-controlled stderr |
 | `bench_budget` `max_ns` | `.BenchTime(percentile)` with `.AtMost(5ms)` and explicit baseline policy | Implicit unpinned wall-clock hard gate |
 | `Game.Budgets.frame_ms` | `.Scene(scene)` / `.SceneProbe(scene)`, `.FrameTime(.P99)`, nanosecond-normalized `.AtMost` | Transcript display and runtime setter |
 | `Game.Budgets.memory_mb` | `.MemoryHighWater`, `.AtMost(value MiB)` | Transcript display and runtime setter |
@@ -229,62 +846,82 @@ The closed metric set adds `SceneAssetBytes` and `DrawCalls(percentile)`. Game f
 
 Every migrated statistical fact uses `.AbsoluteFrom(baseline)`. Scene probes
 retain backend build, target, device, replay/input, ready event, warmups,
-measured frames, viewport, and settings in canonical provider/context identity.
+measured frames, viewport, and settings in provider/context identity.
+Unmappable semantics remain owner-gated rather than gaining a private alias or
+parallel enforcement path.
 
-## D-PERFBUDGET-PROVIDER1=A — In-process typed provider registry
+## Provider boundary
 
-Providers are resolved deterministically from the compiler-owned registry, never from `PATH`. A `ProviderRequest` fixes schema/version, request id, provider/context/budget hashes, ordered metrics, workload, and policy. Canonical sorting and hashing use REPORT1 bytes. Providers emit a contiguous ordered stream of typed `Sample`, `Unavailable`, then one final `Complete`; providers collect evidence only, while the shared engine owns policy and outcomes. Limits are 1,000,000 samples, 16 MiB total bytes, 4,096 specs, and 512 scalars of detail. Valid unavailability or too few samples is E2906; malformed streams, panic, or timeout are E2908; unsupported pairs are E2903; unresolved providers are E2905. Provider identity and context remain part of every fact.
+`D-PERFBUDGET-PROVIDER1=A` resolves providers deterministically from the
+compiler-owned registry, never from `PATH`. A `ProviderRequest` fixes
+schema/version, request ID, provider/context/budget hashes, ordered metrics,
+workload, and policy; canonical sorting and hashing use REPORT1 bytes.
+Providers collect evidence only, while the shared evaluator owns policy and
+outcomes. The stream is contiguous and ordered as typed `Sample` or
+`Unavailable` events followed by one final `Complete`; bounded metadata carries
+compile-workload provenance through the same protocol. Limits are 1,000,000
+samples, 16 MiB total bytes, 4,096 specs, and 512 detail scalars. Valid
+unavailability or too few samples is E2906; malformed streams, panic, or
+timeout is E2908; unsupported pairs are E2903; unresolved providers are
+E2905. Provider identity and context remain part of every fact.
 
-The built-in `BuildArtifact(target)` provider measures `BinarySize` and
-`ArtifactSize` as one selected-artifact byte count. For target-scoped
-`StartupTime` and `MemoryHighWater`, it runs twenty fresh child processes. A
-startup sample is the elapsed nanoseconds from spawn to the first stdout line;
-the target program owns that line as its readiness declaration. A memory sample
-is Linux `ru_maxrss` in bytes, with live `/proc/<pid>/status` `VmHWM` as the
-same-process observation. A request containing both statistical metrics shares
-one twenty-trial process family. The provider version and isolation fields pin
-this rule into the baseline context; no throughput measurement is implied.
+`BuildArtifact(target)` measures `BinarySize` and `ArtifactSize` as the byte
+count of one selected artifact. For target-scoped `StartupTime` and
+`MemoryHighWater`, it runs twenty fresh child processes. Startup is elapsed
+nanoseconds from spawn to the target program's first stdout readiness line.
+Memory is Linux `ru_maxrss` in bytes with live `/proc/<pid>/status` `VmHWM` as
+the same-process observation. A request containing both statistical metrics
+shares one twenty-trial process family. Provider version and isolation fields
+pin this rule in baseline context; the provider does not imply throughput
+measurement.
 
-## D-PERFBUDGET-INTEGRATION1=A — Intent-owned refresh with compatible reuse
+## Integration ownership
 
-Every build runs deterministic Fail gates. `jet test --measure` owns
+`D-PERFBUDGET-INTEGRATION1=A` assigns refresh to the command that owns the
+intent. Every build runs deterministic `Fail` gates. `jet test --measure` owns
 `BenchMeasurement`; dev owns explicitly requested startup, service, and scene
-probes. These commands refresh evidence when the relevant digest changes.
-Read-only dossier, Canvas, and LSP views never measure. CI runs `jet budget
-check`. Prove never measures and adds no parallel flags or report types: it
-translates compatible budget results into the existing proof Evidence model.
-Exact compatible slices may satisfy matching facts but never stand in for the
-whole policy. Missing, stale, mismatched, unavailable, inconclusive, warning,
-and failure states remain visible under REPORT1/OUTPUT1; failures fail. Every
-surface reads the same `BudgetReport` and shared evaluator.
+probes. These commands refresh evidence when a relevant digest changes.
+Read-only dossier, Canvas, and LSP views never measure. CI runs
+`jet budget check`. Prove never measures and adds no parallel flags or report
+types; it translates compatible budget results into the existing proof
+Evidence model.
 
-## D-COSTLAW1=A — Typed cost transparency
+An exact compatible slice may satisfy a matching fact but never stand in for
+the whole policy. Missing, stale, mismatched, unavailable, inconclusive,
+warning, and failure evidence remain visible under the report/output laws;
+failures fail. Every surface reads the same verified BudgetReport and shared
+evaluator. A budget baseline does not weaken the strict peer gate: the
+per-cell/per-metric comparator still evaluates every required peer and metric.
 
-Jet keeps optimizer excellence and cost transparency together. A cost that the
-optimizer proves it removed appears in `jet explain --cost`, but does not emit a
-lint. A semantic cost that remains visible in lowered code stays reportable.
+## Cost transparency
 
-The five cost rows are:
+`D-COSTLAW1=A` keeps optimizer excellence and cost transparency together. A
+cost the optimizer proves it removed appears in `jet explain --cost` but does
+not emit a lint. A semantic cost that remains visible in lowered code remains
+reportable. The reason is to expose meaningful costs without warning about
+work that the optimizer eliminates.
 
-1. **View materialization.** A read-only view crosses an owning boundary and
+The five reportable cost rows are:
+
+1. **View materialization:** a read-only view crosses an owning boundary and
    must copy.
-2. **Map copy-on-write.** A shared map spine is copied before mutation.
-3. **Exact-Int spill.** An operation leaves the packed `Int` range and uses the
+2. **Map copy-on-write:** a shared map spine is copied before mutation.
+3. **Exact-Int spill:** an operation leaves packed `Int` range and uses the
    exact big-number representation.
-4. **Outcome construction.** A `Result` or `Option` carrier is built before an
-   immediate consumer fast path can remove that work.
-5. **Generic representation fallback.** A collection uses its generic
+4. **Outcome construction:** a `Result` or `Option` carrier is built before an
+   immediate consumer fast path can remove it.
+5. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
 The sema checker supplies view-copy `L2510` rows. Typed TIR supplies the other
 four rows and the complete explain projection. Before projection, the shared
-cost seam verifies that every sema-checked reachable callable has a matching
-TIR body. A type-parameterized, foreign, or otherwise uncovered reachable
-surface is an explicit completeness failure; it is never silently omitted.
+cost seam requires every sema-checked reachable callable to have a matching
+TIR body. Type-parameterized, foreign, and otherwise uncovered reachable
+surfaces are explicit completeness failures; they are never silently omitted.
 `jet check` and `jet lint --cost` merge these sources and deduplicate identical
-diagnostics at one source site. They keep only semantic remainders inside
-loops. `jet explain --cost` also keeps optimizer-proven removals. Backends do
-not reconstruct cost from emitted Rust. Every explain row uses the honest
+source-site diagnostics. They retain semantic remainders inside loops.
+`jet explain --cost` also retains optimizer-proven removals. Backends do not
+reconstruct cost from emitted Rust; every explain row uses the honest
 `tier=shared-tir` label.
 
 ```jet
@@ -298,10 +935,30 @@ loop item in items {
 ```
 
 `jet check` keeps ordinary code quiet unless a semantic remainder repeats in a
-loop. `jet lint --cost file.jet` reports those rows directly. `jet explain --cost
-file.jet` reports both semantic remainders and optimizer-proven removals, so a
-missing lint row is explainable rather than silent.
+loop. `jet lint --cost file.jet` reports those rows directly.
+`jet explain --cost file.jet` reports semantic remainders and
+optimizer-proven removals, so a missing lint row is explainable rather than
+silent.
 
-## Reconciliation and precedence
+## Precedence
 
-D-PERFBUDGET-GRAMMAR1 owns declarations, closed vocabulary, defaults, inference, constant normalization, exact arithmetic, applicability, collision detection, source spans, and mandatory retirement of prior bench/game budget engines. D-PERFBUDGET-REPORT1 owns canonical report/baseline bytes, identifiers, evidence and context, statistical decisions, storage, retention, migration, path security, and CAS. D-PERFBUDGET-OUTPUT1 owns command validation, confirmation, projection, ordering, diagnostics, fixtures, annotations, and exits. Where an older SURFACE1 or BASELINE1 example differs, these later specialized laws govern. No section authorizes runtime implementation before the card's parser, sema, provider, migration, diagnostics, and test slices land end to end.
+The grammar decision owns declarations, closed vocabulary, defaults, inference,
+constant normalization, exact arithmetic, applicability, collision detection,
+source spans, and prototype retirement. The report decision owns canonical
+report/baseline bytes, identifiers, evidence and context, statistical
+decisions, storage, retention, migration, path security, and CAS. The output
+decision owns command validation, confirmation, projection, ordering,
+diagnostics, fixtures, annotations, and exits. Provider and integration
+decisions own measurement transport and intent-owned refresh. The cost decision
+owns semantic cost rows and their projection.
+
+When an older surface or baseline example conflicts with a specialized law,
+the specialized law controls. When this record's performance explanation
+conflicts with AGENTS.md, the strict per-cell, per-metric gate controls. No
+section authorizes a second evaluator, report format, provider lookup path,
+compatibility alias, or silent evidence fallback.
+
+Each command path must satisfy its parser, sema, provider, migration,
+diagnostic, and test contracts end to end. This requirement preserves one
+auditable evaluator and report model; it does not authorize a partial or
+parallel implementation.

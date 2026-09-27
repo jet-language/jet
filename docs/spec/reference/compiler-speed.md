@@ -1,19 +1,33 @@
 # Compiler speed: the two-lens law
 
-One compiler core, two lenses. The **JIT lens** gives the rapid development
-loop people love in Python/TypeScript. The **AOT lens** produces a highly
-optimized binary when the program is ready; longer build time is an accepted
-cost, not a bug.
+Jet has one compiler meaning and two execution lenses. The **JIT lens** serves
+the edit/run loop; the **AOT lens** produces an optimized artifact when the
+program is ready. This page is for compiler contributors and users reasoning
+about build/run trade-offs. The executable perf schema and gate are in
+[`tools/perf/ci-perf-check.sh`](../../../tools/perf/ci-perf-check.sh), with
+scenario planning in
+[`tools/perf/test-ci-perf-check.sh`](../../../tools/perf/test-ci-perf-check.sh);
+[R12 and I9](../philosophy.md) are the semantic constraints.
 
-There is never a difference in supported features or behavior between the
-lenses. Both consume the same executable TIR from the same front end (R12).
-Compile-speed work therefore targets dev velocity through JIT coverage and
-latency, and self-hosted AOT architecture that avoids rustc's redundant work.
+## One core, two lenses
+
+Both lenses consume the same executable TIR from the same front end (R12).
+They must preserve the same supported features and behavior (I9). Compile-speed
+work therefore targets development latency through JIT coverage and precise
+incrementality, while AOT retains the optimization work requested by the
+program's profile.
+
+The Rust host remains the production and reference implementation boundary for
+compiler work. A Jet-authored compiler path is a staged port contract: it may
+replace redundant work only after the same front-end checks, TIR meaning,
+diagnostics, and AOT/JIT parity are proven. This document does not claim that
+the staged port has replaced the default compiler or that the Rust reference
+boundary has been removed.
 
 ## Build-speed constraints
 
-When AOT lowers through a generated backend, backend/toolchain work remains an
-irreducible cost. The two-lens contract therefore requires:
+When AOT lowers through a generated backend, backend and toolchain work remains
+an irreducible cost. The two-lens contract requires:
 
 - Fast and optimized profiles use explicit linker, optimization, and LTO
   settings. Native builds honor explicit `RUSTC_LINKER`/`CC`; otherwise Jet
@@ -28,64 +42,63 @@ irreducible cost. The two-lens contract therefore requires:
 - Incremental checking uses module interfaces and dependent-only invalidation.
   Staged source parsing is bounded and deterministic, with stable module
   discovery order.
-- JIT coverage grows so pure-Jet `jet dev` reloads do not touch rustc.
+- Pure-Jet `jet dev` reloads should not invoke the Rust host backend for work
+  that the JIT can execute.
 
-D-BUILD-DEFAULT1=B sets `jet run` and `jet dev` to the fast profile while
-`jet build` remains optimized. D-AOT-CRANELIFT1 is ratified under this law.
+`D-BUILD-DEFAULT1=B` sets `jet run` and `jet dev` to the fast profile while
+`jet build` remains optimized. `D-AOT-CRANELIFT1` is ratified under this law.
+The command and backend sources, rather than this paragraph, define which
+profile a particular invocation selects.
 
-## Anti-goals from Xcode / Swift
+## Incremental and tier invariants
 
 Jet must not recreate these failure modes:
 
-1. **Incremental worse than clean or no-change multi-minute work.** Unchanged
-   and representative-edit runs remain distinct, and unexplained slowdowns are
-   compiler bugs.
-2. **World rebuilds for a local edit.** Batch dirty sets use module-interface
-   fingerprints and dependents only, with sealed package objects for link
-   restore. Text sources remain the truth; no opaque IDE project database.
-3. **Type checker “gave up” with a useless wide span.** Diagnostics stay
-   bounded and pinpointed; users must not reshape working code to soothe the
-   compiler.
-4. **Tool debugging before code debugging.** Cache purge, clean, or reopen
-   must not be required to make diagnostics stable and explainable.
-5. **Dev profile silently becoming ship profile.** Cache identity includes
-   profile, target, and backend; differential checks protect tier behavior.
+1. An incremental edit must not become slower than an equivalent clean or
+   unchanged run without a diagnostic reason. Unchanged and representative-edit
+   cells remain distinct in the perf manifest.
+2. A local edit must not rebuild the world. Dirty sets use module-interface
+   fingerprints and dependents only; sealed package objects provide the link and
+   restore layer. Text sources remain the truth.
+3. A type-checking failure must retain a bounded, pinpointed diagnostic rather
+   than a wide span that makes the user reshape working code.
+4. Cache purge, clean, or reopen must not be required to make diagnostics stable
+   and explainable.
+5. A development profile must not silently become a ship profile. Cache identity
+   includes profile, target, and backend; differential checks protect tier
+   behavior.
 
+## Port contract for a Jet-authored compiler
 
-## Self-hosted compiler principles
+If Jet code takes over a compiler stage, it follows these principles. They are
+architecture constraints, not a claim about which stage has already moved.
 
-rustc is slow for identifiable, avoidable reasons. A self-hosted compiler uses
-the following principles:
+1. **No redundant verification.** Semantic analysis remains the single
+   gatekeeper (R2). The backend consumes proven TIR; it does not rediscover
+   user errors through a hidden host compiler.
+2. **Query-based incrementality.** Function- and module-granular memoization is
+   the spine. An edit rechecks the touched item and dependents rather than the
+   whole world.
+3. **Parallel by construction.** Per-module lex/parse/sema work fans out with
+   one controlled cross-module resolve point and no global mutable context.
+4. **Monomorphization is policy.** Generic instances may be shared, cold code
+   outlined, and duplication capped during TIR lowering.
+5. **Tiered backends consume one TIR.** The JIT lens and AOT lens are consumers
+   of the same executable representation; R12 differential gates compare the
+   same program and output across tiers.
+6. **Optimization follows the declared budget.** AOT may spend longer on the
+   ship step, while the default development path avoids work that does not
+   affect the current edit.
 
-1. **No redundant verification.** rustc re-checks what its own front end
-   already knows (and in our transpile era, re-checks what Jet's sema already
-   proved). In the self-hosted compiler, sema remains the single gatekeeper
-   (R2); the backend consumes proven TIR and emits code — no borrow-check, no
-   trait-solve, no inference at emit (I3 carried forward).
-2. **Query-based incrementality from day one.** rustc retrofitted incremental
-   compilation onto a batch design and it still invalidates coarsely. Jet's
-   front end is already organized around jet-queries; the self-hosted compiler
-   keeps function/module-granular memoization as its spine, so an edit
-   re-checks the touched item plus dependents, not the world.
-3. **Parallel by construction.** Per-module lex/parse/sema fan-out with one
-   serial cross-module resolve point; no global mutable context like rustc's.
-4. **Monomorphization under our control.** Share generic instances, outline
-   cold ones, cap duplication — the classic LLVM-input blowup rustc suffers is
-   a policy choice we own in TIR lowering.
-5. **Tiered backends off one TIR.** The JIT lens (Cranelift) and the AOT lens
-   (optimizing backend) are two consumers of the same executable TIR. Feature
-   parity is structural — one front end, one TIR — and enforced by the R12
-   differential gates (same program, same output, every tier).
-6. **Optimization budget is spent where the user said it matters.** AOT may be
-   slow because it is the ship step; the perf.<role> budget vocabulary lets an
-   expert dial optimization scope, while the beginner default just works.
+## Performance gate and dated evidence
 
+The repository gate compares each matched cell and metric independently. Every
+non-Rust peer requires Jet/peer below `1.00`; Rust permits parity only at a
+Jet/Rust ratio of `1.05` or lower, which is a noise band rather than a win.
+Missing, wrong, unavailable, uncovered, mismatched, or inconclusive evidence
+cannot be averaged away.
 
-## Honest constraints
-
-The development loop can avoid optimizer work through JIT coverage, cached
-stdlib/runtime objects, and incremental semantic checking. A release build still
-owes the optimizer the work the owner requested; speed comes from avoiding
-redundant front-end work and using precise incrementality, not from skipping
-optimization.
-
+A dated receipt is historical evidence, not a live status claim:
+[`performance-receipt.md`](../../audits/performance-receipt.md). The scripts
+and their manifest define the measurement protocol; this page records the
+meaning-preserving architecture law.

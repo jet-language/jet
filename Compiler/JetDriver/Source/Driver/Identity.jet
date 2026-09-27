@@ -1,0 +1,269 @@
+// Source, module, and package identities remain separate at the driver boundary.
+
+struct JetDriverAuthorizedSourceFile {
+    path: String
+    relative_path: String
+    identity: String
+    source: String
+}
+
+struct JetDriverAuthorizedSourceRoot {
+    canonical_path: String
+    identity: String
+    allow_hardlinks: Bool
+    files: [JetDriverAuthorizedSourceFile]
+    foreign_cache_files: [JetDriverAuthorizedSourceFile]
+}
+
+struct JetDriverAuthorizedSourceSnapshot {
+    roots: [JetDriverAuthorizedSourceRoot]
+    entry_root_identity: String
+    entry_path: String
+}
+struct JetDriverHostFacts {
+    target_triple: ?String
+    active_os: ?String
+    compiler_identity: ?String
+
+enum JetDriverCompileTarget {
+    Native
+    Web(
+        assets: JetWebAssets,
+        release_devtools_policy: JetReleaseDevtoolsPolicy,
+        profile: MirArtifactBuildMode,
+    )
+}
+
+struct JetDriverCompileRequest {
+    authorized_sources: JetDriverAuthorizedSourceSnapshot
+    canonical_effect_source: String
+    host_facts: JetDriverHostFacts
+    eval_config: JetEvalConfig
+    target: JetDriverCompileTarget
+}
+
+struct JetDriverSourceUnit {
+    root_index: Int
+    file_index: Int
+    root_identity: String
+    package_identity: String
+    module_name: String
+    path: String
+    relative_path: String
+    source_segments: [SemaSourceSegment]
+    source_origin: SemaSourceOrigin
+}
+
+struct JetDriverPackageDependency {
+    name: String
+    source: String
+    source_path: String
+    span: ?Span
+    target_root_index: Int
+}
+
+struct JetDriverPackageEntry {
+    module_alias: ?String
+    function_name: String
+    source_path: String
+    span: ?Span
+}
+
+struct JetDriverPackageInfo {
+    root_index: Int
+    identity: String
+    name: String
+    version: String
+    edition: String
+    runtime_ceiling: ?MirRuntimeLayer
+    allocator_policy: MirAllocatorPolicy
+    authority_allow: ?[String]
+    authority_deny: ?[String]
+    authority_needs: [String]
+    entry: ?JetDriverPackageEntry
+    manifest_path: ?String
+    dependencies: [JetDriverPackageDependency]
+}
+
+
+struct JetDriverSourceIndex {
+    by_identity: [String:Int]
+    by_module_name: [String:Int]
+    ambiguous_module_names: [String:Bool]
+    by_path: [String:Int]
+}
+
+struct JetDriverSourceIndexResult {
+    index: JetDriverSourceIndex
+    diagnostics: [Diagnostic]
+    complete: Bool
+}
+
+struct JetDriverSourceFileCollection {
+    files: [MirSourceFile]
+    diagnostics: [Diagnostic]
+    complete: Bool
+}
+struct JetDriverSourceCatalogResult {
+    packages: [JetDriverPackageInfo]
+    source_units: [JetDriverSourceUnit]
+    entry_package_identity: String
+    diagnostics: [Diagnostic]
+    complete: Bool
+}
+
+enum JetDriverStage { Collect Parse Load Check Comptime Lower Assemble Pass Emit }
+
+struct JetDriverLoadedModule {
+    source_unit_index: Int
+    source_identity: String
+    package_identity: String
+    module_identity: String
+    module_name: String
+    program: Program
+}
+struct JetDriverCompileTrace {
+    stdout: [String]
+    stderr: [String]
+    soft_stop: Bool
+    exit_code: ?Int
+}
+
+
+struct JetDriverLoadResult {
+    package_identity: String
+    packages: [JetDriverPackageInfo]
+    source_units: [JetDriverSourceUnit]
+    entry_source_identity: String
+    entry_module_identity: String
+    modules: [JetDriverLoadedModule]
+    imports: [SemaRegistrationImportEdge]
+    source_files: [MirSourceFile]
+    generated_source_files: [MirSourceFile]
+    diagnostics: [Diagnostic]
+    failed_stage: ?JetDriverStage
+    complete: Bool
+}
+
+
+struct JetDriverCompileResult {
+    diagnostics: [Diagnostic]
+    generated_source_files: [MirSourceFile]
+    package_identity: String
+    entry_module_identity: String
+    entry_function: ?MirFunctionId
+    runtime_artifact: ?MirArtifactId
+    web_artifact: ?MirArtifactId
+    web_artifacts: ?JetWebArtifacts
+    mir: ?MirProgram
+    emitted_source: ?String
+    emit_manifest: ?JetRustEmitManifest
+    comptime_stdout: String
+    comptime_stderr: String
+    soft_stop: Bool
+    exit_code: ?Int
+    failed_stage: ?JetDriverStage
+    complete: Bool
+    internal_problem: ?String
+}
+
+fn jet_driver_source_identity(package_identity: String, path: String) -> String {
+    "source:{package_identity.len()}:{package_identity}:{path}"
+}
+
+fn jet_driver_module_identity(package_identity: String, path: String) -> String {
+    "module:{package_identity.len()}:{package_identity}:{path}"
+}
+
+fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] {
+    bytes := source.bytes()
+    line_starts := [Int]{0}
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
+        index += 1
+    }
+[SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
+}
+
+fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic_from_registry(code, Val(span), what, why, fix)
+}
+
+fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic_from_registry(code, None, what, why, fix)
+}
+fn jet_driver_diagnostic_with_optional_span(code: String, span: ?Span, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic_from_registry(code, span, what, why, fix)
+}
+
+fn jet_driver_diagnostic_at_source(code: String, span: ?Span, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic := diagnostic_from_registry(code, span, what, why, fix)
+    diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
+}
+
+fn jet_driver_lint_diagnostic_at_source(code: String, span: ?Span, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic := diagnostic_from_registry(code, span, what, why, fix)
+    diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
+}
+
+
+fn jet_driver_module_index_key(package_identity: String, module_name: String) -> String {
+    "{package_identity.len()}:{package_identity}:{module_name}"
+}
+
+fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriverSourceIndexResult {
+    by_identity := [String:Int]{}
+    by_module_name := [String:Int]{}
+    ambiguous_module_names := [String:Bool]{}
+    by_path := [String:Int]{}
+    diagnostics := [Diagnostic]{}
+    index := 0
+    loop index < source_units.len() {
+        unit := source_units[index]
+        identity := jet_driver_source_identity(unit.package_identity, unit.path)
+        module_key := jet_driver_module_index_key(unit.package_identity, unit.module_name)
+        valid := true
+        if unit.package_identity.len() == 0 {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
+            valid = false
+        }
+        if unit.module_name.len() == 0 {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no module identity", "every loaded source belongs to one named module", "derive a module name from the checked source path"))
+            valid = false
+        }
+        if unit.path.len() == 0 || unit.relative_path.len() == 0 {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no canonical path", "source identity and diagnostics require a stable path inside one authority root", "supply the canonical path and root-relative path selected by the native authority adapter"))
+            valid = false
+        }
+        if by_identity.get(identity) != None {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the source unit identity is duplicated", "one package path identifies exactly one source unit", "remove the duplicate source unit"))
+            valid = false
+        }
+        if by_path.get(unit.path) != None {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the canonical source path is duplicated", "one path identifies exactly one checked source record", "keep only one source record for this canonical path"))
+            valid = false
+        }
+        if valid {
+            by_identity.add(identity, index)
+            by_path.add(unit.path, index)
+            if by_module_name.get(module_key) != None {
+                ambiguous_module_names.add(module_key, true)
+            } else {
+                by_module_name.add(module_key, index)
+            }
+        }
+        index += 1
+    }
+    complete := diagnostics.len() == 0
+    JetDriverSourceIndexResult{
+        index: JetDriverSourceIndex{
+            by_identity: by_identity,
+            by_module_name: by_module_name,
+            ambiguous_module_names: ambiguous_module_names,
+            by_path: by_path,
+        },
+        diagnostics: diagnostics,
+        complete: complete,
+    }
+}

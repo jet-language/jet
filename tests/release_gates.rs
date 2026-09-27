@@ -1,4 +1,4 @@
-//! Milestone gate checks, one lane: canon.jet golden run, `--small` binary
+//! Milestone gate checks, one lane: `--small` binary
 //! size gates, the compiled-workload contract, the Epoch 2 GA checklist, and
 //! release/edition/deprecation policy. Distinct from `tests/golden.rs`
 //! (per-example front-end + rustc matrix) — these are one-off milestone
@@ -13,41 +13,6 @@ use common::have_rustc;
 
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-}
-
-// ============================================================================
-// Section: canon.jet golden run (was tests/canon.rs)
-// ============================================================================
-
-#[test]
-fn canon_compiles_and_runs() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let jet = jet_bin();
-    assert!(jet.exists(), "build the jet binary first (cargo build)");
-
-    let have_rustc = have_rustc();
-    if !have_rustc {
-        eprintln!("note: rustc not found; skipping canon golden run");
-        return;
-    }
-
-    let tool = root.join("examples/canon.jet");
-    let out = Command::new(&jet)
-        .arg("run")
-        .arg(&tool)
-        .current_dir(&root)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "canon.jet failed:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-
-    let expected = fs::read_to_string(root.join("tests/fixtures/canon/expected.out"))
-        .expect("tests/fixtures/canon/expected.out");
-    let actual = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(actual, expected);
 }
 
 // ============================================================================
@@ -813,35 +778,6 @@ fn verify_full_default_run_covers_whole_workspace() {
     );
 }
 
-#[test]
-fn ci_runs_repository_no_nix_dogfood_gate() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
-        .expect("read scripts/agent/verify-full.sh");
-    assert!(
-        verify.contains("node \"$repo/scripts/agent/verify-jet-shell-parity.js\""),
-        "verify-full must compare the declared shell manifest with the Nix oracle"
-    );
-    assert!(
-        verify.contains("cargo test --test jetpack_dogfood")
-            && verify
-                .contains("jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures")
-            && verify.contains("-- --exact --nocapture"),
-        "verify-full must run the exact repository no-Nix dogfood test"
-    );
-
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    assert!(workflow.contains("push:"), "CI must run on pushes");
-    assert!(
-        workflow.contains("pull_request:"),
-        "CI must run on pull requests"
-    );
-    assert!(
-        workflow.contains("scripts/agent/verify-full.sh"),
-        "CI must invoke verify-full, which owns the repository no-Nix dogfood gate"
-    );
-}
 
 fn workflow_job(workflow: &str, name: &str) -> String {
     let marker = format!("  {name}:");

@@ -1107,6 +1107,7 @@ fn resolve_toolchain(
         project_dir: Some(project_root),
         nix_index: nix_index.as_ref(),
         nix_roots: Some(roots),
+        allow_local_nix_catalog: false,
     };
     let table = SourceTable::empty();
     let realized = Provider::realize(spec, &table, &ctx)?;

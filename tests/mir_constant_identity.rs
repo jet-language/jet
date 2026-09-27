@@ -46,20 +46,20 @@ fn run() {
 "#;
 
 const ALPHA_SOURCE: &str = r#"
-token :: [Int]{65}
-payload :: [Int]{17}
-alias_values :: [Int]{31}
+TOKEN :: [Int]{65}
+PAYLOAD :: [Int]{17}
+ALIAS_VALUES :: [Int]{31}
 
 pub fn token_at(index: Int) -> Int {
-    return token[index]
+    return TOKEN[index]
 }
 
 pub fn payload_at(index: Int) -> Int {
-    return payload[index]
+    return PAYLOAD[index]
 }
 
 pub fn alias_value_list() -> [Int] {
-    return alias_values
+    return ALIAS_VALUES
 }
 
 pub fn shadowed(token: [Int]) -> Int {
@@ -68,25 +68,25 @@ pub fn shadowed(token: [Int]) -> Int {
 "#;
 
 const BETA_SOURCE: &str = r#"
-token :: [Int]{66}
-payload :: [U8]{84}
-alias_values :: [U8]{42}
-import_values :: [U8]{43}
+TOKEN :: [Int]{66}
+PAYLOAD :: [U8]{84}
+ALIAS_VALUES :: [U8]{42}
+IMPORT_VALUES :: [U8]{43}
 
 pub fn token_at(index: Int) -> Int {
-    return token[index]
+    return TOKEN[index]
 }
 
 pub fn payload_at(index: Int) -> U8 {
-    return payload[index]
+    return PAYLOAD[index]
 }
 
 pub fn alias_value_list() -> [U8] {
-    return alias_values
+    return ALIAS_VALUES
 }
 
 pub fn import_value_list() -> [U8] {
-    return import_values
+    return IMPORT_VALUES
 }
 "#;
 
@@ -152,7 +152,7 @@ fn assert_fixture_constants_reach_mir_globals() {
             (module.path.ends_with("alpha.jet") || module.path.ends_with("beta.jet"))
                 && matches!(
                     constant.name.as_str(),
-                    "token" | "payload" | "alias_values" | "import_values"
+                    "TOKEN" | "PAYLOAD" | "ALIAS_VALUES" | "IMPORT_VALUES"
                 )
         })
         .map(|constant| constant.key.clone())
@@ -190,7 +190,7 @@ fn assert_private_module_constant_is_rejected() {
         r#"
 module alpha
 fn run() {
-    print(alpha.payload[0])
+    print(alpha.PAYLOAD[0])
 }
 "#,
     )
@@ -206,7 +206,7 @@ fn run() {
         .find(|diagnostic| diagnostic.code == "E0605")
         .expect("qualified private module constant should be rejected");
     assert!(
-        private.what.contains("payload"),
+        private.what.contains("PAYLOAD"),
         "private diagnostic must name the inaccessible constant: {private:?}"
     );
 }

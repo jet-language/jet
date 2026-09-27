@@ -1,5 +1,5 @@
 //! M9.5 differential battery (permanent CI). For each expression, the same
-//! code is evaluated twice — once as `@comptime_value :: e;` (the sema
+//! code is evaluated twice — once as `@COMPTIME_VALUE :: e;` (the sema
 //! tree-walking interpreter) and once as a runtime `r :: e` (generated
 //! Rust). The program prints both; the two lines MUST be byte-identical.
 //!
@@ -135,11 +135,11 @@ fn f32_value_flow() String -> {
     return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
 }
 
-@expected :: f32_value_flow()
+@EXPECTED :: f32_value_flow()
 
 fn run() {
     actual :: f32_value_flow()
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{actual}")
 }
 "#;
@@ -150,21 +150,21 @@ fn run() {
 const MODULE_CASES: &[&str] = &[
     // D-CORE-USELIST1=A: comptime resolves each bracket-list member to the
     // same default local name that runtime code uses.
-    "use core.math.[abs, min]\n@comptime_value :: abs(-8) + min(9, 4)\n\nfn run() {\n    r :: abs(-8) + min(9, 4)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.math.[abs, min]\n@COMPTIME_VALUE :: abs(-8) + min(9, 4)\n\nfn run() {\n    r :: abs(-8) + min(9, 4)\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // `("core.string", ...)` was a dead dispatch key (no import resolves to
     // it — `core.text` is the only ratified spelling), so every
     // `text.<method>(...)` call hit E0956. Fixed via `TextLite` (ported
     // verbatim from AOT's `jet_text_*` prelude fns).
-    "use core.text as text\n@comptime_value :: text.trim(\" hi \")\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\n@comptime_value :: text.upper(\"abc\")\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\n@comptime_value :: text.words(\"hello world's foo\")[0]\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\n@comptime_value :: text.pad_start(\"7\", 3, \"0\")\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\n@COMPTIME_VALUE :: text.trim(\" hi \")\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\n@COMPTIME_VALUE :: text.upper(\"abc\")\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\n@COMPTIME_VALUE :: text.words(\"hello world's foo\")[0]\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\n@COMPTIME_VALUE :: text.pad_start(\"7\", 3, \"0\")\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // core.math: previously only sqrt/floor/ceil/round/abs/pow/min/max/clamp/
     // log2/log10 were dispatched; the rest (trig, checked/saturating/
     // wrapping, gcd/lcm) fell to E0956.
-    "use core.math as math\n@comptime_value :: math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.math as math\n@comptime_value :: math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.math as math\n@comptime_value :: math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\n@COMPTIME_VALUE :: math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\n@COMPTIME_VALUE :: math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\n@COMPTIME_VALUE :: math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.net.url` (D-URL1=A), ported verbatim from AOT's
     // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
     // Plain string-returning free functions use this differential. URL
@@ -172,10 +172,10 @@ const MODULE_CASES: &[&str] = &[
     // marshalled value path; tier-wide typed-head coverage lives in
     // `tests/tir_language_features.rs`.
     // parity: guard tests/repl.rs::repl_core_url_dispatch
-    "use core.net.url as url\n@comptime_value :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.net.url as url\n@comptime_value :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.net.url as url\n@comptime_value :: url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.net.url as url\n@comptime_value :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@COMPTIME_VALUE :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@COMPTIME_VALUE :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@COMPTIME_VALUE :: url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@COMPTIME_VALUE :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
     // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
     // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
@@ -185,22 +185,22 @@ const MODULE_CASES: &[&str] = &[
     // by every builtin struct type, not specific to `core.data` — see
     // `UrlLite.rs`'s note) — covered instead by
     // `tests/repl.rs::repl_core_data_dispatch`.
-    "use core.data as data\n@comptime_value :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n\nfn run() {\n    r :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n\nfn run() {\n    r :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // #1657: catastrophic cancellation. A naive left-to-right sum answers
     // 0.0 here and the compensated kernel answers 1.0, so a second
     // implementation on either tier fails these three cases.
-    "use core.data as data\n@comptime_value :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@COMPTIME_VALUE :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
@@ -208,34 +208,34 @@ const MODULE_CASES: &[&str] = &[
     // (see `EncodingLite.rs`). Every case round-trips `parse`+`to_string` (or
     // `to_bytes`+`parse`) so both the parser and the renderer sides differ
     // against real generated Rust, not just one direction.
-    "use core.encoding.csv as csv\n@comptime_value :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.csv as csv\n@comptime_value :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.csv as csv\n@comptime_value :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.toml as toml\n@comptime_value :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.toml as toml\n@comptime_value :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.yaml as yaml\n@comptime_value :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.xml as xml\n@comptime_value :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\n@comptime_value :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\n@comptime_value :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.jsonl as jsonl\n@comptime_value :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\n@COMPTIME_VALUE :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\n@COMPTIME_VALUE :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\n@COMPTIME_VALUE :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\n@COMPTIME_VALUE :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\n@COMPTIME_VALUE :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.yaml as yaml\n@COMPTIME_VALUE :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.xml as xml\n@COMPTIME_VALUE :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\n@COMPTIME_VALUE :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\n@COMPTIME_VALUE :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.jsonl as jsonl\n@COMPTIME_VALUE :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // D-JSONCANON1: edition 2027 `json.canonical` is fallible (`String ?
     // encoding.EncodingError`); `run()` is infallible, so the ratified
     // migration form is the panic fallback, not `?` propagation.
-    "use core.encoding.json as json\n@comptime_value :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\n@comptime_value :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\n@COMPTIME_VALUE :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\n@COMPTIME_VALUE :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
 ];
 
 const LOADABLE_CASES: &[&str] = &[
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.idle()\n\nfn run() {\n    r :: loadable.idle()\n    print(\"{@comptime_value.is_idle()}\")\n    print(\"{r.is_idle()}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loading()\n\nfn run() {\n    r :: loadable.loading()\n    print(\"{@comptime_value.is_loading()}\")\n    print(\"{r.is_loading()}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loaded(7)\n\nfn run() {\n    r :: loadable.loaded(7)\n    print(\"{@comptime_value.loaded() ?? 0}\")\n    print(\"{r.loaded() ?? 0}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.failed(\"offline\")\n\nfn run() {\n    r :: loadable.failed(\"offline\")\n    print(\"{@comptime_value.is_failed()}\")\n    print(\"{r.is_failed()}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.idle().is_idle()\n\nfn run() {\n    r :: loadable.idle().is_idle()\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loading().is_loading()\n\nfn run() {\n    r :: loadable.loading().is_loading()\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loaded(7).is_loaded()\n\nfn run() {\n    r :: loadable.loaded(7).is_loaded()\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.failed(\"offline\").is_failed()\n\nfn run() {\n    r :: loadable.failed(\"offline\").is_failed()\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loaded(7).loaded() ?? 0\n\nfn run() {\n    r :: loadable.loaded(7).loaded() ?? 0\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.reactive.loadable as loadable\n@comptime_value :: loadable.loaded(7).or_else(0)\n\nfn run() {\n    r :: loadable.loaded(7).or_else(0)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.idle()\n\nfn run() {\n    r :: loadable.idle()\n    print(\"{@COMPTIME_VALUE.is_idle()}\")\n    print(\"{r.is_idle()}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loading()\n\nfn run() {\n    r :: loadable.loading()\n    print(\"{@COMPTIME_VALUE.is_loading()}\")\n    print(\"{r.is_loading()}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loaded(7)\n\nfn run() {\n    r :: loadable.loaded(7)\n    print(\"{@COMPTIME_VALUE.loaded() ?? 0}\")\n    print(\"{r.loaded() ?? 0}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.failed(\"offline\")\n\nfn run() {\n    r :: loadable.failed(\"offline\")\n    print(\"{@COMPTIME_VALUE.is_failed()}\")\n    print(\"{r.is_failed()}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.idle().is_idle()\n\nfn run() {\n    r :: loadable.idle().is_idle()\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loading().is_loading()\n\nfn run() {\n    r :: loadable.loading().is_loading()\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loaded(7).is_loaded()\n\nfn run() {\n    r :: loadable.loaded(7).is_loaded()\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.failed(\"offline\").is_failed()\n\nfn run() {\n    r :: loadable.failed(\"offline\").is_failed()\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loaded(7).loaded() ?? 0\n\nfn run() {\n    r :: loadable.loaded(7).loaded() ?? 0\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\n@COMPTIME_VALUE :: loadable.loaded(7).or_else(0)\n\nfn run() {\n    r :: loadable.loaded(7).or_else(0)\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
 ];
 
 #[test]
@@ -347,11 +347,11 @@ fn first() [Int] -> {
     }
 }
 
-@expected :: first()
+@EXPECTED :: first()
 
 fn run() {
     actual :: first()
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{actual}")
 }
 "#,
@@ -387,11 +387,11 @@ fn codec_probe() String -> {
     return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
 }
 
-@expected :: codec_probe()
+@EXPECTED :: codec_probe()
 
 fn run() {
     actual :: codec_probe()
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{actual}")
 }
 "#;
@@ -406,13 +406,13 @@ fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     }
     let src = r#"use core.archive.zstd as zstd
 
-@bytes :: [U8]{ 72, 101, 108, 108, 111 }
-@encoded :: zstd.compress(@bytes)
-@expected :: zstd.decompress(@encoded) ?? [U8]{}
+@BYTES :: [U8]{ 72, 101, 108, 108, 111 }
+@ENCODED :: zstd.compress(@BYTES)
+@EXPECTED :: zstd.decompress(@ENCODED) ?? [U8]{}
 
 fn run() {
-    restored :: zstd.decompress(@encoded) ?? [U8]{}
-    print("{@expected}")
+    restored :: zstd.decompress(@ENCODED) ?? [U8]{}
+    print("{@EXPECTED}")
     print("{restored}")
 }
 "#;
@@ -427,11 +427,11 @@ fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
     }
     let src = r#"use core.archive.zstd as zstd
 
-@expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
+@EXPECTED :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
 
 fn run() {
     actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{actual}")
 }
 "#;
@@ -488,11 +488,11 @@ fn answer() Answer<Int> -> {
     return 42
 }
 
-@expected :: answer()
+@EXPECTED :: answer()
 
 fn run() {
     actual :: answer()
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{actual}")
 }
 "#;
@@ -501,7 +501,7 @@ fn run() {
 
 fn check_comptime_case(i: usize, expr: &str) {
     let src = format!(
-        "@comptime_value :: {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{@comptime_value}}\")\n    print(\"{{r}}\")\n}}\n",
+        "@COMPTIME_VALUE :: {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{@COMPTIME_VALUE}}\")\n    print(\"{{r}}\")\n}}\n",
         e = expr
     );
     check_comptime_src(i, expr, &src);
@@ -513,15 +513,15 @@ fn reusable_regex_matches_across_comptime_tir_and_runtime() {
         34_000,
         "typed Regex methods and canonical grammar",
         r#"
-@ct_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
-@ct_match :: @ct_regex.match("xx Jet_2026 yy") ?? panic("missing comptime match")
-@comptime_value :: "{@ct_match.group(2) ?? "none"}|{@ct_match.name("word") ?? "none"}|{@ct_match.start()}|{@ct_match.end()}|{@ct_match.group_start(1) ?? -1}|{@ct_match.group_end(1) ?? -1}|{@ct_regex.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{@ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
+@CT_REGEX :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
+@CT_MATCH :: @CT_REGEX.match("xx Jet_2026 yy") ?? panic("missing comptime match")
+@COMPTIME_VALUE :: "{@CT_MATCH.group(2) ?? "none"}|{@CT_MATCH.name("word") ?? "none"}|{@CT_MATCH.start()}|{@CT_MATCH.end()}|{@CT_MATCH.group_start(1) ?? -1}|{@CT_MATCH.group_end(1) ?? -1}|{@CT_REGEX.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{@CT_REGEX.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
 
 fn run() {
     rt_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
     rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
     runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
-    print("{@comptime_value}")
+    print("{@COMPTIME_VALUE}")
     print("{runtime_value}")
 }
 "#,
@@ -536,12 +536,12 @@ fn typed_datetime_head_matches_comptime_and_runtime() {
         34_002,
         "typed DateTime head",
         r#"
-@stamp :: DateTime{"2026-08-07T12:00:00Z"}
-@expected :: @stamp.to_string()
+@STAMP :: DateTime{"2026-08-07T12:00:00Z"}
+@EXPECTED :: @STAMP.to_string()
 
 fn run() {
     runtime :: DateTime{"2026-08-07T12:00:00Z"}
-    print("{@expected}")
+    print("{@EXPECTED}")
     print("{runtime.to_string()}")
 }
 "#,
@@ -826,7 +826,7 @@ fn xml_rich_whole_value_matches_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping rich XML comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\n@comptime_value :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\n@COMPTIME_VALUE :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2004, "rich lossless XML whole-value round-trip", src);
 }
 
@@ -836,7 +836,7 @@ fn xml_parse_options_match_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping XML options comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\n@comptime_value :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\n@COMPTIME_VALUE :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2005, "typed XML options", src);
 }
 
@@ -869,11 +869,11 @@ fn empty() [Float] -> {{
     return []
 }}
 
-@expected_empty :: show(data.{method}(empty()))
+@EXPECTED_EMPTY :: show(data.{method}(empty()))
 
 fn run() {{
     actual_empty :: show(data.{method}(empty()))
-    print("{{@expected_empty}}")
+    print("{{@EXPECTED_EMPTY}}")
     print("{{actual_empty}}")
 }}
 "#
@@ -900,11 +900,11 @@ fn show(result: DataTree !XMLError) String -> {
     return "unreachable"
 }
 
-@expected_mismatch :: show(xml.parse("<root>\n<a></root>"))
+@EXPECTED_MISMATCH :: show(xml.parse("<root>\n<a></root>"))
 
 fn run() {
     actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
-    print("{@expected_mismatch}")
+    print("{@EXPECTED_MISMATCH}")
     print("{actual_mismatch}")
 }
 "#;
@@ -921,7 +921,7 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // including normal-mode indefinite containers and preferred Float16,
     // is one R12 semantic path at comptime and AOT. This intentionally does
     // not exercise the retired untyped `decode(DataTree)` compatibility arm.
-    let src = "use core.encoding.cbor as cbor\n@comptime_value :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.cbor as cbor\n@COMPTIME_VALUE :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{@COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
 }
 
@@ -931,7 +931,7 @@ fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
         eprintln!("note: rustc not found; skipping current CBOR whole-value differential");
         return;
     }
-    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\n@encoded :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n@parsed :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{@encoded}|{@parsed}\")\n    print(\"{r}|{p}\")\n}\n";
+    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\n@ENCODED :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n@PARSED :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{@ENCODED}|{@PARSED}\")\n    print(\"{r}|{p}\")\n}\n";
     check_comptime_src(2001, "current CBOR to_bytes and parse", src);
 }
 
@@ -948,10 +948,10 @@ use core.encoding.hex as hex
 #Codable
 struct Packet { id: Int, payload: [U8] }
 
-@expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-@expected_floats :: hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
-@expected_nan :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
-@expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+@EXPECTED_MAP :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+@EXPECTED_FLOATS :: hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
+@EXPECTED_NAN :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+@EXPECTED_TYPED :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
 
 fn run() {
     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
@@ -962,7 +962,7 @@ fn run() {
     if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
     if actual_nan != "f97e00" { panic("canonical NaN drift") }
     if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
-    print("{@expected_map}|{@expected_floats}|{@expected_nan}|{@expected_typed}")
+    print("{@EXPECTED_MAP}|{@EXPECTED_FLOATS}|{@EXPECTED_NAN}|{@EXPECTED_TYPED}")
     print("{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
 }
 "#;
@@ -1033,15 +1033,15 @@ fn show_ints(bytes: [U8]) String -> {
     return "unreachable"
 }
 
-@expected_malformed :: show([255])
-@expected_truncated :: show([129])
-@expected_noncanonical :: show_strict([24, 1])
-@expected_unsupported :: show([192, 1])
-@expected_mismatch :: show_ints([129, 97, 120])
-@expected_depth :: show_depth([129, 129, 1])
-@expected_items :: show_items([130, 1, 2])
-@expected_bytes :: show_bytes([130, 1, 2])
-@expected_alloc :: show_alloc([130, 1, 2])
+@EXPECTED_MALFORMED :: show([255])
+@EXPECTED_TRUNCATED :: show([129])
+@EXPECTED_NONCANONICAL :: show_strict([24, 1])
+@EXPECTED_UNSUPPORTED :: show([192, 1])
+@EXPECTED_MISMATCH :: show_ints([129, 97, 120])
+@EXPECTED_DEPTH :: show_depth([129, 129, 1])
+@EXPECTED_ITEMS :: show_items([130, 1, 2])
+@EXPECTED_BYTES :: show_bytes([130, 1, 2])
+@EXPECTED_ALLOC :: show_alloc([130, 1, 2])
 
 fn run() {
     malformed_wire := [U8]{ 255 }
@@ -1060,7 +1060,7 @@ fn run() {
     actual_items := show_items(items_wire)
     actual_bytes := show_bytes(items_wire)
     actual_alloc := show_alloc(items_wire)
-    print("{@expected_malformed}~{@expected_truncated}~{@expected_noncanonical}~{@expected_unsupported}~{@expected_mismatch}~{@expected_depth}~{@expected_items}~{@expected_bytes}~{@expected_alloc}")
+    print("{@EXPECTED_MALFORMED}~{@EXPECTED_TRUNCATED}~{@EXPECTED_NONCANONICAL}~{@EXPECTED_UNSUPPORTED}~{@EXPECTED_MISMATCH}~{@EXPECTED_DEPTH}~{@EXPECTED_ITEMS}~{@EXPECTED_BYTES}~{@EXPECTED_ALLOC}")
     print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
 }
 "#;
@@ -1111,17 +1111,17 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair{left: 7, right: "seven"}
-@light_value :: Light.Green
+@PAIR_VALUE :: Pair{left: 7, right: "seven"}
+@LIGHT_VALUE :: Light.Green
 
 fn run() {
     p :: Pair{left: 7, right: "seven"}
     l :: Light.Green
-    print("{@pair_value.left}")
+    print("{@PAIR_VALUE.left}")
     print("{p.left}")
-    print("{@pair_value.right}")
+    print("{@PAIR_VALUE.right}")
     print("{p.right}")
-    print("{@light_value == Light.Green}")
+    print("{@LIGHT_VALUE == Light.Green}")
     print("{l == Light.Green}")
 }
 "#,
@@ -1136,15 +1136,15 @@ fn run() {
 fn if_expr_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
-@true_value :: if 3 > 2 -> 10 else -> 20
-@false_value :: if 1 > 2 -> 10 else -> 20
+@TRUE_VALUE :: if 3 > 2 -> 10 else -> 20
+@FALSE_VALUE :: if 1 > 2 -> 10 else -> 20
 
 fn run() {
     c :: if 3 > 2 -> 10 else -> 20
     d :: if 1 > 2 -> 10 else -> 20
-    print("{@true_value}")
+    print("{@TRUE_VALUE}")
     print("{c}")
-    print("{@false_value}")
+    print("{@FALSE_VALUE}")
     print("{d}")
 }
 "#,

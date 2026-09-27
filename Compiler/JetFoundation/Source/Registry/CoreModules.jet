@@ -1,0 +1,61 @@
+pub struct CoreModuleExportNames {
+    pub module_name: String
+    pub members: [String]
+    pub type_exports: [String]
+}
+
+fn core_module_export(module_name: String) -> ?CoreModuleExportNames {
+    loop row in @CORE_MODULE_EXPORTS {
+        if row.module_name == module_name -> return Val(row)
+    }
+    None
+}
+
+fn core_module_export_has_name(names: [String], name: String) -> Bool {
+    loop item in names {
+        if item == name -> return true
+    }
+    false
+}
+
+pub fn core_module_has_member(module_name: String, member: String) -> Bool {
+    row :: core_module_export(module_name) ?? return false
+    core_module_export_has_name(row.members, member)
+}
+
+pub fn core_module_has_type(module_name: String, name: String) -> Bool {
+    row :: core_module_export(module_name) ?? return false
+    core_module_export_has_name(row.type_exports, name)
+}
+
+fn core_module_type_leaf(name: String) -> String {
+    bytes := name.bytes()
+    namespace_separator := -1
+    module_separator := -1
+    index := 0
+    loop index < bytes.len() {
+        if index + 1 < bytes.len() && bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) {
+            namespace_separator = index
+            index += 1
+        } else {
+            if bytes[index] == (U8{46}) -> module_separator = index
+            index += 1
+        }
+    }
+    if namespace_separator >= 0 {
+        return String.from_bytes(bytes[namespace_separator + 2..bytes.len()]) ?? name
+    }
+    if module_separator >= 0 {
+        return String.from_bytes(bytes[module_separator + 1..bytes.len()]) ?? name
+    }
+    name
+}
+
+pub fn core_type_modules(name: String) -> [String] {
+    leaf := core_module_type_leaf(name)
+    modules := [String]{}
+    loop row in @CORE_MODULE_EXPORTS {
+        if core_module_export_has_name(row.type_exports, leaf) -> modules.push(row.module_name)
+    }
+    modules
+}

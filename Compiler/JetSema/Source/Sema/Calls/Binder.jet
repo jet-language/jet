@@ -1,0 +1,630 @@
+// Canonical call binding over the shared AST/Type contract.
+//
+// Name and overload resolution stay with the enclosing Sema checker. This
+// file receives the already selected callable signature and owns only the
+// argument shape: labels, zones, defaults, rest arguments, source order, and
+// the declaration access convention. A Type-derived default is represented by
+// its FunctionDefaultRef; this layer never invents an expression for it.
+
+pub struct SemaCallParam {
+    pub label: String
+    pub name: String
+    pub zone: ParamZone
+    pub default: ?Expr
+    pub default_ref: ?FunctionDefaultRef
+    pub convention: AccessConvention
+    pub ty: ?Type
+    pub variadic: Bool
+}
+
+pub enum SemaCallArgSource {
+    Written(index: Int)
+    Default(parameter: Int)
+}
+
+pub enum SemaCallConventionDecision {
+    Accepted
+    NeedsImplicitClone
+    RequiresWrite
+    RejectsMove
+}
+
+pub struct SemaCallBinding {
+    // One entry per written source argument. The value is the explicit
+    // parameter slot, or -1 only for an argument that has no slot after an
+    // arity failure is recovered by the caller.
+    pub slots: [Int]
+    // Declaration/output order. Written indices always refer to the original
+    // source argument list, never to the rewritten list.
+    pub sources: [SemaCallArgSource]
+    // Defaults carried by Type.Fn but not materializable in this layer. The
+    // owner_key/source_file/span identity is kept intact for a later resolver.
+    pub default_refs: [FunctionDefaultRef]
+    // True when the result's written values can be evaluated left-to-right
+    // without compiler temporaries: written source indices are increasing and
+    // every supplied value precedes every default.
+    pub source_ordered: Bool
+    // True when args was changed to declaration order or a concrete default
+    // was inserted. Unresolved metadata defaults intentionally keep args in
+    // source order and set this false.
+    pub rewrote: Bool
+}
+
+fn sema_call_param_optional(param: SemaCallParam) -> Bool {
+    param.variadic || param.default != None || param.default_ref != None
+}
+
+fn sema_call_param_label(param: Param) -> String {
+    if param.public_label != None {
+        return (param.public_label ?? CallLabel{name: param.name, span: param.name_span}).name
+    }
+    param.name
+}
+
+pub fn sema_call_params_from_func(func: Func) -> [SemaCallParam] {
+    params := [SemaCallParam]{}
+    index := 0
+    loop index < func.params.len() {
+        parameter :: func.params[index]
+        parameter_ty := type_with_effective_fn_returns(parameter.ty)
+        if parameter.variadic {
+            parameter_ty = Type.List(parameter_ty)
+        }
+        params.push(SemaCallParam{
+            label: sema_call_param_label(parameter),
+            name: parameter.name,
+            zone: parameter.zone,
+            default: parameter.default,
+            default_ref: None,
+            convention: parameter.convention,
+            ty: Val(parameter_ty),
+            variadic: parameter.variadic,
+        })
+        index += 1
+    }
+    params
+}
+
+fn sema_call_fn_param_label(contract: ?[CallContractRow], metadata: ?FunctionCallMetadata, index: Int, fallback_name: Bool) -> String {
+    if contract != None {
+        rows :: contract ?? [CallContractRow]{}
+        if index >= 0 && index < rows.len() && rows[index].label != "" {
+            return rows[index].label
+        }
+        // An explicitly present contract with an empty label is the
+        // unlabelled function-value ABI. Do not fall through to metadata's
+        // local declaration name and accidentally make it public.
+        return ""
+    }
+    if fallback_name && metadata != None {
+        row :: metadata ?? FunctionCallMetadata{names: [String]{}, defaults: [?FunctionDefaultRef]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{} }}
+        if index >= 0 && index < row.names.len() -> return row.names[index]
+    }
+    ""
+}
+
+fn sema_call_fn_param_name(contract: ?[CallContractRow], metadata: ?FunctionCallMetadata, index: Int) -> String {
+    if metadata != None {
+        row :: metadata ?? FunctionCallMetadata{names: [String]{}, defaults: [?FunctionDefaultRef]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{} }}
+        if index >= 0 && index < row.names.len() -> return row.names[index]
+    }
+    if contract != None {
+        rows :: contract ?? [CallContractRow]{}
+        if index >= 0 && index < rows.len() -> return rows[index].label
+    }
+    ""
+}
+
+fn sema_call_fn_param_zone(contract: ?[CallContractRow], index: Int) -> ParamZone {
+    if contract != None {
+        rows :: contract ?? [CallContractRow]{}
+        if index >= 0 && index < rows.len() -> return rows[index].zone
+    }
+    ParamZone.Either
+}
+
+fn sema_call_fn_param_default(metadata: ?FunctionCallMetadata, index: Int) -> ?FunctionDefaultRef {
+    if metadata == None -> return None
+    row :: metadata ?? FunctionCallMetadata{names: [String]{}, defaults: [?FunctionDefaultRef]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{} }}
+    if index < 0 || index >= row.defaults.len() -> return None
+    row.defaults[index]
+}
+
+fn sema_call_fn_param_variadic(metadata: ?FunctionCallMetadata, index: Int) -> Bool {
+    if metadata == None -> return false
+    row :: metadata ?? FunctionCallMetadata{names: [String]{}, defaults: [?FunctionDefaultRef]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{} }}
+    if index < 0 || index >= row.variadic.len() -> return false
+    row.variadic[index]
+}
+
+fn sema_call_fn_param_convention(metadata: ?FunctionCallMetadata, index: Int) -> AccessConvention {
+    if metadata == None -> return AccessConvention.Read
+    row :: metadata ?? FunctionCallMetadata{names: [String]{}, defaults: [?FunctionDefaultRef]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{} }}
+    if index < 0 || index >= row.conventions.len() -> return AccessConvention.Read
+    row.conventions[index]
+}
+
+fn sema_call_params_from_type_range(ty: Type, offset: Int, fallback_name: Bool) -> ?[SemaCallParam] {
+    if offset < 0 -> return None
+    if ty == {
+        .Fn(params, _, _, contract, metadata, _) -> {
+            if offset > params.len() -> return None
+            result := [SemaCallParam]{}
+            index := offset
+            loop index < params.len() {
+                parameter_ty :: params[index]
+                result.push(SemaCallParam{
+                    label: sema_call_fn_param_label(contract, metadata, index, fallback_name),
+                    name: sema_call_fn_param_name(contract, metadata, index),
+                    zone: sema_call_fn_param_zone(contract, index),
+                    default: None,
+                    default_ref: sema_call_fn_param_default(metadata, index),
+                    convention: sema_call_fn_param_convention(metadata, index),
+                    ty: Val(parameter_ty),
+                    variadic: sema_call_fn_param_variadic(metadata, index),
+                })
+                index += 1
+            }
+            return Val(result)
+        }
+        else -> return None
+    }
+    return None
+}
+
+pub fn sema_call_params_from_type(ty: Type) -> ?[SemaCallParam] {
+    sema_call_params_from_type_range(ty, 0, true)
+}
+
+pub fn sema_call_params_from_value_type(ty: Type) -> ?[SemaCallParam] {
+    sema_call_params_from_type_range(ty, 0, false)
+}
+
+pub fn sema_call_params_from_type_after(ty: Type, offset: Int) -> ?[SemaCallParam] {
+    sema_call_params_from_type_range(ty, offset, true)
+}
+
+pub fn sema_call_params_from_value_type_after(ty: Type, offset: Int) -> ?[SemaCallParam] {
+    sema_call_params_from_type_range(ty, offset, false)
+}
+
+
+fn sema_call_diag_unknown_label(callee: String, label: String, params: [SemaCallParam], span: Span) -> Diagnostic {
+    accepted := [String]{}
+    index := 0
+    loop index < params.len() {
+        parameter :: params[index]
+        if parameter.zone != ParamZone.PositionalOnly && parameter.label != "" {
+            already := false
+            accepted_index := 0
+            loop accepted_index < accepted.len() {
+                if accepted[accepted_index] == parameter.label -> already = true
+                accepted_index += 1
+            }
+            if !already -> accepted.push(parameter.label)
+        }
+        index += 1
+    }
+    fix := "`{callee}` takes no labelled arguments"
+    if accepted.len() > 0 -> fix = "`{callee}` accepts `{accepted.join("`, `")}`"
+    sema_error(
+        "E0764",
+        span,
+        "`{callee}` has no parameter labelled `{label}`",
+        "a label binds an argument to the parameter of that name",
+        fix,
+    )
+}
+
+fn sema_call_diag_repeated_label(callee: String, label: String, span: Span) -> Diagnostic {
+    sema_error("E0765", span, "`{label}:` is written twice in this call to `{callee}`", "each parameter takes exactly one argument", "remove one of the `{label}:` arguments")
+}
+
+fn sema_call_diag_missing(callee: String, label: String, span: Span) -> Diagnostic {
+    sema_error("E0766", span, "this call to `{callee}` is missing `{label}`", "`{label}` has no default, so every call has to supply it", "add `{label}: …` to the call")
+}
+
+fn sema_call_diag_forbidden_label(callee: String, label: String, span: Span) -> Diagnostic {
+    sema_error("E0767", span, "`{label}` is a positional-only parameter of `{callee}`", "the `/` in the declaration keeps these parameters positional, so their names stay free to change", "drop the `{label}:` label and pass the value by position")
+}
+
+fn sema_call_diag_ambiguous_positional(callee: String, span: Span) -> Diagnostic {
+    sema_error("E0768", span, "this argument to `{callee}` follows a labelled one without a label", "labels bind by name, so a bare argument after one has no parameter to fill", "label this argument, or move it before the labelled ones")
+}
+
+fn sema_call_diag_required_label(callee: String, label: String, span: Span) -> Diagnostic {
+    sema_error("E0769", span, "`{label}` is a label-only parameter of `{callee}`", "the `*` in the declaration requires the label, so the call says what the value means", "write `{label}: …` for this argument")
+}
+
+pub fn sema_call_arity_diagnostic(callee: String, expected: Int, actual: Int, variadic: Bool, span: Span) -> Diagnostic {
+    if variadic {
+        return sema_error("E0104", span, "`{callee}` expects at least {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every fixed parameter must receive a value before the variadic tail", "check how many values this function expects")
+    }
+    sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", "check how many values this function expects")
+}
+
+fn sema_call_diag_spread(callee: String, span: Span) -> Diagnostic {
+    sema_error("E1312", span, "`{callee}` doesn't accept a spread argument", "call spread `f(...xs)` only works when the callee has a final variadic parameter", "pass arguments individually, or call a function whose last parameter is variadic")
+}
+
+fn sema_call_param_index(params: [SemaCallParam], label: String) -> Int {
+    index := 0
+    loop index < params.len() {
+        if params[index].label == label -> return index
+        index += 1
+    }
+    -1
+}
+
+fn sema_call_source_ordered(sources: [SemaCallArgSource]) -> Bool {
+    last := -1
+    saw_default := false
+    index := 0
+    loop index < sources.len() {
+        if sources[index] == {
+            .Written(source_index) -> {
+                if saw_default || source_index < last -> return false
+                last = source_index
+            }
+            .Default(_) -> saw_default = true
+        }
+        index += 1
+    }
+    true
+}
+
+fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource]) -> [FunctionDefaultRef] {
+    refs := [FunctionDefaultRef]{}
+    index := 0
+    loop index < sources.len() {
+        if sources[index] == {
+            .Default(parameter) -> {
+                if parameter >= 0 && parameter < params.len() && params[parameter].default_ref != None {
+                    default_ref_opt := params[parameter].default_ref
+                    if default_ref_opt != None {
+                        default_ref :: default_ref_opt ?? return refs
+                        refs.push(default_ref)
+                    }
+                }
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    refs
+}
+
+fn sema_call_append_rewritten_written(taken: &[?CallArg], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) {
+    written :: taken[original_index] ?? return
+    taken[original_index] = None
+    rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
+    sources.push(SemaCallArgSource.Written(original_index))
+}
+
+fn sema_call_append_rewritten_default(rewritten: &[CallArg], sources: &[SemaCallArgSource], default_arg: ?CallArg, parameter: Int) {
+    if default_arg == None -> return
+    default_value :: default_arg ?? return
+    rewritten.push(default_value)
+    sources.push(SemaCallArgSource.Default(parameter))
+}
+
+fn sema_call_append_rewritten_default_ref(default_refs: &[FunctionDefaultRef], sources: &[SemaCallArgSource], default_ref: ?FunctionDefaultRef, parameter: Int) {
+    if default_ref == None -> return
+    value :: default_ref ?? return
+    default_refs.push(value)
+    sources.push(SemaCallArgSource.Default(parameter))
+}
+
+fn sema_call_append_remaining_written(taken: &[?CallArg], rewritten: &[CallArg], sources: &[SemaCallArgSource], source_index: Int) {
+
+    written :: taken[source_index] ?? return
+    rewritten.push(written)
+    sources.push(SemaCallArgSource.Written(source_index))
+}
+
+
+
+fn sema_call_mark_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, call_span: Span) -> CallArg {
+    value := arg
+    value.flags.source_index = Val(source_index)
+    value.flags.binder_slot = Val(parameter)
+    value.flags.binder_site = Val(call_span.start)
+    value.flags.binder_label = Val(param.label)
+    value
+}
+
+fn sema_call_make_default_arg(param: SemaCallParam, parameter: Int, params: [SemaCallParam], call_span: Span) -> ?CallArg {
+    default_expr :: param.default ?? return None
+    flags := ast_empty_call_arg_flags()
+    flags.binder_slot = Val(parameter)
+    flags.binder_site = Val(call_span.start)
+    refs := [BinderRef]{}
+    earlier := 0
+    loop earlier < parameter {
+        ty_opt := params[earlier].ty
+        if ty_opt != None {
+            ty :: ty_opt ?? return None
+            refs.push(BinderRef{name: params[earlier].name, slot: earlier, ty: ty})
+        }
+        earlier += 1
+    }
+    flags.binder_refs = refs
+    Val(CallArg{convention: param.convention, expr: default_expr, span: call_span, flags: flags, label: None, spread: false})
+}
+
+fn sema_call_rewrite_args(params: [SemaCallParam], args: &[CallArg], slots: [[Int]], call_span: Span) -> SemaCallBinding {
+    // Copy the source list into optional cells so each written expression is
+    // moved at most once. This preserves its original source index even when
+    // labels reorder the declaration slots.
+    taken := [?CallArg]{}
+    source_index := 0
+    loop source_index < args.len() {
+        taken.push(Val(args[source_index]))
+        source_index += 1
+    }
+    rewritten := [CallArg]{}
+    sources := [SemaCallArgSource]{}
+    default_refs := [FunctionDefaultRef]{}
+    position := 0
+    loop position < params.len() {
+        bound_indices := slots[position]
+        if {
+            bound_indices.len() > 0 -> {
+                bound_index := 0
+                loop bound_index < bound_indices.len() {
+                    original_index :: bound_indices[bound_index]
+                    sema_call_append_rewritten_written(&taken, &rewritten, &sources, original_index, position, params, call_span)
+                    bound_index += 1
+                }
+            }
+            else -> {
+                default_arg := sema_call_make_default_arg(params[position], position, params, call_span)
+                if {
+                    default_arg != None -> sema_call_append_rewritten_default(&rewritten, &sources, default_arg, position)
+                    params[position].default_ref != None -> sema_call_append_rewritten_default_ref(&default_refs, &sources, params[position].default_ref, position)
+                    else -> {}
+                }
+            }
+        }
+        position += 1
+    }
+    // Preserve arguments outside the selected declaration shape for caller
+    // recovery; they remain written expressions, never fabricated defaults.
+    source_index = 0
+    loop source_index < taken.len() {
+        if taken[source_index] != None -> sema_call_append_remaining_written(&taken, &rewritten, &sources, source_index)
+        source_index += 1
+    }
+    loop args.len() > 0 -> _ := args.pop()
+    loop arg in rewritten -> args.push(arg)
+    SemaCallBinding{slots: [Int]{}, sources: sources, default_refs: default_refs, source_ordered: sema_call_source_ordered(sources), rewrote: false}
+}
+
+
+pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    slots := [[Int]]{}
+    param_index := 0
+    loop param_index < params.len() {
+        slots.push([Int]{})
+        param_index += 1
+    }
+    source_slots := [Int]{}
+    source_index := 0
+    loop source_index < args.len() {
+        source_slots.push(-1)
+        source_index += 1
+    }
+
+    source_index = 0
+    next_positional := 0
+    saw_label := false
+    failed := false
+    ambiguous_reported := false
+    loop source_index < args.len() {
+        arg :: args[source_index]
+        parameter_index := -1
+        skip_arg := false
+        if {
+            arg.label == None -> {
+                if saw_label {
+                    if !ambiguous_reported {
+                        diagnostics.push(sema_call_diag_ambiguous_positional(callee, arg.span))
+                        ambiguous_reported = true
+                    }
+                    failed = true
+                    skip_arg = true
+                }
+                if !skip_arg {
+                    loop next_positional < params.len() && !params[next_positional].variadic && slots[next_positional].len() > 0 {
+                        next_positional += 1
+                    }
+                    if next_positional >= params.len() -> skip_arg = true
+                }
+                if !skip_arg {
+                    parameter_index = next_positional
+                    if params[parameter_index].zone == ParamZone.LabelOnly {
+                        diagnostics.push(sema_call_diag_required_label(callee, params[parameter_index].label, arg.span))
+                        failed = true
+                        if !params[parameter_index].variadic -> next_positional += 1
+                        skip_arg = true
+                    }
+                    if !skip_arg && !params[parameter_index].variadic -> next_positional += 1
+                }
+            }
+            else -> {
+                saw_label = true
+                label :: (arg.label ?? CallLabel{name: "", span: arg.span}).name
+                parameter_index = sema_call_param_index(params, label)
+                if parameter_index < 0 {
+                    label_span :: (arg.label ?? CallLabel{name: label, span: arg.span}).span
+                    diagnostics.push(sema_call_diag_unknown_label(callee, label, params, label_span))
+                    failed = true
+                    skip_arg = true
+                }
+                if !skip_arg && params[parameter_index].zone == ParamZone.PositionalOnly {
+                    label_span :: (arg.label ?? CallLabel{name: label, span: arg.span}).span
+                    diagnostics.push(sema_call_diag_forbidden_label(callee, label, label_span))
+                    failed = true
+                    skip_arg = true
+                }
+                if !skip_arg && slots[parameter_index].len() > 0 {
+                    label_span :: (arg.label ?? CallLabel{name: label, span: arg.span}).span
+                    diagnostics.push(sema_call_diag_repeated_label(callee, label, label_span))
+                    failed = true
+                    skip_arg = true
+                }
+            }
+        }
+        if !skip_arg && parameter_index >= 0 {
+            if arg.spread && !params[parameter_index].variadic {
+                diagnostics.push(sema_call_diag_spread(callee, arg.span))
+                failed = true
+            }
+            slots[parameter_index].push(source_index)
+            source_slots[source_index] = parameter_index
+        }
+        source_index += 1
+    }
+    if failed -> return None
+
+    missing := [Int]{}
+    parameter_index = 0
+    loop parameter_index < params.len() {
+        if slots[parameter_index].len() == 0 && !sema_call_param_optional(params[parameter_index]) {
+            missing.push(parameter_index)
+        }
+        parameter_index += 1
+    }
+if missing.len() > 0 {
+    if !saw_label {
+        positional_recovery := true
+        index := 0
+        loop index < missing.len() {
+            if params[missing[index]].zone == ParamZone.LabelOnly -> positional_recovery = false
+            index += 1
+        }
+        if positional_recovery {
+            sources := [SemaCallArgSource]{}
+            index = 0
+            loop index < args.len() -> sources.push(SemaCallArgSource.Written(index))
+            return Val(SemaCallBinding{slots: source_slots, sources: sources, default_refs: [FunctionDefaultRef]{}, source_ordered: true, rewrote: false})
+        }
+    }
+    index := 0
+    loop index < missing.len() {
+        parameter :: missing[index]
+        diagnostics.push(sema_call_diag_missing(callee, params[parameter].label, call_span))
+        index += 1
+    }
+    return None
+}
+
+    unresolved := false
+    parameter_index = 0
+    loop parameter_index < params.len() {
+        if slots[parameter_index].len() == 0 && params[parameter_index].default_ref != None && params[parameter_index].default == None -> unresolved = true
+        parameter_index += 1
+    }
+    if unresolved {
+        sources := [SemaCallArgSource]{}
+        parameter_index = 0
+        loop parameter_index < params.len() {
+            if slots[parameter_index].len() > 0 {
+                written_index := 0
+                loop written_index < slots[parameter_index].len() {
+                    sources.push(SemaCallArgSource.Written(slots[parameter_index][written_index]))
+                    written_index += 1
+                }
+            }
+            if slots[parameter_index].len() == 0 && params[parameter_index].default_ref != None -> sources.push(SemaCallArgSource.Default(parameter_index))
+            parameter_index += 1
+        }
+        refs := sema_call_default_refs(params, sources)
+        return Val(SemaCallBinding{slots: source_slots, sources: sources, default_refs: refs, source_ordered: sema_call_source_ordered(sources), rewrote: false})
+    }
+
+    // Rewrite only after all shape diagnostics have passed. This guarantees
+    // that a failed bind leaves the caller's source AST untouched.
+    binding := sema_call_rewrite_args(params, args, slots, call_span)
+    binding.slots = source_slots
+    binding.rewrote = false
+    if binding.sources.len() != args.len() -> binding.rewrote = true
+    if args.len() != source_slots.len() -> binding.rewrote = true
+    index = 0
+    loop index < args.len() {
+        if index >= source_slots.len() || source_slots[index] != index -> binding.rewrote = true
+        index += 1
+    }
+    if binding.sources.len() > source_slots.len() -> binding.rewrote = true
+    return binding
+}
+
+pub fn sema_call_bind_signature(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    params :: sema_call_params_from_type_after(signature, parameter_offset) ?? return None
+    sema_call_bind_args(callee, params, args, call_span, &diagnostics)
+}
+
+pub fn sema_call_bind_direct(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    sema_call_bind_signature(callee, signature, 0, args, call_span, &diagnostics)
+}
+
+pub fn sema_call_bind_value(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    params :: sema_call_params_from_value_type(signature) ?? return None
+    sema_call_bind_args("this function value", params, args, call_span, &diagnostics)
+}
+
+pub fn sema_call_bind_method(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+    sema_call_bind_signature(method, signature, receiver_offset, args, call_span, &diagnostics)
+}
+
+pub fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool {
+    binding.default_refs.len() > 0
+}
+
+pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int {
+    if arg.flags.binder_slot != None -> return arg.flags.binder_slot ?? -1
+    if source_index >= 0 && source_index < binding.slots.len() -> return binding.slots[source_index]
+    -1
+}
+
+pub fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision {
+    if param.convention == AccessConvention.Write && arg.convention != AccessConvention.Write -> return SemaCallConventionDecision.RequiresWrite
+    if param.convention == AccessConvention.Read && arg.convention == AccessConvention.Move -> return SemaCallConventionDecision.RejectsMove
+    if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Read -> return SemaCallConventionDecision.NeedsImplicitClone
+    SemaCallConventionDecision.Accepted
+}
+
+pub fn sema_call_parameter_type(param: SemaCallParam) -> ?Type {
+    ty :: param.ty ?? return None
+    if param.variadic {
+        if ty == {
+            .List(element) -> return Val(element)
+            else -> return None
+        }
+    }
+    Val(ty)
+}
+
+pub fn sema_call_method_receiver_type(signature: Type, receiver_offset: Int) -> ?Type {
+    if receiver_offset <= 0 -> return None
+    if signature == {
+        .Fn(params, _, _, _, _, _) -> {
+            receiver_index := receiver_offset - 1
+            if receiver_index < 0 || receiver_index >= params.len() -> return None
+            return Val(params[receiver_index])
+        }
+        else -> None
+    }
+}
+
+pub fn sema_call_method_receiver_convention(signature: Type, receiver_offset: Int) -> ?AccessConvention {
+    if receiver_offset <= 0 -> return None
+    if signature == {
+        .Fn(_, _, _, _, metadata, _) -> {
+            metadata_value :: metadata ?? return None
+            if receiver_offset - 1 < 0 || receiver_offset - 1 >= metadata_value.conventions.len() -> return None
+            return Val(metadata_value.conventions[receiver_offset - 1])
+        }
+        else -> None
+    }
+}

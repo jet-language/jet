@@ -6,8 +6,9 @@ use jet_foundation::{
     HotSwap::HotSwapDecision,
     JitBackend::RunOutcome,
     MIR::{
-        MirArtifactId, MirCallee, MirDecisionLedger, MirDecisionRow, MirFailureCarrier,
+        MirAccess, MirArtifactId, MirCallee, MirDecisionLedger, MirDecisionRow, MirFailureCarrier,
         MirFunction, MirFunctionId, MirOperation, MirProgram, MirRuntimeValue, MirSemanticOp,
+        MirType,
     },
     SchemaMigration::SchemaMigrationReceipt,
 };
@@ -15,7 +16,8 @@ use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
 use super::deopt::clear_deopt_state;
 use super::functions_compile::{
-    compile_program, install_finalized_iterable_hooks, redefine_mir_functions, CompiledMirProgram,
+    compile_program, compile_typed_entry_adapter, install_finalized_iterable_hooks,
+    redefine_mir_functions, CompiledMirProgram,
 };
 use super::runtime_host::{new_jit_module, EntryErrorType, ResidentHotSwapPlan, ResidentModule};
 use super::safety::artifact_entry;
@@ -209,7 +211,14 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         type_descriptor_names: HashMap::new(),
         default_error_type: None,
         trait_object_types: HashMap::new(),
-        dma_types: HashMap::new(),
+        native_interface_carriers: HashMap::new(),
+        native_shared_carriers: HashMap::new(),
+        invocation_carrier_epoch: 1,
+        next_invocation_carrier_token: 1,
+        jit_closure_targets: HashMap::new(),
+        jit_closure_targets_by_ptr: HashMap::new(),
+        native_interface_methods: HashMap::new(),
+        native_callable_methods: HashMap::new(),
         dma_transfers: HashMap::new(),
         iterable_hooks: HashMap::new(),
         hardware_host: None,
@@ -341,6 +350,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.deterministic_world.take();
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
+    rt.clear_invocation_carriers();
     rt.int_list_views.clear();
     rt.view_slots.clear();
     rt.clear_lazy_iters();
@@ -459,6 +469,7 @@ pub(crate) fn ensure_resident_module(
                 module,
                 host,
                 main_id: compiled.entry_id,
+                typed_entry_id: compiled.typed_entry_id,
                 main_returns_result,
                 main_returns_app,
                 main_serves_app,
@@ -486,6 +497,7 @@ pub(crate) fn ensure_resident_module(
             runtime.snapshot_compile_strings();
             install_program_source(runtime, program);
             resident.main_id = compiled.entry_id;
+            resident.typed_entry_id = compiled.typed_entry_id;
             resident.main_returns_result = main_returns_result;
             resident.main_returns_app = main_returns_app;
             resident.main_serves_app = main_serves_app;
@@ -495,8 +507,96 @@ pub(crate) fn ensure_resident_module(
     })
 }
 
+fn ensure_typed_entry_adapter(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> Result<(), String> {
+    let function = entry_function(program, artifact)
+        .ok_or_else(|| format!("MIR artifact {artifact:?} has no entry function"))?;
+    RESIDENT_MODULE.with(|slot| {
+        let mut resident_guard = slot.borrow_mut();
+        let resident = resident_guard
+            .as_mut()
+            .ok_or_else(|| "resident module missing".to_string())?;
+        if resident.typed_entry_id.is_some() {
+            return Ok(());
+        }
+        resident.typed_entry_id =
+            compile_typed_entry_adapter(&mut resident.module, resident.main_id, function)?;
+        Ok(())
+    })
+}
+
+fn invoke_word_entry(code: *const u8, args: &[i64]) -> Result<i64, String> {
+    match args {
+        [] => {
+            let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
+            Ok(entry())
+        }
+        [a] => {
+            let entry: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(code) };
+            Ok(entry(*a))
+        }
+        [a, b] => {
+            let entry: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b))
+        }
+        [a, b, c] => {
+            let entry: extern "C" fn(i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c))
+        }
+        [a, b, c, d] => {
+            let entry: extern "C" fn(i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c, *d))
+        }
+        [a, b, c, d, e] => {
+            let entry: extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c, *d, *e))
+        }
+        [a, b, c, d, e, f] => {
+            let entry: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c, *d, *e, *f))
+        }
+        [a, b, c, d, e, f, g] => {
+            let entry: extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c, *d, *e, *f, *g))
+        }
+        [a, b, c, d, e, f, g, h] => {
+            let entry: extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64 =
+                unsafe { std::mem::transmute(code) };
+            Ok(entry(*a, *b, *c, *d, *e, *f, *g, *h))
+        }
+        _ => Err(format!(
+            "typed Cranelift entry adapter received {} arguments; maximum is eight",
+            args.len()
+        )),
+    }
+}
+
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result, main_returns_app, main_serves_app, main_error_type) =
+    resident_invoke_inner(None, None).map(|(outcome, _)| outcome)
+}
+
+
+pub(crate) fn resident_invoke_with_words_and_value(
+    words: &[i64],
+    return_type: &MirType,
+) -> Result<(RunOutcome, MirRuntimeValue), String> {
+    let (outcome, value) = resident_invoke_inner(Some(words), Some(return_type))?;
+    let value = value.ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())?;
+    Ok((outcome, value))
+}
+
+fn resident_invoke_inner(
+    words: Option<&[i64]>,
+    typed_return: Option<&MirType>,
+) -> Result<(RunOutcome, Option<MirRuntimeValue>), String> {
+    let (code, typed_code, main_returns_result, main_returns_app, main_serves_app, main_error_type) =
         RESIDENT_MODULE.with(|slot| -> Result<_, String> {
             let mut resident_guard = slot.borrow_mut();
             let resident = resident_guard
@@ -508,6 +608,9 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 .map_err(|error| error.to_string())?;
             Ok((
                 resident.module.get_finalized_function(resident.main_id),
+                resident
+                    .typed_entry_id
+                    .map(|id| resident.module.get_finalized_function(id)),
                 resident.main_returns_result,
                 resident.main_returns_app,
                 resident.main_serves_app,
@@ -515,6 +618,9 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             ))
         })?;
 
+    if words.is_some() && typed_code.is_none() {
+        return Err("typed Cranelift entry adapter is unavailable for this function".to_string());
+    }
     let cli_adapter = crate::CLI::cli_run_requires_adapter();
     RESIDENT_RUNTIME.with(|slot| {
         let mut rt_guard = slot.borrow_mut();
@@ -526,10 +632,27 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.errors.clear();
         jet_foundation::Outcome::jet_journey_reset();
         let ptr: *mut JitRuntime = runtime;
+        let mut typed_handle = None;
         Concurrency::set_active_runtime(Some(ptr));
         jet_codegen::scheduler::jet_observe_runtime_start_from_env(Vec::new());
         jet_codegen::scheduler::jet_scheduler_task_completion_begin();
-        if cli_adapter {
+        if let Some(args) = words {
+            let typed_code = typed_code
+                .ok_or("typed Cranelift entry adapter is unavailable for this function")?;
+            let handle = invoke_word_entry(typed_code, args)?;
+            typed_handle = Some(handle);
+            if main_returns_result {
+                if let Some(app) =
+                    super::runtime_host::report_unhandled_entry_result(handle, main_error_type)
+                {
+                    if main_serves_app {
+                        crate::Web::serve_app(app);
+                    }
+                }
+            } else if main_serves_app {
+                crate::Web::serve_app(handle);
+            }
+        } else if cli_adapter {
             let handle = crate::CLI::jet_jit_cli_main();
             if runtime.exit_code.is_none() {
                 if main_returns_result {
@@ -563,7 +686,6 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             entry();
         }
         if runtime.host_fault {
-            crate::Collections::drop_loop_stream_resources(runtime);
         }
         jet_codegen::scheduler::jet_scheduler_task_completion_drain();
         jet_codegen::scheduler::jet_scheduler_task_completion_end();
@@ -577,6 +699,20 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         jet_codegen::scheduler::jet_scheduler_drain_after_exit();
         jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
+        let typed_value = match (typed_handle, typed_return) {
+            (Some(handle), Some(return_type)) => {
+                let type_id = super::runtime_host::runtime_type_id(return_type)
+                    .ok_or_else(|| "typed return has no runtime type identity".to_string())?;
+                match super::runtime_host::decode_jit_cell_value(runtime, handle, type_id) {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        reset_run_heap(runtime);
+                        return Err(error);
+                    }
+                }
+            }
+            _ => None,
+        };
         if let Some(rendered) = runtime.deadline_exceeded.take() {
             let mut stderr = rendered;
             if !stderr.ends_with('\n') {
@@ -584,14 +720,17 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             }
             let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);
-            return Ok(RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code: 70,
-            });
+            return Ok((
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code: 70,
+                },
+                typed_value,
+            ));
         }
         if let Some(outcome) = take_host_fault_outcome(runtime) {
-            return Ok(outcome);
+            return Ok((outcome, typed_value));
         }
         if let Some(msg) = runtime.take_trap() {
             if msg == "__jet_rich_panic__" || runtime.exit_code.is_some() {
@@ -599,30 +738,39 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 let stdout = runtime.stdout.clone();
                 let stderr = runtime.stderr.clone();
                 reset_run_heap(runtime);
-                return Ok(RunOutcome::Ran {
-                    stdout,
-                    stderr,
-                    exit_code: code,
-                });
+                return Ok((
+                    RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code: code,
+                    },
+                    typed_value,
+                ));
             }
             let stderr = runtime.stderr.clone();
             let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);
-            return Ok(RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code: 1,
-            });
+            return Ok((
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code: 1,
+                },
+                typed_value,
+            ));
         }
         let stdout = runtime.stdout.clone();
         let stderr = runtime.stderr.clone();
         let exit_code = runtime.exit_code.take().unwrap_or(0);
         reset_run_heap(runtime);
-        Ok(RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        })
+        Ok((
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            },
+            typed_value,
+        ))
     })
 }
 
@@ -632,6 +780,49 @@ pub(crate) fn resident_run_fresh(
     artifact: MirArtifactId,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Result<RunOutcome, String> {
+    resident_run_fresh_inner(
+        program,
+        cap_bytes,
+        artifact,
+        release_devtools_policy,
+        None,
+        None,
+    )
+    .map(|(outcome, _)| outcome)
+}
+
+
+pub(crate) fn resident_run_fresh_with_values_and_result(
+    program: &MirProgram,
+    cap_bytes: Option<u64>,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    values: &[MirRuntimeValue],
+    return_type: &MirType,
+) -> Result<(RunOutcome, MirRuntimeValue), String> {
+    resident_run_fresh_inner(
+        program,
+        cap_bytes,
+        artifact,
+        release_devtools_policy,
+        Some(values),
+        Some(return_type),
+    )
+    .and_then(|(outcome, value)| {
+        value
+            .map(|value| (outcome, value))
+            .ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())
+    })
+}
+
+fn resident_run_fresh_inner(
+    program: &MirProgram,
+    cap_bytes: Option<u64>,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    values: Option<&[MirRuntimeValue]>,
+    return_type: Option<&MirType>,
+) -> Result<(RunOutcome, Option<MirRuntimeValue>), String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| {
@@ -646,7 +837,66 @@ pub(crate) fn resident_run_fresh(
         super::tier_cache::abort_capture();
     }
     compiled?;
-    let outcome = resident_invoke();
+    let encoded_words = values
+        .map(|values| {
+            let function = entry_function(program, artifact)
+                .ok_or_else(|| format!("MIR artifact {artifact:?} has no entry function"))?;
+            if !function.capture_params.is_empty() || function.params.len() != values.len() {
+                return Err(format!(
+                    "typed Cranelift entry expected {} parameters, got {} values",
+                    function.params.len(),
+                    values.len()
+                ));
+            }
+            RESIDENT_RUNTIME.with(|slot| {
+                let mut runtime_guard = slot.borrow_mut();
+                let runtime = runtime_guard
+                    .as_mut()
+                    .ok_or_else(|| "resident runtime missing".to_string())?;
+                values
+                    .iter()
+                    .zip(&function.params)
+                    .map(|(value, parameter)| {
+                        if parameter.access == MirAccess::Write {
+                            return Err(format!(
+                                "typed Cranelift entry cannot marshal writable parameter `{}`",
+                                parameter.name
+                            ));
+                        }
+                        let type_id = super::runtime_host::runtime_type_id(&parameter.ty)
+                            .ok_or_else(|| {
+                                format!(
+                                    "typed parameter `{}` has no runtime type identity",
+                                    parameter.name
+                                )
+                            })?;
+                        super::runtime_host::encode_jit_cell_value(runtime, value, type_id)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+        })
+        .transpose()
+        .map_err(|error| {
+            super::tier_cache::abort_capture();
+            error
+        })?;
+    let words = encoded_words.as_deref();
+    if words.is_some() {
+        if let Err(error) = ensure_typed_entry_adapter(program, artifact) {
+            super::tier_cache::abort_capture();
+            return Err(error);
+        }
+    }
+    let outcome = match words {
+        Some(words) => {
+            let return_type = return_type.ok_or_else(|| {
+                "typed Cranelift entry has values but no checked return type".to_string()
+            })?;
+            resident_invoke_with_words_and_value(words, return_type)
+                .map(|(outcome, value)| (outcome, Some(value)))
+        }
+        None => resident_invoke().map(|outcome| (outcome, None)),
+    };
     if outcome.is_err() {
         super::tier_cache::abort_capture();
     }
@@ -844,7 +1094,39 @@ fn resident_redefine(
         .module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
-    install_selected_cli_function_pointers(&resident.module, &selected_ids)?;
+    for function_id in &selected_ids {
+        let Some(function_row) = program.functions.iter().find(|row| row.id == *function_id) else {
+            return Err(format!("MIR closure function {:?} is missing", function_id));
+        };
+        let Some(FuncOrDataId::Func(compiled_id)) =
+            resident.module.get_name(&mir_fn_name(*function_id))
+        else {
+            return Err(format!(
+                "MIR closure function {:?} has no finalized definition",
+                function_id
+            ));
+        };
+        let pointer = resident.module.get_finalized_function(compiled_id);
+        if pointer.is_null() {
+            return Err(format!(
+                "MIR closure function {:?} has no finalized function address",
+                function_id
+            ));
+        }
+        let capture_type_ids = function_row
+            .capture_params
+            .iter()
+            .map(|parameter| {
+                super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
+                    format!(
+                        "MIR closure {:?} capture has no runtime type identity",
+                        function_id
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        runtime.install_jit_closure_target(*function_id, pointer as i64, capture_type_ids);
+    }
     runtime.snapshot_compile_strings();
     install_program_source(runtime, program);
     Ok(ResidentRedefineStatus::Applied)

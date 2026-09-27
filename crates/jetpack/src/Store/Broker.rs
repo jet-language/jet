@@ -2434,6 +2434,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let realized = super::super::realize_verified(
             &local,
@@ -2492,6 +2493,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let reused = super::super::realize_verified(
             &reader,
@@ -2532,6 +2534,7 @@ mod tests {
             project_dir: None,
             nix_index: None,
             nix_roots: None,
+            allow_local_nix_catalog: false,
         };
         let error = match super::super::realize_verified(
             &denied,

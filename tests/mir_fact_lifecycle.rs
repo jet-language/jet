@@ -676,7 +676,7 @@ fn value_reads_place(
         MirOperation::ReadPlace(candidate) | MirOperation::MovePlace { place: candidate } => {
             *candidate == place
         }
-        MirOperation::Copy { value }
+        MirOperation::Copy { value, .. }
         | MirOperation::Move { value }
         | MirOperation::AttachTag { value, .. }
         | MirOperation::Convert { value, .. } => value_reads_place(function, *value, place, seen),

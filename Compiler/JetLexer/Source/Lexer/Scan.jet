@@ -1,0 +1,957 @@
+// Raw source scanning for the Jet lexer.
+//
+// The scanner emits private four-field raw-token facts consumed by both
+// payload construction and the terminator pass:
+// [kind, byte_start, byte_end, first_char_is_uppercase].
+use core.text as unicode
+
+
+fn byte_at(source: [U8], index: Int) -> Int {
+    if index < 0 || index >= source.len() -> return -1
+    Int.from_u8(source[index])
+}
+
+fn is_continuation(value: Int) -> Bool {
+    value >= 128 && value <= 191
+}
+
+fn utf8_width(source: [U8], index: Int) -> Int {
+    first :: byte_at(source, index)
+    if first < 0 -> return 0
+    if first < 128 -> return 1
+    if first >= 194 && first <= 223 && is_continuation(byte_at(source, index + 1)) -> return 2
+    if first >= 224 && first <= 239 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) -> return 3
+    if first >= 240 && first <= 244 && is_continuation(byte_at(source, index + 1)) && is_continuation(byte_at(source, index + 2)) && is_continuation(byte_at(source, index + 3)) -> return 4
+    1
+}
+
+fn scalar_at(source: [U8], index: Int) -> String {
+    width :: utf8_width(source, index)
+    if width <= 0 -> return ""
+    out := [U8]{}
+    loop offset in 0..<width {
+        if index + offset >= source.len() -> break
+        out.push(source[index + offset])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn ascii_alpha(value: Int) -> Bool {
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
+}
+
+fn ascii_digit(value: Int) -> Bool {
+    value >= 48 && value <= 57
+}
+
+fn is_identifier_start(source: [U8], index: Int) -> Bool {
+    value :: byte_at(source, index)
+    value == 95 || ascii_alpha(value) || unicode.is_alphabetic(scalar_at(source, index))
+}
+
+fn is_identifier_continue(source: [U8], index: Int) -> Bool {
+    value :: byte_at(source, index)
+    value == 95 || ascii_alpha(value) || ascii_digit(value) || unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
+}
+
+fn first_char_is_upper(source: [U8], start: Int) -> Bool {
+    scalar := scalar_at(source, start)
+    unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
+}
+
+fn is_whitespace_at(source: [U8], index: Int) -> Bool {
+    value :: byte_at(source, index)
+    if value < 0 -> return false
+    if value < 128 {
+        return value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
+    }
+    unicode.is_whitespace(scalar_at(source, index))
+}
+
+fn slice_text(source: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop i < end && i < source.len() {
+        out.push(source[i])
+        i += 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn emit(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) {
+    flag := 0
+    if uppercase -> flag = 1
+    facts.push(kind)
+    facts.push(start)
+    facts.push(end)
+    facts.push(flag)
+}
+
+fn push_code(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int {
+    emit(&facts, kind, start, end, uppercase)
+    kind
+}
+
+fn previous_scalar_start(source: [U8], index: Int) -> Int {
+    if index <= 0 -> return -1
+    cursor := index - 1
+    loop cursor > 0 && is_continuation(byte_at(source, cursor)) -> cursor -= 1
+    cursor
+}
+
+fn previous_is_identifier(source: [U8], index: Int) -> Bool {
+    previous :: previous_scalar_start(source, index)
+    previous >= 0 && is_identifier_continue(source, previous)
+}
+
+fn scan_identifier_end(source: [U8], start: Int) -> Int {
+    i := start
+    loop i < source.len() {
+        if !is_identifier_continue(source, i) -> return i
+        i += utf8_width(source, i)
+    }
+    i
+}
+
+fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
+    i := start
+    loop i < source.len() {
+        if !is_identifier_continue(source, i) -> return i
+        i += utf8_width(source, i)
+    }
+    i
+}
+
+fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int {
+    word :: slice_text(source, start, end)
+    previous_is_dot :: if previous_kind == {
+        K_DOT -> true
+        K_QUESTION_DOT -> true
+        else -> false
+    }
+    if word == "in" && previous_is_dot -> return K_IDENT
+    if word == {
+        "true" -> K_TRUE
+        "false" -> K_FALSE
+        "self" -> K_SELF
+        "null" -> K_NULL
+        "break" -> K_BREAK
+        "return" -> K_RETURN
+        "fn" -> K_FN
+        "pub" -> K_PUB
+        "priv" -> K_PRIV
+        "if" -> K_IF
+        "else" -> K_ELSE
+        "in" -> K_IN
+        "mut" -> K_MUTATE
+        "take" -> K_MOVE
+        "copy" -> K_COPY
+        "struct" -> K_STRUCT
+        "enum" -> K_ENUM
+        "impl" -> K_IMPL
+        "trait" -> K_TRAIT
+        "tag" -> K_TAG
+        "effect" -> K_EFFECT
+        "derive" -> K_DERIVE
+        "it" -> K_IT
+        "const" -> K_CONST
+        "comptime" -> K_COMPTIME
+        "loop" -> K_LOOP
+        "yield" -> K_YIELD
+        "use" -> K_USE
+        "extern" -> K_EXTERN
+        "module" -> K_MODULE
+        else -> K_IDENT
+    }
+}
+
+fn scan_digits(source: [U8], start: Int) -> Int {
+    i := start
+    loop i < source.len() {
+        value :: byte_at(source, i)
+        if {
+            ascii_digit(value) || value == 95 -> {
+                i += 1
+            }
+            else -> {
+                return i
+            }
+        }
+    }
+    i
+}
+
+fn base_digit(value: Int, radix: Int) -> Bool {
+    if value >= 48 && value <= 57 -> return value - 48 < radix
+    if value >= 65 && value <= 70 -> return value - 55 < radix
+    if value >= 97 && value <= 102 -> return value - 87 < radix
+    false
+}
+
+fn base_number_end(source: [U8], start: Int) -> Int {
+    marker :: byte_at(source, start + 1)
+    radix := if marker == {
+        120 | 88 -> 16
+        111 | 79 -> 8
+        98 | 66 -> 2
+        else -> 0
+    }
+    if radix == 0 -> return -1
+    i := start + 2
+    loop i < source.len() {
+        value :: byte_at(source, i)
+        if {
+            value == 95 || base_digit(value, radix) -> {
+                i += 1
+            }
+            else -> {
+                return i
+            }
+        }
+    }
+    i
+}
+
+fn scan_numeric_end(source: [U8], start: Int) -> Int {
+    if byte_at(source, start) == 48 {
+        prefixed :: base_number_end(source, start)
+        if prefixed >= 0 -> return prefixed
+    }
+    i := scan_digits(source, start)
+    if byte_at(source, i) == 46 && ascii_digit(byte_at(source, i + 1)) {
+        i += 1
+        i = scan_digits(source, i)
+    }
+    exponent :: byte_at(source, i)
+    if exponent == 101 || exponent == 69 {
+        after :: byte_at(source, i + 1)
+        valid := ascii_digit(after)
+        if (after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)) -> valid = true
+        if valid {
+            i += 1
+            sign :: byte_at(source, i)
+            if sign == 43 || sign == 45 -> i += 1
+            i = scan_digits(source, i)
+        }
+    }
+    i
+}
+
+fn scan_number_end(source: [U8], start: Int) -> Int {
+    numeric_end :: scan_numeric_end(source, start)
+    if numeric_end < 0 -> return start + 1
+    if base_number_end(source, start) >= 0 -> return numeric_end
+    value :: byte_at(source, numeric_end)
+    if !ascii_alpha(value) && value != 95 -> return numeric_end
+    scan_unit_suffix_end(source, numeric_end)
+}
+
+fn numeric_is_float(source: [U8], start: Int) -> Bool {
+    if base_number_end(source, start) >= 0 -> return false
+    i := scan_digits(source, start)
+    if byte_at(source, i) == 46 && ascii_digit(byte_at(source, i + 1)) -> return true
+    exponent :: byte_at(source, i)
+    if !(exponent == 101 || exponent == 69) -> return false
+    after :: byte_at(source, i + 1)
+    ascii_digit(after) || ((after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)))
+}
+
+fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int {
+    i := start + 1
+    loop i < source.len() {
+        value :: byte_at(source, i)
+        if value == 10 -> return -(i + 1)
+        if value == 34 -> return i + 1
+        if {
+            value == 92 -> {
+                if {
+                    !raw_head || byte_at(source, i + 1) == 34 -> {
+                        if i + 1 < source.len() -> i += 2 else -> i += 1
+                    }
+                    else -> {
+                        i += 1
+                    }
+                }
+            }
+            else -> {
+                i += utf8_width(source, i)
+            }
+        }
+    }
+    -(source.len() + 1)
+}
+
+fn scan_raw_fence_end(source: [U8], start: Int) -> Int {
+    fence_len := 0
+    loop byte_at(source, start + fence_len) == 96 -> fence_len += 1
+    cursor := start + fence_len
+    loop cursor < source.len() {
+        if byte_at(source, cursor) != 96 {
+            cursor += 1
+            next
+        }
+        run_start := cursor
+        loop byte_at(source, cursor) == 96 -> cursor += 1
+        if cursor - run_start == fence_len -> return cursor
+    }
+    -(source.len() + 1)
+}
+
+fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int {
+    i := start + 3
+    depth := 0
+    loop i < source.len() {
+        value :: byte_at(source, i)
+        if depth == 0 {
+            if value == 92 {
+                if {
+                    !raw_head || byte_at(source, i + 1) == 34 -> {
+                        if i + 1 < source.len() -> i += 2 else -> i += 1
+                    }
+                    else -> {
+                        i += 1
+                    }
+                }
+                next
+            }
+            if value == 123 && byte_at(source, i + 1) != 123 {
+                depth = 1
+                i += 1
+                next
+            }
+            if value == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 -> return i + 3
+            i += utf8_width(source, i)
+            next
+        }
+        if value == 47 && byte_at(source, i + 1) == 47 {
+            i += 2
+            loop i < source.len() && byte_at(source, i) != 10 -> i += utf8_width(source, i)
+            next
+        }
+        if value == 47 && byte_at(source, i + 1) == 42 {
+            i += 2
+            comment_depth := 1
+            loop i < source.len() && comment_depth > 0 {
+                if {
+                    byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
+                        comment_depth += 1
+                        i += 2
+                    }
+                    byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
+                        comment_depth -= 1
+                        i += 2
+                    }
+                    else -> {
+                        i += utf8_width(source, i)
+                    }
+                }
+            }
+            next
+        }
+        if value == 34 {
+            triple := byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34
+            nested :: if triple -> scan_triple_string_end(source, i, false) else -> scan_plain_string_end(source, i, false)
+            if {
+                nested >= 0 -> {
+                    i = nested
+                }
+                else -> {
+                    i = -nested - 1
+                }
+            }
+            next
+        }
+        if value == 39 {
+            nested :: scan_char_end(source, i)
+            if {
+                nested >= 0 -> {
+                    i = nested
+                }
+                else -> {
+                    i = source.len()
+                }
+            }
+            next
+        }
+        if value == 96 {
+            nested :: scan_raw_fence_end(source, i)
+            if {
+                nested >= 0 -> {
+                    i = nested
+                }
+                else -> {
+                    i = source.len()
+                }
+            }
+            next
+        }
+        if value == 123 {
+            depth += 1
+            i += 1
+            next
+        }
+        if value == 125 {
+            depth -= 1
+            i += 1
+            next
+        }
+        i += utf8_width(source, i)
+    }
+    -(source.len() + 1)
+}
+
+fn scan_raw_foreign_string_end(source: [U8], start: Int) -> Int {
+    i := start + 3
+    loop i + 2 < source.len() {
+        if byte_at(source, i) == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 -> return i + 3
+        i += 1
+    }
+    -(source.len() + 1)
+}
+
+fn scan_char_end(source: [U8], start: Int) -> Int {
+    i := start + 1
+    if i >= source.len() -> return -1
+    if {
+        byte_at(source, i) == 92 -> {
+            i += 2
+            if i > source.len() -> i = source.len()
+        }
+        else -> {
+            i += utf8_width(source, i)
+        }
+    }
+    if byte_at(source, i) == 39 -> return i + 1
+    loop i < source.len() && byte_at(source, i) != 39 -> i += utf8_width(source, i)
+    if byte_at(source, i) == 39 -> i + 1 else -> source.len()
+}
+
+pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
+    facts := [Int]{}
+    last_code := -1
+    i := 0
+    if byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
+        loop i < source.len() && byte_at(source, i) != 10 -> i += 1
+        if i < source.len() -> i += 1
+    }
+    loop i < source.len() {
+        if is_whitespace_at(source, i) {
+            i += utf8_width(source, i)
+            next
+        }
+        start := i
+        value :: byte_at(source, i)
+        next1 :: byte_at(source, i + 1)
+        next2 :: byte_at(source, i + 2)
+        if value == 35 && next1 == 33 && next2 == 47 {
+            loop i < source.len() && byte_at(source, i) != 10 -> i += 1
+            if i < source.len() -> i += 1
+            next
+        }
+        if value == 47 && next1 == 47 {
+            if config_surface && byte_at(source, i - 1) == 58 {
+                last_code = push_code(&facts, K_SLASH, i, i + 1, false)
+                last_code = push_code(&facts, K_SLASH, i + 1, i + 2, false)
+                i += 2
+                next
+            }
+            loop i < source.len() && byte_at(source, i) != 10 -> i += 1
+            emit(&facts, K_LINE_COMMENT, start, i, false)
+            next
+        }
+        if value == 47 && next1 == 42 {
+            i += 2
+            depth := 1
+            loop i < source.len() && depth > 0 {
+                if {
+                    byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
+                        depth += 1
+                        i += 2
+                    }
+                    byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
+                        depth -= 1
+                        i += 2
+                    }
+                    else -> {
+                        i += utf8_width(source, i)
+                    }
+                }
+            }
+            emit(&facts, K_BLOCK_COMMENT, start, i, false)
+            next
+        }
+        if value == 40 {
+            last_code = push_code(&facts, K_LPAREN, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 41 {
+            last_code = push_code(&facts, K_RPAREN, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 123 {
+            last_code = push_code(&facts, K_LBRACE, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 125 {
+            last_code = push_code(&facts, K_RBRACE, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 91 {
+            last_code = push_code(&facts, K_LBRACKET, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 93 {
+            if {
+                next1 == 64 -> {
+                    last_code = push_code(&facts, K_FENCE_CLOSE, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_RBRACKET, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 58 {
+            if {
+                next1 == 62 -> {
+                    last_code = push_code(&facts, K_ARROW, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 58 -> {
+                    last_code = push_code(&facts, K_COLON_COLON, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_COLON_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_COLON, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 44 {
+            last_code = push_code(&facts, K_COMMA, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 59 {
+            last_code = push_code(&facts, K_SEMI, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 64 {
+            if next1 == 91 {
+                last_code = push_code(&facts, K_FENCE_OPEN, start, start + 2, false)
+                i += 2
+                next
+            }
+            if {
+                is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
+                    end :: scan_identifier_end(source, i + 1)
+                    marker_kind :: word_kind(source, i + 1, end, 0)
+                    if {
+                        marker_kind == K_IDENT -> {
+                            last_code = push_code(&facts, K_IDENT, start, end, false)
+                            i = end
+                        }
+                        else -> {
+                            last_code = push_code(&facts, K_AT, start, start + 1, false)
+                            i += 1
+                        }
+                    }
+                }
+                else -> {
+                    last_code = push_code(&facts, K_AT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 35 {
+            last_code = push_code(&facts, K_HASH, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 36 {
+            last_code = push_code(&facts, K_DOLLAR, start, start + 1, false)
+            i += 1
+            next
+        }
+        if value == 63 {
+            if {
+                next1 == 63 -> {
+                    last_code = push_code(&facts, K_QUESTION_QUESTION, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 46 -> {
+                    last_code = push_code(&facts, K_QUESTION_DOT, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_QUESTION, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 46 {
+            if {
+                next1 == 46 && next2 == 46 -> {
+                    last_code = push_code(&facts, K_DOT_DOT_DOT, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 46 && next2 == 60 -> {
+                    last_code = push_code(&facts, K_DOT_DOT_LT, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 46 -> {
+                    last_code = push_code(&facts, K_DOT_DOT, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_DOT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 61 {
+            if {
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_EQ_EQ, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 62 -> {
+                    last_code = push_code(&facts, K_LAMBDA_ARROW, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_EQ, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 33 {
+            if {
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_NOT_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_BANG, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 43 {
+            if {
+                next1 == 43 -> {
+                    last_code = push_code(&facts, K_PLUS_PLUS, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_PLUS_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_PLUS, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 45 {
+            if {
+                next1 == 62 -> {
+                    last_code = push_code(&facts, K_UNIFIED_ARROW, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 45 -> {
+                    last_code = push_code(&facts, K_MINUS_MINUS, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_MINUS_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_MINUS, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 42 {
+            if {
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_STAR_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_STAR, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 47 {
+            if {
+                next1 == 37 && next2 == 61 -> {
+                    last_code = push_code(&facts, K_SLASH_PERCENT_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 37 -> {
+                    last_code = push_code(&facts, K_SLASH_PERCENT, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_SLASH_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_SLASH, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 37 {
+            if {
+                next1 == 37 && next2 == 61 -> {
+                    last_code = push_code(&facts, K_PERCENT_PERCENT_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 37 -> {
+                    last_code = push_code(&facts, K_PERCENT_PERCENT, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_PERCENT_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_PERCENT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 38 {
+            if {
+                next1 == 38 -> {
+                    last_code = push_code(&facts, K_AND_AND, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_AMP_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_AMP, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 124 {
+            if {
+                next1 == 124 -> {
+                    last_code = push_code(&facts, K_OR_OR, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_PIPE_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_PIPE, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 94 {
+            if {
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_CARET_EQ, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_CARET, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 126 {
+            if {
+                next1 == 126 -> {
+                    last_code = push_code(&facts, K_TILDE_TILDE, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 124 && next2 == 61 -> {
+                    last_code = push_code(&facts, K_TILDE_PIPE_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 124 -> {
+                    last_code = push_code(&facts, K_TILDE_PIPE, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_TILDE, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 60 {
+            if {
+                next1 == 60 && next2 == 61 -> {
+                    last_code = push_code(&facts, K_SHL_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 60 -> {
+                    last_code = push_code(&facts, K_SHL, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 && next2 == 62 -> {
+                    last_code = push_code(&facts, K_COMPARE, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_LE, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_LT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 62 {
+            if {
+                next1 == 62 && next2 == 61 -> {
+                    last_code = push_code(&facts, K_SHR_EQ, start, start + 3, false)
+                    i += 3
+                }
+                next1 == 62 -> {
+                    last_code = push_code(&facts, K_SHR, start, start + 2, false)
+                    i += 2
+                }
+                next1 == 61 -> {
+                    last_code = push_code(&facts, K_GE, start, start + 2, false)
+                    i += 2
+                }
+                else -> {
+                    last_code = push_code(&facts, K_GT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            next
+        }
+        if value == 34 {
+            if {
+                next1 == 34 && next2 == 34 -> {
+                    end := if {
+                        raw_foreign_body_at(source, facts, facts.len() /% 4) -> scan_raw_foreign_string_end(source, start)
+                        else -> {
+                            modes :: string_head_modes(source, facts, facts.len() /% 4)
+                            scan_triple_string_end(source, start, modes.raw_head)
+                        }
+                    }
+                    if {
+                        end < 0 -> {
+                            i = -end - 1
+                        }
+                        else -> {
+                            last_code = push_code(&facts, K_STR, start, end, false)
+                            i = end
+                        }
+                    }
+                }
+                else -> {
+                    modes :: string_head_modes(source, facts, facts.len() /% 4)
+                    end :: scan_plain_string_end(source, start, modes.raw_head)
+                    if {
+                        end < 0 -> {
+                            i = -end - 1
+                        }
+                        else -> {
+                            last_code = push_code(&facts, K_STR, start, end, false)
+                            i = end
+                        }
+                    }
+                }
+            }
+            next
+        }
+        if value == 96 {
+            end :: scan_raw_fence_end(source, start)
+            if {
+                end < 0 -> {
+                    i = -end - 1
+                }
+                else -> {
+                    last_code = push_code(&facts, K_RAW_STR, start, end, false)
+                    i = end
+                }
+            }
+            next
+        }
+        if value == 39 {
+            end :: scan_char_end(source, start)
+            if {
+                end < 0 -> {
+                    i = source.len()
+                }
+                else -> {
+                    last_code = push_code(&facts, K_CHAR, start, end, false)
+                    i = end
+                }
+            }
+            next
+        }
+        if ascii_digit(value) {
+            numeric_end :: scan_numeric_end(source, start)
+            end :: scan_number_end(source, start)
+            kind :: if {
+                end != numeric_end -> K_UNIT_NUMBER
+                numeric_is_float(source, start) -> K_FLOAT
+                else -> K_INT
+            }
+            last_code = push_code(&facts, kind, start, end, false)
+            i = end
+            next
+        }
+        if is_identifier_start(source, i) {
+            end :: scan_identifier_end(source, i)
+            kind :: word_kind(source, i, end, last_code)
+            upper := false
+            if kind == K_IDENT -> upper = first_char_is_upper(source, i)
+            last_code = push_code(&facts, kind, i, end, upper)
+            i = end
+            next
+        }
+        i += utf8_width(source, i)
+    }
+    emit(&facts, K_EOF, source.len(), source.len(), false)
+    facts
+}
+
+pub fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {
+    facts :: raw_token_facts(source, config_surface)
+    terminator_events(source, facts)
+}

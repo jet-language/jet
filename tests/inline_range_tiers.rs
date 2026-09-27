@@ -242,10 +242,10 @@ fn named_range_comptime_folds_the_same_carrier() {
     }
     let source = r#"
 Die :: distinct Int(1..6)
-@named :: Die.from_int(3)
+@NAMED :: Die.from_int(3)
 
 fn run() {
-    print(@named.raw())
+    print(@NAMED.raw())
 }
 "#;
     let (code, stdout) = tir_support::build_and_run("named_range_comptime", source);

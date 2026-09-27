@@ -21,6 +21,75 @@ fn lexer_api_returns_stable_value_tokens() {
 }
 
 #[test]
+fn lexer_api_positions_match_canonical_unicode_newline_and_long_line() {
+    let source = "fn α() {\r\n    value :: π\r\n}\n";
+    let lexed = jet::Compiler::lex_source(source);
+    assert!(
+        lexed.diagnostics.is_empty(),
+        "unexpected lexer diagnostics: {:?}",
+        lexed.diagnostics
+    );
+    for token in &lexed.tokens {
+        assert_eq!(
+            (token.start.line, token.start.column),
+            jet::Diagnostics::span_line_col(source, token.span.start),
+            "start position for {} {:?}",
+            token.kind,
+            token.span
+        );
+        assert_eq!(
+            (token.end.line, token.end.column),
+            jet::Diagnostics::span_line_col(source, token.span.end),
+            "end position for {} {:?}",
+            token.kind,
+            token.span
+        );
+    }
+    let eof = lexed.tokens.last().expect("lexer always emits eof");
+    assert_eq!(eof.kind, "eof");
+    assert_eq!(eof.text, "");
+    assert_eq!(eof.span.start, source.len());
+    assert_eq!(eof.span.end, source.len());
+
+    let mut long_line = String::with_capacity(4_096 * 5);
+    for index in 0..4_096 {
+        if index != 0 {
+            long_line.push(' ');
+        }
+        long_line.push_str("item");
+    }
+    let long = jet::Compiler::lex_source(&long_line);
+    assert!(
+        long.diagnostics.is_empty(),
+        "unexpected long-line lexer diagnostics: {:?}",
+        long.diagnostics
+    );
+    assert_eq!(
+        long.tokens
+            .iter()
+            .filter(|token| token.kind == "identifier")
+            .count(),
+        4_096
+    );
+    for token in &long.tokens {
+        assert_eq!(
+            (token.start.line, token.start.column),
+            jet::Diagnostics::span_line_col(&long_line, token.span.start),
+            "long-line start position for {} {:?}",
+            token.kind,
+            token.span
+        );
+        assert_eq!(
+            (token.end.line, token.end.column),
+            jet::Diagnostics::span_line_col(&long_line, token.span.end),
+            "long-line end position for {} {:?}",
+            token.kind,
+            token.span
+        );
+    }
+}
+
+#[test]
 fn postfix_in_lexes_as_a_member_identifier() {
     let lexed = jet::Compiler::lex_source(
         "fn run() {\n    value :: duration.in(.Seconds)\n    loop item in [1] -> print(item)\n}\n",
@@ -364,7 +433,7 @@ fn compiler_api_is_compile_time_only() {
 fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
     for operation in ["lex", "parse", "check", "source_map"] {
         let zero = format!(
-            "use core.compiler as compiler\n@value :: compiler.{operation}()\n"
+            "use core.compiler as compiler\n@VALUE :: compiler.{operation}()\n"
         );
         let diagnostics = jet::compile(&zero).expect_err("zero-argument call must be rejected");
         assert!(
@@ -373,7 +442,7 @@ fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
         );
 
         let extra = format!(
-            "use core.compiler as compiler\n@value :: compiler.{operation}(\"source\", \"extra\")\n"
+            "use core.compiler as compiler\n@VALUE :: compiler.{operation}(\"source\", \"extra\")\n"
         );
         let diagnostics =
             jet::compile(&extra).expect_err("extra-argument call must be rejected");

@@ -90,7 +90,7 @@ fn aot_jit_and_interpreter_agree_on_additive_fixed_list_length() {
 #[test]
 fn comptime_resolves_a_declared_measure_binding() {
     let source = r#"
-@capacity :: 3
+@CAPACITY :: 3
 
 struct Buffer {
     values: [Int#capacity]

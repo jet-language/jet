@@ -29,6 +29,7 @@ use crate::MIR::{
     MirSemanticOp, MirSourceFileId, MirStringPart, MirStructLayout, MirSwitchArm,
     MirTestScopeMember,
     MirTerminator, MirTestCase,
+    MirCoreOwner,
     MirTraitDef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind, MirUnaryOp,
     MirPanicContext, MirValidationError, MirValueId, MirVectorAccess, MirVectorAccessRoot,
     MirVectorFact, MirVectorLayout, MirVectorRule, MirFixedReductionFact,
@@ -1247,6 +1248,13 @@ fn verify_function(
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirLegalityError> {
     let span = function.span;
+    if !source_file_ids.contains(&function.source_file) {
+        return Err(MirLegalityError::InvalidReference {
+            function: function.id,
+            subject: format!("source file {:?}", function.source_file),
+            span,
+        });
+    }
     if span.start > span.end {
         return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span });
     }
@@ -1781,6 +1789,31 @@ fn verify_block_references(
                 if !place_map.contains_key(&place_id) {
                     return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("place {place_id:?}"), span: instruction.span });
                 }
+            }
+        }
+        if let MirOperation::TraitBox { target, .. } = operation {
+            let Some(result) = instruction.result else {
+                return Err(MirLegalityError::InvalidReference {
+                    function: function.id,
+                    subject: "trait boxing instruction has no result".to_string(),
+                    span: instruction.span,
+                });
+            };
+            let Some(result_ty) = instruction.ty.as_ref() else {
+                return Err(MirLegalityError::InvalidReference {
+                    function: function.id,
+                    subject: format!("trait boxing result {result:?} has no type"),
+                    span: instruction.span,
+                });
+            };
+            if result_ty.identity != Some(*target)
+                || !matches!(result_ty.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1)
+            {
+                return Err(MirLegalityError::InvalidReference {
+                    function: function.id,
+                    subject: format!("trait boxing result {result:?} does not match target {target:?}"),
+                    span: instruction.span,
+                });
             }
         }
         verify_operation_metadata(
@@ -2331,6 +2364,15 @@ fn verify_operation_metadata(
                 }
             }
         }
+        MirOperation::TraitBox { value, target } => {
+            check_type_id(*target)?;
+            let Some((_, _, source, _)) = defs.get(value) else {
+                return invalid(format!("trait boxing value {value:?} has no definition"));
+            };
+            if matches!(source.kind(), MirTypeKind::TraitObject(_)) {
+                return invalid("trait boxing source is already a trait object".to_string());
+            }
+        }
         MirOperation::ScopeExit { scope } if !scope_ids.contains(scope) => {
             return invalid(format!("scope {scope:?}"));
         }
@@ -2420,7 +2462,7 @@ fn verify_call_args(
                 arg.value
             ));
         }
-        let Some((_, _, _, ownership)) = defs.get(&arg.value) else {
+        let Some((_, _, source_ty, ownership)) = defs.get(&arg.value) else {
             return invalid(format!("call argument value {:?}", arg.value));
         };
         if arg.label.as_deref() == Some("") {
@@ -2442,7 +2484,10 @@ fn verify_call_args(
                 return invalid(format!("trait boxing type {type_id:?}"));
             }
         }
-        let coercion_consumes = arg.fn_coercion.is_some() || arg.widen_to_union.is_some() || arg.box_as_trait.is_some();
+        let boxes_trait = arg.box_as_trait.is_some()
+            && !matches!(source_ty.kind(), MirTypeKind::TraitObject(_));
+        let coercion_consumes =
+            arg.fn_coercion.is_some() || arg.widen_to_union.is_some() || boxes_trait;
         if coercion_consumes
             && ownership.mode != MirOwnershipMode::Copy
             && arg.access != MirAccess::Move
@@ -3904,7 +3949,7 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
                 MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
                 MirOperation::ReadPlace(place) =>
                     tracked.get(place).and_then(|local| facts.places.get(local)).copied(),
-                MirOperation::Copy { value } | MirOperation::Move { value } =>
+                MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
                     facts.values.get(value).copied(),
                 MirOperation::Unary { op: MirUnaryOp::Not, value } =>
                     facts.values.get(value).map(|value| !value),
@@ -4107,7 +4152,9 @@ fn verify_moves_and_borrows(
             }
             let mut moved = Vec::new();
             match &instruction.operation {
-                MirOperation::Move { value } => moved.push(*value),
+                MirOperation::Move { value } | MirOperation::TraitBox { value, .. } => {
+                    moved.push(*value)
+                }
                 MirOperation::Drop { value, kind } if *kind != crate::MIR::MirDropKind::None => {
                     moved.push(*value)
                 }
@@ -5124,6 +5171,7 @@ fn inline_call(
                 ty: Some(argument_type.clone()),
                 operation: MirOperation::Copy {
                     value: argument.value,
+                    materialize_view: false,
                 },
             });
             value
@@ -5757,11 +5805,19 @@ fn inline_operation(
         MirOperation::InitializeUninit { place } => MirOperation::InitializeUninit {
             place: inline_place(ids, *place),
         },
-        MirOperation::Copy { value } => MirOperation::Copy {
+        MirOperation::Copy {
+            value,
+            materialize_view,
+        } => MirOperation::Copy {
             value: inline_value(ids, *value),
+            materialize_view: *materialize_view,
         },
         MirOperation::Move { value } => MirOperation::Move {
             value: inline_value(ids, *value),
+        },
+        MirOperation::TraitBox { value, target } => MirOperation::TraitBox {
+            value: inline_value(ids, *value),
+            target: *target,
         },
         MirOperation::Constant(constant) => MirOperation::Constant(constant.clone()),
         MirOperation::Unary { op, value } => MirOperation::Unary {
@@ -8740,7 +8796,7 @@ fn scalar_int_constant_value(function: &MirFunction, value: MirValueId) -> Optio
             MirOperation::Constant(MirConstant::Int { value, .. }) => {
                 return Some(i128::from(*value))
             }
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. } => current = *value,
             _ => return None,
@@ -9874,8 +9930,9 @@ fn cursor_value_matches(
             MirOperation::ReadPlace(place) => cursor_place == Some(*place),
             MirOperation::LoopRangeValue { cursor: source, .. }
             | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
+            | MirOperation::TraitBox { value, .. }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Convert { value, .. } => {
                 inner(function, *value, cursor, cursor_place, seen)
@@ -10173,9 +10230,9 @@ fn loop_copy_cost(function: &MirFunction, blocks: &[MirBlockId]) -> MirCopyCost 
         for instruction in &block.instructions {
             match &instruction.operation {
                 MirOperation::Copy { .. } => copies = copies.saturating_add(1),
-                MirOperation::BuildList { .. } | MirOperation::BuildMap { .. } => {
-                    return MirCopyCost::Unknown
-                }
+                MirOperation::TraitBox { .. }
+                | MirOperation::BuildList { .. }
+                | MirOperation::BuildMap { .. } => return MirCopyCost::Unknown,
                 MirOperation::Call { args, .. }
                 | MirOperation::CoreCall { args, .. }
                 | MirOperation::IndirectCall { args, .. } => {
@@ -10637,8 +10694,9 @@ fn vector_list_length_matches(
             return false;
         };
         match &instruction.operation {
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
+            | MirOperation::TraitBox { value, .. }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Convert { value, .. } => {
                 inner(function, *value, base, prelude_calls, seen)
@@ -10705,9 +10763,9 @@ fn vector_same_collection_value(
         }
         let instruction = find_value_instruction(function, value)?;
         match &instruction.operation {
-            MirOperation::ReadPlace(place) => Some(*place),
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
+            | MirOperation::TraitBox { value, .. }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Convert { value, .. } => direct_place(function, *value, seen),
             _ => None,
@@ -10933,8 +10991,9 @@ fn value_depends_on_cursor(
         | MirOperation::LoopIterValue {
             cursor: source_cursor, ..
         } => *source_cursor == cursor,
-        MirOperation::Copy { value }
+        MirOperation::Copy { value, .. }
         | MirOperation::Move { value }
+        | MirOperation::TraitBox { value, .. }
         | MirOperation::AttachTag { value, .. }
         | MirOperation::Unary { value, .. }
         | MirOperation::Convert { value, .. } => {
@@ -11053,8 +11112,9 @@ fn value_reads_place(
     };
     match &instruction.operation {
         MirOperation::ReadPlace(read) | MirOperation::MovePlace { place: read } => *read == place,
-        MirOperation::Copy { value }
+        MirOperation::Copy { value, .. }
         | MirOperation::Move { value }
+        | MirOperation::TraitBox { value, .. }
         | MirOperation::AttachTag { value, .. }
         | MirOperation::Unary { value, .. }
         | MirOperation::Convert { value, .. } => {
@@ -11115,12 +11175,10 @@ fn value_has_cursor_index(
         MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
             place_has_cursor_index(function, *place, cursor, cursor_place)
         }
-        MirOperation::Semantic(MirSemanticOp::ColumnarRead { index, .. }) => {
-            cursor_value_matches(function, *index, cursor, cursor_place)
-        }
         MirOperation::Field { base, .. }
-        | MirOperation::Copy { value: base }
+        | MirOperation::Copy { value: base, .. }
         | MirOperation::Move { value: base }
+        | MirOperation::TraitBox { value: base, .. }
         | MirOperation::AttachTag { value: base, .. } => {
             value_has_cursor_index(function, *base, cursor, cursor_place, seen)
         }
@@ -11363,7 +11421,7 @@ fn value_access_root(function: &MirFunction, value: MirValueId) -> MirVectorAcce
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
                 MirVectorAccessRoot::Place(*place)
             }
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Field { base: value, .. }
@@ -11435,7 +11493,7 @@ fn value_root_key(function: &MirFunction, value: MirValueId) -> String {
             }
             MirOperation::Parameter { index, .. } => format!("parameter:{index}"),
             MirOperation::Capture { slot } => format!("capture:{slot}"),
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Field { base: value, .. }
@@ -11741,6 +11799,9 @@ fn canonicalize_program_order(program: &mut MirProgram) {
     program.imports.sort_by_key(|row| (row.id, row.module));
     program.functions.sort_by_key(|function| (function.id, function.key.clone()));
     program.types.sort_by_key(|ty| (ty.id, ty.key.clone()));
+    program
+        .core_owners
+        .sort_by_key(|owner| (owner.id, owner.key.clone(), owner.name.clone()));
     program.traits.sort_by_key(|row| (row.id, row.key.clone()));
     program.impls.sort_by_key(|row| (row.id, row.key.clone()));
     program.constants.sort_by_key(|row| (row.id, row.key.clone()));
@@ -11847,6 +11908,12 @@ pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
     writer.len(types.len());
     for ty in types {
         encode_type_def(&mut writer, ty);
+    }
+    let mut core_owners = program.core_owners.iter().collect::<Vec<_>>();
+    core_owners.sort_by_key(|owner| (owner.id, owner.key.as_str(), owner.name.as_str()));
+    writer.len(core_owners.len());
+    for owner in core_owners {
+        encode_core_owner(&mut writer, owner);
     }
     let mut traits = program.traits.iter().collect::<Vec<_>>();
     traits.sort_by_key(|row| (row.id, row.key.as_str()));
@@ -12280,9 +12347,18 @@ impl CanonicalWriter {
                 self.bool(*by_value);
                 encode_loop_source_kind(self, source_kind);
             }
-            MirOperation::InitializeUninit { place } => {
-                self.tag("initialize-uninit");
-                self.u64(place.0);
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
+                self.tag("copy");
+                self.u64(value.0);
+                self.bool(*materialize_view);
+            }
+            MirOperation::TraitBox { value, target } => {
+                self.tag("trait-box");
+                self.u64(value.0);
+                self.u64(target.0);
             }
             MirOperation::Semantic(operation) => {
                 self.tag("semantic");
@@ -12375,6 +12451,55 @@ fn encode_struct_layout(writer: &mut CanonicalWriter, layout: Option<crate::MIR:
         None => writer.u64(0),
     }
 }
+fn encode_c_enum_tag(writer: &mut CanonicalWriter, tag: Option<crate::MIR::MirCEnumTag>) {
+    match tag {
+        None => writer.bool(false),
+        Some(tag) => {
+            writer.bool(true);
+            writer.u64(match tag {
+                crate::MIR::MirCEnumTag::CInt => 1,
+                crate::MIR::MirCEnumTag::U8 => 2,
+                crate::MIR::MirCEnumTag::I8 => 3,
+                crate::MIR::MirCEnumTag::U16 => 4,
+                crate::MIR::MirCEnumTag::I16 => 5,
+                crate::MIR::MirCEnumTag::U32 => 6,
+                crate::MIR::MirCEnumTag::I32 => 7,
+                crate::MIR::MirCEnumTag::U64 => 8,
+                crate::MIR::MirCEnumTag::I64 => 9,
+            });
+        }
+    }
+}
+
+fn encode_layout_facts(
+    writer: &mut CanonicalWriter,
+    facts: Option<&crate::Layout::LayoutFacts>,
+) {
+    match facts {
+        None => writer.bool(false),
+        Some(facts) => {
+            writer.bool(true);
+            match facts.bytes {
+                None => writer.bool(false),
+                Some(bytes) => {
+                    writer.bool(true);
+                    writer.u64(bytes.size);
+                    writer.u64(bytes.alignment);
+                    writer.u64(bytes.stride);
+                }
+            }
+            writer.len(facts.fields.len());
+            for field in &facts.fields {
+                writer.str(&field.name);
+                writer.option_u64(field.offset);
+                writer.option_u64(field.size);
+                writer.option_u64(field.alignment);
+                writer.option_u64(field.stride);
+            }
+        }
+    }
+}
+
 fn encode_layout_alignment(
     writer: &mut CanonicalWriter,
     fact: Option<&crate::Layout::LayoutAlignmentFact>,
@@ -12945,6 +13070,21 @@ fn encode_import(writer: &mut CanonicalWriter, import: &MirImport) {
     }
 }
 
+fn encode_core_owner(writer: &mut CanonicalWriter, owner: &MirCoreOwner) {
+    writer.u64(owner.id.0);
+    writer.u64(owner.nominal_id.0);
+    match owner.module_id {
+        Some(module_id) => {
+            writer.bool(true);
+            writer.u64(module_id.0);
+        }
+        None => writer.bool(false),
+    }
+    writer.str(&owner.key);
+    writer.str(&owner.name);
+    encode_ownership_mode(writer, owner.ownership);
+}
+
 fn encode_type_def(writer: &mut CanonicalWriter, ty: &MirTypeDef) {
     writer.u64(ty.id.0);
     writer.u64(ty.module.0);
@@ -12964,6 +13104,8 @@ fn encode_type_def(writer: &mut CanonicalWriter, ty: &MirTypeDef) {
     writer.bool(ty.single_use);
     writer.bool(ty.must_use);
     encode_struct_layout(writer, ty.layout);
+    encode_c_enum_tag(writer, ty.c_layout_tag);
+    encode_layout_facts(writer, ty.enum_layout.as_ref());
     encode_layout_alignment(writer, ty.layout_alignment.as_ref());
     encode_serde_attributes(writer, &ty.serde);
     writer.len(ty.cli_bindings.len());
@@ -12982,6 +13124,13 @@ fn encode_type_def(writer: &mut CanonicalWriter, ty: &MirTypeDef) {
     writer.len(ty.boxed_edges.len());
     for edge in &ty.boxed_edges {
         writer.str(edge);
+    }
+    match ty.compiler_builtin {
+        None => writer.bool(false),
+        Some(crate::MIR::MirCompilerBuiltin::DefaultErr) => {
+            writer.bool(true);
+            writer.tag("default-err");
+        }
     }
     encode_type_def_kind(writer, &ty.kind);
 }
@@ -14789,6 +14938,28 @@ fn encode_core_call(writer: &mut CanonicalWriter, call: &crate::MIR::MirCoreCall
     writer.option_str(call.jit_symbol.as_deref());
     writer.debug(&call.marker);
 }
+fn encode_authority(
+    writer: &mut CanonicalWriter,
+    authority: &Option<crate::MIR::MirAuthorityDecision>,
+) {
+    match authority {
+        Some(decision) => {
+            writer.bool(true);
+            writer.str(&decision.import.id);
+            writer.str(&decision.import.operation);
+            writer.str(&decision.import.required_right);
+            writer.len(decision.import.parameter_type_ids.len());
+            for type_id in &decision.import.parameter_type_ids {
+                writer.str(type_id);
+            }
+            writer.option_str(decision.import.result_type_id.as_deref());
+            writer.option_u64(decision.authority_argument.map(|value| value as u64));
+            writer.bool(decision.inherited);
+        }
+        None => writer.bool(false),
+    }
+}
+
 fn encode_prelude_call(writer: &mut CanonicalWriter, call: &MirPreludeCall) {
     writer.u64(call.id.0);
     encode_prelude_family(writer, call.family);
@@ -14808,6 +14979,7 @@ fn encode_prelude_call(writer: &mut CanonicalWriter, call: &MirPreludeCall) {
     writer.debug(&call.effect);
     encode_call_fallibility(writer, &call.fallibility);
     encode_prelude_abi(writer, call.abi);
+    encode_authority(writer, &call.authority);
     match &call.db_metadata {
         Some(metadata) => {
             writer.bool(true);
@@ -14946,6 +15118,7 @@ fn encode_place(writer: &mut CanonicalWriter, place: &MirPlace) {
 fn encode_function(writer: &mut CanonicalWriter, function: &MirFunction) {
     writer.u64(function.id.0);
     writer.u64(function.module_id.0);
+    writer.u64(function.source_file.0);
     writer.str(&function.key);
     writer.str(&function.module);
     writer.str(&function.name);
@@ -15156,7 +15329,14 @@ fn encode_optimization_facts(writer: &mut CanonicalWriter, facts: &MirOptimizati
     writer.len(acceleration_facts.len());
     for fact in acceleration_facts {
         writer.u64(fact.loop_header.0);
-        writer.tag(fact.transform.as_str());
+        writer.tag(match fact.transform {
+            crate::MIROptimization::Acceleration::AccelerationTransform::TransientColumnCopy => {
+                "transient-column-copy"
+            }
+            crate::MIROptimization::Acceleration::AccelerationTransform::PooledParallelChunks => {
+                "pooled-parallel-chunks"
+            }
+        });
         writer.bool(fact.workload.nested_reuse);
         writer.bool(fact.workload.single_pass);
         writer.bool(fact.proof.source_proven);
@@ -15376,6 +15556,7 @@ mod ownership_guard_tests {
         }).collect();
         MirFunction {
             id: MirFunctionId(0), module_id: crate::MIR::MirModuleId(0),
+            source_file: crate::MIR::MirSourceFileId(stable_id("mir-source-file", "test.jet")),
             key: "ownership_guard".into(), module: "test".into(), name: "ownership_guard".into(),
             span: Span::new(0, 100), kind: crate::MIR::MirFunctionKind::Jet,
             form: crate::MIR::MirFunctionForm::TopLevel,

@@ -1,0 +1,347 @@
+// Checked MIR Web publication context.  The Web adapter is deliberately a
+// representation layer: target applicability, partition markers, runtime
+// closure, and artifact selection are facts already present on MirProgram.
+// It never re-runs sema policy and never asks a host compiler to choose a
+// partition.
+
+pub struct JetWebTimezoneAsset {
+    pub name: String
+    pub bytes: [U8]
+}
+
+pub struct JetWebAssets {
+    pub dom_runtime: String
+    pub execution_prelude: String
+    pub event_prelude: String
+    pub realtime_prelude: String
+    pub data_prelude: String
+    pub history_prelude: String
+    pub compute_prelude: String
+    pub raylib_prelude: String
+    pub game_prelude: String
+    pub task_group_prelude: String
+    pub runtime_stop_metadata: String
+    pub game_default_frame_budget: Int
+    pub game_frame_budget_error: String
+    pub harfbuzz_wasm: [U8]
+    pub timezone_data: [JetWebTimezoneAsset]
+    pub index_html: String
+    pub explicit_html_path: ?String
+    pub source_names: [String]
+    pub source_contents: [String]
+    pub onnx_runtime_js: String
+    pub onnx_runtime_worker_js: String
+}
+
+pub fn jet_web_assets_with_default_shell() -> JetWebAssets {
+    JetWebAssets{
+        // The canonical DOM/runtime fragments are supplied by Foundation/Driver.
+        // Empty values are rejected by the checked publication gate rather than
+        // replaced with a second runtime implementation here.
+        dom_runtime: "",
+        execution_prelude: "",
+        event_prelude: "",
+        realtime_prelude: "",
+        data_prelude: "",
+        history_prelude: "",
+        compute_prelude: "",
+        raylib_prelude: "",
+        game_prelude: "",
+        task_group_prelude: "",
+        runtime_stop_metadata: "",
+        game_default_frame_budget: 0,
+        game_frame_budget_error: "",
+        harfbuzz_wasm: [U8]{},
+        timezone_data: [JetWebTimezoneAsset]{},
+        index_html: "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Jet app</title></head><body><script type=\"module\" src=\"./app.js\"></script></body></html>\n",
+        explicit_html_path: None,
+        source_names: [String]{},
+        source_contents: [String]{},
+        onnx_runtime_js: "",
+        onnx_runtime_worker_js: "",
+    }
+}
+
+pub struct JetWebEmitConfig {
+    pub artifact: MirArtifactId
+    pub layout: JetTargetLayout
+    pub assets: JetWebAssets
+    pub semantic_digest: String
+    pub root_prefix: String
+    pub release_devtools_policy: JetReleaseDevtoolsPolicy
+}
+
+pub enum JetWebEmitFailureKind {
+    InvalidMir
+    InvalidLayout
+    InvalidAssets
+    InvalidRuntimeAssets
+    MissingCoreCall
+    MissingPreludeCall
+    MissingUserFunction
+    MissingEntryFunction
+    InvalidAbi
+    InvalidExport
+    InvalidPartition
+    InvalidProvenance
+}
+
+pub struct JetWebEmitFailure {
+    pub kind: JetWebEmitFailureKind
+    pub code: String
+    pub message: String
+    pub detail: String
+    pub span: ?Span
+}
+
+pub struct JetWebArtifacts {
+    pub manifest_json: String
+    pub wasm_rust: String
+    pub rustc_incremental_identity: String
+    pub js_app: String
+    pub js_source_map: String
+    pub source_names: [String]
+    pub source_contents: [String]
+    pub dom_runtime: String
+    pub onnx_runtime_js: String
+    pub onnx_runtime_worker_js: String
+    pub index_html: String
+    pub explicit_html_path: ?String
+    pub command_record: [U8]
+}
+
+pub enum JetWebEmitResult {
+    Complete(value: JetWebArtifacts)
+    Incomplete(failure: JetWebEmitFailure)
+}
+
+struct JetWebEmitContext {
+    pub program: MirProgram
+    pub config: JetWebEmitConfig
+    pub functions: [MirFunction]
+    pub entry: MirFunction
+    pub artifact_identity: String
+    pub history_source: String
+    pub history_tool: String
+    pub history_target: String
+    pub failure: ?JetWebEmitFailure
+}
+
+fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: ?Span) -> JetWebEmitFailure {
+    JetWebEmitFailure{kind: kind, code: code, message: message, detail: detail, span: span}
+}
+
+fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: ?Span) {
+    if ctx.failure == None {
+        ctx.failure = Val(jet_web_failure(kind, code, message, detail, span))
+    }
+}
+
+fn jet_web_id(value: Int) -> String { "{value}" }
+
+fn jet_web_json_quote(value: String) -> String {
+    bytes := value.bytes()
+    out := "\""
+    loop byte in bytes {
+        code := Int.from_u8(byte)
+        if code == 92 -> out = "{out}\\\\"
+        else if code == 34 -> out = "{out}\\\""
+        else if code == 10 -> out = "{out}\\n"
+        else if code == 13 -> out = "{out}\\r"
+        else if code == 9 -> out = "{out}\\t"
+        else if code < 32 -> {
+            hex := "0123456789abcdef"
+            high := String.from_bytes([hex.bytes()[code / 16]]) ?? "0"
+            low := String.from_bytes([hex.bytes()[code % 16]]) ?? "0"
+            out = "{out}\\u00{high}{low}"
+        }
+        else -> out = "{out}{String.from_bytes([byte]) ?? \"\"}"
+    }
+    "{out}\""
+}
+
+fn jet_web_js_quote(value: String) -> String { jet_web_json_quote(value) }
+
+fn jet_web_bool_json(value: Bool) -> String { if value -> "true" else -> "false" }
+fn jet_web_optional_string(value: ?String) -> String {
+    if value == None -> return "null"
+    jet_web_json_quote(value ?? "")
+}
+fn jet_web_optional_int(value: ?Int) -> String {
+    if value == None -> return "null"
+    "{value ?? 0}"
+}
+
+fn jet_web_bucket_json(value: ?MirWebBucket) -> String {
+    if value == None -> return "null"
+    bucket :: value ?? MirWebBucket.JS
+    if bucket == MirWebBucket.JS -> return jet_web_json_quote("JS")
+    jet_web_json_quote("Wasm")
+}
+
+fn jet_web_marker_json(value: ?MirWebPartitionMarker) -> String {
+    if value == None -> return "null"
+    marker :: value ?? MirWebPartitionMarker.JS
+    if marker == MirWebPartitionMarker.JS -> return jet_web_json_quote("JS")
+    if marker == MirWebPartitionMarker.Wasm -> return jet_web_json_quote("Wasm")
+    jet_web_json_quote("WasmExport")
+}
+
+fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bool {
+    if function.web_bucket != None -> return (function.web_bucket ?? bucket) == bucket
+    if function.web_marker == None -> return false
+    marker :: function.web_marker ?? MirWebPartitionMarker.JS
+    if bucket == MirWebBucket.JS -> return marker == MirWebPartitionMarker.JS
+    marker == MirWebPartitionMarker.Wasm || marker == MirWebPartitionMarker.WasmExport
+}
+
+fn jet_web_is_wasm_export(function: MirFunction) -> Bool {
+    function.web_marker == Val(MirWebPartitionMarker.WasmExport)
+}
+
+fn jet_web_find_function(program: MirProgram, id: MirFunctionId) -> ?MirFunction {
+    loop function in program.functions { if function.id == id -> return Val(function) }
+    None
+}
+
+fn jet_web_find_type(program: MirProgram, id: MirTypeId) -> ?MirTypeDef {
+    loop definition in program.types { if definition.id == id -> return Val(definition) }
+    None
+}
+
+fn jet_web_find_artifact(program: MirProgram, id: MirArtifactId) -> ?MirArtifactPlan {
+    loop artifact in program.artifacts { if artifact.id == id -> return Val(artifact) }
+    None
+}
+
+fn jet_web_find_field_name(program: MirProgram, id: MirFieldId) -> ?String {
+    loop row in program.fields { if row.id == id -> return Val(row.field.name) }
+    None
+}
+
+fn jet_web_find_source_path(program: MirProgram, id: MirSourceFileId) -> ?String {
+    loop row in program.source_files { if row.id == id -> return Val(row.path) }
+    None
+}
+
+fn jet_web_find_prelude(program: MirProgram, id: MirPreludeCallId) -> ?MirPreludeCall {
+    loop row in program.prelude_calls { if row.id == id -> return Val(row) }
+    None
+}
+
+fn jet_web_find_core(program: MirProgram, id: MirCoreCallId) -> ?MirCoreCall {
+    loop row in program.core_calls { if row.id == id -> return Val(row) }
+    None
+}
+
+fn jet_web_find_value_type(function: MirFunction, id: MirValueId) -> ?MirType {
+    loop row in function.values { if row.id == id -> return Val(row.ty) }
+    None
+}
+
+fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String {
+    source := None
+    loop candidate in program.source_files { if candidate.id == function.source_file -> source = Val(candidate.source) }
+    text :: source ?? return ""
+    line := 1
+    offset := 0
+    loop offset < function.span.start && offset < text.bytes().len() {
+        if text.bytes()[offset] == U8{10} -> line += 1
+        offset += 1
+    }
+    lines := text.split("\n")
+    if line > 0 && line <= lines.len() -> return lines[line - 1]
+    ""
+}
+
+fn jet_web_validate_assets(ctx: &JetWebEmitContext) {
+    if ctx.config.assets.dom_runtime == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web DOM runtime asset is empty", "the canonical browser runtime must be supplied by Driver/Prelude assets", None)
+    }
+    if ctx.config.assets.execution_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web execution Prelude asset is empty", "the canonical raw execution fragments must be supplied by Driver/Host", None)
+    }
+    if ctx.config.assets.history_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web history Prelude asset is empty", "the Wasm history ABI requires the canonical raw history fragment", None)
+    }
+    if ctx.config.assets.task_group_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web task-group Prelude asset is empty", "the canonical task-group fragment must be supplied by Driver/Host", None)
+    }
+    if ctx.config.assets.runtime_stop_metadata == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web runtime-stop metadata asset is empty", "the canonical checked diagnostic metadata must be supplied by Driver/Host", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Event) && ctx.config.assets.event_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web Event Prelude asset is empty", "the selected Event runtime part has no canonical raw fragment", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Realtime) && ctx.config.assets.realtime_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web Realtime Prelude asset is empty", "the selected Realtime runtime part has no canonical raw fragment", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Data) && ctx.config.assets.data_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web Data Prelude asset is empty", "the selected Data runtime part has no canonical raw fragment", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Compute) && ctx.config.assets.compute_prelude == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web Compute Prelude asset is empty", "the selected Compute runtime part has no canonical raw fragment", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Game) {
+        if ctx.config.assets.raylib_prelude == "" || ctx.config.assets.game_prelude == "" || ctx.config.assets.game_default_frame_budget <= 0 || ctx.config.assets.game_frame_budget_error == "" {
+            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web Game runtime assets are incomplete", "the selected Game runtime part requires canonical Raylib, Game, and frame-budget assets", None)
+        }
+    }
+    if jet_web_needs_font_shaping(ctx) && ctx.config.assets.harfbuzz_wasm.len() == 0 {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web HarfBuzz asset is empty", "core.font.shape requires the canonical checked HarfBuzz Wasm bytes", None)
+    }
+    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Math) && ctx.config.assets.timezone_data.len() == 0 {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web timezone asset is empty", "the selected Math runtime part requires canonical sorted TZif data", None)
+    }
+    if ctx.config.assets.index_html == "" {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAssets, "E0003", "Web HTML asset is empty", "publication requires a non-empty index HTML asset", None)
+    }
+    if ctx.config.assets.source_names.len() != ctx.config.assets.source_contents.len() {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAssets, "E0003", "Web source-map asset rows are misaligned", "source_names and source_contents must be parallel canonical rows", None)
+    }
+}
+
+fn jet_web_validate_artifact(ctx: &JetWebEmitContext) {
+    artifact := ctx.artifact
+    if artifact.kind != MirArtifactKind.WebApplication {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact is not a WebApplication", "Web emission accepts only the checked WebApplication artifact plan", None)
+    }
+    if artifact.target != MirArtifactTarget.Web {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact does not target Web", "artifact target and Web representation must agree", None)
+    }
+    if artifact.modules.len() == 0 {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "WebApplication artifact has no selected modules", "publication closure must select at least one module", None)
+    }
+    loop module_id in artifact.modules {
+        if !program_has_module(ctx.program, module_id) -> jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact references a missing module", "selected module identities must resolve in the checked MIR program", None)
+    }
+    if artifact.entry == None {
+        jet_web_fail(ctx, JetWebEmitFailureKind.MissingEntryFunction, "E0003", "WebApplication artifact has no entry", "the checked artifact plan must carry one entry function", None)
+    }
+}
+
+fn program_has_module(program: MirProgram, id: MirModuleId) -> Bool {
+    loop module in program.modules { if module.id == id -> return true }
+    false
+}
+
+fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MirFunction) {
+    if function.target_applicability.web && function.web_bucket == None {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web-applicable MIR function has no Web bucket", "partition selection must be a checked MIR fact before emission", Val(function.span))
+    }
+    if function.web_bucket == Val(MirWebBucket.JS) && function.web_marker == Val(MirWebPartitionMarker.Wasm) {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS Web bucket has a Wasm marker", "contradictory checked partition facts cannot be published", Val(function.span))
+    }
+    if function.web_bucket == Val(MirWebBucket.JS) && function.web_marker == Val(MirWebPartitionMarker.WasmExport) {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS Web bucket has a WasmExport marker", "contradictory checked partition facts cannot be published", Val(function.span))
+    }
+    if function.web_bucket == Val(MirWebBucket.Wasm) && function.web_marker == Val(MirWebPartitionMarker.JS) {
+        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Wasm Web bucket has a JS marker", "contradictory checked partition facts cannot be published", Val(function.span))
+    }
+    loop reconstruction in function.web_param_reconstructions {
+        if reconstruction.local == "" -> jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web parameter reconstruction has an empty local", "reconstruction rows must preserve checked local identity", Val(function.span))
+        loop field in reconstruction.fields {
+            if field.field == "" || field.parameter == "" -> jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web parameter reconstruction has an empty field", "reconstruction rows must preserve checked field and parameter identity", Val(function.span))
+        }
+    }
+}

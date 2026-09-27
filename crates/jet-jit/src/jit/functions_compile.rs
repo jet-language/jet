@@ -256,17 +256,7 @@ fn is_shared_guard_type(ty: &MirType) -> bool {
         _ => false,
     }
 }
-fn view_element_type(ty: &MirType) -> Option<&MirType> {
-    match ty.kind() {
-        MirTypeKind::Apply { name, args }
-            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
-        {
-            args.first()
-        }
-        MirTypeKind::Tagged { inner, .. } => view_element_type(inner),
-        _ => None,
-    }
-}
+
 
 fn pin_inner_type(ty: &MirType) -> Option<&MirType> {
     match ty.kind() {
@@ -799,6 +789,7 @@ pub(crate) struct CompiledIterableHook {
 #[derive(Debug)]
 pub(crate) struct CompiledMirProgram {
     pub(crate) entry_id: FuncId,
+    pub(crate) typed_entry_id: Option<FuncId>,
     pub(crate) function_ids: HashMap<MirFunctionId, FuncId>,
     pub(crate) iterable_hooks: Vec<CompiledIterableHook>,
 }
@@ -1061,7 +1052,7 @@ fn direct_function_call(operation: &MirOperation) -> Option<MirFunctionId> {
         | MirOperation::WritePlace { .. }
         | MirOperation::ReplacePlace { .. }
         | MirOperation::Copy { .. }
-        | MirOperation::Move { .. }
+        | MirOperation::TraitBox { .. }
         | MirOperation::Constant(_)
         | MirOperation::Unary { .. }
         | MirOperation::Binary { .. }
@@ -1410,6 +1401,35 @@ pub(crate) fn compile_program(
     module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
+    for (function, function_id) in &compiled.function_ids {
+        let Some(function_row) = program.functions.iter().find(|row| row.id == *function) else {
+            return Err(format!("MIR closure function {:?} is missing", function));
+        };
+        let pointer = module.get_finalized_function(*function_id);
+        if pointer.is_null() {
+            return Err(format!(
+                "MIR closure function {:?} has no finalized function address",
+                function
+            ));
+        }
+        let capture_type_ids = function_row
+            .capture_params
+            .iter()
+            .map(|parameter| {
+                super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
+                    format!(
+                        "MIR closure {:?} capture has no runtime type identity",
+                        function
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        runtime.install_jit_closure_target(
+            *function,
+            pointer as i64,
+            capture_type_ids,
+        );
+    }
     Ok(compiled)
 }
 
@@ -1712,6 +1732,13 @@ fn compile_program_inner(
         .filter(|function| selected_ids.contains(&function.id))
         .collect::<Vec<_>>();
     super::runtime_host::install_program_type_descriptors(runtime, program, &selected_functions);
+    super::runtime_host::install_native_interface_methods(
+        runtime,
+        program,
+        artifact_id,
+        &selected_functions,
+    )?;
+    super::runtime_host::install_native_callable_methods(runtime, program, artifact_id)?;
     let mut function_ids = HashMap::new();
     let mut generator_body_ids = HashMap::new();
     for function in &selected_functions {
@@ -1787,8 +1814,15 @@ fn compile_program_inner(
     let entry_id = *function_ids
         .get(&entry)
         .ok_or_else(|| format!("MIR entry {:?} was not declared", entry))?;
+    let entry_function = program
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .ok_or_else(|| format!("MIR entry {:?} has no function row", entry))?;
+    let typed_entry_id = compile_typed_entry_adapter(module, entry_id, entry_function)?;
     Ok(CompiledMirProgram {
         entry_id,
+        typed_entry_id,
         function_ids,
         iterable_hooks,
     })
@@ -3616,6 +3650,70 @@ fn lower_view_callback_thunk(
     Ok(())
 }
 
+/// Build an all-word adapter for a checked entry whose native ABI uses scalar
+/// Cranelift values. The adapter performs the same bit-preserving casts used
+/// by callback thunks, so the host can invoke one stable `i64`-only ABI while
+/// the checked entry keeps its declared float/bool/char parameter classes.
+pub(crate) fn compile_typed_entry_adapter<M: Module + ?Sized>(
+    module: &mut M,
+    target: FuncId,
+    function: &MirFunction,
+) -> Result<Option<FuncId>, String> {
+    if !function.capture_params.is_empty() || function.params.len() > 8 {
+        return Ok(None);
+    }
+    let target_signature = function_signature(module, function)?;
+    if target_signature.params.len() != function.params.len()
+        || target_signature.params.iter().any(|parameter| {
+            parameter.value_type != types::I8
+                && parameter.value_type != types::I32
+                && parameter.value_type != types::I64
+                && parameter.value_type != types::F32
+                && parameter.value_type != types::F64
+        })
+    {
+        return Ok(None);
+    }
+    let mut adapter_signature = Signature::new(module.target_config().default_call_conv);
+    for _ in &function.params {
+        adapter_signature.params.push(AbiParam::new(types::I64));
+    }
+    adapter_signature.returns.push(AbiParam::new(types::I64));
+    let adapter_id = module
+        .declare_function(
+            &format!("__jet_typed_entry_adapter_{}", function.id.0),
+            Linkage::Local,
+            &adapter_signature,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut context = module.make_context();
+    context.func.signature = adapter_signature;
+    let mut builder_context = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    builder.seal_block(entry);
+    let raw_params = builder.block_params(entry).to_vec();
+    let target_args = raw_params
+        .iter()
+        .zip(target_signature.params.iter())
+        .map(|(value, parameter)| thunk_cast(&mut builder, *value, parameter.value_type))
+        .collect::<Result<Vec<_>, _>>()?;
+    let target_ref = module.declare_func_in_func(target, builder.func);
+    let call = builder.ins().call(target_ref, &target_args);
+    let returned = if let Some(value) = builder.inst_results(call).first().copied() {
+        thunk_cast(&mut builder, value, types::I64)?
+    } else {
+        builder.ins().iconst(types::I64, 0)
+    };
+    builder.ins().return_(&[returned]);
+    builder.finalize();
+    define_function_checked(module, adapter_id, &mut context)?;
+    module.clear_context(&mut context);
+    Ok(Some(adapter_id))
+}
+
 fn function_signature<M: Module + ?Sized>(
     module: &M,
     function: &MirFunction,
@@ -4228,9 +4326,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.observe_live_place(builder, *place)?;
                 None
             }
-            MirOperation::Copy { value } => {
+            MirOperation::Copy {
+                value,
+                materialize_view,
+            } => {
                 let ty = self.mir_value_type(*value)?;
-                if let Some(kind) = core_files_resource_kind(self.program, &ty) {
+                if *materialize_view {
+                    let target_ty = instruction
+                        .result
+                        .map(|result| self.mir_value_type(result))
+                        .transpose()?;
+                    Some(self.materialize_view_value(builder, *value, target_ty.as_ref())?)
+                } else if let Some(kind) = core_files_resource_kind(self.program, &ty) {
                     let value = self.cast(builder, self.value(*value)?, types::I64)?;
                     let kind = builder.ins().iconst(types::I64, kind);
                     Some(
@@ -4248,6 +4355,41 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 }
             }
             MirOperation::Move { value } => Some(self.value(*value)?),
+            MirOperation::TraitBox { value, target } => {
+                let target_ty = self
+                    .program
+                    .type_instances
+                    .iter()
+                    .find(|instance| instance.identity == Some(*target))
+                    .ok_or_else(|| {
+                        format!("MIR trait boxing target {:?} has no instance row", target)
+                    })?;
+                if !matches!(target_ty.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
+                    return Err(format!(
+                        "MIR trait boxing target {:?} is not a single-trait object",
+                        target
+                    ));
+                }
+                let source_ty = self.mir_value_type(*value)?;
+                if matches!(source_ty.kind(), MirTypeKind::TraitObject(_)) {
+                    return Err("MIR trait boxing source is already a trait object".to_string());
+                }
+                let source_id = source_ty
+                    .identity
+                    .ok_or_else(|| "MIR trait boxing source has no type identity".to_string())?;
+                let source_id_value = builder.ins().iconst(types::I64, source_id.0 as i64);
+                let record = self.cast(builder, self.value(*value)?, types::I64)?;
+                Some(
+                    self.call_host(
+                        builder,
+                        self.host.trait_object_tag,
+                        &[record, source_id_value],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR trait boxing host returned no record".to_string())?,
+                )
+            }
             MirOperation::Constant(constant) => Some(self.constant(builder, constant, expected)?),
             MirOperation::Unary { op, value } => {
                 let operand_ty = self.mir_value_type(*value)?;
@@ -5566,7 +5708,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         }
                         saw_write
                     }
-                    MirOperation::Copy { value } => self.packed_optional_subject(*value),
+                    MirOperation::Copy { value, .. } => self.packed_optional_subject(*value),
                     _ => false,
                 }
             })
@@ -10809,9 +10951,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .ok_or_else(|| {
                     format!("MIR trait list coercion target {:?} has no instance row", type_id)
                 })?;
-            if !matches!(target.kind(), MirTypeKind::TraitObject(_)) {
+            if !matches!(target.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
                 return Err(format!(
-                    "MIR trait list coercion target {:?} is not a trait object",
+                    "MIR trait list coercion target {:?} is not a single-trait object",
                     type_id
                 ));
             }
@@ -10886,6 +11028,47 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
     }
 
+    fn materialize_view_value(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        value_id: MirValueId,
+        target_ty: Option<&MirType>,
+    ) -> Result<Value, String> {
+        let ty = self.mir_value_type(value_id)?;
+        let kind = jet_foundation::MIR::mir_view_copy_kind(&ty).ok_or_else(|| {
+            format!(
+                "MIR `{}` view materialization has no canonical copy kernel",
+                ty.display_name()
+            )
+        })?;
+        if let Some(target_ty) = target_ty {
+            if !kind.target_matches(target_ty) {
+                return Err(format!(
+                    "MIR `{}` view materialization has destination `{}`",
+                    kind.symbol(),
+                    target_ty.display_name()
+                ));
+            }
+        }
+        let host = match kind {
+            jet_foundation::MIR::MirViewCopyKind::String => self.host.memory.view_string,
+            jet_foundation::MIR::MirViewCopyKind::List => {
+                let element = jet_foundation::MIR::mir_view_copy_element_type(&ty).ok_or_else(|| {
+                    format!(
+                        "MIR `{}` view materialization has no checked sequence element",
+                        ty.display_name()
+                    )
+                })?;
+                self.list_copy_host(element)
+            }
+        };
+        let value = self.cast(builder, self.value(value_id)?, types::I64)?;
+        self.call_host(builder, host, &[value])?
+            .first()
+            .copied()
+            .ok_or_else(|| format!("MIR `{}` view materialization host returned no value", ty.display_name()))
+    }
+
     fn copy_value(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -10905,20 +11088,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     )
                 });
         }
-        if let Some(element) = view_element_type(&ty) {
-            let host = if matches!(element.kind(), MirTypeKind::String)
-                || element.nominal_name() == Some("str")
-            {
-                self.host.memory.view_string
-            } else {
-                self.list_copy_host(element)
-            };
-            let value = self.cast(builder, self.value(value_id)?, types::I64)?;
-            return self
-                .call_host(builder, host, &[value])?
-                .first()
-                .copied()
-                .ok_or_else(|| format!("MIR `{}` view copy host returned no value", ty.display_name()));
+        if jet_foundation::MIR::mir_view_element_type(&ty).is_some() {
+            return self.value(value_id);
         }
         if copy_needs_typed_clone(&ty) {
             let value = self.cast(builder, self.value(value_id)?, types::I64)?;
@@ -11451,8 +11622,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirOperation::BuildMap { entries } => {
                 Some(entries.iter().map(|(key, _)| *key).collect())
             }
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
+            | MirOperation::TraitBox { value, .. }
             | MirOperation::AttachTag { value, .. } => self.ordered_map_key_ids_inner(*value, seen),
             MirOperation::Convert {
                 value,
@@ -11760,7 +11932,205 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .copied()
             .ok_or_else(|| "MIR absent result constructor returned no value".to_string())
     }
+    fn call_native_callable(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        callee: MirValueId,
+        callee_type: &MirType,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let type_id = super::runtime_host::runtime_type_id(callee_type)
+            .ok_or_else(|| "native callable has no checked type identity".to_string())?;
+        let signature = self
+            .runtime
+            .native_callable_methods
+            .get(&type_id)
+            .cloned()
+            .ok_or_else(|| "native callable has no checked binding descriptor".to_string())?;
+        let checked_signature = crate::SourceInterfaces::NativeCallableSignature::checked(callee_type)
+            .map_err(|error| format!("native callable type is invalid: {error}"))?;
+        if signature != checked_signature {
+            return Err("native callable signature disagrees with checked MIR type".to_string());
+        }
+        match (signature.return_type.as_ref(), result_type) {
+            (Some(checked), Some(actual)) if checked != actual => {
+                return Err("native callable result type disagrees with checked signature".to_string());
+            }
+            (None, None) | (Some(_), Some(_)) => {}
+            (Some(_), None) | (None, Some(_)) => {
+                return Err("native callable result presence disagrees with checked signature".to_string());
+            }
+        }
+        if args.len() != signature.parameters.len() {
+            return Err(format!(
+                "native callable expects {} arguments, got {}",
+                signature.parameters.len(),
+                args.len()
+            ));
+        }
+        let parameter_count = i64::try_from(signature.parameters.len())
+            .map_err(|_| "native callable signature parameter count exceeds i64".to_string())?;
+        let count = builder.ins().iconst(types::I64, parameter_count);
+        let buffer = self
+            .call_host(builder, self.host.struct_new, &[count])?
+            .first()
+            .copied()
+            .ok_or_else(|| "native callable argument carrier allocation returned no value".to_string())?;
+        for (index, (argument, parameter)) in args.iter().zip(&signature.parameters).enumerate() {
+            if argument.access != parameter.access {
+                return Err(format!(
+                    "native callable argument {index} access disagrees with checked metadata"
+                ));
+            }
+            if self.mir_value_type(argument.value)? != parameter.ty {
+                return Err(format!(
+                    "native callable argument {index} type disagrees with checked metadata"
+                ));
+            }
+            let value = if argument.access == MirAccess::Write {
+                self.address_of(
+                    builder,
+                    argument
+                        .place
+                        .ok_or_else(|| format!("native callable write argument {index} has no place"))?,
+                )?
+            } else {
+                let value = self.value(argument.value)?;
+                let source = self.value_type(builder, value);
+                thunk_encode_raw(builder, value, source)?
+            };
+            let index = i64::try_from(index)
+                .map_err(|_| "native callable argument index exceeds i64".to_string())?;
+            let index = builder.ins().iconst(types::I64, index);
+            let _ = self.call_host(builder, self.host.struct_set_i64, &[buffer, index, value])?;
+        }
+        let callee = self.value(callee)?;
+        let callee_source = self.value_type(builder, callee);
+        let callee = thunk_encode_raw(builder, callee, callee_source)?;
+        let type_id = builder.ins().iconst(types::I64, type_id as i64);
+        let result = self
+            .call_host(builder, self.host.native_callable_call, &[type_id, callee, buffer])?
+            .first()
+            .copied()
+            .ok_or_else(|| "native callable returned no typed carrier".to_string())?;
+        let result = signature
+            .return_type
+            .as_ref()
+            .and_then(clif_ty_from_mir)
+            .map_or(Ok(result), |ty| thunk_decode_raw(builder, result, ty))?;
+        if let Some(failure) = signature.return_type.as_ref().and_then(|ret| match ret.kind() {
+            MirTypeKind::Result { ok, err } => Some(MirFailureCarrier::Result {
+                success: (**ok).clone(),
+                error: (**err).clone(),
+            }),
+            MirTypeKind::Option(value) => Some(MirFailureCarrier::Optional {
+                value: (**value).clone(),
+            }),
+            _ => None,
+        }) {
+            if result_type.is_some_and(|return_type| {
+                Self::call_result_matches_return_type(result_type, return_type)
+            }) {
+                return self.unwrap_call_result(builder, result, expected, &failure);
+            }
+        }
+        expected.map_or(Ok(result), |target| thunk_cast(builder, result, target))
+    }
+
     fn indirect_call(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        callee: MirValueId,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let callee_type = self.mir_value_type(callee)?;
+        let Some(type_id) = super::runtime_host::runtime_type_id(&callee_type) else {
+            return self.indirect_call_source(builder, callee, args, result_type, expected);
+        };
+        if !self.runtime.native_callable_methods.contains_key(&type_id) {
+            return self.indirect_call_source(builder, callee, args, result_type, expected);
+        }
+        self.call_native_callable_or_source(
+            builder,
+            callee,
+            &callee_type,
+            type_id,
+            args,
+            result_type,
+            expected,
+        )
+    }
+
+    fn call_native_callable_or_source(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        callee: MirValueId,
+        callee_type: &MirType,
+        type_id: u64,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let callee_value = self.value(callee)?;
+        let callee_source = self.value_type(builder, callee_value);
+        let callee_word = thunk_encode_raw(builder, callee_value, callee_source)?;
+        let type_id_value = builder.ins().iconst(types::I64, type_id as i64);
+        let is_native = self
+            .call_host(
+                builder,
+                self.host.native_callable_is_carrier,
+                &[type_id_value, callee_word],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| "native callable carrier check returned no value".to_string())?;
+        let is_native = self.bool_value(builder, is_native)?;
+        let native_block = builder.create_block();
+        let source_block = builder.create_block();
+        let merge_block = builder.create_block();
+        let result_abi = expected
+            .or_else(|| {
+                callable_signature(callee_type)
+                    .and_then(|(_, return_type)| return_type.and_then(clif_ty_from_mir))
+            })
+            .unwrap_or(types::I64);
+        builder.append_block_param(merge_block, result_abi);
+        builder
+            .ins()
+            .brif(is_native, native_block, &[], source_block, &[]);
+
+        builder.switch_to_block(native_block);
+        let native_result = self.call_native_callable(
+            builder,
+            callee,
+            callee_type,
+            args,
+            result_type,
+            expected,
+        )?;
+        let native_result = thunk_cast(builder, native_result, result_abi)?;
+        builder.ins().jump(merge_block, &[native_result]);
+
+        builder.switch_to_block(source_block);
+        let source_result =
+            self.indirect_call_source(builder, callee, args, result_type, expected)?;
+        let source_result = thunk_cast(builder, source_result, result_abi)?;
+        builder.ins().jump(merge_block, &[source_result]);
+
+        builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+        builder
+            .block_params(merge_block)
+            .first()
+            .copied()
+            .ok_or_else(|| "native callable dispatch merge has no result".to_string())
+    }
+
+    fn indirect_call_source(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         callee: MirValueId,
@@ -13452,7 +13822,268 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
             })
     }
+    fn call_native_interface_method(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        method_id: jet_foundation::MIR::MirTraitMethodId,
+        trait_ref: &jet_foundation::MIR::MirTraitRef,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+        receiver_type: &MirType,
+    ) -> Result<Value, String> {
+        let receiver_type_id = super::runtime_host::runtime_type_id(receiver_type)
+            .ok_or_else(|| "native interface receiver has no checked type identity".to_string())?;
+        let descriptor = self
+            .runtime
+            .native_interface_methods
+            .get(&(trait_ref.id.0, method_id.0, receiver_type_id))
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "native interface `{}`::{method_id:?} has no checked descriptor",
+                    trait_ref.name
+                )
+            })?;
+        if receiver_type != &descriptor.identity.receiver_type {
+            return Err("native interface receiver type disagrees with checked descriptor".to_string());
+        }
+        if result_type.is_some_and(|ty| ty != &descriptor.signature.return_type) {
+            return Err("native interface result type disagrees with checked descriptor".to_string());
+        }
+        let expected_args = descriptor
+            .signature
+            .parameters
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| "native interface signature argument count overflow".to_string())?;
+        if args.len() != expected_args {
+            return Err(format!(
+                "native interface call expects {expected_args} arguments, got {}",
+                args.len()
+            ));
+        }
+        let receiver_arg = args
+            .first()
+            .ok_or_else(|| "native interface call has no receiver".to_string())?;
+        if receiver_arg.access != descriptor.signature.receiver_access {
+            return Err("native interface receiver access disagrees with checked metadata".to_string());
+        }
+        if self.mir_value_type(receiver_arg.value)? != *receiver_type {
+            return Err("native interface receiver value type disagrees with checked metadata".to_string());
+        }
+        let receiver = if receiver_arg.access == MirAccess::Write {
+            self.address_of(
+                builder,
+                receiver_arg
+                    .place
+                    .ok_or_else(|| "native interface write receiver has no place".to_string())?,
+            )?
+        } else {
+            self.value(receiver_arg.value)?
+        };
+        let receiver_source = self.value_type(builder, receiver);
+        let receiver = thunk_encode_raw(builder, receiver, receiver_source)?;
+        let parameter_count = i64::try_from(descriptor.signature.parameters.len())
+            .map_err(|_| "native interface signature parameter count exceeds i64".to_string())?;
+        let count = builder.ins().iconst(types::I64, parameter_count);
+        let buffer = self
+            .call_host(builder, self.host.struct_new, &[count])?
+            .first()
+            .copied()
+            .ok_or_else(|| "native interface argument carrier allocation returned no value".to_string())?;
+        for (index, (argument, parameter)) in args[1..]
+            .iter()
+            .zip(&descriptor.signature.parameters)
+            .enumerate()
+        {
+            if argument.access != parameter.access {
+                return Err(format!(
+                    "native interface argument {index} access disagrees with checked metadata"
+                ));
+            }
+            let value_type = self.mir_value_type(argument.value)?;
+            if value_type != parameter.ty {
+                return Err(format!(
+                    "native interface argument {index} type disagrees with checked metadata"
+                ));
+            }
+            let value = if argument.access == MirAccess::Write {
+                self.address_of(
+                    builder,
+                    argument
+                        .place
+                        .ok_or_else(|| format!("native interface write argument {index} has no place"))?,
+                )?
+            } else {
+                let value = self.value(argument.value)?;
+                let source = self.value_type(builder, value);
+                thunk_encode_raw(builder, value, source)?
+            };
+            let index = i64::try_from(index)
+                .map_err(|_| "native interface argument index exceeds i64".to_string())?;
+            let index = builder.ins().iconst(types::I64, index);
+            let _ = self.call_host(builder, self.host.struct_set_i64, &[buffer, index, value])?;
+        }
+        let values = [
+            builder.ins().iconst(types::I64, trait_ref.id.0 as i64),
+            builder.ins().iconst(types::I64, method_id.0 as i64),
+            builder.ins().iconst(types::I64, receiver_type_id as i64),
+            receiver,
+            buffer,
+        ];
+        let result = self
+            .call_host(builder, self.host.native_interface_call, &values)?
+            .first()
+            .copied()
+            .ok_or_else(|| "native interface call returned no typed carrier".to_string())?;
+        expected.map_or_else(
+            || {
+                result_type
+                    .and_then(clif_ty_from_mir)
+                    .map_or(Ok(result), |ty| thunk_decode_raw(builder, result, ty))
+            },
+            |ty| thunk_decode_raw(builder, result, ty),
+        )
+    }
+
     fn call_trait_method(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        method_id: jet_foundation::MIR::MirTraitMethodId,
+        trait_ref: &jet_foundation::MIR::MirTraitRef,
+        receiver_type: &MirType,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let Some(type_id) = super::runtime_host::runtime_type_id(receiver_type) else {
+            return self.call_trait_method_source(
+                builder,
+                method_id,
+                trait_ref,
+                args,
+                result_type,
+                expected,
+            );
+        };
+        if !matches!(receiver_type.kind(), MirTypeKind::TraitObject(_))
+            || !self
+                .runtime
+                .native_interface_methods
+                .contains_key(&(trait_ref.id.0, method_id.0, type_id))
+        {
+            return self.call_trait_method_source(
+                builder,
+                method_id,
+                trait_ref,
+                args,
+                result_type,
+                expected,
+            );
+        }
+        self.call_native_interface_or_source(
+            builder,
+            method_id,
+            trait_ref,
+            receiver_type,
+            args,
+            result_type,
+            expected,
+        )
+    }
+
+    fn call_native_interface_or_source(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        method_id: jet_foundation::MIR::MirTraitMethodId,
+        trait_ref: &jet_foundation::MIR::MirTraitRef,
+        receiver_type: &MirType,
+        args: &[MirCallArg],
+        result_type: Option<&MirType>,
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let receiver_arg = args
+            .first()
+            .ok_or_else(|| "native interface call has no receiver".to_string())?;
+        let receiver = if receiver_arg.access == MirAccess::Write {
+            self.address_of(
+                builder,
+                receiver_arg
+                    .place
+                    .ok_or_else(|| "native interface write receiver has no place".to_string())?,
+            )?
+        } else {
+            self.value(receiver_arg.value)?
+        };
+        let receiver_source = self.value_type(builder, receiver);
+        let receiver = thunk_encode_raw(builder, receiver, receiver_source)?;
+        let receiver_type_id = super::runtime_host::runtime_type_id(receiver_type)
+            .ok_or_else(|| "native interface receiver has no checked type identity".to_string())?;
+        let trait_id_value = builder.ins().iconst(types::I64, trait_ref.id.0 as i64);
+        let method_id_value = builder.ins().iconst(types::I64, method_id.0 as i64);
+        let receiver_type_id_value = builder.ins().iconst(types::I64, receiver_type_id as i64);
+        let carrier = self
+            .call_host(
+                builder,
+                self.host.native_interface_is_carrier,
+                &[
+                    trait_id_value,
+                    method_id_value,
+                    receiver_type_id_value,
+                    receiver,
+                ],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| "native interface carrier check returned no value".to_string())?;
+        let carrier = self.bool_value(builder, carrier)?;
+        let native_block = builder.create_block();
+        let source_block = builder.create_block();
+        let merge_block = builder.create_block();
+        let result_abi = expected
+            .or_else(|| result_type.and_then(clif_ty_from_mir))
+            .unwrap_or(types::I64);
+        builder.append_block_param(merge_block, result_abi);
+        builder
+            .ins()
+            .brif(carrier, native_block, &[], source_block, &[]);
+
+        builder.switch_to_block(native_block);
+        let native_result = self.call_native_interface_method(
+            builder,
+            method_id,
+            trait_ref,
+            args,
+            result_type,
+            expected,
+            receiver_type,
+        )?;
+        let native_result = thunk_cast(builder, native_result, result_abi)?;
+        builder.ins().jump(merge_block, &[native_result]);
+
+        builder.switch_to_block(source_block);
+        let source_result = self.call_trait_method_source(
+            builder,
+            method_id,
+            trait_ref,
+            args,
+            result_type,
+            expected,
+        )?;
+        let source_result = thunk_cast(builder, source_result, result_abi)?;
+        builder.ins().jump(merge_block, &[source_result]);
+
+        builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+        builder
+            .block_params(merge_block)
+            .first()
+            .copied()
+            .ok_or_else(|| "native interface dispatch merge has no result".to_string())
+    }
+
+    fn call_trait_method_source(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         method_id: jet_foundation::MIR::MirTraitMethodId,
@@ -13605,8 +14236,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 }
             }
             MirCallee::TraitMethod {
-                method, trait_ref, ..
-            } => self.call_trait_method(builder, *method, trait_ref, args, result_type, expected),
+                method,
+                trait_ref,
+                receiver,
+            } => self.call_trait_method(builder, *method, trait_ref, receiver, args, result_type, expected),
             MirCallee::Prelude(id) => self.call_prelude_args(builder, *id, args, expected),
             MirCallee::Foreign(id) => self.call_foreign(builder, *id, args, expected),
             MirCallee::Indirect(value) => {
@@ -15695,8 +16328,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .map(|instruction| &instruction.operation)?;
         match operation {
             MirOperation::AddressOf { place, .. } => Some(*place),
-            MirOperation::Copy { value }
+            MirOperation::Copy { value, .. }
             | MirOperation::Move { value }
+            | MirOperation::TraitBox { value, .. }
             | MirOperation::AttachTag { value, .. } => self.borrowed_handle_place(*value, seen),
             MirOperation::Phi { incoming } => {
                 let mut origin = None;
@@ -16431,7 +17065,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 if let Some(coercion) = &arg.widen_to_union {
                     self.validate_union_coercion(coercion)?;
                 }
-                if let Some(type_id) = arg.box_as_trait {
+                let source_is_trait_object =
+                    matches!(self.mir_value_type(arg.value)?.kind(), MirTypeKind::TraitObject(_));
+                let trait_target = if let Some(type_id) = arg.box_as_trait {
                     let target = self
                         .program
                         .type_instances
@@ -16443,13 +17079,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                                 type_id
                             )
                         })?;
-                    if !matches!(target.kind(), MirTypeKind::TraitObject(_)) {
+                    if !matches!(target.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
                         return Err(format!(
-                            "MIR trait coercion target {:?} is not a trait object",
+                            "MIR trait coercion target {:?} is not a single-trait object",
                             type_id
                         ));
                     }
-                }
+                    Some(type_id)
+                } else {
+                    None
+                };
+                let needs_trait_box = trait_target.is_some() && !source_is_trait_object;
                 let value = if arg.access == MirAccess::Write {
                     let place = arg.place.expect("checked MIR write argument place");
                     if write_as_value {
@@ -16465,7 +17105,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 } else {
                     value
                 };
-                if arg.box_as_trait.is_some() {
+                if needs_trait_box {
                     let source_type = self.mir_value_type(arg.value)?;
                     let source_id = source_type.identity.ok_or_else(|| {
                         "MIR trait coercion source has no type identity".to_string()
@@ -17554,7 +18194,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                                 self.value(condition)?,
                                 builder
                                     .ins()
-                                    .iconst(types::I64, self.runtime.heap.alloc_string("condition failed")),
+                                    .iconst(
+                                        types::I64,
+                                        self.runtime
+                                            .heap
+                                            .alloc_string(jet_foundation::Outcome::jet_require_message(None)),
+                                    ),
                             ],
                             [message] => vec![self.value(condition)?, self.value(*message)?],
                             _ => {

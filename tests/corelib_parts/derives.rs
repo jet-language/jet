@@ -996,7 +996,7 @@ struct Case { n: Int }
 #AddFields
 struct Person { first: String  last: String }
 
-@cases :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
+@CASES :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
 
 @loop T in [Person] {
     impl T {
@@ -1004,7 +1004,7 @@ struct Person { first: String  last: String }
     }
 }
 
-@loop case in @cases {
+@loop case in @CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }
@@ -1037,9 +1037,9 @@ fn run() {
 fn structure_once_duplicate_generated_tests_reenter_test_registration() {
     let source = r#"
 struct Case { n: Int }
-@cases :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
+@CASES :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
 
-@loop case in @cases {
+@loop case in @CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }

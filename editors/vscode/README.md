@@ -1,81 +1,99 @@
-# Jet — VS Code / Cursor / VSCodium
+# Jet for VS Code, Cursor, and VSCodium
 
-Extension id: **`jet-lang.jet`** (publisher `jet-lang`, name `jet`).
-Generated TextMate syntax highlighting + LSP: diagnostics, quick-fixes,
-formatting (full/range/on-type), semantic tokens (full/range/delta), inlay hints, navigation,
-rename, document links, run/test code lenses, call hierarchy, and type
-hierarchy.
+The extension id is **`jet-lang.jet`** (publisher `jet-lang`, package name
+`jet`). It provides Jet syntax highlighting, the language server, diagnostics,
+completion, navigation, semantic tokens, inlay hints, formatting, rename, and
+run/test code lenses. The package manifest is the authoritative list of
+commands and settings: [`package.json`](package.json).
 
-## Language-server features
+## Install from this checkout
 
-| Area | Jet LSP 3.17 behavior |
-|---|---|
-| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range/on-type formatting, quick fixes |
-| Completion | Context-aware items, snippets, auto-import edits, signature help |
-| Navigation | Hover, definition, references, prepare-rename/rename, document and workspace symbols across workspace folders |
-| Structure | Folding, occurrence highlights, selection ranges, document links, run/test code lenses |
-| Semantics | Semantic tokens full/range/delta, inlay hints, call hierarchy, trait/type hierarchy |
-| Workspace | Multiple roots with folder add/remove notifications; `jet.impact` and `jet.budgetReports` commands |
+Build the repository executable, then package and install the extension:
 
-Rename uses the checked versions of the edited documents. If one changes
-while the rename request is pending, the extension refuses the edits.
-Run Rename again to get a new preview.
-
-## Setup
-
-From the repo root:
-
-```bash
-nix develop                 # toolchain (cargo, rustc, node)
-cargo build                 # produces target/debug/jet — the language server
-editors/vscode/install.sh   # packs a .vsix and installs it into cursor/codium/code
+```sh
+scripts/agent/jet-env cargo build
+editors/vscode/install.sh
 ```
 
-Then open the repo normally (`cursor .`) and open any `.jet` file.
-No workspace file and no settings are needed.
+The installer packages `vscode-languageclient` into a `.vsix` and installs it
+with the first available `cursor`, `codium`, or `code` command. If the editor
+is already running, reload the window after installation. The extension
+requires VS Code-compatible editor version 1.80 or newer.
 
-## How the extension finds the server
+Open a trusted workspace containing a `.jet` file. Untrusted workspaces do not
+start the language server, debugger, or a workspace-selected executable.
 
-In order:
+## Server discovery
 
-1. The `jet.executablePath` setting, if set (supports `${workspaceFolder}` and `~`).
-2. The legacy `jet.languageServerPath` setting, if set.
-3. `<workspaceFolder>/target/debug/jet` — covers working on this repo.
-4. `jet` on PATH — covers an installed jet (`nix profile install .#jet`) or an
-   editor launched from the dev shell.
+The extension chooses the executable in this order:
 
-`jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
-After `cargo build` the running server picks up the new binary via
-**Jet: Restart Language Server** (or reload the window).
+1. `jet.executablePath` (with `${workspaceFolder}`, `${workspaceRoot}`, and
+   `~` expansion);
+2. the legacy `jet.languageServerPath` setting;
+3. `<workspaceFolder>/target/debug/jet` in a trusted workspace; and
+4. `jet` on `PATH`.
 
-## Reasoning
+The server is started as `jet self lsp` over stdio. It does not invoke `rustc`,
+so a plain Jet executable is sufficient. After rebuilding the executable, use
+**Jet: Restart Language Server** or reload the editor window.
 
-Run **Jet: Explain Reasoning** with a Jet file active. The panel groups checked
-facts by value, ownership, and relationships, with source links and producer
-details. It does not execute the program.
+Example settings:
 
-**Pin panel** keeps the view on its current file. **Refresh** checks that file
-again. Source edits mark the view stale; refresh before following a fact's
-source span so the link cannot select shifted text. **Open source** can still
-open the file while the facts are stale.
+```json
+{
+  "jet.executablePath": "${workspaceFolder}/target/debug/jet",
+  "jet.inlayHints.cloneHints": true,
+  "jet.inlayHints.typeAnnotations": false
+}
+```
+
+`jet.languageServerPath` remains readable for existing workspaces; new
+settings should use `jet.executablePath`.
+
+## Commands and code lenses
+
+The command palette provides:
+
+- **Jet: Run File**, which opens a terminal for `jet run <file>`;
+- **Jet: Test File**, which opens a terminal for `jet test <file>`;
+- **Jet: Debug File**, which starts the native debug adapter;
+- **Jet: Learn (Watch)** and **Jet: Learn Once**; and
+- **Jet: Explain Reasoning**, which opens the static reasoning panel.
+
+The run/test code lenses use the same executable selected for the language
+server. They do not create a separate editor-specific execution path.
+
+## Rename safety
+
+Rename records the checked version of every open document before requesting
+edits. If any affected document changes while the rename is pending, the
+extension refuses the whole edit set; run **Rename** again to obtain a fresh
+checked edit.
+
+## Explain Reasoning
+
+**Jet: Explain Reasoning** presents facts checked by the language service,
+including value, ownership, relationship, source span, and producer details.
+It does not execute the program. Refresh after changing source. A changed
+source document marks the panel stale; **Open source** remains available, but
+source spans are followed only after refresh. Pinning keeps the panel on its
+current file while other files are inspected.
 
 ## Native debugging
 
-The extension registers the `jet` DAP adapter. Use **Jet: Debug File** or press
-F5 with a `.jet` file open. The adapter runs `jet debug --dap <file>` and maps
-source breakpoints, stepping, pause, stack frames, and Jet locals through the
-same native debugger path as the terminal command. LLDB must be on `PATH`.
-Debugging requires a trusted VS Code workspace.
-The adapter starts the selected Jet executable with direct argv. It does not
-run a shell. Set `jet.executablePath` when the editor must use a specific
-build.
-Restart keeps launch arguments and source breakpoints. It expires stack,
-scope, and variable references, so the editor must refresh them after the stop.
-The adapter accepts strict `Content-Length` frames up to 16 MiB. It requires
-`adapterID: "jet"`, uses canonical local source paths, and follows the
-`linesStartAt1` and `columnsStartAt1` values from DAP `initialize`.
+The extension registers the `jet` DAP type. **Jet: Debug File** (or F5 with a
+`.jet` file open) starts the selected executable directly with:
 
-Optional `.vscode/launch.json` configuration:
+```text
+jet debug --dap <file>
+```
+
+No shell is inserted between the editor and the executable. LLDB must be on
+`PATH`; the supported native debugging path is Linux and macOS. Debugging
+requires a trusted workspace.
+
+A launch configuration can pass arguments, a working directory, environment
+overrides, and `stopOnEntry`:
 
 ```json
 {
@@ -86,6 +104,8 @@ Optional `.vscode/launch.json` configuration:
       "request": "launch",
       "name": "Jet: Launch",
       "program": "${file}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
       "stopOnEntry": true,
       "showRawFrames": false
     }
@@ -93,12 +113,10 @@ Optional `.vscode/launch.json` configuration:
 }
 ```
 
-For a local attach, use the native debug binary and the matching `.jetmap`
-sidecar. The extension reads the Jet source identity from that sidecar before
-starting the adapter; the adapter then verifies the same-user process and
-build identity.
-If the sidecar stores a relative source path, the extension resolves it
-relative to the sidecar itself.
+For attach, `program` is the native debug binary, `map` must name its matching
+`<executable>.jetmap` sidecar, and `processId` is the local same-user process
+id. The extension reads the sidecar first and resolves its `jet_file` source
+path relative to the sidecar, not the editor process's current directory:
 
 ```json
 {
@@ -111,56 +129,39 @@ relative to the sidecar itself.
 }
 ```
 
-Set `showRawFrames` to `true` only when you need clearly marked generated-Rust
-frames and scopes; the default projection stays in Jet terms.
+The adapter verifies same-user ownership and executable/build identity before
+attaching. The sidecar's source and generated-file hashes must also match the
+requested debug inputs, so a replaced binary or edited map is rejected. Set
+`showRawFrames` only when generated native frames and scopes are useful; the
+default projection stays in Jet terms. DAP messages use strict
+`Content-Length` framing with a 16 MiB maximum frame, and adapter identity is
+`jet`. See [`crates/jet-debug`](../../crates/jet-debug/) for the native adapter
+implementation.
 
-## Manual install
+## Source highlighting
 
-`--install-extension` needs a `.vsix` file or an extension id — not a
-directory path. If you don't want install.sh:
+TextMate grammar sources live in
+[`editors/vscode/syntaxes`](syntaxes/); their lexical vocabulary is generated
+from [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). Semantic tokens
+refine live coloring for ownership markers, rules, decorators, and effect
+rows. The editor surface is not a substitute for the compiler's parser: use
+feature sources and the language specification for accepted syntax.
 
-```bash
-cd editors/vscode
-npm install
-npx --yes @vscode/vsce package --allow-missing-repository -o jet.vsix
-cursor --install-extension "$(pwd)/jet.vsix" --force
+To regenerate the checked-in grammar while working on the repository:
+
+```sh
+scripts/agent/jet-env cargo run --bin jet -- self devtools grammars
 ```
 
-Cursor refuses a live reinstall of Jet (`Please restart VS Code before
-reinstalling Jet`). Nix-bundled Jet is also a read-only store path. `install.sh`
-unpacks `jet-lang.jet-<version>` into `~/.cursor/extensions` and
-`~/.vscode-oss/extensions` so **Developer: Reload Window** picks up this
-checkout. Fully quit the editor only if the colors stay stale after reload.
+## Focused checks
 
-## Highlighting
+From the repository root, the language-server test and deterministic benchmark
+can be run with:
 
-Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
-
-```bash
-nix develop -c cargo run --bin jet -- self devtools grammars
-nix develop -c cargo test --test grammar
+```sh
+scripts/agent/jet-env cargo test --test lsp
+scripts/agent/jet-env target/debug/jet self lsp --bench
 ```
 
-String interpolations stay string-colored (`"{escape(level)}"` is one string,
-not re-lexed Jet). Escapes (`\"`, `\\`, `{{`, `}}`, `\u{..}`) use the same
-string scope. The LSP semantic overlay refines live editor coloring for
-ownership (`~`, `^`, `&`), rules (`#Test`, `#Unsafe`), and effect rows (`-[]>`,
-`-[IO]>`). Retired or foreign spellings are not colored as live syntax.
-
-Code lenses use **Jet: Run File** and **Jet: Test File**, which open a terminal
-running the same `jet` binary the language server uses.
-
-## Verify
-
-```bash
-cargo test --test lsp
-jet self lsp --bench
-```
-
-`--bench` reports cold, warm-hit, and warm-edit latency plus deterministic
-query-cache memory counters. Timings are measurements, not flaky wall-clock
-pass/fail assertions.
-
-In the editor, open a `.jet` file containing `x :: 1` and expect a clean parse.
-In a v5 ownership sample, `copy`, `^`, `&`, and PascalCase markers should color
-consistently.
+The benchmark reports cold, warm-hit, and warm-edit measurements plus cache
+counters; its timings are measurements, not a wall-clock pass/fail contract.

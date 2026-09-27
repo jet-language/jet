@@ -72,12 +72,13 @@ fn check(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
     let expected = match case {
         NameCase::Pascal => "PascalCase",
         NameCase::Snake => "snake_case",
+        NameCase::Screaming => "ALL_CAPS",
     };
     let fixed = Syntax::canonical_name_case(name, case);
     out.push(Diagnostic::error(
         "E0357",
         format!("{category} `{name}` must be {expected}"),
-        "Jet uses one machine-enforced type-like/value-like casing law (D-SHAPE-CASE1)".to_string(),
+        "Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants (D-SHAPE-CASE1)".to_string(),
         format!("rename it to `{fixed}`"),
         Some(span),
     ));
@@ -97,6 +98,15 @@ fn snake(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
     debug_assert_eq!(
         Syntax::name_case_for_category(category),
         Some(NameCase::Snake)
+    );
+    for segment in name.split(['.', '-']) {
+        check(segment, span, category, out);
+    }
+}
+fn screaming(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
+    debug_assert_eq!(
+        Syntax::name_case_for_category(category),
+        Some(NameCase::Screaming)
     );
     for segment in name.split(['.', '-']) {
         check(segment, span, category, out);
@@ -226,7 +236,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             }
         }
         Item::Const(c) => {
-            snake(&c.name, c.name_span, "constant", out);
+            screaming(&c.name, c.name_span, "constant", out);
             expr_names(&c.value, out);
         }
         Item::Test(t) => {

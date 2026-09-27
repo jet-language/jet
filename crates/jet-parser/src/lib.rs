@@ -459,6 +459,116 @@ fn run(value: Int !Err, maybe: ?Int) {
 }
 
 #[cfg(test)]
+mod comptime_termination_tests {
+    use super::{AST, Lexer, Parser};
+
+    fn parse_source(
+        source: &str,
+    ) -> Result<AST::Program, Vec<super::Diagnostics::Diagnostic>> {
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens)
+    }
+
+    #[test]
+    fn comptime_braced_values_accept_implicit_eof_termination() {
+        for suffix in ["", "\n", " // trailing comment"] {
+            for (source, typed_array) in [
+                (
+                    format!(
+                        "@CORE_MODULE_EXPORTS :: CoreModuleExportNames{{ name: \"core\" }}{suffix}"
+                    ),
+                    false,
+                ),
+                (
+                    format!(
+                        "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{{ CoreModuleExportNames{{ name: \"core\" }} }}{suffix}"
+                    ),
+                    true,
+                ),
+            ] {
+                let program = parse_source(&source).expect("complete comptime value");
+                assert_eq!(program.items.len(), 1, "{source:?}");
+                let AST::Item::Const(def) = &program.items[0] else {
+                    panic!("expected comptime declaration: {source:?}");
+                };
+                assert_eq!(def.span.end, def.value.span().end, "{source:?}");
+                if typed_array {
+                    assert!(matches!(
+                        &def.value,
+                        AST::Expr::TypedLit {
+                            head: Some(AST::Type::List(_)),
+                            body: AST::TypedLitBody::Elements(elements),
+                            ..
+                        } if elements.len() == 1
+                    ));
+                } else {
+                    assert!(matches!(
+                        &def.value,
+                        AST::Expr::StructLit {
+                            type_name,
+                            fields,
+                            ..
+                        } if type_name == "CoreModuleExportNames" && fields.len() == 1
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn comptime_eof_termination_keeps_newline_item_boundaries() {
+        let source =
+            "@FIRST :: CoreModuleExportNames{ name: \"first\" }\n@SECOND :: 2";
+        let program = parse_source(source).expect("newline separates comptime declarations");
+        assert_eq!(program.items.len(), 2, "{source:?}");
+        assert!(matches!(
+            &program.items[0],
+            AST::Item::Const(def) if def.name == "@FIRST"
+        ));
+        assert!(matches!(
+            &program.items[1],
+            AST::Item::Const(def) if def.name == "@SECOND"
+        ));
+    }
+
+    #[test]
+    fn comptime_eof_termination_still_rejects_incomplete_initializers() {
+        let source =
+            "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{ CoreModuleExportNames{ name: \"core\" }";
+        let diagnostics =
+            parse_source(source).expect_err("incomplete comptime initializer must fail");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic
+                        .span
+                        .is_some_and(|span| span.start == source.len() && span.end == source.len())
+            }),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn comptime_eof_termination_still_rejects_unseparated_declarations() {
+        let source =
+            "@FIRST :: CoreModuleExportNames{ name: \"first\" } @SECOND :: 2";
+        let second_start = source.find("@SECOND").expect("second declaration");
+        let diagnostics =
+            parse_source(source).expect_err("unseparated comptime declarations must fail");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic
+                        .span
+                        .is_some_and(|span| span.start == second_start)
+            }),
+            "{diagnostics:?}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod compare_tests {
     use super::{Lexer, Parser};
 
@@ -628,6 +738,122 @@ mod raw_literal_fmt_tests {
         }
         let twice = Formatter::format_source(&once).expect("formatted literals should reformat");
         assert_eq!(once, twice, "numeric literal formatting must be idempotent");
+    }
+}
+#[cfg(test)]
+mod or_pattern_terminator_tests {
+    use super::{Lexer, Parser};
+
+    fn parse_complete(source: &str) {
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens).expect("complete dispatch program should parse");
+    }
+
+    #[test]
+    fn or_pattern_arm_after_braceless_call_keeps_payloads_and_guard() {
+        parse_complete(
+            r#"
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Idle(Int)
+    Closed
+}
+
+fn classify(c: Conn) -> String {
+    if c == {
+        .Closed -> render_closed()
+        .Active(id) /* before pipe */ | /* after pipe */ .Reconnecting(id) /* before pipe */ | .Idle(id) /* before guard */ && id > 0 /* before arrow */ -> render_live(id)
+        else -> "unknown"
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn or_pattern_arm_after_nested_value_dispatch_keeps_outer_boundary() {
+        parse_complete(
+            r#"
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Idle(Int)
+    Closed
+}
+
+fn classify_nested(c: Conn, code: Int) -> String {
+    if c == {
+        .Closed -> return if code == {
+            0 -> "zero"
+            else -> "other"
+        }
+        .Active(id) | .Reconnecting(id) | .Idle(id) /* before arrow */ -> render_live(id)
+        else -> "unknown"
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn leading_dot_fluent_chain_stays_one_expression() {
+        parse_complete(
+            r#"
+struct Box {
+    value: Int
+}
+
+fn chain(value: Box) -> Box {
+    return value
+        .next()
+        .finish()
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn malformed_or_pattern_does_not_gain_a_terminator_boundary() {
+        for source in [
+            r#"
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Closed
+}
+
+fn trailing_pipe(c: Conn) -> String {
+    if c == {
+        .Closed -> render_closed()
+        .Active(id) | -> render_live(id)
+        else -> "unknown"
+    }
+}
+"#,
+            r#"
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Closed
+}
+
+fn split_guard(c: Conn) -> String {
+    if c == {
+        .Closed -> render_closed()
+        .Active(id) | .Reconnecting(id)
+            && id > 0
+            -> render_live(id)
+        else -> "unknown"
+    }
+}
+"#,
+        ] {
+            let (tokens, lexer_diagnostics) = Lexer::lex(source);
+            assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+            Parser::parse(&tokens).expect_err("malformed dispatch head must be rejected");
+        }
     }
 }
 

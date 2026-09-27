@@ -1,330 +1,357 @@
-# Prior Art
+# Prior art
 
-Every external source Jet has learned from: the languages, tools, ecosystems,
-papers, talks, and creator retrospectives that shaped its semantics, syntax,
-philosophy, and ecosystem plans. This is a provenance record — a trace from
-today's design back to its inputs.
+This reference compares Jet's language and tooling contracts with ideas from
+other languages and ecosystems. It is for readers evaluating a design choice,
+not a compatibility promise. Executable truth is in the
+[syntax decisions](../syntax-decisions.md), the
+[metaprogramming reference](metaprogramming.md), the
+[Jetpack reference](jetpack-epoch5.md), the
+[foundation syntax ledger](../../../crates/jet-foundation/src/Syntax.rs), and
+the checked examples under `examples/`.
 
-**How to read this.** Jet's rule is "take the invariant, not the surface
-syntax": copy the successful idea, understand the constraint that produced it,
-and decline the historical baggage. Most entries below are therefore listed
-with *what Jet drew from them* — a feature adopted, a mistake avoided, or a
-choice deliberately rejected.
+## How to read the comparison
 
-**Where the deep synthesis lives.** This page indexes sources. The reasoned
-analysis of each one lives in Jet's own primary documents:
+Each comparison separates three questions:
 
-- `docs/audits/language-lessons-and-regrets.md` — the master lineage study
-  (2026-07-15): 30+ languages, each with creator regrets, official
-  retrospectives, and Jet's defensive position.
-- `docs/research/language-shape-research.md` — surface-shape research mining
-  other languages for concrete syntax/semantics transplants (archived).
-- `docs/audits/ecosystem-shape.md` — package/config/ecosystem research.
-- `docs/proposals/epoch-3/universal-language-core.md` — web/UI/notebook/numeric
-  reach research.
-- `docs/proposals/jetpack/world-class-package-manager.md` — package-manager and
-  supply-chain research.
-- `docs/research/*` — active dated deep-dive reports; finished mines remain
-  under the research and audit categories.
+- **Jet takes:** a useful mechanism or observation that fits Jet's typed,
+  effect-aware, inspectable model.
+- **Jet rejects:** a mechanism whose implicitness, unchecked authority, or
+  second grammar conflicts with that model.
+- **Why:** the boundary that keeps the same source fact visible to checking,
+  interpretation, code generation, and tooling.
 
----
+The links at the end are the reading record. They provide context and
+counterexamples; they do not establish a language guarantee on their own.
 
-## Videos, talks & podcasts
+## Systems and safety
 
-Mined in full with transcript + comment analysis (see `docs/research/` and the
-`mine-for-jet` skill).
+### C and C++
 
-**September research playlist (14 videos, mined 2026-09-09).** Full captured
-transcript arguments, stratified audience samples, and selected visual frames.
-The dated [mining report](../../audits/mine-for-jet-2026-09-09.md) retains the
-claims, corrections, executable evidence, and unratified owner choices.
+**Jet takes:** C's direct data and ABI model, and C++'s zero-cost abstraction,
+generic programming, deterministic resource ownership, and explicit layout
+remain useful constraints for systems code. Jet exposes those concerns through
+typed values, named unsafe boundaries, checked slices, explicit layout facts,
+and a compiler-owned representation shared by its execution paths.
 
-- Let's Get Rusty — How Rust Made Search 8,000x Faster — https://www.youtube.com/watch?v=H1TSClkkHy0
-- Pokelego Dev — Zig 0.16 IO: Everything You Need to Know — https://www.youtube.com/watch?v=BUX01em5eG4
-- commonLuke — I Tried to Learn Rust — https://www.youtube.com/watch?v=_2xQog4EBzg
-- You Suck at Programming — Why I Don't Use #!/bin/bash — Shebangs Explained! — https://www.youtube.com/watch?v=aoHMiCzqCNw
-- Flo Woelki — TypeScript 7.0 is 10x Faster! Why Microsoft Chose Go?! — https://www.youtube.com/watch?v=WXo6ial-vm4
-- Matt Pocock — How To De-Slop A Codebase Ruined By AI (with one skill) — https://www.youtube.com/watch?v=3MP8D-mdheA
-- Casey Muratori — The Root of The Root of All Evil — BSC 2026 — https://www.youtube.com/watch?v=hpj6r6CjJf8
-- Casey Muratori — The Big OOPs: Anatomy of a Thirty-five-year Mistake — BSC 2025 — https://www.youtube.com/watch?v=wo84LFzx5nI
-- Practical Coder — Wails V3: Go's Best GUI Framework (Electron Killer?) — https://www.youtube.com/watch?v=N5bH6ALXX4U
-- Richard Hipp — Reliability Lessons From SQLite — SSW 2026 — https://www.youtube.com/watch?v=V_qzqY1bb7I
-- Awesome — Web dev is finally healing — https://www.youtube.com/watch?v=9T0LVlVKjGo
-- D_00 — I Write Python Like THIS and now Everyone Hates Me — https://www.youtube.com/watch?v=Xz2f-PtQAdk
-- Suboptimal Engineer — Why C++ Static Variables Secretly Use Mutexes — https://www.youtube.com/watch?v=GnAwY55hux0
-- Indently — "tqdm" is Awesome in Python — https://www.youtube.com/watch?v=gDDvH0ZyM7E
+**Jet rejects:** unchecked pointer arithmetic, implicit narrowing, raw-array
+decay, C-style casts, dangling views, and inheritance as the default modeling
+tool. A low-level escape must remain a named, reviewable boundary; the source
+language does not make an unchecked operation safe merely because it is
+familiar in C or C++.
 
-**Logan Smith — Rust series (9 videos, mined 2026-07-24).** External validation
-of Jet's ratified safety/error/ownership design; report at
-`docs/audits/2026-07-24-logan-smith-rust-series-mining.md`.
+**Why:** a layout or ownership fact must survive semantic checking and remain
+available to code generation and inspection. The contract is about the fact,
+not about preserving a particular C spelling.
 
-- 5 Strong Opinions On Everyday Rust — https://www.youtube.com/watch?v=8j_FbjiowvE
-- Constructors Are Broken (build-then-construct-valid; "named constructor" not "factory") — https://www.youtube.com/watch?v=KWB-gDVuy_I
-- Moves Are Broken (destructive moves + strong invariants) — https://www.youtube.com/watch?v=Klq-sNxuP2g
-- Comprehending Proc Macros (bounded metaprogramming; why Jet rejects arbitrary syntax) — https://www.youtube.com/watch?v=SMCRQj9Hbx8
-- Two Ways To Do Dynamic Dispatch (auto-box vs monomorphize; no user-facing `dyn`) — https://www.youtube.com/watch?v=wU8hQvU8aKM
-- A Simpler Way to See Results (typed errors as values) — https://www.youtube.com/watch?v=s5S2Ed5T-dc
-- Use Arc Instead of Vec (why Jet does *not* default to `Arc`) — https://www.youtube.com/watch?v=A4cKi7PTJSs
-- Rust Functions Are Weird (But Be Glad) — https://www.youtube.com/watch?v=SqT5YglW3qU
-- Choose the Right Option (`Option<&T>` not `&Option<T>`) — https://www.youtube.com/watch?v=6c7pZYP_iIE
+### Rust
 
-**Logan Smith — "Verse: A New Scripting Language? In THIS Economy?"** (mined
-2026-07-24). Crash course on Epic's Verse; source of the transactional-rollback
-"watch" lesson and strategic validation of the Epoch-6 Canvas bet. Report at
-`docs/audits/2026-07-24-verse-video-mining.md`.
-https://www.youtube.com/watch?v=ebqKYLKjL6U
+**Jet takes:** ownership-oriented APIs, deterministic cleanup, exhaustive
+sum-type handling, strong diagnostics, and an integrated package workflow.
+Rust's experience also makes the cost of coherence, feature composition, build
+scripts, and foreign authority visible.
 
-**Cross-facet polish batch (11 videos, mined 2026-08-03).** These sources
-checked Jet's compiler seams, memory safety, runtime, layout, module, tooling,
-environment, onboarding, UI, UX, and DX. The mine kept small polish cuts as
-well as large design lessons.
+**Jet rejects:** treating a token-stream macro or a build script as an
+unbounded second compiler, or treating a provider's missing identity as a
+guessable default. Jet's typed generation and package facts stay in one
+language-owned graph; foreign tools remain explicit boundaries.
 
-Resulting work: Tower cards #1388 (`inspect expand --json`), #1389 (`inspect
-unsafe` diagnostics and locations), #1390 (`layout` facts), and #1391 (final
-S33 reconciliation), with ratified decisions D-LAYOUT-FACTS1=B and
-D-GENERIC-CALL1=A recorded in `docs/spec/syntax-decisions.md`.
+**Why:** ownership and provenance are useful only when they are carried by
+the same checked facts. A source transform that cannot be inspected in the
+typed graph is not an equivalent of typed metaprogramming.
 
-- lolzdev — Making my own programming language: keep keyword tables simple;
-  preserve sema and TIR; reject unsafe-by-default design.
-  https://www.youtube.com/watch?v=6lXZCOXCRME
-- Tsoding Daily — Writing Garbage Collector in C: mark before traversal;
-  prefer exact roots and edges over conservative stack scans.
-  https://www.youtube.com/watch?v=2JgEKEd3tw8
-- CsMadeEz — Goroutines Are NOT Threads: keep M:N scheduling, bounded work,
-  known task exits, cancellation, and clear concurrency facts.
-  https://www.youtube.com/watch?v=vfrAX26cqtg
-- Cache Miss — Why Your C++ Struct Is Bigger Than It Should Be: keep explicit
-  C and columnar layouts; measure locality instead of sorting fields blindly.
-  https://www.youtube.com/watch?v=w50ofEmhRoc
-- Adumh00man — Dendritic Nix is the Best Way to Configure a System: keep one
-  reproducible graph with one-file defaults and optional module structure.
-  https://www.youtube.com/watch?v=buxopFR4VXQ
-- Semicolon — Rustc Commands Every Rust Developer Should Know: make errors,
-  compiler facts, profiles, and targets easy to inspect without leaking rustc.
-  https://www.youtube.com/watch?v=-DaVwuQeQD0
-- Adumh00man — Installing Nixos on my Server! (500 ish sub special): preview
-  destructive work; preserve locked bootstrap, recovery, driver, and secret state.
-  https://www.youtube.com/watch?v=E3G2tl0GAb0
-- Indently — `__init__.py` Explained in Just 7 minutes: keep short explicit
-  module facades and reject import-time execution.
-  https://www.youtube.com/watch?v=xn7nZLWXYSg
-- DistroTube — The Age Of Beginner Friendly Distros Is Over: judge beginner
-  UX by install, maintenance, recovery, hardware, docs, and offline states.
-  https://www.youtube.com/watch?v=A6XI_0DWQOw
-- Code to the Moon — 10 Underrated Rust Features & Patterns: keep exclusive
-  mutation, bounded structured work, explicit modules, and uncolored tasks.
-  https://www.youtube.com/watch?v=7QwqShxyHtc
-- Let's Get Rusty — How unsafe Rust made Polars 30x times faster than Pandas:
-  keep audited unsafe internals behind safe APIs; require measured attribution.
-  https://www.youtube.com/watch?v=l6tisoOzTuk
+### Zig
 
-**Visually Explained — Python mechanisms (4 videos, mined 2026-08-03).**
-Stepwise visual explanations checked Jet's source-local transformations,
-pull-driven streams, typed variadics, and JSON boundaries. Jet keeps one typed
-mechanism for each job and rejects Python's dynamic baggage.
+**Jet takes:** explicit allocation and error decisions, a small surface, and
+version-matched local documentation as useful design pressures.
 
-- Python Decorators - Visually Explained: keep transformations visible and
-  inspectable; reject a second runtime decorator mechanism.
-  https://www.youtube.com/watch?v=3tyaO-OE0K0
-- Python Generators - Visually Explained: teach suspend/resume and one-pass
-  streams; reject memory claims until Jet's thread-backed stream is measured.
-  https://www.youtube.com/watch?v=GWZf_B129zs
-- Python *args vs **kwargs - Visually Explained: use explicit typed parameters
-  by default and typed variadics only for genuine open arity.
-  https://www.youtube.com/watch?v=FFpDsC6B2qw
-- JSON in Python - Visually Explained: preserve missing versus explicit null;
-  reject object-only JSON roots and direct file truncation as safe defaults.
-  https://www.youtube.com/watch?v=4rmBOxn0PdI
+**Jet rejects:** making manual lifetime or unchecked pointer conventions the
+ordinary burden of every caller. Jet's ordinary values, effects, and resource
+contracts make the safe path the default while reserving named boundaries for
+host interaction.
 
-**Five-language release batch (5 videos, mined 2026-08-28).** The owner's
-"Jet Research Queue" playlist mined together with live binary probes; full
-report at `docs/audits/video-mine-five-languages-2026-08-28.md`. Meta-lesson:
-every mature language is paying down a default it can no longer change.
+**Why:** explicitness is valuable when it names an invariant or authority.
+Ceremony without a corresponding fact does not improve the contract.
 
-- Let's Get Rusty — The biggest change to the Rust compiler is here!: next-gen
-  trait solver; 4-year dual-solver cost, instruction-counts-not-wall-time perf
-  plot; Jet's one-solver design confirmed live with product diagnostics.
-  https://www.youtube.com/watch?v=aPL6y2oJjMw
-- Indently — 5 Uncommon Python Features I Love: slice objects, set operators,
-  `__format__`, walrus, currying; found D-DISPLAYDBG1 broken on all tiers and
-  the S40 `slice(a..b)` drift; declined operator/walrus second spellings.
-  https://www.youtube.com/watch?v=sQ1Q96-Vhjk
-- Better Stack — JavaScript's Biggest Update in Years (ES2027): Temporal,
-  `using`, `Iterator.zip`, `Atomics.pause`; Jet's zoned DST arithmetic and
-  compile-time date-literal rejection ran live; ownership-checked `close(^r)`
-  beats runtime disposal; E0620/E0041 immunities make `import defer` and
-  `Atomics.pause` unnecessary. https://www.youtube.com/watch?v=DLT6n3wCkuc
-- Coding with Patrik — Everything New in Go 1.27: generic methods (interface
-  fence), stdlib `uuid`, `json/v2`, `simd`, `goroutineleak`, `synctest`;
-  fed the E0956 reproducer batch (#2252) and the task-leak/observability gap.
-  https://www.youtube.com/watch?v=rTgROnXIwnI
-- Awesome — Go is becoming shockingly good: Go 1.27 opinion pass; 150-like
-  audience verdict that generics erode Go's readability identity; JSON-default
-  and enum/sum-type contrasts favor Jet live.
-  https://www.youtube.com/watch?v=c7eLIsaDL7U
+## Compile-time and metaprogramming
 
-**Never, operators, and supply-chain batch (4 videos, mined 2026-09-01).** The
-remaining "Jet Research Queue" entries, mined with 30 live probes on AOT,
-`jet run`, and `jet eval` and a fresh second reader; full report at
-`docs/audits/video-mine-never-operators-supply-chain-2026-09-01.md`.
-Meta-lesson: the default path decides the outcome, and a name for a fact is
-not the fact. Cards #2430–#2438; ballots D-NEVER2 and D-OPMIX1.
+### Jai-style compile-time execution
 
-- Semicolon — Rust Condvar Explained: Stop Wasting 100% CPU: Jet's
-  `Shared`/`Condition`/`guard.wait` is shipped with predicate re-check and
-  tier parity; the busy loop compiles in silence (lint card #2435) and E0041
-  claims Jet never shares memory (copy card #2434).
-  https://www.youtube.com/watch?v=kHpEolpE3pU
-- Let's Get Rusty — Rust just introduced a new "never" type: `!` merged for
-  1.100 after ten years of `()`-fallback and `Infallible` debt; Jet's
-  `fn f() Never` is an AOT ICE and D-NEVER1=C's own sample fails E0124
-  (#2431); ballot D-NEVER2 on the named contract.
-  https://www.youtube.com/watch?v=wpqiH56ITZo
-- Indently — "NotImplemented" is Awesome in Python: run-time operand
-  ownership versus Jet's static hooks; `Money + Money` prints zero on the
-  default tier and ICEs on AOT, including the repo example (#2430); ballot
-  D-OPMIX1 on mixed-type operands. https://www.youtube.com/watch?v=xUBIbhPC_rQ
-- Low Level — a lot of people are upset: the 2026-08-20 `arrayref`
-  compile-time backdoor (RUSTSEC-2026-0260); Jet's `extern rust` bridge calls
-  host cargo outside D-JPK-SANDBOX2 (#2432); `jet new` emits an unparseable
-  manifest since 8b9933668 (#2433). https://www.youtube.com/watch?v=uQV6hYwyjMY
+**Jet takes:** compile-time computation can make tables, constants, and
+declarations from the same typed source as the program. Jai's emphasis on
+staged language work is a useful comparison for keeping migration and
+generation understandable.
 
-**Rust-vs-C++, Python infinite loops, SIMD, C++ build systems batch (4 videos,
-mined 2026-09-03).** Owner playlist batch, mined in full and cross-checked
-against the live binary with about 90 probes on AOT, `jet run`, and
-`--interpret`, plus a fresh-context second reader. Report:
-`docs/audits/video-mine-cpp-loops-simd-build-2026-09-03.md`; companion tier
-audit: `docs/audits/tier-parity-architecture-2026-09-03.md`. Meta-lesson: a
-language is replaced when the thing you must reason about is the problem and
-not the tool; Jet's design answers all four videos and its binary delivers one.
-Second lesson: no tier receives Jet-owned optimization today (inlining and
-folding exist only as rustc's work on emitted Rust), so "tiers are optimization
-levels" needs a shared TIR pass before it can be true. Every finding maps to
-one of seven defect shapes (report section "Generalize every finding") so the
-fix closes the shape; five census cards enumerate the other instances; the tier
-audit carries the enforcement design (E1–E4) that keeps one lowering one. Cards
-#2878–#2906; ballots D-DO1, D-TIER-ONEIR1, D-PLACE1, D-FRED1, D-ACCEL1,
-D-LOOPREAD1; owner gates #2897 and #2905; research #2901. Owner rulings
-2026-09-03: S3 (a performance surface must beat the plain spelling) and S7 (CI
-walks the first hour on every tier) become `AGENTS.md` invariants plus CI cards
-#2905/#2900; D-TIER-ONEIR1 option A keeps rustc/LLVM as the release back end
-with the Rust emitter reduced to a mechanical printer of one shared MIR (speed
-and the borrow-checker safety witness untouched; Cranelift consumes the same MIR
-for `jet run`; an LLVM back end is a separate axis from self-hosting).
+**Jet rejects:** an unbounded compile-time escape that can silently change the
+language grammar or acquire undeclared host authority. Jet's `@` form is a
+compile-time value, block, or fact; build entries, derives, and generated names
+remain typed operations.
 
-- ForrestKnight — Why Rust Can't Replace C++: the losses are exact placement,
-  alignment, and lock-free control, not templates; Jet has none of the four
-  surfaces without `#Unsafe` (#2887) and its first-try doubly linked node ICEs
-  on AOT while the index arena runs everywhere (#2879).
-  https://www.youtube.com/watch?v=QNPwKMOQIKM
-- Indently — The Infinite Loop Problem in Python: `while 1` is a trap truthy
-  conditions set; Jet is immune (E0110) but its interpreter charges 2.5x for
-  the spelling of a loop (#2886); no `do` keyword, ballot D-DO1 (#2884).
-  https://www.youtube.com/watch?v=L6r0HBz9sT4
-- Core Dumped — Simple Instructions, Weird Algorithms: layout, not
-  instruction choice, decides vectorization; Jet's proof vectorizer emits zmm
-  `vaddpd` unasked, yet `#Layout(columnar)` runs 15x slower than AoS (#2889),
-  every elementwise loop clones its list (#2890), and Float reductions need a
-  defined order to widen (#2891).
-  https://www.youtube.com/watch?v=ryfbBB3pHfI
-- Cakez reacting to Kea Sigma Delta — What is the BEST C++ Build System: every
-  feature must earn its place; Jet's strict manifest already is the simplest
-  surface in the comparison, and a fresh `jet new` project cannot use a path
-  dependency, build `--locked`, or target the web (#2882, #2883).
-  https://www.youtube.com/watch?v=lzhwEDkn6NY
+**Why:** compile-time output must be attributable to an evaluation site and
+its allowed effects. A generated declaration is checked as a declaration, not
+re-lexed from arbitrary source text.
 
-**Compiled-scripting and explicitness batch (3 videos, mined 2026-08-21).**
-A YouTube playlist mined together: the compiled-TypeScript moment, the
-hardware-cost optimization thesis, and Zig 0.16 explicitness pedagogy.
-Findings: unused-code lints card (#2141), footprint receipts card (#2142),
-coverage-scoreboard lesson on #1156, version-matched local docs evidence on
-#86, autovectorization expectation on #2059.
+### Rust procedural macros
 
-- ThePrimeTime — I tried Compiled Typescript (vercel-labs/scriptc): footprint
-  and cold-start are the marketed axes; typed source becomes real structs;
-  audience caught naive field-order padding and RC-cycle risk; keep the
-  `coverage` remainder scoreboard idea, decline the RC default.
-  https://www.youtube.com/watch?v=2g63UXaynaA
-- dreadjordan — Why the HW Crisis forces Software to catch up: RAM ~4x cost
-  makes performance a software-first problem; AI writes correct-not-best code,
-  so perf must be a machine-checked verdict (Jet's budget law), not a habit.
-  https://www.youtube.com/watch?v=Kr9ai5zxAcY
-- tony — How to Actually Learn Zig (2027 Edition): Zig 0.16 writer-gate print
-  ceremony vs Jet's one-line `print`; view-store copy semantics make Zig's
-  dangling-slice `dupe` lesson unnecessary; `zig std` version-matched local
-  docs are the learning workflow; audience rejects unused-variable hard errors.
-  https://www.youtube.com/watch?v=dYGSPyp41vY
+**Jet takes:** deriving repetitive declarations from a type and keeping
+generated code close to its declaration.
 
-**Jonathan Blow on Jai** (The Standup w/ ThePrimeagen, transcript) — closed-beta
-migration discipline; staged spelling migration through coexistence → warning →
-removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow
+**Jet rejects:** treating a token stream as a general-purpose syntax channel.
+Jet's derive and generation bodies use ordinary typed item templates. They
+cannot introduce a second parser or hide an arbitrary re-lexing pass.
 
-**Onboarding reference** (Tower card note) — https://youtu.be/OPuztQfM3Fg
+**Why:** a typed template exposes names, types, effects, and source spans to
+the same semantic machinery as hand-written code. This makes generated output
+reviewable without requiring readers to reverse-engineer a macro protocol.
+
+### Python decorators and generators
+
+**Jet takes:** decorators show how a local declaration can receive reusable
+behavior, and generators show the value of explicit suspend/resume state and
+one-pass streams.
+
+**Jet rejects:** an implicit runtime decorator mechanism that changes a
+callable's meaning outside its type, and memory or performance claims that are
+not part of a stream's contract. Jet uses typed derives and explicit stream
+operations instead.
+
+**Why:** transformations and suspension points belong in the callable's
+checked contract. A runtime convention should not become an invisible second
+type system.
+
+### Verse and transactional state
+
+Verse is a useful comparison for transactional rollback and failure-aware
+state. Jet takes the discipline of making failure and rollback boundaries
+explicit, but does not use a comparison language's runtime semantics as a
+replacement for its own effects, ownership, or package facts.
+
+## API and function design
 
 ### Function-design canon
 
-Mining date: 2026-08-21. One video plus its three
-linked sources, mined together for function/API design law. Findings: rubric
-rows and review vocabulary (card #2137), E0150 free-function wording (#2138),
-sequence-algorithm gaps (#2139), stored invariant facts design (#2140), and
-independent corroboration of D-DEVR-TWICE1 logged on card #2062.
+A function should expose the facts its caller must reason about: meaningful
+inputs, the result, effects, and the invariant that determines failure. Jet
+keeps pure calculation separate from host interaction and lets types carry
+stable identities and valid-state constraints.
 
-- Logan Smith — How to write the perfect function: honest/dishonest signatures,
-  inject dishonesty at the top, signature empathy, invariant-bearing types, one
-  level of abstraction per body. Jet ships the enforcement the talk wishes for
-  (effect rows, `#Abilities`, typestate, labels).
-  https://www.youtube.com/watch?v=2OMRWPOSw9s
-- Tony Van Eerd — Value Oriented Programming Part 1 (CppNow 2023): complecting,
-  separate calculating from doing, narrow value arguments, non-member functions,
-  strong IDs, sink arguments. https://www.youtube.com/watch?v=b4p_tcLYDV0
-- Sean Parent — C++ Seasoning (GoingNative 2013): no raw loops / synchronization
-  / owning pointers; rotate, gather, task dataflow, value-semantic polymorphism.
-  https://www.youtube.com/watch?v=W2tWOdzgXHA
-- Robert C. Martin — The Single Responsibility Principle (2014): reasons to
-  change are people; gather what changes together, separate what does not.
-  https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
+```jet
+fn parse(input: String) -> ParseResult { … }
+fn write(path: Path, text: String) -[FS]> WriteResult { … }
+```
 
----
+The effect row is part of the signature. A result type names failure; a bare
+`!` is not a complete return contract. Narrow functions compose because a
+caller can see which authority they need without reading an implementation.
+The sources below compare honest signatures, value-oriented APIs, non-member
+operations, and single responsibility. Jet uses those observations as API
+review criteria rather than as a second syntax.
+
+## Packages, builds, and ecosystems
+
+Cargo demonstrates the value of an integrated package graph, while Nix
+demonstrates reproducible inputs and explicit host/platform facts. Jet takes
+those goals through `package.jet`, `env.jet`, one `.jet/lock`, provider
+identity, and a content-addressed Hangar. The [Jetpack reference](jetpack-epoch5.md)
+defines the package, source, environment, service, and cache boundaries.
+
+**Jet takes:** exact source selectors, typed package outputs, deterministic
+member discovery, lock records that retain provider and content identity,
+offline replay from verified local bytes, and host-owned credentials.
+
+**Jet rejects:** a second manifest grammar, a mutable selector hidden behind
+an unqualified name, network fallback during offline replay, guessed provider
+metadata, and repository-controlled cache credentials. A foreign provider
+either supplies the required fact or leaves an explicit loss/error.
+
+**Why:** package identity, build inputs, outputs, and authority must be
+inspectable before realization. A convenient shortcut that loses one of those
+facts makes reproducibility and recovery depend on ambient machine state.
+
+## Domain observations
+
+The source record spans domains, but it is not a compatibility matrix. These
+are design observations, not claims that Jet implements every framework named
+by a source.
+
+| Domain | Useful observation | Jet boundary |
+| --- | --- | --- |
+| Web | Route, data-loading, mutation, and UI state form different facts. | Keep them typed and explicit rather than hiding server calls in view syntax. |
+| Live tooling | Inspectable state and time-travel debugging help explain a system. | Expose checked facts and deterministic projections; do not add a second runtime debugger language. |
+| Games | Frame budgets, ownership, and data layout interact. | Make resource and layout choices explicit; measure rather than promise a performance tier. |
+| Backend services | Readiness, cancellation, and dependency order are operational contracts. | Typed service records and effect rows carry those facts into Jetpack. |
+| Mobile | Platform capabilities and credentials need a host authority. | Keep target and grant facts in the environment plan; never embed secret values. |
+| Data and science | Columnar layout, streaming, and reproducible inputs affect results. | Preserve typed layout and input identity; do not infer numeric or memory guarantees from a library name. |
+| CLI and devtools | Good tools preview mutation and explain provenance. | Use one checked plan for read-only inspection, realization, and recovery. |
 
 ## Programming languages
 
-### Systems & safety languages
+### C
 
-**C** — predictable representation, direct FFI, freestanding reach; avoid:
-unsafe-by-default, NUL-terminated strings, array-to-pointer decay, `_s` parallel
-APIs, textual headers.
-- WG14 N2659 (ordinary C is unsafe) — https://www.open-std.org/JTC1/SC22/WG14/www/docs/n2659.htm
-- WG14 N1990 / N2660 / N3360 (recover array bounds) — https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1990.htm · https://www.open-std.org/JTC1/SC22/WG14/www/docs/n2660.pdf · https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3360.htm
-- WG14 N1967 (Annex K bounds-checking failure) — https://open-std.org/jtc1/sc22/wg14/www/docs/n1967.htm
-- WG14 N1400 / N2896 (preprocessor/header semantics) — https://www.open-std.org/JTC1/SC22/wg14/www/docs/n1400.htm · https://open-std.org/jtc1/sc22/wg14/www/docs/n2896.htm
-- WG14 N1254 / N2885 (integer promotion/overflow) — https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1254.htm · https://www.open-std.org/JTC1/SC22/WG14/www/docs/n2885.pdf
-- "The Most Expensive One-byte Mistake" (ACM Queue) — https://queue.acm.org/detail.cfm?id=2010365
+C supplies the low-level comparison for object representation, array bounds,
+integer conversion, preprocessing, and the limits of retrofit safety. Jet keeps
+the useful representation facts while requiring them to pass through typed
+checking and explicit unsafe authority.
 
-**C++** — zero-cost abstraction, deterministic lifetime, generics, native
-interop; reject: inheritance, implicit narrowing, C-style casts, raw array
-decay, dangling views, no-common-ABI.
-- Stroustrup interviews: Slashdot / DevX / Italian — https://www.stroustrup.com/slashdot_interview.html · https://www.stroustrup.com/devXinterview.html · https://www.stroustrup.com/italian_interview.html
-- P2771R1 (memory-safety views) — https://isocpp.org/files/papers/P2771R1.html
-- CppCoreGuidelines view-lifetime issue #2276 — https://github.com/isocpp/CppCoreGuidelines/issues/2276
-- mp-units — points & quantities (affine space) — https://mpusz.github.io/mp-units/latest/tutorials/affine_space/points_and_quantities/
+- WG14 N2659 (ordinary C safety) —
+  https://www.open-std.org/JTC1/SC22/WG14/www/docs/n2659.htm
+- WG14 N1990, N2660, and N3360 (array bounds) —
+  https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1990.htm
+  https://www.open-std.org/jtc1/sc22/wg14/www/docs/n2660.pdf
+  https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3360.htm
+- WG14 N1967 (Annex K) —
+  https://open-std.org/jtc1/sc22/wg14/www/docs/n1967.htm
+- WG14 N1400 and N2896 (preprocessor and headers) —
+  https://www.open-std.org/JTC1/SC22/wg14/www/docs/n1400.htm
+  https://open-std.org/jtc1/sc22/wg14/www/docs/n2896.htm
+- WG14 N1254 and N2885 (integer promotion and overflow) —
+  https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1254.htm
+  https://www.open-std.org/JTC1/SC22/WG14/www/docs/n2885.pdf
+- ACM Queue, “The Most Expensive One-byte Mistake” —
+  https://queue.acm.org/detail.cfm?id=2010365
 
-**Rust** — ownership, deterministic cleanup, exhaustive ADTs, strong
-diagnostics, Cargo's integrated workflow; watch: learning-curve accidental
-detail, async-as-parallel-surface, compile time, orphan-rule glue friction,
-build-script supply chain, feature unification.
-- The Rust I Wanted Had No Future (Graydon Hoare) — https://graydon2.dreamwidth.org/307291.html
-- 2024 lang roadmap / 2024 State of Rust / 2025 compiler-perf survey — https://blog.rust-lang.org/inside-rust/2022/04/04/lang-roadmap-2024/ · https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/ · https://blog.rust-lang.org/2025/09/10/rust-compiler-performance-survey-2025-results/
-- Async project goals 2024h2 / 2026 roadmap — https://rust-lang.github.io/rust-project-goals/2024h2/async.html · https://rust-lang.github.io/rust-project-goals/2026/roadmap-just-add-async.html
-- Relaxing the orphan rule — https://rust-lang.github.io/rust-project-goals/2024h2/Relaxing-the-Orphan-Rule.html
-- RFC 2451 re-rebalancing coherence — https://github.com/rust-lang/rfcs/blob/master/text/2451-re-rebalancing-coherence.md
-- Little Orphan Impls (Niko Matsakis) — https://smallcultfollowing.com/babysteps/blog/2015/01/14/little-orphan-impls/
-- Cargo: build scripts / features / workspaces / resolver — https://doc.rust-lang.org/stable/cargo/reference/build-scripts.html · https://doc.rust-lang.org/cargo/reference/features.html · https://doc.rust-lang.org/cargo/reference/workspaces.html · https://doc.rust-lang.org/nightly/cargo/reference/resolver.html
-- crates.io malware postmortem — https://blog.rust-lang.org/inside-rust/2023/09/01/crates-io-malware-postmortem/
-- Cargo issues #14414 / #8088 — https://github.com/rust-lang/cargo/issues/14414 · https://github.com/rust-lang/cargo/issues/8088
-- The Book: ownership ch04 / enums ch06 / patterns ch19-01 — https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html · https://doc.rust-lang.org/book/ch06-00-enums.html · https://doc.rust-lang.org/book/ch19-01-all-the-places-for-patterns.html
-- API Guidelines: predictability — https://rust-lang.github.io/api-guidelines/predictability.html
-- struct/impl colocation study (`docs/audits/2026-07-24-rust-struct-impl-colocation.md`): Clippy `multiple_inherent_impl` — https://github.com/rust-lang/rust-clippy/blob/master/clippy_lints/src/inherent_impl.rs · Clippy #6446 explicit-drop — https://github.com/rust-lang/rust-clippy/issues/6446 · Canonical ordering discipline — https://canonical.github.io/rust-best-practices/ordering-discipline.html · PingCAP trait style — https://pingcap.github.io/style-guide/rust/traits.html · users.rust-lang style thread — https://users.rust-lang.org/t/a-question-of-style-for-impl-of-structs/118029
+### C++
 
+C++ supplies comparisons for zero-cost abstraction, native interoperation,
+generic code, lifetimes, views, and dimensional types.
+
+- Stroustrup interviews —
+  https://www.stroustrup.com/slashdot_interview.html
+  https://www.stroustrup.com/devXinterview.html
+  https://www.stroustrup.com/italian_interview.html
+- P2771R1, memory-safety views —
+  https://isocpp.org/files/papers/P2771R1.html
+- CppCoreGuidelines view-lifetime issue —
+  https://github.com/CppCoreGuidelines/issues/2276
+- mp-units, points and quantities —
+  https://mpusz.github.io/mp-units/latest/tutorials/affine_space/points_and_quantities/
+  https://mpusz.github.io/mp-units/latest/tutorials/affine_space/points_and_quantities
+
+### Rust
+
+Rust supplies comparisons for ownership, enums, patterns, API predictability,
+coherence, asynchronous design, package resolution, and supply-chain
+boundaries.
+
+- Graydon Hoare, “The Rust I Wanted Had No Future” —
+  https://graydon2.dreamwidth.org/307291.html
+- Rust language roadmap, State of Rust, and compiler performance —
+  https://blog.rust-lang.org/inside-rust/2022/04/04/lang-roadmap-2024/
+  https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/
+  https://blog.rust-lang.org/2025/09/10/rust-compiler-performance-survey-2025-results/
+  https://blog.rust-lang.org/inside-rust/2022/04/04/lang-roadmap-2024
+  https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results
+  https://blog.rust-lang.org/2025/09/10/rust-compiler-performance-survey-2025-results
+- Async project goals —
+  https://rust-lang.github.io/rust-project-goals/2024h2/async.html
+  https://rust-lang.github.io/rust-project-goals/2026/roadmap-just-add-async.html
+- Relaxing the orphan rule and RFC 2451 —
+  https://rust-lang.github.io/rust-project-goals/2024h2/Relaxing-the-Orphan-Rule.html
+  https://github.com/rust-lang/rfcs/blob/master/text/2451-re-rebalancing-coherence.md
+- Little Orphan Impls —
+  https://smallcultfollowing.com/babysteps/blog/2015/01/14/little-orphan-impls/
+  https://smallcultfollowing.com/babysteps/blog/2015/01/14/little-orphan-impls
+- Cargo build scripts, features, workspaces, and resolver —
+  https://doc.rust-lang.org/stable/cargo/reference/build-scripts.html
+  https://doc.rust-lang.org/cargo/reference/features.html
+  https://doc.rust-lang.org/cargo/reference/workspaces.html
+  https://doc.rust-lang.org/nightly/cargo/reference/resolver.html
+- crates.io malware postmortem —
+  https://blog.rust-lang.org/inside-rust/2023/09/01/crates-io-malware-postmortem/
+  https://blog.rust-lang.org/inside-rust/2023/09/01/crates-io-malware-postmortem
+- Cargo issues —
+  https://github.com/rust-lang/cargo/issues/14414
+  https://github.com/rust-lang/cargo/issues/8088
+- The Rust Book: ownership, enums, and patterns —
+  https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html
+  https://doc.rust-lang.org/book/ch06-00-enums.html
+  https://doc.rust-lang.org/book/ch19-01-all-the-places-for-patterns.html
+- API Guidelines, predictability —
+  https://rust-lang.github.io/api-guidelines/predictability.html
+- Inherent-impl and explicit-drop discussions —
+  https://github.com/rust-lang/rust-clippy/blob/master/clippy_lints/src/inherent_impl.rs
+  https://github.com/rust-lang/rust-clippy/issues/6446
+  https://canonical.github.io/rust-best-practices/ordering-discipline.html
+  https://pingcap.github.io/style-guide/rust/traits.html
+  https://users.rust-lang.org/t/a-question-of-style-for-impl-of-structs/118029
+
+## Source index
+
+The following sources are retained as a compact reading index. Their arguments
+inform the comparisons above; the linked Jet source and examples define Jet's
+actual contracts.
+
+### Systems, safety, and tooling
+
+- https://www.youtube.com/watch?v=H1TSClkkHy0
+- https://www.youtube.com/watch?v=BUX01em5eG4
+- https://www.youtube.com/watch?v=_2xQog4EBzg
+- https://www.youtube.com/watch?v=aoHMiCzqCNw
+- https://www.youtube.com/watch?v=WXo6ial-vm4
+- https://www.youtube.com/watch?v=3MP8D-mdheA
+- https://www.youtube.com/watch?v=hpj6r6CjJf8
+- https://www.youtube.com/watch?v=wo84LFzx5nI
+- https://www.youtube.com/watch?v=N5bH6ALXX4U
+- https://www.youtube.com/watch?v=V_qzqY1bb7I
+- https://www.youtube.com/watch?v=9T0LVlVKjGo
+- https://www.youtube.com/watch?v=Xz2f-PtQAdk
+- https://www.youtube.com/watch?v=GnAwY55hux0
+- https://www.youtube.com/watch?v=gDDvH0ZyM7E
+
+### Ownership and compile-time
+
+- https://www.youtube.com/watch?v=8j_FbjiowvE
+- https://www.youtube.com/watch?v=KWB-gDVuy_I
+- https://www.youtube.com/watch?v=Klq-sNxuP2g
+- https://www.youtube.com/watch?v=SMCRQj9Hbx8
+- https://www.youtube.com/watch?v=wU8hQvU8aKM
+- https://www.youtube.com/watch?v=s5S2Ed5T-dc
+- https://www.youtube.com/watch?v=A4cKi7PTJSs
+- https://www.youtube.com/watch?v=SqT5YglW3qU
+- https://www.youtube.com/watch?v=6c7pZYP_iIE
+- https://www.youtube.com/watch?v=ebqKYLKjL6U
+- https://www.youtube.com/watch?v=6lXZCOXCRME
+- https://www.youtube.com/watch?v=2JgEKEd3tw8
+- https://www.youtube.com/watch?v=vfrAX26cqtg
+- https://www.youtube.com/watch?v=w50ofEmhRoc
+- https://www.youtube.com/watch?v=buxopFR4VXQ
+- https://www.youtube.com/watch?v=-DaVwuQeQD0
+- https://www.youtube.com/watch?v=E3G2tl0GAb0
+- https://www.youtube.com/watch?v=xn7nZLWXYSg
+- https://www.youtube.com/watch?v=A6XI_0DWQOw
+- https://www.youtube.com/watch?v=7QwqShxyHtc
+- https://www.youtube.com/watch?v=l6tisoOzTuk
+
+### Python, JavaScript, Go, and compiled scripting
+
+- https://www.youtube.com/watch?v=3tyaO-OE0K0
+- https://www.youtube.com/watch?v=GWZf_B129zs
+- https://www.youtube.com/watch?v=FFpDsC6B2qw
+- https://www.youtube.com/watch?v=4rmBOxn0PdI
+- https://www.youtube.com/watch?v=aPL6y2oJjMw
+- https://www.youtube.com/watch?v=sQ1Q96-Vhjk
+- https://www.youtube.com/watch?v=DLT6n3wCkuc
+- https://www.youtube.com/watch?v=rTgROnXIwnI
+- https://www.youtube.com/watch?v=c7eLIsaDL7U
+- https://www.youtube.com/watch?v=kHpEolpE3pU
+- https://www.youtube.com/watch?v=wpqiH56ITZo
+- https://www.youtube.com/watch?v=xUBIbhPC_rQ
+- https://www.youtube.com/watch?v=uQV6hYwyjMY
+- https://www.youtube.com/watch?v=QNPwKMOQIKM
+- https://www.youtube.com/watch?v=L6r0HBz9sT4
+- https://www.youtube.com/watch?v=ryfbBB3pHfI
+- https://www.youtube.com/watch?v=lzhwEDkn6NY
+- https://www.youtube.com/watch?v=2g63UXaynaA
+- https://www.youtube.com/watch?v=Kr9ai5zxAcY
+- https://www.youtube.com/watch?v=dYGSPyp41vY
+
+### Functions and API design
+
+- https://www.youtube.com/watch?v=2OMRWPOSw9s
+- https://www.youtube.com/watch?v=b4p_tcLYDV0
+- https://www.youtube.com/watch?v=W2tWOdzgXHA
+- https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
+- https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow
+- https://youtu.be/OPuztQfM3Fg
 [Showing lines 1-300 of 306. Use :301 to continue]
 
 ## Developer experience (e14)

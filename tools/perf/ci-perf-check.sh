@@ -1,16 +1,35 @@
 #!/usr/bin/env sh
-# Compiler-speed CI gate.
+# Compiler-speed CI gate.  `--source-implementation REPORT_DIR` adds the
+# criterion11 Source-vs-native-Rust implementation gate to this same canonical
+# executable entry point.  The ordinary compiler-speed peer policy remains
+# unchanged; it is not used as a substitute for the strict Source lane.
 #
 # Dashboard evidence is valid only when the checked corpus, production stages,
 # toolchain, machine, output parity, and variance policy all match. Missing
 # evidence fails; it never becomes a zero or a skipped check.
+#
+# Source implementation evidence is supplied by source-compiler-runner.mjs and
+# is mandatory whenever this mode is selected.  This switch cannot silently
+# ignore a missing, stale, unavailable, or mismatched Source report.
 
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 PERF_DIR="$ROOT/tools/perf"
-BASELINE="$PERF_DIR/baseline.json"
+SOURCE_IMPLEMENTATION_REPORT=
+if [ "${1:-}" = "--source-implementation" ]; then
+    [ "$#" -eq 2 ] || {
+        echo "usage: $0 [THRESHOLD] | --source-implementation REPORT_DIR" >&2
+        exit 64
+    }
+    SOURCE_IMPLEMENTATION_REPORT=$2
+    shift 2
+fi
 THRESH=${1:-}
+[ "$#" -le 1 ] || {
+    echo "usage: $0 [THRESHOLD] | --source-implementation REPORT_DIR" >&2
+    exit 64
+}
 TAB=$(printf '\t')
 ROW_HEADER=$(printf 'program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases')
 PEER_META_PREFIX='compiler-speed-peer version='
@@ -1128,4 +1147,8 @@ if [ "$current_peer_pending" -eq 1 ]; then
     echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT}, peer gate pending D-BUILDBENCH1)"
 else
     echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT})"
+fi
+if [ -n "$SOURCE_IMPLEMENTATION_REPORT" ]; then
+    "$PERF_DIR/source-compiler-gate.sh" --check "$SOURCE_IMPLEMENTATION_REPORT"
+    echo "criterion11 Source compiler implementation gate OK (report $SOURCE_IMPLEMENTATION_REPORT)"
 fi

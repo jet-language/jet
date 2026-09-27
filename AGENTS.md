@@ -102,8 +102,8 @@ The owner alone starts `tower serve`. Agents use non-serve Tower CLI commands ag
 
 OMP `task` and `hub` are the first path for every dispatch. Use the most specific available agent. Main keeps its session model. Active profiles:
 
-- `@implementation`: GPT-5.6 Luna, maximum reasoning, for normal code-writing workers.
-- `@full_review`: GPT-5.6 Sol, high reasoning, for full review axes, security review, and milestone review.
+- `@implementation`: GPT-6 Luna, maximum reasoning, for normal code-writing workers.
+- `@full_review`: GPT-6 Sol, high reasoning, for full review axes, security review, and milestone review.
 - `@cavecrew`: Sonnet for investigator, builder, and reviewer roles.
 - Existing audit, research, report, HTML, and gauntlet skills keep their own declared routes.
 

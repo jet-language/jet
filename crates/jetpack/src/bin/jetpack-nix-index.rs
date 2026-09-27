@@ -57,6 +57,9 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
     if write_signature_request && options.contains_key("native-recipes") {
         return Err("--native-recipes is only valid with generate-local".to_string());
     }
+    if write_signature_request && options.contains_key("provenance") {
+        return Err("--provenance is only valid with generate-local".to_string());
+    }
     let channel = required(&options, "channel")?;
     let system = required(&options, "system")?;
     let requested_revision = required(&options, "revision")?;
@@ -80,6 +83,12 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
             .map_err(|error| error.to_string())
         })
         .transpose()?;
+    let provenance = options.get("provenance").map(|path| {
+        let path = Path::new(path);
+        let value = read_json_input(path, 1024 * 1024, "local import provenance")?;
+        validate_local_provenance(&value, &requested_revision, &system)?;
+        read_file(path, 1024 * 1024, "local import provenance")
+    }).transpose()?;
     let actual_revision = fs::read_to_string(&revision_file)
         .map_err(|error| format!("read git-revision: {error}"))?
         .trim()
@@ -184,6 +193,9 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
             &output_root.join("recipes-v1.json"),
             &native_recipes,
         )?;
+    }
+    if let Some(provenance) = provenance {
+        write_immutable(&output_root.join("provenance.json"), &provenance)?;
     }
     println!(
         "generated channel={channel} revision={requested_revision} system={system} compressed_bytes={} decoded_bytes={} target_sha256={digest}",
@@ -594,6 +606,23 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
     result
 }
 
+fn validate_local_provenance(
+    value: &jet_foundation::DataTree::DataTree,
+    revision: &str,
+    system: &str,
+) -> Result<(), String> {
+    for (field, expected) in [
+        ("revision", revision),
+        ("system", system),
+        ("trust_tier", "local-unofficial"),
+    ] {
+        if value.get(field).ok().and_then(|value| value.as_str().ok()) != Some(expected) {
+            return Err(format!("local import provenance has the wrong top-level {field}"));
+        }
+    }
+    Ok(())
+}
+
 fn read_json_input(
     path: &Path,
     limit: u64,
@@ -804,6 +833,23 @@ mod tests {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn local_provenance_rejects_nested_matches_for_conflicting_bindings() {
+        let parse = |text: &str| {
+            jet_foundation::EncodingJson::parse_json_exact_numbers(text, true).unwrap()
+        };
+        let valid = parse(r#"{"revision":"revision","system":"x86_64-linux","trust_tier":"local-unofficial"}"#);
+        super::validate_local_provenance(&valid, "revision", "x86_64-linux").unwrap();
+        for invalid in [
+            r#"{"revision":"other","system":"x86_64-linux","trust_tier":"local-unofficial","nested":{"revision":"revision"}}"#,
+            r#"{"revision":"revision","system":"aarch64-linux","trust_tier":"local-unofficial","nested":{"system":"x86_64-linux"}}"#,
+            r#"{"revision":"revision","system":"x86_64-linux","trust_tier":"official-signed","nested":{"trust_tier":"local-unofficial"}}"#,
+            r#"{"nested":{"revision":"revision","system":"x86_64-linux","trust_tier":"local-unofficial"}}"#,
+        ] {
+            assert!(super::validate_local_provenance(&parse(invalid), "revision", "x86_64-linux").is_err());
         }
     }
 

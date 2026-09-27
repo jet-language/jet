@@ -45,6 +45,10 @@ const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.
 const CORE_CALLS_PATH = "crates/jet-foundation/src/Syntax/core_calls.rs";
 const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
 const ENCODING_TYPES_PATH = "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs";
+const TIR_CORE_CALLS_PATH = "crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs";
+const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
+const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
+const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
 const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
 const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
@@ -599,8 +603,9 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  Url: "core.net.url",
-  Mime: "core.net.mime",
+  // Exact Rust type names harvested from url_mime_method_return.
+  URL: "core.net.url",
+  MIME: "core.net.mime",
   Regex: "core.regex",
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
@@ -1085,8 +1090,8 @@ function syntaxConstants() {
   );
   for (const file of files) {
     const source = read(file);
-    for (const match of source.matchAll(/pub const ([A-Z][A-Z0-9_]*):\s*&str\s*=\s*"([^"]*)"/g)) {
-      values.set(match[1], match[2]);
+    for (const match of source.matchAll(/pub const ([A-Z][A-Z0-9_]*):\s*&str\s*=\s*"((?:\\.|[^"\\])*)"/g)) {
+      values.set(match[1], decodeRustStringContent(match[2], file + " " + match[1]));
     }
   }
   return values;
@@ -1236,16 +1241,538 @@ function coreCallArguments(expression, open, sourceLine) {
   }
   throw new Error("unterminated Core dispatcher adapter at line " + sourceLine);
 }
+function decodeRustStringContent(content, context) {
+  let decoded = "";
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (character !== "\\") {
+      decoded += character;
+      continue;
+    }
+    index += 1;
+    if (index >= content.length) {
+      throw new Error("unterminated Rust string escape in " + context);
+    }
+    const escape = content[index];
+    if (escape === "n") decoded += "\n";
+    else if (escape === "r") decoded += "\r";
+    else if (escape === "t") decoded += "\t";
+    else if (escape === "0") decoded += "\0";
+    else if (escape === "\\") decoded += "\\";
+    else if (escape === "\"") decoded += "\"";
+    else if (escape === "'") decoded += "'";
+    else if (escape === "x") {
+      const digits = content.slice(index + 1, index + 3);
+      if (!/^[0-7][0-9a-fA-F]$/.test(digits)) {
+        throw new Error("invalid Rust byte escape in " + context);
+      }
+      decoded += String.fromCodePoint(parseInt(digits, 16));
+      index += 2;
+    } else if (escape === "u" && content[index + 1] === "{") {
+      const end = content.indexOf("}", index + 2);
+      if (end < 0) throw new Error("unterminated Rust Unicode escape in " + context);
+      const digits = content.slice(index + 2, end).replace(/_/g, "");
+      if (!/^[0-9a-fA-F]+$/.test(digits)) {
+        throw new Error("invalid Rust Unicode escape in " + context);
+      }
+      const codepoint = parseInt(digits, 16);
+      if (codepoint > 0x10ffff || (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+        throw new Error("invalid Rust Unicode scalar in " + context);
+      }
+      decoded += String.fromCodePoint(codepoint);
+      index = end;
+    } else {
+      throw new Error("unsupported Rust string escape `\\" + escape + "` in " + context);
+    }
+  }
+  return decoded;
+}
+
+// Lexer/Strings.rs accepts only \n, \t, \", and \\ in ordinary text;
+// literal braces must be doubled. Unicode scalars stay literal source text.
+function jetStringExpression(value) {
+  const needsByteExpression = Array.from(value).some(function (character) {
+    const codepoint = character.codePointAt(0);
+    return (codepoint < 0x20 || (codepoint >= 0x7f && codepoint <= 0x9f)) &&
+      character !== "\n" && character !== "\t";
+  });
+  if (needsByteExpression) {
+    const bytes = Array.from(Buffer.from(value, "utf8"));
+    const items = bytes.map(function (byte) { return "U8{" + byte + "}"; });
+    return "String.from_bytes([U8]{" + items.join(", ") + "}) ?? \"\"";
+  }
+  let literal = "\"";
+  for (const character of value) {
+    if (character === "\\") literal += "\\\\";
+    else if (character === "\"") literal += "\\\"";
+    else if (character === "\n") literal += "\\n";
+    else if (character === "\t") literal += "\\t";
+    else if (character === "{") literal += "{{";
+    else if (character === "}") literal += "}}";
+    else literal += character;
+  }
+  return literal + "\"";
+}
+
+function splitRustTopLevelWithOffsets(source, context) {
+  const parts = [];
+  let start = 0;
+  let paren = 0;
+  let bracket = 0;
+  let brace = 0;
+  let quotedString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockCommentDepth = 0;
+  function push(end) {
+    const value = source.slice(start, end).trim();
+    if (value) parts.push({ value: value, offset: start });
+  }
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      continue;
+    }
+    if (blockCommentDepth > 0) {
+      if (character === "/" && next === "*") {
+        blockCommentDepth += 1;
+        index += 1;
+      } else if (character === "*" && next === "/") {
+        blockCommentDepth -= 1;
+        index += 1;
+      }
+      continue;
+    }
+    if (quotedString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") quotedString = false;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      blockCommentDepth = 1;
+      index += 1;
+      continue;
+    }
+    if (character === "\"") {
+      quotedString = true;
+      continue;
+    }
+    if (character === "(") paren += 1;
+    else if (character === ")") paren -= 1;
+    else if (character === "[") bracket += 1;
+    else if (character === "]") bracket -= 1;
+    else if (character === "{") brace += 1;
+    else if (character === "}") brace -= 1;
+    else if (character === "," && paren === 0 && bracket === 0 && brace === 0) {
+      push(index);
+      start = index + 1;
+    }
+    if (paren < 0 || bracket < 0 || brace < 0) {
+      throw new Error("unbalanced Rust row expression in " + context);
+    }
+  }
+  if (quotedString || blockCommentDepth || paren !== 0 || bracket !== 0 || brace !== 0) {
+    throw new Error("unterminated Rust row expression in " + context);
+  }
+  push(source.length);
+  return parts;
+}
+
+function rustCallEnd(source, open, context) {
+  let depth = 0;
+  let quotedString = false;
+  let escaped = false;
+  for (let index = open; index < source.length; index += 1) {
+    const character = source[index];
+    if (quotedString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") quotedString = false;
+      continue;
+    }
+    if (character === "\"") {
+      quotedString = true;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  throw new Error("unterminated Rust call in " + context);
+}
+
+function readRustCall(source, start, context) {
+  const match = /^([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\(/.exec(
+    source.slice(start),
+  );
+  if (!match) throw new Error("unsupported Rust call in " + context + ": " + source.trim());
+  const open = start + match[0].lastIndexOf("(");
+  const close = rustCallEnd(source, open, context);
+  const args = splitRustTopLevelWithOffsets(source.slice(open + 1, close), context)
+    .map(function (part) { return part.value; });
+  return { name: match[1], args: args, end: close + 1 };
+}
+
+function rustStringExpression(expression, context) {
+  const value = expression.trim();
+  const literal = value.match(/^"((?:\\.|[^"\\])*)"$/);
+  if (literal) return jetStringExpression(decodeRustStringContent(literal[1], context));
+  const symbolic = value.match(/^(?:(?:crate::)?Syntax::|super::)?([A-Z][A-Z0-9_]*)$/);
+  if (!symbolic) throw new Error("unsupported Rust string value in " + context + ": " + value);
+  const constants = syntaxConstants();
+  if (!constants.has(symbolic[1])) {
+    throw new Error("unknown Rust string constant `" + value + "` in " + context);
+  }
+  return jetStringExpression(constants.get(symbolic[1]));
+}
+
+function rustSliceItems(expression, context) {
+  const match = expression.trim().match(/^&\s*\[([\s\S]*)\]$/);
+  if (!match) throw new Error("unsupported Rust slice in " + context + ": " + expression.trim());
+  return splitRustTopLevelWithOffsets(match[1], context).map(function (part) {
+    return part.value;
+  });
+}
+
+function translateRustBool(expression, context) {
+  const value = expression.trim();
+  if (value !== "true" && value !== "false") {
+    throw new Error("unsupported Rust boolean in " + context + ": " + value);
+  }
+  return value;
+}
+
+function translateRustInteger(expression, context) {
+  const value = expression.trim().replace(/_/g, "");
+  const match = value.match(/^([0-9]+)(?:usize)?$/);
+  if (!match || !Number.isSafeInteger(Number(match[1]))) {
+    throw new Error("unsupported Rust integer in " + context + ": " + value);
+  }
+  return String(Number(match[1]));
+}
+
+function translateBoolSlice(expression, context) {
+  return "[Bool]{" + rustSliceItems(expression, context).map(function (value) {
+    return translateRustBool(value, context);
+  }).join(", ") + "}";
+}
+
+function translateStringSlice(expression, context) {
+  return "[String]{" + rustSliceItems(expression, context).map(function (value) {
+    return rustStringExpression(value, context);
+  }).join(", ") + "}";
+}
+
+function translatePureRoute(expression, context) {
+  const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
+  const variants = new Set([
+    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Measurement", "Date",
+    "DateTime", "SketchHll", "SketchTDigest", "SketchCms", "SketchReservoir", "Ui",
+    "Raylib", "Io", "Net", "Crypto",
+  ]);
+  if (!match || !variants.has(match[1])) {
+    throw new Error("unsupported CoreCallPureRoute in " + context + ": " + expression.trim());
+  }
+  const variant = match[1] === "None" ? "NoPureRoute" : match[1];
+  return "CoreCallPureRoute." + variant;
+}
+
+function translateInterpreterRoute(expression, context) {
+  const value = expression.trim();
+  if (value.startsWith("CoreCallInterpreterRoute::Pure(")) {
+    const pure = readRustCall(value, 0, context);
+    if (pure.name !== "CoreCallInterpreterRoute::Pure" ||
+        pure.end !== value.length || pure.args.length !== 1) {
+      throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
+    }
+    return "CoreCallInterpreterRoute.Pure(" +
+      translatePureRoute(pure.args[0], context) + ")";
+  }
+  const match = value.match(/^CoreCallInterpreterRoute::(None|Ambient|TypedIntrinsic)$/);
+  if (!match) {
+    throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
+  }
+  const variant = match[1] === "None" ? "NoRoute" : match[1];
+  return "CoreCallInterpreterRoute." + variant;
+}
+
+function translateCoreCoverage(expression, context) {
+  const value = expression.trim();
+  const call = readRustCall(value, 0, context);
+  if (call.name !== "CoreCallCoverage::from_bits" || call.end !== value.length ||
+      call.args.length !== 1) {
+    throw new Error("unsupported CoreCallCoverage in " + context + ": " + value);
+  }
+  const bits = call.args[0].split("|").map(function (raw) {
+    const part = raw.trim();
+    const constant = part.match(
+      /^CoreCallCoverage::(SEMA|TIR_SUBSET|TIR_EVAL|AOT|INTERPRETER|COMPTIME|JIT|KNOWN)$/,
+    );
+    if (constant) return "@CORE_CALL_COVERAGE_" + constant[1];
+    return translateRustInteger(part, context);
+  });
+  return "CoreCallCoverage{bits: " + bits.join(" | ") + "}";
+}
+
+function translateResourceAccess(expression, context) {
+  const call = readRustCall(expression.trim(), 0, context);
+  if (call.end !== expression.trim().length || call.args.length !== 1) {
+    throw new Error("unsupported CoreCallResourceAccess in " + context);
+  }
+  const mode = {
+    "CoreCallResourceAccess::read": "read",
+    "CoreCallResourceAccess::write": "write",
+    "CoreCallResourceAccess::move_": "move",
+  }[call.name];
+  if (!mode) throw new Error("unsupported CoreCallResourceAccess in " + context + ": " + call.name);
+  return "core_call_resource_access_" + mode + "(" +
+    translateRustInteger(call.args[0], context) + ")";
+}
+
+function translateCompletion(expression, context) {
+  const call = readRustCall(expression.trim(), 0, context);
+  if (call.end !== expression.trim().length) {
+    throw new Error("unsupported CoreCallCompletion in " + context);
+  }
+  if (call.name === "CoreCallCompletion::synchronous" && call.args.length === 1) {
+    return "core_call_completion_synchronous(" +
+      rustStringExpression(call.args[0], context) + ")";
+  }
+  if (call.name === "CoreCallCompletion::pending" && call.args.length === 2) {
+    return "core_call_completion_pending(" +
+      rustStringExpression(call.args[0], context) + ", " +
+      rustStringExpression(call.args[1], context) + ")";
+  }
+  if (call.name === "CoreCallCompletion::event" && call.args.length === 2) {
+    return "core_call_completion_event(" +
+      rustStringExpression(call.args[0], context) + ", " +
+      rustStringExpression(call.args[1], context) + ")";
+  }
+  throw new Error("unsupported CoreCallCompletion in " + context + ": " + call.name);
+}
+
+function translateCapability(expression, context) {
+  const call = readRustCall(expression.trim(), 0, context);
+  if (call.end !== expression.trim().length) {
+    throw new Error("unsupported CoreCapabilityContract in " + context);
+  }
+  if (call.name === "CoreCapabilityContract::pure" && call.args.length === 0) {
+    return "core_capability_pure()";
+  }
+  if (call.name === "CoreCapabilityContract::native_required" && call.args.length === 2) {
+    return "core_capability_native_required(" +
+      rustStringExpression(call.args[0], context) + ", " +
+      rustStringExpression(call.args[1], context) + ")";
+  }
+  if (call.name === "CoreCapabilityContract::portable_fallback" && call.args.length === 3) {
+    return "core_capability_portable_fallback(" +
+      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
+      ")";
+  }
+  if (call.name === "CoreCapabilityContract::explicit_simulation" && call.args.length === 2) {
+    return "core_capability_explicit_simulation(" +
+      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
+      ")";
+  }
+  throw new Error("unsupported CoreCapabilityContract in " + context + ": " + call.name);
+}
+
+function translateOptionalString(expression, context) {
+  const value = expression.trim();
+  if (value === "None") return "None";
+  const call = readRustCall(value, 0, context);
+  if (call.name !== "Some" || call.end !== value.length || call.args.length !== 1) {
+    throw new Error("unsupported optional Rust string in " + context + ": " + value);
+  }
+  return "Val(" + rustStringExpression(call.args[0], context) + ")";
+}
+
+function translateMarker(expression, context) {
+  const value = expression.trim();
+  const call = readRustCall(value, 0, context);
+  if (call.name !== "CoreMarkerApplication::deprecated" ||
+      call.end !== value.length || call.args.length !== 4) {
+    throw new Error("unsupported CoreMarkerApplication in " + context);
+  }
+  return "core_marker_deprecated(" +
+    rustStringExpression(call.args[0], context) + ", " +
+    rustStringExpression(call.args[1], context) + ", " +
+    rustStringExpression(call.args[2], context) + ", " +
+    translateOptionalString(call.args[3], context) + ")";
+}
+
+function expectRustArgumentCount(name, args, count, context) {
+  if (args.length !== count) {
+    throw new Error(name + " expected " + count + " arguments in " + context);
+  }
+}
+
+function translateCoreCallConstructor(name, args, context) {
+  if (name === "sema_web_call") {
+    expectRustArgumentCount(name, args, 4, context);
+    return "core_call_web(" +
+      rustStringExpression(args[0], context) + ", " +
+      rustStringExpression(args[1], context) + ", " +
+      rustStringExpression(args[2], context) + ", " +
+      translateBoolSlice(args[3], context) + ")";
+  }
+  if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
+    const withCoverage = name.endsWith("new_with_coverage");
+    expectRustArgumentCount(name, args, withCoverage ? 6 : 5, context);
+    const translated = [
+      rustStringExpression(args[0], context),
+      rustStringExpression(args[1], context),
+      rustStringExpression(args[2], context),
+      translateRustBool(args[3], context),
+      translateBoolSlice(args[4], context),
+    ];
+    if (withCoverage) translated.push(translateCoreCoverage(args[5], context));
+    return "core_call_" + (withCoverage ? "new_with_coverage" : "new") +
+      "(" + translated.join(", ") + ")";
+  }
+  if (name === "CoreCallRecord::receiver" ||
+      name === "CoreCallRecord::receiver_with_symbol" ||
+      name === "CoreCallRecord::receiver_with_coverage") {
+    const withSymbol = name.endsWith("receiver_with_symbol");
+    const withCoverage = name.endsWith("receiver_with_coverage");
+    const expected = withSymbol ? 5 : withCoverage ? 4 : 3;
+    expectRustArgumentCount(name, args, expected, context);
+    const translated = [
+      translateStringSlice(args[0], context),
+      rustStringExpression(args[1], context),
+    ];
+    if (withSymbol) {
+      translated.push(
+        rustStringExpression(args[2], context),
+        translateRustBool(args[3], context),
+        translateBoolSlice(args[4], context),
+      );
+    } else if (withCoverage) {
+      translated.push(
+        translateBoolSlice(args[2], context),
+        translateCoreCoverage(args[3], context),
+      );
+    } else {
+      translated.push(translateBoolSlice(args[2], context));
+    }
+    const suffix = withSymbol ? "receiver_with_symbol" :
+      withCoverage ? "receiver_with_coverage" : "receiver";
+    return "core_call_" + suffix + "(" + translated.join(", ") + ")";
+  }
+  throw new Error("unsupported CoreCallRecord constructor in " + context + ": " + name);
+}
+
+function translateCoreCallMethod(record, name, args, context) {
+  if (name === "without_direct_aot" || name === "without_direct_jit") {
+    expectRustArgumentCount(name, args, 0, context);
+    return "core_call_" + name + "(" + record + ")";
+  }
+  expectRustArgumentCount(name, args, 1, context);
+  const argument = args[0];
+  if (name === "with_max_arity") {
+    return "core_call_with_max_arity(" + record + ", " +
+      translateRustInteger(argument, context) + ")";
+  }
+  if (name === "with_jit_symbol") {
+    return "core_call_with_jit_symbol(" + record + ", " +
+      rustStringExpression(argument, context) + ")";
+  }
+  if (name === "with_pure_route") {
+    return "core_call_with_pure_route(" + record + ", " +
+      translatePureRoute(argument, context) + ")";
+  }
+  if (name === "with_interpreter_route") {
+    return "core_call_with_interpreter_route(" + record + ", " +
+      translateInterpreterRoute(argument, context) + ")";
+  }
+  if (name === "with_frame_accesses") {
+    const accesses = rustSliceItems(argument, context).map(function (value) {
+      return translateResourceAccess(value, context);
+    });
+    return "core_call_with_frame_accesses(" + record +
+      ", [CoreCallResourceAccess]{" + accesses.join(", ") + "})";
+  }
+  if (name === "with_frame_completion") {
+    return "core_call_with_frame_completion(" + record + ", " +
+      translateCompletion(argument, context) + ")";
+  }
+  if (name === "with_capability") {
+    return "core_call_with_capability(" + record + ", " +
+      translateCapability(argument, context) + ")";
+  }
+  if (name === "with_ui_capabilities") {
+    return "core_call_with_ui_capabilities(" + record + ", " +
+      translateStringSlice(argument, context) + ")";
+  }
+  if (name === "with_marker") {
+    return "core_call_with_marker(" + record + ", " +
+      translateMarker(argument, context) + ")";
+  }
+  throw new Error("unsupported CoreCallRecord builder in " + context + ": " + name);
+}
+
+function translateCoreCallExpression(expression, context) {
+  const value = expression.trim();
+  const root = readRustCall(value, 0, context);
+  let translated = translateCoreCallConstructor(root.name, root.args, context);
+  let position = root.end;
+  while (position < value.length) {
+    while (/\s/.test(value[position] || "")) position += 1;
+    if (position >= value.length) break;
+    if (value[position] !== ".") {
+      throw new Error("unsupported CoreCallRecord expression in " + context + ": " + value);
+    }
+    position += 1;
+    const method = readRustCall(value, position, context);
+    translated = translateCoreCallMethod(translated, method.name, method.args, context);
+    position = method.end;
+  }
+  return translated;
+}
+
+function rustArrayEntries(source, startToken) {
+  const body = rustValueBody(source, startToken);
+  const start = source.indexOf(startToken);
+  const equals = source.indexOf("=", start);
+  const open = source.indexOf("[", equals);
+  if (open < 0) throw new Error("Rust list value disappeared: " + startToken);
+  return splitRustTopLevelWithOffsets(body, startToken).map(function (part) {
+    return {
+      expression: part.value,
+      sourceLine: lineAt(source, open + 1 + part.offset),
+    };
+  });
+}
+
+function coreDispatcherExpression(row, ambientKeys) {
+  let expression = row.expression.replace(/,\s*$/, "");
+  const key = row.module + "." + row.member;
+  if (
+    ambientKeys.has(key) &&
+    !expression.includes("with_interpreter_route(") &&
+    !expression.includes("with_pure_route(") &&
+    !expression.includes("sema_web_call(")
+  ) {
+    expression += ".with_interpreter_route(CoreCallInterpreterRoute::Ambient)";
+  }
+  return expression;
+}
 
 function coreCallIdentityValue(argument, field, sourceLine) {
   const value = argument.trim();
   const literal = value.match(/^"((?:\\.|[^"\\])*)"$/);
   if (literal) {
-    try {
-      return JSON.parse(value);
-    } catch (error) {
-      return literal[1].replace(/\\"/g, "\"");
-    }
+    return decodeRustStringContent(literal[1], "dispatcher line " + sourceLine);
   }
   const symbolic = value.match(/^(?:(?:crate::)?Syntax::|super::)?([A-Z][A-Z0-9_]*)$/);
   if (!symbolic) {
@@ -2083,19 +2610,63 @@ function generatedCoreCalls(source, declarations) {
     "pub const CORE_CALLS: &[CoreCallRecord] = &[",
   );
   for (const row of declarations.dispatcherRows) {
-    let expression = row.expression.replace(/,\s*$/, "");
-    const key = row.module + "." + row.member;
-    if (
-      ambientKeys.has(key) &&
-      !expression.includes("with_interpreter_route(") &&
-      !expression.includes("with_pure_route(") &&
-      !expression.includes("sema_web_call(")
-    ) {
-      expression += ".with_interpreter_route(CoreCallInterpreterRoute::Ambient)";
-    }
-    lines.push("    " + expression + ",");
+    lines.push("    " + coreDispatcherExpression(row, ambientKeys) + ",");
   }
   lines.push("];", CORE_CALLS_END);
+  return lines.join("\n");
+}
+
+function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
+  const ambientKeys = new Set(
+    declarations.ambientRoutes.map(function (route) {
+      return route.module + "." + route.member;
+    }),
+  );
+  const lines = [
+    CORE_CALL_ROWS_BEGIN,
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(coreSource),
+    "// Source: " + TIR_CORE_CALLS_PATH + " (TIR_CORE_CALL_RECORDS, appended in declaration order)",
+    "// Source SHA-256: " + sha256(tirSource),
+    "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
+    "// CoreModuleExportNames is the separate module/export-name projection.",
+    "@CORE_CALLS :: [CoreCallRecord]{",
+  ];
+  for (const row of declarations.dispatcherRows) {
+    const expression = coreDispatcherExpression(row, ambientKeys);
+    lines.push(
+      "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
+    );
+  }
+  const tirRows = rustArrayEntries(tirSource, "const TIR_CORE_CALL_RECORDS");
+  for (const row of tirRows) {
+    lines.push(
+      "    " + translateCoreCallExpression(
+        row.expression,
+        TIR_CORE_CALLS_PATH + " line " + row.sourceLine,
+      ) + ",",
+    );
+  }
+  lines.push(
+    "}",
+    "",
+    "// Module/member/type names follow Core.jet module declaration order.",
+    "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
+  );
+  for (const module of declarations.modules) {
+    const members = module.members.map(function (member) {
+      return jetStringExpression(member);
+    });
+    const typeExports = module.types.map(function (type) {
+      return jetStringExpression(type.name);
+    });
+    lines.push(
+      "    CoreModuleExportNames{module_name: " + jetStringExpression(module.module) +
+      ", members: [String]{" + members.join(", ") +
+      "}, type_exports: [String]{" + typeExports.join(", ") + "}},",
+    );
+  }
+  lines.push("}", CORE_CALL_ROWS_END, "");
   return lines.join("\n");
 }
 
@@ -2110,6 +2681,13 @@ function writeCoreCallTable(source, declarations) {
     generatedCoreCalls(source, declarations),
   ));
 }
+function writeCoreCallRegistry(source, declarations) {
+  const tirSource = read(TIR_CORE_CALLS_PATH);
+  writeFileSync(
+    join(ROOT, CORE_CALL_ROWS_PATH),
+    generatedCoreCallRegistry(source, tirSource, declarations),
+  );
+}
 
 function writeRingDependencyTable(source, declarations) {
   const path = join(ROOT, RING_LAYER_PATH);
@@ -2120,6 +2698,14 @@ function writeRingDependencyTable(source, declarations) {
     "// END GENERATED CORE DEPENDENCIES",
     generatedRingDependencies(source, declarations),
   ));
+}
+function validateCoreCallRegistry(source, declarations) {
+  const tirSource = read(TIR_CORE_CALLS_PATH);
+  const expected = generatedCoreCallRegistry(source, tirSource, declarations);
+  if (!existsSync(join(ROOT, CORE_CALL_ROWS_PATH)) ||
+      read(CORE_CALL_ROWS_PATH) !== expected) {
+    throw new Error("CoreCallRows.jet is stale; run gen-core-tables.mjs --write-core-call-registry");
+  }
 }
 
 function validateGeneratedViews(source, declarations) {
@@ -2168,6 +2754,7 @@ function validateGeneratedViews(source, declarations) {
   if (actualEncoding !== expectedEncoding) {
     throw new Error("EncodingTypes.rs is stale; run --write to regenerate from Core.jet");
   }
+  validateCoreCallRegistry(source, declarations);
 }
 
 function writeCoreViews() {
@@ -2177,8 +2764,23 @@ function writeCoreViews() {
   writeRingDependencyTable(source, declarations);
   writeEncodingFormatTable(source, declarations);
   writeCoreCallTable(source, declarations);
-  process.stdout.write("wrote generated Core views and dispatcher\n");
+  writeCoreCallRegistry(source, declarations);
+  process.stdout.write("wrote generated Core views, dispatcher, and Jet CoreCall registry\n");
   return { source, declarations };
+}
+function writeCoreCallRegistryOnly() {
+  const source = read(CORE_SOURCE_PATH);
+  const declarations = coreSourceFacts();
+  writeCoreCallRegistry(source, declarations);
+  // Keep this writer scoped to CoreCallRows while retaining the complete
+  // source-consistency gate before accepting the generated view.
+  buildLedger();
+  process.stdout.write("wrote Jet CoreCall registry view; Core surface consistency checks passed\n");
+}
+
+function checkCoreCallRegistryOnly() {
+  buildLedger();
+  process.stdout.write("Jet CoreCall registry view and Core surface consistency checks are current\n");
 }
 
 
@@ -2466,7 +3068,7 @@ function collectionInventory() {
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
-  // D-URL1: Url/Mime methods live in the same file (url_mime_method_return).
+  // D-URL1: URL/MIME methods live in the same file (url_mime_method_return).
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
@@ -5342,6 +5944,8 @@ export {
   writeRingDependencyTable,
   writeCoreCallTable,
   writeCoreViews,
+  writeCoreCallRegistryOnly,
+  checkCoreCallRegistryOnly,
   generatedEncodingFormats,
   writeEncodingFormatTable,
 };
@@ -5349,11 +5953,13 @@ export {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const args = process.argv.slice(2);
   try {
-    if (args.includes("--write")) write();
+    if (args.includes("--write-core-call-registry")) writeCoreCallRegistryOnly();
+    else if (args.includes("--check-core-call-registry")) checkCoreCallRegistryOnly();
+    else if (args.includes("--write")) write();
     else if (args.includes("--check")) check();
     else if (args.includes("--core-api-release-check")) coreApiReleaseCheck();
     else if (args.includes("--hostile-fixtures")) hostileFixtures();
-    else throw new Error("usage: check-core-surface-ledger.mjs --write|--check|--core-api-release-check|--hostile-fixtures");
+    else throw new Error("usage: check-core-surface-ledger.mjs --write|--check|--write-core-call-registry|--check-core-call-registry|--core-api-release-check|--hostile-fixtures");
   } catch (error) {
     process.stderr.write(error.message + "\n");
     process.exitCode = 1;

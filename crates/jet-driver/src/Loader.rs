@@ -478,19 +478,22 @@ pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> Prepa
         let next_ref = &next;
         for _ in 0..workers {
             let sender = sender.clone();
+            let terminator_driver = crate::Lexer::terminator_driver();
             let _worker = std::thread::Builder::new()
                 .name("jet-frontend".to_string())
                 .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
                 .spawn_scoped(scope, move || {
-                    crate::run_compiler_work(|| loop {
-                        let index = next_ref.fetch_add(1, Ordering::Relaxed);
-                        let Some((_, source)) = jobs_ref.get(index) else {
-                            break;
-                        };
-                        let prepared = prepare_frontend_module(source);
-                        sender
-                            .send((index, prepared))
-                            .expect("frontend result receiver remains in scope");
+                    crate::Lexer::with_terminator_driver(terminator_driver, || {
+                        crate::run_compiler_work(|| loop {
+                            let index = next_ref.fetch_add(1, Ordering::Relaxed);
+                            let Some((_, source)) = jobs_ref.get(index) else {
+                                break;
+                            };
+                            let prepared = prepare_frontend_module(source);
+                            sender
+                                .send((index, prepared))
+                                .expect("frontend result receiver remains in scope");
+                        });
                     });
                 })
                 .unwrap_or_else(|error| {

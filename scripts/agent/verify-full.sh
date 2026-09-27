@@ -189,14 +189,15 @@ bash "$repo/tools/ci/tower-hygiene-gate.sh"
 # before the Nix-backed stop-line so package selection cannot hide a parity gap.
 node "$repo/scripts/agent/verify-jet-shell-parity.js"
 
-# The repository dogfood test re-enters the real default environment inside a
-# rootless namespace with an empty /nix, then repeats the build and targeted
-# test probes both online and offline. Keep this beside the manifest gate so
-# CI cannot claim shell parity from package-list comparison alone.
+# Live compiler dogfood is deliberately separate from hermetic fixture tests.
+# It downloads real signed closures and builds the compiler in an empty-/nix
+# namespace. The coordinator supplies disk-backed scratch and the shared target.
 if [ "$(uname -s)" = "Linux" ]; then
-  cargo test --test jetpack_dogfood \
+  : "${JETPACK_DOGFOOD_ROOT:?set a fresh bounded disk-backed dogfood root}"
+  : "${JETPACK_DOGFOOD_TARGET_DIR:?set the coordinated shared Cargo target}"
+  timeout --kill-after=30s 1800s cargo test --test jetpack_dogfood \
     jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures \
-    -- --exact --nocapture
+    -- --exact --ignored --nocapture
 fi
 
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"

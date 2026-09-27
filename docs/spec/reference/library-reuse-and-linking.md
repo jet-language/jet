@@ -1,15 +1,16 @@
 # Library reuse and linking
 
-This reference defines exact-match dependency reuse and the `Library` output
-boundary. Ratified decisions below are the governing law; current sequencing
-and proof state belong in Tower.
+This reference explains exact-match reuse of compiled dependency work and the
+`Library` output boundary. It is for package authors, build engineers, and
+people integrating a Jet library into another language. The executable
+contracts are the driver implementation in
+[`crates/jet-driver/src/LibraryExport.rs`](../../../crates/jet-driver/src/LibraryExport.rs),
+the code generator in
+[`crates/jet-codegen/src/Codegen/Library.rs`](../../../crates/jet-codegen/src/Codegen/Library.rs),
+and the library tests. Ratified decision IDs below are the durable law; build
+receipts and diagnostics are the operational proof.
 
-Vocabulary: [Jet vocabulary](../vocabulary.md).
-
-## Scope
-
-This reference covers reuse of compiled dependency work and the `Library`
-output boundary. Both are governed by the ratified decisions below.
+## Vocabulary and scope
 
 - **Artifact** — a file a build produces and a later build can reuse.
 - **Sealed package object** — one dependency compiled once, stored under a key,
@@ -17,197 +18,173 @@ output boundary. Both are governed by the ratified decisions below.
 - **Artifact identity** — the exact key. It covers package sources, dependency
   artifact digests, compiler identity, target, and profile.
 - **ABI** (application binary interface) — the fixed byte layout and calling
-  rules two separately compiled programs must agree on to link.
+  rules separately compiled programs must agree on to link.
 - **Public stable ABI** — a promise that this layout never breaks, so a library
-  compiled years ago still links today.
-- **Version-keyed reuse** — no layout promise at all. Two artifacts link only
-  when their keys match exactly, so layout can change freely between versions.
+  compiled with an old version remains linkable under that stable promise.
+- **Version-keyed reuse** — no layout promise. Two artifacts link only when
+  their keys match exactly, so layout may change between compiler versions.
 - **Static link** — the library's code is copied into the program at build time.
 - **Dynamic load** — the program opens the library file while it runs.
 
+## Version-keyed reuse
 
-## Ratified law: version-keyed reuse, no public ABI
+**D-LIB-REUSE1=B** is the governing rule. Each dependency compiles into an
+artifact keyed on exact identity. Later builds restore that artifact. A compiler
+identity change invalidates the key and causes the dependency to rebuild; no
+cache path skips parsing, semantic checking, policy, or diagnostics. Generic
+function bodies may travel inside the typed artifact and instantiate at the use
+site, so generic use does not require distributing source.
 
-D-LIB-REUSE1=B is law. It has two halves.
+A Jet program may also load a Jet library at run time. Both sides carry compiler
+identity and the relevant ABI version. A mismatch is a checked error before the
+file is mapped, never an unchecked layout assumption or a crash.
 
-**Half one — sealed package objects.** Each dependency compiles once into an
-artifact keyed on exact identity. Later builds restore it. A compiler upgrade
-empties the cache and rebuilds the world once, automatically. Generic function
-bodies travel inside the artifact as typed intermediate code and instantiate at
-the use site, so generics do not force source distribution. No cache path skips
-parsing, sema, policy, or diagnostics.
+This intentionally differs from a public stable ABI:
 
-**Half two — pinned Jet dynamic libraries.** A Jet program can load a Jet
-library file at run time. Both sides must carry identical compiler identity. A
-mismatch is a checked error before the file is mapped, never a crash.
+| System | Compatibility promise | Jet's boundary |
+| --- | --- | --- |
+| Rust | No stable layout promise for arbitrary crate internals. | Reuse exact artifacts instead of requiring a permanent ABI. |
+| Swift | Public stable ABI for its declared compatibility boundary. | No permanent Jet layout promise without a new owner decision. |
+| Nix | Content identity determines whether an object can be reused. | Apply the same identity principle to sealed package objects. |
 
-### What each neighbour pays, and what Jet takes
+The accepted cost is explicit: an artifact does not survive a compiler identity
+change. It is rebuilt or fetched again. Correctness never depends on layout
+luck.
 
-| | Promise | Cost | Jet's position |
-|---|---|---|---|
-| **Rust** | none | every project recompiles every dependency from source; clean builds and CI pay full price | Jet refuses the recompile tax. Version-keyed reuse gets the speed without the promise. |
-| **Swift** | public stable ABI since Swift 5 | permanent tax: resilient public types pay indirection forever, and layout choices are frozen before the language settles | Jet refuses the promise. Greenfield law already forbids a compatibility baseline until the owner declares one. |
-| **Nix** | none; identity does the work | a changed input rebuilds | Jet copies this directly. The ratified store already works this way. |
+## Cache tiers and invalidation
 
-The accepted loss is stated in the ratified tradeoff: **no artifact survives a
-compiler upgrade.** Every upgrade rebuilds or re-downloads once. Correctness
-never depends on layout luck.
+Sealed objects use the existing cache tiers rather than introducing a second
+reuse protocol:
 
-## (a) Reuse model — cache tiers
+- **Local** — the machine's own store; the first build fills it and the next
+  matching build restores it.
+- **Shared** — a configured store whose writer authority and namespace policy
+  still apply.
+- **Remote** — a content-addressed mirror; a hit is usable only when its
+  identity and receipt match the requested object.
 
-No new law is needed here. The tiers already exist in ratified jetpack
-decisions; sealed package objects are simply another object kind flowing
-through them.
+`D-JPK-CACHEAUTH1=D` remains the writer-authority rule: shared namespaces accept
+only objects with the required provenance. `D-JPK-REMOTE1=C` remains the
+remote-read rule: a remote object is a candidate, not a reason to skip local
+validation. `D-JPK-STORE1=A` keeps store identity separate from package source
+identity.
 
-- **Local** — the machine's own store. First build fills it; the second build
-  restores.
-- **Team** — a bound mirror. `jet cache bind` maps roles to ordered endpoints
-  with typed credential providers (D-JPK-CACHECONFIG1=D). A repository never
-  names an endpoint or a key.
-- **Public** — further mirrors in the same ordered list. The first hit that
-  verifies digest and signature against the role's trust roots wins, wherever it
-  came from. Location grants no trust.
+A restored package object is a link-and-restore layer. It complements module
+semantic dirty sets: restoring an unchanged dependency never skips checking the
+package being edited. The same identity and restore path serve `jet build`,
+`jet run`, and `jet dev`; the lens changes how the current package is compiled,
+not which dependency object is trusted.
 
-Two ratified rules carry over unchanged and must not be re-encoded for this
-artifact kind:
+## The `Library` output boundary
 
-- **Writer authority** (D-JPK-CACHEAUTH1=D): shared namespaces accept only
-  allowlisted builders, every upload carries signed provenance, and consumers
-  re-verify on every hit.
-- **Unreproducible outputs** (D-JPK-REPROCACHE1=D): divergent bytes land in an
-  untrusted namespace and taint anything downstream that opts into them.
+`Library` is the single output kind for the three audiences below. Its fields
+select the artifacts a build emits (**D-LIB-NAME1=A**); a new output kind is not
+needed.
 
-Worked example. Priya's three services share twelve packages.
+### Jet calls Jet
 
-```
-$ jet build                 # first machine, cold
-  http 2.1: compile (1.8s)
-  json 1.4: compile (1.1s)
-  flightdeck: compile + link (3.1s)
+Sealed package objects are linked statically. There is no public ABI and no
+foreign export surface. This is the **D-LIB-REUSE1=B** case.
 
-$ jet build                 # her teammate, same team mirror
-  http 2.1, json 1.4: restored from cache (0.2s)
-  flightdeck: compile + link (3.1s)
+### Another language calls Jet
 
-$ jet build                 # after upgrading the compiler
-  cache empty for Jet 1.4.2 — rebuilding dependencies once
-```
+Under **D-LIB-EXPORT1=C**, a `Library` build can produce a native static or
+shared library, a C header, and generated bindings for each language named by
+the package. The entry module's `pub` items form the exported surface. The
+API-freeze check is the single source for the header, bindings, and version
+check. Supported binding names are selected by the library backend rather than
+invented by a host build.
 
-**Relation to incremental compilation.** Sealed objects are the link and restore
-layer. They complement module-level semantic dirty sets: restoring a package
-never skips checking the package being edited.
-
-**Relation to the two lenses.** I9 permits no tier difference. The same artifact
-identity and the same restore path serve `jet build`, `jet run`, and `jet dev`.
-The lens changes how the current package is compiled, never which dependency
-work is reused.
-
-## (b) What Jet hands to the world
-
-Three audiences, one output kind. `Library` covers all of them, and fields on
-it say which artifacts the build produces (D-LIB-NAME1=A). No new output kind
-enters the ratified closed set.
-
-**Jet calls Jet.** Sealed package objects, linked statically. No ABI and no
-export surface. Already covered by D-LIB-REUSE1=B.
-
-**Another language calls Jet** (D-LIB-EXPORT1=C). `jet build` produces a static
-library, a shared library, a C header, and a generated binding file for each
-language the package names. The exported surface is the entry module's `pub`
-items, frozen by `Sema::ApiFreeze`, so a breaking change is a diagnostic. The
-same frozen surface is the single source for the header, the bindings, and the
-version check. This mirrors the inbound binder direction (D-FFI-UNIFY1=A,
-D-FFI-PY1=A) rather than adding a second mechanism.
+A package declaration has the following shape (the exact output path is chosen
+by the build):
 
 ```jet
 # package.jet
 name: "flightlog"
-outputs: .{
-  core: .Library.{ native: true, entry: Flightlog, bindings: [c, python, swift] }
+outputs: {
+    core: .Library{
+        native: true,
+        entry: Flightlog,
+        bindings: [c, python, swift],
+    },
 }
 ```
 
-```
-$ jet build
-  built .jet/build/libflightlog.so, .jet/build/libflightlog.a, .jet/build/flightlog.h
-  built .jet/build/bindings/flightlog.py, .jet/build/bindings/Flightlog.swift
-```
+The generated native boundary owns its ownership rules. An exported surface
+states who frees a returned buffer and what a foreign caller may hold across
+calls; semantic checking rejects an incompatible boundary. A C calling
+convention at this edge does not make Jet's internal layout stable.
 
-Jet owns the ownership rules at that boundary. The exported surface states who
-frees a returned buffer and what a foreign caller may hold across calls, and
-sema checks it (I3).
+### A Jet program loads Jet at run time
 
-**A Jet program loads Jet at run time** (D-LIB-DYNTRUST1=A). A `Library` marked
-loadable builds a `.jetlib` file pinned to one compiler identity. Its header
-also records the host-native target, ABI version, Library name, exact checked
-top-level `pub fn` export table, and payload length. The loaded library
-declares its effects like any package. The host states its grant at the load
-site, and a library asking for more is refused before it is mapped. The shared
-Prelude loader verifies every declared symbol, maps through the platform
-`dlopen`/`LoadLibraryW` bridge, and drops the handle before deleting its staged
-payload; JIT and interpreter teardown release their load tables.
+Under **D-LIB-DYNTRUST1=A**, a loadable `Library` produces a `.jetlib` file
+pinned to one compiler identity. Its header records the host-native target, ABI
+version, library name, checked top-level `pub fn` export table, and payload
+length. The loaded library declares its effects like any package; the host
+states a grant at the load site. A library asking for more is refused before it
+is mapped.
+
+The canonical Jet-side loader is:
 
 ```jet
-# the mod declares what it needs
-effects: .{ read: ["./mods/f16"] }
+use core.mod as library
 
-# the host grants a narrower or equal set
-mod := Mod.load("./mods/f16.jetlib", grant: .{ read: ["./mods"] })
+loaded :: library.load(
+    ".jet/build/loadable.jetlib",
+    grant: { read: [".jet/build"] },
+)
 ```
 
-The compiler already proves a package cannot use an effect it did not declare,
-so that declaration is enforceable rather than advisory. This is why a loaded
-native library needs no sandbox. The sandboxed wasm plugin keeps its own job:
-code the host author did not compile and does not trust.
+The loader verifies declared symbols, maps through the platform bridge, and
+releases the handle before deleting staged payload. JIT and interpreter
+teardown release their load tables. The grant is explicit: loading a package
+does not silently grant arbitrary filesystem or process access.
 
-## (c) ABI stance
+## ABI stance
 
-Jet makes **no public stable ABI promise**, by ratified decision. Reuse is
-exact-match only.
+Jet makes **no public stable ABI promise** by ratified decision. Reuse is
+exact-match only. The native export under **D-LIB-EXPORT1=C** uses the C calling
+convention at the edge, but promises nothing about Jet's internal type layout
+across compiler versions.
 
-The native export under D-LIB-EXPORT1=C does not change this. A C-facing
-boundary uses the C calling convention, which C froze decades ago. Jet borrows
-that convention at the edge and promises nothing about its own internal layout.
-The promise Jet refuses is the Swift-style one: that *Jet's own* types and calls
-keep their layout across compiler versions.
-
-Practical consequences to enforce:
+Enforce these consequences:
 
 - A compiled Jet artifact records compiler identity. A mismatch is refused with
   a registered diagnostic before anything is linked or mapped.
-- No closed-source Jet package can be shipped as a binary that outlives a
-  compiler release. That is the intended outcome, not a gap to fix later.
-- Any future request for a stable Jet ABI needs a fresh owner decision, because
-  it also needs an explicit compatibility baseline under greenfield law.
+- A closed-source Jet package cannot be treated as a binary that outlives the
+  compiler identity recorded in it.
+- A request for a stable Jet ABI needs a fresh owner decision and an explicit
+  compatibility baseline under greenfield law.
 
-## (d) Both passes
+## Beginner and expert paths
 
-**Beginner.** Nothing is typed and nothing is configured. The first build
-compiles; the second build is fast. A compiler upgrade prints one line saying
-the dependencies rebuild once. There is no cache flag to learn, no clean step to
-remember, and no stale-artifact failure mode to debug. When an artifact cannot
-be trusted, it is rebuilt silently rather than offered with a warning.
+**Beginner:** the first build compiles and the next matching build restores
+work. A compiler identity change rebuilds dependencies. No cache flag or clean
+step is required, and an untrusted artifact is rebuilt rather than offered with
+a warning.
 
-**Expert.** Everything is inspectable and controllable:
+**Expert:** reuse remains inspectable and controllable:
 
 - `jet cache bind` sets mirror order, roles, and credential providers.
-- `jet build` prints the namespace of every cache write.
-- `jet explain --lens cache` states why each hit was trusted or refused.
+- `jet build` prints the namespace of each cache write.
+- `jet explain --lens cache` explains why a hit was trusted or refused.
 - `jet prove --lens reproducibility` names the first differing path between two
   builders.
-- `--offline` beats every mirror.
-- Exporting a library artifact is opt-in and declared in the package, never a
+- `--offline` takes precedence over mirrors.
+- Exporting a library is opt-in and declared in the package, never an accidental
   side effect of building.
-- The load site names its grant, so a reader of the host sees what a loaded
-  library may do.
+- The load site names its grant, so the host code shows what the library may do.
 
 ## Ratified answers
 
 | Decision | Outcome |
 |---|---|
-| **D-LIB-REUSE1=B** | Sealed package objects, plus pinned Jet libraries loaded at run time. No public stable ABI. |
-| **D-LIB-EXPORT1=C** | `Library` also emits a native static and shared library, a C header, and generated bindings per named language. |
-| **D-LIB-DYNTRUST1=A** | A loaded library declares its effects; the host grants a set at the load site; anything more is refused before mapping. |
-| **D-LIB-NAME1=A** | A field on the ratified `Library` output, not a new output kind. Loadable files use the `.jetlib` suffix. |
-| **D-LIB-CALLGRANT1=A** | `Mod.load(path, grant: .{ ... })?` keeps the grant at the load site; loaded exports are typed members such as `mod.on_tick(dt)`. |
+| **D-LIB-REUSE1=B** | Sealed package objects, plus pinned Jet libraries loaded at run time; no public stable ABI. |
+| **D-LIB-EXPORT1=C** | `Library` emits native static/shared output, a C header, and generated bindings for each named language. |
+| **D-LIB-DYNTRUST1=A** | A loaded library declares effects; the host grants a set at the load site; anything more is refused before mapping. |
+| **D-LIB-NAME1=A** | `Library` is the ratified output field, not a new output kind; loadable files use `.jetlib`. |
+| **D-LIB-CALLGRANT1=A** | `library.load("./mods/f16.jetlib", grant: { read: ["./mods"] })?` keeps the grant at the load site; loaded exports are typed members such as `library.on_tick(dt)`. |
 
+The implementation and its tests are authoritative for artifact names and
+backend-specific files. This page defines the compatibility and trust rules,
+not a promise that an arbitrary host toolchain can consume every binding.

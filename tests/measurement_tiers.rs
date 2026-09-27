@@ -106,10 +106,10 @@ fn measurement_comptime_matches_the_known_result() {
         return;
     }
     let source = r#"
-@folded :: measurement(12.0, uncertainty: 0.1) + measurement(3.0, uncertainty: 0.2)
+@FOLDED :: measurement(12.0, uncertainty: 0.1) + measurement(3.0, uncertainty: 0.2)
 
 fn run() {
-    print(@folded)
+    print(@FOLDED)
 }
 "#;
     let (code, stdout, stderr) = tir_support::build_and_run_full(

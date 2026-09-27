@@ -2133,7 +2133,10 @@ pub struct JetRuntimeDiagnostic {
 /// One active runtime row projected into a standalone Prelude. The host
 /// wrapper below adapts Foundation's RegistryRow to this self-contained shape;
 /// AOT and Wasm emit the same shape from the active Registry rows.
-pub use crate::RuntimeDiagnosticCore::{JetRuntimeDiagnosticRow, jet_runtime_stop_has_context};
+pub use crate::RuntimeDiagnosticCore::{
+    JetRequireEqMessage, JetRuntimeDiagnosticRow, jet_require_eq_message,
+    jet_require_message, jet_runtime_stop_has_context,
+};
 use crate::RuntimeDiagnosticCore::{
     JetRuntimeStopContext, jet_runtime_stop_fields, jet_runtime_stop_status,
     jet_write_diagnostic_template, jet_write_runtime_stop, jet_write_sentence_case,
@@ -2278,6 +2281,7 @@ pub fn jet_loop_stride_message() -> &'static str {
 // shared limit below the smallest native worker stack so it can report the
 // stop before the host stack aborts.
 pub const JET_RUNTIME_STACK_LIMIT: usize = 1024;
+
 
 
 /// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.

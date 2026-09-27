@@ -57,6 +57,12 @@ pub struct CacheVerification {
 
 impl CacheVerification {
     pub fn trusted(self) -> bool {
+        self.admission_trusted() && self.closure
+    }
+
+    /// Certify the recorded output and producer, not permission to consume an
+    /// incomplete closure. Repair must re-establish `trusted()` before reuse.
+    pub(super) fn admission_trusted(self) -> bool {
         self.output_exists
             && self.output_digest
             && self.source
@@ -64,7 +70,6 @@ impl CacheVerification {
             && self.platform
             && self.policy
             && (self.signature_verified || self.unsigned_local_allowed)
-            && self.closure
     }
 }
 
@@ -108,7 +113,8 @@ pub(crate) fn verify_cache_entry_with_graph(
         && !entry.envelope.provenance.is_empty()
         && !expectation.identity.policy_fingerprint.is_empty()
         && entry.cache_identity.policy_fingerprint == expectation.identity.policy_fingerprint
-        && producer_authority_verified(roots, entry, expectation);
+        && producer_authority_verified(roots, entry, expectation)
+        && graph.is_some_and(|graph| Closure::entry_record_store_proof(graph, entry));
     let signature_verified = !entry.envelope.signature.is_empty()
         && verify_configured_signature(roots, entry, expectation);
     let canonical_local = Path::new(&entry.out)
@@ -124,8 +130,9 @@ pub(crate) fn verify_cache_entry_with_graph(
                 .as_ref()
                 .is_some_and(|path| path == Path::new(&entry.out)));
     let closure = output_exists
+        && policy
         && closure_is_reachable(roots, entry)
-        && graph.is_some_and(|graph| Closure::entry_closure_store_proof(roots, graph, entry));
+        && graph.is_some_and(|graph| Closure::entry_closure_objects_rehash(roots, graph, entry));
     let verification = CacheVerification {
         output_exists,
         output_digest,
@@ -1295,7 +1302,7 @@ pub(crate) fn reuse_verified_user_profile_batch(
             else {
                 continue;
             };
-            if !nix_catalog_cache_entry_matches(entry, local_nix_catalog) {
+            if require_entry_catalog_permission(entry, local_nix_catalog).is_err() {
                 continue;
             }
             selected.push(entry.clone());
@@ -1340,6 +1347,7 @@ pub(crate) fn reuse_verified_environment_members(
     roots: &Roots,
     selections: &[EnvironmentSelection],
     expectations: &BTreeMap<String, CacheExpectation>,
+    allow_local_nix_catalog: bool,
 ) -> std::io::Result<Option<Vec<VerifiedRealization>>> {
     if selections.is_empty() || expectations.is_empty() {
         return Ok(None);
@@ -1367,6 +1375,7 @@ pub(crate) fn reuse_verified_environment_members(
             if !valid {
                 continue;
             }
+            require_entry_catalog_permission(entry, allow_local_nix_catalog)?;
             // The receipt stamp records external dependency metadata, but the
             // member proof has no prior digest to compare for those auxiliary
             // paths. The primary output is already covered by output_digest;
@@ -1407,30 +1416,6 @@ pub(crate) fn reuse_verified_environment_members(
     })
 }
 
-fn nix_catalog_cache_entry_matches(entry: &StoreEntry, local: bool) -> bool {
-    let expected = if local {
-        "local-unofficial"
-    } else {
-        "official-signed"
-    };
-    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
-        return false;
-    };
-    let relevant = producer.provider == "nix"
-        || (local
-            && producer.provider == "jetpackage"
-            && producer
-                .facts
-                .get("source.kind")
-                .is_some_and(|kind| kind == "local-unofficial-catalog"));
-    if !relevant {
-        return true;
-    }
-    producer
-        .facts
-        .get("nix.index.tier")
-        .is_some_and(|tier| tier == expected)
-}
 
 pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {

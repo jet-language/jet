@@ -874,8 +874,8 @@ module workspace {
     fn members_references_sibling_comptime_const() {
         // Slice A: a `members:` expression can name a top-level `comptime`
         // binding declared in the same file — not just inline literals.
-        let src = "@pkgs :: [\"./packages/hello\", \"./packages/ranker\"]\n\
-                   module workspace {\n    members: pkgs\n}\n";
+        let src = "@PKGS :: [\"./packages/hello\", \"./packages/ranker\"]\n\
+                   module workspace {\n    members: PKGS\n}\n";
         let tmp = tempdir("comptime-list");
         for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
             let dir = tmp.join(relative);
@@ -895,8 +895,8 @@ module workspace {
     #[test]
     fn members_composes_comptime_const_with_string_ops() {
         // A binding can be composed inside the list expression.
-        let src = "@base :: \"./workspace-packages\"\n\
-                   module workspace {\n    members: [\"{base}/a\", \"{base}/b\"]\n}\n";
+        let src = "@BASE :: \"./workspace-packages\"\n\
+                   module workspace {\n    members: [\"{BASE}/a\", \"{BASE}/b\"]\n}\n";
         let tmp = tempdir("comptime-strings");
         for (relative, name) in [("workspace-packages/a", "a"), ("workspace-packages/b", "b")] {
             let dir = tmp.join(relative);

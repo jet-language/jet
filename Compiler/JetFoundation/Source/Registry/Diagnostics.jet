@@ -1,0 +1,277 @@
+use core.text as diagnostic_unicode
+
+pub enum DiagnosticRegistryStatus { Active Retired Reserved }
+
+pub enum DiagnosticRegistryFix {
+    SourceEdit
+    SuggestedSourceEdit
+    CryptoMisuse
+    Replace(from: String, to: String)
+    Remove(text: String)
+    GeneratedMarkerGroup
+    GeneratedMissingArms
+    GeneratedScriptRun
+    GeneratedCallValue
+    GeneratedRedundantTailReturn
+}
+
+// This is a generated view of crates/jet-codegen/src/Prelude/Diagnostics.jet.
+// DiagnosticRows.jet owns the data; this file owns the Source-side projection
+// and canonical construction rules. Human wording at a raise site remains
+// authored input, while moment, severity, row edits, grades, and no-fix facts
+// come from the generated row.
+pub struct DiagnosticRegistryRow {
+    pub code: String
+    pub lint_name: ?String
+    pub stage: String
+    pub severity: Int
+    pub moment: DiagnosticMoment
+    pub status: DiagnosticRegistryStatus
+    pub meaning: String
+    pub what: String
+    pub why: String
+    pub fix: String
+    pub detail: Bool
+    pub structured_fix: ?DiagnosticRegistryFix
+    pub fix_safety: ?DiagnosticFixSafety
+    pub no_fix_reason: ?DiagnosticNoFixReason
+}
+
+
+fn diagnostic_byte_at(source: [U8], index: Int) -> Int {
+    if index < 0 || index >= source.len() -> return -1
+    Int.from_u8(source[index])
+}
+
+fn diagnostic_is_continuation(value: Int) -> Bool {
+    value >= 128 && value <= 191
+}
+
+fn diagnostic_utf8_width(source: [U8], index: Int) -> Int {
+    first := diagnostic_byte_at(source, index)
+    if first < 0 -> return 0
+    if first < 128 -> return 1
+    if first >= 194 && first <= 223 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) -> return 2
+    if first >= 224 && first <= 239 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) -> return 3
+    if first >= 240 && first <= 244 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 3)) -> return 4
+    1
+}
+
+fn diagnostic_scalar_at(source: [U8], index: Int) -> String {
+    width := diagnostic_utf8_width(source, index)
+    if width <= 0 -> return ""
+    out := [U8]{}
+    loop offset in 0..<width {
+        if index + offset >= source.len() -> break
+        out.push(source[index + offset])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool {
+    value := diagnostic_byte_at(source, index)
+    if value < 0 -> return false
+    if value < 128 -> return value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
+    diagnostic_unicode.is_whitespace(diagnostic_scalar_at(source, index))
+}
+
+fn diagnostic_is_sentence_digit(value: Int) -> Bool {
+    value >= 48 && value <= 57
+}
+
+fn diagnostic_sentence_case_line(value: String) -> String {
+    bytes := value.bytes()
+    first := -1
+    token_len := 0
+    is_fn := false
+    preserve := false
+    period := false
+    finished := false
+    index := 0
+    loop index < bytes.len() {
+        width := diagnostic_utf8_width(bytes, index)
+        if finished {
+            index += width
+            next
+        }
+        character := diagnostic_byte_at(bytes, index)
+        if first < 0 {
+            if diagnostic_is_whitespace_at(bytes, index) || character == 42 || character == 126 || character == 95 {
+                index += width
+                next
+            }
+            if character < 97 || character > 122 {
+                finished = true
+                index += width
+                next
+            }
+            first = index
+            token_len = 1
+            is_fn = character == 102
+            index += width
+            next
+        }
+        if diagnostic_is_whitespace_at(bytes, index) || character == 44 || character == 59 || character == 58 || character == 40 || character == 41 || character == 91 || character == 93 || character == 33 {
+            finished = true
+            index += width
+            next
+        }
+        if period -> preserve = true
+        period = character == 46
+        if period {
+            index += width
+            next
+        }
+        token_len += 1
+        if token_len != 2 || character != 110 -> is_fn = false
+        if diagnostic_is_sentence_digit(character) || character == 95 || character == 47 || character == 92 || character == 64 || character == 35 -> preserve = true
+        index += width
+    }
+    if first >= 0 && !preserve && !(is_fn && token_len == 2) {
+        bytes[first] = U8{diagnostic_byte_at(bytes, first) - 32}
+    }
+    String.from_bytes(bytes) ?? value
+}
+
+fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> ?DiagnosticRegistryRow {
+    loop row in rows {
+        if row.code == code -> return Val(row)
+    }
+    None
+}
+
+pub fn diagnostic_registry_row(code: String) -> ?DiagnosticRegistryRow {
+    diagnostic_registry_row_in(@DIAGNOSTIC_ROWS, code)
+}
+
+fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> ?TextEdit {
+    fix :: row.structured_fix ?? return None
+    if fix == {
+        .Replace(_, replacement) -> return Val(TextEdit{span: span, new_text: replacement})
+        .Remove(_) -> return Val(TextEdit{span: span, new_text: ""})
+        else -> None
+    }
+}
+
+fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> ?DiagnosticFixApplicability {
+    if !has_edit -> return None
+    safety :: row.fix_safety ?? return None
+    if safety == DiagnosticFixSafety.Formatting || safety == DiagnosticFixSafety.BehaviorPreserving -> return Val(DiagnosticFixApplicability.Safe)
+    Val(DiagnosticFixApplicability.Suggested)
+}
+
+fn diagnostic_registry_project_row(diagnostic: Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic {
+    if diagnostic.span != None {
+        span :: diagnostic.span ?? return diagnostic
+        edit := diagnostic_registry_static_edit(row, span)
+        if edit != None {
+            diagnostic.edit = edit
+            diagnostic.applicability = diagnostic_registry_applicability(row, true)
+            diagnostic.safety = row.fix_safety
+        }
+    }
+    diagnostic.no_fix_reason = row.no_fix_reason
+    diagnostic
+}
+
+// Canonical Source-side constructor. The raise site owns the filled prose and
+// span; the generated registry row owns protocol metadata and static edits.
+pub fn diagnostic_from_registry(code: String, span: ?Span, what: String, why: String, fix: String) -> Diagnostic {
+    row :: diagnostic_registry_row(code) ?? return panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic := Diagnostic{
+        moment: row.moment,
+        severity: row.severity,
+        code: code,
+        span: span,
+        what: diagnostic_sentence_case_line(what),
+        why: diagnostic_sentence_case_line(why),
+        fix: diagnostic_sentence_case_line(fix),
+    }
+    diagnostic_registry_project_row(diagnostic, row)
+}
+
+// Dynamic Source edits are authorized and graded by the generated row. This
+// preserves the exact replacement/span authored by the producer without
+// deriving safety from human Fix prose.
+pub fn diagnostic_registry_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+    row :: diagnostic_registry_row(diagnostic.code) ?? return panic("diagnostic `{diagnostic.code}` has no generated Source registry row")
+    if diagnostic.no_fix_reason != None || row.no_fix_reason != None -> return panic("diagnostic `{diagnostic.code}` cannot carry an edit and a registry no-fix reason")
+    fix :: row.structured_fix ?? return panic("diagnostic `{diagnostic.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> return panic("diagnostic `{diagnostic.code}` has no Source edit registry channel")
+    diagnostic.edit = Val(edit)
+    diagnostic.applicability = diagnostic_registry_applicability(row, true)
+    diagnostic.safety = row.fix_safety
+    diagnostic
+}
+
+fn diagnostic_registry_is_source_edit(fix: DiagnosticRegistryFix) -> Bool {
+    if fix == {.SourceEdit | .SuggestedSourceEdit -> true else -> false}
+}
+
+fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool {
+    if fix == {
+        .GeneratedMarkerGroup
+        | .GeneratedMissingArms
+        | .GeneratedScriptRun
+        | .GeneratedCallValue
+        | .GeneratedRedundantTailReturn -> true
+        else -> false
+    }
+}
+
+fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool {
+    safety == DiagnosticFixSafety.Formatting || safety == DiagnosticFixSafety.BehaviorPreserving
+}
+
+pub fn diagnostic_registry_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
+    row :: diagnostic_registry_row(diagnostic.code) ?? return panic("diagnostic `{diagnostic.code}` has no generated Source registry row")
+    if diagnostic.no_fix_reason != None || row.no_fix_reason != None -> return panic("diagnostic `{diagnostic.code}` cannot carry an edit and a registry no-fix reason")
+    fix :: row.structured_fix ?? return panic("diagnostic `{diagnostic.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> return panic("diagnostic `{diagnostic.code}` has no Source edit registry channel")
+    if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> return panic("safe diagnostic edit `{diagnostic.code}` must have an auto-applicable safety grade")
+    diagnostic.edit = Val(edit)
+    diagnostic.applicability = Val(applicability)
+    diagnostic.safety = Val(safety)
+    diagnostic
+}
+
+pub fn diagnostic_registry_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+    row :: diagnostic_registry_row(diagnostic.code) ?? return panic("diagnostic `{diagnostic.code}` has no generated Source registry row")
+    if diagnostic.no_fix_reason != None || row.no_fix_reason != None -> return panic("diagnostic `{diagnostic.code}` cannot carry an edit and a registry no-fix reason")
+    fix :: row.structured_fix ?? return panic("diagnostic `{diagnostic.code}` has no registry-owned generated edit channel")
+    if !diagnostic_registry_is_generated_edit(fix) -> return panic("diagnostic `{diagnostic.code}` has no generated structured edit registry channel")
+    diagnostic.edit = Val(edit)
+    diagnostic.applicability = diagnostic_registry_applicability(row, true)
+    diagnostic.safety = row.fix_safety
+    diagnostic
+}
+
+pub fn diagnostic_registry_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic {
+    if diagnostic.edit != None -> return panic("diagnostic `{diagnostic.code}` already carries an edit")
+    row :: diagnostic_registry_row(diagnostic.code) ?? return panic("diagnostic `{diagnostic.code}` has no generated Source registry row")
+    if row.no_fix_reason == None -> return panic("diagnostic `{diagnostic.code}` has no explanatory row reason to replace")
+    diagnostic.no_fix_reason = None
+    diagnostic.applicability = Val(DiagnosticFixApplicability.Suggested)
+    diagnostic.safety = Val(DiagnosticFixSafety.NeedsReview)
+    diagnostic.edit = Val(TextEdit{span: span, new_text: new_text})
+    diagnostic
+}
+
+pub fn diagnostic_registry_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+    if diagnostic.no_fix_reason != None -> return panic("diagnostic `{diagnostic.code}` cannot carry an edit and no-fix reason")
+    if diagnostic.edit == None || diagnostic.applicability == None || diagnostic.safety == None -> return panic("diagnostic `{diagnostic.code}` needs a graded primary edit before an alternative")
+    if diagnostic.structured == None {
+        diagnostic.structured = Val(DiagnosticStructured.SuggestedEdits([TextEdit]{edit}))
+        return diagnostic
+    }
+    structured :: diagnostic.structured ?? return diagnostic
+    if structured == {
+        .SuggestedEdits(edits) -> {
+            edits.push(edit)
+            diagnostic.structured = Val(DiagnosticStructured.SuggestedEdits(edits))
+            diagnostic
+        }
+        else -> return panic("diagnostic `{diagnostic.code}` cannot carry source edit alternatives with another structured payload")
+    }
+}
+

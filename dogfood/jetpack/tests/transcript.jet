@@ -215,6 +215,12 @@ fn phase1_root() String !TranscriptError -> {
     return Ok(Path.from("dogfood").join("jetpack").join("tests").join("fixtures").join("phase1").to_string())
 }
 
+fn stage_phase1_lock(fixture: String, project: String) -> {
+    source_lock :: Path.from(fixture).join("fixture-state").join("lock").to_string()
+    staged_lock :: Path.from(project).join(".jet").join("lock").to_string()
+    fs.copy2(source_lock, staged_lock) ?? panic("phase1 lock fixture staging failed")
+}
+
 fn phase1_transcript_path() String -> {
     local :: Path.from("tests").join("transcripts").join("phase1.json")
     if fs.exists(~local) -> return local.to_string()
@@ -480,6 +486,7 @@ fn maybe_compare_oracle(
     fixture :: phase1_root() ?? panic("lock fixture root cannot be resolved")
     project :: Path.from(temp.path).join("project")
     fs.copy_dir(fixture, project) ?? panic("lock fixture copy failed")
+    stage_phase1_lock(fixture, project.to_string())
     lock_path :: project.join(".jet").join("lock")
     fs.write(~lock_path, "version = 2\n") ?? panic("malformed lock write failed")
 
@@ -497,6 +504,7 @@ fn maybe_compare_oracle(
     fixture :: phase1_root() ?? panic("plan facts fixture root cannot be resolved")
     project :: Path.from(temp.path).join("project")
     fs.copy_dir(fixture, project) ?? panic("plan facts fixture copy failed")
+    stage_phase1_lock(fixture, project.to_string())
     package_path :: project.join("package.jet")
     lock_path :: project.join(".jet").join("lock")
     baseline :: plan.render(project.to_string(), "dogfood") ?? panic("baseline plan failed")

@@ -1,10 +1,10 @@
 // core.web.table — typed rows, sorting, filtering, and paging.
-c_max_table_page_size :: 4096
+C_MAX_TABLE_PAGE_SIZE :: 4096
 
-c_max_table_columns :: 256
+C_MAX_TABLE_COLUMNS :: 256
 
-c_max_table_rows :: 1048576
-c_max_table_index :: 2147483647
+C_MAX_TABLE_ROWS :: 1048576
+C_MAX_TABLE_INDEX :: 2147483647
 
 
 
@@ -87,7 +87,7 @@ pub fn column<T>(name: String, label: String, project: ^fn(T) -> String) -> WebT
 }
 
 pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T> {
-    if col.name.len() == 0 || table.columns.len() >= c_max_table_columns -> return ~table
+    if col.name.len() == 0 || table.columns.len() >= C_MAX_TABLE_COLUMNS -> return ~table
     loop existing in table.columns {
         if existing.name == col.name -> return ~table
     }
@@ -99,7 +99,7 @@ pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T
 
 pub fn with_server_page<T>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T>) -> WebTable<T> {
     page :: fetch(table.state)
-    if page.index < 0 || page.index > c_max_table_index || page.size < 1 || page.size > c_max_table_page_size || page.total < 0 || page.total > c_max_table_rows || page.rows.len() > c_max_table_rows || page.rows.len() > page.total {
+    if page.index < 0 || page.index > C_MAX_TABLE_INDEX || page.size < 1 || page.size > C_MAX_TABLE_PAGE_SIZE || page.total < 0 || page.total > C_MAX_TABLE_ROWS || page.rows.len() > C_MAX_TABLE_ROWS || page.rows.len() > page.total {
         return ~table
     }
     table.rows = page.rows
@@ -122,7 +122,7 @@ pub fn keys<T>(table: WebTable<T>) -> [String] !WebTableError {
 }
 
 pub fn page_state<T>(table: WebTable<T>) -> WebTablePage<T> !WebTableError {
-    if table.state.page_size < 1 || table.state.page_size > c_max_table_page_size || table.state.page_index < 0 || table.state.page_index > c_max_table_index -> return Err(WebTableError.Invalid)
+    if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE || table.state.page_index < 0 || table.state.page_index > C_MAX_TABLE_INDEX -> return Err(WebTableError.Invalid)
     rows := projected_rows<T>(table)
     start := table.state.page_index * table.state.page_size
     if start > rows.len() -> start = rows.len()
@@ -162,7 +162,7 @@ pub fn filter<T>(rows: [T], predicate: fn(T) -> Bool) -> [T] {
 }
 
 pub fn page<T>(rows: [T], index: Int, size: Int) -> WebTablePage<T> !WebTableError {
-    if size < 1 || size > c_max_table_page_size || index < 0 || index > c_max_table_index -> return Err(WebTableError.Invalid)
+    if size < 1 || size > C_MAX_TABLE_PAGE_SIZE || index < 0 || index > C_MAX_TABLE_INDEX -> return Err(WebTableError.Invalid)
     start := index * size
     if start > rows.len() -> start = rows.len()
     finish := start + size
@@ -187,17 +187,17 @@ pub fn filter_by<T>(table: &WebTable<T>, name: String, value: String) -> WebTabl
 pub fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) -> WebTable<T> {
     i := index
     if i < 0 -> i = 0
-    if i > c_max_table_index -> i = c_max_table_index
+    if i > C_MAX_TABLE_INDEX -> i = C_MAX_TABLE_INDEX
     n := size
     if n < 1 -> n = 25
-    if n > c_max_table_page_size -> n = c_max_table_page_size
+    if n > C_MAX_TABLE_PAGE_SIZE -> n = C_MAX_TABLE_PAGE_SIZE
     table.state.page_index = i
     table.state.page_size = n
     ~table
 }
 
 pub fn set_rows<T>(table: &WebTable<T>, rows: [T]) !WebTableError {
-    if rows.len() > c_max_table_rows -> return Err(WebTableError.Invalid)
+    if rows.len() > C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
     keyed := [WebTableRow<T>]{ }
     loop i in 0..<rows.len() -> keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
     table.rows = keyed
@@ -266,7 +266,7 @@ pub fn selected_rows<T>(table: WebTable<T>) -> [WebTableRow<T>] !WebTableError {
 }
 
 pub fn insert_row<T>(table: &WebTable<T>, row: T) String !WebTableError {
-    if table.rows.len() >= c_max_table_rows -> return Err(WebTableError.Invalid)
+    if table.rows.len() >= C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
     key := "{table.rows.len()}"
     loop {
         if !has_key<T>(table.rows, key) -> break
@@ -322,7 +322,7 @@ pub fn remove_row<T>(table: &WebTable<T>, key: String) -> T !WebTableError {
         visible := projected_rows<T>(~table)
         page_size := table.state.page_size
         if page_size < 1 -> page_size = 25
-        if page_size > c_max_table_page_size -> page_size = c_max_table_page_size
+        if page_size > C_MAX_TABLE_PAGE_SIZE -> page_size = C_MAX_TABLE_PAGE_SIZE
         table.state.page_size = page_size
         pages := (visible.len() + page_size - 1) /% page_size
         if pages < 1 -> pages = 1
@@ -338,7 +338,7 @@ pub fn first_page<T>(table: &WebTable<T>) -> WebTable<T> {
 
 pub fn next_page<T>(table: &WebTable<T>) -> WebTable<T> {
     if table.state.page_size < 1 -> table.state.page_size = 25
-    if table.state.page_size > c_max_table_page_size -> table.state.page_size = c_max_table_page_size
+    if table.state.page_size > C_MAX_TABLE_PAGE_SIZE -> table.state.page_size = C_MAX_TABLE_PAGE_SIZE
     rows := projected_rows<T>(~table)
     pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
@@ -347,7 +347,7 @@ pub fn next_page<T>(table: &WebTable<T>) -> WebTable<T> {
 }
 
 pub fn last_page<T>(table: &WebTable<T>) -> WebTable<T> !WebTableError {
-    if table.state.page_size < 1 || table.state.page_size > c_max_table_page_size -> return Err(WebTableError.Invalid)
+    if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE -> return Err(WebTableError.Invalid)
     rows := projected_rows<T>(~table)
     pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
@@ -363,7 +363,7 @@ pub fn visible_rows<T>(table: WebTable<T>, plan: WebVirtualPlan) -> [WebTableRow
     end := plan.end
     if end < start -> end = start
     if end > projected.len() -> end = projected.len()
-    if end - start > c_max_table_page_size -> end = start + c_max_table_page_size
+    if end - start > C_MAX_TABLE_PAGE_SIZE -> end = start + C_MAX_TABLE_PAGE_SIZE
     if end > projected.len() -> end = projected.len()
     out := [WebTableRow<T>]{ }
     loop i in start..<end -> out.push(projected[i])
@@ -442,7 +442,7 @@ fn parse_columns<T>(text: String) -> [WebTableColumn<T>] {
     out := [WebTableColumn<T>]{ }
     loop raw_name in split_commas(text) {
         name :: trim(~raw_name)
-        if out.len() >= c_max_table_columns -> next
+        if out.len() >= C_MAX_TABLE_COLUMNS -> next
         if name.len() > 0 && name.len() <= 128 && !has_control_text(name) -> out.push(WebTableColumn<T>{name: ~name, label: ~name, project: default_project})
     }
     out

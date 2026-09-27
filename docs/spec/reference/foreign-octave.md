@@ -1,11 +1,17 @@
 # Octave sidecar
 
 Jet can call one-input, one-output matrix functions from an Octave `.m` file.
-This is the `octave.*` binder from `D-FFI-OCTAVE1`.
+This page is for numerical-code authors using the `octave.*` binder and for
+reviewers checking the foreign-process boundary. The executable binder is
+[`Source/CmdDevTools.rs`](../../../Source/CmdDevTools.rs), with input rules and
+artifact generation in
+[`crates/jet-pkg-model/src/OctaveBind.rs`](../../../crates/jet-pkg-model/src/OctaveBind.rs).
+The boundary is identified by `D-FFI-OCTAVE1=A`.
 
 ## Bind a script
 
-Write a function with one matrix input and one matrix output:
+The source must define a top-level function with exactly one matrix input and
+one matrix output:
 
 ```octave
 function result = scale(input)
@@ -13,20 +19,38 @@ function result = scale(input)
 end
 ```
 
-Generate the checked binding cache:
+Generate the checked binding cache with the explicit binder command:
 
-```text
+```sh
 jet inspect bind octave scale.m --pkg scale
 ```
 
-The command writes `.jet/bindings/octave/scale.jet`, the static archive, and
-the binding provenance file. `jet-env full` provisions `octave-cli` and the
-POSIX process supervisor.
+The accepted usage is:
+
+```text
+jet inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]
+```
+
+Without `-o`, the binder writes the package's default binding module under
+`.jet/bindings/octave/`; with `-o`, it writes the requested Jet source path. It
+also writes a generated C archive and `<lib>.provenance` beside the binding.
+The binder checks the provisioned `octave-cli` (or `octave`), `cc`, and `ar`
+tools and refuses a missing or failing tool rather than evaluating an
+unvalidated script.
+
+The parser rejects multiple outputs, missing arguments, duplicate functions,
+invalid identifiers, and unsupported declarations. It parses the function
+shape; it does not translate arbitrary Octave syntax or claim semantic
+equivalence between the languages.
 
 ## Call the binding
 
-The generated module exposes a `Tensor` call. The adapter accepts rank-two
-tensors and returns a rank-two tensor.
+The generated module supplies a supervised session API and one typed call per
+bound function. Calls carry a rank-two `Tensor` and return a rank-two `Tensor`;
+`OctaveError` covers a missing worker, timeout, cancellation, protocol or
+command failure, shape/width mismatch, and message-limit failure.
+
+A host program can use the generated module in the normal effect-declared loop:
 
 ```jet
 use octave.scale as scale
@@ -42,14 +66,21 @@ fn run() -[FFI.Octave, GPU, IO]> {
 }
 ```
 
-The worker sends shape and data as JSON. It uses column-major order, which
-matches Octave and the Jet `Tensor` wire contract. Jet checks the rank and the
-element count before it constructs the result tensor.
+The generated API's `open`, function calls, `cancel`, and `close` operations
+are all supervised foreign effects. Keep the session alive for the calls and
+close it when ownership ends; a failed worker is represented as `OctaveError`,
+not as an unchecked foreign exception.
 
-Tensor marshalling uses `core.compute`, so callers also declare `GPU`.
+## Wire contract and provenance
 
-The generated API reports `OctaveError` for a missing worker, timeout,
-cancellation, protocol failure, command failure, shape mismatch, width
-mismatch, or message-limit failure. The binder rejects multiple outputs,
-missing arguments, invalid identifiers, and duplicate functions. It does not
-translate unsupported Octave syntax or claim semantic equivalence.
+The worker sends shape and data through a bounded JSON protocol in column-major
+order, matching Octave and the Jet `Tensor` wire contract. Jet checks rank and
+element count before constructing the result tensor. Callers therefore declare
+`GPU` for Tensor marshalling in addition to the Octave and process effects used
+by the session.
+
+The provenance record identifies the `jet-octave-bind-v1` schema, the exact
+script and worker, the selected Octave tool, the archive tool identities,
+`transport=json`, `order=column-major`, `shape=rank-2`, and the bounded session
+limit. The archive and provenance are build inputs: editing the `.m` source or
+changing the provisioned tool identity requires rebinding.

@@ -1,0 +1,532 @@
+// Expression and call AST. Recursive expression types and semantic type
+// annotations are shared across compiler phases; `Type` is JetFoundation's.
+
+pub enum Expr {
+    Str(parts: [StrPart], span: Span)
+    StrMatchLit(parts: [StrMatchPart], span: Span)
+    BinMatchLit(parts: [BinMatchPart], span: Span)
+    Int(value: Int, span: Span, width: ?IntegerWidth, raw: ?String)
+    Float(value: Float, span: Span, is_f32: Bool, raw: ?String)
+    Bool(value: Bool, span: Span)
+    Unit(span: Span)
+    Char(value: String, span: Span)
+    ListLit(elements: [Expr], span: Span)
+    MemberSpread(base: Expr, members: [ExprMember], span: Span)
+    Spread(value: Expr, span: Span)
+    MapLit(entries: [ExprPair], span: Span)
+    Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
+    Slice(base: Expr, start: Expr, end: Expr, range: ?Expr, span: Span)
+    Range(start: Expr, end: Expr, exclusive: Bool, span: Span)
+    Ident(name: String, span: Span)
+    Call(call: Call)
+    Unary(op: UnOp, operand: Expr, span: Span)
+    Binary(op: BinOp, left: Expr, right: Expr, span: Span)
+    CompareChain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span)
+    UnitLit(raw: String, int: ?Int, float: ?Float, suffix: String, suffix_span: Span, span: Span)
+    Deref(value: Expr, span: Span)
+    RawOf(value: Expr, span: Span)
+    Copy(value: Expr, span: Span)
+    Place(value: Expr, access: PlaceAccess, span: Span)
+    Field(base: Expr, member: String, span: Span)
+    OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
+    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: ?String, resolved_ret: ?Type, operator_rhs: ?Type, checked_widen: Bool)
+    StructLit(type_name: String, type_args: [Type], import_ns: ?String, as_trait: ?String, fields: [ExprField], inferred: Bool, span: Span)
+    TypedLit(head: ?Type, body: TypedLitBody, span: Span)
+    EnumLit(type_name: String, variant: String, variant_span: ?Span, args: [EnumLitArg], leading_dot: Bool, span: Span)
+    Tainted(value: Expr, tag: ?String, span: Span)
+    Present(value: Expr, span: Span)
+    Absent(span: Span)
+    Todo(span: Span, expected_type: ?String)
+    NoElse(span: Span)
+    ReduceMarker(name: String, span: Span)
+    PatternTest(subject: Expr, pattern: Pattern, span: Span)
+    Ok(value: Expr, span: Span)
+    Err(value: Expr, span: Span)
+    Try(value: Expr, span: Span, conversion: TryConvert, context: ?Expr)
+    OrFallback(value: Expr, fallback: OrFallback, is_option: Bool, span: Span)
+    If(cond: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span)
+    TupleLit(fields: [TupleField], span: Span, ty: ?Type)
+    Lambda(lambda: Lambda)
+    CallValue(callee: Expr, args: [CallArg], span: Span)
+    PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span)
+    ComptimeName(name: String, span: Span, value: ?CtValue)
+    Paren(value: Expr, span: Span)
+    IncDec(op: IncDecOp, operand: Expr, postfix: Bool, span: Span)
+}
+
+pub struct IntegerWidth {
+    pub signed: Bool
+    pub bits: Int
+}
+
+pub struct ExprField {
+    pub name: String
+    pub name_span: Span
+    pub value: Expr
+}
+
+pub struct ExprMember {
+    pub name: String
+    pub span: Span
+}
+
+pub struct ExprPair {
+    pub key: Expr
+    pub value: Expr
+}
+
+pub struct TupleField {
+    pub name: String
+    pub value: Expr
+}
+
+pub enum EnumLitArg {
+    Positional(value: Expr)
+    Named(label: String, expr: Expr)
+}
+
+pub struct Call {
+    pub name: String
+    pub name_span: Span
+    pub type_args: [Type]
+    pub args: [CallArg]
+    pub resolved_ret: ?Type
+    pub range_checked: Bool
+    pub widen_approx: Bool
+}
+
+pub struct CallArg {
+    pub convention: AccessConvention
+    pub expr: Expr
+    pub span: Span
+    pub flags: CallArgFlags
+    pub label: ?CallLabel
+    pub spread: Bool
+}
+
+pub struct CallLabel {
+    pub name: String
+    pub span: Span
+}
+
+pub struct CallArgFlags {
+    pub implicit_clone: Bool
+    pub shared_auto_clone: Bool
+    pub owned_last_use: Bool
+    pub shared_access_desugar: Bool
+    pub is_trailing_block: Bool
+    pub template_items: ?[DeriveBodyItem]
+    pub c_callback_symbol: Bool
+    pub c_callback_function_key: ?String
+    pub c_callback_managed: Bool
+    pub c_callback_plan_digest: ?String
+    pub c_callback_identity: ?String
+    pub trusted_html: Bool
+    pub source_index: ?Int
+    pub binder_slot: ?Int
+    pub binder_label: ?String
+    pub binder_refs: [BinderRef]
+    pub binder_site: ?Int
+    pub callable_policy: ?CallablePolicyChain
+    pub authority_boundary: Bool
+    pub arithmetic_policy: ?ArithmeticPolicyFact
+}
+
+pub struct BinderRef {
+    pub name: String
+    pub slot: Int
+    pub ty: Type
+}
+
+pub enum MarkerCallArg {
+    Expr(value: Expr)
+    EffectRow(effects: [EffectRowEntry], span: Span)
+}
+
+pub enum BinOp {
+    Add
+    Sub
+    Mul
+    Div
+    FloorDiv
+    Mod
+    Rem
+    Pow
+    BitAnd
+    BitOr
+    BitXor
+    Shl
+    Shr
+    Eq
+    Ne
+    Lt
+    Gt
+    Le
+    Ge
+    Compare
+    And
+    Or
+}
+
+pub enum UnOp {
+    Neg
+    Not
+}
+
+pub enum IncDecOp {
+    Inc
+    Dec
+}
+
+pub enum IndexKind {
+    Unknown
+    List
+    Range
+    FixedListProof
+    Map
+    Lane(name: String)
+    User(name: String)
+    LayoutField(name: String)
+    Pool
+}
+
+pub enum PlaceAccess {
+    Read
+    Write
+}
+
+pub enum TryConvert {
+    NoConversion
+    Never
+    DefaultErr
+    Typed(fn_name: String, source: Type, target: Type)
+    WidenUnion(enum_name: String, tag: String)
+}
+
+pub enum StrPart {
+    Lit(text: String)
+    Interp(expr: Expr, format: StrFormat)
+    Byte(value: U8)
+}
+pub fn ast_empty_call_arg_flags() -> CallArgFlags {
+    CallArgFlags{
+        implicit_clone: false,
+        shared_auto_clone: false,
+        owned_last_use: false,
+        shared_access_desugar: false,
+        is_trailing_block: false,
+        template_items: None,
+        c_callback_symbol: false,
+        c_callback_function_key: None,
+        c_callback_managed: false,
+        c_callback_plan_digest: None,
+        c_callback_identity: None,
+        trusted_html: false,
+        source_index: None,
+        binder_slot: None,
+        binder_label: None,
+        binder_refs: [BinderRef]{},
+        binder_site: None,
+        callable_policy: None,
+        authority_boundary: false,
+        arithmetic_policy: None,
+    }
+}
+
+pub fn ast_empty_lambda_meta() -> LambdaMeta {
+    LambdaMeta{
+        escapes: false,
+        runtime_erased: false,
+        needs_fn_mut: false,
+        mut_captures: [String]{},
+        cloned_captures: [String]{},
+        effect_direct: [String]{},
+        effect_solved: [String]{},
+        effect_call_edges: [String]{},
+        effect_maximal: false,
+        effect_direct_spans: [EffectRowEntry]{},
+        frozen_captures: [String]{},
+        materialized_captures: [String]{},
+        moved_captures: [String]{},
+        collecting_loop: false,
+        collect_item_type: None,
+        result_loop: false,
+        requires_exhaustion_route: false,
+        exhaustion_span: None,
+        exhaustion_route_attached: false,
+        loop_result_type: None,
+        loop_label: None,
+        guard_projection: None,
+        return_view_provenance: None,
+        cell_projection_path: None,
+        fallible_propagation: false,
+        fallible_carrier: None,
+        frame_schedule_explanation: None,
+        frame_schedule: None,
+        frame_schedule_derivation: None,
+    }
+}
+
+pub enum StrFormat {
+    Display
+    Debug
+    Pretty
+    Fixed(digits: Int)
+    Grouped(digits: Int)
+    Hex(digits: Int)
+    Pad(width: Int, fill: String)
+    PadLeft(width: Int, fill: String)
+    Sci(digits: Int)
+    Percent(digits: Int)
+    Bin
+    Oct
+    Unit(format: UnitFormat)
+}
+
+pub enum UnitFormat {
+    Symbol
+    Name
+    Bare
+}
+
+pub struct LambdaParam {
+    pub name: String
+    pub name_span: Span
+    pub ty: ?Type
+    pub ty_span: ?Span
+}
+
+pub enum LambdaBody {
+    Expr(value: Expr)
+    Block(body: [Stmt])
+}
+
+pub struct Lambda {
+    pub take_names: [NamedSpan]
+    pub params: [LambdaParam]
+    pub result_type: ?Type
+    pub error_type: ?Type
+    pub effects: ?[EffectRowEntry]
+    pub body: LambdaBody
+    pub span: Span
+    pub meta: LambdaMeta
+}
+
+pub struct NamedSpan {
+    pub name: String
+    pub span: Span
+}
+
+pub struct LambdaMeta {
+    pub escapes: Bool
+    pub runtime_erased: Bool
+    pub needs_fn_mut: Bool
+    pub mut_captures: [String]
+    pub cloned_captures: [String]
+    pub effect_direct: [String]
+    pub effect_solved: [String]
+    pub effect_call_edges: [String]
+    pub effect_maximal: Bool
+    pub effect_direct_spans: [EffectRowEntry]
+    pub frozen_captures: [String]
+    pub materialized_captures: [String]
+    pub moved_captures: [String]
+    pub collecting_loop: Bool
+    pub collect_item_type: ?Type
+    pub result_loop: Bool
+    pub requires_exhaustion_route: Bool
+    pub exhaustion_span: ?Span
+    pub exhaustion_route_attached: Bool
+    pub loop_result_type: ?Type
+    pub loop_label: ?NamedSpan
+    pub guard_projection: ?[String]
+    pub return_view_provenance: ?ViewProvenanceMap
+    pub cell_projection_path: ?[String]
+    pub fallible_propagation: Bool
+    pub fallible_carrier: ?Type
+    pub frame_schedule_explanation: ?String
+    pub frame_schedule: ?FrameSchedule
+    pub frame_schedule_derivation: ?DerivationRef
+}
+
+pub struct TypedLitBody {
+    pub kind: Int
+    pub fields: [ExprField]
+    pub elements: [Expr]
+    pub entries: [ExprPair]
+    pub value: ?Expr
+    pub byte_text: [ByteTextPart]
+}
+
+pub enum ByteTextPart {
+    Lit(text: String)
+    Byte(value: U8)
+}
+
+pub struct ArithmeticPolicyFact {
+    pub mode: ArithmeticMode
+    pub scope_span: Span
+    pub operation_span: Span
+    pub operation: ?ArithmeticOperation
+}
+
+pub enum ArithmeticMode {
+    Checked
+    Wrapping
+    Saturating
+}
+
+pub enum ArithmeticOperation {
+    Add
+    Sub
+    Mul
+    Neg
+    Pow
+}
+
+pub struct FrameSchedule {
+    pub operations: [FrameOperation]
+    pub dependencies: [FrameDependency]
+    pub transfers: [FrameTransfer]
+    pub reuse: [FrameReuse]
+    pub retentions: [FrameRetention]
+    pub conservative: [String]
+}
+
+pub struct FrameOperation {
+    pub name: String
+    pub source_index: Int
+    pub accesses: [ResourceAccess]
+    pub completion: FrameCompletion
+    pub completion_provider: ?String
+    pub external_effect: Bool
+}
+
+pub struct ResourceAccess {
+    pub resource: ResourceIdentity
+    pub mode: ResourceAccessMode
+    pub region: ResourceRegion
+    pub layout: ?ResourceLayout
+    pub temporary: Bool
+}
+
+pub enum ResourceIdentity {
+    Named(name: String)
+    Unknown
+}
+
+pub enum ResourceAccessMode {
+    Read
+    Write
+    Move
+}
+
+pub enum ResourceRegion {
+    Whole
+    Bytes(start: Int, length: Int)
+    Unknown
+}
+
+pub struct ResourceLayout {
+    pub size: Int
+    pub align: Int
+    pub layout: String
+    pub device: String
+}
+
+pub enum FrameCompletion {
+    Synchronous
+    Pending(token: String)
+    Event(token: String)
+}
+
+pub struct FrameDependency {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub reason: String
+}
+
+pub struct FrameTransfer {
+    pub before: Int
+    pub after: Int
+    pub resource: String
+    pub from_device: String
+    pub to_device: String
+}
+
+pub struct FrameReuse {
+    pub previous_resource: String
+    pub next_resource: String
+    pub previous_last_use: Int
+    pub next_first_use: Int
+    pub legal: Bool
+    pub reason: String
+}
+
+pub struct FrameRetention {
+    pub resource: String
+    pub operation: Int
+    pub owner: String
+    pub completion_token: ?String
+    pub completed: Bool
+}
+
+pub struct DerivationRef {
+    pub id: String
+}
+pub fn expr_span(expr: Expr) -> Span {
+    if expr == {
+        .Str(_, span) -> return span
+        .StrMatchLit(_, span) -> return span
+        .BinMatchLit(_, span) -> return span
+        .Int(_, span, _, _) -> return span
+        .Float(_, span, _, _) -> return span
+        .Bool(_, span) -> return span
+        .Unit(span) -> return span
+        .Char(_, span) -> return span
+        .ListLit(_, span) -> return span
+        .MemberSpread(_, _, span) -> return span
+        .Spread(_, span) -> return span
+        .MapLit(_, span) -> return span
+        .Index(_, _, span, _) -> return span
+        .Slice(_, _, _, _, span) -> return span
+        .Range(_, _, _, span) -> return span
+        .Ident(_, span) -> return span
+        .Call(call) -> return call.name_span
+        .Unary(_, _, span) -> return span
+        .Binary(_, _, _, span) -> return span
+        .CompareChain(_, _, _, span) -> return span
+        .UnitLit(_, _, _, _, _, span) -> return span
+        .Deref(_, span) -> return span
+        .RawOf(_, span) -> return span
+        .Copy(_, span) -> return span
+        .Place(_, _, span) -> return span
+        .Field(_, _, span) -> return span
+        .OptField(_, _, _, _, span) -> return span
+        .MethodCall(_, _, method_span, _, _, _, _, _, _, _) -> return method_span
+        .StructLit(_, _, _, _, _, _, span) -> return span
+        .TypedLit(_, _, span) -> return span
+        .EnumLit(_, _, _, _, _, span) -> return span
+        .Tainted(_, _, span) -> return span
+        .Present(_, span) -> return span
+        .Absent(span) -> return span
+        .Todo(span, _) -> return span
+        .NoElse(span) -> return span
+        .ReduceMarker(_, span) -> return span
+        .PatternTest(_, _, span) -> return span
+        .Ok(_, span) -> return span
+        .Err(_, span) -> return span
+        .Try(_, span, _, _) -> return span
+        .OrFallback(_, _, _, span) -> return span
+        .If(_, _, _, _, _, span) -> return span
+        .TupleLit(_, span, _) -> return span
+        .Lambda(lambda) -> return lambda.span
+        .CallValue(_, _, span) -> return span
+        .PtrFromAddr(_, _, _, _, span) -> return span
+        .ComptimeName(_, span, _) -> return span
+        .Paren(_, span) -> return span
+        .IncDec(_, _, _, span) -> return span
+    }
+    Span{start: 0, end: 0}
+}

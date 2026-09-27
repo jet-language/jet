@@ -385,7 +385,25 @@ fn validate_adapter_hook_producer(
         .facts()
         .get("adapter.build.sandbox")
         .map(String::as_str);
-    if require_current_backend {
+    let producer_policy = producer.facts.get("build.sandbox_policy");
+    let plan_policy = producer.plan.facts().get("adapter.build.sandbox_policy");
+    // Recipe's executor launches children only for Exec steps. Install,
+    // InstallTree and Fetch retain the non-executing run report.
+    let executes = recipe.steps.iter().any(|step| {
+        matches!(step, jet_pkg_model::Recipe::BuildStep::Exec { .. })
+    });
+    if !executes {
+        for (name, expected, actual) in [
+            ("build.sandbox", "non-executing", recorded_sandbox),
+            ("adapter.build.sandbox", "non-executing", planned_sandbox),
+            ("build.sandbox_policy", "no child launched", producer_policy.map(String::as_str)),
+            ("adapter.build.sandbox_policy", "no child launched", plan_policy.map(String::as_str)),
+        ] {
+            if actual != Some(expected) {
+                return Err(hook_fact_mismatch(name, expected, actual));
+            }
+        }
+    } else if require_current_backend {
         let sandbox = crate::RuntimePolicy::detect_sandbox();
         if sandbox.level != crate::RuntimePolicy::SandboxLevel::Strong {
             return Err(std::io::Error::new(
@@ -438,8 +456,6 @@ fn validate_adapter_hook_producer(
             ));
         }
     }
-    let producer_policy = producer.facts.get("build.sandbox_policy");
-    let plan_policy = producer.plan.facts().get("adapter.build.sandbox_policy");
     if !recorded_sandbox.is_some_and(|class| {
         producer_policy
             .is_some_and(|policy| crate::RuntimePolicy::sandbox_receipt_is_truthful(class, policy))

@@ -1,10 +1,14 @@
 # Environment variables
 
 This page is the registry for environment variables that configure Jet tools,
-generated Jet programs, and the repository's verification harness. Command-line
-flags remain the normal user interface. Environment variables exist for
-reproducible automation, process-wide defaults, and controls that a child
-process must inherit.
+generated Jet programs, and repository verification. It is for users writing
+reproducible automation and maintainers passing explicit state to child
+processes. Command-line flags remain the normal user interface. The executable
+name checks are in [`tests/syntax_reconciliation.rs`](../../../tests/syntax_reconciliation.rs),
+the effect surface is
+[`crates/jet-foundation/src/Syntax/effects_surface.rs`](../../../crates/jet-foundation/src/Syntax/effects_surface.rs),
+and the verification defaults are in
+[`scripts/agent/verify-full.sh`](../../../scripts/agent/verify-full.sh).
 
 ## Naming convention
 
@@ -21,7 +25,7 @@ one exists instead of adding another spelling for the same job.
 | --- | --- | --- |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
-| `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for the `jet env hook` auto-activation hook: set it to suppress automatic activation in the current shell and drop any env the hook already activated. |
+| `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
 | `JET_FUZZ_ITERATIONS` | non-negative integer | Sets the generated fuzz-case limit. |
 | `JET_FUZZ_SEED` | unsigned integer | Makes fuzz generation reproducible. |
@@ -37,8 +41,8 @@ one exists instead of adding another spelling for the same job.
 | `JET_ROOT` | path | Overrides the installed Jet runtime-data root. |
 | `JET_SCHEDULER_THREADS` | positive integer | Sets the generated program's scheduler worker count. |
 | `JET_PACKAGE_STORE_DIR` | path | Overrides the package-store directory. |
-| `JET_TEST_FILTER` | test-name substring | Selects generated `jet test` cases. Prefer the corresponding CLI flag. |
-| `JET_TEST_SERIAL` | `1` | Runs generated `jet test` cases serially. Prefer the corresponding CLI flag. |
+| `JET_TEST_FILTER` | test-name substring | Selects generated `jet test` cases; prefer the corresponding CLI flag. |
+| `JET_TEST_SERIAL` | `1` | Runs generated `jet test` cases serially; prefer the corresponding CLI flag. |
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |
 | `JET_TIMING` | `1` | Prints compiler phase timings. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
@@ -52,16 +56,25 @@ one exists instead of adding another spelling for the same job.
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
-| `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `scripts/agent/verify-full.sh` defaults it to 16. |
+| `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `scripts/agent/verify-full.sh` defaults it to 6. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |
-| `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example. Requires `JET_GOLDEN_FILTER`. |
-| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows. Review the diff immediately. |
+| `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example; requires `JET_GOLDEN_FILTER`. |
+| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows; review the diff immediately. |
 | `JET_VERIFY_TMPDIR` | path | Overrides the temporary root used by verification scenarios. |
 
-The Canvas harness also accepts `JET_CANVAS_CHROMIUM` and `JET_CANVAS_NODE`
-as explicit tool paths. `JET_CANVAS_PREREQUISITES=strict` is the stable policy
-control; resolved-path and proof variables with longer `JET_CANVAS_*` names are
-harness transport, not user configuration.
+Canvas verification can receive explicit paths for its browser and driver
+processes:
+
+| Variable | Accepted value | Effect |
+| --- | --- | --- |
+| `JET_CANVAS_CHROMIUM` | executable path | Selects the Chromium executable. |
+| `JET_CANVAS_FIREFOX` | executable path | Selects the Firefox executable. |
+| `JET_CANVAS_GECKODRIVER` | executable path | Selects the geckodriver executable used with Firefox. |
+| `JET_CANVAS_NODE` | executable path | Selects the Node executable used by the Canvas harness. |
+
+`JET_CANVAS_PREREQUISITES=strict` is the policy control. Resolved paths and
+proof variables with longer `JET_CANVAS_*` names are harness transport rather
+than a second user configuration surface.
 
 ## Internal transport and test hooks
 
@@ -78,4 +91,5 @@ undocumented user controls:
   in `_OBSERVER` or `_SUBPROCESS` are fault-injection hooks.
 
 Do not build scripts against internal variables. Their names and values may
-change with the implementation.
+change with the implementation; use a documented command-line flag or public
+control instead.

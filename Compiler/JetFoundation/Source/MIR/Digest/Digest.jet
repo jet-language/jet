@@ -1,0 +1,4804 @@
+// Canonical MIR byte encoding and digest lanes.
+//
+// The writer is deliberately kept beside MIR rather than in an optimizer
+// consumer.  It frames every scalar and row explicitly, and all collection
+// order is established by the canonical row sorters below.  The public digest
+// seam is added only after the complete schema row set is assembled.
+
+use core.math as math
+struct MirCanonicalWriter { pub bytes: [U8] }
+
+fn mir_digest_writer() -> MirCanonicalWriter {
+    MirCanonicalWriter{bytes: [U8]{}}
+}
+
+fn mir_digest_u8(writer: &MirCanonicalWriter, value: U8) {
+    writer.bytes.push(value)
+}
+
+fn mir_digest_u16(writer: &MirCanonicalWriter, value: Int) {
+    writer.bytes.push(U8{value & 255})
+    writer.bytes.push(U8{(value >> 8) & 255})
+}
+
+fn mir_digest_u64(writer: &MirCanonicalWriter, value: Int) {
+    index := 0
+    loop index < 8 {
+        writer.bytes.push(U8{(value >> (8 * index)) & 255})
+        index += 1
+    }
+}
+
+fn mir_digest_len(writer: &MirCanonicalWriter, value: Int) {
+    mir_digest_u64(writer, value)
+}
+
+fn mir_digest_bool(writer: &MirCanonicalWriter, value: Bool) {
+    if value -> mir_digest_u8(writer, U8{1}) else -> mir_digest_u8(writer, U8{0})
+}
+
+fn mir_digest_string(writer: &MirCanonicalWriter, value: String) {
+    bytes := value.bytes()
+    mir_digest_len(writer, bytes.len())
+    loop byte in bytes -> mir_digest_u8(writer, byte)
+}
+
+fn mir_digest_tag(writer: &MirCanonicalWriter, value: String) {
+    mir_digest_string(writer, value)
+}
+
+fn mir_digest_bytes(writer: &MirCanonicalWriter, value: [U8]) {
+    mir_digest_len(writer, value.len())
+    loop byte in value -> mir_digest_u8(writer, byte)
+}
+
+fn mir_digest_span(writer: &MirCanonicalWriter, span: Span) {
+    mir_digest_len(writer, span.start)
+    mir_digest_len(writer, span.end)
+}
+
+fn mir_digest_option_int(writer: &MirCanonicalWriter, value: ?Int) {
+    if value == {
+        None -> mir_digest_bool(writer, false)
+        Val(number) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_u64(writer, number)
+        }
+    }
+}
+
+fn mir_digest_option_string(writer: &MirCanonicalWriter, value: ?String) {
+    if value == {
+        None -> mir_digest_bool(writer, false)
+        Val(text) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_string(writer, text)
+        }
+    }
+}
+
+fn mir_digest_option_type(writer: &MirCanonicalWriter, value: ?MirType) {
+    if value == {
+        None -> mir_digest_bool(writer, false)
+        Val(ty) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_type(writer, ty)
+        }
+    }
+}
+
+fn mir_digest_debug_quote(value: String) -> String {
+    out := "\""
+    loop byte in value.bytes() {
+        code := Int.from_u8(byte)
+        if code == {
+            34 -> out = "{out}\\\""
+            92 -> out = "{out}\\\\"
+            10 -> out = "{out}\\n"
+            13 -> out = "{out}\\r"
+            9 -> out = "{out}\\t"
+            else -> {
+                if code < 32 || code == 127 -> out = "{out}\\u{{{code}}}"
+                else -> out = "{out}{String.from_bytes([byte]) ?? ""}"
+            }
+        }
+    }
+    "{out}\""
+}
+
+fn mir_digest_debug_bool(value: Bool) -> String { if value -> "true" else -> "false" }
+
+fn mir_digest_debug_option_string(value: ?String) -> String {
+    if value == None -> return "None"
+    "Some({mir_digest_debug_quote(value ?? "")})"
+}
+
+fn mir_digest_debug_string_list(values: [String]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push(mir_digest_debug_quote(value))
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_debug_bool_list(values: [Bool]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push(mir_digest_debug_bool(value))
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_debug_int_option(value: ?Int) -> String {
+    if value == None -> return "None"
+    "Some({value ?? 0})"
+}
+
+fn mir_digest_access_debug(value: MirAccess) -> String {
+    return if value == {
+        .Read -> "Read"
+        .Write -> "Write"
+        .Move -> "Move"
+    }
+}
+
+fn mir_digest_visibility_debug(value: MirVisibility) -> String {
+    return if value == {
+        .Private -> "Private"
+        .Package -> "Package"
+        .Public -> "Public"
+    }
+}
+
+fn mir_digest_ownership_mode_debug(value: MirOwnershipMode) -> String {
+    return if value == {
+        .Copy -> "Copy"
+        .Owned -> "Owned"
+        .Shared -> "Shared"
+        .ReadBorrow -> "ReadBorrow"
+        .WriteBorrow -> "WriteBorrow"
+        .Move -> "Move"
+    }
+}
+
+fn mir_digest_drop_kind_debug(value: MirDropKind) -> String {
+    return if value == {
+        .NoDrop -> "NoDrop"
+        .Value -> "Value"
+        .Shared -> "Shared"
+        .View -> "View"
+        .ForeignHandle -> "ForeignHandle"
+    }
+}
+
+fn mir_digest_ownership_debug(value: MirOwnership) -> String {
+    "MirOwnership {{ mode: {mir_digest_ownership_mode_debug(value.mode)}, drop: {mir_digest_drop_kind_debug(value.drop)}, moved: {mir_digest_debug_bool(value.moved)}, last_use: {mir_digest_debug_bool(value.last_use)}, gc_root: {mir_digest_debug_bool(value.gc_root)} }}"
+}
+
+fn mir_digest_scalar_kind_debug(value: MirScalarKind) -> String {
+    return if value == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Float32 -> "Float32"
+        .Bool -> "Bool"
+        .Char -> "Char"
+        .Pointer -> "Pointer"
+    }
+}
+
+fn mir_digest_abi_debug(value: MirAbi) -> String {
+    return if value == {
+        .Scalar(kind) -> "Scalar({mir_digest_scalar_kind_debug(kind)})"
+        .Aggregate -> "Aggregate"
+        .Sequence -> "Sequence"
+        .Function -> "Function"
+        .Nominal -> "Nominal"
+        .Dynamic -> "Dynamic"
+        .Never -> "Never"
+    }
+}
+
+fn mir_digest_size_debug(value: MirSize) -> String {
+    return if value == {
+        .Static(bytes) -> "Static({bytes})"
+        .Dynamic -> "Dynamic"
+    }
+}
+
+fn mir_digest_layout_debug(value: MirLayout) -> String {
+    "MirLayout {{ abi: {mir_digest_abi_debug(value.abi)}, size: {mir_digest_size_debug(value.size)}, align: {mir_digest_size_debug(value.align)} }}"
+}
+
+fn mir_digest_measure_debug(value: MirMeasure) -> String {
+    return if value == {
+        .Literal(kind, amount) -> "Literal({mir_digest_debug_quote(kind)}, {amount})"
+        .SignedLiteral(kind, amount) -> "SignedLiteral({mir_digest_debug_quote(kind)}, {amount})"
+        .Symbol(kind, name) -> "Symbol({mir_digest_debug_quote(kind)}, {mir_digest_debug_quote(name)})"
+        .Combined(kind, rule, left, right) -> "Combined({mir_digest_debug_quote(kind)}, {mir_digest_measure_rule_debug(rule)}, {mir_digest_measure_debug(left)}, {mir_digest_measure_debug(right)})"
+    }
+}
+
+fn mir_digest_measure_rule_debug(value: MirMeasureRule) -> String {
+    return if value == {
+        .Add -> "Add"
+        .Mul -> "Mul"
+        .Match -> "Match"
+    }
+}
+
+fn mir_digest_dimension_debug(value: MirDimension) -> String {
+    rendered := [String]{}
+    loop axis in value.axes -> rendered.push("MirDimensionAxis {{ name: {mir_digest_debug_quote(axis.name)}, exponent: {mir_digest_measure_debug(axis.exponent)} }}")
+    "MirDimension {{ axes: [{rendered.join(", ")}] }}"
+}
+
+fn mir_digest_tag_marker_debug(value: MirTagMarker) -> String {
+    return if value == {
+        .User(name) -> "User({mir_digest_debug_quote(name)})"
+        .Internal(marker_tag) -> "Internal({mir_digest_internal_tag_debug(marker_tag)})"
+    }
+}
+
+fn mir_digest_internal_tag_debug(value: MirInternalTag) -> String {
+    return if value == {
+        .CoreCryptoNominal -> "CoreCryptoNominal"
+        .DeterministicClock -> "DeterministicClock"
+        .SystemClock -> "SystemClock"
+        .ExpiringSecretLoan -> "ExpiringSecretLoan"
+        .SharedGuardRead -> "SharedGuardRead"
+        .SharedGuardEdit -> "SharedGuardEdit"
+        .TerminalFactSet -> "TerminalFactSet"
+        .CppCallbackAbi -> "CppCallbackAbi"
+        .AllocatorView -> "AllocatorView"
+    }
+}
+
+fn mir_digest_param_zone_debug(value: ParamZone) -> String {
+    return if value == {
+        .PositionalOnly -> "PositionalOnly"
+        .Either -> "Either"
+        .LabelOnly -> "LabelOnly"
+    }
+}
+
+fn mir_digest_call_contract_debug(value: MirCallContractRow) -> String {
+    "MirCallContractRow {{ label: {mir_digest_debug_quote(value.label)}, zone: {mir_digest_param_zone_debug(value.zone)} }}"
+}
+
+fn mir_digest_policy_debug(value: MirCallablePolicy) -> String {
+    "MirCallablePolicy {{ name: {mir_digest_debug_quote(value.name)}, arguments: {mir_digest_debug_string_list(value.arguments)} }}"
+}
+
+fn mir_digest_policy_chain_debug(value: MirCallablePolicyChain) -> String {
+    rendered := [String]{}
+    loop policy in value.policies -> rendered.push(mir_digest_policy_debug(policy))
+    "MirCallablePolicyChain {{ policies: [{rendered.join(", ")}] }}"
+}
+
+fn mir_digest_call_metadata_debug(value: MirCallMetadata) -> String {
+    conventions := [String]{}
+    loop row in value.conventions -> conventions.push(mir_digest_access_debug(row))
+    "MirCallMetadata {{ names: {mir_digest_debug_string_list(value.names)}, defaults: {mir_digest_debug_bool_list(value.defaults)}, variadic: {mir_digest_debug_bool_list(value.variadic)}, conventions: [{conventions.join(", ")}], policies: {mir_digest_policy_chain_debug(value.policies)} }}"
+}
+
+fn mir_digest_call_contracts_debug(value: ?[MirCallContractRow]) -> String {
+    if value == None -> return "None"
+    rows := value ?? [MirCallContractRow]{}
+    rendered := [String]{}
+    loop row in rows -> rendered.push(mir_digest_call_contract_debug(row))
+    "Some([{rendered.join(", ")}])"
+}
+
+fn mir_digest_view_provenance_entry_debug(value: MirViewProvenanceEntry) -> String {
+    "MirViewProvenanceEntry {{ slot: {mir_digest_debug_string_list(value.slot)}, provenance: {mir_digest_view_provenance_debug(value.provenance)} }}"
+}
+
+fn mir_digest_view_provenance_debug(value: MirViewProvenance) -> String {
+    sources := [String]{}
+    loop source in value.sources -> sources.push(mir_digest_view_source_path_debug(source))
+    "MirViewProvenance {{ sources: [{sources.join(", ")}], mutable: {mir_digest_debug_bool(value.mutable)} }}"
+}
+
+fn mir_digest_view_source_path_debug(value: MirViewSourcePath) -> String {
+    projections := [String]{}
+    loop projection in value.projections -> projections.push(mir_digest_view_projection_debug(projection))
+    "MirViewSourcePath {{ source: {mir_digest_view_source_debug(value.source)}, projections: [{projections.join(", ")}] }}"
+}
+
+fn mir_digest_view_source_debug(value: MirViewSource) -> String {
+    return if value == {
+        .Receiver -> "Receiver"
+        .Parameter(index) -> "Parameter({index})"
+        .Static(module_path, name) -> "Static({mir_digest_debug_quote(module_path)}, {mir_digest_debug_quote(name)})"
+    }
+}
+
+fn mir_digest_view_projection_debug(value: MirViewProjection) -> String {
+    return if value == {
+        .Field(name) -> "Field({mir_digest_debug_quote(name)})"
+        .Index -> "Index"
+        .Range -> "Range"
+    }
+}
+
+fn mir_digest_view_provenance_option_debug(value: ?[MirViewProvenanceEntry]) -> String {
+    if value == None -> return "None"
+    rows := value ?? [MirViewProvenanceEntry]{}
+    rendered := [String]{}
+    loop row in rows -> rendered.push(mir_digest_view_provenance_entry_debug(row))
+    "Some([{rendered.join(", ")}])"
+}
+
+fn mir_digest_function_signature_effect_debug(value: ?[String]) -> String {
+    if value == None -> return "None"
+    "Some({mir_digest_debug_string_list(value ?? [String]{})})"
+}
+
+fn mir_digest_type_kind(writer: &MirCanonicalWriter, value: MirTypeKind) {
+    if value == {
+        .Int -> mir_digest_tag(writer, "int")
+        .Float -> mir_digest_tag(writer, "float")
+        .Bool -> mir_digest_tag(writer, "bool")
+        .String -> mir_digest_tag(writer, "string")
+        .Char -> mir_digest_tag(writer, "char")
+        .List(inner) -> {
+            mir_digest_tag(writer, "list")
+            mir_digest_type(writer, inner)
+        }
+        .Map(key, value) -> {
+            mir_digest_tag(writer, "map")
+            mir_digest_type(writer, key)
+            mir_digest_type(writer, value)
+        }
+        .Shared(inner) -> {
+            mir_digest_tag(writer, "shared")
+            mir_digest_type(writer, inner)
+        }
+        .Option(inner) -> {
+            mir_digest_tag(writer, "option")
+            mir_digest_type(writer, inner)
+        }
+        .Result(ok, err) -> {
+            mir_digest_tag(writer, "result")
+            mir_digest_type(writer, ok)
+            mir_digest_type(writer, err)
+        }
+        .Fn(signature) -> {
+            mir_digest_tag(writer, "fn")
+            mir_digest_len(writer, signature.params.len())
+            loop param in signature.params -> mir_digest_type(writer, param)
+            if {
+                signature.ret == None -> mir_digest_tag(writer, "unit-ret")
+                else -> {
+                    mir_digest_tag(writer, "ret")
+                    mir_digest_type(writer, signature.ret ?? MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)})
+                }
+            }
+            mir_digest_string(writer, mir_digest_function_signature_effect_debug(signature.effect_bound))
+            mir_digest_string(writer, mir_digest_call_contracts_debug(signature.param_contract))
+            mir_digest_string(writer, if signature.call_metadata == None -> "None" else -> "Some({mir_digest_call_metadata_debug(signature.call_metadata ?? MirCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MirAccess]{}, policies: MirCallablePolicyChain{policies: [MirCallablePolicy]{}}})})")
+            mir_digest_string(writer, mir_digest_view_provenance_option_debug(signature.return_view_provenance))
+        }
+        .SendFn(params, ret, conventions) -> {
+            mir_digest_tag(writer, "send-fn")
+            mir_digest_len(writer, params.len())
+            loop param in params -> mir_digest_type(writer, param)
+            if {
+                ret == None -> mir_digest_tag(writer, "unit-ret")
+                else -> {
+                    mir_digest_tag(writer, "ret")
+                    mir_digest_type(writer, ret ?? MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)})
+                }
+            }
+            rendered := [String]{}
+            loop convention in conventions -> rendered.push(mir_digest_access_debug(convention))
+            mir_digest_string(writer, "[{rendered.join(", ")}]")
+        }
+        .Apply(name, args) -> {
+            mir_digest_tag(writer, "apply")
+            mir_digest_u64(writer, name.id.value)
+            mir_digest_len(writer, args.len())
+            loop arg in args -> mir_digest_type(writer, arg)
+        }
+        .TraitObject(bounds) -> {
+            mir_digest_tag(writer, "trait-object")
+            mir_digest_len(writer, bounds.len())
+            loop bound in bounds -> mir_digest_u64(writer, bound.id.value)
+        }
+        .Tuple(fields) -> {
+            mir_digest_tag(writer, "tuple")
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_string(writer, field.name)
+                mir_digest_type(writer, field.ty)
+            }
+        }
+        .FixedList(elem, len) -> {
+            mir_digest_tag(writer, "fixed-list")
+            mir_digest_type(writer, elem)
+            mir_digest_string(writer, mir_digest_measure_debug(len))
+        }
+        .IntN(signed, bits) -> {
+            mir_digest_tag(writer, "int-n")
+            mir_digest_bool(writer, signed)
+            mir_digest_u64(writer, bits)
+        }
+        .InlineRange(base, lo, hi) -> {
+            mir_digest_tag(writer, "inline-range")
+            mir_digest_type(writer, base)
+            mir_digest_u64(writer, lo)
+            mir_digest_u64(writer, hi)
+        }
+        .Float32 -> mir_digest_tag(writer, "float32")
+        .Tagged(marker, inner) -> {
+            mir_digest_tag(writer, "tagged")
+            mir_digest_string(writer, mir_digest_tag_marker_debug(marker))
+            mir_digest_type(writer, inner)
+        }
+        .Union(members) -> {
+            mir_digest_tag(writer, "union")
+            mir_digest_len(writer, members.len())
+            loop member in members -> mir_digest_type(writer, member)
+        }
+        .Quantity(base, dimension) -> {
+            mir_digest_tag(writer, "quantity")
+            mir_digest_type(writer, base)
+            mir_digest_string(writer, mir_digest_dimension_debug(dimension))
+        }
+        .Measure(measure) -> {
+            mir_digest_tag(writer, "measure")
+            mir_digest_string(writer, mir_digest_measure_debug(measure))
+        }
+    }
+}
+
+fn mir_digest_type(writer: &MirCanonicalWriter, value: MirType) {
+    mir_digest_tag(writer, "mir-type")
+    mir_digest_option_int(writer, value.identity.map(row -> row.value))
+    mir_digest_type_kind(writer, value.kind)
+    mir_digest_string(writer, mir_digest_layout_debug(value.layout))
+}
+
+fn mir_digest_values(writer: &MirCanonicalWriter, values: [MirValueId]) {
+    mir_digest_len(writer, values.len())
+    loop value in values -> mir_digest_u64(writer, value.value)
+}
+
+fn mir_digest_field_path(writer: &MirCanonicalWriter, path: [MirFieldId]) {
+    mir_digest_len(writer, path.len())
+    loop field in path -> mir_digest_u64(writer, field.value)
+}
+
+fn mir_digest_field_paths(writer: &MirCanonicalWriter, paths: [[MirFieldId]]) {
+    mir_digest_len(writer, paths.len())
+    loop path in paths -> mir_digest_field_path(writer, path)
+}
+
+fn mir_digest_access_option(writer: &MirCanonicalWriter, access: ?MirAccess) {
+    if access == None -> mir_digest_u64(writer, 0) else {
+        access_value :: access ?? .Read
+        if access_value == .Read -> mir_digest_u64(writer, 1)
+        else if access_value == .Write -> mir_digest_u64(writer, 2)
+        else -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_visibility(writer: &MirCanonicalWriter, value: MirVisibility) {
+    if value == {
+        .Private -> mir_digest_u64(writer, 1)
+        .Package -> mir_digest_u64(writer, 2)
+        .Public -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_failure_carrier(writer: &MirCanonicalWriter, value: MirFailureCarrier) {
+    if value == {
+        .Infallible -> mir_digest_tag(writer, "infallible")
+        .Result(success, error) -> {
+            mir_digest_tag(writer, "result")
+            mir_digest_type(writer, success)
+            mir_digest_type(writer, error)
+        }
+        .Optional(inner) -> {
+            mir_digest_tag(writer, "optional")
+            mir_digest_type(writer, inner)
+        }
+        .Diverges(inner) -> {
+            mir_digest_tag(writer, "diverges")
+            mir_digest_type(writer, inner)
+        }
+    }
+}
+
+fn mir_digest_call_fallibility(writer: &MirCanonicalWriter, value: MirCallFallibility) {
+    if value == {
+        .Infallible -> mir_digest_tag(writer, "infallible")
+        .Failure(carrier) -> {
+            mir_digest_tag(writer, "failure")
+            mir_digest_failure_carrier(writer, carrier)
+        }
+    }
+}
+
+fn mir_digest_callee(writer: &MirCanonicalWriter, value: MirCallee) {
+    if value == {
+        .User(function) -> {
+            mir_digest_tag(writer, "user")
+            mir_digest_u64(writer, function.value)
+        }
+        .Associated(function, owner) -> {
+            mir_digest_tag(writer, "associated")
+            mir_digest_u64(writer, function.value)
+            mir_digest_type(writer, owner)
+        }
+        .Method(function, owner) -> {
+            mir_digest_tag(writer, "method")
+            mir_digest_u64(writer, function.value)
+            mir_digest_type(writer, owner)
+        }
+        .TraitMethod(method, trait_ref, receiver) -> {
+            mir_digest_tag(writer, "trait_method")
+            mir_digest_u64(writer, method.value)
+            mir_digest_u64(writer, trait_ref.id.value)
+            mir_digest_string(writer, trait_ref.name)
+            mir_digest_type(writer, receiver)
+        }
+        .Core(call) -> {
+            mir_digest_tag(writer, "core")
+            mir_digest_u64(writer, call.value)
+        }
+        .Prelude(call) -> {
+            mir_digest_tag(writer, "prelude")
+            mir_digest_u64(writer, call.value)
+        }
+        .Foreign(id) -> {
+            mir_digest_tag(writer, "foreign")
+            mir_digest_u64(writer, id.value)
+        }
+        .Indirect(value) -> {
+            mir_digest_tag(writer, "indirect")
+            mir_digest_u64(writer, value.value)
+        }
+    }
+}
+fn mir_digest_debug_u8_list(value: [U8]) -> String {
+    rendered := [String]{}
+    loop byte in value -> rendered.push("{Int.from_u8(byte)}")
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_panic_location(writer: &MirCanonicalWriter, value: MirPanicLoc) {
+    mir_digest_u64(writer, value.file.value)
+    mir_digest_u64(writer, value.line)
+    mir_digest_u64(writer, value.column)
+}
+
+fn mir_digest_panic_context(writer: &MirCanonicalWriter, value: MirPanicContext) {
+    mir_digest_string(writer, value.function)
+    mir_digest_string(writer, value.source_line)
+    mir_digest_u64(writer, value.caret)
+    mir_digest_len(writer, value.locals.len())
+    loop local in value.locals {
+        mir_digest_string(writer, local.name)
+        mir_digest_u64(writer, local.local.value)
+    }
+}
+
+fn mir_digest_call_args(writer: &MirCanonicalWriter, args: [MirCallArg]) {
+    mir_digest_len(writer, args.len())
+    loop arg in args {
+        mir_digest_u64(writer, arg.value.value)
+        mir_digest_option_int(writer, arg.place.map(row -> row.value))
+        mir_digest_string(writer, mir_digest_access_debug(arg.access))
+        mir_digest_span(writer, arg.span)
+        mir_digest_option_string(writer, arg.label)
+        mir_digest_option_int(writer, arg.source_index)
+        mir_digest_option_int(writer, arg.binder_slot)
+        mir_digest_bool(writer, arg.spread)
+        mir_digest_bool(writer, arg.implicit_clone)
+        mir_digest_bool(writer, arg.shared_auto_clone)
+        mir_digest_bool(writer, arg.owned_last_use)
+        mir_digest_bool(writer, arg.authority_boundary)
+        if arg.fn_coercion == {
+            None -> mir_digest_bool(writer, false)
+            Val(coercion) -> {
+                mir_digest_bool(writer, true)
+                mir_digest_type(writer, coercion.ty)
+                mir_digest_bool(writer, coercion.already_boxed)
+            }
+        }
+        mir_digest_bool(writer, arg.widen_fixed_to_list)
+        if arg.widen_to_union == {
+            None -> mir_digest_bool(writer, false)
+            Val(coercion) -> {
+                mir_digest_bool(writer, true)
+                mir_digest_u64(writer, coercion.union.value)
+                mir_digest_string(writer, coercion.variant)
+            }
+        }
+        mir_digest_option_int(writer, arg.box_as_trait.map(row -> row.value))
+    }
+}
+
+fn mir_digest_conversion(writer: &MirCanonicalWriter, value: MirConversion) {
+    if value == {
+        .Transparent -> mir_digest_tag(writer, "transparent")
+        .NumericCast -> mir_digest_tag(writer, "numeric-cast")
+        .SendFn -> mir_digest_tag(writer, "send-fn")
+        .Prelude(call, location, fallibility) -> {
+            mir_digest_tag(writer, "prelude")
+            mir_digest_u64(writer, call.value)
+            mir_digest_string(writer, if location == None -> "None" else -> "Some({mir_digest_panic_location_debug(location ?? MirPanicLoc{file: MirSourceFileId{value: 0}, line: 0, column: 0})})")
+            mir_digest_call_fallibility(writer, fallibility)
+        }
+    }
+}
+
+fn mir_digest_panic_location_debug(value: MirPanicLoc) -> String {
+    "MirPanicLoc {{ file: MirSourceFileId {{ value: {value.file.value} }}, line: {value.line}, column: {value.column} }}"
+}
+
+fn mir_digest_loop_source_kind(writer: &MirCanonicalWriter, value: MirLoopSourceKind) {
+    if value == {
+        .Plain -> mir_digest_tag(writer, "plain")
+        .Chars -> mir_digest_tag(writer, "chars")
+        .LinesFile -> mir_digest_tag(writer, "lines-file")
+        .LinesStdin -> mir_digest_tag(writer, "lines-stdin")
+        .LinesProcessStream -> mir_digest_tag(writer, "lines-process-stream")
+        .ChannelReceiver -> mir_digest_tag(writer, "channel-receiver")
+        .EncodingReader(reader_type) -> {
+            mir_digest_tag(writer, "encoding-reader")
+            mir_digest_string(writer, reader_type)
+        }
+        .Iterable(coll_type, iter_type, iter_symbol, next_symbol) -> {
+            mir_digest_tag(writer, "iterable")
+            mir_digest_string(writer, coll_type)
+            mir_digest_string(writer, iter_type)
+            mir_digest_string(writer, iter_symbol)
+            mir_digest_string(writer, next_symbol)
+        }
+    }
+}
+
+fn mir_digest_text_hole_kind(writer: &MirCanonicalWriter, value: MirTextHoleKind) {
+    if value == {
+        .Text -> mir_digest_u64(writer, 1)
+        .Int -> mir_digest_u64(writer, 2)
+        .Float -> mir_digest_u64(writer, 3)
+        .Bool -> mir_digest_u64(writer, 4)
+        .InlineRange(lo, hi) -> {
+            mir_digest_u64(writer, 5)
+            mir_digest_u64(writer, lo)
+            mir_digest_u64(writer, hi)
+        }
+    }
+}
+
+fn mir_digest_text_pattern_parts(writer: &MirCanonicalWriter, values: [MirTextPatternPart]) {
+    mir_digest_len(writer, values.len())
+    loop value in values {
+        if value == {
+            .Literal(text) -> {
+                mir_digest_tag(writer, "literal")
+                mir_digest_string(writer, text)
+            }
+            .Hole(kind, ty, span) -> {
+                mir_digest_tag(writer, "hole")
+                mir_digest_text_hole_kind(writer, kind)
+                mir_digest_u64(writer, ty.value)
+                mir_digest_span(writer, span)
+            }
+        }
+    }
+}
+
+fn mir_digest_binary_pattern_parts(writer: &MirCanonicalWriter, values: [MirBinaryPatternPart]) {
+    mir_digest_len(writer, values.len())
+    loop value in values {
+        if value == {
+            .Literal(bytes) -> {
+                mir_digest_tag(writer, "literal")
+                mir_digest_string(writer, mir_digest_debug_u8_list(bytes))
+            }
+            .Bits(width, ty, little, span) -> {
+                mir_digest_tag(writer, "bits")
+                mir_digest_u64(writer, Int.from_u8(width))
+                mir_digest_u64(writer, ty.value)
+                mir_digest_bool(writer, little)
+                mir_digest_span(writer, span)
+            }
+            .Rest(ty, span) -> {
+                mir_digest_tag(writer, "rest")
+                mir_digest_u64(writer, ty.value)
+                mir_digest_span(writer, span)
+            }
+        }
+    }
+}
+
+fn mir_digest_component_type(writer: &MirCanonicalWriter, value: MirComponentTypeDescriptor) {
+    if value == {
+        .Int -> mir_digest_tag(writer, "int")
+        .Float -> mir_digest_tag(writer, "float")
+        .Bool -> mir_digest_tag(writer, "bool")
+        .String -> mir_digest_tag(writer, "string")
+        .List(inner) -> {
+            mir_digest_tag(writer, "list")
+            mir_digest_component_type(writer, inner)
+        }
+        .Option(inner) -> {
+            mir_digest_tag(writer, "option")
+            mir_digest_component_type(writer, inner)
+        }
+        .Result(ok, err) -> {
+            mir_digest_tag(writer, "result")
+            mir_digest_component_type(writer, ok)
+            mir_digest_component_type(writer, err)
+        }
+        .Record(name, fields) -> {
+            mir_digest_tag(writer, "record")
+            mir_digest_string(writer, name)
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_len(writer, field.index)
+                mir_digest_string(writer, field.name)
+                mir_digest_component_type(writer, field.ty)
+            }
+        }
+    }
+}
+
+fn mir_digest_component_signature(writer: &MirCanonicalWriter, value: MirComponentSignatureDescriptor) {
+    mir_digest_tag(writer, "component-signature")
+    mir_digest_len(writer, value.params.len())
+    loop param in value.params -> mir_digest_component_type(writer, param)
+    mir_digest_component_type(writer, value.result)
+}
+
+fn mir_digest_hardware_op(writer: &MirCanonicalWriter, value: MirHardwareOp) {
+    if value == {
+        .RegisterRead(profile, block, register, width)
+        | .RegisterWrite(profile, block, register, width) -> {
+            mir_digest_tag(writer, if value == {
+                .RegisterRead(_, _, _, _) -> "register-read"
+                else -> "register-write"
+            })
+            mir_digest_string(writer, profile)
+            mir_digest_string(writer, block)
+            mir_digest_string(writer, register)
+            mir_digest_string(writer, if width == {
+                .U8 -> "u8"
+                .U16 -> "u16"
+                .U32 -> "u32"
+                .U64 -> "u64"
+            })
+        }
+        .DmaStart(profile, channel, buffer_type)
+        | .DmaWait(profile, channel, buffer_type) -> {
+            mir_digest_tag(writer, if value == {
+                .DmaStart(_, _, _) -> "dma-start"
+                else -> "dma-wait"
+            })
+            mir_digest_string(writer, profile)
+            mir_digest_string(writer, channel)
+            mir_digest_type(writer, buffer_type)
+        }
+    }
+}
+
+fn mir_digest_struct_extra(writer: &MirCanonicalWriter, value: ?MirStructExtra) {
+    if value == None -> mir_digest_u64(writer, 0) else -> mir_digest_u64(writer, 1)
+}
+
+fn mir_digest_require_kind(writer: &MirCanonicalWriter, value: MirRequireKind) {
+    if value == {
+        .Require -> mir_digest_u64(writer, 1)
+        .RequireEq -> mir_digest_u64(writer, 2)
+        .Panic -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_layout_compare(writer: &MirCanonicalWriter, value: MirLayoutCompareOp) {
+    if value == {
+        .Equal -> mir_digest_u64(writer, 1)
+        .LessEqual -> mir_digest_u64(writer, 2)
+        .GreaterEqual -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_allocator(writer: &MirCanonicalWriter, value: MirAllocatorKind) {
+    if value == {
+        .Arena -> mir_digest_u64(writer, 1)
+        .Bump -> mir_digest_u64(writer, 3)
+        .Pool -> mir_digest_u64(writer, 4)
+        .Fixed -> mir_digest_u64(writer, 2)
+    }
+}
+
+fn mir_digest_task_group(writer: &MirCanonicalWriter, value: MirTaskGroupKind) {
+    if value == {
+        .All -> mir_digest_u64(writer, 1)
+        .Any -> mir_digest_u64(writer, 2)
+        .Race -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_select(writer: &MirCanonicalWriter, value: MirSelectKind) {
+    if value == {
+        .Start -> mir_digest_u64(writer, 1)
+        .Receive -> mir_digest_u64(writer, 2)
+        .After -> mir_digest_u64(writer, 3)
+        .Wait -> mir_digest_u64(writer, 4)
+    }
+}
+
+fn mir_digest_core_closure(writer: &MirCanonicalWriter, value: MirCoreClosureKind) {
+    if value == {
+        .Spawn -> mir_digest_u64(writer, 1)
+        .Serve -> mir_digest_u64(writer, 2)
+        .OnInterrupt -> mir_digest_u64(writer, 3)
+        .Guard -> mir_digest_u64(writer, 4)
+        .OnCommit -> mir_digest_u64(writer, 5)
+        .OnRollback -> mir_digest_u64(writer, 6)
+        .ReactiveDerived -> mir_digest_u64(writer, 7)
+        .ReactiveEffect -> mir_digest_u64(writer, 8)
+        .UiMount -> mir_digest_u64(writer, 9)
+        .UiAction -> mir_digest_u64(writer, 10)
+        .Realtime -> mir_digest_u64(writer, 11)
+        .UiTextInputOnDrop -> mir_digest_u64(writer, 12)
+        .UiPreview(playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
+            mir_digest_u64(writer, 13)
+            mir_digest_bool(writer, playground)
+            mir_digest_string(writer, source_file)
+            mir_digest_span(writer, source_span)
+            mir_digest_u64(writer, source_start_line)
+            mir_digest_u64(writer, source_start_column)
+            mir_digest_u64(writer, source_end_line)
+            mir_digest_u64(writer, source_end_column)
+            mir_digest_string(writer, build_id)
+            mir_digest_string(writer, revision)
+        }
+    }
+}
+
+fn mir_digest_gc_edit(writer: &MirCanonicalWriter, value: MirGcEditKind) {
+    if value == {
+        .Clear -> mir_digest_u64(writer, 1)
+        .Pop -> mir_digest_u64(writer, 2)
+        .RemoveIndex -> mir_digest_u64(writer, 3)
+        .InsertIndex -> mir_digest_u64(writer, 4)
+        .Prepend -> mir_digest_u64(writer, 5)
+        .Additive -> mir_digest_u64(writer, 6)
+        .Plain -> mir_digest_u64(writer, 7)
+        .EdgeSlot -> mir_digest_u64(writer, 8)
+    }
+}
+
+fn mir_digest_typed_head(writer: &MirCanonicalWriter, value: MirTypedHeadKind) {
+    if value == {
+        .SQL -> mir_digest_u64(writer, 1)
+        .HTML -> mir_digest_u64(writer, 2)
+        .Sh -> mir_digest_u64(writer, 3)
+        .URL -> mir_digest_u64(writer, 4)
+        .Path -> mir_digest_u64(writer, 5)
+        .DateTime -> mir_digest_u64(writer, 6)
+    }
+}
+
+fn mir_digest_semantic_operation(writer: &MirCanonicalWriter, value: MirSemanticOp) {
+    if value == {
+        .DataEntriesToMap(call, local) -> {
+            mir_digest_tag(writer, "data-entries-to-map")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, local.value)
+        }
+        .MathBuiltin(type_id, call, args)
+        | .PreciseBuiltin(type_id, call, args) -> {
+            mir_digest_tag(writer, if value == {
+                .MathBuiltin(_, _, _) -> "math-builtin"
+                else -> "precise-builtin"
+            })
+            mir_digest_u64(writer, type_id.value)
+            mir_digest_u64(writer, call.value)
+            mir_digest_values(writer, args)
+        }
+        .Print(call, value) -> {
+            mir_digest_tag(writer, "print")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, value.value)
+        }
+        .AmbientInput(call, prompt) -> {
+            mir_digest_tag(writer, "ambient-input")
+            mir_digest_u64(writer, call.value)
+            mir_digest_option_int(writer, prompt.map(row -> row.value))
+        }
+        .RequireStop(call, kind, condition, location, context, values, always_stops) -> {
+            mir_digest_tag(writer, "require-stop")
+            mir_digest_u64(writer, call.value)
+            mir_digest_require_kind(writer, kind)
+            mir_digest_option_int(writer, condition.map(row -> row.value))
+            mir_digest_panic_location(writer, location)
+            mir_digest_panic_context(writer, context)
+            mir_digest_values(writer, values)
+            mir_digest_bool(writer, always_stops)
+        }
+        .LayoutCompare(call, op, left, right) -> {
+            mir_digest_tag(writer, "layout-compare")
+            mir_digest_u64(writer, call.value)
+            mir_digest_layout_compare(writer, op)
+            mir_digest_u64(writer, left.value)
+            mir_digest_u64(writer, right.value)
+        }
+        .LayoutLiteral(inner) -> {
+            mir_digest_tag(writer, "layout-literal")
+            mir_digest_u64(writer, inner.value)
+        }
+        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> {
+            mir_digest_tag(writer, "struct-literal")
+            mir_digest_u64(writer, type_id.value)
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_u64(writer, field.field.value)
+                mir_digest_u64(writer, field.value.value)
+            }
+            mir_digest_struct_extra(writer, extra)
+            mir_digest_option_int(writer, trait_coercion.map(row -> row.value))
+            mir_digest_len(writer, boxed_fields.len())
+            loop field in boxed_fields -> mir_digest_u64(writer, field.value)
+        }
+        .ReflectOf(type_name, path, display, fields) -> {
+            mir_digest_tag(writer, "reflect-of")
+            mir_digest_string(writer, type_name)
+            mir_digest_string(writer, path)
+            mir_digest_u64(writer, display.value)
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_string(writer, field.name)
+                mir_digest_string(writer, field.type_name)
+                mir_digest_string(writer, field.path)
+                mir_digest_u64(writer, field.value.value)
+            }
+        }
+        .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> {
+            mir_digest_tag(writer, "cell-guard-project")
+            mir_digest_u64(writer, map_call.value)
+            mir_digest_option_int(writer, split_call.map(row -> row.value))
+            mir_digest_u64(writer, guard.value)
+            mir_digest_field_paths(writer, paths)
+            mir_digest_bool(writer, editable)
+            mir_digest_bool(writer, disjoint)
+        }
+        .SharedGuardMap(call, guard, path, editable) -> {
+            mir_digest_tag(writer, "shared-guard-map")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, guard.value)
+            mir_digest_field_path(writer, path)
+            mir_digest_bool(writer, editable)
+        }
+        .SharedGuardSplit(call, map_call, guard, first, second, editable) -> {
+            mir_digest_tag(writer, "shared-guard-split")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, map_call.value)
+            mir_digest_u64(writer, guard.value)
+            mir_digest_len(writer, 2)
+            mir_digest_field_path(writer, first)
+            mir_digest_field_path(writer, second)
+            mir_digest_bool(writer, editable)
+        }
+        .SharedGuardWait(call, guard, condition, predicate) -> {
+            mir_digest_tag(writer, "shared-guard-wait")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, guard.value)
+            mir_digest_u64(writer, condition.value)
+            mir_digest_u64(writer, predicate.value)
+        }
+        .ConditionNotify(call, condition, all) -> {
+            mir_digest_tag(writer, "condition-notify")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, condition.value)
+            mir_digest_bool(writer, all)
+        }
+        .AllocNew(call, kind, inline_size, args) -> {
+            mir_digest_tag(writer, "alloc-new")
+            mir_digest_u64(writer, call.value)
+            mir_digest_allocator(writer, kind)
+            mir_digest_option_int(writer, inline_size)
+            mir_digest_call_args(writer, args)
+        }
+        .ColumnarRead(base, index, column, column_index, accessor) -> {
+            mir_digest_tag(writer, "columnar-read")
+            mir_digest_u64(writer, base.value)
+            mir_digest_u64(writer, index.value)
+            mir_digest_u64(writer, column.value)
+            mir_digest_len(writer, column_index)
+            mir_digest_u64(writer, accessor.value)
+        }
+        .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
+            mir_digest_tag(writer, "static-prelude-call")
+            mir_digest_u64(writer, call.value)
+            mir_digest_call_args(writer, args)
+            mir_digest_len(writer, owner_type_args.len())
+            loop type_arg in owner_type_args {
+                if type_arg == {
+                    .Type(ty) -> {
+                        mir_digest_tag(writer, "type")
+                        mir_digest_type(writer, ty)
+                    }
+                    .HostUsize -> mir_digest_tag(writer, "host-usize")
+                }
+            }
+            mir_digest_len(writer, type_args.len())
+            loop type_arg in type_args -> mir_digest_type(writer, type_arg)
+        }
+        .DecodeUnder(call, segment, inner) -> {
+            mir_digest_tag(writer, "decode-under")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, segment.value)
+            mir_digest_u64(writer, inner.value)
+        }
+        .HardwareCall(call, op, receiver, args) -> {
+            mir_digest_tag(writer, "hardware-call")
+            mir_digest_u64(writer, call.value)
+            mir_digest_hardware_op(writer, op)
+            mir_digest_option_int(writer, receiver.map(row -> row.value))
+            mir_digest_call_args(writer, args)
+        }
+        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> {
+            mir_digest_tag(writer, "builtin-method")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_option_int(writer, receiver_place.map(row -> row.value))
+            mir_digest_values(writer, args)
+            if aggregate_fields == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                mir_digest_field_path(writer, aggregate_fields ?? [MirFieldId]{})
+            }
+        }
+        .OptionLift2(call, function, left, right) -> {
+            mir_digest_tag(writer, "option-lift2")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, function.value)
+            mir_digest_u64(writer, left.value)
+            mir_digest_u64(writer, right.value)
+        }
+        .ClosureMethod(receiver, args, call) -> {
+            mir_digest_tag(writer, "closure-method")
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, call.value)
+            mir_digest_call_args(writer, args)
+        }
+        .HostBorrowCallback(callable, params) -> {
+            mir_digest_tag(writer, "host-borrow-callback")
+            mir_digest_u64(writer, callable.value)
+            mir_digest_len(writer, params.len())
+            loop param in params -> mir_digest_type(writer, param)
+        }
+        .TextPatternMatch(call, subject, parts) -> {
+            mir_digest_tag(writer, "text-pattern-match")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, subject.value)
+            mir_digest_text_pattern_parts(writer, parts)
+        }
+        .BinaryPatternMatch(call, subject, parts) -> {
+            mir_digest_tag(writer, "binary-pattern-match")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, subject.value)
+            mir_digest_binary_pattern_parts(writer, parts)
+        }
+        .CursorTakePattern(receiver, receiver_place, parts) -> {
+            mir_digest_tag(writer, "cursor-take-pattern")
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, receiver_place.value)
+            mir_digest_text_pattern_parts(writer, parts)
+        }
+        .ReaderTakePattern(receiver, receiver_place, parts) -> {
+            mir_digest_tag(writer, "reader-take-pattern")
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, receiver_place.value)
+            mir_digest_binary_pattern_parts(writer, parts)
+        }
+        .NumericMethod(call, receiver) -> {
+            mir_digest_tag(writer, "numeric-method")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+        }
+        .NumericBinaryMethod(call, receiver, argument) -> {
+            mir_digest_tag(writer, "numeric-binary-method")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, argument.value)
+        }
+        .OverflowOption(call, left, right, location) -> {
+            mir_digest_tag(writer, "overflow-option")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, left.value)
+            mir_digest_u64(writer, right.value)
+            if location == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                mir_digest_panic_location(writer, location ?? MirPanicLoc{file: MirSourceFileId{value: 0}, line: 0, column: 0})
+            }
+        }
+        .HandleMethod(call, receiver, args, frame_schedule, frame_schedule_derivation) -> {
+            mir_digest_tag(writer, "handle-method")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_values(writer, args)
+            if frame_schedule == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                mir_digest_string(writer, mir_digest_frame_schedule_text(frame_schedule ?? MirFrameSchedule{operations: [MirFrameOperation]{}, dependencies: [MirFrameDependency]{}, transfers: [MirFrameTransfer]{}, reuse: [MirFrameReuse]{}, retentions: [MirFrameRetention]{}, conservative: [String]{}}))
+            }
+            mir_digest_option_string(writer, frame_schedule_derivation.map(row -> row.id))
+        }
+        .PluginInvoke(call, handle, export_name, signature, args) -> {
+            mir_digest_tag(writer, "plugin-invoke")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, handle.value)
+            mir_digest_string(writer, export_name)
+            mir_digest_component_signature(writer, signature)
+            mir_digest_values(writer, args)
+        }
+        .HttpRouterRegister(call, receiver, path, handler, method, names, contract_json, location) -> {
+            mir_digest_tag(writer, "http-router-register")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, path.value)
+            mir_digest_u64(writer, handler.value)
+            mir_digest_string(writer, mir_digest_http_method(method))
+            mir_digest_string_list_encode(writer, names)
+            mir_digest_string(writer, contract_json)
+            mir_digest_panic_location(writer, location)
+        }
+        .CoreClosureCall(call, kind, values, closure, site, label) -> {
+            mir_digest_tag(writer, "core-closure-call")
+            mir_digest_u64(writer, call.value)
+            mir_digest_core_closure(writer, kind)
+            mir_digest_values(writer, values)
+            mir_digest_option_int(writer, closure.map(row -> row.value))
+            mir_digest_u64(writer, site.value)
+            mir_digest_string(writer, label)
+        }
+        .TaskGroup(call, kind, tasks) -> {
+            mir_digest_tag(writer, "task-group")
+            mir_digest_u64(writer, call.value)
+            mir_digest_task_group(writer, kind)
+            mir_digest_values(writer, tasks)
+        }
+        .Select(call, kind, values) -> {
+            mir_digest_tag(writer, "select")
+            mir_digest_u64(writer, call.value)
+            mir_digest_select(writer, kind)
+            mir_digest_values(writer, values)
+        }
+        .PolicyFunction(policy, values) -> {
+            mir_digest_tag(writer, "policy-function")
+            mir_digest_u64(writer, policy.value)
+            mir_digest_values(writer, values)
+        }
+        .InterruptFunction(interrupt, values) -> {
+            mir_digest_tag(writer, "interrupt-function")
+            mir_digest_u64(writer, interrupt.value)
+            mir_digest_values(writer, values)
+        }
+        .CarrierFact(call, receiver, field, notes) -> {
+            mir_digest_tag(writer, "carrier-fact")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, receiver.value)
+            mir_digest_u64(writer, field.value)
+            mir_digest_bool(writer, notes)
+        }
+        .GcEdit(call, root, edges, edit, index, kind, site) -> {
+            mir_digest_tag(writer, "gc-edit")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, root.value)
+            mir_digest_values(writer, edges)
+            mir_digest_u64(writer, edit.value)
+            mir_digest_option_int(writer, index.map(row -> row.value))
+            mir_digest_gc_edit(writer, kind)
+            mir_digest_u64(writer, site.value)
+        }
+        .TypedTextInterp(call, kind, literals, holes, trusted_html) -> {
+            mir_digest_tag(writer, "typed-text-interp")
+            mir_digest_u64(writer, call.value)
+            mir_digest_typed_head(writer, kind)
+            mir_digest_len(writer, literals.len())
+            loop literal in literals -> mir_digest_string(writer, literal)
+            mir_digest_values(writer, holes)
+            mir_digest_len(writer, trusted_html.len())
+            loop trusted in trusted_html -> mir_digest_bool(writer, trusted)
+        }
+        .CCallback(call, callback, lambda) -> {
+            mir_digest_tag(writer, "c-callback")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, callback.value)
+            mir_digest_u64(writer, lambda.value)
+        }
+        .HostCall(call, args) -> {
+            mir_digest_tag(writer, "host-call")
+            mir_digest_call_args(writer, args)
+        }
+    }
+}
+
+fn mir_digest_http_method(value: MirHttpMethod) -> String {
+    return if value == {
+        .Get -> "GET"
+        .Post -> "POST"
+        .Put -> "PUT"
+        .Delete -> "DELETE"
+        .Patch -> "PATCH"
+        .Head -> "HEAD"
+        .Options -> "OPTIONS"
+    }
+}
+
+fn mir_digest_frame_schedule_text(value: MirFrameSchedule) -> String {
+    operations := [String]{}
+    loop operation in value.operations -> operations.push("{mir_digest_debug_quote(operation.name)}:{operation.source_index}:{mir_digest_debug_bool(operation.external_effect)}")
+    dependencies := [String]{}
+    loop dependency in value.dependencies -> dependencies.push("{dependency.before}->{dependency.after}:{mir_digest_debug_quote(dependency.resource)}")
+    transfers := [String]{}
+    loop transfer in value.transfers -> transfers.push("{transfer.before}->{transfer.after}:{mir_digest_debug_quote(transfer.resource)}")
+    "{operations.join("|")};{dependencies.join("|")};{transfers.join("|")};{value.conservative.join("|")}"
+}
+
+fn mir_digest_operation(writer: &MirCanonicalWriter, value: MirOperation) {
+    if value == {
+        .Parameter(index, name) -> {
+            mir_digest_tag(writer, "parameter")
+            mir_digest_len(writer, index)
+            mir_digest_string(writer, name)
+        }
+        .Capture(slot) -> {
+            mir_digest_tag(writer, "capture")
+            mir_digest_len(writer, slot)
+        }
+        .Global(name) -> {
+            mir_digest_tag(writer, "global")
+            mir_digest_string(writer, name)
+        }
+        .Phi(incoming) -> {
+            mir_digest_tag(writer, "phi")
+            mir_digest_len(writer, incoming.len())
+            loop row in incoming {
+                mir_digest_u64(writer, row.block.value)
+                mir_digest_u64(writer, row.value.value)
+            }
+        }
+        .ReadPlace(place) -> {
+            mir_digest_tag(writer, "read-place")
+            mir_digest_u64(writer, place.value)
+        }
+        .MovePlace(place) -> {
+            mir_digest_tag(writer, "move-place")
+            mir_digest_u64(writer, place.value)
+        }
+        .WritePlace(place, value) -> {
+            mir_digest_tag(writer, "write-place")
+            mir_digest_u64(writer, place.value)
+            mir_digest_u64(writer, value.value)
+        }
+        .ReplacePlace(place, value) -> {
+            mir_digest_tag(writer, "replace-place")
+            mir_digest_u64(writer, place.value)
+            mir_digest_u64(writer, value.value)
+        }
+        .InitializeUninit(place) -> {
+            mir_digest_tag(writer, "initialize-uninit")
+            mir_digest_u64(writer, place.value)
+        }
+        .TraitBox(value, target) -> {
+            mir_digest_tag(writer, "trait-box")
+            mir_digest_u64(writer, value.value)
+            mir_digest_u64(writer, target.value)
+        }
+        .Copy(value, materialize_view) -> {
+            mir_digest_tag(writer, "copy")
+            mir_digest_u64(writer, value.value)
+            mir_digest_bool(writer, materialize_view)
+        }
+        .Move(value) -> {
+            mir_digest_tag(writer, "move")
+            mir_digest_u64(writer, value.value)
+        }
+        .Constant(constant) -> {
+            mir_digest_tag(writer, "constant")
+            mir_digest_constant(writer, constant)
+        }
+        .Unary(op, value) -> {
+            mir_digest_tag(writer, "unary")
+            mir_digest_string(writer, mir_digest_unary_debug(op))
+            mir_digest_u64(writer, value.value)
+        }
+        .Binary(op, dispatch, _, left, right) -> {
+            mir_digest_tag(writer, "binary")
+            mir_digest_string(writer, mir_digest_binary_debug(op))
+            mir_digest_string(writer, mir_digest_binary_dispatch_debug(dispatch))
+            mir_digest_u64(writer, left.value)
+            mir_digest_u64(writer, right.value)
+        }
+        .BuildString(parts) -> {
+            mir_digest_tag(writer, "build-string")
+            mir_digest_len(writer, parts.len())
+            loop part in parts -> mir_digest_string(writer, mir_digest_string_part_debug(part))
+        }
+        .BuildList(values, trait_coercion) -> {
+            mir_digest_tag(writer, "build-list")
+            mir_digest_values(writer, values)
+            mir_digest_option_int(writer, trait_coercion.map(row -> row.value))
+        }
+        .BuildMap(entries) -> {
+            mir_digest_tag(writer, "build-map")
+            mir_digest_len(writer, entries.len())
+            loop entry in entries {
+                mir_digest_u64(writer, entry.key.value)
+                mir_digest_u64(writer, entry.value.value)
+            }
+        }
+        .EnumIs(subject, owner, variant) -> {
+            mir_digest_tag(writer, "enum-is")
+            mir_digest_u64(writer, subject.value)
+            mir_digest_u64(writer, owner.value)
+            mir_digest_string(writer, variant)
+        }
+        .EnumPayload(subject, owner, variant, index) -> {
+            mir_digest_tag(writer, "enum-payload")
+            mir_digest_u64(writer, subject.value)
+            mir_digest_u64(writer, owner.value)
+            mir_digest_string(writer, variant)
+            mir_digest_len(writer, index)
+        }
+        .OptionIsSome(subject) -> {
+            mir_digest_tag(writer, "option-is-some")
+            mir_digest_u64(writer, subject.value)
+        }
+        .OptionValue(subject) -> {
+            mir_digest_tag(writer, "option-value")
+            mir_digest_u64(writer, subject.value)
+        }
+        .ResultIsOk(subject) -> {
+            mir_digest_tag(writer, "result-is-ok")
+            mir_digest_u64(writer, subject.value)
+        }
+        .ResultValue(subject, ok) -> {
+            mir_digest_tag(writer, "result-value")
+            mir_digest_u64(writer, subject.value)
+            mir_digest_bool(writer, ok)
+        }
+        .PatternCapture(matched, index) -> {
+            mir_digest_tag(writer, "pattern-capture")
+            mir_digest_u64(writer, matched.value)
+            mir_digest_len(writer, index)
+        }
+        .PatternMatched(matched) -> {
+            mir_digest_tag(writer, "pattern-matched")
+            mir_digest_u64(writer, matched.value)
+        }
+        .ProjectMembers(base, members) -> {
+            mir_digest_tag(writer, "project-members")
+            mir_digest_u64(writer, base.value)
+            mir_digest_len(writer, members.len())
+            loop member in members -> mir_digest_u64(writer, member.value)
+        }
+        .Index(call, base, index, kind, access, location, context) -> {
+            mir_digest_tag(writer, "index")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, base.value)
+            mir_digest_u64(writer, index.value)
+            mir_digest_index_kind(writer, kind)
+            mir_digest_string(writer, mir_digest_access_debug(access))
+            mir_digest_panic_location(writer, location)
+            mir_digest_string(writer, mir_digest_panic_context_debug(context))
+        }
+        .Slice(call, base, start, end, range, location) -> {
+            mir_digest_tag(writer, "slice")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, base.value)
+            mir_digest_u64(writer, start.value)
+            mir_digest_u64(writer, end.value)
+            mir_digest_option_int(writer, range.map(row -> row.value))
+            mir_digest_panic_location(writer, location)
+        }
+        .Range(start, end, exclusive) -> {
+            mir_digest_tag(writer, "range")
+            mir_digest_u64(writer, start.value)
+            mir_digest_u64(writer, end.value)
+            mir_digest_bool(writer, exclusive)
+        }
+        .Field(base, field) -> {
+            mir_digest_tag(writer, "field")
+            mir_digest_u64(writer, base.value)
+            mir_digest_u64(writer, field.value)
+        }
+        .Struct(type_id, fields) | .Tuple(type_id, fields) -> {
+            mir_digest_tag(writer, if value == {
+                .Struct(_, _) -> "struct"
+                else -> "tuple"
+            })
+            mir_digest_u64(writer, type_id.value)
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_u64(writer, field.field.value)
+                mir_digest_u64(writer, field.value.value)
+            }
+        }
+        .Enum(type_id, variant, args) -> {
+            mir_digest_tag(writer, "enum")
+            mir_digest_u64(writer, type_id.value)
+            mir_digest_string(writer, variant)
+            mir_digest_len(writer, args.len())
+            loop arg in args {
+                mir_digest_option_int(writer, arg.field.map(row -> row.value))
+                mir_digest_u64(writer, arg.value.value)
+                mir_digest_bool(writer, arg.boxed)
+            }
+        }
+        .Present(value) -> {
+            mir_digest_tag(writer, "present")
+            mir_digest_u64(writer, value.value)
+        }
+        .Convert(value, parameters, target, conversion) -> {
+            mir_digest_tag(writer, "convert")
+            mir_digest_u64(writer, value.value)
+            mir_digest_len(writer, parameters.len())
+            loop parameter in parameters -> mir_digest_u64(writer, parameter.value)
+            mir_digest_type(writer, target)
+            mir_digest_conversion(writer, conversion)
+        }
+        .Absent -> mir_digest_tag(writer, "absent")
+        .ResultOk(value) -> {
+            mir_digest_tag(writer, "result-ok")
+            mir_digest_u64(writer, value.value)
+        }
+        .ResultErr(value) -> {
+            mir_digest_tag(writer, "result-err")
+            mir_digest_u64(writer, value.value)
+        }
+        .Call(callee, args, type_args) -> {
+            mir_digest_tag(writer, "call")
+            mir_digest_callee(writer, callee)
+            mir_digest_call_args(writer, args)
+            mir_digest_len(writer, type_args.len())
+            loop type_arg in type_args -> mir_digest_type(writer, type_arg)
+        }
+        .IndirectCall(callee, args, type_args) -> {
+            mir_digest_tag(writer, "indirect-call")
+            mir_digest_u64(writer, callee.value)
+            mir_digest_call_args(writer, args)
+            mir_digest_len(writer, type_args.len())
+            loop type_arg in type_args -> mir_digest_type(writer, type_arg)
+        }
+        .Closure(function, captures, facts) -> {
+            mir_digest_tag(writer, "closure")
+            mir_digest_u64(writer, function.value)
+            mir_digest_len(writer, captures.len())
+            loop capture in captures -> mir_digest_string(writer, mir_digest_capture_operand_debug(capture))
+            mir_digest_string(writer, mir_digest_capture_facts_debug(facts))
+        }
+        .PtrFromAddr(address, element) -> {
+            mir_digest_tag(writer, "ptr-from-addr")
+            mir_digest_u64(writer, address.value)
+            mir_digest_type(writer, element)
+        }
+        .Deref(value) -> {
+            mir_digest_tag(writer, "deref")
+            mir_digest_u64(writer, value.value)
+        }
+        .RawAddressOf(place) -> {
+            mir_digest_tag(writer, "raw-address-of")
+            mir_digest_u64(writer, place.value)
+        }
+        .AddressOf(place, access) -> {
+            mir_digest_tag(writer, "address-of")
+            mir_digest_u64(writer, place.value)
+            mir_digest_string(writer, mir_digest_access_debug(access))
+        }
+        .CoreCall(call, route, args, type_args, fallibility, data_plan) -> {
+            mir_digest_tag(writer, "core-call")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, route.value)
+            mir_digest_call_args(writer, args)
+            mir_digest_len(writer, type_args.len())
+            loop type_arg in type_args -> mir_digest_type(writer, type_arg)
+            mir_digest_call_fallibility(writer, fallibility)
+            if data_plan == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                plan :: data_plan ?? panic("checked data plan disappeared during MIR digest")
+                mir_digest_data_plan(writer, plan)
+            }
+        }
+        .AttachTag(value, tag_value) -> {
+            mir_digest_tag(writer, "attach-tag")
+            mir_digest_u64(writer, value.value)
+            mir_digest_option_string(writer, tag_value)
+        }
+        .Todo(call, location, expected_type) -> {
+            mir_digest_tag(writer, "todo")
+            mir_digest_u64(writer, call.value)
+            mir_digest_panic_location(writer, location)
+            mir_digest_option_type(writer, expected_type)
+        }
+        .Never(reason) -> {
+            mir_digest_tag(writer, "never")
+            mir_digest_string(writer, reason)
+        }
+        .Semantic(semantic) -> {
+            mir_digest_tag(writer, "semantic")
+            mir_digest_semantic_operation(writer, semantic)
+        }
+        .LoopRangeInit(call, start, end, step, exclusive) -> {
+            mir_digest_tag(writer, "loop-range-init")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, start.value)
+            mir_digest_u64(writer, end.value)
+            mir_digest_option_int(writer, step.map(row -> row.value))
+            mir_digest_bool(writer, exclusive)
+        }
+        .LoopRangeHasNext(call, cursor) -> {
+            mir_digest_tag(writer, "loop-range-has-next")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .LoopRangeValue(call, cursor) -> {
+            mir_digest_tag(writer, "loop-range-value")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .LoopRangeAdvance(call, cursor) -> {
+            mir_digest_tag(writer, "loop-range-advance")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .LoopIterInit(call, collection, step, by_value, source_kind) -> {
+            mir_digest_tag(writer, "loop-iter-init")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, collection.value)
+            mir_digest_option_int(writer, step.map(row -> row.value))
+            mir_digest_bool(writer, by_value)
+            mir_digest_loop_source_kind(writer, source_kind)
+        }
+        .LoopIterHasNext(call, cursor) -> {
+            mir_digest_tag(writer, "loop-iter-has-next")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .LoopIterValue(call, cursor) -> {
+            mir_digest_tag(writer, "loop-iter-value")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .LoopIterAdvance(call, cursor) -> {
+            mir_digest_tag(writer, "loop-iter-advance")
+            mir_digest_u64(writer, call.value)
+            mir_digest_u64(writer, cursor.value)
+        }
+        .ScopeEnter(scope, test_member) -> {
+            mir_digest_tag(writer, "scope-enter")
+            mir_digest_u64(writer, scope.value)
+            mir_digest_option_string(writer, test_member.map(row -> mir_digest_test_scope_member_debug(row)))
+        }
+        .ScopeExit(scope) -> {
+            mir_digest_tag(writer, "scope-exit")
+            mir_digest_u64(writer, scope.value)
+        }
+        .Drop(value, kind) -> {
+            mir_digest_tag(writer, "drop")
+            mir_digest_u64(writer, value.value)
+            mir_digest_string(writer, mir_digest_drop_kind_debug(kind))
+        }
+    }
+}
+fn mir_digest_string_list_encode(writer: &MirCanonicalWriter, values: [String]) {
+    mir_digest_len(writer, values.len())
+    loop value in values -> mir_digest_string(writer, value)
+}
+
+fn mir_digest_index_kind(writer: &MirCanonicalWriter, value: MirIndexKind) {
+    if value == {
+        .List -> mir_digest_u64(writer, 1)
+        .FixedListProof -> mir_digest_u64(writer, 2)
+        .Map -> mir_digest_u64(writer, 3)
+        .Lane -> mir_digest_u64(writer, 4)
+        .Pool -> mir_digest_u64(writer, 5)
+    }
+}
+
+fn mir_digest_panic_context_debug(value: MirPanicContext) -> String {
+    locals := [String]{}
+    loop local in value.locals -> locals.push("MirPanicLocal {{ name: {mir_digest_debug_quote(local.name)}, local: MirLocalId {{ value: {local.local.value} }} }}")
+    "MirPanicContext {{ function: {mir_digest_debug_quote(value.function)}, source_line: {mir_digest_debug_quote(value.source_line)}, caret: {value.caret}, locals: [{locals.join(", ")}] }}"
+}
+
+fn mir_digest_unary_debug(value: MirUnaryOp) -> String {
+    return if value == {
+        .Neg -> "Neg"
+        .Not -> "Not"
+    }
+}
+
+fn mir_digest_binary_debug(value: MirBinaryOp) -> String {
+    return if value == {
+        .Add -> "Add"
+        .Sub -> "Sub"
+        .Mul -> "Mul"
+        .Div -> "Div"
+        .FloorDiv -> "FloorDiv"
+        .Mod -> "Mod"
+        .Rem -> "Rem"
+        .Pow -> "Pow"
+        .BitAnd -> "BitAnd"
+        .BitOr -> "BitOr"
+        .BitXor -> "BitXor"
+        .Shl -> "Shl"
+        .Shr -> "Shr"
+        .Eq -> "Eq"
+        .Ne -> "Ne"
+        .Lt -> "Lt"
+        .Gt -> "Gt"
+        .Le -> "Le"
+        .Ge -> "Ge"
+        .Compare -> "Compare"
+        .And -> "And"
+        .Or -> "Or"
+    }
+}
+fn mir_digest_binary_dispatch_debug(value: MirBinaryDispatch) -> String {
+    return if value == {
+        .Primitive -> "Primitive"
+        .Prelude(call, location) -> "Prelude(MirPreludeCallId {{ value: {call.value} }}, {if location == None -> "None" else -> "Some({mir_digest_panic_location_debug(location ?? MirPanicLoc{file: MirSourceFileId{value: 0}, line: 0, column: 0})})"})"
+    }
+}
+fn mir_digest_string_format_debug(value: MirStringFormat) -> String {
+    return if value == {
+        .Display -> "Display"
+        .Debug -> "Debug"
+        .Pretty -> "Pretty"
+        .Fixed(digits) -> "Fixed({digits})"
+        .Grouped(digits) -> "Grouped({digits})"
+    }
+}
+fn mir_digest_string_part_debug(value: MirStringPart) -> String {
+    if value.kind == {
+        .Literal(text) -> "MirStringPart {{ kind: Literal({mir_digest_debug_quote(text)}) }}"
+        .Interpolation(id, format) -> "MirStringPart {{ kind: Interpolation(MirValueId {{ value: {id.value} }}, {mir_digest_string_format_debug(format)}) }}"
+    }
+}
+fn mir_digest_capture_operand_debug(value: MirCaptureOperand) -> String {
+    return if value == {
+        .Value(id) -> "Value(MirValueId {{ value: {id.value} }})"
+        .Place(id) -> "Place(MirPlaceId {{ value: {id.value} }})"
+    }
+}
+fn mir_digest_capture_facts_debug(value: MirCaptureFacts) -> String {
+    "MirCaptureFacts {{ escapes: {mir_digest_debug_bool(value.escapes)}, needs_fn_mut: {mir_digest_debug_bool(value.needs_fn_mut)}, mutable: {mir_digest_debug_string_list(value.mutable)}, cloned: {mir_digest_debug_string_list(value.cloned)}, frozen: {mir_digest_debug_string_list(value.frozen)}, materialized: {mir_digest_debug_string_list(value.materialized)}, moved: {mir_digest_debug_string_list(value.moved)} }}"
+}
+fn mir_digest_test_scope_member_debug(value: MirTestScopeMember) -> String {
+    return if value == {
+        .ExpectFail(code) -> "ExpectFail({mir_digest_debug_option_string(code)})"
+        .Timeout(duration) -> "Timeout(MirValueId {{ value: {duration.value} }})"
+        .Skip(whole_test) -> "Skip({mir_digest_debug_bool(whole_test)})"
+        .Measure -> "Measure"
+    }
+}
+fn mir_digest_data_plan_operation_debug(value: MirDataPlanOperation) -> String {
+    return if value == {
+        .Scan -> "Scan"
+        .Filter -> "Filter"
+        .SortBy -> "SortBy"
+        .InnerJoin -> "InnerJoin"
+        .LeftJoin -> "LeftJoin"
+        .Group -> "Group"
+        .Window -> "Window"
+        .Project -> "Project"
+        .Collect -> "Collect"
+    }
+}
+fn mir_digest_data_plan_source_debug(value: MirDataPlanSourceKind) -> String {
+    return if value == {
+        .Table -> "Table"
+        .Series -> "Series"
+        .Csv -> "Csv"
+        .Json -> "Json"
+        .Jsonl -> "Jsonl"
+        .Parquet -> "Parquet"
+        .Arrow -> "Arrow"
+        .Loader -> "Loader"
+        .CsvReader -> "CsvReader"
+        .JsonReader -> "JsonReader"
+    }
+}
+fn mir_digest_data_plan_stream(writer: &MirCanonicalWriter, value: MirDataPlanStreamMode) {
+    if value == {
+        .Bounded(batch_rows) -> {
+            mir_digest_tag(writer, "bounded")
+            mir_digest_option_int(writer, batch_rows)
+        }
+        .Materialized(reason) -> {
+            mir_digest_tag(writer, "materialized")
+            mir_digest_string(writer, reason)
+        }
+    }
+}
+fn mir_digest_data_plan_physical_debug(value: MirDataPlanPhysicalOperator) -> String {
+    return if value == {
+        .Scan -> "Scan"
+        .Filter -> "Filter"
+        .SortBy -> "SortBy"
+        .InnerJoin -> "InnerJoin"
+        .LeftJoin -> "LeftJoin"
+        .Group -> "Group"
+        .Window -> "Window"
+        .Project -> "Project"
+        .Batch -> "Batch"
+        .Materialize -> "Materialize"
+    }
+}
+fn mir_digest_data_plan(writer: &MirCanonicalWriter, value: MirDataPlan) {
+    mir_digest_u64(writer, value.schema_version)
+    mir_digest_string(writer, mir_digest_data_plan_source_debug(value.source))
+    mir_digest_len(writer, value.logical.len())
+    loop node in value.logical {
+        mir_digest_u64(writer, node.id.value)
+        mir_digest_string(writer, mir_digest_data_plan_operation_debug(node.operation))
+        mir_digest_len(writer, node.inputs.len())
+        loop input in node.inputs -> mir_digest_u64(writer, input.value)
+        mir_digest_option_string(writer, node.source.map(row -> mir_digest_data_plan_source_debug(row)))
+        mir_digest_type(writer, node.row_type)
+        mir_digest_len(writer, node.columns.len())
+        loop column in node.columns {
+            mir_digest_string(writer, column.name)
+            mir_digest_type(writer, column.ty)
+            mir_digest_bool(writer, column.nullable)
+        }
+        if node.callable == {
+            None -> mir_digest_bool(writer, false)
+            Val(callable) -> {
+                mir_digest_bool(writer, true)
+                mir_digest_string(writer, callable.label)
+                mir_digest_type(writer, callable.parameter)
+                mir_digest_type(writer, callable.result)
+                mir_digest_span(writer, callable.span)
+            }
+        }
+        mir_digest_data_plan_stream(writer, node.stream)
+        mir_digest_span(writer, node.span)
+    }
+    mir_digest_len(writer, value.physical.len())
+    loop node in value.physical {
+        mir_digest_u64(writer, node.logical.value)
+        mir_digest_string(writer, mir_digest_data_plan_physical_debug(node.operator))
+        mir_digest_data_plan_stream(writer, node.stream)
+        mir_digest_string(writer, node.reason)
+    }
+    mir_digest_u64(writer, value.output.value)
+    mir_digest_span(writer, value.source_span)
+}
+
+fn mir_digest_constant(writer: &MirCanonicalWriter, value: MirConstant) {
+    if value == {
+        .Int(amount, width, spelling) -> {
+            mir_digest_tag(writer, "int")
+            mir_digest_u64(writer, amount)
+            if width == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                row :: width ?? MirIntegerWidth{signed: false, bits: 0}
+                mir_digest_bool(writer, row.signed)
+                mir_digest_u64(writer, row.bits)
+            }
+            mir_digest_option_string(writer, spelling)
+        }
+        .Float(amount, f32, spelling) -> {
+            mir_digest_tag(writer, "float")
+            mir_digest_u64(writer, math.to_bits(amount))
+            mir_digest_bool(writer, f32)
+            mir_digest_option_string(writer, spelling)
+        }
+        .Bool(value) -> {
+            mir_digest_tag(writer, "bool")
+            mir_digest_bool(writer, value)
+        }
+        .Char(value) -> {
+            mir_digest_tag(writer, "char")
+            mir_digest_u64(writer, value)
+        }
+        .String(value) -> {
+            mir_digest_tag(writer, "string")
+            mir_digest_string(writer, value)
+        }
+        .Bytes(value) -> {
+            mir_digest_tag(writer, "bytes")
+            mir_digest_bytes(writer, value)
+        }
+        .Unit -> mir_digest_tag(writer, "unit")
+        .BigInt(value) -> {
+            mir_digest_tag(writer, "bigint")
+            mir_digest_string(writer, value)
+        }
+        .List(values) -> {
+            mir_digest_tag(writer, "list")
+            mir_digest_len(writer, values.len())
+            loop item in values -> mir_digest_constant(writer, item)
+        }
+        .Map(values) -> {
+            mir_digest_tag(writer, "map")
+            mir_digest_len(writer, values.len())
+            loop item in values {
+                mir_digest_const_key(writer, item.key)
+                mir_digest_constant(writer, item.value)
+            }
+        }
+        .Struct(type_name, fields) -> {
+            mir_digest_tag(writer, "struct")
+            mir_digest_string(writer, type_name)
+            mir_digest_len(writer, fields.len())
+            loop field in fields {
+                mir_digest_string(writer, field.name)
+                mir_digest_constant(writer, field.value)
+            }
+        }
+        .Enum(type_name, variant, args) -> {
+            mir_digest_tag(writer, "enum")
+            mir_digest_string(writer, type_name)
+            mir_digest_string(writer, variant)
+            mir_digest_len(writer, args.len())
+            loop arg in args {
+                mir_digest_option_string(writer, arg.name)
+                mir_digest_constant(writer, arg.value)
+            }
+        }
+        .Present(inner) -> {
+            mir_digest_tag(writer, "present")
+            mir_digest_constant(writer, inner)
+        }
+        .Failed(report) -> {
+            mir_digest_tag(writer, "failed")
+            if report == {
+                .Clean(ty) -> {
+                    mir_digest_tag(writer, "clean")
+                    mir_digest_type(writer, ty)
+                }
+                .Told(inner) -> {
+                    mir_digest_tag(writer, "told")
+                    mir_digest_constant(writer, inner)
+                }
+            }
+        }
+    }
+}
+
+fn mir_digest_const_key(writer: &MirCanonicalWriter, value: MirConstKey) {
+    if value == {
+        .Int(amount) -> {
+            mir_digest_tag(writer, "int")
+            mir_digest_u64(writer, amount)
+        }
+        .String(text) -> {
+            mir_digest_tag(writer, "string")
+            mir_digest_string(writer, text)
+        }
+        .Bool(value) -> {
+            mir_digest_tag(writer, "bool")
+            mir_digest_bool(writer, value)
+        }
+        .Char(value) -> {
+            mir_digest_tag(writer, "char")
+            mir_digest_u64(writer, value)
+        }
+        .Tuple(values) -> {
+            mir_digest_tag(writer, "tuple")
+            mir_digest_len(writer, values.len())
+            loop row in values {
+                mir_digest_string(writer, row.name)
+                mir_digest_const_key(writer, row.key)
+            }
+        }
+        .Struct(type_name, fields) -> {
+            mir_digest_tag(writer, "struct")
+            mir_digest_string(writer, type_name)
+            mir_digest_len(writer, fields.len())
+            loop row in fields {
+                mir_digest_string(writer, row.name)
+                mir_digest_const_key(writer, row.key)
+            }
+        }
+        .Enum(type_name, variant) -> {
+            mir_digest_tag(writer, "enum")
+            mir_digest_string(writer, type_name)
+            mir_digest_string(writer, variant)
+        }
+    }
+}
+
+fn mir_digest_item_ref(writer: &MirCanonicalWriter, value: MirItemRef) {
+    if value == {
+        .Type(id) -> {
+            mir_digest_tag(writer, "type")
+            mir_digest_u64(writer, id.value)
+        }
+        .Trait(id) -> {
+            mir_digest_tag(writer, "trait")
+            mir_digest_u64(writer, id.value)
+        }
+        .Function(id) -> {
+            mir_digest_tag(writer, "function")
+            mir_digest_u64(writer, id.value)
+        }
+        .Constant(id) -> {
+            mir_digest_tag(writer, "constant")
+            mir_digest_u64(writer, id.value)
+        }
+        .Impl(id) -> {
+            mir_digest_tag(writer, "impl")
+            mir_digest_u64(writer, id.value)
+        }
+        .Foreign(id) -> {
+            mir_digest_tag(writer, "foreign")
+            mir_digest_u64(writer, id.value)
+        }
+        .Import(id) -> {
+            mir_digest_tag(writer, "import")
+            mir_digest_u64(writer, id.value)
+        }
+    }
+}
+
+fn mir_digest_visibility_code(value: MirVisibility) -> Int {
+    return if value == {
+        .Private -> 1
+        .Package -> 2
+        .Public -> 3
+    }
+}
+
+fn mir_digest_access_code(value: MirAccess) -> Int {
+    return if value == {
+        .Read -> 1
+        .Write -> 2
+        .Move -> 3
+    }
+}
+
+fn mir_digest_access_optional(writer: &MirCanonicalWriter, value: ?MirAccess) {
+    if value == None -> mir_digest_u64(writer, 0) else -> mir_digest_u64(writer, mir_digest_access_code(value ?? .Read))
+}
+
+fn mir_digest_ownership_mode_code(value: MirOwnershipMode) -> Int {
+    return if value == {
+        .Copy -> 1
+        .Owned -> 2
+        .Shared -> 3
+        .ReadBorrow -> 4
+        .WriteBorrow -> 5
+        .Move -> 6
+    }
+}
+
+fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: ?MirStructLayout) {
+    if value == None -> mir_digest_u64(writer, 0) else {
+        layout :: value ?? .C
+        if layout == {
+            .C -> mir_digest_u64(writer, 1)
+            .Columnar -> mir_digest_u64(writer, 2)
+            .CAligned(alignment, target) -> {
+                mir_digest_u64(writer, 3)
+                mir_digest_u64(writer, alignment)
+                mir_digest_bool(writer, target)
+            }
+        }
+    }
+}
+
+fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: ?MirCEnumTag) {
+    if value == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        tag :: value ?? .CInt
+        code := if tag == {
+            .CInt -> 1
+            .U8 -> 2
+            .I8 -> 3
+            .U16 -> 4
+            .I16 -> 5
+            .U32 -> 6
+            .I32 -> 7
+            .U64 -> 8
+            .I64 -> 9
+        }
+        mir_digest_u64(writer, code)
+    }
+}
+
+fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: ?LayoutFacts) {
+    if value == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        facts :: value ?? LayoutFacts{bytes: None, fields: [FieldLayoutFacts]{}}
+        if facts.bytes == None -> mir_digest_bool(writer, false) else {
+            mir_digest_bool(writer, true)
+            bytes :: facts.bytes ?? ByteLayout{size: 0, alignment: 0, stride: 0}
+            mir_digest_u64(writer, bytes.size)
+            mir_digest_u64(writer, bytes.alignment)
+            mir_digest_u64(writer, bytes.stride)
+        }
+        mir_digest_len(writer, facts.fields.len())
+        loop field in facts.fields {
+            mir_digest_string(writer, field.name)
+            mir_digest_option_int(writer, field.offset)
+            mir_digest_option_int(writer, field.size)
+            mir_digest_option_int(writer, field.alignment)
+            mir_digest_option_int(writer, field.stride)
+        }
+    }
+}
+
+
+fn mir_digest_layout_alignment(writer: &MirCanonicalWriter, value: ?MirLayoutAlignmentFact) {
+    if value == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        row :: value ?? MirLayoutAlignmentFact{requested_alignment: 0, effective_alignment: 0, target_mode: false, target_profile: "", fact_identity: ""}
+        mir_digest_u64(writer, row.requested_alignment)
+        mir_digest_u64(writer, row.effective_alignment)
+        mir_digest_bool(writer, row.target_mode)
+        mir_digest_string(writer, row.target_profile)
+        mir_digest_string(writer, row.fact_identity)
+    }
+}
+
+fn mir_digest_serde_codec(writer: &MirCanonicalWriter, value: ?MirSerdeCodec) {
+    if value == None -> mir_digest_u64(writer, 0) else {
+        codec :: value ?? .Encode
+        if codec == {
+            .Encode -> mir_digest_u64(writer, 1)
+            .Decode -> mir_digest_u64(writer, 2)
+        }
+    }
+}
+
+
+fn mir_digest_serde_attribute_kind(value: MirSerdeAttributeKind) -> Int {
+    return if value == {
+        .RenameAll -> 1
+        .Tag -> 2
+        .Untagged -> 3
+        .DenyUnknownFields -> 4
+    }
+}
+
+fn mir_digest_serde_attributes(writer: &MirCanonicalWriter, values: [MirSerdeAttribute]) {
+    mir_digest_len(writer, values.len())
+    loop value in values {
+        mir_digest_u64(writer, mir_digest_serde_attribute_kind(value.kind))
+        mir_digest_option_string(writer, value.value)
+    }
+}
+
+fn mir_digest_target_applicability(writer: &MirCanonicalWriter, value: MirTargetApplicability) {
+    mir_digest_bool(writer, value.rust_aot)
+    mir_digest_bool(writer, value.cranelift)
+    mir_digest_bool(writer, value.interpreter)
+    mir_digest_bool(writer, value.web)
+}
+
+fn mir_digest_generic_params(writer: &MirCanonicalWriter, values: [MirGenericParam]) {
+    mir_digest_len(writer, values.len())
+    loop value in values {
+        mir_digest_string(writer, value.name)
+        mir_digest_len(writer, value.bounds.len())
+        loop bound in value.bounds {
+            mir_digest_u64(writer, bound.id.value)
+            mir_digest_string(writer, bound.name)
+        }
+    }
+}
+
+fn mir_digest_shape_field_names(writer: &MirCanonicalWriter, value: MirShapeFieldNames) {
+    mir_digest_string(writer, value.text)
+    mir_digest_option_string(writer, value.json)
+    mir_digest_option_string(writer, value.cbor)
+    mir_digest_option_string(writer, value.csv)
+    mir_digest_option_string(writer, value.toml)
+    mir_digest_option_string(writer, value.yaml)
+    mir_digest_option_string(writer, value.xml)
+    mir_digest_string(writer, value.args)
+    mir_digest_string(writer, value.env)
+    mir_digest_option_string(writer, value.db)
+    mir_digest_option_string(writer, value.layout)
+}
+
+fn mir_digest_field(writer: &MirCanonicalWriter, value: MirField) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.name)
+    mir_digest_shape_field_names(writer, value.shape_names)
+    mir_digest_bool(writer, value.skip)
+    mir_digest_type(writer, value.ty)
+    mir_digest_span(writer, value.span)
+    mir_digest_bool(writer, value.public)
+    mir_digest_bool(writer, value.package_public)
+    mir_digest_bool(writer, value.computed)
+    mir_digest_bool(writer, value.has_default)
+}
+
+fn mir_digest_variant_payload(writer: &MirCanonicalWriter, value: MirVariantPayload) {
+    if value == {
+        .Unit -> mir_digest_tag(writer, "unit")
+        .Single(ty) -> {
+            mir_digest_tag(writer, "single")
+            mir_digest_type(writer, ty)
+        }
+        .Named(fields) -> {
+            mir_digest_tag(writer, "named")
+            mir_digest_len(writer, fields.len())
+            loop field in fields -> mir_digest_field(writer, field)
+        }
+    }
+}
+
+fn mir_digest_type_def_kind(writer: &MirCanonicalWriter, value: MirTypeDefKind) {
+    if value == {
+        .Struct(fields, methods) -> {
+            mir_digest_tag(writer, "struct")
+            mir_digest_len(writer, fields.len())
+            loop field in fields -> mir_digest_field(writer, field)
+            mir_digest_string(writer, mir_digest_debug_int_list(methods.map(row -> row.value)))
+        }
+        .Enum(variants, methods) -> {
+            mir_digest_tag(writer, "enum")
+            mir_digest_len(writer, variants.len())
+            loop variant in variants {
+                mir_digest_string(writer, variant.name)
+                mir_digest_string(writer, variant.wire_name)
+                mir_digest_span(writer, variant.span)
+                mir_digest_variant_payload(writer, variant.payload)
+                mir_digest_option_int(writer, variant.discriminant)
+            }
+            mir_digest_string(writer, mir_digest_debug_int_list(methods.map(row -> row.value)))
+        }
+        .Distinct(base, range) -> {
+            mir_digest_tag(writer, "distinct")
+            mir_digest_type(writer, base)
+            mir_digest_string(writer, mir_digest_integer_range_debug(range))
+        }
+        .Alias(target) -> {
+            mir_digest_tag(writer, "alias")
+            mir_digest_type(writer, target)
+        }
+        .UnitFamily(members) -> {
+            mir_digest_tag(writer, "unit-family")
+            mir_digest_string(writer, mir_digest_debug_string_list(members))
+        }
+    }
+}
+
+fn mir_digest_param(writer: &MirCanonicalWriter, value: MirParam) {
+    mir_digest_len(writer, value.index)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_type(writer, value.ty)
+    mir_digest_string(writer, mir_digest_access_debug(value.access))
+    mir_digest_string(writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_string(writer, value.public_label)
+}
+
+fn mir_digest_capture_param(writer: &MirCanonicalWriter, value: MirCaptureParam) {
+    mir_digest_len(writer, value.slot)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_type(writer, value.ty)
+    mir_digest_string(writer, mir_digest_access_debug(value.access))
+    mir_digest_string(writer, mir_digest_ownership_debug(value.ownership))
+}
+
+fn mir_digest_cli_value_kind(value: MirCliValueKind) -> Int {
+    return if value == {
+        .Bool -> 1
+        .Int -> 2
+        .Float -> 3
+        .String -> 4
+        .Path -> 5
+    }
+}
+
+fn mir_digest_param_zone_code(value: ParamZone) -> Int {
+    return if value == {
+        .PositionalOnly -> 1
+        .Either -> 2
+        .LabelOnly -> 3
+    }
+}
+
+fn mir_digest_cli_input(writer: &MirCanonicalWriter, value: MirCliInput) {
+    mir_digest_len(writer, value.parameter)
+    mir_digest_string(writer, value.name)
+    mir_digest_string(writer, value.label)
+    mir_digest_type(writer, value.ty)
+    mir_digest_u64(writer, mir_digest_param_zone_code(value.zone))
+    mir_digest_option_string(writer, value.short)
+    mir_digest_option_string(writer, value.env)
+    mir_digest_string(writer, value.help)
+    mir_digest_option_string(writer, value.metavar)
+    if value.shape == {
+        .Flag -> mir_digest_tag(writer, "flag")
+        .Value(kind, optional, default) -> {
+            mir_digest_tag(writer, "value")
+            mir_digest_u64(writer, mir_digest_cli_value_kind(kind))
+            mir_digest_bool(writer, optional)
+            if default == None -> mir_digest_tag(writer, "no-default") else {
+                default_value :: default ?? .TypeDefault
+                if default_value == {
+                    .TypeDefault -> mir_digest_tag(writer, "type-default")
+                    .Value(constant) -> {
+                        mir_digest_tag(writer, "value-default")
+                        mir_digest_constant(writer, constant)
+                    }
+                }
+            }
+        }
+    }
+    mir_digest_option_int(writer, value.positional)
+    mir_digest_bool(writer, value.variadic)
+}
+
+fn mir_digest_cli_entry(writer: &MirCanonicalWriter, value: MirCliEntry) {
+    mir_digest_bool(writer, value.record_inputs)
+    mir_digest_option_string(writer, value.description)
+    mir_digest_len(writer, value.inputs.len())
+    loop input in value.inputs -> mir_digest_cli_input(writer, input)
+    mir_digest_len(writer, value.commands.len())
+    loop command in value.commands {
+        mir_digest_string(writer, command.name)
+        mir_digest_option_string(writer, command.description)
+        mir_digest_u64(writer, command.function.value)
+        mir_digest_option_int(writer, command.receiver.map(row -> row.value))
+        mir_digest_len(writer, command.inputs.len())
+        loop input in command.inputs -> mir_digest_cli_input(writer, input)
+    }
+    mir_digest_bool(writer, value.standard)
+}
+
+fn mir_digest_module(writer: &MirCanonicalWriter, value: MirModule) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.name)
+    mir_digest_string(writer, value.path)
+    mir_digest_u64(writer, value.source_file.value)
+    imports := value.imports.map(row -> row.value)
+    mir_digest_sort_ints(&imports)
+    mir_digest_len(writer, imports.len())
+    loop id in imports -> mir_digest_u64(writer, id)
+    mir_digest_len(writer, value.item_order.len())
+    loop item in value.item_order -> mir_digest_item_ref(writer, item)
+}
+
+fn mir_digest_import(writer: &MirCanonicalWriter, value: MirImport) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_u64(writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_string(writer, value.alias)
+    mir_digest_span(writer, value.span)
+    if value.kind == {
+        .File(path) -> {
+            mir_digest_tag(writer, "file")
+            mir_digest_string(writer, path)
+        }
+        .Module(path) -> {
+            mir_digest_tag(writer, "module")
+            mir_digest_string(writer, path)
+        }
+        .Unqualified(module_id, items) -> {
+            mir_digest_tag(writer, "unqualified")
+            mir_digest_u64(writer, module_id.value)
+            sorted_items := items
+            mir_digest_sort_import_items(&sorted_items)
+            mir_digest_len(writer, sorted_items.len())
+            loop item in sorted_items {
+                mir_digest_string(writer, item.original)
+                mir_digest_string(writer, item.local)
+                mir_digest_item_ref(writer, item.item)
+            }
+        }
+    }
+}
+
+fn mir_digest_type_def(writer: &MirCanonicalWriter, value: MirTypeDef) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_bool(writer, value.public)
+    mir_digest_bool(writer, value.package_public)
+    mir_digest_generic_params(writer, value.generic_params)
+    mir_digest_len(writer, value.derives.len())
+    loop derive_id in value.derives -> mir_digest_u64(writer, derive_id.value)
+    mir_digest_bool(writer, value.auto_derive_default)
+    mir_digest_bool(writer, value.auto_printable)
+    mir_digest_bool(writer, value.published_schema)
+    mir_digest_bool(writer, value.single_use)
+    mir_digest_bool(writer, value.must_use)
+    mir_digest_struct_layout(writer, value.layout)
+    mir_digest_c_enum_tag(writer, value.c_layout_tag)
+    mir_digest_layout_facts(writer, value.enum_layout)
+    mir_digest_layout_alignment(writer, value.layout_alignment)
+    mir_digest_serde_attributes(writer, value.serde)
+    mir_digest_len(writer, value.cli_bindings.len())
+    loop binding in value.cli_bindings {
+        mir_digest_string(writer, binding.name)
+        mir_digest_u64(writer, binding.function.value)
+    }
+    if value.cli == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_cli_entry(writer, value.cli ?? MirCliEntry{record_inputs: false, description: None, inputs: [MirCliInput]{}, commands: [MirCliCommand]{}, standard: false, version: None})
+    }
+    mir_digest_u64(writer, mir_digest_ownership_mode_code(value.ownership))
+    mir_digest_len(writer, value.boxed_edges.len())
+    loop edge in value.boxed_edges -> mir_digest_string(writer, edge)
+    if value.compiler_builtin == {
+        None -> mir_digest_bool(writer, false)
+        Val(builtin) -> {
+            mir_digest_bool(writer, true)
+            if builtin == MirCompilerBuiltin.DefaultErr -> mir_digest_tag(writer, "default-err")
+        }
+    }
+    mir_digest_type_def_kind(writer, value.kind)
+}
+fn mir_digest_core_owner(writer: &MirCanonicalWriter, value: MirCoreOwner) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.nominal_id.value)
+    mir_digest_option_int(writer, value.module_id.map(row -> row.value))
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.name)
+    mir_digest_u64(writer, mir_digest_ownership_mode_code(value.ownership))
+}
+
+fn mir_digest_trait_method(writer: &MirCanonicalWriter, value: MirTraitMethod) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_access_optional(writer, value.self_access)
+    mir_digest_len(writer, value.params.len())
+    loop param in value.params -> mir_digest_param(writer, param)
+    mir_digest_option_type(writer, value.declared_return)
+    mir_digest_type(writer, value.return_type)
+    mir_digest_failure_carrier(writer, value.failure)
+    mir_digest_string(writer, mir_digest_effects_debug(value.effects))
+    mir_digest_bool(writer, value.is_pure)
+    mir_digest_string(writer, mir_digest_view_provenance_option_debug(value.return_view_provenance))
+    mir_digest_option_int(writer, value.default.map(row -> row.value))
+}
+
+fn mir_digest_trait_def(writer: &MirCanonicalWriter, value: MirTraitDef) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_u64(writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_len(writer, value.associated_types.len())
+    loop associated in value.associated_types {
+        mir_digest_string(writer, associated.name)
+        mir_digest_span(writer, associated.span)
+    }
+    methods := value.methods
+    mir_digest_sort_trait_methods(&methods)
+    mir_digest_len(writer, methods.len())
+    loop method in methods -> mir_digest_trait_method(writer, method)
+}
+
+fn mir_digest_impl_def(writer: &MirCanonicalWriter, value: MirImplDef) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_span(writer, value.span)
+    mir_digest_type(writer, value.self_type)
+    if value.trait_ref == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        trait_ref :: value.trait_ref ?? MirTraitRef{id: MirTraitId{value: 0}, name: ""}
+        mir_digest_u64(writer, trait_ref.id.value)
+        mir_digest_string(writer, trait_ref.name)
+    }
+    associated_types := value.associated_types
+    mir_digest_sort_associated_types(&associated_types)
+    mir_digest_len(writer, associated_types.len())
+    loop associated in associated_types {
+        mir_digest_string(writer, associated.name)
+        mir_digest_type(writer, associated.ty)
+        mir_digest_span(writer, associated.span)
+    }
+    methods := value.methods.map(row -> row.value)
+    mir_digest_sort_ints(&methods)
+    mir_digest_len(writer, methods.len())
+    loop method in methods -> mir_digest_u64(writer, method)
+    mir_digest_option_int(writer, value.delegation.map(row -> row.value))
+    mir_digest_bool(writer, value.compiler_generated)
+    mir_digest_serde_codec(writer, value.serde)
+    if value.operator_rhs == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_type(writer, value.operator_rhs ?? MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)})
+    }
+    if value.operator_marker == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_tag(writer, "commutative")
+    }
+    mir_digest_target_applicability(writer, value.target_applicability)
+}
+
+fn mir_digest_constant_def(writer: &MirCanonicalWriter, value: MirConstantDef) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_u64(writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_type(writer, value.ty)
+    mir_digest_constant(writer, value.value)
+}
+
+fn mir_digest_debug_int_list(values: [Int]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push("{value}")
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_integer_range_debug(value: ?MirIntegerRange) -> String {
+    if value == None -> return "None"
+    row :: value ?? MirIntegerRange{lo: 0, hi: 0}
+    "Some(MirIntegerRange {{ lo: {row.lo}, hi: {row.hi} }})"
+}
+
+fn mir_digest_effects_debug(value: MirEffectFacts) -> String {
+    direct := value.direct
+    mir_digest_sort_strings(&direct)
+    solved := value.solved
+    mir_digest_sort_strings(&solved)
+    call_edges := value.call_edges
+    mir_digest_sort_strings(&call_edges)
+    direct_spans := value.direct_spans
+    mir_digest_sort_named_spans(&direct_spans)
+    rendered_spans := [String]{}
+    loop row in direct_spans {
+        rendered_spans.push("{mir_digest_debug_quote(row.name)}: Span {{ start: {row.span.start}, end: {row.span.end} }}")
+    }
+    "MirEffectFacts {{ direct: {mir_digest_debug_string_list(direct)}, solved: {mir_digest_debug_string_list(solved)}, call_edges: {mir_digest_debug_string_list(call_edges)}, maximal: {mir_digest_debug_bool(value.maximal)}, direct_spans: {{{rendered_spans.join(", ")}}} }}"
+}
+
+fn mir_digest_foreign_abi(writer: &MirCanonicalWriter, value: MirForeignAbi) {
+    if value == {
+        .C -> mir_digest_u64(writer, 1)
+        .CUnwind -> mir_digest_u64(writer, 2)
+        .System -> mir_digest_u64(writer, 3)
+        .Stdcall -> mir_digest_u64(writer, 4)
+        .Fastcall -> mir_digest_u64(writer, 5)
+        .Vectorcall -> mir_digest_u64(writer, 6)
+        .Rust -> mir_digest_u64(writer, 7)
+        .Platform(name) -> {
+            mir_digest_u64(writer, 8)
+            mir_digest_string(writer, name)
+        }
+    }
+}
+
+fn mir_digest_foreign_language(value: MirForeignLanguage) -> Int {
+    return if value == {
+        .C -> 1
+        .Cpp -> 2
+        .Rust -> 3
+        .Assembly -> 4
+    }
+}
+
+fn mir_digest_link_artifact_kind(value: MirLinkArtifactKind) -> Int {
+    return if value == {
+        .Object -> 1
+        .StaticLibrary -> 2
+        .DynamicLibrary -> 3
+        .Framework -> 4
+        .GeneratedSource -> 5
+    }
+}
+
+fn mir_digest_handle_ownership(value: MirHandleOwnership) -> Int {
+    return if value == {
+        .Owned -> 1
+        .Shared -> 2
+        .Borrowed -> 3
+    }
+}
+
+fn mir_digest_link_unit(writer: &MirCanonicalWriter, value: MirLinkUnit) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.crate_spec)
+    mir_digest_string(writer, value.cache_identity)
+    mir_digest_target_applicability(writer, value.target_applicability)
+    mir_digest_len(writer, value.artifacts.len())
+    loop artifact in value.artifacts {
+        mir_digest_u64(writer, mir_digest_link_artifact_kind(artifact.kind))
+        mir_digest_string(writer, artifact.path)
+    }
+    mir_digest_len(writer, value.dependency_dirs.len())
+    loop path in value.dependency_dirs -> mir_digest_string(writer, path)
+    closure := value.link_closure.map(row -> row.value)
+    mir_digest_sort_ints(&closure)
+    mir_digest_len(writer, closure.len())
+    loop unit in closure -> mir_digest_u64(writer, unit)
+}
+
+fn mir_digest_callback(writer: &MirCanonicalWriter, value: MirCallbackAdapter) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.symbol)
+    mir_digest_u64(writer, value.function.value)
+    mir_digest_len(writer, value.params.len())
+    loop param in value.params -> mir_digest_param(writer, param)
+    mir_digest_option_type(writer, value.return_type)
+    mir_digest_foreign_abi(writer, value.abi)
+}
+
+fn mir_digest_handle(writer: &MirCanonicalWriter, value: MirHandleLifecycle) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_type(writer, value.ty)
+    mir_digest_u64(writer, mir_digest_handle_ownership(value.ownership))
+    mir_digest_string(writer, value.payload.library)
+    mir_digest_string(writer, value.payload.typedef_name)
+    mir_digest_string(writer, value.payload.close)
+    mir_digest_option_int(writer, value.close.map(row -> row.value))
+    mir_digest_option_int(writer, value.close_foreign.map(row -> row.value))
+    mir_digest_option_int(writer, value.undo.map(row -> row.value))
+    mir_digest_bool(writer, value.send)
+    mir_digest_bool(writer, value.sync)
+}
+
+fn mir_digest_prelude_family(value: MirPreludeFamily) -> Int {
+    return if value == {
+        .MathBuiltin -> 1
+        .PreciseBuiltin -> 2
+        .BuiltinMethod -> 3
+        .HostBorrowCallback -> 4
+        .Overflow -> 5
+        .HandleMethod -> 6
+        .ClosureMethod -> 7
+        .ColumnarAccess -> 8
+        .StaticPrelude -> 9
+        .Host -> 10
+    }
+}
+
+fn mir_digest_prelude_abi(value: MirPreludeAbi) -> Int {
+    return if value == {
+        .Value -> 1
+        .Aggregate -> 2
+        .Control -> 3
+        .Effect -> 4
+    }
+}
+
+fn mir_digest_symbol(writer: &MirCanonicalWriter, value: MirSymbol) {
+    if value == {
+        .Prelude(name) -> {
+            mir_digest_tag(writer, "prelude-symbol")
+            mir_digest_string(writer, name)
+        }
+        .Runtime(name) -> {
+            mir_digest_tag(writer, "runtime-symbol")
+            mir_digest_string(writer, name)
+        }
+    }
+}
+
+fn mir_digest_call_signature_debug(value: MirCallSignature) -> String {
+    "MirCallSignature {{ arity: {value.arity}, max_arity: {value.max_arity}, borrow_mask: {mir_digest_debug_bool_list(value.borrow_mask)} }}"
+}
+
+fn mir_digest_authority(writer: &MirCanonicalWriter, value: ?MirAuthorityDecision) {
+    if value == {
+        None -> mir_digest_bool(writer, false)
+        Val(row) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_string(writer, row.import.id)
+            mir_digest_string(writer, row.import.operation)
+            mir_digest_string(writer, row.import.required_right)
+            mir_digest_len(writer, row.import.parameter_type_ids.len())
+            loop type_id in row.import.parameter_type_ids -> mir_digest_string(writer, type_id)
+            mir_digest_option_string(writer, row.import.result_type_id)
+            mir_digest_option_int(writer, row.authority_argument)
+            mir_digest_bool(writer, row.inherited)
+        }
+    }
+}
+
+fn mir_digest_db_metadata_debug(value: ?MirDbQueryMetadata) -> String {
+    return if value == {
+        None -> "None"
+        Val(row) -> {
+            tables := [String]{}
+            for fact in row.table_facts -> tables.push("MirDbTableFact {{ table_id: {mir_digest_debug_quote(fact.table_id)}, read: {mir_digest_debug_bool(fact.read)}, write: {mir_digest_debug_bool(fact.write)} }}")
+            "Some(MirDbQueryMetadata {{ source_file: {row.source_file.value}, source_path: {mir_digest_debug_quote(row.source_path)}, source_span: {row.source_span.start}..{row.source_span.end}, statement_identity: {mir_digest_debug_quote(row.statement_identity)}, table_facts: [{tables.join(", ")}] }})"
+        }
+    }
+}
+
+fn mir_digest_prelude_call(writer: &MirCanonicalWriter, value: MirPreludeCall) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, mir_digest_prelude_family(value.family))
+    mir_digest_string(writer, value.module_name)
+    mir_digest_string(writer, value.member)
+    mir_digest_symbol(writer, value.symbol)
+    mir_digest_string(writer, mir_digest_call_signature_debug(value.signature))
+    mir_digest_string(writer, mir_digest_core_effect_debug(value.effect))
+    mir_digest_call_fallibility(writer, value.fallibility)
+    mir_digest_u64(writer, mir_digest_prelude_abi(value.abi))
+    mir_digest_authority(writer, value.authority)
+    mir_digest_string(writer, mir_digest_db_metadata_debug(value.db_metadata))
+}
+
+fn mir_digest_core_call_fallibility(writer: &MirCanonicalWriter, value: CoreCallFallibility) {
+    if value == .Sema -> mir_digest_u64(writer, 1)
+}
+
+fn mir_digest_core_effect_debug(value: ?Effect) -> String {
+    if value == None -> return "None"
+    effect_value :: value ?? .Net
+    name := if effect_value == {
+        .Net -> "Net"
+        .FS -> "FS"
+        .IO -> "IO"
+        .DB -> "DB"
+        .Time -> "Time"
+        .Rand -> "Rand"
+        .Env -> "Env"
+        .Exec -> "Exec"
+        .Log -> "Log"
+        .GPU -> "GPU"
+        .Panic -> "Panic"
+        .FFI -> "FFI"
+        .Browser -> "Browser"
+        .Secret -> "Secret"
+        .Mem -> "Mem"
+    }
+    "Some({name})"
+}
+
+fn mir_digest_core_sink_debug(value: ?SinkClass) -> String {
+    if value == None -> return "None"
+    "Some(Credential)"
+}
+
+fn mir_digest_core_pure_route(writer: &MirCanonicalWriter, value: CoreCallPureRoute) {
+    code := if value == {
+        .NoPureRoute -> 0
+        .Mime -> 1
+        .Email -> 2
+        .EncodingXml -> 3
+        .Time -> 4
+        .Math -> 5
+        .Measurement -> 6
+        .Date -> 7
+        .DateTime -> 8
+        .SketchHll -> 9
+        .SketchTDigest -> 10
+        .SketchCms -> 11
+        .SketchReservoir -> 12
+        .Ui -> 13
+        .Raylib -> 14
+        .Io -> 15
+        .Net -> 16
+        .Crypto -> 17
+    }
+    mir_digest_u64(writer, code)
+}
+
+fn mir_digest_core_interpreter_route(writer: &MirCanonicalWriter, value: CoreCallInterpreterRoute) {
+    if value == {
+        .NoRoute -> mir_digest_u64(writer, 0)
+        .Pure(route) -> {
+            mir_digest_u64(writer, 1)
+            mir_digest_core_pure_route(writer, route)
+        }
+        .Ambient -> mir_digest_u64(writer, 2)
+        .TypedIntrinsic -> mir_digest_u64(writer, 3)
+    }
+}
+
+fn mir_digest_core_symbol(writer: &MirCanonicalWriter, value: CoreCallSymbol) {
+    if value == {
+        .Prelude(name) -> {
+            mir_digest_u64(writer, 1)
+            mir_digest_string(writer, name)
+        }
+        .Rust(name) -> {
+            mir_digest_u64(writer, 2)
+            mir_digest_string(writer, name)
+        }
+    }
+}
+
+fn mir_digest_core_marker_debug(value: ?CoreMarkerApplication) -> String {
+    if value == None -> return "None"
+    marker :: value ?? CoreMarkerApplication{member: "", since: "", replacement: "", removed_in: None}
+    "Some(CoreMarkerApplication {{ member: {mir_digest_debug_quote(marker.member)}, since: {mir_digest_debug_quote(marker.since)}, replacement: {mir_digest_debug_quote(marker.replacement)}, removed_in: {mir_digest_debug_option_string(marker.removed_in)} }})"
+}
+
+fn mir_digest_core_call(writer: &MirCanonicalWriter, value: MirCoreCall) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.module_name)
+    mir_digest_string(writer, value.member)
+    mir_digest_string(writer, mir_digest_debug_string_list(value.receiver_types))
+    mir_digest_len(writer, value.arity)
+    mir_digest_len(writer, value.max_arity)
+    mir_digest_string(writer, mir_digest_debug_bool_list(value.borrow_mask))
+    mir_digest_core_call_fallibility(writer, value.fallibility)
+    mir_digest_string(writer, mir_digest_core_effect_debug(value.effect_kind))
+    mir_digest_string(writer, mir_digest_debug_option_string(value.effect_leaf))
+    mir_digest_string(writer, mir_digest_core_sink_debug(value.sink_class))
+    mir_digest_core_pure_route(writer, value.pure_route)
+    mir_digest_core_interpreter_route(writer, value.interpreter_route)
+    mir_digest_core_symbol(writer, value.symbol)
+    mir_digest_u64(writer, value.coverage_bits)
+    mir_digest_bool(writer, value.aot_direct)
+    mir_digest_bool(writer, value.jit_direct)
+    mir_digest_option_string(writer, value.jit_symbol)
+    mir_digest_string(writer, mir_digest_core_marker_debug(value.marker))
+}
+
+fn mir_digest_foreign(writer: &MirCanonicalWriter, value: MirForeign) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.module_name)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_string(writer, value.symbol)
+    mir_digest_string(writer, value.path)
+    mir_digest_len(writer, value.params.len())
+    loop param in value.params -> mir_digest_param(writer, param)
+    mir_digest_bool(writer, value.bridge_eligible)
+    mir_digest_option_type(writer, value.return_type)
+    mir_digest_foreign_abi(writer, value.foreign_abi)
+    mir_digest_u64(writer, mir_digest_foreign_language(value.foreign_language))
+    mir_digest_target_applicability(writer, value.target_applicability)
+    mir_digest_string(writer, mir_digest_effects_debug(value.effects))
+    mir_digest_option_int(writer, value.link.map(row -> row.value))
+    mir_digest_option_int(writer, value.callback.map(row -> row.value))
+    mir_digest_option_int(writer, value.handle.map(row -> row.value))
+    mir_digest_option_int(writer, value.close_function.map(row -> row.value))
+    mir_digest_option_int(writer, value.close_foreign.map(row -> row.value))
+    mir_digest_option_int(writer, value.undo_function.map(row -> row.value))
+}
+
+fn mir_digest_runtime_part(value: MirRuntimePartId) -> Int {
+    return if value == {
+        .Event -> 1
+        .Realtime -> 2
+        .EmbeddedHardware -> 3
+        .Ui -> 4
+        .Devtools -> 5
+        .Gtk -> 6
+        .Apps -> 7
+        .Email -> 8
+        .Game -> 9
+        .Files -> 10
+        .Interrupt -> 11
+        .FsRuntime -> 12
+        .Process -> 13
+        .Crypto -> 14
+        .Math -> 15
+        .Encoding -> 16
+        .Data -> 17
+        .Fmt -> 18
+        .DataFmt -> 19
+        .Compute -> 20
+        .Http -> 21
+        .WebSocket -> 22
+        .Browser -> 23
+        .Args -> 24
+        .Reflect -> 25
+        .AuthTokens -> 26
+        .AuthSession -> 27
+        .Sync -> 28
+        .Services -> 29
+        .Mod -> 30
+        .Gc -> 31
+    }
+}
+
+fn mir_digest_runtime_order(value: MirRuntimePartId) -> Int {
+    return if value == {
+        .Gc -> 0
+        .Event -> 1
+        .Realtime -> 2
+        .EmbeddedHardware -> 3
+        .Ui -> 4
+        .Devtools -> 5
+        .Gtk -> 6
+        .Apps -> 7
+        .Email -> 8
+        .Game -> 9
+        .Files -> 10
+        .Interrupt -> 11
+        .FsRuntime -> 12
+        .Process -> 13
+        .Crypto -> 14
+        .Math -> 15
+        .Encoding -> 16
+        .Data -> 17
+        .Fmt -> 18
+        .DataFmt -> 19
+        .Compute -> 20
+        .Http -> 21
+        .WebSocket -> 22
+        .Browser -> 23
+        .Args -> 24
+        .Reflect -> 25
+        .AuthTokens -> 26
+        .AuthSession -> 27
+        .Sync -> 28
+        .Services -> 29
+        .Mod -> 30
+    }
+}
+
+fn mir_digest_runtime_parts(writer: &MirCanonicalWriter, values: [MirRuntimePartId]) {
+    mir_digest_len(writer, values.len())
+    loop value in values -> mir_digest_u64(writer, mir_digest_runtime_part(value))
+}
+
+fn mir_digest_register_width(value: MirRegisterWidth) -> String {
+    return if value == {
+        .U8 -> "u8"
+        .U16 -> "u16"
+        .U32 -> "u32"
+        .U64 -> "u64"
+    }
+}
+
+fn mir_digest_dma_ownership(value: MirTargetDmaOwnership) -> String {
+    return if value == {
+        .Borrowed -> "borrowed"
+        .Transfer -> "transfer"
+    }
+}
+
+fn mir_digest_joined_strings_before(left: [String], right: [String]) -> Bool {
+    index := 0
+    common_len := if left.len() < right.len() -> left.len() else -> right.len()
+    loop index < common_len {
+        if left[index] != right[index] -> return left[index] < right[index]
+        index += 1
+    }
+    left.len() < right.len()
+}
+
+fn mir_digest_hardware_setup_before(left: MirHardwareSetup, right: MirHardwareSetup) -> Bool {
+    if left == {
+        .DmaConfigure(left_profile, left_channel, left_width, left_ownership) -> {
+            if right == {
+                .DmaConfigure(right_profile, right_channel, right_width, right_ownership) -> {
+                    if left_profile != right_profile -> return left_profile < right_profile
+                    if left_channel != right_channel -> return left_channel < right_channel
+                    left_width_name := mir_digest_register_width(left_width)
+                    right_width_name := mir_digest_register_width(right_width)
+                    if left_width_name != right_width_name -> return left_width_name < right_width_name
+                    left_ownership_name := mir_digest_dma_ownership(left_ownership)
+                    right_ownership_name := mir_digest_dma_ownership(right_ownership)
+                    left_ownership_name < right_ownership_name
+                }
+                .InterruptBind(_, _, _, _, _) -> true
+            }
+        }
+        .InterruptBind(left_profile, left_interrupt, left_vector, left_handler, left_effects) -> {
+            if right == {
+                .DmaConfigure(_, _, _, _) -> false
+                .InterruptBind(right_profile, right_interrupt, right_vector, right_handler, right_effects) -> {
+                    if left_profile != right_profile -> return left_profile < right_profile
+                    if left_interrupt != right_interrupt -> return left_interrupt < right_interrupt
+                    if left_vector != right_vector -> return left_vector < right_vector
+                    if left_handler != right_handler -> return left_handler < right_handler
+                    mir_digest_joined_strings_before(left_effects, right_effects)
+                }
+            }
+        }
+    }
+}
+
+fn mir_digest_sort_hardware_setups(values: &[MirHardwareSetup]) {
+    index := 1
+    loop index < values.len() {
+        current := values[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_hardware_setup_before(current, values[cursor]) {
+            values[cursor + 1] = values[cursor]
+            cursor -= 1
+        }
+        values[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_hardware_setup(writer: &MirCanonicalWriter, values: [MirHardwareSetup]) {
+    sorted := values
+    mir_digest_sort_hardware_setups(&sorted)
+    mir_digest_len(writer, sorted.len())
+    loop value in sorted {
+        if value == {
+            .DmaConfigure(profile, channel, width, ownership) -> {
+                mir_digest_tag(writer, "dma-configure")
+                mir_digest_string(writer, profile)
+                mir_digest_string(writer, channel)
+                mir_digest_string(writer, mir_digest_register_width(width))
+                mir_digest_string(writer, mir_digest_dma_ownership(ownership))
+            }
+            .InterruptBind(profile, interrupt, vector, handler, effects) -> {
+                mir_digest_tag(writer, "interrupt-bind")
+                mir_digest_string(writer, profile)
+                mir_digest_string(writer, interrupt)
+                mir_digest_u16(writer, vector)
+                mir_digest_string(writer, handler)
+                sorted_effects := effects
+                mir_digest_sort_strings(&sorted_effects)
+                mir_digest_len(writer, sorted_effects.len())
+                loop effect_name in sorted_effects -> mir_digest_string(writer, effect_name)
+            }
+        }
+    }
+}
+
+fn mir_digest_job_scope(value: MirJobScope) -> Int {
+    return if value == {
+        .Dev -> 1
+        .Ship -> 2
+        .Internal -> 3
+    }
+}
+
+fn mir_digest_job_dispatch(value: MirJobDispatch) -> Int {
+    return if value == {
+        .Direct -> 1
+        .Spawn -> 2
+        .Scheduled -> 3
+    }
+}
+
+fn mir_digest_job_cache(value: MirJobCachePolicy) -> Int {
+    return if value == {
+        .Uncached -> 1
+        .Local -> 2
+        .Shared -> 3
+    }
+}
+
+fn mir_digest_test_kind(value: MirTestKind) -> Int {
+    return if value == {
+        .Unit -> 1
+        .Property -> 2
+    }
+}
+
+fn mir_digest_harness_kind(value: MirHarnessKind) -> Int {
+    return if value == {
+        .Test -> 1
+        .Fuzz -> 2
+        .Coverage -> 3
+    }
+}
+
+fn mir_digest_job(writer: &MirCanonicalWriter, value: MirJob) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.function.value)
+    mir_digest_string(writer, value.name)
+    mir_digest_u64(writer, mir_digest_job_scope(value.scope))
+    if value.schedule == None -> mir_digest_tag(writer, "no-schedule") else {
+        schedule :: value.schedule ?? .Duration(0)
+        if schedule == {
+            .Duration(nanos) -> {
+                mir_digest_tag(writer, "duration")
+                mir_digest_u64(writer, nanos)
+            }
+            .WallClockTime(hour, minute) -> {
+                mir_digest_tag(writer, "wall-clock")
+                mir_digest_u64(writer, hour)
+                mir_digest_u64(writer, minute)
+            }
+        }
+    }
+    mir_digest_len(writer, value.inputs.len())
+    loop input in value.inputs -> mir_digest_cli_input(writer, input)
+    mir_digest_u64(writer, mir_digest_job_dispatch(value.dispatch))
+    mir_digest_len(writer, value.after.len())
+    loop dependency in value.after -> mir_digest_string(writer, dependency)
+    mir_digest_u64(writer, value.parallel)
+    mir_digest_len(writer, value.packages.len())
+    loop package in value.packages -> mir_digest_string(writer, package)
+    mir_digest_option_string(writer, value.working_directory)
+    mir_digest_len(writer, value.input_paths.len())
+    loop path in value.input_paths -> mir_digest_string(writer, path)
+    mir_digest_len(writer, value.output_paths.len())
+    loop path in value.output_paths -> mir_digest_string(writer, path)
+    if value.skip == None -> mir_digest_tag(writer, "no-skip") else {
+        skip :: value.skip ?? .Always("")
+        if skip == {
+            .Always(reason) -> {
+                mir_digest_tag(writer, "always")
+                mir_digest_string(writer, reason)
+            }
+            .UnlessPlatform(platform) -> {
+                mir_digest_tag(writer, "unless-platform")
+                mir_digest_string(writer, platform)
+            }
+        }
+    }
+    mir_digest_u64(writer, mir_digest_job_cache(value.cache))
+    limits := value.limits
+    mir_digest_sort_job_limits(&limits)
+    mir_digest_len(writer, limits.len())
+    loop limit in limits {
+        mir_digest_string(writer, limit.name)
+        mir_digest_string(writer, limit.value)
+    }
+}
+
+fn mir_digest_test(writer: &MirCanonicalWriter, value: MirTestCase) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.function.value)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_u64(writer, mir_digest_test_kind(value.kind))
+    mir_digest_bool(writer, value.contract_generated)
+    mir_digest_option_int(writer, value.eligibility.map(row -> row.value))
+    mir_digest_len(writer, value.parameters.len())
+    loop param in value.parameters -> mir_digest_param(writer, param)
+    mir_digest_len(writer, value.faults.len())
+    loop fault in value.faults -> mir_digest_string(writer, fault)
+    mir_digest_bool(writer, value.expected_failure)
+    mir_digest_option_string(writer, value.generation_unavailable_reason)
+}
+
+fn mir_digest_harness(writer: &MirCanonicalWriter, value: MirHarnessPlan) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, mir_digest_harness_kind(value.kind))
+    tests := value.tests.map(row -> row.value)
+    mir_digest_sort_ints(&tests)
+    mir_digest_len(writer, tests.len())
+    loop test in tests -> mir_digest_u64(writer, test)
+    output_checks := value.output_checks
+    mir_digest_sort_output_checks(&output_checks)
+    mir_digest_len(writer, output_checks.len())
+    loop check in output_checks {
+        mir_digest_u64(writer, check.id.value)
+        mir_digest_string(writer, check.name)
+        mir_digest_u64(writer, check.function.value)
+    }
+    mir_digest_option_int(writer, value.selected_test.map(row -> row.value))
+    coverage_points := value.coverage_points
+    mir_digest_sort_coverage_points(&coverage_points)
+    mir_digest_len(writer, coverage_points.len())
+    loop point in coverage_points {
+        mir_digest_u64(writer, point.id.value)
+        mir_digest_u64(writer, point.function.value)
+        mir_digest_u64(writer, point.block.value)
+        mir_digest_span(writer, point.span)
+    }
+    mir_digest_bool(writer, value.command_override)
+}
+
+fn mir_digest_artifact_kind(value: MirArtifactKind) -> Int {
+    return if value == {
+        .NativeExecutable -> 1
+        .NativeLibrary -> 2
+        .WebApplication -> 3
+        .TestExecutable -> 4
+        .FuzzExecutable -> 5
+        .SandboxPlugin -> 6
+        .TestOverride -> 7
+    }
+}
+
+fn mir_digest_artifact_target(value: MirArtifactTarget) -> Int {
+    return if value == {
+        .RustAot -> 1
+        .Cranelift -> 2
+        .Interpreter -> 3
+        .Web -> 4
+    }
+}
+
+fn mir_digest_artifact_mode(value: MirArtifactBuildMode) -> Int {
+    return if value == {
+        .Dev -> 1
+        .Release -> 2
+        .Test -> 3
+        .Fuzz -> 4
+        .Coverage -> 5
+    }
+}
+
+fn mir_digest_entry_kind(value: MirEntryKind) -> Int {
+    return if value == {
+        .Library -> 1
+        .Command -> 2
+        .App -> 3
+        .Service -> 4
+        .Test -> 5
+    }
+}
+
+fn mir_digest_entry_output(value: MirEntryOutput) -> Int {
+    return if value == {
+        .NoOutput -> 1
+        .ReturnValue -> 2
+        .StandardOutput -> 3
+        .ExitStatus -> 4
+    }
+}
+
+fn mir_digest_entry_spec(writer: &MirCanonicalWriter, value: MirEntrySpec) {
+    mir_digest_u64(writer, mir_digest_entry_kind(value.kind))
+    mir_digest_option_int(writer, value.function.map(row -> row.value))
+    if value.cli == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_cli_entry(writer, value.cli ?? MirCliEntry{record_inputs: false, description: None, inputs: [MirCliInput]{}, commands: [MirCliCommand]{}, standard: false, version: None})
+    }
+    mir_digest_u64(writer, mir_digest_entry_output(value.output))
+    mir_digest_bool(writer, value.initialize_environment)
+    mir_digest_bool(writer, value.initialize_gc)
+    mir_digest_bool(writer, value.serves_until_stopped)
+    mir_digest_string(writer, value.package_version)
+}
+
+fn mir_digest_export(writer: &MirCanonicalWriter, value: MirExport) {
+    mir_digest_string(writer, value.symbol)
+    mir_digest_u64(writer, value.function.value)
+    mir_digest_foreign_abi(writer, value.abi)
+}
+
+fn mir_digest_artifact(writer: &MirCanonicalWriter, value: MirArtifactPlan) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, mir_digest_artifact_kind(value.kind))
+    mir_digest_string(writer, value.name)
+    mir_digest_u64(writer, mir_digest_artifact_target(value.target))
+    mir_digest_u64(writer, mir_digest_artifact_mode(value.mode))
+    modules := value.modules.map(row -> row.value)
+    mir_digest_sort_ints(&modules)
+    mir_digest_len(writer, modules.len())
+    loop module_id in modules -> mir_digest_u64(writer, module_id)
+    links := value.links.map(row -> row.value)
+    mir_digest_sort_ints(&links)
+    mir_digest_len(writer, links.len())
+    loop link in links -> mir_digest_u64(writer, link)
+    jobs := value.jobs.map(row -> row.value)
+    mir_digest_sort_ints(&jobs)
+    mir_digest_len(writer, jobs.len())
+    loop job in jobs -> mir_digest_u64(writer, job)
+    mir_digest_runtime_parts(writer, value.runtime_parts)
+    exports := value.exports
+    mir_digest_sort_exports(&exports)
+    mir_digest_len(writer, exports.len())
+    loop export in exports -> mir_digest_export(writer, export)
+    mir_digest_string(writer, value.provider_identity)
+    mir_digest_string(writer, value.closure_identity)
+    mir_digest_string(writer, value.artifact_identity)
+    if value.entry == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_entry_spec(writer, value.entry ?? MirEntrySpec{kind: .Library, function: None, cli: None, output: .NoOutput, initialize_environment: false, initialize_gc: false, serves_until_stopped: false, package_version: ""})
+    }
+    mir_digest_option_int(writer, value.harness.map(row -> row.value))
+}
+
+fn mir_digest_erasure_reason(value: MirErasureReason) -> Int {
+    return if value == {
+        .CompileTimeOnly -> 1
+        .Disabled -> 2
+        .ExpandedBeforeLowering -> 3
+        .SemanticIndexOnly -> 4
+    }
+}
+fn mir_digest_web_bucket_debug(value: ?MirWebBucket) -> String {
+    if value == None -> return "None"
+    bucket :: value ?? .JS
+    if bucket == .JS -> return "Some(JS)"
+    "Some(Wasm)"
+}
+
+fn mir_digest_web_marker_debug(value: ?MirWebPartitionMarker) -> String {
+    if value == None -> return "None"
+    marker :: value ?? .JS
+    if marker == .Wasm -> return "Some(Wasm)"
+    if marker == .JS -> return "Some(JS)"
+    "Some(WasmExport)"
+}
+
+fn mir_digest_function_form(writer: &MirCanonicalWriter, value: MirFunctionForm) {
+    if value == {
+        .TopLevel -> mir_digest_tag(writer, "top-level")
+        .Method(owner, self_access) -> {
+            mir_digest_tag(writer, "method")
+            mir_digest_type(writer, owner)
+            mir_digest_access_optional(writer, self_access)
+        }
+        .TraitMethod(owner, trait_ref, self_access, serde) -> {
+            mir_digest_tag(writer, "trait-method")
+            mir_digest_type(writer, owner)
+            mir_digest_u64(writer, trait_ref.id.value)
+            mir_digest_string(writer, trait_ref.name)
+            mir_digest_access_optional(writer, self_access)
+            mir_digest_serde_codec(writer, serde)
+        }
+    }
+}
+
+fn mir_digest_web_param_reconstruction(writer: &MirCanonicalWriter, value: MirWebParamReconstruction) {
+    mir_digest_string(writer, value.local)
+    mir_digest_type(writer, value.ty)
+    mir_digest_len(writer, value.fields.len())
+    loop field in value.fields {
+        mir_digest_string(writer, field.field)
+        mir_digest_string(writer, field.parameter)
+        mir_digest_type(writer, field.ty)
+    }
+}
+
+fn mir_digest_kernel_facts_debug(value: ?MirKernelFacts) -> String {
+    if value == None -> return "None"
+    row :: value ?? MirKernelFacts{bounds: false, alias_free: false, captures: false, race_free: false, barriers_uniform: false, control_flow: false}
+    "Some(MirKernelFacts {{ bounds: {mir_digest_debug_bool(row.bounds)}, alias_free: {mir_digest_debug_bool(row.alias_free)}, captures: {mir_digest_debug_bool(row.captures)}, race_free: {mir_digest_debug_bool(row.race_free)}, barriers_uniform: {mir_digest_debug_bool(row.barriers_uniform)}, control_flow: {mir_digest_debug_bool(row.control_flow)} }})"
+}
+
+fn mir_digest_unsafe_gate_debug(value: ?MirUnsafeGate) -> String {
+    if value == None -> return "None"
+    row :: value ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: false, fenced: false}
+    "Some(MirUnsafeGate {{ file: {mir_digest_debug_quote(row.file)}, line: {row.line}, reason: {mir_digest_debug_quote(row.reason)}, enabled: {mir_digest_debug_bool(row.enabled)}, fenced: {mir_digest_debug_bool(row.fenced)} }})"
+}
+
+fn mir_digest_scope_debug(value: MirScope) -> String {
+    facts := [String]{}
+    loop fact in value.facts -> facts.push("MirScopeFact {{ key: {mir_digest_debug_quote(fact.key)}, value: {mir_digest_debug_quote(fact.value)} }}")
+    "MirScope {{ id: MirScopeId {{ value: {value.id.value} }}, kind: {mir_digest_scope_kind_debug(value.kind)}, span: {value.span.start}..{value.span.end}, name: {mir_digest_debug_option_string(value.name)}, deadline: {mir_digest_debug_int_option(value.deadline.map(row -> row.value))}, facts: [{facts.join(", ")}] }}"
+}
+
+fn mir_digest_scope_kind_debug(value: MirScopeKind) -> String {
+    return if value == {
+        .Unsafe -> "Unsafe"
+        .Impure -> "Impure"
+        .Reactive -> "Reactive"
+        .Shield -> "Shield"
+        .Region -> "Region"
+        .Policy -> "Policy"
+        .TaskGroup -> "TaskGroup"
+        .Layout -> "Layout"
+        .Authority -> "Authority"
+        .Context -> "Context"
+        .Live -> "Live"
+        .AssumeDeterministic -> "AssumeDeterministic"
+        .Transaction -> "Transaction"
+        .ScopeMember -> "ScopeMember"
+        .DebugOnly -> "DebugOnly"
+    }
+}
+
+fn mir_digest_place_base(writer: &MirCanonicalWriter, value: MirPlaceBase) {
+    if value == {
+        .Local(local) -> {
+            mir_digest_tag(writer, "local")
+            mir_digest_u64(writer, local.value)
+        }
+        .Parameter(parameter) -> {
+            mir_digest_tag(writer, "parameter")
+            mir_digest_u64(writer, parameter.value)
+        }
+        .Capture(capture) -> {
+            mir_digest_tag(writer, "capture")
+            mir_digest_u64(writer, capture.value)
+        }
+        .Temporary(temporary) -> {
+            mir_digest_tag(writer, "temporary")
+            mir_digest_u64(writer, temporary.value)
+        }
+        .Static(name) -> {
+            mir_digest_tag(writer, "static")
+            mir_digest_string(writer, name)
+        }
+    }
+}
+
+fn mir_digest_index_debug(value: MirIndexKind) -> String {
+    return if value == {
+        .List -> "List"
+        .FixedListProof -> "FixedListProof"
+        .Map -> "Map"
+        .Lane -> "Lane"
+        .Pool -> "Pool"
+    }
+}
+
+fn mir_digest_projection(writer: &MirCanonicalWriter, value: MirProjection) {
+    if value == {
+        .Field(field, span) -> {
+            mir_digest_tag(writer, "field")
+            mir_digest_u64(writer, field.value)
+            mir_digest_span(writer, span)
+        }
+        .Index(kind, index, call, write_call, location, context, span) -> {
+            mir_digest_tag(writer, "index")
+            mir_digest_u64(writer, mir_digest_index_kind_code(kind))
+            mir_digest_u64(writer, index.value)
+            mir_digest_u64(writer, call.value)
+            mir_digest_option_int(writer, write_call.map(row -> row.value))
+            mir_digest_string(writer, mir_digest_panic_location_debug(location))
+            mir_digest_string(writer, mir_digest_panic_context_debug(context ?? MirPanicContext{function: "", source_line: "", caret: 0, locals: [MirPanicLocal]{}}))
+            mir_digest_span(writer, span)
+        }
+        .Deref(span) -> {
+            mir_digest_tag(writer, "deref")
+            mir_digest_span(writer, span)
+        }
+    }
+}
+
+fn mir_digest_index_kind_code(value: MirIndexKind) -> Int {
+    return if value == {
+        .List -> 1
+        .FixedListProof -> 2
+        .Map -> 3
+        .Lane -> 4
+        .Pool -> 5
+    }
+}
+
+fn mir_digest_place(writer: &MirCanonicalWriter, value: MirPlace) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_span(writer, value.span)
+    mir_digest_type(writer, value.ty)
+    mir_digest_place_base(writer, value.base)
+    mir_digest_len(writer, value.projections.len())
+    loop projection in value.projections -> mir_digest_projection(writer, projection)
+    mir_digest_string(writer, mir_digest_access_debug(value.access))
+    mir_digest_option_string(writer, value.persist_key)
+}
+
+fn mir_digest_local(writer: &MirCanonicalWriter, value: MirLocal) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_type(writer, value.ty)
+    mir_digest_u64(writer, value.place.value)
+    mir_digest_string(writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_bool(writer, value.mutable)
+    mir_digest_bool(writer, value.is_comptime)
+    mir_digest_bool(writer, value.uninit)
+    mir_digest_bool(writer, value.arena_view)
+    mir_digest_bool(writer, value.string_view)
+    mir_digest_bool(writer, value.gc_root)
+}
+
+fn mir_digest_terminator_debug(value: MirTerminator) -> String {
+    return if value == {
+        .Jump(target) -> "Jump(MirBlockId({target.value}))"
+        .Branch(condition, then_target, else_target) -> "Branch(MirValueId({condition.value}), MirBlockId({then_target.value}), MirBlockId({else_target.value}))"
+        .Switch(subject, arms, otherwise) -> {
+            rendered := [String]{}
+            loop arm in arms -> rendered.push("MirSwitchArm {{ condition: MirValueId {{ value: {arm.condition.value} }}, target: MirBlockId {{ value: {arm.target.value} }}, span: {arm.span.start}..{arm.span.end} }}")
+            "Switch(MirValueId({subject.value}), [{rendered.join(", ")}], MirBlockId({otherwise.value}))"
+        }
+        .Return(value) -> "Return({mir_digest_debug_int_option(value.map(row -> row.value))})"
+        .Yield(value, resume) -> "Yield(MirValueId({value.value}), MirBlockId({resume.value}))"
+        .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_int_option(value.map(row -> row.value))})"
+        .Continue(target) -> "Continue(MirBlockId({target.value}))"
+        .Unreachable(reason) -> "Unreachable({mir_digest_debug_quote(reason)})"
+    }
+}
+
+fn mir_digest_copy_cost_debug(value: MirCopyCost) -> String {
+    return if value == {
+        .NoCopy -> "NoCopy"
+        .PerIteration(count) -> "PerIteration({count})"
+        .Unknown -> "Unknown"
+    }
+}
+
+fn mir_digest_optimization_decision_debug(value: MirOptimizationDecision) -> String {
+    return if value == {
+        .Eligible -> "Eligible"
+        .Rejected(reason) -> "Rejected({mir_digest_optimization_rejection_debug(reason)})"
+    }
+}
+
+fn mir_digest_optimization_rejection_debug(value: MirOptimizationRejection) -> String {
+    return if value == {
+        .MissingProof -> "MissingProof"
+        .MayTrap -> "MayTrap"
+        .HasEffects -> "HasEffects"
+        .HasEarlyExit -> "HasEarlyExit"
+        .MayAlias -> "MayAlias"
+        .CrossIterationDependency -> "CrossIterationDependency"
+        .DynamicTripCount -> "DynamicTripCount"
+        .UnknownCopyCost -> "UnknownCopyCost"
+        .ScalarBoundary -> "ScalarBoundary"
+        .ObservableLayout -> "ObservableLayout"
+        .OwnershipObligation -> "OwnershipObligation"
+        .UnsupportedOperation -> "UnsupportedOperation"
+    }
+}
+
+fn mir_digest_loop_facts_debug(values: [MirLoopFact]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push("MirLoopFact {{ header: {value.header.value}, body: {mir_digest_debug_int_option(value.body.map(row -> row.value))}, exit: {mir_digest_debug_int_option(value.exit.map(row -> row.value))}, form: {mir_digest_loop_form_debug(value.form)}, trip_count: {mir_digest_debug_int_option(value.trip_count)}, copy_cost: {mir_digest_copy_cost_debug(value.copy_cost)}, canonical: {mir_digest_debug_bool(value.canonical)}, span: {value.span.start}..{value.span.end}, decision: {mir_digest_optimization_decision_debug(value.decision)} }}")
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_loop_form_debug(value: MirLoopForm) -> String {
+    return if value == {
+        .Unconditional -> "Unconditional"
+        .Counted -> "Counted"
+        .Iterator -> "Iterator"
+    }
+}
+
+fn mir_digest_vector_rule(value: MirVectorRule) -> String {
+    return if value == {
+        .Elementwise -> "elementwise"
+        .FieldAccess -> "field-access"
+        .ConditionalAccumulate -> "conditional-accumulate"
+        .EarlyExitSearch -> "early-exit-search"
+        .Reduction -> "reduction"
+    }
+}
+
+fn mir_digest_vector_layout(value: MirVectorLayout) -> String {
+    return if value == {
+        .Flat -> "flat"
+        .AosStrided -> "aos-strided"
+        .ColumnarDirect -> "columnar-direct"
+    }
+}
+
+fn mir_digest_vector_access_debug(value: MirVectorAccess) -> String {
+    root := if value.root == {
+        .Place(id) -> "Place({id.value})"
+        .Value(id) -> "Value({id.value})"
+    }
+    "MirVectorAccess {{ root: {root}, field: {mir_digest_debug_int_option(value.field.map(row -> row.value))}, layout: {mir_digest_vector_layout(value.layout)}, column_index: {mir_digest_debug_int_option(value.column_index)} }}"
+}
+
+fn mir_digest_bounds_facts_debug(values: [MirBoundsFact]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push("MirBoundsFact {{ operation: {value.operation.value}, place: {mir_digest_debug_int_option(value.place.map(row -> row.value))}, index: {mir_digest_debug_int_option(value.index.map(row -> row.value))}, kind: {mir_digest_index_debug(value.kind)}, proven: {mir_digest_debug_bool(value.proven)}, elided: {mir_digest_debug_bool(value.elided)}, failure_preserved: {mir_digest_debug_bool(value.failure_preserved)}, span: {value.span.start}..{value.span.end} }}")
+    "[{rendered.join(", ")}]"
+}
+
+fn mir_digest_vector_fact(writer: &MirCanonicalWriter, value: MirVectorFact) {
+    mir_digest_u64(writer, value.loop_header.value)
+    mir_digest_option_int(writer, value.cursor.map(row -> row.value))
+    mir_digest_len(writer, value.body_blocks.len())
+    loop block in value.body_blocks -> mir_digest_u64(writer, block.value)
+    mir_digest_option_int(writer, value.advance_block.map(row -> row.value))
+    mir_digest_tag(writer, mir_digest_vector_rule(value.rule))
+    mir_digest_len(writer, value.accesses.len())
+    loop access in value.accesses {
+        if access.root == {
+            .Place(place) -> {
+                mir_digest_tag(writer, "place")
+                mir_digest_u64(writer, place.value)
+            }
+            .Value(value) -> {
+                mir_digest_tag(writer, "value")
+                mir_digest_u64(writer, value.value)
+            }
+        }
+        mir_digest_option_int(writer, access.field.map(row -> row.value))
+        mir_digest_tag(writer, mir_digest_vector_layout(access.layout))
+        mir_digest_option_int(writer, access.column_index)
+    }
+    mir_digest_tag(writer, mir_digest_vector_layout(value.layout))
+    mir_digest_option_type(writer, value.element_type)
+    mir_digest_bool(writer, value.packed)
+    mir_digest_option_int(writer, value.lane_width)
+    mir_digest_bool(writer, value.no_aliasing)
+    mir_digest_bool(writer, value.no_early_exit)
+    mir_digest_bool(writer, value.effect_free_body)
+    mir_digest_bool(writer, value.no_cross_iteration_dependencies)
+    if value.fixed_reduction == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        reduction :: value.fixed_reduction ?? MirFixedReductionFact{accumulator: MirPlaceId{value: 0}, addend: MirValueId{value: 0}, seed: MirValueId{value: 0}, condition: None, source_operations: [MirOpId]{}, exit: MirBlockId{value: 0}, order: MirFixedReductionOrder{lanes: 0, seed_lane: 0, tree: .AdjacentPairsThenRoot}}
+        mir_digest_u64(writer, reduction.accumulator.value)
+        mir_digest_u64(writer, reduction.addend.value)
+        mir_digest_u64(writer, reduction.seed.value)
+        mir_digest_option_int(writer, reduction.condition.map(row -> row.value))
+        mir_digest_len(writer, reduction.source_operations.len())
+        loop operation in reduction.source_operations -> mir_digest_u64(writer, operation.value)
+        mir_digest_u64(writer, reduction.exit.value)
+        mir_digest_u64(writer, reduction.order.lanes)
+        mir_digest_u64(writer, reduction.order.seed_lane)
+        mir_digest_tag(writer, "adjacent-pairs-then-root")
+    }
+    mir_digest_span(writer, value.span)
+    mir_digest_optimization_decision(writer, value.decision)
+}
+
+fn mir_digest_optimization_decision(writer: &MirCanonicalWriter, value: MirOptimizationDecision) {
+    if value == {
+        .Eligible -> mir_digest_tag(writer, "eligible")
+        .Rejected(reason) -> {
+            mir_digest_tag(writer, "rejected")
+            mir_digest_tag(writer, mir_digest_optimization_rejection_debug(reason))
+        }
+    }
+}
+
+fn mir_digest_optimization_facts(writer: &MirCanonicalWriter, value: MirOptimizationFacts) {
+    mir_digest_bool(writer, value.pure)
+    mir_digest_bool(writer, value.replayable)
+    mir_digest_bool(writer, value.diverges)
+    mir_digest_bool(writer, value.inline)
+    mir_digest_bool(writer, value.inline_always)
+    mir_digest_bool(writer, value.gc_return)
+    mir_digest_bool(writer, value.gc_scope)
+    mir_digest_bool(writer, value.kernel)
+    mir_digest_bool(writer, value.auto_vectorizable)
+    mir_digest_bool(writer, value.no_aliasing)
+    mir_digest_bool(writer, value.no_early_exit)
+    mir_digest_bool(writer, value.no_cross_iteration_dependencies)
+    mir_digest_string(writer, mir_digest_debug_string_list(value.pass_ids.map(row -> "{row}")))
+    mir_digest_string(writer, mir_digest_loop_facts_debug(value.loop_facts))
+    mir_digest_string(writer, mir_digest_bounds_facts_debug(value.bounds_facts))
+    mir_digest_len(writer, value.vector_facts.len())
+    loop fact in value.vector_facts -> mir_digest_vector_fact(writer, fact)
+    mir_digest_string(writer, mir_digest_debug_string_list(value.checked_vector_facts.map(row -> "{row.loop_header.value}:{row.span.start}")))
+    mir_digest_string(writer, mir_digest_debug_string_list(value.fusion_facts.map(row -> "{row.first_loop.value}:{row.second_loop.value}")))
+    mir_digest_len(writer, value.acceleration_facts.len())
+    loop fact in value.acceleration_facts {
+        mir_digest_u64(writer, fact.loop_header.value)
+        mir_digest_tag(writer, if fact.transform == .TransientColumnCopy -> "transient-column-copy" else -> "pooled-parallel-chunks")
+        mir_digest_bool(writer, fact.workload.nested_reuse)
+        mir_digest_bool(writer, fact.workload.single_pass)
+        mir_digest_bool(writer, fact.proof.source_proven)
+        mir_digest_bool(writer, fact.proof.independent_iterations)
+        mir_digest_bool(writer, fact.proof.no_aliasing)
+        mir_digest_bool(writer, fact.proof.no_cross_iteration_dependencies)
+        mir_digest_bool(writer, fact.proof.no_early_exit)
+        mir_digest_bool(writer, fact.proof.effect_free_body)
+        mir_digest_bool(writer, fact.proof.ownership_safe)
+        mir_digest_bool(writer, fact.proof.failure_order_preserved)
+        mir_digest_span(writer, fact.span)
+    }
+}
+
+fn mir_digest_instruction(writer: &MirCanonicalWriter, value: MirInstruction) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_span(writer, value.span)
+    mir_digest_string(writer, mir_digest_debug_int_option(value.source_line))
+    mir_digest_option_int(writer, value.result.map(row -> row.value))
+    mir_digest_option_type(writer, value.ty)
+    mir_digest_operation(writer, value.operation)
+}
+
+fn mir_digest_function(writer: &MirCanonicalWriter, value: MirFunction) {
+    mir_digest_u64(writer, value.id.value)
+    mir_digest_u64(writer, value.module_id.value)
+    mir_digest_u64(writer, value.source_file.value)
+    mir_digest_string(writer, value.key)
+    mir_digest_string(writer, value.module_name)
+    mir_digest_string(writer, value.name)
+    mir_digest_span(writer, value.span)
+    mir_digest_string(writer, mir_digest_function_kind_debug(value.kind))
+    mir_digest_function_form(writer, value.form)
+    mir_digest_string(writer, mir_digest_visibility_debug(value.visibility))
+    mir_digest_target_applicability(writer, value.target_applicability)
+    mir_digest_string(writer, mir_digest_web_bucket_debug(value.web_bucket))
+    mir_digest_string(writer, mir_digest_web_marker_debug(value.web_marker))
+    mir_digest_generic_params(writer, value.generic_params)
+    captures := value.capture_params
+    mir_digest_sort_captures(&captures)
+    mir_digest_len(writer, captures.len())
+    loop capture in captures -> mir_digest_capture_param(writer, capture)
+    mir_digest_len(writer, value.params.len())
+    loop param in value.params -> mir_digest_param(writer, param)
+    mir_digest_option_type(writer, value.declared_return)
+    mir_digest_type(writer, value.return_type)
+    if value.generator == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        mir_digest_type(writer, (value.generator ?? MirGeneratorFacts{item: MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)}}).item)
+    }
+    mir_digest_failure_carrier(writer, value.failure)
+    mir_digest_string(writer, mir_digest_effects_debug(value.effects))
+    mir_digest_string(writer, if value.captures == None -> "None" else -> mir_digest_capture_facts_debug(value.captures ?? MirCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}))
+    mir_digest_optimization_facts(writer, value.optimization)
+    mir_digest_bool(writer, value.is_unsafe)
+    mir_digest_string(writer, mir_digest_unsafe_gate_debug(value.unsafe_gate))
+    mir_digest_bool(writer, value.is_pure)
+    mir_digest_string(writer, mir_digest_debug_int_option(value.memo_bound))
+    mir_digest_bool(writer, value.is_reactive)
+    mir_digest_string(writer, mir_digest_debug_string_list(value.reactive_upgrades))
+    mir_digest_bool(writer, value.is_inline)
+    mir_digest_bool(writer, value.is_inline_always)
+    mir_digest_bool(writer, value.is_scalar)
+    mir_digest_string(writer, mir_digest_kernel_facts_debug(value.kernel_proof))
+    mir_digest_bool(writer, value.gc_return)
+    mir_digest_string(writer, mir_digest_view_provenance_option_debug(value.return_view_provenance))
+    mir_digest_len(writer, value.web_param_reconstructions.len())
+    loop reconstruction in value.web_param_reconstructions -> mir_digest_web_param_reconstruction(writer, reconstruction)
+    blocks := value.blocks
+    mir_digest_sort_blocks(&blocks)
+    mir_digest_len(writer, blocks.len())
+    loop block in blocks {
+        mir_digest_u64(writer, block.id.value)
+        mir_digest_span(writer, block.span)
+        mir_digest_len(writer, block.instructions.len())
+        loop instruction in block.instructions -> mir_digest_instruction(writer, instruction)
+        mir_digest_string(writer, mir_digest_terminator_debug(block.terminator))
+    }
+    locals := value.locals
+    mir_digest_sort_locals(&locals)
+    mir_digest_len(writer, locals.len())
+    loop local in locals -> mir_digest_local(writer, local)
+    values := value.values
+    mir_digest_sort_value_facts(&values)
+    mir_digest_len(writer, values.len())
+    loop fact in values {
+        mir_digest_u64(writer, fact.id.value)
+        mir_digest_type(writer, fact.ty)
+        mir_digest_span(writer, fact.span)
+        mir_digest_string(writer, mir_digest_ownership_debug(fact.ownership))
+    }
+    places := value.places
+    mir_digest_sort_places(&places)
+    mir_digest_len(writer, places.len())
+    loop place in places -> mir_digest_place(writer, place)
+    scopes := value.scopes
+    mir_digest_sort_scopes(&scopes)
+    mir_digest_string(writer, mir_digest_debug_string_list(scopes.map(row -> mir_digest_scope_debug(row))))
+    drops := value.drops
+    mir_digest_sort_drops(&drops)
+    mir_digest_string(writer, mir_digest_debug_string_list(drops.map(row -> "{row.place.value}:{row.span.start}:{row.span.end}")))
+}
+
+fn mir_digest_register_access_mode(value: MirTargetRegisterAccessMode) -> String {
+    return if value == {
+        .ReadOnly -> "read-only"
+        .WriteOnly -> "write-only"
+        .ReadWrite -> "read-write"
+    }
+}
+
+fn mir_digest_target_register_operation(value: MirTargetRegisterOperation) -> String {
+    return if value == {
+        .Read -> "read"
+        .Write -> "write"
+    }
+}
+
+fn mir_digest_target_dma_operation(value: MirTargetDmaOperation) -> String {
+    return if value == {
+        .Start -> "start"
+        .Wait -> "wait"
+        .UseBuffer -> "use-buffer"
+    }
+}
+
+fn mir_digest_target_dma_owner(value: MirTargetDmaOwner) -> String {
+    return if value == {
+        .Cpu -> "cpu"
+        .Device -> "device"
+    }
+}
+
+fn mir_digest_target_unresolved(writer: &MirCanonicalWriter, value: MirTargetHardwareUnresolvedReference) {
+    if value == {
+        .RegisterBlock(block) -> {
+            mir_digest_tag(writer, "register-block")
+            mir_digest_string(writer, block)
+        }
+        .Register(block, register) -> {
+            mir_digest_tag(writer, "register")
+            mir_digest_string(writer, block)
+            mir_digest_string(writer, register)
+        }
+        .DmaChannel(channel) -> {
+            mir_digest_tag(writer, "dma-channel")
+            mir_digest_string(writer, channel)
+        }
+        .Interrupt(interrupt) -> {
+            mir_digest_tag(writer, "interrupt")
+            mir_digest_string(writer, interrupt)
+        }
+    }
+}
+
+fn mir_digest_bool_order(value: Bool) -> Int {
+    if value -> 1 else -> 0
+}
+
+fn mir_digest_target_register_after(left: MirTargetRegisterFact, right: MirTargetRegisterFact) -> Bool {
+    if left.name != right.name -> return left.name > right.name
+    if left.offset != right.offset -> return left.offset > right.offset
+    left_width := mir_digest_register_width(left.width)
+    right_width := mir_digest_register_width(right.width)
+    if left_width != right_width -> return left_width > right_width
+    left_access := mir_digest_register_access_mode(left.access)
+    right_access := mir_digest_register_access_mode(right.access)
+    if left_access != right_access -> return left_access > right_access
+    mir_digest_bool_order(left.volatile) > mir_digest_bool_order(right.volatile)
+}
+
+fn mir_digest_sort_target_registers(rows: &[MirTargetRegisterFact]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_target_register_after(rows[cursor], current) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_target_block_after(left: MirTargetRegisterBlockFact, right: MirTargetRegisterBlockFact) -> Bool {
+    if left.name != right.name -> return left.name > right.name
+    if left.base != right.base -> return left.base > right.base
+    left.size.bytes > right.size.bytes
+}
+
+fn mir_digest_sort_target_blocks(rows: &[MirTargetRegisterBlockFact]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_target_block_after(rows[cursor], current) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_target_interrupt_after(left: MirTargetInterruptFact, right: MirTargetInterruptFact) -> Bool {
+    if left.name != right.name -> return left.name > right.name
+    left.vector > right.vector
+}
+
+fn mir_digest_sort_target_interrupts(rows: &[MirTargetInterruptFact]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_target_interrupt_after(rows[cursor], current) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_target_channel_after(left: MirTargetDmaChannelFact, right: MirTargetDmaChannelFact) -> Bool {
+    if left.name != right.name -> return left.name > right.name
+    if left.channel != right.channel -> return left.channel > right.channel
+    left_width := mir_digest_register_width(left.transfer_width)
+    right_width := mir_digest_register_width(right.transfer_width)
+    if left_width != right_width -> return left_width > right_width
+    left_ownership := mir_digest_dma_ownership(left.ownership)
+    right_ownership := mir_digest_dma_ownership(right.ownership)
+    if left_ownership != right_ownership -> return left_ownership > right_ownership
+    mir_digest_option_int_order(left.max_transfer_bytes) > mir_digest_option_int_order(right.max_transfer_bytes)
+}
+
+fn mir_digest_sort_target_channels(rows: &[MirTargetDmaChannelFact]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_target_channel_after(rows[cursor], current) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_option_int_order(value: ?Int) -> Int {
+    if value == None -> return -1
+    value ?? 0
+}
+
+fn mir_digest_target_hardware_facts(writer: &MirCanonicalWriter, value: MirTargetHardwareFacts) {
+    if value.svd == {
+        None -> mir_digest_bool(writer, false)
+        Val(svd) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_string(writer, svd.source)
+            mir_digest_string(writer, svd.sha256)
+        }
+    }
+    blocks := value.register_blocks
+    mir_digest_sort_target_blocks(&blocks)
+    mir_digest_len(writer, blocks.len())
+    loop block in blocks {
+        mir_digest_string(writer, block.name)
+        mir_digest_u64(writer, block.base)
+        mir_digest_u64(writer, block.size.bytes)
+        registers := block.registers
+        mir_digest_sort_target_registers(&registers)
+        mir_digest_len(writer, registers.len())
+        loop register in registers {
+            mir_digest_string(writer, register.name)
+            mir_digest_u64(writer, register.offset)
+            mir_digest_string(writer, mir_digest_register_width(register.width))
+            mir_digest_string(writer, mir_digest_register_access_mode(register.access))
+            mir_digest_bool(writer, register.volatile)
+        }
+    }
+    interrupts := value.interrupts
+    mir_digest_sort_target_interrupts(&interrupts)
+    mir_digest_len(writer, interrupts.len())
+    loop interrupt in interrupts {
+        mir_digest_string(writer, interrupt.name)
+        mir_digest_u16(writer, interrupt.vector)
+        mir_digest_len(writer, interrupt.forbidden_effects.len())
+        loop effect_name in interrupt.forbidden_effects -> mir_digest_string(writer, effect_name)
+        mir_digest_bool(writer, interrupt.bounded)
+    }
+    channels := value.dma_channels
+    mir_digest_sort_target_channels(&channels)
+    mir_digest_len(writer, channels.len())
+    loop channel in channels {
+        mir_digest_string(writer, channel.name)
+        mir_digest_u16(writer, channel.channel)
+        mir_digest_string(writer, mir_digest_register_width(channel.transfer_width))
+        mir_digest_string(writer, mir_digest_dma_ownership(channel.ownership))
+        mir_digest_option_int(writer, channel.max_transfer_bytes)
+    }
+}
+
+fn mir_digest_target_hardware_use(writer: &MirCanonicalWriter, value: MirTargetHardwareUse) {
+    mir_digest_len(writer, value.register_accesses.len())
+    loop access in value.register_accesses {
+        mir_digest_string(writer, access.block)
+        mir_digest_string(writer, access.register)
+        mir_digest_string(writer, mir_digest_target_register_operation(access.operation))
+        mir_digest_string(writer, mir_digest_register_width(access.width))
+    }
+    mir_digest_len(writer, value.interrupt_handlers.len())
+    loop handler in value.interrupt_handlers {
+        mir_digest_string(writer, handler.interrupt)
+        mir_digest_string(writer, handler.handler)
+        mir_digest_len(writer, handler.effects.len())
+        loop effect_name in handler.effects -> mir_digest_string(writer, effect_name)
+        mir_digest_len(writer, handler.forbidden_effects.len())
+        loop effect_name in handler.forbidden_effects -> mir_digest_string(writer, effect_name)
+        mir_digest_bool(writer, handler.bounded)
+    }
+    mir_digest_len(writer, value.dma_operations.len())
+    loop operation in value.dma_operations {
+        mir_digest_string(writer, operation.channel)
+        mir_digest_string(writer, operation.buffer)
+        mir_digest_string(writer, mir_digest_target_dma_operation(operation.operation))
+        mir_digest_string(writer, mir_digest_target_dma_owner(operation.owner))
+    }
+    mir_digest_len(writer, value.unresolved_references.len())
+    loop reference in value.unresolved_references -> mir_digest_target_unresolved(writer, reference)
+}
+
+fn mir_digest_runtime_layer(value: MirRuntimeLayer) -> String {
+    return if value == {
+        .Core -> "core"
+        .Alloc -> "alloc"
+        .Std -> "std"
+    }
+}
+
+fn mir_digest_cache_frame(bytes: &[U8], value: String) {
+    mir_digest_u64_bytes(bytes, value.bytes().len())
+    loop byte in value.bytes() -> bytes.push(byte)
+}
+
+fn mir_digest_u64_bytes(bytes: &[U8], value: Int) {
+    index := 0
+    loop index < 8 {
+        bytes.push(U8{(value >> (8 * index)) & 255})
+        index += 1
+    }
+}
+
+fn mir_digest_target_dossier_bytes(value: MirTargetDossier, target_triple: String) -> [U8] {
+    bytes := [U8]{}
+    loop byte in "jet-target-dossier-v3".bytes() -> bytes.push(byte)
+    bytes.push(U8{0})
+    if value.machine == {
+        None -> mir_digest_cache_frame(&bytes, "hosted-default")
+        Val(machine) -> {
+            mir_digest_cache_frame(&bytes, "selected-machine")
+            mir_digest_cache_frame(&bytes, machine.name)
+            mir_digest_cache_frame(&bytes, machine.triple)
+            mir_digest_cache_frame(&bytes, value.provider_identity)
+            mir_digest_cache_frame(&bytes, value.linker_identity)
+        }
+    }
+    mir_digest_cache_frame(&bytes, target_triple)
+    mir_digest_cache_frame(&bytes, mir_digest_runtime_layer(value.layer))
+    mir_digest_cache_frame(&bytes, value.provider_identity)
+    mir_digest_cache_frame(&bytes, value.closure_identity)
+    mir_digest_cache_frame(&bytes, value.linker_identity)
+    mir_digest_cache_frame(&bytes, value.tier_identity)
+    mir_digest_cache_frame(&bytes, value.compiler_identity)
+    mir_digest_cache_frame(&bytes, value.environment_identity)
+    mir_digest_cache_frame(&bytes, value.dependency_identity)
+    bytes
+}
+
+fn mir_digest_layout_support_default() -> MirLayoutSupportFacts {
+    MirLayoutSupportFacts{proven: false, alignments: [Int]{}, max_size: None, max_address: None, abi: None, provenance: ""}
+}
+
+fn mir_digest_app_string_list(writer: &MirCanonicalWriter, values: [String]) {
+    mir_digest_len(writer, values.len())
+    loop value in values -> mir_digest_string(writer, value)
+}
+
+fn mir_digest_app_route_fields(writer: &MirCanonicalWriter, values: [MirAppRouteField]) {
+    mir_digest_len(writer, values.len())
+    loop value in values {
+        mir_digest_string(writer, value.name)
+        mir_digest_string(writer, value.ty)
+        mir_digest_string(writer, value.codec)
+        mir_digest_bool(writer, value.required)
+        mir_digest_option_string(writer, value.default)
+    }
+}
+
+fn mir_digest_app_render_mode(value: MirAppRenderMode) -> String {
+    return if value == {
+        .Csr -> "csr"
+        .Ssr -> "ssr"
+        .Ssg -> "ssg"
+        .Stream -> "stream"
+        .Island -> "island"
+    }
+}
+
+fn mir_digest_app_render_fact_mode(value: MirAppRenderFactMode) -> String {
+    return if value == {
+        .Static -> "static"
+        .Server -> "server"
+        .ServerStream -> "server-stream"
+        .ServerIsland -> "server-island"
+        .Client -> "client"
+    }
+}
+
+fn mir_digest_app_cache_fact(value: MirAppCacheFact) -> String {
+    return if value == {
+        .Unspecified -> "unspecified"
+        .Immutable -> "immutable"
+        .Revalidate -> "revalidate"
+        .Private -> "private"
+    }
+}
+
+
+fn mir_digest_app_render_facts(writer: &MirCanonicalWriter, value: MirAppRenderFacts) {
+    mir_digest_string(writer, mir_digest_app_render_fact_mode(value.mode))
+    mir_digest_app_string_list(writer, value.reason)
+    mir_digest_app_string_list(writer, value.effects)
+    mir_digest_bool(writer, value.interactive)
+    mir_digest_option_string(writer, value.loader)
+    mir_digest_option_string(writer, value.form)
+    mir_digest_string(writer, mir_digest_app_cache_fact(value.cache))
+    mir_digest_option_string(writer, value.override_mode.map(row -> mir_digest_app_render_fact_mode(row)))
+    if value.island == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        island :: value.island ?? MirAppIslandFact{identity: "", hydration_trigger: .Immediate, resume_payload: MirAppResumePayload{captures: [MirAppResumeCapture]{}, serializable: false}}
+        mir_digest_string(writer, island.identity)
+        mir_digest_bool(writer, island.resume_payload.serializable)
+        mir_digest_len(writer, island.resume_payload.captures.len())
+        loop capture in island.resume_payload.captures {
+            mir_digest_string(writer, capture.name)
+            mir_digest_string(writer, capture.ty)
+            mir_digest_bool(writer, capture.serializable)
+        }
+    }
+}
+
+fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: ?MirAppGraph) {
+    if value == None -> mir_digest_bool(writer, false) else {
+        mir_digest_bool(writer, true)
+        graph :: value ?? MirAppGraph{entry_file: "", routes: [MirAppRoute]{}, actions: [MirAppAction]{}, forms: [MirAppFormFact]{}, queries: [MirAppQueryFact]{}, stores: [MirAppStoreFact]{}, mounts: [MirAppMount]{}, routes_from: [MirAppRoutesFrom]{}, policy: MirAppPolicy{security: [String]{}, assets: [String]{}, split: [String]{}, cache: [String]{}, a11y: [String]{}, adapters: [String]{}}, hydration: "", shared_tir: false}
+        mir_digest_string(writer, graph.entry_file)
+        mir_digest_string(writer, graph.hydration)
+        mir_digest_bool(writer, graph.shared_tir)
+        mir_digest_len(writer, graph.routes.len())
+        loop route in graph.routes {
+            mir_digest_string(writer, route.path)
+            mir_digest_string(writer, route.handler)
+            mir_digest_string(writer, route.route_identity)
+            mir_digest_app_route_fields(writer, route.path_params)
+            mir_digest_app_route_fields(writer, route.search_params)
+            mir_digest_string(writer, route.search_codec)
+            if route.loader == None -> mir_digest_bool(writer, false) else {
+                mir_digest_bool(writer, true)
+                loader :: route.loader ?? MirAppRouteLoader{handler: "", data_type: "", dependency: "", preload: false, cache_identity: ""}
+                mir_digest_string(writer, loader.handler)
+                mir_digest_string(writer, loader.data_type)
+                mir_digest_string(writer, loader.dependency)
+                mir_digest_bool(writer, loader.preload)
+                mir_digest_string(writer, loader.cache_identity)
+            }
+            mir_digest_option_string(writer, route.boundaries.pending)
+            mir_digest_option_string(writer, route.boundaries.not_found)
+            mir_digest_option_string(writer, route.boundaries.error)
+            mir_digest_string(writer, route.precedence)
+            mir_digest_string(writer, mir_digest_app_render_mode(route.render))
+            mir_digest_app_render_facts(writer, route.render_facts)
+            mir_digest_string(writer, route.provenance)
+            mir_digest_len(writer, route.span_start)
+            mir_digest_len(writer, route.span_end)
+        }
+        mir_digest_len(writer, graph.actions.len())
+        loop action in graph.actions {
+            mir_digest_string(writer, action.name)
+            mir_digest_string(writer, action.handler)
+            mir_digest_string(writer, action.kind)
+            mir_digest_string(writer, action.provenance)
+            mir_digest_len(writer, action.span_start)
+            mir_digest_len(writer, action.span_end)
+        }
+        mir_digest_len(writer, graph.mounts.len())
+        loop mount in graph.mounts {
+            mir_digest_string(writer, mount.prefix)
+            mir_digest_string(writer, mount.handler)
+            mir_digest_app_string_list(writer, mount.effects)
+            mir_digest_app_string_list(writer, mount.security)
+            mir_digest_string(writer, mount.provenance)
+            mir_digest_len(writer, mount.span_start)
+            mir_digest_len(writer, mount.span_end)
+        }
+        mir_digest_len(writer, graph.routes_from.len())
+        loop root in graph.routes_from {
+            mir_digest_string(writer, root.root)
+            mir_digest_len(writer, root.span_start)
+            mir_digest_len(writer, root.span_end)
+        }
+        mir_digest_app_string_list(writer, graph.policy.security)
+        mir_digest_app_string_list(writer, graph.policy.assets)
+        mir_digest_app_string_list(writer, graph.policy.split)
+        mir_digest_app_string_list(writer, graph.policy.cache)
+        mir_digest_app_string_list(writer, graph.policy.a11y)
+        mir_digest_app_string_list(writer, graph.policy.adapters)
+    }
+}
+
+fn mir_digest_sort_modules(rows: &[MirModule]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_imports(rows: &[MirImport]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].module_id.value > current.module_id.value)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_type_defs(rows: &[MirTypeDef]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+fn mir_digest_sort_core_owners(rows: &[MirCoreOwner]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_traits(rows: &[MirTraitDef]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_impls(rows: &[MirImplDef]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_constants(rows: &[MirConstantDef]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_functions(rows: &[MirFunction]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_fields(rows: &[MirFieldRow]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].owner.value > current.owner.value)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_source_files(rows: &[MirSourceFile]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].path > current.path)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_foreign(rows: &[MirForeign]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_links(rows: &[MirLinkUnit]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].crate_spec > current.crate_spec)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_callbacks(rows: &[MirCallbackAdapter]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].symbol > current.symbol)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_handles(rows: &[MirHandleLifecycle]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+fn mir_digest_sort_job_limits(rows: &[MirJobLimit]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].value > current.value)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+
+fn mir_digest_sort_jobs(rows: &[MirJob]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_tests(rows: &[MirTestCase]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_harnesses(rows: &[MirHarnessPlan]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_artifacts(rows: &[MirArtifactPlan]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_core_calls(rows: &[MirCoreCall]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_prelude_calls(rows: &[MirPreludeCall]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && (rows[cursor].module_name > current.module_name || (rows[cursor].module_name == current.module_name && rows[cursor].member > current.member)))) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_type_instances(rows: &[MirType]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        current_id := current.identity.map(row -> row.value) ?? -1
+        cursor := index - 1
+        prior_id := rows[cursor].identity.map(row -> row.value) ?? -1
+        loop cursor >= 0 && prior_id > current_id {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+            if cursor >= 0 -> prior_id = rows[cursor].identity.map(row -> row.value) ?? -1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_unreachable(rows: &[MirUnreachable]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].span.start > current.span.start || (rows[cursor].span.start == current.span.start && (rows[cursor].span.end > current.span.end || (rows[cursor].span.end == current.span.end && rows[cursor].construct > current.construct)))) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_strings(values: &[String]) {
+    index := 1
+    loop index < values.len() {
+        current := values[index]
+        cursor := index - 1
+        loop cursor >= 0 && values[cursor] > current {
+            values[cursor + 1] = values[cursor]
+            cursor -= 1
+        }
+        values[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_runtime_parts(values: &[MirRuntimePartId]) {
+    index := 1
+    loop index < values.len() {
+        current := values[index]
+        cursor := index - 1
+        loop cursor >= 0 && mir_digest_runtime_order(values[cursor]) > mir_digest_runtime_order(current) {
+            values[cursor + 1] = values[cursor]
+            cursor -= 1
+        }
+        values[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_unreachable(writer: &MirCanonicalWriter, value: MirUnreachable) {
+    mir_digest_string(writer, value.construct)
+    mir_digest_span(writer, value.span)
+    mir_digest_u64(writer, mir_digest_erasure_reason(value.reason))
+}
+
+fn mir_program_bytes_internal(program: MirProgram) -> [U8] {
+    writer := mir_digest_writer()
+    mir_digest_tag(&writer, "mir")
+    mir_digest_u16(&writer, program.schema_version)
+    mir_digest_string(&writer, program.package_identity)
+    facts := program.facts
+    mir_digest_string(&writer, facts.project_root)
+    mir_digest_string(&writer, facts.edition)
+    runtime_parts := facts.runtime_parts
+    mir_digest_sort_runtime_parts(&runtime_parts)
+    mir_digest_runtime_parts(&writer, runtime_parts)
+    mir_digest_string(&writer, facts.active_os)
+    mir_digest_string(&writer, facts.inferred_layer)
+    mir_digest_string(&writer, facts.allocator)
+    target_triple := facts.target_dossier.machine.map(row -> row.triple) ?? ""
+    dossier_bytes := mir_digest_target_dossier_bytes(facts.target_dossier, target_triple)
+    mir_digest_bytes(&writer, dossier_bytes)
+    mir_digest_app_graph(&writer, facts.web_app)
+    mir_digest_hardware_setup(&writer, facts.hardware_setups)
+    mir_digest_string(&writer, facts.hardware_profile_id)
+    if facts.hardware_profile == None -> mir_digest_bool(&writer, false) else {
+        mir_digest_bool(&writer, true)
+        mir_digest_target_hardware_facts(&writer, facts.hardware_profile ?? MirTargetHardwareFacts{svd: None, register_blocks: [MirTargetRegisterBlockFact]{}, interrupts: [MirTargetInterruptFact]{}, dma_channels: [MirTargetDmaChannelFact]{} })
+    }
+    mir_digest_target_hardware_use(&writer, facts.hardware_use)
+    capabilities := facts.hardware_capabilities
+    mir_digest_sort_strings(&capabilities)
+    mir_digest_len(&writer, capabilities.len())
+    loop capability in capabilities -> mir_digest_string(&writer, capability)
+
+    modules := program.modules
+    mir_digest_sort_modules(&modules)
+    mir_digest_len(&writer, modules.len())
+    loop row in modules -> mir_digest_module(&writer, row)
+    imports := program.imports
+    mir_digest_sort_imports(&imports)
+    mir_digest_len(&writer, imports.len())
+    loop row in imports -> mir_digest_import(&writer, row)
+    types := program.types
+    mir_digest_sort_type_defs(&types)
+    mir_digest_len(&writer, types.len())
+    loop row in types -> mir_digest_type_def(&writer, row)
+    core_owners := program.core_owners
+    mir_digest_sort_core_owners(&core_owners)
+    mir_digest_len(&writer, core_owners.len())
+    loop row in core_owners -> mir_digest_core_owner(&writer, row)
+    traits := program.traits
+    mir_digest_sort_traits(&traits)
+    mir_digest_len(&writer, traits.len())
+    loop row in traits -> mir_digest_trait_def(&writer, row)
+    impls := program.impls
+    mir_digest_sort_impls(&impls)
+    mir_digest_len(&writer, impls.len())
+    loop row in impls -> mir_digest_impl_def(&writer, row)
+    constants := program.constants
+    mir_digest_sort_constants(&constants)
+    mir_digest_len(&writer, constants.len())
+    loop row in constants -> mir_digest_constant_def(&writer, row)
+    fields := program.fields
+    mir_digest_sort_fields(&fields)
+    mir_digest_len(&writer, fields.len())
+    loop row in fields {
+        mir_digest_u64(&writer, row.id.value)
+        mir_digest_u64(&writer, row.owner.value)
+        mir_digest_field(&writer, row.field)
+    }
+    source_files := program.source_files
+    mir_digest_sort_source_files(&source_files)
+    mir_digest_len(&writer, source_files.len())
+    loop row in source_files {
+        mir_digest_u64(&writer, row.id.value)
+        mir_digest_string(&writer, row.path)
+        mir_digest_string(&writer, row.source)
+    }
+    functions := program.functions
+    mir_digest_sort_functions(&functions)
+    mir_digest_len(&writer, functions.len())
+    loop row in functions -> mir_digest_function(&writer, row)
+    foreign := program.foreign
+    mir_digest_sort_foreign(&foreign)
+    mir_digest_len(&writer, foreign.len())
+    loop row in foreign -> mir_digest_foreign(&writer, row)
+    links := program.links
+    mir_digest_sort_links(&links)
+    mir_digest_len(&writer, links.len())
+    loop row in links -> mir_digest_link_unit(&writer, row)
+    callbacks := program.callbacks
+    mir_digest_sort_callbacks(&callbacks)
+    mir_digest_len(&writer, callbacks.len())
+    loop row in callbacks -> mir_digest_callback(&writer, row)
+    handles := program.handles
+    mir_digest_sort_handles(&handles)
+    mir_digest_len(&writer, handles.len())
+    loop row in handles -> mir_digest_handle(&writer, row)
+    jobs := program.jobs
+    mir_digest_sort_jobs(&jobs)
+    mir_digest_len(&writer, jobs.len())
+    loop row in jobs -> mir_digest_job(&writer, row)
+    tests := program.tests
+    mir_digest_sort_tests(&tests)
+    mir_digest_len(&writer, tests.len())
+    loop row in tests -> mir_digest_test(&writer, row)
+    harnesses := program.harnesses
+    mir_digest_sort_harnesses(&harnesses)
+    mir_digest_len(&writer, harnesses.len())
+    loop row in harnesses -> mir_digest_harness(&writer, row)
+    artifacts := program.artifacts
+    mir_digest_sort_artifacts(&artifacts)
+    mir_digest_len(&writer, artifacts.len())
+    loop row in artifacts -> mir_digest_artifact(&writer, row)
+    core_calls := program.core_calls
+    mir_digest_sort_core_calls(&core_calls)
+    mir_digest_len(&writer, core_calls.len())
+    loop row in core_calls -> mir_digest_core_call(&writer, row)
+    prelude_calls := program.prelude_calls
+    mir_digest_sort_prelude_calls(&prelude_calls)
+    mir_digest_len(&writer, prelude_calls.len())
+    loop row in prelude_calls -> mir_digest_prelude_call(&writer, row)
+    type_instances := program.type_instances
+    mir_digest_sort_type_instances(&type_instances)
+    mir_digest_len(&writer, type_instances.len())
+    loop row in type_instances -> mir_digest_type(&writer, row)
+    unreachable := program.unreachable
+    mir_digest_sort_unreachable(&unreachable)
+    mir_digest_len(&writer, unreachable.len())
+    loop row in unreachable -> mir_digest_unreachable(&writer, row)
+    writer.bytes
+}
+
+fn mir_digest_wrap64(value: Int) -> Int {
+    value & 0xffffffffffffffff
+}
+
+fn mir_digest_fnv_lane(bytes: [U8], seed: Int) -> Int {
+    hash := seed
+    loop byte in bytes {
+        hash = mir_digest_wrap64((hash ^ Int.from_u8(byte)) * 0x100000001b3)
+    }
+    hash
+}
+
+fn mir_digest_hex_digit(value: Int) -> String {
+    if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
+    else -> String.from_bytes([U8{87 + value}]) ?? "0"
+}
+
+fn mir_digest_hex(bytes: [U8]) -> String {
+    output := ""
+    loop byte in bytes {
+        value := Int.from_u8(byte)
+        output = "{output}{mir_digest_hex_digit((value >> 4) & 15)}{mir_digest_hex_digit(value & 15)}"
+    }
+    output
+}
+
+pub fn mir_program_bytes(program: MirProgram) -> [U8] {
+    mir_program_bytes_internal(program)
+}
+
+pub fn mir_program_digest(program: MirProgram) -> String {
+    bytes := mir_program_bytes_internal(program)
+    seeds := [Int]{0xcbf29ce484222325, 0x84222325cbf29ce4, 0x9e3779b185ebca87, 0xd6e8feb86659fd93}
+    output := [U8]{}
+    loop seed in seeds {
+        hash := mir_digest_fnv_lane(bytes, seed)
+        index := 0
+        loop index < 8 {
+            output.push(U8{(hash >> (8 * index)) & 255})
+            index += 1
+        }
+    }
+    mir_digest_hex(output)
+}
+
+
+fn mir_digest_sort_ints(values: &[Int]) {
+    index := 1
+    loop index < values.len() {
+        current := values[index]
+        cursor := index - 1
+        loop cursor >= 0 && values[cursor] > current {
+            values[cursor + 1] = values[cursor]
+            cursor -= 1
+        }
+        values[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_import_items(rows: &[MirImportItem]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].local > current.local || (rows[cursor].local == current.local && rows[cursor].original > current.original)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_blocks(rows: &[MirBasicBlock]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_captures(rows: &[MirCaptureParam]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].slot > current.slot || (rows[cursor].slot == current.slot && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_value_facts(rows: &[MirValueFact]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_locals(rows: &[MirLocal]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_places(rows: &[MirPlace]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_scopes(rows: &[MirScope]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_drops(rows: &[MirDropAction]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].place.value > current.place.value || (rows[cursor].place.value == current.place.value && (rows[cursor].span.start > current.span.start || (rows[cursor].span.start == current.span.start && rows[cursor].span.end > current.span.end)))) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_trait_methods(rows: &[MirTraitMethod]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_associated_types(rows: &[MirAssociatedTypeValue]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].span.start > current.span.start)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_exports(rows: &[MirExport]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].symbol > current.symbol || (rows[cursor].symbol == current.symbol && rows[cursor].function.value > current.function.value)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_output_checks(rows: &[MirOutputCheck]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_coverage_points(rows: &[MirCoveragePoint]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && (rows[cursor].function.value > current.function.value || (rows[cursor].function.value == current.function.value && rows[cursor].block.value > current.block.value)))) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}
+
+fn mir_digest_sort_named_spans(rows: &[MirNamedSpan]) {
+    index := 1
+    loop index < rows.len() {
+        current := rows[index]
+        cursor := index - 1
+        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].span.start > current.span.start)) {
+            rows[cursor + 1] = rows[cursor]
+            cursor -= 1
+        }
+        rows[cursor + 1] = current
+        index += 1
+    }
+}

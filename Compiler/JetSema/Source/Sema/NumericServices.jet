@@ -1,0 +1,16 @@
+// Private compiler numeric services.  The Source Sema asks the configured
+// native service for exact unit conversion proofs; arithmetic remains owned by
+// Foundation's canonical unit kernel.
+
+pub enum SemaNumericUnitConversionProof {
+    Exact(value: Float)
+    Inexact
+    Unavailable
+}
+
+pub fn sema_numeric_unit_conversion_exact(graph: SemaRegistrationGraph, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
+    callback :: graph.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
+    result := callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}")
+    if result == None -> return SemaNumericUnitConversionProof.Inexact
+    SemaNumericUnitConversionProof.Exact(result ?? 0.0)
+}

@@ -134,7 +134,7 @@ fn fact_reads_do_not_enter_type_position() {
 #[test]
 fn folded_fact_reads_emit_values_without_runtime_dispatch() {
     let output = jet::compile(
-        "#Numeric Severity :: distinct Int(0..10)\n\n@range :: Severity.@range\n\nfn run() {\n    print(@range.start)\n}\n",
+        "#Numeric Severity :: distinct Int(0..10)\n\n@RANGE :: Severity.@range\n\nfn run() {\n    print(@RANGE.start)\n}\n",
     )
     .expect("a comptime fact read should compile");
     assert!(
@@ -177,7 +177,7 @@ fn every_registered_plane_has_a_source_fact_read() {
 
 #[test]
 fn registry_derived_plane_reads_are_typed_and_folded() {
-    let source = "@flow :: Flow.@flow\n@taint :: Taint.@taint\n@duty :: Duty.@duty\n\nfn run() {\n    print(@flow.kind == .Flow)\n    print(@taint.kind == .Taint)\n    print(@duty.kind == .Duty)\n}\n";
+    let source = "@FLOW :: Flow.@flow\n@TAINT :: Taint.@taint\n@DUTY :: Duty.@duty\n\nfn run() {\n    print(@FLOW.kind == .Flow)\n    print(@TAINT.kind == .Taint)\n    print(@DUTY.kind == .Duty)\n}\n";
     tir_support::assert_tiers_agree("registry-derived-plane-reads", source, "true\ntrue\ntrue\n");
     let output = jet::compile(source).expect("registry-derived plane reads should compile");
     assert!(!has_runtime_fact_dispatch(&output.rust));

@@ -210,6 +210,7 @@ pub(crate) fn build_for_cache(
             // Keep the private root for source-build certification, but publish
             // the complete Nix closure into the caller's Hangar.
             nix_roots: ctx.nix_roots,
+            allow_local_nix_catalog: ctx.allow_local_nix_catalog,
         };
         let left = match realize_uncached(&left_workspace.roots, &left_ctx, request) {
             Ok(realized) => realized,
@@ -250,6 +251,7 @@ pub(crate) fn build_for_cache(
             project_dir: ctx.project_dir,
             nix_index: ctx.nix_index,
             nix_roots: ctx.nix_roots,
+            allow_local_nix_catalog: ctx.allow_local_nix_catalog,
         };
         let right = match realize_uncached(&right_workspace.roots, &right_ctx, request) {
             Ok(realized) => realized,

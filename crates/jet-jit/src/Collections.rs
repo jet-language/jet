@@ -8,7 +8,6 @@
 use super::Concurrency;
 use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
-use std::io::BufRead;
 
 mod set_semantics {
     #[allow(unused_imports)]
@@ -1126,31 +1125,19 @@ pub(crate) enum JetLoopLineReader {
 
 impl JetLoopLineReader {
     fn next(&mut self) -> Result<Option<String>, String> {
-        let operation = match self {
-            Self::File(_) => "FS.Read",
-            Self::Stdin => "IO.Read",
-        };
-        if crate::fault_injection::jet_fault_should_fail(operation) {
-            return Err(format!("fault injected: {operation}"));
-        }
         match self {
-            Self::Stdin => crate::IO::term_prelude::jet_term_read_stdin_line()
-                .map_err(|error| format!("read stdin: {error}"))
-                .map(|line| match line {
-                    crate::IO::term_prelude::JetTermRead::Line(line) => Some(line),
-                    crate::IO::term_prelude::JetTermRead::EndOfInput => None,
-                }),
-            Self::File(reader) => {
-                let mut line = String::new();
-                let count = reader
-                    .inner
-                    .read_line(&mut line)
-                    .map_err(|error| format!("read {}: {error}", reader.path))?;
-                if count == 0 {
-                    return Ok(None);
+            Self::File(reader) => crate::enc_stream::source_file_next_line(reader)
+                .map_err(|error| format!("{error:?}")),
+            Self::Stdin => {
+                if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+                    return Err("fault injected: IO.Read".to_string());
                 }
-                crate::IO::term_prelude::jet_term_trim_line(&mut line);
-                Ok(Some(line))
+                crate::IO::term_prelude::jet_term_read_stdin_line()
+                    .map_err(|error| format!("read stdin: {error}"))
+                    .map(|line| match line {
+                        crate::IO::term_prelude::JetTermRead::Line(line) => Some(line),
+                        crate::IO::term_prelude::JetTermRead::EndOfInput => None,
+                    })
             }
         }
     }

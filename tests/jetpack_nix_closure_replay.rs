@@ -8,6 +8,402 @@ use std::process::Command;
 mod common;
 use common::Scratch;
 
+#[path = "support/nix_index_cache_server.rs"]
+mod nix_index_cache_server;
+
+#[cfg(target_os = "linux")]
+#[test]
+fn local_index_lock_preserves_admission_and_rejects_trust_tampering() {
+    use jetpack::Store::{self, ProducerRecord, Roots};
+    use nix_index_cache_server::NixIndexCacheServer;
+
+    let project = Scratch::new("local-index-lock-project");
+    let root = Scratch::new("local-index-lock-hangar");
+    let replay = Scratch::new("local-index-replay-hangar");
+    let catalog = Scratch::new("local-index-catalog");
+    let replacement = Scratch::new("local-index-replacement");
+    let home = Scratch::new("local-index-lock-home");
+    let nested_project = Scratch::new("local-index-nested-project");
+    let source = nested_project.join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload"), b"isolated adapter output\n").unwrap();
+    let plan = jet_env_model::ModuleEval::AdapterPlan {
+        name: "local-tool-consumer".into(),
+        source: source.to_string_lossy().into_owned(),
+        deps: vec![jet_env_model::Merge::Pkg { source: "jetpack".into(), name: "ripgrep".into() }],
+        recipe: jet_env_model::ModuleEval::AdapterRecipe::Build(jet_pkg_model::Recipe::BuildRecipe {
+            steps: vec![jet_pkg_model::Recipe::BuildStep::Install {
+                src: "payload".into(),
+                dest: "payload".into(),
+            }],
+        }),
+    };
+    let temporary = home.join("tmp");
+    fs::create_dir_all(&temporary).unwrap();
+    let server = NixIndexCacheServer::start_ripgrep(&project.path);
+    server.install(&root.path);
+    fs::remove_file(root.join("trust/nix-index-v1.ed25519.pub")).unwrap();
+    let index_path = catalog.join(
+        server.signed_index.target_url
+            .strip_prefix(&server.index_endpoint).unwrap().trim_start_matches('/'),
+    );
+    fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+    fs::write(&index_path, &server.signed_index.index_bytes).unwrap();
+    let index_authority = index_path.file_name().unwrap().to_str().unwrap()
+        .strip_suffix(".json.zst").unwrap().to_string();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    // Declare the adapter before Nix admission binds the complete lock digest.
+    // The nested project receives this same declaration, not an after-the-fact
+    // lock change that would refresh the original Nix producer's authority.
+    let expected_adapter = Scratch::new("local-index-expected-adapter");
+    // Scratch's own package.jet is fixture authority, not an installed output.
+    let expected_tree = expected_adapter.join("output");
+    fs::create_dir(&expected_tree).unwrap();
+    fs::write(expected_tree.join("payload"), b"isolated adapter output\n").unwrap();
+    // Recipe publishes an owner-only private output directory.
+    fs::set_permissions(&expected_tree, fs::Permissions::from_mode(0o700)).unwrap();
+    Store::seal_local_output(&expected_tree).unwrap();
+    let source_hash = jetpack::Envelope::try_output_hash_of(&plan.source).unwrap();
+    let adapter_reference = format!("adapt:{}:{}", plan.name, plan.source);
+    let expected_output = jetpack::Envelope::try_output_hash_of(
+        &expected_tree.to_string_lossy(),
+    ).unwrap();
+    let mut initial_lock = jetpack::Lock::parse(&format!(
+        "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+        nix_index_cache_server::REVISION,
+    )).unwrap();
+    initial_lock.packages.push(jetpack::Lock::LockedPackage {
+        name: plan.name.clone(),
+        version: String::new(),
+        source: jetpack::Lock::LockSource::Path(adapter_reference),
+        nix_closure: None,
+        locked: None,
+        fingerprint: source_hash.clone(),
+        content_hash: Some(source_hash),
+        dependencies: vec!["ripgrep".into()],
+        layer: None,
+        inferred_layer: None,
+        effects: Vec::new(),
+        effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
+        envelope: Some(jetpack::Lock::LockEnvelope {
+            output_hash: expected_output,
+            platform: jetpack::Envelope::host_platform(),
+            ..Default::default()
+        }),
+        receipt: None,
+        provenance: None,
+    });
+    fs::write(project.join(".jet/lock"), jetpack::Lock::write(&initial_lock)).unwrap();
+    let prepare = |hangar: &Path, selected_catalog: &Path, offline: bool| {
+        let mut command = Command::new(common::jetpack_bin());
+        command.args(["env", "--env", "dev", "--prep", "--trust", "--no-color", "--yes", "--local-nix-catalog"])
+            .arg(selected_catalog)
+            .current_dir(&project.path)
+            .env_clear()
+            .env("PATH", "")
+            .env("HOME", &home.path)
+            .env("XDG_DATA_HOME", home.join("data"))
+            .env("XDG_STATE_HOME", home.join("state"))
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_RUNTIME_DIR", home.join("run"))
+            .env("TMPDIR", &temporary)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("JETPACK_SHARED_CAS", hangar.join("hangar/cas"))
+            .env("JETPACK_ROOT", hangar)
+            .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
+        if offline {
+            command.arg("--offline");
+        }
+        command.output().unwrap()
+    };
+    let assert_success = |output: std::process::Output| {
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    };
+    // Invocation-only trust is confined to this loopback fixture. No live
+    // provider approval, real installation, or persistent grant is authorized.
+    let env_command = |local: bool| {
+        let mut command = Command::new(common::jetpack_bin());
+        command.args(["env", "--env", "dev", "--offline", "--trust", "--no-color"])
+            .current_dir(&project.path)
+            .env_clear()
+            .env("PATH", "")
+            .env("HOME", &home.path)
+            .env("XDG_DATA_HOME", home.join("data"))
+            .env("XDG_STATE_HOME", home.join("state"))
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_RUNTIME_DIR", home.join("run"))
+            .env("TMPDIR", &temporary)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("JETPACK_SHARED_CAS", root.join("hangar/cas"))
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
+        if local {
+            command.arg("--local-nix-catalog").arg(&replacement.path);
+        }
+        command
+    };
+    let prepare_env = |local: bool| env_command(local).arg("--prep").output().unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev {\n    sources: { jetpack: NixOS/nixpkgs/nixpkgs-unstable@github }\n    packages: [jetpack.ripgrep]\n}\n",
+    ).unwrap();
+    assert_success(prepare(&root.path, &catalog.path, false));
+    let (closure, envelope) =
+        jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
+            .unwrap().unwrap();
+    assert_eq!(closure.index_authority, index_authority);
+    assert_eq!(envelope.catalog_tier, "local-unofficial");
+    assert_eq!(envelope.catalog_trust, "unverified");
+    let original_lock = fs::read(project.join(".jet/lock")).unwrap();
+    let entries = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
+    let original = entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap().clone();
+    let producer = ProducerRecord::decode(&original.producer_record).unwrap();
+    assert_eq!(producer.facts["nix.index.target.sha256"], index_authority);
+    assert_eq!(producer.facts["nix.index.manifest.sha256"], "");
+    assert_eq!(producer.facts["nix.project-cas-bundle"], closure.project_cas_bundle);
+    let original_graph = Store::closure_graph(&Roots::at(root.path.clone())).unwrap();
+    let original_closure = original_graph.closure(&closure.output);
+
+    server.reset_counts();
+    server.stop_network();
+    let bundle = project.join(".jet/nix-cas").join(&closure.project_cas_bundle);
+    let saved_bundle = project.join("saved-bundle");
+    fs::rename(&bundle, &saved_bundle).unwrap();
+    assert_success(prepare(&root.path, &replacement.path, true));
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    let env_receipt = project.join(".jet/receipts/env-entry");
+    fs::remove_file(&env_receipt).unwrap();
+    let unapproved = prepare_env(false);
+    assert_eq!(unapproved.status.code(), Some(1));
+    assert!(!env_receipt.exists(), "unapproved local admission created an environment receipt");
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    assert_success(prepare_env(true));
+    fs::remove_file(&env_receipt).unwrap();
+    assert_success(prepare_env(true));
+    // An intact warm environment receipt is not an invocation permission grant.
+    let allowed = env_command(true).args(["--", "/bin/sh", "-c", "printf allowed"])
+        .output().unwrap();
+    assert!(allowed.status.success(), "{}", String::from_utf8_lossy(&allowed.stderr));
+    assert_eq!(allowed.stdout, b"allowed");
+    let intact_receipt = fs::read(&env_receipt).unwrap();
+    let unapproved = env_command(false).args(["--", "/bin/sh", "-c", "printf forbidden"])
+        .output().unwrap();
+    assert_eq!(unapproved.status.code(), Some(1));
+    assert!(unapproved.stdout.is_empty(), "unapproved command ran");
+    assert!(String::from_utf8_lossy(&unapproved.stderr).contains("--local-nix-catalog"));
+    assert_eq!(fs::read(&env_receipt).unwrap(), intact_receipt);
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    let exported = env_command(true).args(["export", "bash"]).output().unwrap();
+    assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stderr));
+    assert!(String::from_utf8_lossy(&exported.stdout).contains("export PATH="));
+    let intact_receipt = fs::read(&env_receipt).unwrap();
+    let unapproved = env_command(false).args(["export", "bash"]).output().unwrap();
+    // Export's quiet refusal must preserve the caller's existing activation.
+    assert!(unapproved.status.success());
+    assert!(unapproved.stdout.is_empty(), "unapproved export emitted activation");
+    assert_eq!(fs::read(&env_receipt).unwrap(), intact_receipt);
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    let (env_closure, env_envelope) =
+        jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
+            .unwrap().unwrap();
+    assert_eq!(env_closure, closure);
+    assert_eq!(env_envelope, envelope);
+    let original_lock = fs::read(project.join(".jet/lock")).unwrap();
+    let warm_entries = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
+    let warm = warm_entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
+    let warm_producer = ProducerRecord::decode(&warm.producer_record).unwrap();
+    assert_eq!(warm_producer.facts["nix.output.out"], server.root_store_path);
+    assert_eq!(warm.producer_record, original.producer_record);
+    assert_eq!(warm.named_outputs, original.named_outputs);
+    assert_eq!(
+        Store::closure_graph(&Roots::at(root.path.clone())).unwrap().closure(&closure.output),
+        original_closure,
+    );
+    // JetOS and other non-CLI consumers cross this same Store boundary.
+    let roots = Roots::at(root.path.clone());
+    assert_eq!(roots.shared_cas_dir(), root.join("hangar/cas"));
+    let store_dir = roots.hangar_dir();
+    let spec = jetpack::RefSpec::classify("ripgrep@jetpack").unwrap();
+    let table = jetpack::RefSpec::SourceTable::empty();
+    let mut ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: Some(&project.path),
+        nix_index: None,
+        nix_roots: Some(&roots),
+        allow_local_nix_catalog: false,
+    };
+    let denied = Store::realize_verified(
+        &roots, &ctx, Store::RealizeRequest::Package { spec: &spec, table: &table },
+    );
+    match denied {
+        Err(Store::RealizeError::LockedNix(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            assert!(error.to_string().contains("--local-nix-catalog"));
+        }
+        Err(error) => panic!("unexpected replay error: {error:?}"),
+        Ok(_) => panic!("Store reused a local admission without invocation permission"),
+    }
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    ctx.allow_local_nix_catalog = true;
+    let allowed = Store::realize_verified(
+        &roots, &ctx, Store::RealizeRequest::Package { spec: &spec, table: &table },
+    ).unwrap();
+    assert_eq!(allowed.metadata().producer_record, original.producer_record);
+    assert_eq!(allowed.metadata().envelope, original.envelope);
+    assert_eq!(allowed.metadata().named_outputs, original.named_outputs);
+    drop(allowed);
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    // An adapter's private build roots must inherit denial, and an allowed
+    // dependency must retain its original verified native-Hangar admission.
+    fs::create_dir_all(nested_project.join(".jet")).unwrap();
+    fs::write(nested_project.join(".jet/lock"), &original_lock).unwrap();
+    let mut nested_ctx = jetpack::Provider::Ctx {
+        project_dir: Some(&nested_project.path),
+        allow_local_nix_catalog: false,
+        ..ctx
+    };
+    let expectation = jetpack::Provider::adapter_cache_expectation(&plan, &table, &nested_ctx).unwrap();
+    let denied = Store::realize_verified(
+        &roots, &nested_ctx,
+        Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
+    );
+    match denied {
+        Err(Store::RealizeError::LockedNix(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        }
+        Err(error) => panic!("unexpected nested replay error: {error:?}"),
+        Ok(_) => panic!("adapter reused a local dependency without invocation permission"),
+    }
+    assert!(!Store::list_checked(&roots).unwrap().iter().any(|entry| entry.name == plan.name));
+    assert_eq!(fs::read(nested_project.join(".jet/lock")).unwrap(), original_lock);
+    nested_ctx.allow_local_nix_catalog = true;
+    let adapted = Store::realize_verified(
+        &roots, &nested_ctx,
+        Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
+    ).unwrap();
+    let adapted_entry = adapted.metadata();
+    assert!(adapted_entry.version.is_empty(), "unversioned adapter acquired an invented version");
+    let nested_lock = jetpack::Lock::load(&nested_project.path).unwrap();
+    let locked_adapter = nested_lock.packages.iter().find(|package| package.name == plan.name).unwrap();
+    assert_eq!(locked_adapter.receipt.as_deref(), Some(adapted_entry.receipt.as_str()));
+    assert_eq!(fs::read(Path::new(&adapted_entry.out).join("payload")).unwrap(), b"isolated adapter output\n");
+    assert!(Store::verify_cache_entry(
+        &roots, adapted_entry, &adapted_entry.reference, &expectation,
+    ).trusted());
+    let adapted_producer = ProducerRecord::decode(&adapted_entry.producer_record).unwrap();
+    assert_eq!(adapted_producer.facts["build.dependencies"], "ripgrep@jetpack");
+    assert_eq!(adapted_producer.facts["build.sandbox"], "non-executing");
+    assert_eq!(adapted_producer.facts["build.sandbox_policy"], "no child launched");
+    assert!(adapted_entry.references.is_empty(), "build-only tool became a dangling runtime reference");
+    let warm_adapter = Store::realize_verified(
+        &roots, &nested_ctx,
+        Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
+    ).unwrap();
+    assert_eq!(warm_adapter.source_state(), jetpack::Provider::SourceState::Cached);
+    assert_eq!(warm_adapter.metadata().producer_record, adapted_entry.producer_record);
+    assert_eq!(fs::read(warm_adapter.original_output().join("payload")).unwrap(), b"isolated adapter output\n");
+    drop(warm_adapter);
+    drop(adapted);
+    let entries = Store::list_checked(&roots).unwrap();
+    let after_nested = entries.iter().find(|entry| entry.reference == original.reference).unwrap();
+    assert_eq!(after_nested.producer_record, original.producer_record);
+    assert_eq!(after_nested.envelope, original.envelope);
+    assert_eq!(after_nested.named_outputs, original.named_outputs);
+    assert_eq!(Store::closure_graph(&roots).unwrap().closure(&closure.output), original_closure);
+    assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
+    fs::rename(&saved_bundle, &bundle).unwrap();
+    assert_success(prepare(&replay.path, &replacement.path, true));
+    let (replayed_closure, replayed_envelope) =
+        jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
+            .unwrap().unwrap();
+    assert_eq!(replayed_closure, closure);
+    assert_eq!(replayed_envelope, envelope);
+    let entries = Store::list_checked(&Roots::at(replay.path.clone())).unwrap();
+    let replayed = entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
+    assert_eq!(replayed.envelope.output_hash, closure.output);
+    assert_eq!(replayed.references, closure.references);
+    let producer = ProducerRecord::decode(&replayed.producer_record).unwrap();
+    assert_eq!(producer.facts["nix.index.target.sha256"], index_authority);
+    assert_eq!(producer.facts["nix.index.tier"], "local-unofficial");
+    assert_eq!(producer.facts["nix.index.trust"], "unverified");
+    assert!(!producer.facts.contains_key("nix.index.manifest.sha256"));
+    assert_eq!(server.object_request_count(&server.root_store_path), 0);
+    for path in &server.transitive_store_paths {
+        assert_eq!(server.object_request_count(path), 0);
+    }
+
+    let baseline = jetpack::Lock::parse(std::str::from_utf8(&original_lock).unwrap()).unwrap();
+    let mut promoted = baseline.clone();
+    let promoted_envelope = promoted.packages.iter_mut()
+        .find(|package| package.nix_closure.is_some()).unwrap().envelope.as_mut().unwrap();
+    promoted_envelope.catalog_tier = "official-signed".into();
+    promoted_envelope.catalog_trust = "verified".into();
+    fs::write(project.join(".jet/lock"), jetpack::Lock::write(&promoted)).unwrap();
+    assert!(!prepare(&root.path, &replacement.path, true).status.success());
+    assert!(!prepare_env(true).status.success());
+    let empty = Scratch::new("local-index-forged-official-cold");
+    assert!(!prepare(&empty.path, &replacement.path, true).status.success());
+    assert!(Store::list_checked(&Roots::at(empty.path.clone())).unwrap().is_empty());
+
+    for change_authority in [true, false] {
+        let mut tampered = baseline.clone();
+        let record = tampered.packages.iter_mut()
+            .find_map(|package| package.nix_closure.as_mut()).unwrap();
+        if change_authority {
+            record.index_authority = "d".repeat(64);
+        } else {
+            record.project_cas_bundle = format!("sha256-{}", "d".repeat(64));
+        }
+        fs::write(project.join(".jet/lock"), jetpack::Lock::write(&tampered)).unwrap();
+        assert!(!prepare(&root.path, &replacement.path, true).status.success());
+    }
+    let after_rejections = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
+    let unchanged = after_rejections.iter()
+        .find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
+    assert_eq!(unchanged.producer_record, warm.producer_record);
+    assert_eq!(unchanged.receipt, warm.receipt);
+    fs::write(project.join(".jet/lock"), &original_lock).unwrap();
+
+    let runtime = after_rejections.iter().find(|entry| {
+        ProducerRecord::decode(&entry.producer_record).ok().is_some_and(|record| {
+            record.facts.get("nix.store-path").map(String::as_str)
+                == Some(nix_index_cache_server::RUNTIME_PATH)
+        })
+    }).unwrap();
+    let marker = Path::new(&runtime.out).join("share/marker");
+    use std::os::unix::fs::PermissionsExt as _;
+    let marker_parent = marker.parent().unwrap();
+    let parent_permissions = fs::metadata(marker_parent).unwrap().permissions();
+    fs::set_permissions(marker_parent, fs::Permissions::from_mode(
+        parent_permissions.mode() | 0o200,
+    )).unwrap();
+    let replacement_marker = marker_parent.join("replacement-marker");
+    use std::io::Write as _;
+    fs::OpenOptions::new().write(true).create_new(true)
+        .open(&replacement_marker).unwrap()
+        .write_all(b"corrupted runtime").unwrap();
+    fs::rename(&replacement_marker, &marker).unwrap();
+    fs::set_permissions(marker_parent, parent_permissions).unwrap();
+    assert!(!prepare(&root.path, &replacement.path, true).status.success());
+    assert!(!prepare_env(true).status.success());
+    assert_eq!(fs::read(&marker).unwrap(), b"corrupted runtime");
+}
+
 fn hex_digest(prefix: &str, fill: char) -> String {
     format!("{prefix}{}", fill.to_string().repeat(64))
 }
@@ -21,7 +417,7 @@ fn valid_nix_closure(output: &str) -> jetpack::Lock::NixClosureRecord {
         channel: "nixpkgs-unstable".into(),
         revision: "a".repeat(40),
         system: jetpack::Envelope::host_platform(),
-        signed_index_manifest: "b".repeat(64),
+        index_authority: "b".repeat(64),
         derivation: "c".repeat(64),
         output: output.into(),
         nar_hash: format!("sha256:{}", "d".repeat(64)),
@@ -39,6 +435,8 @@ fn lock_envelope(output: &str, platform: &str) -> jetpack::Lock::LockEnvelope {
         output_hash: output.into(),
         platform: platform.into(),
         provenance: "integration-test".into(),
+        catalog_tier: "local-unofficial".into(),
+        catalog_trust: "unverified".into(),
         ..Default::default()
     }
 }
@@ -53,7 +451,7 @@ fn malformed_present_lock_is_a_trust_error_not_a_cache_miss() {
     let error = jetpack::Lock::load_strict(&project.path).unwrap_err();
     assert!(!error.is_empty(), "malformed present lock must be rejected");
     let error =
-        jetpack::Lock::nix_realization_strict(&project.path, "pkg@nixpkgs").unwrap_err();
+        jetpack::Lock::nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err();
     assert!(!error.is_empty(), "Nix lookup must not downgrade malformed lock state");
 }
 
@@ -73,7 +471,7 @@ fn nix_lock_rejects_platform_and_envelope_mismatch() {
         &project.path,
         "pkg",
         "1.0.0",
-        "pkg@nixpkgs",
+        "pkg@jetpack",
         &output,
         closure.clone(),
         lock_envelope(&output, &mismatch),
@@ -89,7 +487,7 @@ fn nix_lock_rejects_platform_and_envelope_mismatch() {
         &project.path,
         "pkg",
         "1.0.0",
-        "pkg@nixpkgs",
+        "pkg@jetpack",
         &output,
         closure,
         lock_envelope(&output, &platform),
@@ -101,7 +499,7 @@ fn nix_lock_rejects_platform_and_envelope_mismatch() {
     fs::write(&lock_path, jetpack::Lock::write(&lock)).unwrap();
 
     let error =
-        jetpack::Lock::nix_realization_strict(&project.path, "pkg@nixpkgs").unwrap_err();
+        jetpack::Lock::nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err();
     assert!(error.contains("envelope identity"), "{error}");
 }
 
@@ -111,7 +509,7 @@ fn nix_lock_receipt_follows_complete_closure_identity() {
     let output = cas_digest('2');
     let mut closure = valid_nix_closure(&output);
     let envelope = lock_envelope(&output, "x86_64-linux");
-    let reference = "pkg@nixpkgs";
+    let reference = "pkg@jetpack";
 
     jetpack::Lock::record_nix_realization(
         &project.path,
@@ -142,7 +540,7 @@ fn nix_lock_receipt_follows_complete_closure_identity() {
     let lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
     assert_eq!(lock.packages[0].receipt.as_deref(), Some(receipt.as_str()));
 
-    closure.revision = "b".repeat(40);
+    closure.index_authority = "d".repeat(64);
     jetpack::Lock::record_nix_realization(
         &project.path,
         "pkg",
@@ -625,6 +1023,7 @@ fn nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_the
             project_dir: Some(&project.path),
             nix_index: None,
             nix_roots: Some(&destination_roots),
+            allow_local_nix_catalog: true,
         },
         jetpack::Store::RealizeRequest::Package {
             spec: &spec,
@@ -642,6 +1041,7 @@ fn nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_the
             project_dir: Some(&project.path),
             nix_index: None,
             nix_roots: Some(&destination_roots),
+            allow_local_nix_catalog: true,
         },
         jetpack::Store::RealizeRequest::Package {
             spec: &spec,
@@ -684,6 +1084,7 @@ fn nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_the
             project_dir: Some(&copied_project.path),
             nix_index: None,
             nix_roots: Some(&copied_roots),
+            allow_local_nix_catalog: true,
         },
         jetpack::Store::RealizeRequest::Package {
             spec: &spec,

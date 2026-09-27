@@ -1,0 +1,186 @@
+// Marker/fact declarations and bracketed marker groups.  The declaration
+// parameter list is deliberately shared by marker and fact items so typed
+// arguments and fixed `@` facts retain one source shape.
+
+fn parser_marker_expression(marker: Marker, index: Int) -> ?Expr {
+    if index < 0 || index >= marker.args.len() -> return None
+    if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
+}
+
+fn parser_marker_label(marker: Marker, index: Int) -> String {
+    if index < 0 || index >= marker.arg_labels.len() -> return ""
+    label := marker.arg_labels[index]
+    if label == { .Val(value) -> value.name else -> "" }
+}
+fn parser_marker_decl_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT
+}
+
+fn parser_fact_decl_ahead(state: &JetParserState) -> Bool {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT
+}
+
+
+fn parser_parse_marker_decl(state: &JetParserState) -> Item {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "for a marker declaration name")
+    params := parser_marker_decl_params(&state)
+    body := None
+    end := parser_lookahead(&state, -1).span
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        body = Val(parser_marker_body(&state))
+        end = parser_lookahead(&state, -1).span
+    }
+    if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
+    Item.MarkerDecl(value: MarkerDecl{name: name.payload.decoded, name_span: name.span, params: params, body: body, span: parser_cover(start.span, end)})
+}
+
+fn parser_parse_fact_decl(state: &JetParserState) -> Item {
+    start :: parser_bump(&state)
+    name :: parser_expect_name(&state, "for a fact declaration name")
+    params := parser_marker_decl_params(&state)
+    end := parser_lookahead(&state, -1).span
+    if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
+    Item.FactDecl(value: FactDecl{name: name.payload.decoded, name_span: name.span, params: params, span: parser_cover(start.span, end)})
+}
+
+fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
+    parser_expect(&state, TOKEN_LPAREN, "`(` before marker declaration parameters")
+    params := [MarkerDeclParam]{}
+    loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
+        marked := false
+        name_span := parser_current(&state).span
+        name := ""
+        if parser_current_kind(&state) == TOKEN_AT {
+            at :: parser_bump(&state)
+            name_token :: parser_expect_name(&state, "after `@` in marker declaration metadata")
+            name = "@{name_token.payload.decoded}"
+            name_span = parser_cover(at.span, name_token.span)
+            marked = true
+        } else {
+            name_token :: parser_expect_name(&state, "for a marker declaration parameter")
+            name = name_token.payload.decoded
+            name_span = name_token.span
+        }
+        parser_expect(&state, TOKEN_COLON, "between a marker parameter name and its type or value")
+        if marked {
+            value := parser_parse_expression(&state, 1, 0)
+            params.push(MarkerDeclParam{name: name, name_span: name_span, ty: None, value: Val(value.expr), variadic: false})
+        } else {
+            variadic := false
+            if parser_current_kind(&state) == TOKEN_DOT_DOT_DOT {
+                parser_bump(&state)
+                variadic = true
+            }
+            parsed := parser_parse_type(&state, 0)
+            default := None
+            if parser_current_kind(&state) == TOKEN_LBRACE {
+                parser_bump(&state)
+                default = Val(parser_parse_expression(&state, 1, 0).expr)
+                parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
+            }
+            params.push(MarkerDeclParam{name: name, name_span: name_span, ty: Val(parsed.ty), value: default, variadic: variadic})
+        }
+        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        if parser_current_kind(&state) != TOKEN_COMMA {
+            parser_add_error(&state, parser_current(&state).span, "expected `,` between marker declaration parameters", "marker parameters are comma-separated", "add a comma or close the parameter list")
+            break
+        }
+        parser_bump(&state)
+    }
+    parser_expect(&state, TOKEN_RPAREN, "`)` after marker declaration parameters")
+    params
+}
+
+fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
+    parser_expect(&state, TOKEN_LBRACE, "`{{` before a marker body")
+    body := [DeriveBodyItem]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        parser_skip_semicolons(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_LOOP {
+            body.push(parser_marker_template_loop(&state))
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV {
+            modifiers := parser_parse_item_modifiers(&state)
+            body.push(DeriveBodyItem.Item(value: parser_marker_body_item(&state, modifiers)))
+            next
+        }
+        if parser_current_kind(&state) == TOKEN_KW_FN || parser_current_kind(&state) == TOKEN_KW_STRUCT || parser_current_kind(&state) == TOKEN_KW_ENUM || parser_current_kind(&state) == TOKEN_KW_IMPL || parser_current_kind(&state) == TOKEN_KW_TAG {
+            modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
+            body.push(DeriveBodyItem.Item(value: parser_marker_body_item(&state, modifiers)))
+        } else if parser_test_ahead(&state) {
+            body.push(DeriveBodyItem.Item(value: parser_parse_test(&state)))
+        } else {
+            body.push(DeriveBodyItem.Stmt(value: parser_parse_statement(&state)))
+        }
+    }
+    parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker body")
+    body
+}
+
+fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+    if parser_current_kind(&state) == TOKEN_KW_FN {
+        parsed :: parser_parse_function(&state, modifiers)
+        return Item.Func(value: parsed.value)
+    }
+    if parser_current_kind(&state) == TOKEN_KW_STRUCT -> return Item.Struct(value: parser_parse_struct(&state, modifiers))
+    if parser_current_kind(&state) == TOKEN_KW_ENUM -> return Item.Enum(value: parser_parse_enum(&state, modifiers))
+    if parser_current_kind(&state) == TOKEN_KW_IMPL -> return Item.Impl(value: parser_parse_impl(&state))
+    if parser_current_kind(&state) == TOKEN_KW_TAG -> return Item.Tag(value: parser_parse_tag_decl(&state, modifiers))
+    parser_add_error(&state, parser_current(&state).span, "expected an item in a marker body", "marker templates contain declarations or statements", "write a function, struct, enum, impl, or statement")
+    Item.Const(value: parser_parse_const(&state, modifiers))
+}
+
+fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
+    start :: parser_expect(&state, TOKEN_AT, "before a marker template loop")
+    parser_expect(&state, TOKEN_KW_LOOP, "after `@` in a marker template loop")
+    variable :: parser_expect_name(&state, "for a marker template loop binding")
+    parser_expect(&state, TOKEN_KW_IN, "between a marker template loop binding and source")
+    source := parser_parse_expression(&state, 1, 0)
+    body := parser_marker_body(&state)
+    end := parser_lookahead(&state, -1).span
+    DeriveBodyItem.Loop(var: variable.payload.decoded, var_span: variable.span, source: source.expr, body: body, span: parser_cover(start.span, end))
+}
+
+
+fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
+    hash :: parser_expect(&state, TOKEN_HASH, "before a marker group")
+    parser_expect(&state, TOKEN_LBRACKET, "`[` after a marker-group sigil")
+    markers := [Marker]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+        negated := false
+        start := parser_current(&state).span
+        if parser_current_kind(&state) == TOKEN_BANG {
+            parser_bump(&state)
+            negated = true
+        }
+        name :: parser_expect_name(&state, "for a marker in a marker group")
+        args := [MarkerCallArg]{}
+        labels := [?CallLabel]{}
+        end := name.span
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parsed := parser_parse_call_args(&state, 1, true)
+            index := 0
+            loop index < parsed.len() {
+                args.push(MarkerCallArg.Expr(value: parsed[index].expr))
+                labels.push(parsed[index].label)
+                index += 1
+            }
+            if state.position > 0 -> end = parser_lookahead(&state, -1).span
+        }
+        markers.push(Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: args, arg_labels: labels, span: parser_cover(start, end), ct: None})
+        if parser_current_kind(&state) == TOKEN_COMMA {
+            parser_bump(&state)
+            next
+        }
+        if parser_current_kind(&state) != TOKEN_RBRACKET {
+            parser_add_error(&state, parser_current(&state).span, "expected `,` between marker-group entries", "marker groups are ordered comma-separated lists", "add a comma or close the marker group")
+            break
+        }
+    }
+    parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
+    if markers.len() == 1 -> parser_add_error(&state, parser_cover(hash.span, parser_lookahead(&state, -1).span), "one marker is written without brackets", "brackets group two or more markers", "replace `#[Name]` with `#Name`")
+    markers
+}

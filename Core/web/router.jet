@@ -1,9 +1,9 @@
 // core.web.router — typed routes, navigation, and cache state.
 
-c_max_router_path :: 4096
+C_MAX_ROUTER_PATH :: 4096
 
-c_max_router_routes :: 1024
-c_max_router_fields :: 256
+C_MAX_ROUTER_ROUTES :: 1024
+C_MAX_ROUTER_FIELDS :: 256
 
 
 #Error
@@ -99,19 +99,19 @@ pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter 
     body :: handler("*") ?? return Err(WebRouterError.Callback)
     route := WebRoute{pattern: "*", name: "not_found", fields: fields, search_fields: search, codec: WebRouterSearchCodec.Query, response: body, not_found: true}
     routes := copy_routes(router.routes) ?? panic("copy_routes failed")
-    if routes.len() >= c_max_router_routes -> return Err(WebRouterError.Invalid)
+    if routes.len() >= C_MAX_ROUTER_ROUTES -> return Err(WebRouterError.Invalid)
     routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
 
 pub fn navigate(router: WebRouter, path: String) -> WebNavigation !WebRouterError {
-    if path.len() == 0 || path.len() > c_max_router_path || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
+    if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav :: match_path(router, path) ?? return Err(WebRouterError.NotFound)
     Ok(nav)
 }
 
 pub fn preload(router: &WebRouter, path: String) -> WebNavigation !WebRouterError {
-    if path.len() == 0 || path.len() > c_max_router_path || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
+    if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav := match_path(~router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
     router.current = ~path
@@ -164,7 +164,7 @@ pub fn link(router: WebRouter, name: String, params: [String:String], search: [S
                 if !field_name_allowed(r.search_fields, key) -> return Err(WebRouterError.Invalid)
             }
             out := fill_pattern(r.pattern, params, search, r.codec)
-            if out.len() > c_max_router_path -> return Err(WebRouterError.Invalid)
+            if out.len() > C_MAX_ROUTER_PATH -> return Err(WebRouterError.Invalid)
             return Ok(out)
         }
     }
@@ -187,7 +187,7 @@ pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus {
 }
 
 fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String, fallback: Bool) -> WebRouter !WebRouterError {
-    if pattern.len() == 0 || pattern.len() > c_max_router_path || !(valid_percent_encoding(pattern) ?? false) -> return Err(WebRouterError.Invalid)
+    if pattern.len() == 0 || pattern.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(pattern) ?? false) -> return Err(WebRouterError.Invalid)
     if !(route_fields_valid(pattern, fields, search) ?? false) -> return Err(WebRouterError.Invalid)
     loop existing in router.routes {
         if existing.pattern == pattern -> return Err(WebRouterError.Invalid)
@@ -196,7 +196,7 @@ fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], searc
     body :: handler(nav) ?? return Err(WebRouterError.Callback)
     route := WebRoute{pattern: pattern, name: pattern, fields: fields, search_fields: search, codec: codec, response: body, not_found: fallback}
     routes := copy_routes(router.routes) ?? panic("copy_routes failed")
-    if routes.len() >= c_max_router_routes -> return Err(WebRouterError.Invalid)
+    if routes.len() >= C_MAX_ROUTER_ROUTES -> return Err(WebRouterError.Invalid)
     routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
@@ -442,7 +442,7 @@ fn trim_json(text: String) -> String {
     slice_text(text, start, end)
 }
 fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRouterField]) -> Bool {
-    if fields.len() > c_max_router_fields || search.len() > c_max_router_fields -> return false
+    if fields.len() > C_MAX_ROUTER_FIELDS || search.len() > C_MAX_ROUTER_FIELDS -> return false
     path_names := [String]{}
     loop segment in split_slash(pattern) {
         raw :: segment.bytes()
@@ -521,7 +521,7 @@ fn field_name_allowed(fields: [WebRouterField], name: String) -> Bool {
 }
 
 fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> Int {
-    if path.len() == 0 || path.len() > c_max_router_path || !valid_percent_encoding(path) -> return -1
+    if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !valid_percent_encoding(path) -> return -1
     idx := cache_index(router.cache, path)
     if idx >= 0 {
         if idx < router.cache_status.len() -> router.cache_status[idx] = state

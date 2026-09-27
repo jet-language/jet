@@ -14,27 +14,27 @@ use core.crypto.expert.[secret_bytes]
 use core.encoding.base64 as base64
 use core.encoding.hex as hex
 
-c_max_recipients :: 100
+C_MAX_RECIPIENTS :: 100
 
-c_max_attachments :: 64
+C_MAX_ATTACHMENTS :: 64
 
-c_max_header_bytes :: 998
+C_MAX_HEADER_BYTES :: 998
 
-c_max_header_value_bytes :: 65536
+C_MAX_HEADER_VALUE_BYTES :: 65536
 
-c_max_body_bytes :: 1048576
+C_MAX_BODY_BYTES :: 1048576
 
-c_max_attachment_bytes :: 26214400
+C_MAX_ATTACHMENT_BYTES :: 26214400
 
-c_max_message_bytes :: 33554432
+C_MAX_MESSAGE_BYTES :: 33554432
 
-c_max_reply_line_bytes :: 512
+C_MAX_REPLY_LINE_BYTES :: 512
 
-c_max_reply_lines :: 100
+C_MAX_REPLY_LINES :: 100
 
-c_max_capabilities :: 100
+C_MAX_CAPABILITIES :: 100
 
-c_max_auth_challenge_bytes :: 4096
+C_MAX_AUTH_CHALLENGE_BYTES :: 4096
 
 // Jet owns deterministic address, MIME, and message policy. Only the
 // transport-facing SMTP provider calls below cross the native boundary.
@@ -150,12 +150,12 @@ pub struct SendReport {
 
 pub fn limits() -> Limits {
     Limits{
-        max_reply_line_bytes: c_max_reply_line_bytes,
-        max_reply_lines: c_max_reply_lines,
-        max_capabilities: c_max_capabilities,
-        max_recipients: c_max_recipients,
-        max_message_bytes: c_max_message_bytes,
-        max_auth_challenge_bytes: c_max_auth_challenge_bytes,
+        max_reply_line_bytes: C_MAX_REPLY_LINE_BYTES,
+        max_reply_lines: C_MAX_REPLY_LINES,
+        max_capabilities: C_MAX_CAPABILITIES,
+        max_recipients: C_MAX_RECIPIENTS,
+        max_message_bytes: C_MAX_MESSAGE_BYTES,
+        max_auth_challenge_bytes: C_MAX_AUTH_CHALLENGE_BYTES,
     }
 }
 
@@ -202,7 +202,7 @@ pub fn address(text: String) -> Address !EmailError {
 
 pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment !EmailError {
     validate_attachment_parts(~name, ~mime, ~bytes) ?? return Err(invalid_attachment("invalid attachment"))
-    if bytes.len() > c_max_attachment_bytes {
+    if bytes.len() > C_MAX_ATTACHMENT_BYTES {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(Attachment{filename: name, mime: ascii_lower(mime), bytes: bytes})
@@ -212,7 +212,7 @@ pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, te
     html_text :: html.text()
     validate_message_parts(from, to, bcc, subject, text, html_text, attachments) ?? return Err(invalid_message("message contains invalid fields"))
     upper :: prospective_wire_upper(from, to, subject, text, html_text, attachments)
-    if upper > c_max_message_bytes {
+    if upper > C_MAX_MESSAGE_BYTES {
         return Err(limit_error("message", "serialized message exceeds 33554432 bytes"))
     }
     validate_rendered_headers(from, to, subject) ?? return Err(invalid_message("message headers are invalid"))
@@ -237,7 +237,7 @@ pub fn envelope(from: Address, recipients: [Address]) -> Envelope !EmailError {
     if recipients.len() == 0 {
         return Err(invalid_message("email envelope needs at least one recipient"))
     }
-    if recipients.len() > c_max_recipients {
+    if recipients.len() > C_MAX_RECIPIENTS {
         return Err(limit_error("envelope", "email envelope exceeds 100 recipients"))
     }
     loop recipient in recipients {
@@ -281,7 +281,7 @@ pub fn serialize(message: Message) -> [U8] !EmailError {
         push_text(&out, "--{mixed}--")
         push_crlf(&out)
     }
-    if out.len() > message.wire_upper || out.len() > c_max_message_bytes {
+    if out.len() > message.wire_upper || out.len() > C_MAX_MESSAGE_BYTES {
         return Err(limit_error("serialize", "serialized message exceeded its checked wire bound"))
     }
     Ok(out)
@@ -669,7 +669,7 @@ fn validate_dkim_config(dkim: DkimConfig) -> ?EmailError {
     }
     if !has_from -> return Val(email_error("dkim", "signed_headers must include `from`") ?? panic("total email error"))
     list_bytes += normalized.len() - 1
-    if list_bytes + 6 > c_max_header_bytes {
+    if list_bytes + 6 > C_MAX_HEADER_BYTES {
         return Val(email_error("dkim", "signed_headers exceeds the DKIM header line bound") ?? panic("total email error"))
     }
     None
@@ -923,7 +923,7 @@ fn validate_attachment_parts(name: String, mime: String, bytes: [U8]) -> Bool !E
     if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
-    if bytes.len() > c_max_attachment_bytes {
+    if bytes.len() > C_MAX_ATTACHMENT_BYTES {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(true)
@@ -946,7 +946,7 @@ fn valid_mime(text: String) -> Bool {
 }
 
 fn physical_header_fits(name: String, value_bytes: Int) -> Bool {
-    name.bytes().len() + 2 + value_bytes + 2 <= c_max_header_bytes
+    name.bytes().len() + 2 + value_bytes + 2 <= C_MAX_HEADER_BYTES
 }
 
 fn percent_encoded_len(text: String) -> Int {
@@ -995,20 +995,20 @@ html: String,
 attachments: [Attachment],
 ) -> Bool !EmailError {
     reject_controls(~subject, "subject") ?? return Err(invalid_header("subject contains a forbidden control character"))
-    if subject.bytes().len() > c_max_header_value_bytes {
+    if subject.bytes().len() > C_MAX_HEADER_VALUE_BYTES {
         return Err(limit_error("message", "subject exceeds 65536 bytes"))
     }
     if to.len() == 0 -> return Err(invalid_message("message needs at least one visible recipient"))
-    if to.len() + bcc.len() > c_max_recipients {
+    if to.len() + bcc.len() > C_MAX_RECIPIENTS {
         return Err(limit_error("message", "message exceeds 100 recipients"))
     }
-    if attachments.len() > c_max_attachments {
+    if attachments.len() > C_MAX_ATTACHMENTS {
         return Err(limit_error("message", "message exceeds 64 attachments"))
     }
     if text.bytes().len() == 0 && html.bytes().len() == 0 {
         return Err(invalid_message("message needs text or HTML content"))
     }
-    if text.bytes().len() > c_max_body_bytes || html.bytes().len() > c_max_body_bytes {
+    if text.bytes().len() > C_MAX_BODY_BYTES || html.bytes().len() > C_MAX_BODY_BYTES {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
     validate_address(from) ?? return Err(invalid_address("invalid sender address"))
@@ -1069,13 +1069,13 @@ fn default_envelope(from: Address, to: [Address], bcc: [Address]) -> Envelope !E
 fn validate_message_value(message: Message) -> Bool !EmailError {
     validate_message_record(message) ?? return Err(invalid_message("message contains invalid fields"))
     upper :: prospective_message_wire_upper(message)
-    if message.wire_upper < upper || message.wire_upper > c_max_message_bytes {
+    if message.wire_upper < upper || message.wire_upper > C_MAX_MESSAGE_BYTES {
         return Err(limit_error("serialize", "serialized message size bound is invalid"))
     }
     validate_message_headers(message) ?? return Err(invalid_message("message headers are invalid"))
     sender := ~message.envelope.from
     validate_address(sender) ?? return Err(invalid_message("message envelope sender is invalid"))
-    if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > c_max_recipients {
+    if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > C_MAX_RECIPIENTS {
         return Err(invalid_message("message envelope recipient count is outside the supported range"))
     }
     loop recipient in message.envelope.recipients {
@@ -1102,7 +1102,7 @@ fn validate_attachment_record(item: Attachment) -> Bool !EmailError {
     if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
-    if item.bytes.len() > c_max_attachment_bytes {
+    if item.bytes.len() > C_MAX_ATTACHMENT_BYTES {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(true)
@@ -1113,22 +1113,22 @@ fn validate_message_record(message: Message) -> Bool !EmailError {
     if has_control(subject) {
         return Err(invalid_header("subject contains a forbidden control character"))
     }
-    if subject.bytes().len() > c_max_header_value_bytes {
+    if subject.bytes().len() > C_MAX_HEADER_VALUE_BYTES {
         return Err(limit_error("message", "subject exceeds 65536 bytes"))
     }
     if message.to.len() == 0 {
         return Err(invalid_message("message needs at least one visible recipient"))
     }
-    if message.to.len() + message.bcc.len() > c_max_recipients {
+    if message.to.len() + message.bcc.len() > C_MAX_RECIPIENTS {
         return Err(limit_error("message", "message exceeds 100 recipients"))
     }
-    if message.attachments.len() > c_max_attachments {
+    if message.attachments.len() > C_MAX_ATTACHMENTS {
         return Err(limit_error("message", "message exceeds 64 attachments"))
     }
     if message.text.bytes().len() == 0 && message.html.bytes().len() == 0 {
         return Err(invalid_message("message needs text or HTML content"))
     }
-    if message.text.bytes().len() > c_max_body_bytes || message.html.bytes().len() > c_max_body_bytes {
+    if message.text.bytes().len() > C_MAX_BODY_BYTES || message.html.bytes().len() > C_MAX_BODY_BYTES {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
     sender := ~message.from
@@ -1290,7 +1290,7 @@ fn render_addresses(addresses: [Address], name: String) -> String {
         rendered :: render_address(address)
         if item_index > 0 {
             first_line :: first_line_len(~rendered)
-            if physical + 2 + first_line + 2 > c_max_header_bytes {
+            if physical + 2 + first_line + 2 > C_MAX_HEADER_BYTES {
                 out.push(U8{44})
                 push_crlf(&out)
                 out.push(U8{32})
@@ -1413,7 +1413,7 @@ fn validate_folded_header(name: String, value: String) -> Bool {
         if i == raw.len() || (i + 1 < raw.len() && raw[i] == (U8{13}) && raw[i + 1] == (U8{10})) {
             prefix := 0
             if first -> prefix = name.bytes().len() + 2
-            if prefix + i - start + 2 > c_max_header_bytes -> return false
+            if prefix + i - start + 2 > C_MAX_HEADER_BYTES -> return false
             first = false
             if i < raw.len() {
                 i += 2

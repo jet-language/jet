@@ -1698,14 +1698,14 @@ fn replay_locked_nix(
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
     offline: bool,
+    local_nix_catalog: bool,
+    warm: &mut Option<Vec<Store::VerifiedRealization>>,
 ) -> Result<bool, String> {
     match Lock::load_strict(project_dir) {
         Ok(Some(_)) => {}
         Ok(None) => return Ok(false),
         Err(error) => return Err(format!("project lock is invalid: {error}")),
     }
-    let lock_digest = crate::Provider::project_lock_digest(Some(project_dir))
-        .map_err(|error| format!("could not read Nix lock identity: {error:?}"))?;
     let nix_refs = refs
         .iter()
         .filter(|spec| {
@@ -1724,8 +1724,8 @@ fn replay_locked_nix(
     let mut locked = Vec::new();
     let mut missing_real_nix = false;
     for spec in nix_refs {
-        if let Some(package) = Lock::locked_nix_package(project_dir, &spec.raw) {
-            locked.push((spec, package));
+        if Lock::locked_nix_package_strict(project_dir, &spec.raw)?.is_some() {
+            locked.push(spec);
         } else if Lock::registry_realization(project_dir, "jetpackage", &spec.raw).is_none() {
             missing_real_nix = true;
         }
@@ -1738,45 +1738,36 @@ fn replay_locked_nix(
             "project lock has only a partial Nix closure; refusing catalog fallback".into(),
         );
     }
-    let mut bundles: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (spec, (name, version, closure, envelope)) in locked {
-        let object_digests = if let Some(digests) = bundles.get(&closure.project_cas_bundle) {
-            digests.clone()
-        } else {
-            let (_, digests) = Store::import_nix_cas_bundle_checked(
-                project_dir,
-                roots,
-                &closure.project_cas_bundle,
-                &closure,
-                &envelope,
-            )
-            .map_err(|error| {
-                format!(
-                    "could not import locked Nix CAS bundle for `{}`: {error}",
-                    spec.raw
-                )
-            })?;
-            bundles.insert(closure.project_cas_bundle.clone(), digests.clone());
-            digests
-        };
-        Store::record_locked_nix(
+    let store_dir = roots.hangar_dir();
+    let ctx = Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline,
+        project_dir: Some(project_dir),
+        nix_index: None,
+        nix_roots: Some(roots),
+        allow_local_nix_catalog: local_nix_catalog,
+    };
+    let mut checked = Vec::with_capacity(locked.len());
+    for spec in locked {
+        let realized = Store::realize_verified(
             roots,
-            &name,
-            &version,
-            &spec.raw,
-            &envelope,
-            &closure,
-            &object_digests,
-            &lock_digest,
-        )
-        .map_err(|error| {
-            format!(
-                "could not register locked Nix CAS closure for `{}`: {error}",
-                spec.raw
-            )
+            &ctx,
+            Store::RealizeRequest::Package { spec, table },
+        ).map_err(|error| {
+            format!("could not verify locked Nix admission for `{}`: {error:?}", spec.raw)
         })?;
+        checked.push(realized);
     }
-    theme.detail("replayed fully locked Nix closure from project CAS");
+    if let Some(existing) = warm.as_mut() {
+        existing.retain(|entry| !checked.iter().any(|replacement| {
+            replacement.metadata().reference == entry.metadata().reference
+        }));
+        existing.extend(checked);
+    } else {
+        *warm = Some(checked);
+    }
+    theme.detail("verified fully locked Nix admissions");
     Ok(true)
 }
 
@@ -1959,6 +1950,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
                 &definition_fingerprint,
                 inherited_loader_path.as_deref(),
                 &receipt.packages,
+                flags.local_nix_catalog.is_some(),
             )
             .ok()
             .flatten()
@@ -1972,6 +1964,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
                 &roots,
                 &receipt.packages,
                 &expectations,
+                flags.local_nix_catalog.is_some(),
             )
             .ok()
             .flatten();
@@ -1979,10 +1972,9 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     let warm_complete = warm_realizations_complete(&plan, &warm);
     let warm_reused = warm_complete;
-    // Do not replay a locked Nix bundle until the receipt has had a chance to
-    // prove an exact warm entry. Replay imports and journals the bundle; doing
-    // that before this check both spends the warm-path cost and changes the
-    // WAL stamp used by the receipt, turning a valid hit into a miss.
+    // An exact environment receipt can reuse its checked leases directly.
+    // Otherwise use the same authenticated Store boundary as every package
+    // consumer, and forward its leases into composition without re-verification.
     let locked_nix_replayed = if warm_reused {
         false
     } else {
@@ -1993,6 +1985,8 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             &plan.refs,
             &plan.table,
             flags.offline,
+            flags.local_nix_catalog.is_some(),
+            &mut warm,
         ) {
             Ok(replayed) => replayed,
             Err(error) => {
@@ -2000,7 +1994,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
                     "E1350",
                     "locked Nix closure could not be replayed",
                     &error,
-                    "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock",
+                    "restore the lock and matching verified Hangar admission; portable bytes cannot establish signed index authority",
                 );
                 return 1;
             }
@@ -2343,6 +2337,7 @@ fn environment_member_expectations(
         project_dir: Some(project_dir),
         nix_index: None,
         nix_roots: Some(roots),
+        allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
     };
 
     let mut expectations = BTreeMap::new();
@@ -3842,6 +3837,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 &definition_fingerprint,
                 inherited_loader_path.as_deref(),
                 &receipt.packages,
+                parsed.flags.local_nix_catalog.is_some(),
             )
             .ok()
             .flatten()
@@ -3854,15 +3850,15 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                     &roots,
                     &receipt.packages,
                     &expectations,
+                    parsed.flags.local_nix_catalog.is_some(),
                 )
                 .ok()
                 .flatten();
             }
         }
         let warm_reused = warm_realizations_complete(&plan, &warm);
-        // Locked Nix replay is cold-path preparation. Do not import/journal it
-        // before the exact receipt warm check above; the replay mutates the WAL
-        // stamp that authenticates the receipt.
+        // Missing environment receipts still use the canonical Store authority
+        // check. Retain its checked entries and leases for composition.
         if !warm_reused {
             if let Err(error) = replay_locked_nix(
                 theme,
@@ -3871,6 +3867,8 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 &plan.refs,
                 &plan.table,
                 parsed.flags.offline,
+                parsed.flags.local_nix_catalog.is_some(),
+                &mut warm,
             ) {
                 theme.detail(&format!("locked Nix replay was unavailable: {error}"));
                 return 0;

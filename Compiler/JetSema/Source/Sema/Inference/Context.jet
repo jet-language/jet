@@ -1,0 +1,160 @@
+// Shared generic inference context and proof rows.
+//
+// Inference is deliberately the only owner of substitutions for callable and
+// nominal generic checking. Callers retain the resulting evidence rather than
+// guessing whether a bound was checked.
+
+pub struct SemaInferenceTypeParam {
+    pub name: String
+    pub bounds: [String]
+    pub span: Span
+    pub identity_key: String
+}
+
+pub struct SemaInferenceBinding {
+    pub name: String
+    pub ty: Type
+    pub source: String
+}
+
+pub struct SemaInferenceConflict {
+    pub param: String
+    pub first: Type
+    pub first_source: String
+    pub second: Type
+    pub second_source: String
+}
+
+pub struct SemaInferenceBoundEvidence {
+    pub param: String
+    pub actual: Type
+    pub bound: String
+    pub satisfied: Bool
+    pub source: Span
+}
+
+pub struct SemaInferenceContext {
+    pub graph: ?SemaRegistrationGraph
+    pub caller_module_identity: String
+    pub caller_package_identity: String
+    pub type_params: [SemaInferenceTypeParam]
+    pub lexical_generic_params: [TGenericParam]
+    pub expected: ?Type
+}
+
+pub struct SemaInferenceResult {
+    pub substitutions: [SemaInferenceBinding]
+    pub type_args: [Type]
+    pub parameters: [Type]
+    pub return_type: ?Type
+    pub evidence: [SemaInferenceBoundEvidence]
+    pub complete: Bool
+    pub compatible: Bool
+}
+
+pub fn sema_inference_type_params(parameters: [TypeParam]) -> [SemaInferenceTypeParam] {
+    result := [SemaInferenceTypeParam]{}
+    index := 0
+    loop index < parameters.len() {
+        parameter :: parameters[index]
+        result.push(SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: ""})
+        index += 1
+    }
+    result
+}
+
+pub fn sema_inference_registration_params(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] {
+    result := [SemaInferenceTypeParam]{}
+    index := 0
+    loop index < parameters.len() {
+        parameter :: parameters[index]
+        result.push(SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key})
+        index += 1
+    }
+    result
+}
+
+pub fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam], type_args: [Type]) -> [SemaInferenceBinding] {
+    result := [SemaInferenceBinding]{}
+    if parameters.len() != type_args.len() -> return result
+    index := 0
+    loop index < parameters.len() {
+        result.push(SemaInferenceBinding{name: parameters[index].name, ty: type_args[index], source: "explicit type argument"})
+        index += 1
+    }
+    result
+}
+
+pub fn sema_inference_context(graph: ?SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: ?Type) -> SemaInferenceContext {
+    SemaInferenceContext{graph: graph, caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
+}
+
+pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> ?SemaInferenceBinding {
+    index := 0
+    loop index < bindings.len() {
+        if bindings[index].name == name -> return Val(bindings[index])
+        index += 1
+    }
+    None
+}
+
+pub fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> ?Type {
+    binding :: sema_inference_binding_at(result.substitutions, name) ?? return None
+    Val(binding.ty)
+}
+
+pub fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool {
+    required_count := 0
+    index := 0
+    loop index < parameters.len() {
+        parameter :: parameters[index]
+        bound_index := 0
+        loop bound_index < parameter.bounds.len() {
+            required_count += 1
+            bound := parameter.bounds[bound_index]
+            found := false
+            evidence_index := 0
+            loop evidence_index < evidence.len() {
+                row :: evidence[evidence_index]
+                if row.param == parameter.name && row.bound == bound {
+                    found = row.satisfied
+                    expected :: sema_inference_binding_at(substitutions, parameter.name)
+                    if expected == None -> found = false
+                    if expected != None {
+                        binding :: expected ?? return false
+                        concrete := sema_inference_substitute_type_bindings(binding.ty, substitutions)
+                        if !type_identity_equal(row.actual, concrete) -> found = false
+                    }
+                }
+                evidence_index += 1
+            }
+            if !found -> return false
+            bound_index += 1
+        }
+        index += 1
+    }
+    if evidence.len() != required_count -> return false
+    evidence_index := 0
+    loop evidence_index < evidence.len() {
+        row :: evidence[evidence_index]
+        parameter_found := false
+        parameter_index := 0
+        loop parameter_index < parameters.len() {
+            if parameters[parameter_index].name == row.param {
+                bound_index := 0
+                loop bound_index < parameters[parameter_index].bounds.len() {
+                    if parameters[parameter_index].bounds[bound_index] == row.bound -> parameter_found = true
+                    bound_index += 1
+                }
+            }
+            parameter_index += 1
+        }
+        if !parameter_found -> return false
+        evidence_index += 1
+    }
+    true
+}
+
+pub fn sema_inference_result_bounds_checked(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool {
+    result.complete && sema_inference_bounds_checked(parameters, result.evidence, result.substitutions)
+}

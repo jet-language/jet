@@ -1,19 +1,22 @@
 # Case-study evidence contract
 
-No case study is published from this directory until a UL14 capstone supplies
-durable evidence. A finished case study must link a retained receipt for:
+A case study is a bounded evidence record, not a marketing summary. A record
+in this directory must use
+[`case-study.schema.json`](../schemas/case-study.schema.json) and retain
+receipts for:
 
 - migration effort and source scope;
-- build and runtime measurements with host/toolchain facts;
+- build and runtime measurements with host and toolchain facts;
 - failed attempts, recovery, and rollback;
-- clean-machine reproduction;
+- clean-machine reproduction; and
 - the exact Jet and source revisions used.
 
-Claims are bounded by the receipt. A case study cannot turn a fixture, a
-single-machine measurement, or an unverified marketing statement into a
-general performance, compatibility, support, or security claim.
+The UL14 capstone evidence sets the boundary for a publishable outcome. Claims
+must name the measured scope and follow the retained receipt. A fixture,
+single-machine measurement, or unverified statement cannot establish a general
+performance, compatibility, support, or security claim.
 
-The machine-readable shape is
-[`case-study.schema.json`](../schemas/case-study.schema.json). The absence of
-a case-study record is intentional while the capstone evidence is pending; it
-is not a placeholder release claim.
+The directory contains no case-study record by default. That absence avoids an
+unsubstantiated outcome; it is not evidence that any migration, support line,
+or security property exists. Add a schema-valid record only with the complete
+receipts and run the adoption validator against the pack.

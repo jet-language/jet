@@ -106,14 +106,14 @@ fn immutable_integer_array_constants_preserve_values_across_tiers() {
         "module_integer_array_constants",
         r#"
 
-c_words :: [Int]{17, 18446744073709551615}
-c_bytes :: [U8]{0, 127, 255}
+C_WORDS :: [Int]{17, 18446744073709551615}
+C_BYTES :: [U8]{0, 127, 255}
 
 fn run() {
-    print(c_words[0])
-    print(c_words[1])
-    print(Int.from_u8(c_bytes[1]))
-    print(Int.from_u8(c_bytes[2]))
+    print(C_WORDS[0])
+    print(C_WORDS[1])
+    print(Int.from_u8(C_BYTES[1]))
+    print(Int.from_u8(C_BYTES[2]))
 }
 "#,
         "17\n18446744073709551615\n127\n255\n",
@@ -125,7 +125,7 @@ fn module_array_constants_reject_computed_elements_in_sema() {
     let diagnostics = tir_support::compile_source(
         "computed_module_array_constant",
         r#"
-bad_table :: [Int]{1 + 2}
+BAD_TABLE :: [Int]{1 + 2}
 fn run() {}
 "#,
     )

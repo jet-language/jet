@@ -12,9 +12,9 @@
 use core.math as math
 
 // Tier 0: pure math — always evaluates at compile time.
-@digits_of_pi :: math.floor(Float{31415.9})
+@DIGITS_OF_PI :: math.floor(Float{31415.9})
 
-@greeting :: "hello"
+@GREETING :: "hello"
 
 // Tier 1a: embed_file reads the file once at compile time; its path and
 // content hash are recorded in .jet/lock. (Shown as comment — no file
@@ -32,8 +32,8 @@ use core.math as math
 //       sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 //   )
 fn run() {
-    print("{@greeting}, world")
-    print("pi × 10^4 ≈ {@digits_of_pi}")
+    print("{@GREETING}, world")
+    print("pi × 10^4 ≈ {@DIGITS_OF_PI}")
     // Tier 2 gate: the block itself is fine without --gate impure=allow as
     // long as no `comptime` binding is attempted inside it. With
     // --gate impure=allow you can add: @cfg :: fs.read("config.txt")

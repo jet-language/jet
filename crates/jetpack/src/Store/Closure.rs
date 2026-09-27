@@ -1301,8 +1301,9 @@ pub(super) fn lifecycle_closure_graph_unlocked_ignoring(
     Ok(graph)
 }
 
-pub(super) fn entry_closure_store_proof(
-    roots: &Roots,
+/// Verify the original WAL-bound record independently of missing object bytes.
+/// This witness permits authenticated repair, never incomplete consumption.
+pub(super) fn entry_record_store_proof(
     graph: &ClosureGraph,
     entry: &StoreEntry,
 ) -> bool {
@@ -1312,14 +1313,24 @@ pub(super) fn entry_closure_store_proof(
     let mut outputs = entry.named_outputs.clone();
     outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
     if record.primary != entry.envelope.output_hash
+        || record.producer_record != entry.producer_record
         || record.action_key != entry_action_key(entry)
         || record.outputs != outputs
         || record.references != entry.references.iter().cloned().collect()
     {
         return false;
     }
+    true
+}
+
+/// Object-byte leg only; the caller must also require `entry_record_store_proof`.
+pub(super) fn entry_closure_objects_rehash(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    entry: &StoreEntry,
+) -> bool {
     graph
-        .transitive_references(&record.primary)
+        .transitive_references(&entry.envelope.output_hash)
         .into_iter()
         .all(|digest| closure_object_rehashes(roots, graph, &digest))
 }

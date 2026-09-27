@@ -188,10 +188,12 @@ pub enum StructuredDiagnostic {
     SuggestedEdits {
         edits: Vec<TextEdit>,
     },
+    /// Bootstrap projections carry operation labels from the checked Source value;
+    /// keep them owned so a report edge never leaks or interns dynamic text.
     CryptoMisuse {
         reason: CryptoMisuseReason,
-        operation: &'static str,
-        expected: Option<&'static str>,
+        operation: String,
+        expected: Option<String>,
         actual: Option<i128>,
     },
     BuildError {
@@ -821,8 +823,8 @@ impl Diagnostic {
         );
         diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
             reason,
-            operation,
-            expected: Some(expected),
+            operation: operation.to_string(),
+            expected: Some(expected.to_string()),
             actual: Some(actual),
         });
         diagnostic
@@ -847,7 +849,7 @@ impl Diagnostic {
         );
         diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
             reason,
-            operation,
+            operation: operation.to_string(),
             expected: None,
             actual: None,
         });
@@ -1103,8 +1105,8 @@ impl Diagnostic {
         {
             report.extension = Some(ReportExtension::Crypto {
                 reason: reason.as_str().to_string(),
-                operation: (*operation).to_string(),
-                expected: (*expected).map(|value| value.to_string()),
+                operation: operation.clone(),
+                expected: expected.clone(),
                 actual: *actual,
             });
         }

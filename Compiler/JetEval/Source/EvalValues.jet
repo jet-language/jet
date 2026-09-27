@@ -1,0 +1,1527 @@
+// Runtime state and exact scalar/aggregate values for canonical MIR evaluation.
+// TComptimeValue is the shared Foundation carrier; Eval-owned variants keep
+// move/address/shared-cell/call-frame state out of that semantic schema.
+
+pub enum JetEvalRuntimeValue {
+    Moved
+    Data(value: TComptimeValue)
+    Absent(element: MirType)
+    Result(ok: Bool, value: JetEvalRuntimeValue)
+    NativeCallable(key: String, callable_type: MirType)
+    Closure(function: MirFunctionId, captures: [JetEvalRuntimeValue])
+    Address(frame: Int, place: MirPlaceId, access: MirAccess)
+    SharedCell(index: Int, access: MirAccess)
+    Shared(index: Int)
+    SharedGuard(index: Int)
+    SharedSnapshot(index: Int)
+    Condition(index: Int)
+    RangeCursor(start: Int, end: Int, current: Int, step: Int, exclusive: Bool)
+    ListCursor(values: [JetEvalRuntimeValue], index: Int, step: Int)
+    ForeignHandle(handle: MirHandleId, raw: Int, token: Int)
+    Aggregate(value: JetEvalRuntimeAggregate)
+    RuntimeFailure(value: JetEvalRuntimeValue, span: Span)
+    HostCursor(value: JetEvalRuntimeValue, has_next: MirPreludeCallId, value_call: MirPreludeCallId, advance: MirPreludeCallId)
+}
+pub struct JetEvalCallbackRoot {
+    pub value: JetEvalRuntimeValue
+    pub reusable: Bool
+    pub invoked: Bool
+}
+
+// One owned logical reference per registry-naming runtime value. Each
+// SharedCell/ForeignHandle value held by a slot (SSA value, local, parameter,
+// capture, aggregate element, closure capture, callback root, cell or token
+// payload, task root, result) owns exactly one alias: jet_eval_copy_value mints
+// one, jet_eval_drop_value discharges one, moves transfer without counting.
+// Payload and ownership metadata use separate physical permits so retaining or
+// transferring a handle never waits on a payload guard. Every metadata
+// check-and-update runs under one edit permit.
+pub struct JetEvalSharedCellData {
+    pub value: JetEvalRuntimeValue
+}
+pub struct JetEvalSharedCellMeta {
+    pub access: MirAccess
+    pub aliases: Int
+    pub dropped: Bool
+}
+pub struct JetEvalSharedCell {
+    pub storage: Shared<JetEvalSharedCellData>
+    pub metadata: Shared<JetEvalSharedCellMeta>
+}
+
+pub struct JetEvalOutputEvent {
+    pub stdout: String
+    pub stderr: String
+}
+pub struct JetEvalOutputState {
+    pub events: [JetEvalOutputEvent]
+}
+pub struct JetEvalOutputContext {
+    pub storage: Shared<JetEvalOutputState>
+}
+
+// Session-local canonical identity registry. Every machine of one session
+// (root, deopt resume, child tasks, native callbacks) shares this physical
+// storage; no machine sweeps it. Index and token allocation happens under one
+// registry edit permit so concurrent machines never collide.
+pub struct JetEvalRegistryData {
+    pub shared_cells: [JetEvalSharedCell]
+    pub foreign_tokens: [Int:JetEvalForeignToken]
+    pub next_foreign_token: Int
+    pub next_callback_lease: Int
+    pub next_machine_identity: Int
+}
+pub struct JetEvalRegistry {
+    pub storage: Shared<JetEvalRegistryData>
+    pub shared_runtime: JetEvalSharedRuntime
+}
+// Transport-only Source task root. Native scheduling owns task control and
+// ambient context; this carrier owns exactly the callback root moved (FnOnce)
+// or retained (reusable) out of the parent machine plus the shared registry
+// handle. It deliberately contains no HostAdapter, Machine, frame, stack
+// address, or inventory list.
+pub struct JetEvalTaskRoot {
+    pub program: MirProgram
+    pub registry: JetEvalRegistry
+    pub callback_lease: Int
+    pub callback: JetEvalCallbackRoot
+    pub output_context: ?JetEvalOutputContext
+}
+// Outcome of discharging one owned alias of a registry entry.
+pub enum JetEvalAliasRelease { Remaining Last Detached }
+
+
+pub struct JetEvalRuntimeMapEntry {
+    pub key: JetEvalRuntimeValue
+    pub value: JetEvalRuntimeValue
+}
+pub struct JetEvalRuntimeField {
+    pub name: String
+    pub value: JetEvalRuntimeValue
+}
+pub struct JetEvalRuntimeEnumArg {
+    pub name: ?String
+    pub value: JetEvalRuntimeValue
+}
+pub enum JetEvalRuntimeAggregate {
+    List(values: [JetEvalRuntimeValue])
+    Map(entries: [JetEvalRuntimeMapEntry])
+    Struct(type_name: String, fields: [JetEvalRuntimeField])
+    Enum(type_name: String, variant: String, args: [JetEvalRuntimeEnumArg])
+}
+
+pub struct JetEvalHostMapEntry {
+    pub key: JetEvalHostValue
+    pub value: JetEvalHostValue
+}
+pub struct JetEvalHostField {
+    pub name: String
+    pub value: JetEvalHostValue
+}
+pub struct JetEvalHostEnumArg {
+    pub name: ?String
+    pub value: JetEvalHostValue
+}
+pub struct JetEvalHostTypeFieldShape {
+    pub name: String
+    pub node: Int
+}
+pub struct JetEvalHostTypeArgShape {
+    pub name: ?String
+    pub node: Int
+}
+pub struct JetEvalHostTypeVariantShape {
+    pub name: String
+    pub args: [JetEvalHostTypeArgShape]
+}
+pub enum JetEvalHostTypeNode {
+    Scalar(ty: MirType)
+    Option(inner: Int)
+    Result(ok: Int, error: Int)
+    List(inner: Int)
+    Map(key: Int, value: Int)
+    Tuple(fields: [JetEvalHostTypeFieldShape])
+    Struct(type_id: MirTypeId, type_name: String, args: [Int], fields: [JetEvalHostTypeFieldShape])
+    Enum(type_id: MirTypeId, type_name: String, args: [Int], variants: [JetEvalHostTypeVariantShape])
+    Closure(function: MirFunctionId, captures: [Int])
+    Handle(owner: JetEvalHostOwner)
+}
+pub struct JetEvalHostTypeShape {
+    pub root: Int
+    pub nodes: [JetEvalHostTypeNode]
+}
+pub struct JetEvalNativeCallableBinding {
+    pub key: String
+    pub callable_type: MirType
+}
+pub struct JetEvalNativeInterfaceBinding {
+    pub trait_ref: MirTraitRef
+    pub method_id: MirTraitMethodId
+    pub method_name: String
+    pub receiver_type: MirType
+    pub receiver_access: MirAccess
+}
+pub enum JetEvalNativeCallBinding {
+    Callable(binding: JetEvalNativeCallableBinding)
+    Interface(binding: JetEvalNativeInterfaceBinding)
+}
+
+pub enum JetEvalHostValue {
+    Data(value: TComptimeValue)
+    Handle(handle: MirHandleId, raw: Int, owner: JetEvalHostOwner, payload: JetEvalHostValue)
+    Absent(element: MirType)
+    Present(value: JetEvalHostValue)
+    Failed(value: JetEvalHostValue)
+    List(values: [JetEvalHostValue])
+    Map(entries: [JetEvalHostMapEntry])
+    Struct(type_name: String, fields: [JetEvalHostField])
+    Enum(type_name: String, variant: String, args: [JetEvalHostEnumArg])
+    Closure(function: MirFunctionId, captures: [JetEvalHostValue])
+    SharedCarrier(carrier: JetEvalSharedHostCarrier)
+}
+pub struct JetEvalHostArgument {
+    pub value: JetEvalRuntimeValue
+    pub host: JetEvalHostValue
+}
+
+
+pub struct JetEvalHostCoreOwner {
+    pub fact: MirCoreOwner
+    pub ty: MirType
+}
+pub enum JetEvalHostOwner { Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) }
+pub enum JetEvalForeignTokenKind { Foreign Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) }
+
+pub struct JetEvalForeignWriteback {
+    pub argument: Int
+    pub value: JetEvalHostValue
+}
+pub fn jet_eval_native_callable_new(key: String, callable_type: MirType) -> JetEvalRuntimeValue {
+    JetEvalRuntimeValue.NativeCallable(key, callable_type)
+}
+pub struct JetEvalForeignTokenData {
+    pub payload: JetEvalRuntimeValue
+}
+pub struct JetEvalForeignTokenMeta {
+    pub handle: MirHandleId
+    pub raw: Int
+    pub kind: JetEvalForeignTokenKind
+    pub aliases: Int
+    pub closing: Bool
+    pub retired: Bool
+}
+pub struct JetEvalForeignToken {
+    pub storage: Shared<JetEvalForeignTokenData>
+    pub metadata: Shared<JetEvalForeignTokenMeta>
+}
+
+pub enum JetEvalErrorKind { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
+
+pub enum JetEvalHostOutcome {
+    Value(value: JetEvalHostValue)
+    Effect(value: JetEvalHostValue, stdout: [U8], stderr: [U8])
+    Control(value: JetEvalHostValue, stdout: [U8], stderr: [U8], exit_code: Int)
+    RuntimeFailure(value: JetEvalHostValue, span: Span)
+    InternalProblem(problem: JetEvalInternalProblem)
+    Failure(kind: JetEvalErrorKind, diagnostic: Diagnostic)
+}
+
+pub struct JetEvalInternalProblem {
+    pub span: ?Span
+    pub message: String
+}
+
+pub enum JetEvalHostProjection {
+    Present
+    Failed
+    List(index: Int)
+    MapKey(index: Int)
+    MapValue(index: Int)
+    StructField(name: String)
+    EnumArg(index: Int)
+    Capture(index: Int)
+}
+
+pub struct JetEvalHostTransfer {
+    pub argument: Int
+    pub path: [JetEvalHostProjection]
+    pub token: Int
+    pub handle: MirHandleId
+    pub raw: Int
+}
+
+pub struct JetEvalHostResult {
+    pub transfers: [JetEvalHostTransfer]
+    pub outcome: JetEvalHostOutcome
+}
+
+pub struct JetEvalError {
+    pub kind: JetEvalErrorKind
+    pub diagnostic: Diagnostic
+}
+// Callback output is a scoped transcript. Each host Effect/Control append
+// already publishes one event to the shared output context; the native owner
+// must merge this transcript into its local result only, never publish it a
+// second time.
+ 
+pub enum JetEvalCallbackOutcome {
+    Value(value: JetEvalRuntimeValue)
+    Failure(error: JetEvalError)
+    InternalProblem(problem: JetEvalInternalProblem)
+    SoftStop
+    Exit(code: Int)
+}
+
+pub struct JetEvalCallbackResult {
+    pub outcome: JetEvalCallbackOutcome
+    pub stdout: String
+    pub stderr: String
+}
+
+
+trait JetEvalHostAdapter {
+    fn new_session(self) JetEvalHostAdapter
+    fn clone_adapter(self) JetEvalHostAdapter
+    fn poll_callbacks(self, machine: &JetEvalMachine) Bool
+    fn drain_callbacks(self, machine: &JetEvalMachine) Bool
+    fn host_call(self, machine: &JetEvalMachine, row: MirPreludeCall, ^args: [JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, arg_shapes: [JetEvalHostTypeShape], span: Span) ?JetEvalHostResult
+    fn foreign_call(self, machine: &JetEvalMachine, row: MirForeign, ^args: [JetEvalHostArgument], span: Span) ?JetEvalHostResult
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MirHandleId, raw: Int, span: Span) ?JetEvalHostResult
+    fn task_group(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirTaskGroupKind, ^args: [JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) ?JetEvalHostResult
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, ^args: [JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) ?JetEvalHostResult
+    fn channel_select(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirSelectKind, ^args: [JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) ?JetEvalHostResult
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MirPreludeCall, map_row: ?MirPreludeCall, shared: JetEvalRuntimeValue, guard: ?JetEvalRuntimeValue, condition: ?JetEvalRuntimeValue, ^args: [JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) ?JetEvalHostResult
+}
+
+pub struct JetEvalConfig {
+    pub fuel: Int
+    pub max_call_depth: Int
+    pub max_collection_len: Int
+    pub globals: [String:TComptimeValue]
+    pub runtime_execution: Bool
+    pub host_adapter: ?JetEvalHostAdapter
+    pub output_context: ?JetEvalOutputContext
+    pub numeric_unit_conversion_exact: ?fn(Float, String, String, String, String) -> ?Float
+}
+pub fn jet_eval_default_config() -> JetEvalConfig {
+    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, numeric_unit_conversion_exact: None}
+}
+
+
+pub struct JetEvalFrame {
+    pub function: MirFunctionId
+    pub block: MirBlockId
+    pub ip: Int
+    pub predecessor: ?MirBlockId
+    pub params: [JetEvalRuntimeValue]
+    pub captures: [JetEvalRuntimeValue]
+    pub values: [Int:JetEvalRuntimeValue]
+    pub locals: [Int:JetEvalRuntimeValue]
+    pub scopes: [MirScopeId]
+}
+pub struct JetEvalResumeRequest {
+    pub program: MirProgram
+    pub config: JetEvalConfig
+    pub frames: [JetEvalFrame]
+    pub registry: JetEvalRegistry
+    pub callback_roots: [Int:JetEvalCallbackRoot]
+    pub steps: Int
+    pub stdout: String
+    pub stderr: String
+    pub soft_stop: Bool
+    pub exit_code: ?Int
+    pub failure: ?JetEvalError
+    pub internal_problem: ?JetEvalInternalProblem
+    pub target_depth: Int
+}
+
+// A deopt caller transfers this exact Source-MIR machine snapshot into the
+// evaluator. The returned JetEvalResult owns the resumed machine session;
+// callers must retain it until jet_eval_retire_result closes its roots. The
+// frames and callback roots are the only owned references; the registry is the
+// same session registry the suspended machine used.
+pub fn jet_eval_resume_request(
+    ^program: MirProgram,
+    ^config: JetEvalConfig,
+    ^frames: [JetEvalFrame],
+    ^registry: JetEvalRegistry,
+    ^callback_roots: [Int:JetEvalCallbackRoot],
+    steps: Int,
+    ^stdout: String,
+    ^stderr: String,
+    soft_stop: Bool,
+    exit_code: ?Int,
+    ^failure: ?JetEvalError,
+    ^internal_problem: ?JetEvalInternalProblem,
+    target_depth: Int,
+) -> JetEvalResumeRequest {
+    JetEvalResumeRequest{
+        program: program,
+        config: config,
+        frames: frames,
+        registry: registry,
+        callback_roots: callback_roots,
+        steps: steps,
+        stdout: stdout,
+        stderr: stderr,
+        soft_stop: soft_stop,
+        exit_code: exit_code,
+        failure: failure,
+        internal_problem: internal_problem,
+        target_depth: target_depth,
+    }
+}
+pub struct JetEvalDeoptRequest {
+    pub function: MirFunctionId
+    pub argc: Int
+    // The first argc words are live; trailing ABI slots are retained verbatim.
+    pub args: [Int]
+}
+
+pub fn jet_eval_deopt_request(function: MirFunctionId, argc: Int, ^args: [Int]) -> JetEvalDeoptRequest {
+    JetEvalDeoptRequest{function: function, argc: argc, args: args}
+}
+
+
+
+pub struct JetEvalResult {
+    pub complete: Bool
+    pub value: ?JetEvalRuntimeValue
+    pub session: ?JetEvalRuntimeSession
+    pub stdout: String
+    pub stderr: String
+    pub output_context: ?JetEvalOutputContext
+    pub steps: Int
+    pub soft_stop: Bool
+    pub exit_code: ?Int
+    pub error: ?JetEvalError
+    pub internal_problem: ?JetEvalInternalProblem
+}
+
+pub struct JetEvalRuntimeSession {
+    machine: JetEvalMachine
+    pub retired: Bool
+}
+
+struct JetEvalMachine {
+    pub program: MirProgram
+    pub config: JetEvalConfig
+    pub registry: JetEvalRegistry
+    // Session-unique machine identity; child tasks and native callbacks get
+    // fresh identities while sharing the registry.
+    pub identity: Int
+    pub frames: [JetEvalFrame]
+    pub callback_roots: [Int:JetEvalCallbackRoot]
+    pub steps: Int
+    pub stdout: String
+    pub stderr: String
+    pub soft_stop: Bool
+    pub exit_code: ?Int
+    pub failure: ?JetEvalError
+    pub internal_problem: ?JetEvalInternalProblem
+}
+
+
+fn jet_eval_registry_new() -> JetEvalRegistry {
+    storage := shared JetEvalRegistryData{shared_cells: [JetEvalSharedCell]{}, foreign_tokens: [Int:JetEvalForeignToken]{}, next_foreign_token: 1, next_callback_lease: 1, next_machine_identity: 1}
+    JetEvalRegistry{storage: storage, shared_runtime: jet_eval_shared_runtime_new()}
+}
+
+fn jet_eval_registry_machine_identity(registry: JetEvalRegistry) -> Int {
+    storage := registry.storage
+    permit :: storage.guard_edit()
+    identity := permit.value.next_machine_identity
+    permit.value.next_machine_identity += 1
+    identity
+}
+
+fn jet_eval_registry_callback_lease(machine: &JetEvalMachine) -> Int {
+    storage := machine.registry.storage
+    permit :: storage.guard_edit()
+    lease := permit.value.next_callback_lease
+    permit.value.next_callback_lease += 1
+    lease
+}
+
+fn jet_eval_registry_cell(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedCell {
+    if index < 0 -> return None
+    storage := machine.registry.storage
+    permit :: storage.guard_read()
+    if index >= permit.value.shared_cells.len() -> return None
+    Val(permit.value.shared_cells[index])
+}
+
+fn jet_eval_registry_token(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignToken {
+    storage := machine.registry.storage
+    permit :: storage.guard_read()
+    permit.value.foreign_tokens.get(token)
+}
+
+fn jet_eval_registry_token_ids(machine: &JetEvalMachine) -> [Int] {
+    storage := machine.registry.storage
+    permit :: storage.guard_read()
+    output := [Int]{}
+    loop token in permit.value.foreign_tokens -> output.push(token)
+    output
+}
+
+fn jet_eval_registry_insert_cell(machine: &JetEvalMachine, cell: JetEvalSharedCell) -> Int {
+    storage := machine.registry.storage
+    permit :: storage.guard_edit()
+    index := permit.value.shared_cells.len()
+    permit.value.shared_cells.push(cell)
+    index
+}
+
+fn jet_eval_registry_insert_token(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind, payload: JetEvalRuntimeValue) -> Int {
+    token_storage := shared JetEvalForeignTokenData{payload: payload}
+    metadata := shared JetEvalForeignTokenMeta{handle: handle, raw: raw, kind: kind, aliases: 1, closing: false, retired: false}
+    storage := machine.registry.storage
+    permit :: storage.guard_edit()
+    token := permit.value.next_foreign_token
+    permit.value.next_foreign_token += 1
+    permit.value.foreign_tokens[token] = JetEvalForeignToken{storage: token_storage, metadata: metadata}
+    token
+}
+
+// Returns the single owned alias of a fresh cell; the payload is moved in.
+fn jet_eval_new_shared_cell(machine: &JetEvalMachine, value: JetEvalRuntimeValue, access: MirAccess) -> JetEvalRuntimeValue {
+    storage := shared JetEvalSharedCellData{value: value}
+    metadata := shared JetEvalSharedCellMeta{access: access, aliases: 1, dropped: false}
+    index := jet_eval_registry_insert_cell(&machine, JetEvalSharedCell{storage: storage, metadata: metadata})
+    JetEvalRuntimeValue.SharedCell(index, access)
+}
+
+// Alias inspection for fixtures and diagnostics: None for an unknown entry,
+// 0 once the entry is dropped or retired.
+pub fn jet_eval_shared_cell_aliases(machine: &JetEvalMachine, index: Int) -> ?Int {
+    cell :: jet_eval_registry_cell(&machine, index) ?? return None
+    metadata := cell.metadata
+    permit :: metadata.guard_read()
+    if permit.value.dropped -> return Val(0)
+    Val(permit.value.aliases)
+}
+
+pub fn jet_eval_foreign_token_aliases(machine: &JetEvalMachine, token: Int) -> ?Int {
+    state :: jet_eval_registry_token(&machine, token) ?? return None
+    metadata := state.metadata
+    permit :: metadata.guard_read()
+    if permit.value.retired -> return Val(0)
+    Val(permit.value.aliases)
+}
+
+fn jet_eval_shared_cell_access(machine: &JetEvalMachine, index: Int) -> ?MirAccess {
+    cell :: jet_eval_registry_cell(&machine, index) ?? return None
+    metadata := cell.metadata
+    permit :: metadata.guard_read()
+    if permit.value.dropped || permit.value.aliases <= 0 -> return None
+    Val(permit.value.access)
+}
+
+fn jet_eval_shared_cell_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    cell :: jet_eval_registry_cell(&machine, index) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR shared capture cell is unavailable")
+        return false
+    }
+    metadata := cell.metadata
+    permit :: metadata.guard_read()
+    if permit.value.dropped || permit.value.aliases <= 0 {
+        jet_eval_ownership_fail(&machine, span, "MIR shared capture cell was dropped")
+        return false
+    }
+    true
+}
+
+// Mint one more owned alias. Live check and increment share one edit permit.
+fn jet_eval_shared_cell_retain(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    cell :: jet_eval_registry_cell(&machine, index) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR shared capture cell is unavailable")
+        return false
+    }
+    metadata := cell.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.dropped || permit.value.aliases <= 0 {
+        jet_eval_ownership_fail(&machine, span, "MIR shared capture cell was dropped")
+        return false
+    }
+    permit.value.aliases += 1
+    true
+}
+
+// Discharge one owned alias. The last discharge marks the cell dropped under
+// the same permit; the caller then takes and drops the payload outside it.
+fn jet_eval_shared_cell_release(machine: &JetEvalMachine, index: Int, span: Span) -> ?JetEvalAliasRelease {
+    cell :: jet_eval_registry_cell(&machine, index) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR shared capture cell is unavailable")
+        return None
+    }
+    metadata := cell.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.dropped || permit.value.aliases <= 0 {
+        jet_eval_ownership_fail(&machine, span, "MIR shared capture cell alias was released more than once")
+        return None
+    }
+    permit.value.aliases -= 1
+    if permit.value.aliases > 0 -> return Val(JetEvalAliasRelease.Remaining)
+    permit.value.dropped = true
+    Val(JetEvalAliasRelease.Last)
+}
+
+// Claim the payload of a cell whose caller holds its only alias: the alias is
+// consumed and the cell is dropped in one step, so no concurrent retain can
+// observe a live cell with a moved payload.
+fn jet_eval_shared_cell_claim_sole(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    cell :: jet_eval_registry_cell(&machine, index) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR shared capture cell is unavailable")
+        return false
+    }
+    metadata := cell.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.dropped || permit.value.aliases <= 0 {
+        jet_eval_ownership_fail(&machine, span, "MIR move uses a dropped shared capture cell")
+        return false
+    }
+    if permit.value.aliases != 1 {
+        jet_eval_ownership_fail(&machine, span, "MIR move uses a shared capture cell with multiple live aliases")
+        return false
+    }
+    permit.value.aliases = 0
+    permit.value.dropped = true
+    true
+}
+
+fn jet_eval_shared_cell_take_payload(machine: &JetEvalMachine, index: Int) -> JetEvalRuntimeValue {
+    cell :: jet_eval_registry_cell(&machine, index) ?? return JetEvalRuntimeValue.Moved
+    storage := cell.storage
+    permit :: storage.guard_edit()
+    payload := permit.value.value
+    permit.value.value = JetEvalRuntimeValue.Moved
+    payload
+}
+
+fn jet_eval_shared_cell_read_payload(machine: &JetEvalMachine, index: Int) -> ?JetEvalRuntimeValue {
+    cell :: jet_eval_registry_cell(&machine, index) ?? return None
+    storage := cell.storage
+    permit :: storage.guard_read()
+    Val(permit.value.value)
+}
+
+// Replace a live, writable cell payload; returns the previous payload for the
+// caller to discharge.
+fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
+    access :: jet_eval_shared_cell_access(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR write uses a dropped shared capture cell")
+        return None
+    }
+    if access != MirAccess.Write {
+        jet_eval_ownership_fail(&machine, span, "MIR write uses a read-only shared capture cell")
+        return None
+    }
+    cell :: jet_eval_registry_cell(&machine, index) ?? return None
+    storage := cell.storage
+    permit :: storage.guard_edit()
+    previous := permit.value.value
+    permit.value.value = value
+    Val(previous)
+}
+
+pub fn jet_eval_output_context_new() -> JetEvalOutputContext {
+    storage := shared JetEvalOutputState{events: [JetEvalOutputEvent]{}}
+    JetEvalOutputContext{storage: storage}
+}
+
+pub fn jet_eval_output_context_events(context: JetEvalOutputContext) -> [JetEvalOutputEvent] {
+    storage := context.storage
+    storage.events
+}
+
+fn jet_eval_diagnostic(kind: JetEvalErrorKind, span: Span, what: String, why: String, fix: String) -> JetEvalError {
+    code := "E0956"
+    if kind == JetEvalErrorKind.Fuel -> code = "E0952"
+    if kind == JetEvalErrorKind.Effect -> code = "E3401"
+    if kind == JetEvalErrorKind.ComptimePanic -> code = "E0953"
+    JetEvalError{kind: kind, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)}
+}
+
+fn jet_eval_internal_problem(machine: &JetEvalMachine, span: ?Span, message: String) {
+    if machine.internal_problem == None {
+        machine.internal_problem = Val(JetEvalInternalProblem{span: span, message: message})
+    }
+}
+
+fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], span: Span) -> Bool {
+    out_text :: String.from_bytes(stdout) ?? {
+        jet_eval_compiler_fail(&machine, span, "ambient Prelude output is not valid UTF-8")
+        return false
+    }
+    err_text :: String.from_bytes(stderr) ?? {
+        jet_eval_compiler_fail(&machine, span, "ambient Prelude error output is not valid UTF-8")
+        return false
+    }
+    if out_text.len() == 0 && err_text.len() == 0 -> return true
+    context :: machine.config.output_context ?? {
+        jet_eval_compiler_fail(&machine, span, "Source output context disappeared during execution")
+        return false
+    }
+    storage.events.push(JetEvalOutputEvent{stdout: out_text, stderr: err_text})
+    machine.stdout = "{machine.stdout}{out_text}"
+    machine.stderr = "{machine.stderr}{err_text}"
+    true
+}
+
+// Callback output was already published by jet_eval_append_output while the
+// callback executed. This merge only updates the enclosing session transcript.
+pub fn jet_eval_merge_callback_output(machine: &JetEvalMachine, stdout: String, stderr: String) {
+    machine.stdout = "{machine.stdout}{stdout}"
+    machine.stderr = "{machine.stderr}{stderr}"
+}
+fn jet_eval_fail(machine: &JetEvalMachine, kind: JetEvalErrorKind, span: Span, what: String, why: String, fix: String) {
+    if kind == JetEvalErrorKind.Compiler || kind == JetEvalErrorKind.Ownership {
+        jet_eval_internal_problem(&machine, Val(span), what)
+        return
+    }
+    if machine.failure == None {
+        machine.failure = Val(jet_eval_diagnostic(kind, span, what, why, fix))
+    }
+}
+fn jet_eval_effect_fail(machine: &JetEvalMachine, span: Span, what: String) {
+    jet_eval_fail(&machine, JetEvalErrorKind.Effect, span, what, "this effect is not permitted in the current evaluator mode", "run the effect in an authorized runtime ambient context")
+}
+
+fn jet_eval_comptime_panic(machine: &JetEvalMachine, span: Span, message: String) {
+    jet_eval_fail(&machine, JetEvalErrorKind.ComptimePanic, span, "your comptime code stopped the build", "while computing this value at compile time, the program panicked: {message}", "fix the input the check rejects")
+}
+
+fn jet_eval_source_fail(machine: &JetEvalMachine, span: Span, what: String) {
+    code := if machine.config.runtime_execution -> "E3010" else -> "E0956"
+    why := if machine.config.runtime_execution -> "the operands or position do not produce a valid runtime result" else -> "the canonical MIR evaluator reached the operation while computing a compile-time value"
+    fix := if machine.config.runtime_execution -> "check the operands or bounds before the operation" else -> "change the compile-time input or checked operation"
+    if machine.failure == None {
+        machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)})
+    }
+}
+
+fn jet_eval_compiler_fail(machine: &JetEvalMachine, span: Span, what: String) {
+    jet_eval_internal_problem(&machine, Val(span), what)
+}
+
+fn jet_eval_unsupported(machine: &JetEvalMachine, span: Span, operation: String) {
+    jet_eval_fail(&machine, JetEvalErrorKind.Unsupported, span, "MIR evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful")
+}
+
+fn jet_eval_fuel_fail(machine: &JetEvalMachine, span: Span) {
+    if machine.config.runtime_execution {
+        jet_eval_internal_problem(&machine, Val(span), "runtime Source-MIR evaluation exhausted its execution budget")
+        return
+    }
+    jet_eval_fail(&machine, JetEvalErrorKind.Fuel, span, "MIR evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program")
+}
+
+fn jet_eval_ownership_fail(machine: &JetEvalMachine, span: Span, what: String) {
+    jet_eval_internal_problem(&machine, Val(span), what)
+}
+fn jet_eval_loop_cursor_handle_id() -> MirHandleId {
+    MirHandleId{value: stable_id("mir-handle", "core.prelude::loop_iter_cursor")}
+}
+
+fn jet_eval_foreign_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw: Int) -> JetEvalRuntimeValue {
+    token := jet_eval_registry_insert_token(&machine, handle, raw, JetEvalForeignTokenKind.Foreign, JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    JetEvalRuntimeValue.ForeignHandle(handle, raw, token)
+}
+
+// Returns the single owned alias of a fresh cursor token; the payload moves in.
+fn jet_eval_cursor_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, payload: JetEvalRuntimeValue) -> JetEvalRuntimeValue {
+    token := jet_eval_registry_insert_token(&machine, handle, raw, JetEvalForeignTokenKind.Cursor, payload)
+    JetEvalRuntimeValue.ForeignHandle(handle, raw, token)
+}
+
+fn jet_eval_resource_token_kind(kind: JetEvalForeignTokenKind) -> Bool {
+    if kind == {
+        .Cursor | .Core(_) -> return true
+        else -> return false
+    }
+}
+
+// One consistent metadata snapshot taken under a single read permit.
+fn jet_eval_foreign_token_meta(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignTokenMeta {
+    state :: jet_eval_registry_token(&machine, token) ?? return None
+    metadata := state.metadata
+    permit :: metadata.guard_read()
+    Val(permit.value)
+}
+
+fn jet_eval_foreign_token_kind(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignTokenKind {
+    meta :: jet_eval_foreign_token_meta(&machine, token) ?? return None
+    Val(meta.kind)
+}
+
+fn jet_eval_foreign_handle_live(machine: &JetEvalMachine, token: Int, span: Span) -> Bool {
+    meta :: jet_eval_foreign_token_meta(&machine, token) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return false
+    }
+    if meta.retired {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle token was already closed or retired")
+        return false
+    }
+    true
+}
+
+fn jet_eval_foreign_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+    meta :: jet_eval_foreign_token_meta(&machine, token) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return false
+    }
+    if meta.retired {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle token was already closed or retired")
+        return false
+    }
+    if meta.handle != handle || meta.raw != raw {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle token identity disagrees with its native carrier")
+        return false
+    }
+    true
+}
+
+fn jet_eval_cursor_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+    if !jet_eval_foreign_handle_matches(&machine, handle, raw, token, span) -> return false
+    kind :: jet_eval_foreign_token_kind(&machine, token) ?? return false
+    if kind != JetEvalForeignTokenKind.Cursor {
+        jet_eval_ownership_fail(&machine, span, "MIR iterator cursor carries an ordinary foreign-handle token")
+        return false
+    }
+    if handle != jet_eval_loop_cursor_handle_id() {
+        jet_eval_compiler_fail(&machine, span, "MIR iterator cursor has a non-canonical native handle identity")
+        return false
+    }
+    true
+}
+
+fn jet_eval_resource_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+    if !jet_eval_foreign_handle_matches(&machine, handle, raw, token, span) -> return false
+    kind :: jet_eval_foreign_token_kind(&machine, token) ?? return false
+    if kind == {
+        .Cursor -> {
+            if handle != jet_eval_loop_cursor_handle_id() {
+                jet_eval_compiler_fail(&machine, span, "MIR resource cursor has a non-canonical native handle identity")
+                return false
+            }
+        }
+        .Core(_) -> {}
+        else -> {
+            jet_eval_ownership_fail(&machine, span, "MIR resource release reached a non-resource handle token")
+            return false
+        }
+    }
+    true
+}
+
+// Mint one more owned alias of a token of any kind. Identity, liveness, and
+// the increment share one edit permit; retaining never touches the payload.
+fn jet_eval_foreign_token_retain(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+    state :: jet_eval_registry_token(&machine, token) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return false
+    }
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.retired {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle token was already closed or retired")
+        return false
+    }
+    if permit.value.handle != handle || permit.value.raw != raw {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle token identity disagrees with its native carrier")
+        return false
+    }
+    if permit.value.closing {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle was retained while its owner was closing")
+        return false
+    }
+    if permit.value.aliases <= 0 {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle alias count underflowed")
+        return false
+    }
+    permit.value.aliases += 1
+    true
+}
+
+fn jet_eval_foreign_token_try_alias(machine: &JetEvalMachine, token: Int, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind) -> Bool {
+    state :: jet_eval_registry_token(&machine, token) ?? return false
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.retired || permit.value.closing || permit.value.aliases <= 0 -> return false
+    if permit.value.handle != handle || permit.value.raw != raw -> return false
+    if permit.value.kind == {
+        .Cursor -> if kind != JetEvalForeignTokenKind.Cursor -> return false
+        .Core(_) -> if kind == {.Core(_) -> {} else -> return false}
+        else -> return false
+    }
+    permit.value.aliases += 1
+    true
+}
+
+// A native resource identity the session already tracks becomes one more
+// owned alias of that token instead of a second token; the registry is
+// canonical across every machine of the session.
+fn jet_eval_resource_handle_alias(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind) -> ?Int {
+    loop token in jet_eval_registry_token_ids(&machine) {
+        if jet_eval_foreign_token_try_alias(&machine, token, handle, raw, kind) -> return Val(token)
+    }
+    None
+}
+
+// Discharge one owned alias. Last: this caller now owns the physical close and
+// the token is marked closing under the same permit, so no concurrent retain
+// can revive it. Detached: no closer runs, because physical ownership already
+// left Source through a committed native transfer, or because the alias was
+// lent to the running closer of a token that is already closing.
+fn jet_eval_foreign_token_release(machine: &JetEvalMachine, token: Int, span: Span) -> ?JetEvalAliasRelease {
+    state :: jet_eval_registry_token(&machine, token) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return None
+    }
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    if permit.value.aliases <= 0 {
+        jet_eval_ownership_fail(&machine, span, "MIR foreign handle alias was released more than once")
+        return None
+    }
+    permit.value.aliases -= 1
+    if permit.value.retired || permit.value.closing -> return Val(JetEvalAliasRelease.Detached)
+    if permit.value.aliases > 0 -> return Val(JetEvalAliasRelease.Remaining)
+    permit.value.closing = true
+    Val(JetEvalAliasRelease.Last)
+}
+
+// Lend exactly one alias to the Source closer of a token whose last owner is
+// closing it; the closer's frame discharges that alias as Detached.
+fn jet_eval_foreign_token_lend_closer(machine: &JetEvalMachine, token: Int, span: Span) -> Bool {
+    state :: jet_eval_registry_token(&machine, token) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return false
+    }
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    if !permit.value.closing || permit.value.retired || permit.value.aliases != 0 {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle closer was lent an alias outside the closing step")
+        return false
+    }
+    permit.value.aliases = 1
+    true
+}
+
+fn jet_eval_foreign_handle_retire(machine: &JetEvalMachine, token: Int) {
+    state :: jet_eval_registry_token(&machine, token) ?? return
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    permit.value.retired = true
+    permit.value.closing = true
+    permit.value.aliases = 0
+}
+
+fn jet_eval_foreign_token_mark_transferred(machine: &JetEvalMachine, token: Int) -> Bool {
+    state :: jet_eval_registry_token(&machine, token) ?? return false
+    metadata := state.metadata
+    permit :: metadata.guard_edit()
+    permit.value.retired = true
+    permit.value.closing = true
+    true
+}
+
+fn jet_eval_foreign_token_take_payload(machine: &JetEvalMachine, token: Int) -> JetEvalRuntimeValue {
+    state :: jet_eval_registry_token(&machine, token) ?? return JetEvalRuntimeValue.Moved
+    storage := state.storage
+    permit :: storage.guard_edit()
+    payload := permit.value.payload
+    permit.value.payload = JetEvalRuntimeValue.Moved
+    payload
+}
+
+fn jet_eval_foreign_token_read_payload(machine: &JetEvalMachine, token: Int) -> ?JetEvalRuntimeValue {
+    state :: jet_eval_registry_token(&machine, token) ?? return None
+    storage := state.storage
+    permit :: storage.guard_read()
+    Val(permit.value.payload)
+}
+
+// Physical ownership left Source through a committed native transfer. The
+// transfer validated that exactly one Source alias exists; that alias is still
+// discharged by its owner and resolves to Transferred. The Source-side payload
+// stays owned here and is discharged now.
+fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int, span: Span) -> Bool {
+    if !jet_eval_foreign_token_mark_transferred(&machine, token) {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
+        return false
+    }
+    payload := jet_eval_foreign_token_take_payload(&machine, token)
+    jet_eval_drop_value(&machine, payload, span)
+}
+
+
+fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool {
+    if value == {
+        .Address(_, _, _) -> return true
+        .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_runtime_contains_address(nested)
+        .Closure(_, captures) -> loop capture in captures {
+            if jet_eval_runtime_contains_address(capture) -> return true
+        }
+        .HostCursor(inner, _, _, _) -> return jet_eval_runtime_contains_address(inner)
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> loop item in values {
+                    if jet_eval_runtime_contains_address(item) -> return true
+                }
+                .Map(entries) -> loop entry in entries {
+                    if jet_eval_runtime_contains_address(entry.key) || jet_eval_runtime_contains_address(entry.value) -> return true
+                }
+                .Struct(_, fields) -> loop field in fields {
+                    if jet_eval_runtime_contains_address(field.value) -> return true
+                }
+                .Enum(_, _, args) -> loop arg in args {
+                    if jet_eval_runtime_contains_address(arg.value) -> return true
+                }
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> Bool {
+    if jet_eval_runtime_contains_moved(value) {
+        jet_eval_compiler_fail(&machine, span, "MIR value was moved")
+        return false
+    }
+    if value == {
+        .ForeignHandle(handle, raw, token) -> return jet_eval_foreign_handle_matches(&machine, handle, raw, token, span)
+        .Result(_, nested) -> return jet_eval_validate_borrow(nested, &machine, span)
+        .RuntimeFailure(nested, _) -> return jet_eval_validate_borrow(nested, &machine, span)
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> {
+                    loop item in values {
+                        if !jet_eval_validate_borrow(item, &machine, span) -> return false
+                    }
+                }
+                .Map(entries) -> {
+                    loop entry in entries {
+                        if !jet_eval_validate_borrow(entry.key, &machine, span) || !jet_eval_validate_borrow(entry.value, &machine, span) -> return false
+                    }
+                }
+                .Struct(_, fields) -> {
+                    loop field in fields {
+                        if !jet_eval_validate_borrow(field.value, &machine, span) -> return false
+                    }
+                }
+                .Enum(_, _, args) -> {
+                    loop arg in args {
+                        if !jet_eval_validate_borrow(arg.value, &machine, span) -> return false
+                    }
+                }
+            }
+        }
+        .Closure(_, captures) -> {
+            loop capture in captures {
+                if !jet_eval_validate_borrow(capture, &machine, span) -> return false
+            }
+        }
+        .HostCursor(inner, _, _, _) -> {
+            if inner == {.ForeignHandle(handle, raw, token) -> return jet_eval_cursor_handle_matches(&machine, handle, raw, token, span)}
+            jet_eval_compiler_fail(&machine, span, "MIR host cursor carries a non-native cursor value")
+            return false
+        }
+        .SharedCell(index, _) -> return jet_eval_shared_cell_live(&machine, index, span)
+        .Shared(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_live(&machine, value, span)
+    }
+    true
+}
+
+fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    value
+}
+
+// Ownership-transferable check for values crossing to a native retained
+// callback or a child task: no stack place, no task-local runtime handle.
+fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+    if value == {
+        .Address(_, _, _) -> {
+            jet_eval_ownership_fail(&machine, span, "native callback closure retains a stack place")
+            return false
+        }
+        .Shared(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_transferable(&machine, value, span)
+        .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_value_transferable(&machine, nested, span)
+        .Closure(_, captures) -> loop capture in captures {
+            if !jet_eval_value_transferable(&machine, capture, span) -> return false
+        }
+        .HostCursor(inner, _, _, _) -> return jet_eval_value_transferable(&machine, inner, span)
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> loop item in values {
+                    if !jet_eval_value_transferable(&machine, item, span) -> return false
+                }
+                .Map(entries) -> loop entry in entries {
+                    if !jet_eval_value_transferable(&machine, entry.key, span) || !jet_eval_value_transferable(&machine, entry.value, span) -> return false
+                }
+                .Struct(_, fields) -> loop field in fields {
+                    if !jet_eval_value_transferable(&machine, field.value, span) -> return false
+                }
+                .Enum(_, _, args) -> loop arg in args {
+                    if !jet_eval_value_transferable(&machine, arg.value, span) -> return false
+                }
+            }
+        }
+        else -> {}
+    }
+    true
+}
+
+
+
+fn jet_eval_has_failure(machine: JetEvalMachine) -> Bool { machine.failure != None || machine.internal_problem != None }
+
+fn jet_eval_runtime_contains_moved(value: JetEvalRuntimeValue) -> Bool {
+    if value == JetEvalRuntimeValue.Moved -> return true
+    if value == {
+        .Data(data) -> return jet_eval_data_contains_moved(data)
+        .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_runtime_contains_moved(nested)
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> {
+                    loop item in values {
+                        if jet_eval_runtime_contains_moved(item) -> return true
+                    }
+                }
+                .Map(entries) -> {
+                    loop entry in entries {
+                        if jet_eval_runtime_contains_moved(entry.key) || jet_eval_runtime_contains_moved(entry.value) -> return true
+                    }
+                }
+                .Struct(_, fields) -> {
+                    loop field in fields {
+                        if jet_eval_runtime_contains_moved(field.value) -> return true
+                    }
+                }
+                .Enum(_, _, args) -> {
+                    loop arg in args {
+                        if jet_eval_runtime_contains_moved(arg.value) -> return true
+                    }
+                }
+            }
+        }
+        .Closure(_, captures) -> {
+            loop capture in captures {
+                if jet_eval_runtime_contains_moved(capture) -> return true
+            }
+        }
+        .HostCursor(nested, _, _, _) -> return jet_eval_runtime_contains_moved(nested)
+        else -> return false
+    }
+    false
+}
+
+fn jet_eval_data_contains_moved(value: TComptimeValue) -> Bool {
+    if value == {
+        .List(values) -> {
+            loop item in values {
+                if jet_eval_data_contains_moved(item) -> return true
+            }
+        }
+        .Map(entries) -> {
+            loop entry in entries {
+                if jet_eval_data_contains_moved(entry.value) -> return true
+            }
+        }
+        .Struct(_, fields) -> {
+            loop field in fields {
+                if jet_eval_data_contains_moved(field.value) -> return true
+            }
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args {
+                if jet_eval_data_contains_moved(arg.value) -> return true
+            }
+        }
+        .Present(inner) -> return jet_eval_data_contains_moved(inner)
+        .Failed(report) -> if report == {.Told(inner) -> return jet_eval_data_contains_moved(inner)}
+        else -> {}
+    }
+    false
+}
+
+// Release the aliases retained by a partially completed retain walk so a
+// failed copy leaves no orphan references.
+fn jet_eval_retain_undo(machine: &JetEvalMachine, values: [JetEvalRuntimeValue], count: Int, span: Span) {
+    index := 0
+    loop index < count {
+        jet_eval_drop_value(&machine, values[index], span)
+        index += 1
+    }
+}
+
+fn jet_eval_retain_values(machine: &JetEvalMachine, values: [JetEvalRuntimeValue], span: Span) -> Bool {
+    done := 0
+    loop item in values {
+        if !jet_eval_retain_value(&machine, item, span) {
+            jet_eval_retain_undo(&machine, values, done, span)
+            return false
+        }
+        done += 1
+    }
+    true
+}
+
+fn jet_eval_retain_aggregate(machine: &JetEvalMachine, value: JetEvalRuntimeAggregate, span: Span) -> Bool {
+    if value == {
+        .List(values) -> return jet_eval_retain_values(&machine, values, span)
+        .Map(entries) -> {
+            flat := [JetEvalRuntimeValue]{}
+            loop entry in entries {
+                flat.push(entry.key)
+                flat.push(entry.value)
+            }
+            return jet_eval_retain_values(&machine, flat, span)
+        }
+        .Struct(_, fields) -> {
+            flat := [JetEvalRuntimeValue]{}
+            loop field in fields -> flat.push(field.value)
+            return jet_eval_retain_values(&machine, flat, span)
+        }
+        .Enum(_, _, args) -> {
+            flat := [JetEvalRuntimeValue]{}
+            loop arg in args -> flat.push(arg.value)
+            return jet_eval_retain_values(&machine, flat, span)
+        }
+    }
+}
+
+// Mint one owned alias for every registry reference inside the value. Every
+// token kind counts: a borrowed Declared or Foreign handle copied into a callee
+// parameter is discharged by that frame, never closed by it.
+fn jet_eval_retain_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+    if value == {
+        .ForeignHandle(handle, raw, token) -> return jet_eval_foreign_token_retain(&machine, handle, raw, token, span)
+        .SharedCell(index, _) -> return jet_eval_shared_cell_retain(&machine, index, span)
+        .Shared(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_retain(&machine, value, span)
+        .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_retain_value(&machine, nested, span)
+        .Aggregate(aggregate) -> return jet_eval_retain_aggregate(&machine, aggregate, span)
+        .Closure(_, captures) -> return jet_eval_retain_values(&machine, captures, span)
+        .HostCursor(inner, _, _, _) -> return jet_eval_retain_value(&machine, inner, span)
+        else -> {}
+    }
+    true
+}
+
+fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if !jet_eval_retain_value(&machine, value, span) -> return None
+    Val(value)
+}
+fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+    if value == {
+        .List(values) -> {
+            output := [TComptimeValue]{}
+            loop item in values -> output.push(jet_eval_data(item, &machine, span) ?? return None)
+            return Val(TComptimeValue.List(output))
+        }
+        .Map(entries) -> {
+            output := [TComptimeMapEntry]{}
+            loop entry in entries {
+                key_data :: jet_eval_data(entry.key, &machine, span) ?? return None
+                key :: jet_eval_data_key(key_data, &machine, span) ?? return None
+                value :: jet_eval_data(entry.value, &machine, span) ?? return None
+                output.push(TComptimeMapEntry{key: key, value: value})
+            }
+            return Val(TComptimeValue.Map(output))
+        }
+        .Struct(type_name, fields) -> {
+            output := [TComptimeField]{}
+            loop field in fields {
+                value :: jet_eval_data(field.value, &machine, span) ?? return None
+                output.push(TComptimeField{name: field.name, value: value})
+            }
+            return Val(TComptimeValue.Struct(type_name, output))
+        }
+        .Enum(type_name, variant, args) -> {
+            output := [TComptimeEnumArg]{}
+            loop arg in args {
+                value :: jet_eval_data(arg.value, &machine, span) ?? return None
+                output.push(TComptimeEnumArg{name: arg.name, value: value})
+            }
+            return Val(TComptimeValue.Enum(type_name, variant, output))
+        }
+    }
+}
+
+// Move an SSA value out of its frame slot. The moved value keeps its owned
+// aliases; a failed validation restores the slot so the frame still discharges it.
+fn jet_eval_take_value(frame: &JetEvalFrame, value: MirValueId, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    found :: frame.values.remove(value.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR move reads an unavailable SSA value")
+        return None
+    }
+    if !jet_eval_validate_borrow(found, &machine, span) {
+        frame.values[value.value] = found
+        return None
+    }
+    Val(found)
+}
+fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+    if value == {
+        .Moved -> {
+            jet_eval_compiler_fail(&machine, span, "MIR value was moved")
+            return None
+        }
+        .Data(data) -> {
+            if jet_eval_data_contains_moved(data) {
+                jet_eval_compiler_fail(&machine, span, "MIR aggregate contains a moved value")
+                return None
+            }
+            return Val(data)
+        }
+        .Absent(_) -> {
+            jet_eval_unsupported(&machine, span, "materializing an absent failure carrier")
+            return None
+        }
+        .Result(ok, nested) -> {
+            data :: jet_eval_data(nested, &machine, span) ?? return None
+            if ok -> return Val(TComptimeValue.Present(data))
+            return Val(TComptimeValue.Failed(TComptimeReport.Told(data)))
+        }
+        .Aggregate(aggregate) -> return jet_eval_runtime_aggregate_data(aggregate, &machine, span)
+        .RuntimeFailure(_, _) -> {
+            jet_eval_unsupported(&machine, span, "materializing a native runtime failure carrier")
+            return None
+        }
+        .Closure(_, _) -> {
+            jet_eval_unsupported(&machine, span, "materializing a closure")
+            return None
+        }
+        .Address(_, _, _) | .SharedCell(_, _) | .ForeignHandle(_, _, _) | .NativeCallable(_, _) -> {
+            jet_eval_unsupported(&machine, span, "materializing an address, shared capture cell, foreign handle, or native callable")
+            return None
+        }
+        .Shared(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> {
+            jet_eval_unsupported(&machine, span, "materializing a shared runtime handle")
+            return None
+        }
+        .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .HostCursor(_, _, _, _) -> {
+            jet_eval_unsupported(&machine, span, "materializing an iterator cursor")
+            return None
+        }
+    }
+}
+
+
+fn jet_eval_bool(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?Bool {
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    if data == {.Bool(value) -> return Val(value)}
+    jet_eval_compiler_fail(&machine, span, "MIR branch condition is not Bool")
+    None
+}
+
+fn jet_eval_int(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    if data == {.Int(value) -> return Val(value)}
+    if data == {.BigInt(decimal) -> {
+        parsed :: Int.parse(decimal) ?? {
+            jet_eval_compiler_fail(&machine, span, "MIR integer does not fit the cursor/index carrier")
+            return None
+        }
+        return Val(parsed)
+    }}
+    jet_eval_compiler_fail(&machine, span, "MIR integer operation requires an integer value")
+    None
+}
+
+fn jet_eval_decimal_normalize(value: String) -> ?String {
+    if value == "" -> return None
+    negative := value.starts_with("-")
+    digits := if negative -> value.slice(1, value.len()) else -> value
+    if digits == "" -> return None
+    bytes := digits.bytes()
+    loop byte in bytes {
+        code := Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    first := 0
+    loop first + 1 < bytes.len() && bytes[first] == (U8{48}) {
+        first += 1
+    }
+    digits = digits.slice(first, digits.len())
+    if digits == "0" -> return Val("0")
+    if negative -> Val("-{digits}") else -> Val(digits)
+}
+
+fn jet_eval_decimal_abs(value: String) -> String {
+    if value.starts_with("-") -> value.slice(1, value.len()) else -> value
+}
+
+fn jet_eval_decimal_negative(value: String) -> Bool { value.starts_with("-") && value != "0" }
+
+
+
+fn jet_eval_decimal_value(value: String) -> TComptimeValue {
+    normalized_option := jet_eval_decimal_normalize(value)
+    if normalized_option == None -> return TComptimeValue.BigInt(value)
+    normalized :: normalized_option ?? return TComptimeValue.BigInt(value)
+    parsed := Int.parse(normalized)
+    if parsed != None -> return TComptimeValue.Int(parsed ?? 0)
+    TComptimeValue.BigInt(normalized)
+}
+
+fn jet_eval_decimal_text(value: TComptimeValue) -> ?String {
+    if value == {
+        .Int(number) -> return Val("{number}")
+        .BigInt(decimal) -> return jet_eval_decimal_normalize(decimal)
+        else -> None
+    }
+}
+
+
+fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeKey {
+    if value == {
+        .Int(number) -> return Val(TComptimeKey.Int(number))
+        .String(text) -> return Val(TComptimeKey.String(text))
+        .Bool(flag) -> return Val(TComptimeKey.Bool(flag))
+        .Char(character) -> return Val(TComptimeKey.Char(character))
+        .Struct(type_name, fields) -> {
+            keys := [TComptimeKeyField]{}
+            loop field in fields {
+                key :: jet_eval_data_key(field.value, &machine, span) ?? return None
+                keys.push(TComptimeKeyField{name: field.name, key: key})
+            }
+            return Val(TComptimeKey.Struct(type_name, keys))
+        }
+        .Enum(type_name, variant, args) -> {
+            if args.len() == 0 -> return Val(TComptimeKey.Enum(type_name, variant))
+        }
+        else -> {}
+    }
+    jet_eval_compiler_fail(&machine, span, "MIR map key is not a canonical constant key")
+    None
+}
+
+
+fn jet_eval_value_equal(left: TComptimeValue, right: TComptimeValue) -> Bool {
+    left == right
+}
+
+fn jet_eval_find_field(value: TComptimeValue, name: String) -> ?TComptimeValue {
+    if value == {.Struct(_, fields) -> {
+        loop field in fields {
+            if field.name == name -> return Val(field.value)
+        }
+    }}
+    None
+}
+
+fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TComptimeValue) -> ?TComptimeValue {
+    if value == {.Struct(type_name, fields) -> {
+        updated := [TComptimeField]{}
+        found := false
+        loop field in fields {
+            if field.name == name {
+                updated.push(TComptimeField{name: name, value: replacement})
+                found = true
+            } else {
+                updated.push(field)
+            }
+        }
+        if found -> return Val(TComptimeValue.Struct(type_name, updated))
+    }}
+    None
+}
+
+fn jet_eval_constant_runtime(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if constant == {
+        .Failed(report) -> {
+            if report == {.Clean(ty) -> return Val(JetEvalRuntimeValue.Absent(ty))}
+            if report == {.Told(value) -> {
+                data :: jet_eval_constant_data(value, &machine, span) ?? return None
+                return Val(JetEvalRuntimeValue.Data(TComptimeValue.Failed(TComptimeReport.Told(data))))
+            }}
+        }
+    }
+    data :: jet_eval_constant_data(constant, &machine, span) ?? return None
+    Val(JetEvalRuntimeValue.Data(data))
+}
+
+fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+    if constant == {
+        .Int(value, _, _) -> return Val(jet_eval_decimal_value("{value}"))
+        .Float(value, f32, _) -> return Val(TComptimeValue.Float(value, if f32 -> 32 else -> 64))
+        .Bool(value) -> return Val(TComptimeValue.Bool(value))
+        .Char(value) -> return Val(TComptimeValue.Char(value))
+        .String(value) -> return Val(TComptimeValue.String(value))
+        .Bytes(value) -> return Val(TComptimeValue.Bytes(value))
+        .Unit -> return Val(TComptimeValue.Unit)
+        .BigInt(value) -> {
+            normalized :: jet_eval_decimal_normalize(value) ?? {
+                jet_eval_compiler_fail(&machine, span, "MIR BigInt constant is not canonical decimal text")
+                return None
+            }
+            return Val(jet_eval_decimal_value(normalized))
+        }
+        .List(values) -> {
+            output := [TComptimeValue]{}
+            loop item in values {
+                converted :: jet_eval_constant_data(item, &machine, span) ?? return None
+                output.push(converted)
+            }
+            return Val(TComptimeValue.List(output))
+        }
+        .Map(entries) -> {
+            output := [TComptimeMapEntry]{}
+            loop entry in entries {
+                value :: jet_eval_constant_data(entry.value, &machine, span) ?? return None
+                key := jet_eval_key_from_mir(entry.key)
+                output.push(TComptimeMapEntry{key: key, value: value})
+            }
+            return Val(TComptimeValue.Map(output))
+        }
+        .Struct(type_name, fields) -> {
+            output := [TComptimeField]{}
+            loop field in fields {
+                value :: jet_eval_constant_data(field.value, &machine, span) ?? return None
+                output.push(TComptimeField{name: field.name, value: value})
+            }
+            return Val(TComptimeValue.Struct(type_name, output))
+        }
+        .Enum(type_name, variant, args) -> {
+            output := [TComptimeEnumArg]{}
+            loop arg in args {
+                value :: jet_eval_constant_data(arg.value, &machine, span) ?? return None
+                output.push(TComptimeEnumArg{name: arg.name, value: value})
+            }
+            return Val(TComptimeValue.Enum(type_name, variant, output))
+        }
+        .Present(value) -> {
+            inner :: jet_eval_constant_data(value, &machine, span) ?? return None
+            return Val(TComptimeValue.Present(inner))
+        }
+        .Failed(_) -> {}
+    }
+    jet_eval_compiler_fail(&machine, span, "MIR constant conversion reached an invalid report")
+    None
+}
+
+fn jet_eval_key_from_mir(key: MirConstKey) -> TComptimeKey {
+    if key == {
+        .Int(value) -> TComptimeKey.Int(value)
+        .String(value) -> TComptimeKey.String(value)
+        .Bool(value) -> TComptimeKey.Bool(value)
+        .Char(value) -> TComptimeKey.Char(value)
+        .Tuple(fields) -> {
+            output := [TComptimeKeyField]{}
+            loop field in fields -> output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
+            TComptimeKey.Tuple(output)
+        }
+        .Struct(type_name, fields) -> {
+            output := [TComptimeKeyField]{}
+            loop field in fields -> output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
+            TComptimeKey.Struct(type_name, output)
+        }
+        .Enum(type_name, variant) -> TComptimeKey.Enum(type_name, variant)
+    }
+}

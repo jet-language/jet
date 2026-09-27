@@ -1,0 +1,457 @@
+// Runtime identity and synchronization for user-facing Shared values.  The
+// dynamic payload, logical ownership metadata, and native protocol leases are
+// separate: retaining a carrier never touches the user payload.
+
+pub enum JetEvalSharedHostKind { Shared Snapshot Condition Weak }
+pub struct JetEvalSharedHostCarrier {
+    pub kind: JetEvalSharedHostKind
+    pub index: Int
+}
+
+pub enum JetEvalSharedPhysicalOp {
+    CreateShared
+    CreateCondition
+    Acquire(editable: Bool)
+    RequireEdit
+    Map(child: JetEvalRuntimeValue, path: [MirFieldId], editable: Bool)
+    Split(first: JetEvalRuntimeValue, second: JetEvalRuntimeValue, first_path: [MirFieldId], second_path: [MirFieldId], editable: Bool)
+    WaitOnce
+    Notify(all: Bool)
+    Release
+    ReleaseShared
+    ReleaseCondition
+}
+
+pub struct JetEvalSharedValueData { pub value: JetEvalRuntimeValue }
+pub struct JetEvalSharedValueMeta {
+    pub references: Int
+    pub dropped: Bool
+    pub revision: Int
+    pub create_row: MirPreludeCall
+}
+pub struct JetEvalSharedValue {
+    pub storage: Shared<JetEvalSharedValueData>
+    pub metadata: Shared<JetEvalSharedValueMeta>
+}
+
+pub struct JetEvalSharedGuardLeaseMeta {
+    pub shared: Int
+    pub owner_row: MirPreludeCall
+    pub editable: Bool
+    pub handles: Int
+    pub dirty: Bool
+    pub released: Bool
+}
+pub struct JetEvalSharedGuardLease { pub metadata: Shared<JetEvalSharedGuardLeaseMeta> }
+pub struct JetEvalSharedGuardMeta {
+    pub references: Int
+    pub dropped: Bool
+    pub active: Bool
+    pub editable: Bool
+    pub path: [MirFieldId]
+    pub owner_row: MirPreludeCall
+    pub lease: JetEvalSharedGuardLease
+}
+pub struct JetEvalSharedGuard { pub metadata: Shared<JetEvalSharedGuardMeta> }
+
+pub struct JetEvalSharedSnapshotData { pub value: JetEvalRuntimeValue }
+pub struct JetEvalSharedSnapshotMeta {
+    pub references: Int
+    pub dropped: Bool
+    pub owner: Int
+    pub revision: Int
+    pub valid: Bool
+    pub consumed: Bool
+}
+pub struct JetEvalSharedSnapshot {
+    pub storage: Shared<JetEvalSharedSnapshotData>
+    pub metadata: Shared<JetEvalSharedSnapshotMeta>
+}
+
+pub struct JetEvalSharedConditionMeta {
+    pub references: Int
+    pub dropped: Bool
+    pub create_row: MirPreludeCall
+}
+pub struct JetEvalSharedCondition { pub metadata: Shared<JetEvalSharedConditionMeta> }
+
+pub struct JetEvalSharedWeakMeta {
+    pub references: Int
+    pub dropped: Bool
+    pub shared: Int
+}
+pub struct JetEvalSharedWeak { pub metadata: Shared<JetEvalSharedWeakMeta> }
+
+pub struct JetEvalSharedTransactionPart {
+    pub shared: Int
+    pub value: JetEvalRuntimeValue
+    pub base_revision: Int
+    pub writes: Bool
+    pub row: MirPreludeCall
+    pub snapshots: [Int]
+}
+pub struct JetEvalSharedTransactionState {
+    pub machine: Int
+    pub scope: MirScopeId
+    pub parent: ?Int
+    pub active: Bool
+    pub participants: [JetEvalSharedTransactionPart]
+    pub snapshots: [Int]
+}
+pub struct JetEvalSharedTransaction { pub storage: Shared<JetEvalSharedTransactionState> }
+
+pub struct JetEvalSharedRuntimeData {
+    pub values: [JetEvalSharedValue]
+    pub guards: [JetEvalSharedGuard]
+    pub snapshots: [JetEvalSharedSnapshot]
+    pub conditions: [JetEvalSharedCondition]
+    pub weaks: [JetEvalSharedWeak]
+    pub transactions: [JetEvalSharedTransaction]
+}
+pub struct JetEvalSharedRuntime { pub storage: Shared<JetEvalSharedRuntimeData> }
+
+pub fn jet_eval_shared_runtime_new() -> JetEvalSharedRuntime {
+    JetEvalSharedRuntime{
+        storage: shared JetEvalSharedRuntimeData{
+            values: [JetEvalSharedValue]{},
+            guards: [JetEvalSharedGuard]{},
+            snapshots: [JetEvalSharedSnapshot]{},
+            conditions: [JetEvalSharedCondition]{},
+            weaks: [JetEvalSharedWeak]{},
+            transactions: [JetEvalSharedTransaction]{},
+        },
+    }
+}
+enum JetEvalSharedRefRelease { Invalid Remaining Last }
+
+@JET_EVAL_SHARED_REVISION_MAX :: 0xffffffffffffffff
+
+fn jet_eval_shared_runtime_value(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedValue {
+    runtime := machine.registry.shared_runtime
+    values := runtime.storage
+    if index < 0 || index >= values.values.len() -> return None
+    Val(values.values[index])
+}
+fn jet_eval_shared_runtime_guard(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedGuard {
+    runtime := machine.registry.shared_runtime
+    guards := runtime.storage
+    if index < 0 || index >= guards.guards.len() -> return None
+    Val(guards.guards[index])
+}
+fn jet_eval_shared_runtime_snapshot(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedSnapshot {
+    runtime := machine.registry.shared_runtime
+    snapshots := runtime.storage
+    if index < 0 || index >= snapshots.snapshots.len() -> return None
+    Val(snapshots.snapshots[index])
+}
+fn jet_eval_shared_runtime_condition(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedCondition {
+    runtime := machine.registry.shared_runtime
+    conditions := runtime.storage
+    if index < 0 || index >= conditions.conditions.len() -> return None
+    Val(conditions.conditions[index])
+}
+fn jet_eval_shared_runtime_weak(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedWeak {
+    runtime := machine.registry.shared_runtime
+    weaks := runtime.storage
+    if index < 0 || index >= weaks.weaks.len() -> return None
+    Val(weaks.weaks[index])
+}
+fn jet_eval_shared_runtime_transaction(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedTransaction {
+    runtime := machine.registry.shared_runtime
+    transactions := runtime.storage
+    if index < 0 || index >= transactions.transactions.len() -> return None
+    Val(transactions.transactions[index])
+}
+
+fn jet_eval_shared_runtime_allocate_value(machine: &JetEvalMachine, value: JetEvalSharedValue) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.values.len()
+        data.values.push(value)
+        index
+    })
+}
+fn jet_eval_shared_runtime_allocate_guard(machine: &JetEvalMachine, guard: JetEvalSharedGuard) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.guards.len()
+        data.guards.push(guard)
+        index
+    })
+}
+fn jet_eval_shared_runtime_allocate_snapshot(machine: &JetEvalMachine, snapshot: JetEvalSharedSnapshot) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.snapshots.len()
+        data.snapshots.push(snapshot)
+        index
+    })
+}
+fn jet_eval_shared_runtime_allocate_condition(machine: &JetEvalMachine, condition: JetEvalSharedCondition) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.conditions.len()
+        data.conditions.push(condition)
+        index
+    })
+}
+fn jet_eval_shared_runtime_allocate_weak(machine: &JetEvalMachine, weak: JetEvalSharedWeak) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.weaks.len()
+        data.weaks.push(weak)
+        index
+    })
+}
+fn jet_eval_shared_runtime_allocate_transaction(machine: &JetEvalMachine, transaction: JetEvalSharedTransaction) -> Int {
+    runtime := machine.registry.shared_runtime
+    runtime.storage.edit(data -> {
+        index := data.transactions.len()
+        data.transactions.push(transaction)
+        index
+    })
+}
+
+fn jet_eval_shared_runtime_ref_live(references: Int, dropped: Bool) -> Bool {
+    references > 0 && !dropped
+}
+fn jet_eval_shared_runtime_ref_retain(references: Int, dropped: Bool) -> Bool {
+    references > 0 && !dropped
+}
+fn jet_eval_shared_runtime_ref_release(references: Int, dropped: Bool) -> JetEvalSharedRefRelease {
+    if references <= 0 || dropped -> return JetEvalSharedRefRelease.Invalid
+    if references == 1 -> return JetEvalSharedRefRelease.Last
+    JetEvalSharedRefRelease.Remaining
+}
+
+fn jet_eval_shared_runtime_value_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    entry := jet_eval_shared_runtime_value(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR Shared carrier has an unknown registry identity")
+        return false
+    }
+    metadata := entry.metadata
+    live := metadata.references > 0 && !metadata.dropped
+    if !live -> jet_eval_ownership_fail(&machine, span, "MIR Shared carrier is no longer live")
+    live
+}
+fn jet_eval_shared_runtime_guard_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    entry := jet_eval_shared_runtime_guard(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR SharedGuard carrier has an unknown registry identity")
+        return false
+    }
+    metadata := entry.metadata
+    if metadata.dropped || metadata.references <= 0 -> {
+        jet_eval_ownership_fail(&machine, span, "MIR SharedGuard carrier is no longer live")
+        return false
+    }
+    if !metadata.active {
+        jet_eval_source_fail(&machine, span, "jet_shared_guard_invalid")
+        return false
+    }
+    true
+}
+fn jet_eval_shared_runtime_snapshot_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    entry := jet_eval_shared_runtime_snapshot(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR SharedSnapshot carrier has an unknown registry identity")
+        return false
+    }
+    metadata := entry.metadata
+    live := metadata.references > 0 && !metadata.dropped
+    if !live -> jet_eval_ownership_fail(&machine, span, "MIR SharedSnapshot carrier is no longer live")
+    live
+}
+fn jet_eval_shared_runtime_condition_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    entry := jet_eval_shared_runtime_condition(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR Condition carrier has an unknown registry identity")
+        return false
+    }
+    metadata := entry.metadata
+    live := metadata.references > 0 && !metadata.dropped
+    if !live -> jet_eval_ownership_fail(&machine, span, "MIR Condition carrier is no longer live")
+    live
+}
+fn jet_eval_shared_runtime_weak_live(machine: &JetEvalMachine, index: Int, span: Span) -> Bool {
+    entry := jet_eval_shared_runtime_weak(&machine, index) ?? {
+        jet_eval_ownership_fail(&machine, span, "MIR Shared.Weak carrier has an unknown registry identity")
+        return false
+    }
+    metadata := entry.metadata
+    live := metadata.references > 0 && !metadata.dropped
+    if !live -> jet_eval_ownership_fail(&machine, span, "MIR Shared.Weak carrier is no longer live")
+    live
+}
+
+fn jet_eval_shared_runtime_retain(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+    if value == {
+        .Shared(index) -> {
+            entry :: jet_eval_shared_runtime_value(&machine, index) ?? {
+                jet_eval_ownership_fail(&machine, span, "MIR Shared carrier has an unknown registry identity")
+                return false
+            }
+            metadata := entry.metadata
+            retained := metadata.edit(state -> {
+                if !jet_eval_shared_runtime_ref_retain(state.references, state.dropped) -> return false
+                state.references += 1
+                true
+            })
+            if !retained -> jet_eval_ownership_fail(&machine, span, "MIR Shared carrier was retained after release")
+            return retained
+        }
+        .SharedGuard(_) -> {
+            jet_eval_ownership_fail(&machine, span, "MIR SharedGuard values are move-only")
+            return false
+        }
+        .SharedSnapshot(index) -> {
+            entry :: jet_eval_shared_runtime_snapshot(&machine, index) ?? {
+                jet_eval_ownership_fail(&machine, span, "MIR SharedSnapshot carrier has an unknown registry identity")
+                return false
+            }
+            metadata := entry.metadata
+            retained := metadata.edit(state -> {
+                if !jet_eval_shared_runtime_ref_retain(state.references, state.dropped) -> return false
+                state.references += 1
+                true
+            })
+            if !retained -> jet_eval_ownership_fail(&machine, span, "MIR SharedSnapshot carrier was retained after release")
+            return retained
+        }
+        .Condition(index) -> {
+            entry :: jet_eval_shared_runtime_condition(&machine, index) ?? {
+                jet_eval_ownership_fail(&machine, span, "MIR Condition carrier has an unknown registry identity")
+                return false
+            }
+            metadata := entry.metadata
+            retained := metadata.edit(state -> {
+                if !jet_eval_shared_runtime_ref_retain(state.references, state.dropped) -> return false
+                state.references += 1
+                true
+            })
+            if !retained -> jet_eval_ownership_fail(&machine, span, "MIR Condition carrier was retained after release")
+            return retained
+        }
+        .SharedWeak(index) -> {
+            entry :: jet_eval_shared_runtime_weak(&machine, index) ?? {
+                jet_eval_ownership_fail(&machine, span, "MIR Shared.Weak carrier has an unknown registry identity")
+                return false
+            }
+            metadata := entry.metadata
+            retained := metadata.edit(state -> {
+                if !jet_eval_shared_runtime_ref_retain(state.references, state.dropped) -> return false
+                state.references += 1
+                true
+            })
+            if !retained -> jet_eval_ownership_fail(&machine, span, "MIR Shared.Weak carrier was retained after release")
+            return retained
+        }
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Shared retain received a non-Shared carrier")
+            return false
+        }
+    }
+}
+
+fn jet_eval_shared_runtime_live(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+    if value == {
+        .Shared(index) -> return jet_eval_shared_runtime_value_live(&machine, index, span)
+        .SharedGuard(index) -> return jet_eval_shared_runtime_guard_live(&machine, index, span)
+        .SharedSnapshot(index) -> return jet_eval_shared_runtime_snapshot_live(&machine, index, span)
+        .Condition(index) -> return jet_eval_shared_runtime_condition_live(&machine, index, span)
+        .SharedWeak(index) -> return jet_eval_shared_runtime_weak_live(&machine, index, span)
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Shared liveness check received a non-Shared carrier")
+            return false
+        }
+    }
+}
+
+fn jet_eval_shared_runtime_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+    if value == {
+        .SharedGuard(_) -> {
+            jet_eval_ownership_fail(&machine, span, "MIR SharedGuard cannot cross a task or native callback boundary")
+            return false
+        }
+        .Shared(_) | .SharedSnapshot(_) | .Condition(_) | .SharedWeak(_) -> return jet_eval_shared_runtime_live(&machine, value, span)
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Shared transfer check received a non-Shared carrier")
+            return false
+        }
+    }
+}
+
+fn jet_eval_shared_runtime_host_kind(kind: JetEvalSharedHostKind) -> JetEvalRuntimeValue {
+    if kind == {
+        .Shared -> return JetEvalRuntimeValue.Shared(0)
+        .Snapshot -> return JetEvalRuntimeValue.SharedSnapshot(0)
+        .Condition -> return JetEvalRuntimeValue.Condition(0)
+        .Weak -> return JetEvalRuntimeValue.SharedWeak(0)
+    }
+}
+
+fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: ?MirType) -> Bool {
+    ty_value :: ty ?? return false
+    if kind == {
+        .Shared -> return ty_value.kind == {.Shared(_) -> true else -> false}
+        .Snapshot -> {
+            if ty_value.kind == {.Apply(name, _) -> return name.name == "SharedSnapshot"}
+            return false
+        }
+        .Condition -> {
+            if ty_value.kind == {.Apply(name, _) -> return name.name == "Condition"}
+            return false
+        }
+        .Weak -> {
+            if ty_value.kind == {.Apply(name, _) -> return name.name == "Shared.Weak" || name.name == "WeakShared"}
+            return false
+        }
+    }
+}
+
+fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalHostValue {
+    kind :: if value == {
+        .Shared(index) -> {
+            if !jet_eval_shared_runtime_value_live(&machine, index, span) -> return None
+            JetEvalSharedHostKind.Shared
+        }
+        .SharedSnapshot(index) -> {
+            if !jet_eval_shared_runtime_snapshot_live(&machine, index, span) -> return None
+            JetEvalSharedHostKind.Snapshot
+        }
+        .Condition(index) -> {
+            if !jet_eval_shared_runtime_condition_live(&machine, index, span) -> return None
+            JetEvalSharedHostKind.Condition
+        }
+        .SharedWeak(index) -> {
+            if !jet_eval_shared_runtime_weak_live(&machine, index, span) -> return None
+            JetEvalSharedHostKind.Weak
+        }
+        .SharedGuard(_) -> {
+            jet_eval_ownership_fail(&machine, span, "MIR SharedGuard cannot be projected to a native host value")
+            return None
+        }
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Shared host projection received a non-Shared carrier")
+            return None
+        }
+    }
+    index := if value == {
+        .Shared(id) | .SharedSnapshot(id) | .Condition(id) | .SharedWeak(id) -> id
+        else -> -1
+    }
+    Val(JetEvalHostValue.SharedCarrier(JetEvalSharedHostCarrier{kind: kind, index: index}))
+}
+
+pub fn jet_eval_shared_runtime_host_adopt(machine: &JetEvalMachine, carrier: JetEvalSharedHostCarrier, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+    if !jet_eval_shared_runtime_host_kind_matches(carrier.kind, result_ty) {
+        jet_eval_compiler_fail(&machine, span, "native Shared carrier does not match its checked result type")
+        return None
+    }
+    value := if carrier.kind == {
+        .Shared -> JetEvalRuntimeValue.Shared(carrier.index)
+        .Snapshot -> JetEvalRuntimeValue.SharedSnapshot(carrier.index)
+        .Condition -> JetEvalRuntimeValue.Condition(carrier.index)
+        .Weak -> JetEvalRuntimeValue.SharedWeak(carrier.index)
+    }
+    if !jet_eval_shared_runtime_live(&machine, value, span) -> return None
+    if !jet_eval_shared_runtime_retain(&machine, value, span) -> return None
+    Val(value)
+}

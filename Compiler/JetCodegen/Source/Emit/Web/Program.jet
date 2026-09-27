@@ -1,0 +1,217 @@
+// Public Source Web adapter.  Host policy/assets enter through the typed
+// config; this module owns artifact assembly and never calls Native MIRWeb.
+
+fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String {
+    if part == {
+        .Gc -> "Gc"
+        .Event -> "Event"
+        .Realtime -> "Realtime"
+        .EmbeddedHardware -> "EmbeddedHardware"
+        .Ui -> "Ui"
+        .Devtools -> "Devtools"
+        .Gtk -> "Gtk"
+        .Apps -> "Apps"
+        .Email -> "Email"
+        .Game -> "Game"
+        .Files -> "Files"
+        .Interrupt -> "Interrupt"
+        .FsRuntime -> "FsRuntime"
+        .Process -> "Process"
+        .Crypto -> "Crypto"
+        .Math -> "Math"
+        .Encoding -> "Encoding"
+        .Data -> "Data"
+        .Fmt -> "Fmt"
+        .DataFmt -> "DataFmt"
+        .Compute -> "Compute"
+        .Http -> "Http"
+        .WebSocket -> "WebSocket"
+        .Browser -> "Browser"
+        .Args -> "Args"
+        .Reflect -> "Reflect"
+        .AuthTokens -> "AuthTokens"
+        .AuthSession -> "AuthSession"
+        .Sync -> "Sync"
+        .Services -> "Services"
+        .Mod -> "Mod"
+    }
+}
+
+fn jet_web_entry_kind_name(kind: MirEntryKind) -> String {
+    if kind == {
+        .Library -> "Library"
+        .Command -> "Command"
+        .App -> "App"
+        .Service -> "Service"
+        .Test -> "Test"
+    }
+}
+
+fn jet_web_entry_output_name(output: MirEntryOutput) -> String {
+    if output == {
+        .NoOutput -> "NoOutput"
+        .ReturnValue -> "ReturnValue"
+        .StandardOutput -> "StandardOutput"
+        .ExitStatus -> "ExitStatus"
+    }
+}
+
+fn jet_web_abi_name(abi: MirForeignAbi) -> String {
+    if abi == {
+        .C -> "C"
+        .CUnwind -> "C-unwind"
+        .System -> "system"
+        .Stdcall -> "stdcall"
+        .Fastcall -> "fastcall"
+        .Vectorcall -> "vectorcall"
+        .Rust -> "Rust"
+        .Platform(name) -> name
+    }
+}
+
+fn jet_web_release_inspect_json(value: ?JetReleaseInspect) -> String {
+    if value == None -> return "null"
+    inspect :: value ?? JetReleaseInspect.None
+    if inspect == JetReleaseInspect.Local -> return jet_web_json_quote("Local")
+    if inspect == JetReleaseInspect.ReadOnly -> return jet_web_json_quote("ReadOnly")
+    jet_web_json_quote("None")
+}
+
+fn jet_web_release_endpoint_json(value: JetReleaseDevtoolsEndpoint) -> String {
+    if value == JetReleaseDevtoolsEndpoint.Absent -> jet_web_json_quote("Absent") else -> jet_web_json_quote("ReadOnly")
+}
+fn jet_web_release_auth_json(value: JetReleaseDevtoolsAuthentication) -> String { jet_web_json_quote("BearerToken") }
+fn jet_web_release_authority_json(value: JetReleaseDevtoolsAuthority) -> String { jet_web_json_quote("LoopbackOrAllowlist") }
+fn jet_web_release_publication_json(value: JetReleaseDevtoolsPublication) -> String { jet_web_json_quote("SiteGated") }
+
+fn jet_web_release_policy_json(policy: JetReleaseDevtoolsPolicy) -> String {
+    networks := [String]{}
+    loop network in policy.deployment.allowlist {
+        networks.push("{{ address: {jet_web_json_quote(network.address)}, prefix: {network.prefix} }}")
+    }
+    "{{ inspect: {jet_web_release_inspect_json(policy.inspect)}, endpoint: {jet_web_release_endpoint_json(policy.endpoint)}, authentication: {jet_web_release_auth_json(policy.authentication)}, authority: {jet_web_release_authority_json(policy.authority)}, publication: {jet_web_release_publication_json(policy.publication)}, local_rail: {jet_web_bool_json(policy.local_rail)}, panel_code: {jet_web_bool_json(policy.panel_code)}, stream_code: {jet_web_bool_json(policy.stream_code)}, deployment: {{ enabled: {jet_web_bool_json(policy.deployment.enabled)}, token_present: {jet_web_bool_json(policy.deployment.token != None)}, allowlist: [{networks.join(\", \")}] }} }}"
+}
+fn jet_web_release_policy_identity(policy: JetReleaseDevtoolsPolicy) -> String {
+    "release-devtools-v1:{mir_sha256_hex(jet_web_release_policy_json(policy))}"
+}
+
+fn jet_web_source_map(assets: JetWebAssets) -> String {
+    names := [String]{}
+    contents := [String]{}
+    loop name in assets.source_names -> names.push(jet_web_json_quote(name))
+    loop content in assets.source_contents -> contents.push(jet_web_json_quote(content))
+    "{{ version: 3, sources: [{names.join(", ")}], sourcesContent: [{contents.join(", ")}], names: [], mappings: \"\" }}"
+}
+fn jet_web_optional_function_id(value: ?MirFunctionId) -> String {
+    if value == None -> return "null"
+    "{(value ?? MirFunctionId{value: 0}).value}"
+}
+
+fn jet_web_module_ids_json(values: [MirModuleId]) -> String {
+    rendered := [String]{}
+    loop value in values -> rendered.push("{value.value}")
+    rendered.join(", ")
+}
+
+
+fn jet_web_function_json(function: MirFunction) -> String {
+    params := [String]{}
+    loop parameter in function.params {
+        params.push("{{ index: {parameter.index}, name: {jet_web_json_quote(parameter.name)}, access: {jet_web_json_quote(if parameter.access == MirAccess.Read -> \"Read\" else if parameter.access == MirAccess.Write -> \"Write\" else -> \"Move\")}, type: {jet_web_json_quote(mir_type_display_name(parameter.ty))}, public_label: {jet_web_json_quote(parameter.public_label)}, variadic: {jet_web_bool_json(parameter.variadic)} }}")
+    }
+    reconstructions := [String]{}
+    loop row in function.web_param_reconstructions {
+        fields := [String]{}
+        loop field in row.fields -> fields.push("{{ field: {jet_web_json_quote(field.field)}, parameter: {jet_web_json_quote(field.parameter)}, type: {jet_web_json_quote(mir_type_display_name(field.ty))} }}")
+        reconstructions.push("{{ local: {jet_web_json_quote(row.local)}, type: {jet_web_json_quote(mir_type_display_name(row.ty))}, fields: [{fields.join(\", \")}] }}")
+    }
+    effects := [String]{}
+    loop effect in function.effects.solved -> effects.push(jet_web_json_quote(effect))
+    "{{ id: {function.id.value}, key: {jet_web_json_quote(function.key)}, module_id: {function.module_id.value}, module: {jet_web_json_quote(function.module_name)}, name: {jet_web_json_quote(function.name)}, source_file: {function.source_file.value}, bucket: {jet_web_bucket_json(function.web_bucket)}, marker: {jet_web_marker_json(function.web_marker)}, visibility: {jet_web_json_quote(if function.visibility == MirVisibility.Private -> \"Private\" else if function.visibility == MirVisibility.Package -> \"Package\" else -> \"Public\")}, parameters: [{params.join(\", \")}], parameter_reconstructions: [{reconstructions.join(\", \")}], return_type: {jet_web_json_quote(mir_type_display_name(function.return_type))}, generator: {jet_web_bool_json(function.generator != None)}, effects: [{effects.join(\", \")}] }}"
+}
+
+fn jet_web_module_json(module: MirModule) -> String {
+    imports := [String]{}
+    loop import_id in module.imports -> imports.push("{import_id.value}")
+    "{{ id: {module.id.value}, key: {jet_web_json_quote(module.key)}, name: {jet_web_json_quote(module.name)}, path: {jet_web_json_quote(module.path)}, source_file: {module.source_file.value}, imports: [{imports.join(", ")}] }}"
+}
+
+fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String {
+    functions := [String]{}
+    loop function in ctx.functions -> functions.push(jet_web_function_json(function))
+    modules := [String]{}
+    loop module_id in ctx.artifact.modules {
+        loop module in ctx.program.modules { if module.id == module_id -> modules.push(jet_web_module_json(module)) }
+    }
+    exports := [String]{}
+    loop export in ctx.artifact.exports {
+        exports.push("{{ symbol: {jet_web_json_quote(export.symbol)}, function: {export.function.value}, abi: {jet_web_json_quote(jet_web_abi_name(export.abi))} }}")
+    }
+    runtime_parts := [String]{}
+    loop part in ctx.artifact.runtime_parts -> runtime_parts.push(jet_web_json_quote(jet_web_runtime_part_name(part)))
+    entry := ctx.artifact.entry ?? MirEntrySpec{kind: MirEntryKind.App, function: Val(ctx.entry.id), cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
+    entry_function := entry.function
+    artifact_modules_json := jet_web_module_ids_json(ctx.artifact.modules)
+    entry_function_json := jet_web_optional_function_id(entry_function)
+    "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)}, target: {{ triple: {jet_web_json_quote(ctx.config.layout.triple)}, pointer_size: {ctx.config.layout.pointer_size}, pointer_alignment: {ctx.config.layout.pointer_alignment} }}, artifact: {{ id: {ctx.artifact.id.value}, kind: \"WebApplication\", name: {jet_web_json_quote(ctx.artifact.name)}, target: \"Web\", identity: {jet_web_json_quote(ctx.artifact_identity)}, provider_identity: {jet_web_json_quote(ctx.artifact.provider_identity)}, closure_identity: {jet_web_json_quote(ctx.artifact.closure_identity)}, modules: [{artifact_modules_json}] }}, provenance: {{ source: {jet_web_json_quote(ctx.history_source)}, tool: {jet_web_json_quote(ctx.history_tool)}, target: {jet_web_json_quote(ctx.history_target)} }}, entry: {{ kind: {jet_web_json_quote(jet_web_entry_kind_name(entry.kind))}, function: {entry_function_json}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, initialize_environment: {jet_web_bool_json(entry.initialize_environment)}, initialize_gc: {jet_web_bool_json(entry.initialize_gc)}, serves_until_stopped: {jet_web_bool_json(entry.serves_until_stopped)}, package_version: {jet_web_json_quote(entry.package_version)} }}, exports: [{exports.join(\", \")}], runtime_parts: [{runtime_parts.join(\", \")}], modules: [{modules.join(\", \")}], functions: [{functions.join(\", \")}], source_map: {source_map}, devtools: {jet_web_release_policy_json(ctx.config.release_devtools_policy)} }}"
+}
+
+fn jet_web_command_record(ctx: &JetWebEmitContext) -> String {
+    entry := ctx.artifact.entry ?? MirEntrySpec{kind: MirEntryKind.App, function: Val(ctx.entry.id), cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
+    "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, artifact: {ctx.artifact.id.value}, artifact_identity: {jet_web_json_quote(ctx.artifact_identity)}, entry_function: {jet_web_optional_function_id(entry.function)}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)} }}"
+}
+
+fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String {
+    policy_identity := jet_web_release_policy_identity(ctx.config.release_devtools_policy)
+    seed := "jet-web-rustc-v2\u0000{ctx.program.package_identity}\u0000{ctx.config.semantic_digest}\u0000{ctx.artifact_identity}\u0000{ctx.config.layout.triple}\u0000{policy_identity}"
+    "jet-web-rustc-v2:{mir_sha256_hex(seed)}"
+}
+
+fn jet_web_context(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitContext {
+    artifact := jet_web_find_artifact(program, config.artifact)
+    artifact_row := artifact ?? MirArtifactPlan{id: config.artifact, kind: MirArtifactKind.WebApplication, name: "", target: MirArtifactTarget.Web, mode: MirArtifactBuildMode.Dev, modules: [MirModuleId]{}, links: [MirLinkUnitId]{}, jobs: [MirJobId]{}, runtime_parts: [MirRuntimePartId]{}, exports: [MirExport]{}, provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None}
+    entry_spec := artifact_row.entry
+    entry_id := if entry_spec != None -> (entry_spec ?? MirEntrySpec{kind: MirEntryKind.App, function: None, cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: false, initialize_gc: false, serves_until_stopped: false, package_version: ""}).function else -> None
+    entry_function := if entry_id != None -> jet_web_find_function(program, entry_id ?? MirFunctionId{value: 0}) else -> None
+    entry_row := entry_function ?? MirFunction{id: MirFunctionId{value: 0}, module_id: MirModuleId{value: 0}, source_file: MirSourceFileId{value: 0}, key: "", module_name: "", name: "", span: Span{start: 0, end: 0}, kind: MirFunctionKind.Jet, form: MirFunctionForm.TopLevel, visibility: MirVisibility.Private, target_applicability: MirTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}, web_bucket: None, web_marker: None, generic_params: [MirGenericParam]{}, capture_params: [MirCaptureParam]{}, params: [MirParam]{}, declared_return: None, return_type: MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}, failure: MirFailureCarrier.Infallible, effects: MirEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MirNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MirWebParamReconstruction]{}, blocks: [MirBasicBlock]{}, entry: MirBlockId{value: 0}, locals: [MirLocal]{}, values: [MirValueFact]{}, places: [MirPlace]{}, scopes: [MirScope]{}, drops: [MirDropAction]{}, foreign_language: None}
+    context := JetWebEmitContext{program: program, config: config, artifact: artifact_row, functions: [MirFunction]{}, entry: entry_row, artifact_identity: artifact_row.artifact_identity, history_source: "jet", history_tool: "jet-source-web", history_target: config.layout.triple, failure: None}
+    if artifact == None -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact is missing", "Web emission requires the checked WebApplication artifact plan", None)
+    canonical_digest := mir_program_digest(program)
+    if config.semantic_digest == "" || config.semantic_digest != canonical_digest -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidProvenance, "E0003", "Web semantic digest is not the canonical MIR digest", "Web provenance must equal mir_program_digest(program)", None)
+    if config.layout.triple == "" || config.layout.pointer_size <= 0 || config.layout.pointer_alignment <= 0 -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidLayout, "E0003", "Web target layout is incomplete", "the Web target must carry checked triple and non-zero pointer facts", None)
+    jet_web_validate_artifact(&context)
+    if entry_function == None -> jet_web_fail(&context, JetWebEmitFailureKind.MissingEntryFunction, "E0003", "Web artifact entry function is missing", "the checked entry specification must resolve to one MIR function", None)
+    loop function in program.functions {
+        selected := false
+        loop module_id in artifact_row.modules { if module_id == function.module_id -> selected = true }
+        if selected && function.target_applicability.web {
+            jet_web_validate_partition(&context, function)
+            context.functions.push(function)
+        }
+    }
+    jet_web_validate_assets(&context)
+    context
+}
+
+pub fn jet_web_emit(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
+    context := jet_web_context(program, config)
+    if context.failure != None -> return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None))
+    rust_config := JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, web_bucket: Val(MirWebBucket.Wasm)}
+    rust := jet_rust_emit_program(context.program, rust_config)
+    wasm := ""
+    if rust == {
+        .Complete(source, manifest) -> wasm = source
+        .Incomplete(failure) -> {
+            jet_web_fail(&context, JetWebEmitFailureKind.InvalidMir, failure.code, failure.message, failure.detail, failure.span)
+            return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm Rust emission failed", "Rust emission returned no failure row", None))
+        }
+    }
+    js := jet_web_emit_js_app(&context)
+    if context.failure != None -> return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript emission failed", "JavaScript emission returned no failure row", None))
+    source_map := jet_web_source_map(context.config.assets)
+    manifest := jet_web_manifest_json(&context, source_map)
+    command := jet_web_command_record(&context)
+    model_js := if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_js else -> ""
+    model_worker := if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_worker_js else -> ""
+    JetWebEmitResult.Complete(JetWebArtifacts{manifest_json: manifest, wasm_rust: wasm, rustc_incremental_identity: jet_web_rustc_identity(&context), js_app: js, js_source_map: source_map, source_names: context.config.assets.source_names, source_contents: context.config.assets.source_contents, dom_runtime: context.config.assets.dom_runtime, onnx_runtime_js: model_js, onnx_runtime_worker_js: model_worker, index_html: context.config.assets.index_html, explicit_html_path: context.config.assets.explicit_html_path, command_record: command.bytes()})
+}

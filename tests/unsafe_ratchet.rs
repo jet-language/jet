@@ -71,7 +71,7 @@ pub fn ratchet_trips_on_seeded_growth() {
     fixture.write(
         "main.jet",
         r##"// #Unsafe("comment only")
-text :: "#Unsafe(\"string only\")"
+TEXT :: "#Unsafe(\"string only\")"
 #Unsafe("seed region") {}
 #[Unsafe("function region"), FFI(c)] fn foreign() {}
 "##,

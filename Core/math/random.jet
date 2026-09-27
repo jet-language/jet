@@ -15,11 +15,11 @@ fn nonfinite(value: Float) -> Bool {
 }
 
 
-c_mask32 :: 4294967295
-c_base32 :: 4294967296
-c_mask63 :: 9223372036854775807
-c_base63 :: 9223372036854775808
-c_base63_float :: 9223372036854775808.0
+C_MASK32 :: 4294967295
+C_BASE32 :: 4294967296
+C_MASK63 :: 9223372036854775807
+C_BASE63 :: 9223372036854775808
+C_BASE63_FLOAT :: 9223372036854775808.0
 
 // Draw one non-negative 63-bit word from the shared deterministic provider.
 // The provider's getrandbits(63) is the only host boundary; all composition,
@@ -27,41 +27,41 @@ c_base63_float :: 9223372036854775808.0
 fn next_bits63() -[Rand]> Int { core.math.random.getrandbits(63) }
 
 fn unit() -[Rand]> Float {
-    Float{next_bits63()} / c_base63_float
+    Float{next_bits63()} / C_BASE63_FLOAT
 }
 
 fn unit_open() -[Rand]> Float {
     u :: unit()
-    if u <= (Float{0.0}) -> return (Float{1.0}) / c_base63_float
+    if u <= (Float{0.0}) -> return (Float{1.0}) / C_BASE63_FLOAT
     u
 }
 
 fn full_word64() -[Rand]> Int {
-    hi :: next_bits63() & c_mask32
-    lo :: next_bits63() & c_mask32
-    (hi * c_base32) + lo
+    hi :: next_bits63() & C_MASK32
+    lo :: next_bits63() & C_MASK32
+    (hi * C_BASE32) + lo
 }
 
 // Unbiased offset in 0..<span. Rejection over base-2^63 digits covers every
 // representable range without modulo bias.
 fn bounded(span: Int) -[Rand]> Int {
     if span <= 1 -> return 0
-    if span <= c_base63 {
-        limit :: c_base63 - (c_base63 %% span)
+    if span <= C_BASE63 {
+        limit :: C_BASE63 - (C_BASE63 %% span)
         loop {
             draw :: next_bits63()
             if draw < limit -> return draw %% span
         }
     }
-    space := c_base63
-    loop space < span -> space = space * c_base63
+    space := C_BASE63
+    loop space < span -> space = space * C_BASE63
     limit :: space - (space %% span)
     loop {
         draw := 0
         factor := 1
         loop factor < space {
             draw = draw + next_bits63() * factor
-            factor = factor * c_base63
+            factor = factor * C_BASE63
         }
         if draw < limit -> return draw %% span
     }

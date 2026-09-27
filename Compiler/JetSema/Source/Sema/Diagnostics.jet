@@ -1,0 +1,202 @@
+// Sema emits the shared Lexer Diagnostic value; it does not define a second
+// diagnostic payload or rebase the aggregate UTF-8 byte spans.
+
+pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
+pub struct SemaSourceSegment {
+    pub generated: Span
+    pub source_file: String
+    pub source_start: Int
+    pub line_starts: [Int]
+    pub origin: SemaSourceOrigin
+}
+
+pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String {
+    index := 0
+    loop index < segments.len() {
+        segment :: segments[index]
+        if site.start >= segment.generated.start && site.start < segment.generated.end -> return segment.source_file
+        index += 1
+    }
+    if fallback_origin == SemaSourceOrigin.Snapshot -> fallback else -> ""
+}
+pub struct SemaSourceLocation {
+    pub source_path: String
+    pub aggregate_start: Int
+    pub source_start: Int
+    pub origin: SemaSourceOrigin
+}
+
+pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> ?SemaSourceLocation {
+    if site.end < site.start || segments.len() == 0 -> return None
+    candidate := -1
+    matches := 0
+    if site.start == site.end {
+        index := 0
+        loop index < segments.len() {
+            segment :: segments[index]
+            if site.start >= segment.generated.start && site.start < segment.generated.end {
+                candidate = index
+                matches += 1
+            }
+            index += 1
+        }
+        if matches == 0 {
+            final_end := segments[0].generated.end
+            index = 1
+            loop index < segments.len() {
+                if segments[index].generated.end > final_end -> final_end = segments[index].generated.end
+                index += 1
+            }
+            if site.start != final_end -> return None
+            index = 0
+            loop index < segments.len() {
+                if segments[index].generated.end == final_end {
+                    candidate = index
+                    matches += 1
+                }
+                index += 1
+            }
+        }
+    } else {
+        index := 0
+        loop index < segments.len() {
+            segment :: segments[index]
+            intersects := segment.generated.start < site.end && segment.generated.end > site.start
+            if intersects {
+                if site.start >= segment.generated.start && site.start < segment.generated.end && site.end <= segment.generated.end {
+                    candidate = index
+                }
+                matches += 1
+            }
+            index += 1
+        }
+    }
+    if matches != 1 || candidate < 0 -> return None
+    segment := segments[candidate]
+    if segment.source_file == "" || segment.generated.start < 0 || segment.source_start < 0 -> return None
+    Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
+}
+
+pub fn sema_diagnostic_with_source_location(diagnostic: Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic {
+    if diagnostic.span == None -> return diagnostic
+    span :: diagnostic.span ?? return diagnostic
+    location_value := sema_source_location_at(segments, span)
+    if location_value == None {
+        diagnostic.source_path = None
+        diagnostic.source_offset = None
+        diagnostic.source_start = None
+        return diagnostic
+    }
+    location :: location_value ?? return diagnostic
+    if diagnostic.edit != None {
+        edit :: diagnostic.edit ?? return diagnostic
+        edit_location_value := sema_source_location_at(segments, edit.span)
+        if edit_location_value == None {
+            diagnostic.source_path = None
+            diagnostic.source_offset = None
+            diagnostic.source_start = None
+            return diagnostic
+        }
+        edit_location :: edit_location_value ?? return diagnostic
+        if edit_location.source_path != location.source_path || edit_location.aggregate_start != location.aggregate_start || edit_location.source_start != location.source_start || edit_location.origin != location.origin {
+            diagnostic.source_path = None
+            diagnostic.source_offset = None
+            diagnostic.source_start = None
+            return diagnostic
+        }
+    }
+    if diagnostic.source_path != None {
+        if diagnostic.source_path != Val(location.source_path) || diagnostic.source_offset != Val(location.aggregate_start) || diagnostic.source_start != Val(location.source_start) {
+            diagnostic.source_path = None
+            diagnostic.source_offset = None
+            diagnostic.source_start = None
+        }
+        return diagnostic
+    }
+    diagnostic_with_source_mapping(diagnostic, location.source_path, location.aggregate_start, location.source_start)
+}
+
+pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) {
+    index := start
+    loop index < diagnostics.len() {
+        diagnostics[index] = sema_diagnostic_with_source_location(diagnostics[index], segments)
+        index += 1
+    }
+}
+
+pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> ?Int {
+    segment_index := 0
+    loop segment_index < segments.len() {
+        segment :: segments[segment_index]
+        if site.start >= segment.generated.start && site.start < segment.generated.end {
+            if segment.line_starts.len() == 0 -> return None
+            local_offset := site.start - segment.generated.start
+            low := 0
+            high := segment.line_starts.len()
+            loop low < high {
+                middle :: (low + high) / 2
+                if segment.line_starts[middle] <= local_offset {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            if low == 0 -> return None
+            return Val(low)
+        }
+        segment_index += 1
+    }
+    None
+}
+
+pub fn sema_error_optional(code: String, span: ?Span, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic_from_registry(code, span, what, why, fix)
+}
+
+pub fn sema_error(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+    sema_error_optional(code, Val(span), what, why, fix)
+}
+
+pub fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic_from_registry(code, Val(span), what, why, fix)
+}
+
+pub fn sema_defined_twice_optional(name: String, why: String, span: ?Span) -> Diagnostic {
+    sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
+}
+
+pub fn sema_already_defined(name: String, span: Span) -> Diagnostic {
+    sema_error(
+        "E0118",
+        span,
+        "the name `{name}` is already taken here",
+        "inside one function, each name refers to exactly one thing",
+        "pick a different name, or assign to the existing one with `{name} = ...`",
+    )
+}
+
+pub fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
+    sema_error("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
+}
+
+pub fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
+    sema_error(
+        "E0107",
+        span,
+        "nothing named `{name}` exists here",
+        "a name must be declared before it's used",
+        "declare it first: `{name} :: ...`",
+    )
+}
+
+pub fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
+    required_name :: type_name(required)
+    offered_name :: type_name(offered)
+    sema_error(
+        "E0108",
+        span,
+        "this needs {required_name}, but the value is {offered_name}",
+        "the value here does not have the type required by this declaration",
+        "use a value of the required type or convert it explicitly",
+    )
+}

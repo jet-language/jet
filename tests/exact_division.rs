@@ -22,13 +22,13 @@ fn comptime_division_keeps_the_same_exact_value_as_runtime() {
     tir_support::assert_tiers_agree(
         "comptime_exact_division",
         r#"
-@ten :: 10
-@third :: @ten / 3
+@TEN :: 10
+@THIRD :: @TEN / 3
 fn run() {
     runtime :: 10 / 3
-    print(@third)
-    print(@third == runtime)
-    print(@third * 3 == 10)
+    print(@THIRD)
+    print(@THIRD == runtime)
+    print(@THIRD * 3 == 10)
 }
 "#,
         "10/3\ntrue\ntrue\n",

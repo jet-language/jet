@@ -1,0 +1,559 @@
+// Driver-owned target selection and dossier construction ported from
+// TargetMachine.rs and Driver::target_machine_for_facts.
+
+fn jet_target_abi_c() -> MirProviderAbi {
+    MirProviderAbi{calling_convention: "C", version: "1"}
+}
+
+fn jet_target_hardware_empty() -> MirTargetHardwareFacts {
+    MirTargetHardwareFacts{
+        svd: None,
+        register_blocks: [MirTargetRegisterBlockFact]{},
+        interrupts: [MirTargetInterruptFact]{},
+        dma_channels: [MirTargetDmaChannelFact]{},
+    }
+}
+
+fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MirLinkerInput, allocator: MirAllocatorPolicy, panic: MirPanicPolicy, mmio: MirMmioPolicy, wall_clock: MirClockPolicy, monotonic_clock: MirClockPolicy, zone_data: MirClockPolicy, sleep: MirClockPolicy, entropy: MirEntropyPolicy, scheduler: MirSchedulerPolicy, byte_sink: MirByteSinkPolicy, startup: MirStartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> MirTargetMachine {
+    layout := jet_target_layout_from_triple(triple, package_version)
+    MirTargetMachine{
+        name: name,
+        triple: triple,
+        layout: layout.facts,
+        no_os: no_os,
+        memory: [MirMemoryRegion]{},
+        linker: linker,
+        allocator: allocator,
+        panic: panic,
+        mmio: mmio,
+        wall_clock: wall_clock,
+        monotonic_clock: monotonic_clock,
+        zone_data: zone_data,
+        sleep: sleep,
+        entropy: entropy,
+        scheduler: scheduler,
+        byte_sink: byte_sink,
+        startup: startup,
+        startup_entry: startup_entry,
+        startup_vectors: startup_vectors,
+        startup_abi: jet_target_abi_c(),
+        startup_placement: startup_placement,
+        hardware: jet_target_hardware_empty(),
+        programmers: [MirTargetProgrammerFacts]{},
+        audit: MirAuditPolicy{build_artifact: true, dossier_lens: true},
+    }
+}
+
+pub fn jet_target_machine_hosted(triple: String, package_version: String) -> MirTargetMachine {
+    jet_target_machine_base(
+        "hosted",
+        triple,
+        false,
+        MirLinkerInput.HostedDefault,
+        MirAllocatorPolicy.HostedDefault,
+        MirPanicPolicy.HostedDefault,
+        MirMmioPolicy.HostedDefault,
+        MirClockPolicy.HostedDefault,
+        MirClockPolicy.HostedDefault,
+        MirClockPolicy.HostedDefault,
+        MirClockPolicy.HostedDefault,
+        MirEntropyPolicy.HostedDefault,
+        MirSchedulerPolicy.HostedDefault,
+        MirByteSinkPolicy.HostedDefault,
+        MirStartupPolicy.HostedDefault,
+        "",
+        "",
+        "",
+        package_version,
+    )
+}
+
+pub fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MirTargetMachine {
+    jet_target_machine_base(
+        name,
+        triple,
+        true,
+        MirLinkerInput.Generated,
+        MirAllocatorPolicy.Unspecified,
+        MirPanicPolicy.Unspecified,
+        MirMmioPolicy.Unspecified,
+        MirClockPolicy.Unspecified,
+        MirClockPolicy.Unspecified,
+        MirClockPolicy.Unspecified,
+        MirClockPolicy.Unspecified,
+        MirEntropyPolicy.Unspecified,
+        MirSchedulerPolicy.Unspecified,
+        MirByteSinkPolicy.Unspecified,
+        MirStartupPolicy.Unspecified,
+        "Reset_Handler",
+        "vectors",
+        ".vectors",
+        package_version,
+    )
+}
+
+fn jet_target_append_u64(bytes: &[U8], value: Int) {
+    index := 0
+    loop index < 8 {
+        bytes.push(U8{(value >> (8 * index)) & 255})
+        index += 1
+    }
+}
+
+fn jet_target_append_frame(bytes: &[U8], label: String, value: String) {
+    jet_target_append_u64(&bytes, label.bytes().len())
+    loop byte in label.bytes() -> bytes.push(byte)
+    jet_target_append_u64(&bytes, value.bytes().len())
+    loop byte in value.bytes() -> bytes.push(byte)
+}
+
+
+fn jet_target_json_hex(value: Int) -> String {
+    if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
+    String.from_bytes([U8{87 + value}]) ?? "0"
+}
+
+fn jet_target_json_quote(value: String) -> String {
+    bytes := value.bytes()
+    output := "\""
+    segment_start := 0
+    index := 0
+    loop index < bytes.len() {
+        byte := Int.from_u8(bytes[index])
+        escape := ""
+        if byte == 34 -> escape = "\\\""
+        else if byte == 92 -> escape = "\\\\"
+        else if byte == 10 -> escape = "\\n"
+        else if byte == 13 -> escape = "\\r"
+        else if byte == 9 -> escape = "\\t"
+        else if byte < 32 -> escape = "\\u00{jet_target_json_hex((byte >> 4) & 15)}{jet_target_json_hex(byte & 15)}"
+        if escape.len() > 0 {
+            if segment_start < index {
+                chunk := String.from_bytes(bytes[segment_start..index]) ?? ""
+                output = "{output}{chunk}"
+            }
+            output = "{output}{escape}"
+            index += 1
+            segment_start = index
+        } else {
+            index += 1
+        }
+    }
+    if segment_start < bytes.len() {
+        chunk := String.from_bytes(bytes[segment_start..bytes.len()]) ?? ""
+        output = "{output}{chunk}"
+    }
+    "{output}\""
+}
+
+fn jet_target_bool_json(value: Bool) -> String {
+    if value -> "true" else -> "false"
+}
+
+fn jet_target_optional_int_json(value: ?Int) -> String {
+    actual :: value ?? return "null"
+    "{actual}"
+}
+
+fn jet_target_optional_string_json(value: ?String) -> String {
+    actual :: value ?? return "null"
+    jet_target_json_quote(actual)
+}
+
+fn jet_target_optional_contract_json(value: ?MirProviderContract) -> String {
+    contract :: value ?? return "null"
+    jet_target_provider_contract_json(contract)
+}
+
+
+fn jet_target_provider_contract_json(value: MirProviderContract) -> String {
+    "{{\"provider\":{jet_target_json_quote(value.provider)},\"sha256\":{jet_target_json_quote(value.sha256)},\"provenance\":{jet_target_json_quote(value.provenance)},\"abi\":{jet_target_abi_json(value.abi)},\"limits\":{jet_target_provider_limits_json(value.limits)}}}"
+}
+
+fn jet_target_abi_json(value: MirProviderAbi) -> String {
+    "{{\"calling_convention\":{jet_target_json_quote(value.calling_convention)},\"version\":{jet_target_json_quote(value.version)}}}"
+}
+
+fn jet_target_provider_limits_json(value: MirProviderLimits) -> String {
+    "{{\"max_request_bytes\":{jet_target_optional_int_json(value.max_request_bytes)},\"max_response_bytes\":{jet_target_optional_int_json(value.max_response_bytes)},\"max_calls\":{jet_target_optional_int_json(value.max_calls)}}}"
+}
+
+fn jet_target_linker_json(value: MirLinkerInput) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .Generated -> "{{\"kind\":\"generated\"}}"
+        .File(path, sha256) -> "{{\"kind\":\"file\",\"path\":{jet_target_json_quote(path)},\"sha256\":{jet_target_json_quote(sha256)}}}"
+    }
+}
+
+fn jet_target_allocator_json(value: MirAllocatorPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+        .Fixed(region, size) -> "{{\"kind\":\"fixed\",\"region\":{jet_target_json_quote(region)},\"size_bytes\":{size.bytes}}}"
+        .Counting(cap) -> "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":{jet_target_optional_byte_size_json(cap)}}}"
+    }
+}
+
+fn jet_target_optional_byte_size_json(value: ?MirByteSize) -> String {
+    size :: value ?? return "null"
+    "{size.bytes}"
+}
+
+fn jet_target_panic_json(value: MirPanicPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .Abort -> "{{\"kind\":\"abort\"}}"
+        .Report(provider) -> "{{\"kind\":\"report\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_clock_json(value: MirClockPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_entropy_json(value: MirEntropyPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_scheduler_json(value: MirSchedulerPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Cooperative(provider) -> "{{\"kind\":\"cooperative\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+        .InterruptDriven(provider) -> "{{\"kind\":\"interrupt-driven\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+        .BoardRuntime(provider) -> "{{\"kind\":\"board-runtime\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_mmio_json(value: MirMmioPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_byte_sink_json(value: MirByteSinkPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(read, write, report) -> "{{\"kind\":\"provider\",\"read\":{jet_target_optional_contract_json(read)},\"write\":{jet_target_optional_contract_json(write)},\"report\":{jet_target_optional_contract_json(report)}}}"
+    }
+}
+
+fn jet_target_byte_sink_component_json(value: MirByteSinkPolicy, component: String) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .None -> "{{\"kind\":\"none\"}}"
+        .Provider(read, write, report) -> {
+            contract := if component == "read" -> read else if component == "write" -> write else -> report
+            "{{\"kind\":\"provider\",\"contract\":{jet_target_optional_contract_json(contract)}}}"
+        }
+    }
+}
+
+fn jet_target_startup_json(value: MirStartupPolicy) -> String {
+    if value == {
+        .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
+        .Unspecified -> "{{\"kind\":\"unspecified\"}}"
+        .Generated(provider) -> "{{\"kind\":\"generated\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
+    }
+}
+
+fn jet_target_register_width_name(value: MirRegisterWidth) -> String {
+    if value == {
+        .U8 -> "u8"
+        .U16 -> "u16"
+        .U32 -> "u32"
+        .U64 -> "u64"
+    }
+}
+
+fn jet_target_register_access_name(value: MirTargetRegisterAccessMode) -> String {
+    if value == {
+        .ReadOnly -> "read-only"
+        .WriteOnly -> "write-only"
+        .ReadWrite -> "read-write"
+    }
+}
+
+fn jet_target_memory_kind_name(value: MirMemoryKind) -> String {
+    if value == {
+        .Flash -> "flash"
+        .Ram -> "ram"
+        .Mmio -> "mmio"
+        .Reserved -> "reserved"
+    }
+}
+
+fn jet_target_memory_access_name(value: MirMemoryAccess) -> String {
+    if value == {
+        .R -> "r"
+        .Rw -> "rw"
+        .Rx -> "rx"
+        .Rwx -> "rwx"
+    }
+}
+
+fn jet_target_memory_json(regions: [MirMemoryRegion]) -> String {
+    rows := [String]{}
+    loop region in regions {
+        rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
+    }
+    "[{rows.join(",")}]"
+}
+
+fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String {
+    svd := "null"
+    if facts.svd != None {
+        provenance :: facts.svd ?? MirSvdProvenance{source: "", sha256: ""}
+        svd = "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
+    }
+    blocks := [String]{}
+    loop block in facts.register_blocks {
+        registers := [String]{}
+        loop register in block.registers {
+            registers.push("{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}")
+        }
+        blocks.push("{{\"name\":{jet_target_json_quote(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":[{registers.join(",")}]}}")
+    }
+    interrupts := [String]{}
+    loop interrupt in facts.interrupts {
+        effects := [String]{}
+        loop effect_name in interrupt.forbidden_effects -> effects.push(jet_target_json_quote(effect_name))
+        interrupts.push("{{\"name\":{jet_target_json_quote(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{jet_target_bool_json(interrupt.bounded)}}}")
+    }
+    channels := [String]{}
+    loop channel in facts.dma_channels {
+        ownership := if channel.ownership == MirTargetDmaOwnership.Borrowed -> "borrowed" else -> "transfer"
+        channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
+    }
+    "{{\"svd\":{svd},\"register_blocks\":[{blocks.join(",")}],\"interrupts\":[{interrupts.join(",")}],\"dma_channels\":[{channels.join(",")}]}}"
+}
+
+fn jet_target_programmer_adapter_name(value: MirTargetProgrammerAdapter) -> String {
+    if value == {
+        .Emulator -> "emulator"
+        .ProbeRs -> "probe-rs"
+        .OpenOcd -> "openocd"
+    }
+}
+
+fn jet_target_programmers_json(programmers: [MirTargetProgrammerFacts]) -> String {
+    rows := [String]{}
+    loop programmer in programmers {
+        config := [String]{}
+        loop value in programmer.config -> config.push(jet_target_json_quote(value))
+        rows.push("{{\"adapter\":{jet_target_json_quote(jet_target_programmer_adapter_name(programmer.adapter))},\"chip\":{jet_target_optional_string_json(programmer.chip)},\"config\":[{config.join(",")}],\"cpu\":{jet_target_optional_string_json(programmer.cpu)},\"executable\":{jet_target_json_quote(programmer.executable)},\"interface\":{jet_target_optional_string_json(programmer.interface)},\"machine\":{jet_target_optional_string_json(programmer.machine)},\"reset\":{jet_target_bool_json(programmer.reset)},\"speed_khz\":{jet_target_optional_int_json(programmer.speed_khz)}}}")
+    }
+    "[{rows.join(",")}]"
+}
+
+fn jet_target_atomic_word_supported(triple: String) -> Bool {
+    triple.starts_with("x86_64-") || triple.starts_with("aarch64-") || triple.starts_with("wasm32-")
+}
+
+fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String {
+    atomic_supported := jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
+    atomic_triple := jet_target_json_quote(machine.triple)
+    io_read := jet_target_byte_sink_component_json(machine.byte_sink, "read")
+    io_write := jet_target_byte_sink_component_json(machine.byte_sink, "write")
+    io_report := jet_target_byte_sink_component_json(machine.byte_sink, "report")
+    panic := jet_target_panic_json(machine.panic)
+    startup := jet_target_startup_json(machine.startup)
+    abi := jet_target_abi_json(machine.startup_abi)
+    facts := [String]{
+        "{{\"capability\":\"Target.Allocator\",\"fact\":{jet_target_allocator_json(machine.allocator)}}}",
+        "{{\"capability\":\"Target.Atomic64\",\"fact\":{{\"triple\":{atomic_triple},\"supported\":{atomic_supported}}}}}",
+        "{{\"capability\":\"Target.MMIO\",\"fact\":{jet_target_mmio_json(machine.mmio)}}}",
+        "{{\"capability\":\"Target.Hardware\",\"fact\":{jet_target_hardware_json(machine.hardware)}}}",
+        "{{\"capability\":\"Time.Wall\",\"fact\":{jet_target_clock_json(machine.wall_clock)}}}",
+        "{{\"capability\":\"Time.Monotonic\",\"fact\":{jet_target_clock_json(machine.monotonic_clock)}}}",
+        "{{\"capability\":\"Time.ZoneData\",\"fact\":{jet_target_clock_json(machine.zone_data)}}}",
+        "{{\"capability\":\"Time.Sleep\",\"fact\":{jet_target_clock_json(machine.sleep)}}}",
+        "{{\"capability\":\"Rand.Entropy\",\"fact\":{jet_target_entropy_json(machine.entropy)}}}",
+        "{{\"capability\":\"Target.Scheduler\",\"fact\":{jet_target_scheduler_json(machine.scheduler)}}}",
+        "{{\"capability\":\"IO.Read\",\"fact\":{io_read}}}",
+        "{{\"capability\":\"IO.Write\",\"fact\":{io_write}}}",
+        "{{\"capability\":\"Panic.Report\",\"fact\":{{\"panic\":{panic},\"sink\":{io_report}}}}}",
+        "{{\"capability\":\"Target.Startup\",\"fact\":{{\"policy\":{startup},\"entry\":{jet_target_json_quote(machine.startup_entry)},\"vectors\":{jet_target_json_quote(machine.startup_vectors)},\"abi\":{abi},\"placement\":{jet_target_json_quote(machine.startup_placement)}}}}}",
+    }
+    "[{facts.join(",")}]"
+}
+fn jet_target_environment_identity(machine: MirTargetMachine) -> String {
+    if machine.no_os -> return "no-os"
+    if machine.triple.contains("wasip") -> return "wasi"
+    if machine.triple == "wasm32-unknown-unknown" -> return "browser"
+    "hosted"
+}
+
+fn jet_target_provider_identity(machine: MirTargetMachine) -> String {
+    bytes := [U8]{}
+    jet_target_append_frame(&bytes, "environment", jet_target_environment_identity(machine))
+    jet_target_append_frame(&bytes, "linker", jet_target_linker_json(machine.linker))
+    jet_target_append_frame(&bytes, "allocator", jet_target_allocator_json(machine.allocator))
+    jet_target_append_frame(&bytes, "panic", jet_target_panic_json(machine.panic))
+    jet_target_append_frame(&bytes, "memory", jet_target_memory_json(machine.memory))
+    jet_target_append_frame(&bytes, "mmio", jet_target_mmio_json(machine.mmio))
+    jet_target_append_frame(&bytes, "time_wall", jet_target_clock_json(machine.wall_clock))
+    jet_target_append_frame(&bytes, "time_monotonic", jet_target_clock_json(machine.monotonic_clock))
+    jet_target_append_frame(&bytes, "time_zone_data", jet_target_clock_json(machine.zone_data))
+    jet_target_append_frame(&bytes, "time_sleep", jet_target_clock_json(machine.sleep))
+    jet_target_append_frame(&bytes, "entropy", jet_target_entropy_json(machine.entropy))
+    jet_target_append_frame(&bytes, "scheduler", jet_target_scheduler_json(machine.scheduler))
+    jet_target_append_frame(&bytes, "byte_sink", jet_target_byte_sink_json(machine.byte_sink))
+    jet_target_append_frame(&bytes, "startup", jet_target_startup_json(machine.startup))
+    jet_target_append_frame(&bytes, "provider_facts", jet_target_provider_facts_json(machine))
+    jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
+    jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
+    jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
+    "target-providers-v1:{mir_sha256_hex_bytes(bytes)}"
+}
+
+fn jet_target_linker_identity(machine: MirTargetMachine) -> String {
+    audit := jet_target_linker_json(machine.linker)
+    kind := if machine.linker == {
+        .HostedDefault -> "hosted-default"
+        .Unspecified -> "unspecified"
+        .Generated -> "generated"
+        .File(_, _) -> "file"
+    }
+    "linker-{kind}-v1:{mir_sha256_hex(audit)}"
+}
+
+fn jet_target_allocator_provides_heap(policy: MirAllocatorPolicy) -> Bool {
+    if policy == {
+        .HostedDefault -> true
+        .Provider(_) -> true
+        .Fixed(_, _) -> true
+        .Counting(_) -> true
+        else -> false
+    }
+}
+
+fn jet_target_max_runtime_layer(machine: MirTargetMachine) -> MirRuntimeLayer {
+    if !machine.no_os -> return MirRuntimeLayer.Std
+    if jet_target_allocator_provides_heap(machine.allocator) -> return MirRuntimeLayer.Alloc
+    MirRuntimeLayer.Core
+}
+
+pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MirTargetMachine {
+    if web_target -> return jet_target_machine_wasm_browser(package_version)
+    if target_triple == "wasm32-wasip2" -> return jet_target_machine_wasm_wasi(package_version)
+    if no_os -> return jet_target_machine_bare_metal("no-os", target_triple, package_version)
+    jet_target_machine_hosted(target_triple, package_version)
+}
+
+fn jet_target_wasm_provider(name: String, implementation: String) -> MirProviderContract {
+    bytes := [U8]{}
+    jet_target_append_frame(&bytes, "provider", name)
+    jet_target_append_frame(&bytes, "implementation", implementation)
+    digest := mir_sha256_hex_bytes(bytes)
+    MirProviderContract{
+        provider: name,
+        sha256: "sha256:{digest}",
+        provenance: "provider:{name}",
+        abi: jet_target_abi_c(),
+        limits: MirProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None},
+    }
+}
+
+fn jet_target_machine_wasm_browser(package_version: String) -> MirTargetMachine {
+    machine := jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
+    machine.name = "wasm.browser"
+    machine.allocator = MirAllocatorPolicy.Provider(jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator"))
+    machine.panic = MirPanicPolicy.Report(jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report"))
+    machine.mmio = MirMmioPolicy.NoMmio
+    machine.wall_clock = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.browser.wall_clock", "wasm-browser-wall"))
+    machine.monotonic_clock = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.browser.monotonic_clock", "wasm-browser-mono"))
+    machine.zone_data = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.browser.zone_data", "wasm-browser-zone"))
+    machine.sleep = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.browser.sleep", "wasm-browser-sleep"))
+    machine.entropy = MirEntropyPolicy.Provider(jet_target_wasm_provider("wasm.browser.entropy", "wasm-browser-entropy"))
+    machine.scheduler = MirSchedulerPolicy.Cooperative(jet_target_wasm_provider("wasm.browser.scheduler", "wasm-browser-scheduler"))
+    machine.byte_sink = MirByteSinkPolicy.Provider(
+        Val(jet_target_wasm_provider("wasm.browser.io_read", "wasm-browser-read")),
+        Val(jet_target_wasm_provider("wasm.browser.io_write", "wasm-browser-write")),
+        Val(jet_target_wasm_provider("wasm.browser.report", "wasm-browser-report")),
+    )
+    machine.startup = MirStartupPolicy.Generated(jet_target_wasm_provider("wasm.browser.startup", "wasm-browser-startup"))
+    machine
+}
+
+fn jet_target_machine_wasm_wasi(package_version: String) -> MirTargetMachine {
+    machine := jet_target_machine_hosted("wasm32-wasip2", package_version)
+    machine.name = "wasm.wasi"
+    machine.allocator = MirAllocatorPolicy.Provider(jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator"))
+    machine.panic = MirPanicPolicy.Report(jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report"))
+    machine.mmio = MirMmioPolicy.NoMmio
+    machine.wall_clock = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.wasi.wall_clock", "wasm-wasi-wall"))
+    machine.monotonic_clock = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.wasi.monotonic_clock", "wasm-wasi-mono"))
+    machine.zone_data = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.wasi.zone_data", "wasm-wasi-zone"))
+    machine.sleep = MirClockPolicy.Provider(jet_target_wasm_provider("wasm.wasi.sleep", "wasm-wasi-sleep"))
+    machine.entropy = MirEntropyPolicy.Provider(jet_target_wasm_provider("wasm.wasi.entropy", "wasm-wasi-entropy"))
+    machine.scheduler = MirSchedulerPolicy.BoardRuntime(jet_target_wasm_provider("wasm.wasi.scheduler", "wasm-wasi-scheduler"))
+    machine.byte_sink = MirByteSinkPolicy.Provider(
+        Val(jet_target_wasm_provider("wasm.wasi.io_read", "wasm-wasi-read")),
+        Val(jet_target_wasm_provider("wasm.wasi.io_write", "wasm-wasi-write")),
+        Val(jet_target_wasm_provider("wasm.wasi.report", "wasm-wasi-report")),
+    )
+    machine.startup = MirStartupPolicy.Generated(jet_target_wasm_provider("wasm.wasi.startup", "wasm-wasi-startup"))
+    machine
+}
+
+
+pub fn jet_target_dossier_for_usage(machine: MirTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MirTargetDossier {
+    closure := jet_ring_classify_prelude_closure(used_core)
+    closure_bytes := [U8]{}
+    layer := MirRuntimeLayer.Core
+    loop row in closure {
+        jet_target_append_frame(&closure_bytes, "api", row.key)
+        jet_target_append_frame(&closure_bytes, "layer", jet_ring_layer_name(row.layer))
+        if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
+    }
+    MirTargetDossier{
+        machine: Val(machine),
+        layer: layer,
+        provider_identity: jet_target_provider_identity(machine),
+        closure_identity: "prelude-closure-v1:{mir_sha256_hex_bytes(closure_bytes)}",
+        linker_identity: jet_target_linker_identity(machine),
+        tier_identity: tier,
+        compiler_identity: compiler_identity,
+        environment_identity: jet_target_environment_identity(machine),
+        dependency_identity: dependency_identity,
+    }
+}
+pub fn jet_target_package_version_from_compiler_identity(identity: String) -> ?String {
+    identity_parts := identity.split("@")
+    if identity_parts.len() != 2 || identity_parts[0].len() == 0 -> return None
+    build_parts := identity_parts[1].split("#")
+    if build_parts.len() != 2 || build_parts[0].len() == 0 -> return None
+    Val(build_parts[0])
+}
+
+pub fn jet_target_active_os_name(target_triple: String, host_os: String) -> String {
+    if target_triple.contains("windows") -> return "Windows"
+    if target_triple.contains("apple") || target_triple.contains("darwin") -> return "MacOS"
+    if target_triple.contains("linux") -> return "Linux"
+    if host_os == "windows" -> return "Windows"
+    if host_os == "macos" -> return "MacOS"
+    "Linux"
+}

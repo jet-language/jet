@@ -1,0 +1,80 @@
+// Compile-time values retained on AST nodes and semantic projections.
+
+pub enum CtFloat {
+    F32(value: Float)
+    F64(value: Float)
+}
+
+pub enum CtValue {
+    Int(value: Int)
+    Float(value: CtFloat)
+    Bool(value: Bool)
+    Char(value: Char)
+    Str(value: String)
+    BigInt(value: String)
+    Bytes(value: [U8])
+    List(values: [CtValue])
+    Map(entries: [CtMapEntry])
+    Struct(type_name: String, fields: [NamedCtValue])
+    Enum(type_name: String, variant: String, args: [CtEnumArg])
+    Present(value: CtValue)
+    Failed(report: CtReport)
+    Unit
+    Closure(value: ClosureData)
+}
+
+pub struct CtMapEntry {
+    pub key: CtKey
+    pub value: CtValue
+}
+
+pub struct NamedCtValue {
+    pub name: String
+    pub value: CtValue
+}
+
+pub struct CtEnumArg {
+    pub label: ?String
+    pub value: CtValue
+}
+
+pub enum CtReport {
+    Clean(ty: Type)
+    Told(value: CtValue)
+}
+
+pub struct ClosureData {
+    pub lambda: Lambda
+    pub captured: [NamedCtValue]
+    pub return_type: ?Type
+    pub opaque: ?CtOpaque
+}
+
+pub struct CtOpaque {
+    pub kind: String
+    pub identity: String
+}
+
+pub enum CtKey {
+    Int(value: Int)
+    Str(value: String)
+    Bool(value: Bool)
+    Char(value: Char)
+    Tuple(fields: [NamedCtKey])
+    Struct(type_name: String, fields: [NamedCtKey])
+    Enum(type_name: String, variant: String)
+}
+
+pub struct NamedCtKey {
+    pub name: String
+    pub value: CtKey
+}
+
+pub enum FailureContract {
+    Default(success: Type, error: Type)
+    Optional(success: Type)
+    DeclaredNever
+    Explicit(success: Type, error: Type)
+    Converted(success: Type, source: Type, target: Type)
+    ProvenUnreachable(success: Type)
+}

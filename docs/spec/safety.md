@@ -1,24 +1,97 @@
 # Safety
 
-Jet keeps memory-unsafe operations behind explicit `#Unsafe("reason")` gates.
-The reason is part of the review record. Generated Rust may use `unsafe` only
-for an approved gate or in a vetted runtime or standard-library internal.
+This specification defines Jet's default safety boundary and its audited
+expert escape. It is for Jet users, library authors, and reviewers. The
+executable spelling lives in [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs);
+sema checks the gate and its obligations in
+[`UnsafeObligations.rs`](../../crates/jet-sema/src/Sema/UnsafeObligations.rs).
+The focused [`unsafe_ratchet` tests](../../tests/unsafe_ratchet.rs), the
+[`golden` safety checks](../../tests/golden.rs), and the
+[`ratchet checker`](../../scripts/agent/check-unsafe-ratchet.mjs) provide the
+repository proof; gated examples live under
+[`examples/features/`](../../examples/features/). Terms such as stream and
+reader follow the [Jet vocabulary](vocabulary.md).
+
+## The audited escape
+
+Safe Jet code cannot perform a raw memory operation, call an unsafe function,
+or cross an unsafe foreign boundary without an enclosing audited gate. Write
+the gate with Pascal-case `Unsafe` and a string reason:
+
+```jet
+cell :: 1
+#Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
+    ptr :: *cell
+    value :: ptr.*
+}
+```
+
+The same contract applies to a whole function:
+
+```jet
+#Unsafe("the foreign ABI preserves the scalar contract") fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+```
+
+The reason belongs to `#Unsafe` itself. Bare `#Unsafe { … }` and
+`#Unsafe fn …` are rejected (E3112). Lowercase `unsafe` is recognized only to
+teach the foreign-spelling diagnostic; it is not Jet syntax. An unsafe function
+body is an audited region, but calling an unsafe function still requires an
+enclosing `#Unsafe` region.
+
+`use core.mem` is the import gate for the low-level memory names. It does not
+replace the audit gate: raw-pointer formation, dereference, address-based
+pointer construction, and volatile access also require `#Unsafe`. The sema
+obligation pass can require `assert valid_ptr, aligned, no_alias` immediately
+after a tracked operation. Those assertions are meaningful only inside the
+gate and are removed before TIR.
+
+Inline `#FFI(c)`, `#FFI(cpp)`, and `#FFI(asm)` bodies require an enclosing
+`#Unsafe("reason")` gate. The same boundary covers foreign calls whose
+signature transfers ownership or exposes raw memory. A package or
+organization policy may forbid unsafe code; a lexical gate cannot raise that
+safety floor. Under a per-site policy, the gate chooses
+`obligations: .Track` or `.Skip` according to the governing policy.
+
+Generated Rust may contain `unsafe` only for an approved audited Jet gate or
+inside vetted runtime, standard-library, and memory-internal implementations.
+The generated code is not a new user escape hatch; the gate and sema proof are
+the source-level authority.
 
 ## Unsafe-region ratchet
 
-The repository records every user-written unsafe region in one baseline. The
-baseline splits regions by crate or package and names each file, position, and
-reason. `scripts/agent/check-unsafe-ratchet.mjs` checks the baseline.
+The repository records every user-written semantic unsafe region in the
+baseline below. Each row records its package, source file, marker position, and
+reason. The JSON data and Markdown tables are one generated registry; do not
+edit either representation by hand.
 
-The check scans semantic `.jet` source forms: block/function
-`#Unsafe("reason")` gates and grouped `#[Unsafe("reason"), …]` function gates.
-It ignores comments, strings, invalid marker placements, and generated FFI
-files under `.jet/bindings/`. A higher count fails with each new region. Use
-`--update` in the same change when the new region is approved. A lower count
-updates the baseline automatically when the change only removes recorded
-regions. A new semantic region cannot hide behind a net shrink. A same-count
-edit that changes a recorded file, position, or reason fails as stale until the
-baseline is refreshed.
+[`check-unsafe-ratchet.mjs`](../../scripts/agent/check-unsafe-ratchet.mjs)
+recursively scans `.jet` files while excluding its configured generated and
+build directories. It recognizes block and whole-function
+`#Unsafe("reason")` gates and grouped
+`#[Unsafe("reason"), …]` function gates. It skips comments, strings, malformed
+or incorrectly placed markers, and generated FFI files below `.jet/bindings/`.
+
+Run the checker without `--update` to compare source with this baseline. A
+larger count fails and reports each unmatched semantic region. When a new
+region is approved, refresh the baseline in the same change with:
+
+```sh
+node scripts/agent/check-unsafe-ratchet.mjs --update
+```
+
+If source removes only recorded regions, the checker lowers and rewrites the
+baseline automatically. A new semantic region cannot hide behind a net
+decrease. A count-preserving edit that changes a recorded file, position, or
+reason is stale and fails until the baseline is refreshed. The
+`unsafe-ratchet` block is intentionally kept byte-stable between such
+refreshes.
+
+The baseline is also consumed by `tests/golden.rs` to identify the audited
+example stems whose generated Rust may contain `unsafe`; both the positive
+gated assertion and the negative assertion for every other example remain
+required.
 
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data

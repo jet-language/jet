@@ -1,0 +1,233 @@
+// Checked field, place, borrow, dereference, and mutation expressions.
+fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind {
+    return if kind == {
+        .Unknown -> {
+            if base == .Map(_, _, _) {
+                return TIndexKind.Map
+            }
+            return TIndexKind.List
+        }
+        .List -> TIndexKind.List
+        .Range -> TIndexKind.Range
+        .FixedListProof -> TIndexKind.FixedListProof
+        .Map -> TIndexKind.Map
+        .Lane(name) -> TIndexKind.Lane(name)
+        .User(name) -> TIndexKind.User(name)
+        .LayoutField(name) -> TIndexKind.LayoutField(name)
+        .Pool -> TIndexKind.Pool
+    }
+}
+
+fn sema_expression_integer_index(value: TExpr, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_expr_is_integer(value.ty) -> return true
+    diagnostics.push(sema_error(
+        "E0505",
+        span,
+        "an index must be an Int, not {type_name(value.ty)}",
+        "indexed storage is addressed by whole-number positions",
+        "use an Int index here",
+    ))
+    false
+}
+fn sema_expression_field_ref(symbol: Symbol, owner: ?SymbolId, fallback_ty: Type) -> TFieldRef {
+    field_ty :: symbol.ty ?? fallback_ty
+    TFieldRef{owner: owner, field: symbol.id, name: symbol.name, ty: field_ty, boxed: false}
+}
+
+fn sema_expression_tuple_field_ref(owner: Type, name: String, ty: Type) -> TFieldRef {
+    owner_name := type_name(owner)
+    field := symbol_id(SymbolKind.Field, "", owner_name, name)
+    TFieldRef{owner: None, field: field, name: name, ty: ty, boxed: false}
+}
+fn sema_expression_incdec(op: IncDecOp, operand: Expr, postfix: Bool, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if !sema_expression_is_place(operand) {
+        diagnostics.push(sema_error("E0213", span, "increment and decrement need a writable place", "the operand is updated in place", "use a mutable local, field, or index"))
+        return None
+    }
+    value :: sema_check_expression(operand, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_expr_is_integer(value.ty) {
+        diagnostics.push(sema_error("E0162", span, "increment and decrement need an integer", "these operators change a whole-number place by one", "use an Int-valued place"))
+        return None
+    }
+    tir_op := if op == IncDecOp.Inc -> TIncDecOp.Inc else -> TIncDecOp.Dec
+    result := sema_tir_expr(value.ty, TExprKind.IncDec(tir_op, TPlace.Expr(value), postfix, value.ty), span)
+    sema_expr_expected(result, expected, environment, &diagnostics)
+}
+fn sema_expression_is_place(expr: Expr) -> Bool {
+    if expr == {
+        .Ident(_, _) -> true
+        .Field(_, _, _) -> true
+        .Index(_, _, _, _) -> true
+        .Slice(_, _, _, _, _, _) -> true
+        .Deref(_, _) -> true
+        .Place(_, _, _) -> true
+        else -> false
+    }
+}
+
+fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if !sema_expression_is_place(value) {
+        nested :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
+        return None
+    }
+    checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    convention := AccessConvention.Read
+    if access == PlaceAccess.Write -> convention = AccessConvention.Write
+    result_ty := checked.ty
+    if checked.kind == {
+        .Slice(_, _, _, _, _) -> {
+            element := Type.Named("Unit")
+            if checked.ty == {
+                .List(value) -> element = value
+                .FixedList(value, _) -> element = value
+                else -> {}
+            }
+            result_ty = Type.Apply(if convention == AccessConvention.Write -> "ViewMut" else -> "View", [element])
+        }
+        else -> {}
+    }
+    result := sema_tir_expr(result_ty, TExprKind.Borrow(checked, convention), span)
+    sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+fn sema_expression_deref(value: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if checked.ty == {
+        .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 {
+                if !sema_expr_require_unsafe("pointer dereference", span, context, &diagnostics) -> return None
+                result := sema_tir_expr(args[0], TExprKind.Deref(checked), span)
+                return sema_expr_expected(result, expected, environment, &diagnostics)
+            }
+        }
+        else -> {}
+    }
+    diagnostics.push(sema_error("E0112", span, "dereference needs a Ptr value", "only a checked pointer carries an element type through `.*`", "use a Ptr<T> value here"))
+    None
+}
+
+fn sema_expression_tuple_field(base: TExpr, member: String, span: Span, diagnostics: &[Diagnostic]) -> ?TExpr {
+    return if base.ty == {
+        .Tuple(fields) -> {
+            index := 0
+            loop index < fields.len() {
+                field :: fields[index]
+                if field.name == member {
+                    reference := sema_expression_tuple_field_ref(base.ty, member, field.ty)
+                    return Val(sema_tir_expr(field.ty, TExprKind.Field(base, reference), span))
+                }
+                index += 1
+            }
+            diagnostics.push(sema_error("E0302", span, "this tuple has no member `{member}`", "field access only works on names declared in the tuple", "use one of the tuple's declared member names"))
+            return None
+        }
+        else -> None
+    }
+}
+
+fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if base.ty == {
+        .Tuple(_) -> {
+            tuple_field :: sema_expression_tuple_field(base, member, span, &diagnostics) ?? return None
+            tuple_owner := type_name(base.ty)
+            tuple_field_id := symbol_id(SymbolKind.Field, "", tuple_owner, member)
+            tuple_field_symbol := Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
+            context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
+            return sema_expr_expected(tuple_field, expected, environment, &diagnostics)
+        }
+        else -> {}
+    }
+    owner_name := ""
+    owner_args := [Type]{}
+    if base.ty == {
+        .Named(name) -> owner_name = name
+        .Apply(name, args) -> {
+            owner_name = name
+            owner_args = args
+        }
+        else -> {}
+    }
+    if owner_name != "" {
+        owner :: sema_expression_type_symbol(scopes, owner_name)
+        if owner != None {
+            owner_symbol :: owner ?? Symbol{id: SymbolId{key: ""}, kind: SymbolKind.Type, name: owner_name, module_name: "", owner: None, span: span, ty: None, visibility: 0}
+            context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
+            declaration :: sema_scope_resolve_declaration(environment, owner_symbol.id)
+            if declaration != None {
+                if declaration == {
+                    .Struct(struct_def) -> {
+                        names := [String]{}
+                        index := 0
+                        loop index < struct_def.type_params.len() {
+                            names.push(struct_def.type_params[index].name)
+                            index += 1
+                        }
+                        index = 0
+                        loop index < struct_def.fields.len() {
+                            field :: struct_def.fields[index]
+                            if field.name == member {
+                                field_ty :: sema_inference_substitute_type(field.ty, names, owner_args)
+                                field_id := symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
+                                field_symbol := Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+                                context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
+                                reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
+                                reference.boxed = sema_scope_environment_boxed_edge(environment, owner_symbol.id, member)
+                                value := sema_tir_expr(field_ty, TExprKind.Field(base, reference), span)
+                                return sema_expr_expected(value, expected, environment, &diagnostics)
+                            }
+                            index += 1
+                        }
+                        diagnostics.push(sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", "use one of the declared field names"))
+                        return None
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
+    None
+}
+
+fn sema_expression_field(base: Expr, member: String, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    probe_scopes := sema_scope_snapshot(scopes)
+    probe_context := sema_check_context_snapshot(context)
+    probe_state := sema_ownership_state_snapshot(state)
+    probe_diagnostics := [Diagnostic]{}
+    probe_tail_store := sema_statement_tail_store_init()
+    probe_base := sema_check_expression(base, None, environment, &probe_scopes, &probe_state, &probe_tail_store, &probe_context, &probe_diagnostics)
+    if probe_base != None {
+        probe_value :: probe_base ?? return None
+        rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
+        if rewritten != None {
+            generated :: rewritten ?? return None
+            checked_generated :: sema_check_expression(generated, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            return Val(checked_generated)
+        }
+    }
+    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
+}
+
+fn sema_expression_optional_field(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    inner_ty :: if checked_base.ty == {
+        .Option(value) -> value
+        else -> {
+            diagnostics.push(sema_error("E0047", member_span, "`?.` needs an optional on the left, but this is `{type_name(checked_base.ty)}`", "optional chaining short-circuits a T? when a link is absent", "use plain `.` here, or make the value optional first"))
+            return None
+        }
+    }
+    inner_base := TExpr{ty: inner_ty, kind: checked_base.kind, span: checked_base.span, integer_bounds: checked_base.integer_bounds, cost: checked_base.cost}
+    checked_field :: sema_expression_field_checked(inner_base, member, span, None, environment, &scopes, &context, &diagnostics) ?? return None
+    field_ty := checked_field.ty
+    result_ty := Type.Option(field_ty)
+    if flatten {
+        if field_ty == .Option(inner) {
+            result_ty = Type.Option(inner)
+        }
+    }
+    value := sema_tir_expr(result_ty, TExprKind.OptField(checked_base, member, flatten), span)
+    sema_expr_expected(value, expected, environment, &diagnostics)
+}

@@ -643,6 +643,7 @@ fn realize_nix(
             },
         ],
         ctx.offline,
+        None,
         crate::Store::current_progress(),
     )
     .map_err(|error| ProviderError::NixCache(error.to_string()))?;
