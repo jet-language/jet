@@ -201,13 +201,13 @@ fn generic_template_snapshot_never_filters_parser_admitted_items() {
 module everything<T> {
     @answer :: 42
     tag Marked { deny: [Net] }
-    trait Show { fn show(self) T }
+    trait Show { fn show(self) -> T }
     struct Boxed { value: T }
     enum Maybe { Empty Value(T) }
-    impl Boxed.Show { fn show(self) T -> { return self.value } }
-    fn id(value: T) T -> { return ~value }
+    impl Boxed.Show { fn show(self) -> T { return self.value } }
+    fn id(value: T) -> T { return ~value }
     module nested { fn nested() {} }
-    module inner<U> { fn inner(value: U) U -> { return ~value } }
+    module inner<U> { fn inner(value: U) -> U { return ~value } }
     module int_inner :: inner<Int>
     #Test("smoke") { expect(@answer == 42) }
     #Test("work") { .measure { assert(@answer == 42) } }

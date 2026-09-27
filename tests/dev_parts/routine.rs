@@ -371,17 +371,17 @@ fn task_surface_runs_resident_with_string_results_and_typed_failures() {
     let source = r#"
 use core.time as time
 
-fn slow_text() String {
+fn slow_text() -> String {
     time.sleep(25ms)
     return "slow"
 }
 
-fn late_text() String {
+fn late_text() -> String {
     time.sleep(1000ms)
     return "late"
 }
 
-fn failure_label(error: TaskFailure) String {
+fn failure_label(error: TaskFailure) -> String {
     if error == {
         .Cancelled -> { return "cancelled" }
         .DeadlineBlown -> { return "deadline" }
@@ -613,7 +613,7 @@ fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
     let file = dir.join("loop_values.jet");
     fs::write(
         &file,
-        r#"fn find(xs: [Int]) Int {
+        r#"fn find(xs: [Int]) -> Int {
     found :: loop {
         loop x in xs {
             if x > 2 -> break(found, x)
@@ -623,7 +623,7 @@ fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
     found
 }
 
-fn outer_result() Int {
+fn outer_result() -> Int {
     result :: loop {
         ignored :: loop {
             break(result, 9)
@@ -633,9 +633,9 @@ fn outer_result() Int {
     result
 }
 
-fn identity(value: Int) Int -> value
+fn identity(value: Int) -> Int -> value
 
-fn nested_binary_exit() Int {
+fn nested_binary_exit() -> Int {
     result :: loop {
         ignored :: (loop {
             break(result, 11)
@@ -646,7 +646,7 @@ fn nested_binary_exit() Int {
     result
 }
 
-fn nested_call_exit() Int {
+fn nested_call_exit() -> Int {
     result :: loop {
         ignored :: identity(loop {
             break(result, 12)
@@ -657,7 +657,7 @@ fn nested_call_exit() Int {
     result
 }
 
-fn nested_condition_exit() Int {
+fn nested_condition_exit() -> Int {
     result :: loop {
         if (loop {
             break(result, 13)
@@ -670,7 +670,7 @@ fn nested_condition_exit() Int {
     result
 }
 
-fn counted_init_exit() Int {
+fn counted_init_exit() -> Int {
     result :: loop {
         loop i := (loop {
             break(result, 14)
@@ -683,7 +683,7 @@ fn counted_init_exit() Int {
     result
 }
 
-fn counted_step_exit() Int {
+fn counted_step_exit() -> Int {
     result :: loop {
         loop i := 0, i < 2 {
             i = (loop {
@@ -696,7 +696,7 @@ fn counted_step_exit() Int {
     result
 }
 
-fn value_if_exit() Int {
+fn value_if_exit() -> Int {
     result :: loop {
         ignored :: if true -> {
             break(result, 16)
@@ -1192,7 +1192,7 @@ fn returned_parameter_view_matches_aot_and_default_dev() {
     let file = dir.join("returned_parameter_view.jet");
     fs::write(
         &file,
-        r#"fn first(left: [Int], right: [Int]) View<Int> {
+        r#"fn first(left: [Int], right: [Int]) -> View<Int> {
     return left[0..1]
 }
 
@@ -1231,7 +1231,7 @@ fn returned_view_field_matches_aot_and_default_dev() {
         &file,
         r#"struct Window { values: View<Int> }
 
-fn window(values: [Int]) Window {
+fn window(values: [Int]) -> Window {
     selected :: values[0..1]
     return Window{ values: selected }
 }
@@ -1274,7 +1274,7 @@ fn nested_returned_view_field_matches_aot_and_default_dev() {
         r#"struct Inner { values: View<Int> }
 struct Outer { inner: Inner }
 
-fn outer(values: [Int]) Outer {
+fn outer(values: [Int]) -> Outer {
     selected :: values[0..1]
     return Outer{ inner: Inner{ values: selected } }
 }
@@ -1319,22 +1319,22 @@ struct Holder { maybe: ?Window }
 struct GenericHolder<T> { value: T, maybe: ?Window }
 struct Node { next: ?Node, values: View<Int> }
 
-fn maybe(values: [Int]) (?Window) {
+fn maybe(values: [Int]) -> (?Window) {
     selected :: values[0..1]
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) Window !String {
+fn result(values: [Int]) -> Window !String {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
 
-fn tuple(values: [Int]) (window: Window, count: Int) {
+fn tuple(values: [Int]) -> (window: Window, count: Int) {
     selected :: values[0..1]
     return (window: Window{ values: selected }, count: 1)
 }
 
-fn node(values: [Int]) Node {
+fn node(values: [Int]) -> Node {
     selected :: values[0..1]
     return Node{ next: None, values: selected }
 }
@@ -1369,7 +1369,7 @@ fn returned_string_view_field_matches_all_execution_tiers() {
         &file,
         r#"struct Parsed { source: String, head: View<str> }
 
-fn parse(source: String) Parsed {
+fn parse(source: String) -> Parsed {
     head :: source.before(":")
     return Parsed{ source: source, head: head }
 }
@@ -1436,17 +1436,17 @@ fn returned_view_trait_method_matches_aot_and_default_dev() {
     fs::write(
         &file,
         r#"trait Select {
-    fn select(self, left: [Int], right: [Int]) View<Int>
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
 }
 
 struct First { marker: Int }
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) View<Int> {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
         return left[0..1]
     }
 }
 
-fn wrapper(selector: First, left: [Int], right: [Int]) View<Int> {
+fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
     return selector.select(left, right)
 }
 
@@ -1483,14 +1483,14 @@ fn aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders() {
 struct Envelope<T> { value: T, marker: Int }
 
 trait Select {
-    fn select(self, left: [Int], right: [Int]) Pair
-    fn optional(self, left: [Int], right: [Int]) (?Pair)
-    fn fallible(self, left: [Int], right: [Int]) Pair !String
-    fn tupled(self, left: [Int], right: [Int]) (pair: Pair, count: Int)
-    fn generic(self, left: [Int], right: [Int]) Envelope<Pair>
+    fn select(self, left: [Int], right: [Int]) -> Pair
+    fn optional(self, left: [Int], right: [Int]) -> (?Pair)
+    fn fallible(self, left: [Int], right: [Int]) -> Pair !String
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
 }
 
-fn wrapper(selector: First, left: [Int], right: [Int]) Pair {
+fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
     return selector.select(left, right)
 }
 
@@ -1507,27 +1507,27 @@ fn run() {
     let implementation = |name: &str| {
         r#"struct $TYPE { marker: Int }
 impl $TYPE.Select {
-    fn select(self, left: [Int], right: [Int]) Pair {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Pair{ left: left_view, right: right_view }
     }
-    fn optional(self, left: [Int], right: [Int]) (?Pair) {
+    fn optional(self, left: [Int], right: [Int]) -> (?Pair) {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Val(Pair{ left: left_view, right: right_view })
     }
-    fn fallible(self, left: [Int], right: [Int]) Pair !String {
+    fn fallible(self, left: [Int], right: [Int]) -> Pair !String {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Ok(Pair{ left: left_view, right: right_view })
     }
-    fn tupled(self, left: [Int], right: [Int]) (pair: Pair, count: Int) {
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return (pair: Pair{ left: left_view, right: right_view }, count: 1)
     }
-    fn generic(self, left: [Int], right: [Int]) Envelope<Pair> {
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Envelope<Pair>{
@@ -2050,7 +2050,7 @@ fn post_contract_failure_matches_aot_under_quick_run() {
     }
     let src = r#"
 #Post(result == 99, "must equal 99")
-fn get() Int {
+fn get() -> Int {
     return 1
 }
 
@@ -2089,8 +2089,8 @@ fn post_contract_success_and_failure_match_on_all_tiers() {
         return;
     }
     let src = r#"
-#[Post(result > 0, "post sees the successful payload")]
-fn counted(value: Int) Int -> {
+#Post(result > 0, "post sees the successful payload")
+fn counted(value: Int) -> Int {
     print("body:{value}")
     if value > 0 {
         return value
@@ -2764,7 +2764,7 @@ fn range_values_run_in_resident_jit_without_fallback() {
         return;
     }
     let unboxed = r#"
-fn identity(band: ^Range) Range {
+fn identity(band: ^Range) -> Range {
     return band
 }
 fn run() {
@@ -2820,7 +2820,7 @@ fn run() {
     );
 
     let src = r#"
-fn identity(band: ^Range) Range {
+fn identity(band: ^Range) -> Range {
     return band
 }
 fn run() {
@@ -2964,7 +2964,7 @@ fn forced_interpreter_preserves_f32_width_like_aot() {
         eprintln!("note: rustc not found; skipping F32 dev differential");
         return;
     }
-    let source = r#"fn pass(value: F32) F32 { return value }
+    let source = r#"fn pass(value: F32) -> F32 { return value }
 fn run() {
     value :: F32{ 16777217.0 }
     one :: F32{ 1.0 }
@@ -3347,7 +3347,7 @@ fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
         return;
     }
     let src = r#"
-module value(n: Int) { pub fn get() Int { return n } }
+module value(n: Int) { pub fn get() -> Int { return n } }
 module three :: value(3)
 module same :: value(3)
 fn run() { print(three.get()); print(same.get()) }
@@ -3379,23 +3379,23 @@ fn generic_user_derive_multi_instantiation_matches_every_execution_tier() {
 derive T.Access {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn make(value: ^@param) @name<@param> {
+    fn make(value: ^@param) -> @name<@param> {
         return @name<@param>{ value: value }
     }
-    fn marker() Int -> 17
-    fn get_value(self) @param -> ~self.value
-    fn type_name(self) String -> T.@name
+    fn marker() -> Int -> 17
+    fn get_value(self) -> @param -> ~self.value
+    fn type_name(self) -> String -> T.@name
 }
 
 derive T.NumericAccess {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn replace(&self, value: ^@param) @param {
+    fn replace(&self, value: ^@param) -> @param {
         self.value = value
         return ~self.value
     }
-    fn plus(self, rhs: @param) @param -> self.value + rhs
-    fn equal_to(self, rhs: @param) Bool -> self.value == rhs
+    fn plus(self, rhs: @param) -> @param -> self.value + rhs
+    fn equal_to(self, rhs: @param) -> Bool -> self.value == rhs
 }
 
 #Access
@@ -3508,7 +3508,7 @@ fn nested_generic_user_derive_reaches_resident_jit() {
 derive T.Access {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) @param -> ~self.value
+    fn get_value(self) -> @param -> ~self.value
 }
 
 #Access
@@ -3517,7 +3517,7 @@ struct Inner<T: Printable> { value: T }
 struct Outer<T: Printable> {
     value: T
 
-    fn read(self) T {
+    fn read(self) -> T {
         inner := Inner<T>{ value: ~self.value }
         return inner.get_value()
     }
@@ -3541,8 +3541,8 @@ fn unused_expanding_generic_body_does_not_expand_jit_worklist() {
 struct Grow<T: Printable> {
     value: T
 
-    fn read(self) T { return ~self.value }
-    fn unused(self) Int {
+    fn read(self) -> T { return ~self.value }
+    fn unused(self) -> Int {
         nested := Grow<[T]>{ value: [~self.value] }
         return nested.unused()
     }
@@ -3575,11 +3575,11 @@ fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     let src = r#"
 module outer<T>(n: Int) {
     module plain {
-        module inner<U> { pub fn total(value: U) Int { return n } }
+        module inner<U> { pub fn total(value: U) -> Int { return n } }
         module closed :: inner<T>
-        pub fn result(value: T) Int { return closed.total(value) }
+        pub fn result(value: T) -> Int { return closed.total(value) }
     }
-    pub fn result(value: T) Int { return plain.result(value) }
+    pub fn result(value: T) -> Int { return plain.result(value) }
 }
 module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }
@@ -3656,15 +3656,15 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose_ok() Float !String {
+fn choose_ok() -> Float !String {
     return Ok(0.25)
 }
 
-fn choose_err() Float !String {
+fn choose_err() -> Float !String {
     return Err("typed boom")
 }
 
-fn forward() Float !String {
+fn forward() -> Float !String {
     value :: choose_ok()
     return Ok(value + 0.25)
 }
@@ -3744,7 +3744,7 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
         return;
     }
     let one_arm_fallthrough = r#"
-fn direct_ok() Int {
+fn direct_ok() -> Int {
     return Ok(7)
 }
 
@@ -3758,7 +3758,7 @@ fn run() {
 }
 "#;
     let nested_fallthrough = r#"
-fn direct_ok() Int {
+fn direct_ok() -> Int {
     return Ok(7)
 }
 
@@ -3775,7 +3775,7 @@ fn run() {
 }
 "#;
     let neither_arm_terminates = r#"
-fn direct_ok() Int {
+fn direct_ok() -> Int {
     return Ok(7)
 }
 
@@ -3790,7 +3790,7 @@ fn run() {
 }
 "#;
     let both_arms_terminate = r#"
-fn direct_ok() Int {
+fn direct_ok() -> Int {
     return Ok(7)
 }
 
@@ -4145,11 +4145,11 @@ fn run() {
             }
             "generator" => {
                 r#"
-fn stopped() Stream<Int> {
+fn stopped() -> Stream<Int> {
     yield 1
     yield 2
 }
-fn closes() Stream<Int> {
+fn closes() -> Stream<Int> {
     yield 3
     return
 }
@@ -4310,7 +4310,7 @@ fn set_first(bytes: &[U8#2]) {
     bytes[0] = 8
 }
 
-fn first(bytes: [U8#2]) U8 {
+fn first(bytes: [U8#2]) -> U8 {
     index :: 0
     return bytes[index]
 }
@@ -4384,7 +4384,7 @@ fn uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path() {
     let source = r#"
 use core.mem
 
-fn outside() Int {
+fn outside() -> Int {
     return 2
 }
 
@@ -4677,15 +4677,15 @@ fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
     // 7 this block asks for. Both spellings move; not one expected value does.
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
-fn i8_id(value: I8) I8 { return value }
-fn i16_id(value: I16) I16 { return value }
-fn i32_id(value: I32) I32 { return value }
-fn i64_id(value: I64) I64 { return value }
-fn u8_id(value: U8) U8 { return value }
-fn u16_id(value: U16) U16 { return value }
-fn u32_id(value: U32) U32 { return value }
-fn u64_id(value: U64) U64 { return value }
-fn pass_u64(value: ?U64) (?U64) { return ~value }
+fn i8_id(value: I8) -> I8 { return value }
+fn i16_id(value: I16) -> I16 { return value }
+fn i32_id(value: I32) -> I32 { return value }
+fn i64_id(value: I64) -> I64 { return value }
+fn u8_id(value: U8) -> U8 { return value }
+fn u16_id(value: U16) -> U16 { return value }
+fn u32_id(value: U32) -> U32 { return value }
+fn u64_id(value: U64) -> U64 { return value }
+fn pass_u64(value: ?U64) -> (?U64) { return ~value }
 
 fn run() {
     print(i8_id(I8{-8}))
@@ -4881,7 +4881,7 @@ fn fixed_width_signed_remainder_overflow_traps_across_tiers() {
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
-fn remainder(value: I8, divisor: I8) I8 {
+fn remainder(value: I8, divisor: I8) -> I8 {
     return value % divisor
 }
 
@@ -4956,7 +4956,7 @@ fn fixed_width_and_plain_int_remainder_zero_traps_across_tiers() {
         (
             "fixed_width",
             r#"
-fn remainder(value: I8, divisor: I8) I8 {
+fn remainder(value: I8, divisor: I8) -> I8 {
     return value % divisor
 }
 
@@ -4968,7 +4968,7 @@ fn run() {
         (
             "plain_int",
             r#"
-fn remainder(value: Int, divisor: Int) Int {
+fn remainder(value: Int, divisor: Int) -> Int {
     return value % divisor
 }
 
@@ -5415,7 +5415,7 @@ fn resident_jit_1991_dead_edge_zero_passes_the_verifier() {
     Empty
 }
 
-fn area(s: Shape) Float {
+fn area(s: Shape) -> Float {
     return if s == {
         .Circle(r) -> r * r
         .Square(side) -> side * side
@@ -5895,7 +5895,7 @@ fn run() {
 #[test]
 fn cranelift_wait_failures_recover_as_typed_task_failures() {
     let join_cancelled = r#"use core.time as time
-fn failure_label(error: TaskFailure) String {
+fn failure_label(error: TaskFailure) -> String {
     if error == {
         .Cancelled -> { return "cancelled" }
         .DeadlineBlown -> { return "deadline" }
@@ -5978,7 +5978,7 @@ fn cranelift_covers_let_and_if() {
 #[test]
 fn cranelift_covers_function_calls() {
     assert_cranelift_matches_interpreter(
-        "fn double(n: Int) Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
+        "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
         "calls",
     );
 }
@@ -5991,8 +5991,8 @@ enum Shape {
     Circle(Float)
     Rect(left_1: Float, right_1: Float)
 }
-fn area(Circle(r: Float)) Float { return r * r }
-fn area(Rect(left_1: Float, right_1: Float)) Float { return left_1 * right_1 }
+fn area(Circle(r: Float)) -> Float { return r * r }
+fn area(Rect(left_1: Float, right_1: Float)) -> Float { return left_1 * right_1 }
 fn run() {
     print(area(Shape.Circle(3.0)))
     print(area(.Rect{ left_1: 2.0, right_1: 4.0 }))
@@ -6088,7 +6088,7 @@ fn multi_head_payload_range_checks_each_slot_across_runtime_tiers() {
     Values(left: Int, right: Int)
     Empty
 }
-fn classify(pair: Pair) String {
+fn classify(pair: Pair) -> String {
     if pair == {
         .Values(_, 10..19) -> { return "range" }
         .Values(_, _) -> { return "other" }
@@ -6467,7 +6467,7 @@ fn front_end_errors_surface_in_dev_iteration() {
     // Write a broken program to a temp file.
     let dir = std::env::temp_dir();
     let file = dir.join("jet_dev_broken.jet");
-    fs::write(&file, "fn run() {\n    print(nope);\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(nope)\n}\n").unwrap();
     let shown = file.to_string_lossy().to_string();
     match dev_iteration(&shown, false, true) {
         RunOutcome::Problems(diags) => {
@@ -6488,7 +6488,7 @@ fn front_end_errors_surface_in_dev_iteration() {
 fn body_only_edit_is_type_stable() {
     let old = bundle_of(STRUCT_OLD, "stable_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n}\nfn f(p: P) Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P{x: 2}))\n}\n",
+        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P{x: 2}))\n}\n",
         "stable_new",
     );
     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
@@ -6504,7 +6504,7 @@ fn body_only_edit_is_type_stable() {
 fn struct_field_change_emits_e2210() {
     let old = bundle_of(STRUCT_OLD, "field_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1, y: 2}))\n}\n",
+        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1, y: 2}))\n}\n",
         "field_new",
     );
     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
@@ -6530,11 +6530,11 @@ fn struct_field_change_emits_e2210() {
 #[test]
 fn fn_signature_change_emits_e2210() {
     let old = bundle_of(
-        "fn g(a: Int) Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) -> Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_old",
     );
     let new = bundle_of(
-        "fn g(a: Int) Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_new",
     );
     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
@@ -6640,14 +6640,14 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) DataTree {
+    fn encode(self) -> DataTree {
         m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ![FieldError] {
+    fn decode(tree: DataTree) -> Email ![FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
@@ -7111,13 +7111,13 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     let file = dir.join("mixed.jet");
     fs::write(
         &file,
-        r#"#Memo fn cached(n: Int) Int -[]> n * 2
+        r#"#Memo fn cached(n: Int) -[]> Int -> n * 2
 
-fn add1(n: Int) Int {
+fn add1(n: Int) -> Int {
     return n + 1
 }
 
-fn native_sum() Int {
+fn native_sum() -> Int {
     doubled :: [add1(40), add1(1)]
     [a, b] :: doubled
     return a + b

@@ -122,18 +122,18 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("left.jet"),
-        "fn helper() { print(\"left\"); }\npub fn same() { helper(); }\n",
+        "fn helper() { print(\"left\") }\npub fn same() { helper() }\n",
     )
     .unwrap();
     fs::write(
         root.join("right.jet"),
-        "fn helper() {}\npub fn same() { helper(); }\n",
+        "fn helper() {}\npub fn same() { helper() }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
     fs::write(
         &entry,
-        "use \"./left\" as left\nuse \"./right\" as right\nfn clean() -[]> { right.same(); }\nfn run() { clean(); left.same(); }\n",
+        "use \"./left\" as left\nuse \"./right\" as right\nfn clean() -[]> { right.same() }\nfn run() { clean(); left.same() }\n",
     )
     .unwrap();
 
@@ -153,8 +153,8 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
 #[test]
 fn dynamic_trait_calls_use_the_declared_dispatch_row() {
     let source = r#"
-trait Shape { fn area(self) Int -[IO]>; }
-fn clean(shape: Shape) Int -[]> { return shape.area(); }
+trait Shape { fn area(self) -[IO]> Int }
+fn clean(shape: Shape) -[]> Int { return shape.area() }
 fn run() {}
 "#;
     let root = common::unique_tmp("jet_trait_dispatch_effect");
@@ -262,9 +262,9 @@ fn authority_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
     #FX(IO) {
-        print("inside");
+        print("inside")
     }
-    print("outside");
+    print("outside")
 }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
@@ -422,22 +422,22 @@ fn run() {
 #[test]
 fn effect_annotations_are_erased() {
     let annotated = r#"
-trait Shape { fn area(self) Int -[]>; }
+trait Shape { fn area(self) -[]> Int }
 struct Square { side: Int }
-impl Square.Shape { fn area(self) Int { return self.side * self.side; } }
-fn sq(n: Int) Int -[]> { return n * n; }
-fn load(p: String) -[IO]> { print(p); }
-fn invoke(n: Int) -[IO]> { load("{sq(n)}"); }
-fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2); }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
+fn sq(n: Int) -[]> Int { return n * n }
+fn load(p: String) -[IO]> { print(p) }
+fn invoke(n: Int) -[IO]> { load("{sq(n)}") }
+fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2) }
 "#;
     let plain = r#"
-trait Shape { fn area(self) Int; }
+trait Shape { fn area(self) -> Int }
 struct Square { side: Int }
-impl Square.Shape { fn area(self) Int { return self.side * self.side; } }
-fn sq(n: Int) Int { return n * n; }
-fn load(p: String) { print(p); }
-fn invoke(n: Int) { load("{sq(n)}"); }
-fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2); }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
+fn sq(n: Int) -> Int { return n * n }
+fn load(p: String) { print(p) }
+fn invoke(n: Int) { load("{sq(n)}") }
+fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2) }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -452,7 +452,7 @@ fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2); }
 #[test]
 fn panic_prohibition_is_e0749_with_three_exits() {
     let src = r#"
-fn parse_port(raw: String) Int -[!Panic]> {
+fn parse_port(raw: String) -[!Panic]> Int {
     return Int.parse(raw) ?? panic("bad port")
 }
 fn run() { print(parse_port("8080")) }
@@ -506,7 +506,7 @@ fn run() { top() }
 fn fixed_list_refinement_discharges_panic_denial() {
     let src = r#"
 Die :: distinct Int(1..6)
-fn pick(faces: [String#6], roll: Die) String -[!Panic]> ~faces[roll.raw() - 1]
+fn pick(faces: [String#6], roll: Die) -[!Panic]> String -> ~faces[roll.raw() - 1]
 fn run() {}
 "#;
     assert!(
@@ -536,10 +536,10 @@ fn unknown_panic_effect_name_is_e0119_only() {
 fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) String -[FS]> {
-    return fs.read(~path) ?? "";
+fn load(path: String) -[FS]> String {
+    return fs.read(~path) ?? ""
 }
-fn run() { print(load("x")); }
+fn run() { print(load("x")) }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -553,10 +553,10 @@ fn run() { print(load("x")); }
 fn out_of_set_effect_is_e0740() {
     let src = r#"
 use core.files as fs
-fn load(path: String) String -[Net]> {
-    return fs.read(path) ?? "";
+fn load(path: String) -[Net]> String {
+    return fs.read(path) ?? ""
 }
-fn run() { print(load("x")); }
+fn run() { print(load("x")) }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0740"),
@@ -571,9 +571,9 @@ fn run() { print(load("x")); }
 fn effects_propagate_transitively() {
     let src = r#"
 use core.files as fs
-fn helper(p: String) String { return fs.read(p) ?? ""; }
-fn load(path: String) String -[Net]> { return helper(path); }
-fn run() { print(load("x")); }
+fn helper(p: String) -> String { return fs.read(p) ?? "" }
+fn load(path: String) -[Net]> String { return helper(path) }
+fn run() { print(load("x")) }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0740"),
@@ -587,10 +587,10 @@ fn run() { print(load("x")); }
 fn wider_bound_than_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) String -[FS, Net]> {
-    return fs.read(~path) ?? "";
+fn load(path: String) -[FS, Net]> String {
+    return fs.read(~path) ?? ""
 }
-fn run() { print(load("x")); }
+fn run() { print(load("x")) }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -603,8 +603,8 @@ fn run() { print(load("x")); }
 #[test]
 fn io_effect_from_print_ok() {
     let src = r#"
-fn announce(n: Int) -[IO]> { print("{n}"); }
-fn run() { announce(1); }
+fn announce(n: Int) -[IO]> { print("{n}") }
+fn run() { announce(1) }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -618,8 +618,8 @@ fn run() { announce(1); }
 fn unannotated_function_never_trips_e0740() {
     let src = r#"
 use core.files as fs
-fn load(path: String) String { return fs.read(path) ?? ""; }
-fn run() { print(load("x")); }
+fn load(path: String) -> String { return fs.read(path) ?? "" }
+fn run() { print(load("x")) }
 "#;
     assert!(
         !codes(src).iter().any(|c| c == "E0740"),
@@ -632,8 +632,8 @@ fn run() { print(load("x")); }
 #[test]
 fn retired_effect_marker_is_e0066() {
     let src = r#"
-fn calc() #(FS) -> Int { return 1; }
-fn run() { print(calc()); }
+fn calc() #(FS) -> Int { return 1 }
+fn run() { print(calc()) }
 "#;
     assert_eq!(codes(src), vec!["E0066"]);
 }
@@ -643,12 +643,12 @@ fn run() { print(calc()); }
 fn trait_impl_exceeding_bound_is_e0742() {
     let src = r#"
 use core.files as fs
-trait Hasher { fn hash(self) Int -[]>; }
+trait Hasher { fn hash(self) -[]> Int }
 struct Doc { path: String }
 impl Doc.Hasher {
-    fn hash(self) Int { body :: fs.read(self.path) ?? ""; return body.len(); }
+    fn hash(self) -> Int { body :: fs.read(self.path) ?? ""; return body.len() }
 }
-fn run() { d :: Doc{ path: "x" }; print(d.hash()); }
+fn run() { d :: Doc{ path: "x" }; print(d.hash()) }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0742"),
@@ -661,12 +661,12 @@ fn run() { d :: Doc{ path: "x" }; print(d.hash()); }
 #[test]
 fn trait_impl_within_bound_ok() {
     let src = r#"
-trait Shape { fn area(self) Int -[]>; }
+trait Shape { fn area(self) -[]> Int }
 struct Square { side: Int }
 impl Square.Shape {
-    fn area(self) Int { return self.side * self.side; }
+    fn area(self) -> Int { return self.side * self.side }
 }
-fn run() { s :: Square{ side: 5 }; print("{s.area()}"); }
+fn run() { s :: Square{ side: 5 }; print("{s.area()}") }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -681,10 +681,10 @@ fn run() { s :: Square{ side: 5 }; print("{s.area()}"); }
 fn named_callback_flows_through_to_caller() {
     let src = r#"
 use core.files as fs
-fn readit() String { return fs.read("x") ?? ""; }
-fn apply(f: fn() String) String { return f(); }
-fn caller() String -[Net]> { return apply(readit); }
-fn run() { print(caller()); }
+fn readit() -> String { return fs.read("x") ?? "" }
+fn apply(f: fn() -> String) -> String { return f() }
+fn caller() -[Net]> String { return apply(readit) }
+fn run() { print(caller()) }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0740"),
@@ -699,11 +699,11 @@ fn run() { print(caller()); }
 fn lambda_callback_flows_into_region() {
     let src = r#"
 use core.files as fs
-fn apply(f: fn() String) String { return f(); }
+fn apply(f: fn() -> String) -> String { return f() }
 fn run() {
     #FX(Net) {
-        r :: apply(() -> fs.read("x") ?? "");
-        print(r);
+        r :: apply(() -> fs.read("x") ?? "")
+        print(r)
     }
 }
 "#;
@@ -718,10 +718,10 @@ fn run() {
 #[test]
 fn pure_callback_flows_nothing() {
     let src = r#"
-fn inc(n: Int) Int { return n + 1; }
-fn apply(f: fn(Int) Int, x: Int) Int { return f(x); }
-fn caller() -[IO]> { print("{apply(inc, 1)}"); }
-fn run() { caller(); }
+fn inc(n: Int) -> Int { return n + 1 }
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x) }
+fn caller() -[IO]> { print("{apply(inc, 1)}") }
+fn run() { caller() }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -737,8 +737,8 @@ fn run() { caller(); }
 fn pure_fn_with_core_effect_is_e3401() {
     let src = r#"
 use core.files as fs
-fn readit(p: String) String -[]> { return fs.read(p) ?? ""; }
-fn run() { print(readit("x")); }
+fn readit(p: String) -[]> String { return fs.read(p) ?? "" }
+fn run() { print(readit("x")) }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E3401"),
@@ -751,10 +751,10 @@ fn run() { print(readit("x")); }
 #[test]
 fn authority_region_within_set_ok() {
     let src = r#"
-fn announce(n: Int) -[IO]> { print("{n}"); }
+fn announce(n: Int) -[IO]> { print("{n}") }
 fn run() {
     #FX(IO) {
-        announce(1);
+        announce(1)
     }
 }
 "#;
@@ -772,8 +772,8 @@ fn authority_region_out_of_set_is_e0712() {
 use core.files as fs
 fn run() {
     #FX(Net) {
-        text :: fs.read("x") ?? "";
-        print(text);
+        text :: fs.read("x") ?? ""
+        print(text)
     }
 }
 "#;
@@ -790,11 +790,11 @@ fn run() {
 fn authority_region_transitive_is_e0712() {
     let src = r#"
 use core.files as fs
-fn helper(p: String) String { return fs.read(p) ?? ""; }
+fn helper(p: String) -> String { return fs.read(p) ?? "" }
 fn run() {
     #FX(IO) {
-        text :: helper("x");
-        print(text);
+        text :: helper("x")
+        print(text)
     }
 }
 "#;
@@ -809,8 +809,8 @@ fn run() {
 #[test]
 fn unknown_effect_name_is_e0119_only() {
     let src = r#"
-fn work() -[Bogus]> { print("hi"); }
-fn run() { work(); }
+fn work() -[Bogus]> { print("hi") }
+fn run() { work() }
 "#;
     let c = codes(src);
     assert!(
@@ -884,7 +884,7 @@ fn effect_declaration_requires_a_leaf() {
 fn declared_effect_leaf_checks_enum_and_trait_type_surfaces() {
     for source in [
         "effect Log.Audit\nenum Callback { One(fn() -[Log.Aduut]>) }\nfn run() {}\n",
-        "effect Log.Audit\ntrait Callback { fn get(self) fn() -[Log.Aduut]>; }\nfn run() {}\n",
+        "effect Log.Audit\ntrait Callback { fn get(self) -> fn() -[Log.Aduut]> }\nfn run() {}\n",
     ] {
         let diagnostics =
             jet::compile(source).expect_err("an effect typo in a nested type must fail");
@@ -961,8 +961,8 @@ fn grant_within_set_ok() {
 use core.files as fs
 fn run() {
     #FX(authority: FS, IO) {
-        text :: fs.read("x") ?? "";
-        print(text);
+        text :: fs.read("x") ?? ""
+        print(text)
     }
 }
 "#;
@@ -999,8 +999,8 @@ fn grant_out_of_set_is_e0712() {
 use core.files as fs
 fn run() {
     #FX(authority: Net) {
-        text :: fs.read("x") ?? "";
-        print(text);
+        text :: fs.read("x") ?? ""
+        print(text)
     }
 }
 "#;
@@ -1017,11 +1017,11 @@ fn run() {
 fn grant_transitive_is_e0712() {
     let src = r#"
 use core.files as fs
-fn helper(p: String) String { return fs.read(p) ?? ""; }
+fn helper(p: String) -> String { return fs.read(p) ?? "" }
 fn run() {
     #FX(authority: IO) {
-        text :: helper("x");
-        print(text);
+        text :: helper("x")
+        print(text)
     }
 }
 "#;
@@ -1039,8 +1039,8 @@ fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn run() {
     #FX(authority: IO) {
-        alias :: authority;
-        print("hi");
+        alias :: authority
+        print("hi")
     }
 }
 "#;
@@ -1058,7 +1058,7 @@ fn grant_unused_handle_ok() {
     let src = r#"
 fn run() {
     #FX(authority: IO) {
-        print("granted");
+        print("granted")
     }
 }
 "#;
@@ -1076,7 +1076,7 @@ fn grant_unknown_effect_is_e0119() {
     let src = r#"
 fn run() {
     #FX(authority: Bogus) {
-        print("hi");
+        print("hi")
     }
 }
 "#;
@@ -1101,9 +1101,9 @@ fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
     #FX(authority: IO) {
-        print("inside");
+        print("inside")
     }
-    print("outside");
+    print("outside")
 }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
@@ -1137,16 +1137,16 @@ fn grant_lowers_like_authority_region() {
     let granted = r#"
 fn run() {
     #FX(authority: IO) {
-        print("a");
-        print("b");
+        print("a")
+        print("b")
     }
 }
 "#;
     let bare = r#"
 fn run() {
     #FX(IO) {
-        print("a");
-        print("b");
+        print("a")
+        print("b")
     }
 }
 "#;
@@ -1168,8 +1168,8 @@ fn transact_irreversible_fs_is_e0746() {
 use core.files as fs
 fn run() {
     #Transact(tx) {
-        text :: fs.read("x") ?? "";
-        print(text);
+        text :: fs.read("x") ?? ""
+        print(text)
     }
 }
 "#;
@@ -1188,8 +1188,8 @@ use core.http as http
 use core.http.server as server
 fn run() {
     #Transact(tx) {
-        r :: http.get("http://x") ?? server.response(200, "");
-        print(r);
+        r :: http.get("http://x") ?? server.response(200, "")
+        print(r)
     }
 }
 "#;
@@ -1206,7 +1206,7 @@ fn run() {
 fn transact_ffi_without_undo_is_e0746() {
     let src = r#"
 extern rust "std" {
-    fn mutate(left: Int, right: Int) Int = "std::cmp::max"
+    fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
 }
 fn run() {
     #Transact(tx) {
@@ -1227,7 +1227,7 @@ fn run() {
 fn transact_ffi_with_undo_registers_rollback_hook() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
 }
 fn undo_mutate(left: Int, right: Int) { print(left + right) }
 fn run() {
@@ -1253,7 +1253,7 @@ fn run() {
 fn transact_ffi_undo_rejects_parameter_type_mismatch() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
 }
 fn undo_mutate(left: String, right: Int) {}
 fn run() {}
@@ -1265,9 +1265,9 @@ fn run() {}
 fn transact_ffi_undo_rejects_non_unit_return() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
 }
-fn undo_mutate(left: Int, right: Int) Int { return 0 }
+fn undo_mutate(left: Int, right: Int) -> Int { return 0 }
 fn run() {}
 "#;
     assert!(codes(src).iter().any(|code| code == "E0113"));
@@ -1285,19 +1285,19 @@ fn transact_inline_ffi_undo_runs_and_unwinds_lifo() {
 enum Failed { Bad }
 
 #[Unsafe("the scalar ABI contract matches the C definition"), FFI(c), Undo(undo_first)]
-fn mutate_first(value: Int) Int {
+fn mutate_first(value: Int) -> Int {
     """int64_t mutate_first(int64_t value) { return value; }"""
 }
 
 #[Unsafe("the scalar ABI contract matches the C definition"), FFI(c), Undo(undo_second)]
-fn mutate_second(value: Int) Int {
+fn mutate_second(value: Int) -> Int {
     """int64_t mutate_second(int64_t value) { return value; }"""
 }
 
 fn undo_first(value: Int) { print("first") }
 fn undo_second(value: Int) { print("second") }
 
-fn change() Int !Failed {
+fn change() -> Int !Failed {
     #Transact(tx) {
         #Unsafe("call the audited inline C contract") {
             mutate_first(1)
@@ -1348,7 +1348,7 @@ fn cross_module_foreign_undo_bindings_keep_distinct_identities() {
         root.join("left.jet"),
         r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(value: Int) Int = "std::convert::identity"
+    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("left") }
 pub fn exercise() {
@@ -1364,7 +1364,7 @@ pub fn exercise() {
         root.join("right.jet"),
         r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(value: Int) Int = "std::convert::identity"
+    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("right") }
 pub fn exercise() {
@@ -1429,7 +1429,7 @@ fn shared_foreign_undo_rejects_ambiguous_owners() {
         r#"
 use c.shared as ffi
 #Import module c.shared {
-    #Undo(undo_mutate) fn mutate(value: Int) Int = "mutate"
+    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "mutate"
 }
 fn undo_mutate(value: Int) { print(value) }
 "#,
@@ -1473,7 +1473,7 @@ fn transact_ffi_interpreter_reports_unsupported_diagnostic() {
     let path = dir.join("main.jet");
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
 }
 fn undo_mutate(left: Int, right: Int) { print(left + right) }
 fn run() {
@@ -1503,7 +1503,7 @@ fn transact_reversible_io_ok() {
     let src = r#"
 fn run() {
     #Transact(tx) {
-        print("reversible work");
+        print("reversible work")
     }
 }
 "#;
@@ -1522,10 +1522,10 @@ fn transact_fs_in_on_commit_ok() {
 use core.files as fs
 fn run() {
     #Transact(tx) {
-        print("reversible work");
+        print("reversible work")
         tx.on_commit(() -> {
-            fs.write("x", "done") ?? panic("write failed");
-        });
+            fs.write("x", "done") ?? panic("write failed")
+        })
     }
 }
 "#;
@@ -1542,7 +1542,7 @@ fn transact_on_commit_needs_zero_param_lambda() {
     let src = r#"
 fn run() {
     #Transact(tx) {
-        tx.on_commit((n: Int) -> { print("{n}"); });
+        tx.on_commit((n: Int) -> { print("{n}") })
     }
 }
 "#;
@@ -1560,8 +1560,8 @@ fn transact_generates_no_unsafe() {
     let src = r#"
 fn run() {
     #Transact(tx) {
-        print("work");
-        tx.on_commit(() -> { print("hook"); });
+        print("work")
+        tx.on_commit(() -> { print("hook") })
     }
 }
 "#;
@@ -1592,8 +1592,8 @@ fn transact_on_rollback_ok() {
     let src = r#"
 fn run() {
     #Transact(tx) {
-        print("work");
-        tx.on_rollback(() -> { print("undo"); });
+        print("work")
+        tx.on_rollback(() -> { print("undo") })
     }
 }
 "#;
@@ -1617,7 +1617,7 @@ fn transact_on_rollback_needs_zero_param_lambda() {
     let src = r#"
 fn run() {
     #Transact(tx) {
-        tx.on_rollback((n: Int) -> { print("{n}"); });
+        tx.on_rollback((n: Int) -> { print("{n}") })
     }
 }
 "#;
@@ -1635,15 +1635,15 @@ fn run() {
 fn transact_auto_snapshot_mutated_value() {
     let src = r#"
 enum Fail { Bad }
-fn transfer(from: &Int, to: &Int, amount: Int) Int !Fail {
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int !Fail {
     #Transact(tx) {
-        from -= amount;
-        to += amount;
+        from -= amount
+        to += amount
         if amount > 100 {
-            return Err(Fail.Bad);
+            return Err(Fail.Bad)
         }
     }
-    return Ok(amount);
+    return Ok(amount)
 }
 fn run() {
     a := 100
@@ -1676,14 +1676,14 @@ fn run() {
 fn transact_auto_snapshot_unsafe_only_in_prelude() {
     let src = r#"
 enum Fail { Bad }
-fn bump(x: &Int) Int !Fail {
+fn bump(x: &Int) -> Int !Fail {
     #Transact(tx) {
-        x += 1;
-        return Err(Fail.Bad);
+        x += 1
+        return Err(Fail.Bad)
     }
-    return Ok(0);
+    return Ok(0)
 }
-fn run() { a := 0; n :: bump(&a) ?? (-1); print("{n}"); }
+fn run() { a := 0; n :: bump(&a) ?? (-1); print("{n}") }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     assert!(
@@ -1706,7 +1706,7 @@ fn transact_bare_no_handle_ok() {
     let src = r#"
 fn run() {
     #Transact {
-        print("bare transaction");
+        print("bare transaction")
     }
 }
 "#;
@@ -1725,11 +1725,11 @@ fn run() {
 #[test]
 fn callback_pure_bound_pure_arg_ok() {
     let src = r#"
-fn transform(items: [Int], f: fn(Int) Int -[]>) [Int] {
-    return items.map((x) -> f(x)).to_list();
+fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
+    return items.map((x) -> f(x)).to_list()
 }
-fn inc(n: Int) Int -[]> { return n + 1; }
-fn run() { print("{transform([1, 2], inc)}"); }
+fn inc(n: Int) -[]> Int { return n + 1 }
+fn run() { print("{transform([1, 2], inc)}") }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -1742,11 +1742,11 @@ fn run() { print("{transform([1, 2], inc)}"); }
 #[test]
 fn callback_pure_bound_impure_arg_is_e0747() {
     let src = r#"
-fn transform(items: [Int], f: fn(Int) Int -[]>) [Int] {
-    return items.map((x) -> f(x)).to_list();
+fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
+    return items.map((x) -> f(x)).to_list()
 }
-fn noisy(n: Int) Int { print("{n}"); return n; }
-fn run() { print("{transform([1, 2], noisy)}"); }
+fn noisy(n: Int) -> Int { print("{n}"); return n }
+fn run() { print("{transform([1, 2], noisy)}") }
 "#;
     assert_eq!(
         codes(src),
@@ -1760,10 +1760,10 @@ fn run() { print("{transform([1, 2], noisy)}"); }
 fn callback_set_bound_within_ok() {
     let src = r#"
 fn invoke(n: Int, act: fn(Int) -[IO]>) {
-    act(n);
+    act(n)
 }
-fn show(n: Int) { print("{n}"); }
-fn run() { invoke(5, show); }
+fn show(n: Int) { print("{n}") }
+fn run() { invoke(5, show) }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -1779,10 +1779,10 @@ fn callback_set_bound_exceeded_is_e0747() {
     let src = r#"
 use core.files as fs
 fn invoke(p: String, act: fn(String) -[IO]>) {
-    act(p);
+    act(p)
 }
-fn read_it(p: String) { x :: fs.read(~p) ?? ""; print("{x}"); }
-fn run() { invoke("f.txt", read_it); }
+fn read_it(p: String) { x :: fs.read(~p) ?? ""; print("{x}") }
+fn run() { invoke("f.txt", read_it) }
 "#;
     assert_eq!(
         codes(src),
@@ -1795,9 +1795,9 @@ fn run() { invoke("f.txt", read_it); }
 #[test]
 fn callback_bound_unknown_effect_is_e0119() {
     let src = r#"
-fn invoke(n: Int, act: fn(Int) -[Nope]>) { act(n); }
-fn show(n: Int) { print("{n}"); }
-fn run() { invoke(5, show); }
+fn invoke(n: Int, act: fn(Int) -[Nope]>) { act(n) }
+fn show(n: Int) { print("{n}") }
+fn run() { invoke(5, show) }
 "#;
     assert_eq!(
         codes(src),
@@ -1811,12 +1811,12 @@ fn run() { invoke(5, show); }
 #[test]
 fn open_effect_row_parses_checks_and_erases() {
     let src = r#"
-fn invoke<E>(marker: E, act: fn() Int -[..E]>) Int -[Log, ..E]> {
-    return act();
+fn invoke<E>(marker: E, act: fn() -[..E]> Int) -[Log, ..E]> Int {
+    return act()
 }
-fn value() Int -[]> { return 1; }
-fn pure_caller() Int -[]> { return invoke(0, value); }
-fn run() { print("{invoke(0, value)}"); }
+fn value() -[]> Int { return 1 }
+fn pure_caller() -[]> Int { return invoke(0, value) }
+fn run() { print("{invoke(0, value)}") }
 "#;
     let rust = jet::compile(src)
         .expect("generic open effect row compiles")
@@ -1831,11 +1831,11 @@ fn run() { print("{invoke(0, value)}"); }
 fn effect_via_publishes_callback_effect() {
     let src = r#"
 fn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> {
-    act(n);
+    act(n)
 }
-fn show(n: Int) { print("{n}"); }
-fn caller() Int -[]> { invoke(5, show); return 0; }
-fn run() { print("{caller()}"); }
+fn show(n: Int) { print("{n}") }
+fn caller() -[]> Int { invoke(5, show); return 0 }
+fn run() { print("{caller()}") }
 "#;
     assert_eq!(
         codes(src),
@@ -1848,9 +1848,9 @@ fn run() { print("{caller()}"); }
 #[test]
 fn effect_via_unknown_param_is_e0748() {
     let src = r#"
-fn invoke(n: Int, act: fn(Int) -[IO]>) -[via missing]> { act(n); }
-fn show(n: Int) { print("{n}"); }
-fn run() { invoke(5, show); }
+fn invoke(n: Int, act: fn(Int) -[IO]>) -[via missing]> { act(n) }
+fn show(n: Int) { print("{n}") }
+fn run() { invoke(5, show) }
 "#;
     assert_eq!(codes(src), vec!["E0748"], "#(via missing) is E0748");
 }
@@ -1859,8 +1859,8 @@ fn run() { invoke(5, show); }
 #[test]
 fn effect_via_non_callback_param_is_e0748() {
     let src = r#"
-fn invoke(n: Int) -[via n]> { print("{n}"); }
-fn run() { invoke(5); }
+fn invoke(n: Int) -[via n]> { print("{n}") }
+fn run() { invoke(5) }
 "#;
     assert_eq!(
         codes(src),
@@ -1874,22 +1874,22 @@ fn run() { invoke(5); }
 #[test]
 fn eff2_levers_are_erased() {
     let annotated = r#"
-fn transform(items: [Int], f: fn(Int) Int -[]>) [Int] {
-    return items.map((x) -> f(x)).to_list();
+fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
+    return items.map((x) -> f(x)).to_list()
 }
-fn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> { act(n); }
-fn inc(n: Int) Int -[]> { return n + 1; }
-fn show(n: Int) { print("{n}"); }
-fn run() { print("{transform([1], inc)}"); invoke(5, show); }
+fn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> { act(n) }
+fn inc(n: Int) -[]> Int { return n + 1 }
+fn show(n: Int) { print("{n}") }
+fn run() { print("{transform([1], inc)}"); invoke(5, show) }
 "#;
     let plain = r#"
-fn transform(items: [Int], f: fn(Int) Int) [Int] {
-    return items.map((x) -> f(x)).to_list();
+fn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {
+    return items.map((x) -> f(x)).to_list()
 }
-fn invoke(n: Int, act: fn(Int)) { act(n); }
-fn inc(n: Int) Int { return n + 1; }
-fn show(n: Int) { print("{n}"); }
-fn run() { print("{transform([1], inc)}"); invoke(5, show); }
+fn invoke(n: Int, act: fn(Int)) { act(n) }
+fn inc(n: Int) -> Int { return n + 1 }
+fn show(n: Int) { print("{n}") }
+fn run() { print("{transform([1], inc)}"); invoke(5, show) }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -1904,7 +1904,7 @@ fn rights_denials_keep_the_semantic_frame() {
     let src = r#"
 use core.files as fs
 
-fn load(path: String) String -[]> {
+fn load(path: String) -[]> String {
     return fs.read(path) ?? ""
 }
 

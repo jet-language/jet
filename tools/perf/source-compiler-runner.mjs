@@ -296,6 +296,7 @@ for (let index = 0; index < argv.length; index += 1) {
 }
 if (!reportDir) fail("--report is required");
 reportDir = path.isAbsolute(reportDir) ? reportDir : path.join(root, reportDir);
+fs.mkdirSync(reportDir, { recursive: true });
 requireFile(contractPath, "Source compiler contract");
 requireFile(policyPath, "Source compiler policy");
 requireFile(gatePath, "Source compiler gate");
@@ -346,14 +347,18 @@ const runId = `source-compiler-${Date.now()}-${process.pid}`;
 
 const sampleRows = [];
 const receiptRows = [];
+const receiptByKey = new Map();
 for (const cell of cells) {
   const expectedInput = sha256File(path.join(root, cell.input));
   const expectedClosure = sha256File(path.join(root, cell.source_manifest));
   const expectedOutput = cell.expected === "canonical-stage2-probes" ? "-" : sha256File(path.join(root, cell.expected));
   const metrics = expectedMetrics(cell, policyByMetric);
-  for (const implementation of ["source", "rust-reference"]) {
-    const key = `${cell.cell_id}|${implementation}`;
-    for (let sample = 1; sample <= 5; sample += 1) {
+  for (let sample = 1; sample <= 5; sample += 1) {
+    const implementations = sample % 2 === 1
+      ? ["source", "rust-reference"]
+      : ["rust-reference", "source"];
+    for (const implementation of implementations) {
+      const key = `${cell.cell_id}|${implementation}`;
       const pairId = `${runId}|${cell.cell_id}|${sample}`;
       const resultDir = path.join(results, cell.cell_id, implementation, String(sample));
       fs.mkdirSync(resultDir, { recursive: true });

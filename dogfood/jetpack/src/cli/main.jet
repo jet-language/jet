@@ -18,7 +18,7 @@ pub struct CommandResult {
     pub exit_code: Int
 }
 
-fn error_result(action: String, message: String) CommandResult !Never -> {
+fn error_result(action: String, message: String) -> CommandResult !Never {
     wire :: json.to_string(DataTree.Object([
         "schema": DataTree.Text("jet.report/v1"),
         "moment": DataTree.Text("tool"),
@@ -30,7 +30,7 @@ fn error_result(action: String, message: String) CommandResult !Never -> {
     return CommandResult{stdout: "{wire}\n", exit_code: 2}
 }
 
-fn success_result(wire: String) CommandResult !Never -> {
+fn success_result(wire: String) -> CommandResult !Never {
     return CommandResult{stdout: "{wire}\n", exit_code: 0}
 }
 
@@ -42,7 +42,7 @@ struct JetpackArgs {
 
     #Doc("resolve a profile")
     fn plan(self, name: String{"dogfood"}) {
-        emit(plan_command(configured_project_root(), configured_store_root(), name))
+        emit(plan_command(configured_project_root(), configured_store_root(), name) -> )
     }
 
     #Doc("list profiles")
@@ -89,11 +89,11 @@ struct JetpackArgs {
     }
 }
 
-fn configured_project_root() String !Never -> {
+fn configured_project_root() -> String !Never {
     return env.get("JETPACK_PROJECT_ROOT") ?? "."
 }
 
-fn configured_store_root() String !Never -> {
+fn configured_store_root() -> String !Never {
     return env.get("JETPACK_DOGFOOD_ROOT") ?? Path.home().join(".cache").join("jet-dogfood").join("jetpack-store").to_string()
 }
 
@@ -104,7 +104,7 @@ fn emit(result: CommandResult) {
     process.exit(result.exit_code)
 }
 
-fn reject_symlink_components(path: Path, label: String) Bool !CLIError -> {
+fn reject_symlink_components(path: Path, label: String) -> Bool !CLIError {
     current := path
     loop {
         if fs.stat(~current) == {
@@ -133,7 +133,7 @@ fn reject_symlink_components(path: Path, label: String) Bool !CLIError -> {
     return Ok(true)
 }
 
-fn normalized_absolute(raw: String, label: String) String !CLIError -> {
+fn normalized_absolute(raw: String, label: String) -> String !CLIError {
     if raw.trim() == "" {
         return Err(CLIError{message: "{label} is required"})
     }
@@ -148,7 +148,7 @@ fn normalized_absolute(raw: String, label: String) String !CLIError -> {
     return Ok(normalized.to_string())
 }
 
-fn checked_store_root(raw: String) String !CLIError -> {
+fn checked_store_root(raw: String) -> String !CLIError {
     checked :: normalized_absolute(raw, "store root")
     base_path :: Path.home().join(".cache").join("jet-dogfood")
     base :: normalized_absolute(base_path.to_string(), "Jet dogfood cache")
@@ -158,7 +158,7 @@ fn checked_store_root(raw: String) String !CLIError -> {
     return Ok(checked)
 }
 
-fn resolve_source(raw: String, project_root: String, action: String) String !CLIError -> {
+fn resolve_source(raw: String, project_root: String, action: String) -> String !CLIError {
     if raw.trim() == "" -> return Err(CLIError{message: "{action} source is required"})
     if project_root.trim() == "" -> return Err(CLIError{message: "project root is required"})
     project_absolute :: fs.absolute(Path.from(~project_root).normalize()) ?? return Err(CLIError{message: "project root cannot be resolved"})
@@ -179,7 +179,7 @@ fn resolve_source(raw: String, project_root: String, action: String) String !CLI
     return Ok(~absolute)
 }
 
-fn ingest_wire(result: store.IngestResult) String !Never -> {
+fn ingest_wire(result: store.IngestResult) -> String !Never {
     return json.to_string(DataTree.Object([
         "schema": DataTree.Text("jet.report/v1"),
         "moment": DataTree.Text("tool"),
@@ -192,7 +192,7 @@ fn ingest_wire(result: store.IngestResult) String !Never -> {
     ]))
 }
 
-fn realize_wire(result: realization.RealizeResult) String !Never -> {
+fn realize_wire(result: realization.RealizeResult) -> String !Never {
     return json.to_string(DataTree.Object([
         "schema": DataTree.Text("jet.report/v1"),
         "moment": DataTree.Text("tool"),
@@ -207,7 +207,7 @@ fn realize_wire(result: realization.RealizeResult) String !Never -> {
     ]))
 }
 
-pub fn plan_command(project_root: String, store_root: String, name: String) CommandResult !Never -> {
+pub fn plan_command(project_root: String, store_root: String, name: String) -> CommandResult !Never {
     if checked_store_root(store_root) == {
         .Err(error) -> return error_result("plan", error.message)
         .Ok(_) -> {
@@ -220,7 +220,7 @@ pub fn plan_command(project_root: String, store_root: String, name: String) Comm
     panic("unreachable plan result")
 }
 
-pub fn list_command(store_root: String) CommandResult !Never -> {
+pub fn list_command(store_root: String) -> CommandResult !Never {
     if checked_store_root(store_root) == {
         .Err(error) -> return error_result("list", error.message)
         .Ok(root) -> {
@@ -233,7 +233,7 @@ pub fn list_command(store_root: String) CommandResult !Never -> {
     panic("unreachable list result")
 }
 
-pub fn inspect_command(store_root: String) CommandResult !Never -> {
+pub fn inspect_command(store_root: String) -> CommandResult !Never {
     if checked_store_root(store_root) == {
         .Err(error) -> return error_result("inspect", error.message)
         .Ok(root) -> {
@@ -246,7 +246,7 @@ pub fn inspect_command(store_root: String) CommandResult !Never -> {
     panic("unreachable inspect result")
 }
 
-pub fn ingest_command(source: String, name: String, version: String, reference: String, project_root: String, store_root: String) CommandResult !Never -> {
+pub fn ingest_command(source: String, name: String, version: String, reference: String, project_root: String, store_root: String) -> CommandResult !Never {
     if source.trim() == "" -> return error_result("ingest", "ingest source is required")
     if name.trim() == "" -> return error_result("ingest", "ingest --name is required")
     if checked_store_root(store_root) == {
@@ -272,7 +272,7 @@ pub fn ingest_command(source: String, name: String, version: String, reference: 
     panic("unreachable ingest result")
 }
 
-pub fn realize_command(source: String, provider: String, name: String, version: String, reference: String, expected_hash: String, project_root: String, store_root: String) CommandResult !Never -> {
+pub fn realize_command(source: String, provider: String, name: String, version: String, reference: String, expected_hash: String, project_root: String, store_root: String) -> CommandResult !Never {
     if source.trim() == "" -> return error_result("realize", "realize source is required")
     if provider.trim() == "" -> return error_result("realize", "realize --provider is required")
     if provider != "local" && provider != "prefetched" && provider != "recorded" {

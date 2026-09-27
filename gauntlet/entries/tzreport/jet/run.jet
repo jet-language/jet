@@ -5,7 +5,7 @@ struct Args {
     path: String
 }
 
-fn parse_meeting(line: String) (when: DateTime, name: String) -> {
+fn parse_meeting(line: String) -> (name: String, when: DateTime) {
     fields :: line.split_once("|") ?? panic("bad meeting")
     timestamp :: time.parse_rfc3339(fields.after) ?? panic("bad timestamp")
     return (when: timestamp, name: fields.before)

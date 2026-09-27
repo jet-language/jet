@@ -15,7 +15,7 @@ fn jet_target_hardware_empty() -> MirTargetHardwareFacts {
 }
 
 fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MirLinkerInput, allocator: MirAllocatorPolicy, panic: MirPanicPolicy, mmio: MirMmioPolicy, wall_clock: MirClockPolicy, monotonic_clock: MirClockPolicy, zone_data: MirClockPolicy, sleep: MirClockPolicy, entropy: MirEntropyPolicy, scheduler: MirSchedulerPolicy, byte_sink: MirByteSinkPolicy, startup: MirStartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> MirTargetMachine {
-    layout := jet_target_layout_from_triple(triple, package_version)
+    layout :: jet_target_layout_from_triple(triple, package_version)
     MirTargetMachine{
         name: name,
         triple: triple,
@@ -93,11 +93,7 @@ pub fn jet_target_machine_bare_metal(name: String, triple: String, package_versi
 }
 
 fn jet_target_append_u64(bytes: &[U8], value: Int) {
-    index := 0
-    loop index < 8 {
-        bytes.push(U8{(value >> (8 * index)) & 255})
-        index += 1
-    }
+    loop index in 0..<8 -> bytes.push(U8{(value >> (8 * index)) & 255})
 }
 
 fn jet_target_append_frame(bytes: &[U8], label: String, value: String) {
@@ -107,29 +103,31 @@ fn jet_target_append_frame(bytes: &[U8], label: String, value: String) {
     loop byte in value.bytes() -> bytes.push(byte)
 }
 
-
 fn jet_target_json_hex(value: Int) -> String {
     if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
     String.from_bytes([U8{87 + value}]) ?? "0"
 }
 
 fn jet_target_json_quote(value: String) -> String {
-    bytes := value.bytes()
+    bytes :: value.bytes()
     output := "\""
     segment_start := 0
     index := 0
     loop index < bytes.len() {
-        byte := Int.from_u8(bytes[index])
-        escape := ""
-        if byte == 34 -> escape = "\\\""
-        else if byte == 92 -> escape = "\\\\"
-        else if byte == 10 -> escape = "\\n"
-        else if byte == 13 -> escape = "\\r"
-        else if byte == 9 -> escape = "\\t"
-        else if byte < 32 -> escape = "\\u00{jet_target_json_hex((byte >> 4) & 15)}{jet_target_json_hex(byte & 15)}"
+        byte :: Int.from_u8(bytes[index])
+        escape :: if byte == {
+            34 -> "\\\""
+            92 -> "\\\\"
+            10 -> "\\n"
+            13 -> "\\r"
+            9 -> "\\t"
+            else -> {
+                if byte < 32 -> "\\u00{jet_target_json_hex((byte >> 4) & 15)}{jet_target_json_hex(byte & 15)}" else -> ""
+            }
+        }
         if escape.len() > 0 {
             if segment_start < index {
-                chunk := String.from_bytes(bytes[segment_start..index]) ?? ""
+                chunk :: String.from_bytes(bytes[segment_start..index]) ?? ""
                 output = "{output}{chunk}"
             }
             output = "{output}{escape}"
@@ -140,7 +138,7 @@ fn jet_target_json_quote(value: String) -> String {
         }
     }
     if segment_start < bytes.len() {
-        chunk := String.from_bytes(bytes[segment_start..bytes.len()]) ?? ""
+        chunk :: String.from_bytes(bytes[segment_start..bytes.len()]) ?? ""
         output = "{output}{chunk}"
     }
     "{output}\""
@@ -164,7 +162,6 @@ fn jet_target_optional_contract_json(value: ?MirProviderContract) -> String {
     contract :: value ?? return "null"
     jet_target_provider_contract_json(contract)
 }
-
 
 fn jet_target_provider_contract_json(value: MirProviderContract) -> String {
     "{{\"provider\":{jet_target_json_quote(value.provider)},\"sha256\":{jet_target_json_quote(value.sha256)},\"provenance\":{jet_target_json_quote(value.provenance)},\"abi\":{jet_target_abi_json(value.abi)},\"limits\":{jet_target_provider_limits_json(value.limits)}}}"
@@ -265,7 +262,11 @@ fn jet_target_byte_sink_component_json(value: MirByteSinkPolicy, component: Stri
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
         .None -> "{{\"kind\":\"none\"}}"
         .Provider(read, write, report) -> {
-            contract := if component == "read" -> read else if component == "write" -> write else -> report
+            contract :: if component == {
+                "read" -> read
+                "write" -> write
+                else -> report
+            }
             "{{\"kind\":\"provider\",\"contract\":{jet_target_optional_contract_json(contract)}}}"
         }
     }
@@ -323,10 +324,9 @@ fn jet_target_memory_json(regions: [MirMemoryRegion]) -> String {
 }
 
 fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String {
-    svd := "null"
-    if facts.svd != None {
-        provenance :: facts.svd ?? MirSvdProvenance{source: "", sha256: ""}
-        svd = "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
+    svd :: if facts.svd == {
+        .Val(provenance) -> "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
+        .None -> "null"
     }
     blocks := [String]{}
     loop block in facts.register_blocks {
@@ -344,7 +344,7 @@ fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String {
     }
     channels := [String]{}
     loop channel in facts.dma_channels {
-        ownership := if channel.ownership == MirTargetDmaOwnership.Borrowed -> "borrowed" else -> "transfer"
+        ownership :: if channel.ownership == MirTargetDmaOwnership.Borrowed -> "borrowed" else -> "transfer"
         channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
     }
     "{{\"svd\":{svd},\"register_blocks\":[{blocks.join(",")}],\"interrupts\":[{interrupts.join(",")}],\"dma_channels\":[{channels.join(",")}]}}"
@@ -373,15 +373,15 @@ fn jet_target_atomic_word_supported(triple: String) -> Bool {
 }
 
 fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String {
-    atomic_supported := jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
-    atomic_triple := jet_target_json_quote(machine.triple)
-    io_read := jet_target_byte_sink_component_json(machine.byte_sink, "read")
-    io_write := jet_target_byte_sink_component_json(machine.byte_sink, "write")
-    io_report := jet_target_byte_sink_component_json(machine.byte_sink, "report")
-    panic := jet_target_panic_json(machine.panic)
-    startup := jet_target_startup_json(machine.startup)
-    abi := jet_target_abi_json(machine.startup_abi)
-    facts := [String]{
+    atomic_supported :: jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
+    atomic_triple :: jet_target_json_quote(machine.triple)
+    io_read :: jet_target_byte_sink_component_json(machine.byte_sink, "read")
+    io_write :: jet_target_byte_sink_component_json(machine.byte_sink, "write")
+    io_report :: jet_target_byte_sink_component_json(machine.byte_sink, "report")
+    panic :: jet_target_panic_json(machine.panic)
+    startup :: jet_target_startup_json(machine.startup)
+    abi :: jet_target_abi_json(machine.startup_abi)
+    facts :: [String]{
         "{{\"capability\":\"Target.Allocator\",\"fact\":{jet_target_allocator_json(machine.allocator)}}}",
         "{{\"capability\":\"Target.Atomic64\",\"fact\":{{\"triple\":{atomic_triple},\"supported\":{atomic_supported}}}}}",
         "{{\"capability\":\"Target.MMIO\",\"fact\":{jet_target_mmio_json(machine.mmio)}}}",
@@ -399,11 +399,14 @@ fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String {
     }
     "[{facts.join(",")}]"
 }
+
 fn jet_target_environment_identity(machine: MirTargetMachine) -> String {
-    if machine.no_os -> return "no-os"
-    if machine.triple.contains("wasip") -> return "wasi"
-    if machine.triple == "wasm32-unknown-unknown" -> return "browser"
-    "hosted"
+    if {
+        machine.no_os -> "no-os"
+        machine.triple.contains("wasip") -> "wasi"
+        machine.triple == "wasm32-unknown-unknown" -> "browser"
+        else -> "hosted"
+    }
 }
 
 fn jet_target_provider_identity(machine: MirTargetMachine) -> String {
@@ -430,8 +433,8 @@ fn jet_target_provider_identity(machine: MirTargetMachine) -> String {
 }
 
 fn jet_target_linker_identity(machine: MirTargetMachine) -> String {
-    audit := jet_target_linker_json(machine.linker)
-    kind := if machine.linker == {
+    audit :: jet_target_linker_json(machine.linker)
+    kind :: if machine.linker == {
         .HostedDefault -> "hosted-default"
         .Unspecified -> "unspecified"
         .Generated -> "generated"
@@ -442,32 +445,33 @@ fn jet_target_linker_identity(machine: MirTargetMachine) -> String {
 
 fn jet_target_allocator_provides_heap(policy: MirAllocatorPolicy) -> Bool {
     if policy == {
-        .HostedDefault -> true
-        .Provider(_) -> true
-        .Fixed(_, _) -> true
-        .Counting(_) -> true
+        .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true
         else -> false
     }
 }
 
 fn jet_target_max_runtime_layer(machine: MirTargetMachine) -> MirRuntimeLayer {
-    if !machine.no_os -> return MirRuntimeLayer.Std
-    if jet_target_allocator_provides_heap(machine.allocator) -> return MirRuntimeLayer.Alloc
-    MirRuntimeLayer.Core
+    if {
+        !machine.no_os -> MirRuntimeLayer.Std
+        jet_target_allocator_provides_heap(machine.allocator) -> MirRuntimeLayer.Alloc
+        else -> MirRuntimeLayer.Core
+    }
 }
 
 pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MirTargetMachine {
-    if web_target -> return jet_target_machine_wasm_browser(package_version)
-    if target_triple == "wasm32-wasip2" -> return jet_target_machine_wasm_wasi(package_version)
-    if no_os -> return jet_target_machine_bare_metal("no-os", target_triple, package_version)
-    jet_target_machine_hosted(target_triple, package_version)
+    if {
+        web_target -> jet_target_machine_wasm_browser(package_version)
+        target_triple == "wasm32-wasip2" -> jet_target_machine_wasm_wasi(package_version)
+        no_os -> jet_target_machine_bare_metal("no-os", target_triple, package_version)
+        else -> jet_target_machine_hosted(target_triple, package_version)
+    }
 }
 
 fn jet_target_wasm_provider(name: String, implementation: String) -> MirProviderContract {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
-    digest := mir_sha256_hex_bytes(bytes)
+    digest :: mir_sha256_hex_bytes(bytes)
     MirProviderContract{
         provider: name,
         sha256: "sha256:{digest}",
@@ -519,9 +523,8 @@ fn jet_target_machine_wasm_wasi(package_version: String) -> MirTargetMachine {
     machine
 }
 
-
 pub fn jet_target_dossier_for_usage(machine: MirTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MirTargetDossier {
-    closure := jet_ring_classify_prelude_closure(used_core)
+    closure :: jet_ring_classify_prelude_closure(used_core)
     closure_bytes := [U8]{}
     layer := MirRuntimeLayer.Core
     loop row in closure {
@@ -541,6 +544,7 @@ pub fn jet_target_dossier_for_usage(machine: MirTargetMachine, used_core: [Strin
         dependency_identity: dependency_identity,
     }
 }
+
 pub fn jet_target_package_version_from_compiler_identity(identity: String) -> ?String {
     identity_parts := identity.split("@")
     if identity_parts.len() != 2 || identity_parts[0].len() == 0 -> return None
@@ -550,10 +554,12 @@ pub fn jet_target_package_version_from_compiler_identity(identity: String) -> ?S
 }
 
 pub fn jet_target_active_os_name(target_triple: String, host_os: String) -> String {
-    if target_triple.contains("windows") -> return "Windows"
-    if target_triple.contains("apple") || target_triple.contains("darwin") -> return "MacOS"
-    if target_triple.contains("linux") -> return "Linux"
-    if host_os == "windows" -> return "Windows"
-    if host_os == "macos" -> return "MacOS"
-    "Linux"
+    if {
+        target_triple.contains("windows") -> "Windows"
+        target_triple.contains("apple") || target_triple.contains("darwin") -> "MacOS"
+        target_triple.contains("linux") -> "Linux"
+        host_os == "windows" -> "Windows"
+        host_os == "macos" -> "MacOS"
+        else -> "Linux"
+    }
 }

@@ -1,17 +1,17 @@
 Error [E2417]: Explicit failure domain ``FileErr`` is not an Error type
-  --> tests/ui/e2404_no_error_conv.jet:11:12
+  --> tests/ui/e2404_no_error_conv.jet:11:15
     |
- 11 | fn inner() String !FileErr -> Ok("hi")
-    |            ^^^^^^^^^^^^^^^
+ 11 | fn inner() -> String !FileErr { Ok("hi") }
+    |               ^^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
 Error [E2417]: Explicit failure domain ``AppErr`` is not an Error type
-  --> tests/ui/e2404_no_error_conv.jet:13:12
+  --> tests/ui/e2404_no_error_conv.jet:13:15
     |
- 13 | fn outer() String !AppErr -> {
-    |            ^^^^^^^^^^^^^^
+ 13 | fn outer() -> String !AppErr {
+    |               ^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417

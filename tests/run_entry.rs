@@ -129,7 +129,7 @@ fn module_globals_are_file_wide_declarations() {
 LIMIT :: 2
 my_var := 3
 
-fn helper() Int {
+fn helper() -> Int {
     return my_var + LIMIT
 }
 
@@ -143,7 +143,7 @@ fn run() {
 #[test]
 fn unannotated_run_is_fallible_by_default_and_reports_at_the_edge() {
     let source = r#"
-fn step() Int {
+fn step() -> Int {
     return Err("boom")
 }
 
@@ -285,7 +285,7 @@ fn script_dev_verb_runs_only_explicit_run() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.jet"),
-        "fn helper() String { return \"dev script\" }\nfn run() { print(helper()) }\n",
+        "fn helper() -> String { return \"dev script\" }\nfn run() { print(helper()) }\n",
     )
     .unwrap();
 
@@ -317,7 +317,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "fn run() { print(\"script body\") }\n#Test(\"script test\") { assert(helper()) }\nfn helper() Bool { return true }\n",
+        "fn run() { print(\"script body\") }\n#Test(\"script test\") { assert(helper()) }\nfn helper() -> Bool { return true }\n",
     )
     .unwrap();
     let path = file.to_str().unwrap();
@@ -446,7 +446,7 @@ fn unhandled_crypto_error_exits_1_with_the_generic_entry_report() {
     let src = r#"
 use core.crypto as crypto
 
-fn dynamic_length(value: Int) Int {
+fn dynamic_length(value: Int) -> Int {
     return value
 }
 
@@ -630,7 +630,7 @@ fn main() {{
 #[test]
 fn fallible_unit_run_can_finish_normally_after_try() {
     let src = r#"
-fn step() Int {
+fn step() -> Int {
     return Ok(1)
 }
 
@@ -675,7 +675,7 @@ fn sync() {
     return Err("not implemented")
 }
 
-fn load() Config !IOError {
+fn load() -> Config !IOError {
     return Ok(Config{ value: 1 })
 }
 
@@ -715,7 +715,7 @@ fn run() {
 
 #[test]
 fn retired_void_type_reports_the_migration_diagnostic() {
-    let src = "fn run() Void { return Err(\"boom\") }\n";
+    let src = "fn run() -> Void { return Err(\"boom\") }\n";
     let diagnostics = jet::compile(src).expect_err("Void must not remain a source type");
     assert!(
         diagnostics.iter().any(|d| d.code == "E0431"),
@@ -726,7 +726,7 @@ fn retired_void_type_reports_the_migration_diagnostic() {
 #[test]
 fn classic_if_without_else_does_not_satisfy_missing_return_check() {
     let src = r#"
-fn maybe(flag: Bool) Int {
+fn maybe(flag: Bool) -> Int {
     if flag { return 1 }
 }
 

@@ -8932,3 +8932,4 @@ pub use crate::MIROptimization::{
     require_canonical_mir_optimization, verify_mir_legality, MirLegalityError,
     MirOptimizationError, MirOptimizationPolicy, MIR_OPTIMIZATION_PASS_ORDER,
 };
+include!(concat!(env!("OUT_DIR"), "/mir_program_image_codec.rs"));

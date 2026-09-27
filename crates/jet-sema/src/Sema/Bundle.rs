@@ -2022,7 +2022,7 @@ const BUILD_ENTRY_FN: &str = "build";
 /// it. The return clause is graded separately by
 /// [`build_entry_signature_is_valid`].
 ///
-/// The name alone is not enough: an ordinary `fn build(count: Int) Int ->` is a
+/// The name alone is not enough: an ordinary `fn build(count: Int) -> Int ->` is a
 /// normal runtime function, and dropping it would emit calls to a name that has
 /// no definition.
 pub fn is_build_entry(func: &Func) -> bool {
@@ -2324,13 +2324,13 @@ mod structure_tests {
     #[test]
     fn body_only_edit_reuses_unchanged_function() {
         let before = concat!(
-            "fn alpha() Int -> { return 1 }\n",
-            "fn beta() Int -> { return 2 }\n",
+            "fn alpha() -> Int { return 1 }\n",
+            "fn beta() -> Int { return 2 }\n",
             "fn run() { print(alpha() + beta()) }\n",
         );
         let after = concat!(
-            "fn alpha() Int -> { return 1 }\n",
-            "fn beta() Int -> { return 20 }\n",
+            "fn alpha() -> Int { return 1 }\n",
+            "fn beta() -> Int { return 20 }\n",
             "fn run() { print(alpha() + beta()) }\n",
         );
         let before_interface = incremental_module_interface(&incremental_bundle(before).modules[0]);
@@ -2480,9 +2480,9 @@ mod structure_tests {
     #[test]
     fn incremental_dependencies_include_nested_module_imports() {
         let mut bundle = incremental_bundle(
-            "module api {\n    use dep.[value]\n    pub fn call() Int -> { return value() }\n}\n",
+            "module api {\n    use dep.[value]\n    pub fn call() -> Int { return value() }\n}\n",
         );
-        let mut dependency = incremental_bundle("pub fn value() Int -> { return 1 }\n")
+        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "dep.jet".into();
@@ -2497,8 +2497,8 @@ mod structure_tests {
     #[test]
     fn incremental_dependencies_match_directory_module_imports() {
         let mut bundle =
-            incremental_bundle("use archive\nfn run() Int -> { return archive.value() }\n");
-        let mut dependency = incremental_bundle("pub fn value() Int -> { return 1 }\n")
+            incremental_bundle("use archive\nfn run() -> Int { return archive.value() }\n");
+        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "archive/run.jet".into();

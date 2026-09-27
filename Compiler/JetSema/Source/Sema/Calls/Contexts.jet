@@ -7,14 +7,15 @@ pub struct SemaCallKnowledgeScope {
 }
 
 pub fn sema_call_gate_for_name(name: String) -> ?SemaKnowledgeGate {
-    if name == "wrapping" || name == "saturating" || name == "checked" -> return Val(SemaKnowledgeGate.BoundedArithmetic)
-    if name == "approx" -> return Val(SemaKnowledgeGate.Approximation)
-    None
+    if name == {
+        "wrapping" | "saturating" | "checked" -> Val(SemaKnowledgeGate.BoundedArithmetic)
+        "approx" -> Val(SemaKnowledgeGate.Approximation)
+        else -> None
+    }
 }
 
 pub fn sema_call_method_gate(method: String) -> ?SemaKnowledgeGate {
-    if method.starts_with("from_") && method.ends_with("_rounded") -> return Val(SemaKnowledgeGate.RoundedConversion)
-    None
+    if method.starts_with("from_") && method.ends_with("_rounded") -> Val(SemaKnowledgeGate.RoundedConversion) else -> None
 }
 
 pub fn sema_call_gate_is_unshadowed(name: String, scopes: SemaScopeTable) -> Bool {
@@ -30,20 +31,24 @@ pub fn sema_call_leave_gate(scopes: &SemaScopeTable, scope: SemaCallKnowledgeSco
 }
 
 pub fn sema_call_direct_gate(name: String, scopes: SemaScopeTable) -> ?SemaKnowledgeGate {
-    if !sema_call_gate_is_unshadowed(name, scopes) -> return None
-    sema_call_gate_for_name(name)
+    if sema_call_gate_is_unshadowed(name, scopes) -> sema_call_gate_for_name(name) else -> None
 }
 
 pub fn sema_call_is_overflow_operation(op: BinOp) -> Bool {
-    op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div
+    if op == {
+        .Add | .Sub | .Mul | .Div -> true
+        else -> false
+    }
 }
 
 pub fn sema_call_overflow_operation_name(op: BinOp) -> String {
-    if op == BinOp.Add -> return "add"
-    if op == BinOp.Sub -> return "sub"
-    if op == BinOp.Mul -> return "mul"
-    if op == BinOp.Div -> return "div"
-    "add"
+    if op == {
+        .Add -> "add"
+        .Sub -> "sub"
+        .Mul -> "mul"
+        .Div -> "div"
+        else -> "add"
+    }
 }
 
 pub fn sema_call_host_callback_type(inner: Type, result: ?Type, shared: Bool) -> Type {

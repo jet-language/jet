@@ -501,9 +501,9 @@ repeat {{
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_r_{lib}");
-    let mut out = format!("#Import module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
         out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n"));
         out.push_str(&format!("    fn {name}_plot(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n"));
     }
@@ -519,7 +519,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
 
 pub fn close(^session: Session) { abi.close(session.value) }
 
-pub fn open() Session !RError -> {
+pub fn open() -> Session !RError {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(RError.NotRunning)
     return Ok(Session{ value: handle })
@@ -531,7 +531,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
     );
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !RError -> {{
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree !RError {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -540,7 +540,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
 "#
         ));
         out.push_str(&format!(
-            r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) [T] !RError -> {{
+            r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] !RError {{
     raw :: abi.{name}_table(session.value, json.to_string(~rows), deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)
@@ -550,7 +550,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
 "#
         ));
         out.push_str(&format!(
-            r#"pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) String !RError -> {{
+            r#"pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) -> String !RError {{
     raw :: abi.{name}_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)

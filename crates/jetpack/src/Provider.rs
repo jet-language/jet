@@ -2887,18 +2887,18 @@ mod tests {
         // D-ILE1: a top-level `fn run` means executable.
         assert!(file_has_top_level_run("fn run() {}\n"));
         assert!(file_has_top_level_run(
-            "fn helper() => Int { return 1; }\nfn run() { print(\"hi\"); }\n"
+            "fn helper() -> Int { return 1 }\nfn run() { print(\"hi\") }\n"
         ));
         // A `run` nested in a module/impl block is not the entry point.
         assert!(!file_has_top_level_run("module m { fn run() {} }\n"));
         // A library: no top-level `fn run`.
         assert!(!file_has_top_level_run(
-            "fn add(a: Int, b: Int) => Int { return a + b; }\n"
+            "fn add(a: Int, b: Int) -> Int { return a + b }\n"
         ));
         // `fn run` inside a comment or string never counts.
         assert!(!file_has_top_level_run("// fn run()\nfn lib() {}\n"));
         assert!(!file_has_top_level_run(
-            "fn lib() { let s = \"fn run()\"; }\n"
+            "fn lib() { s :: \"fn run()\" }\n"
         ));
     }
 

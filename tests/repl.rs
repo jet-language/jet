@@ -627,7 +627,7 @@ impl Marker.Close {
     }
 }
 
-fn values() Stream<Int> -[]> {
+fn values() -[]> Stream<Int> {
     marker := Marker{name: "stream"}
     defer close(^marker)
     print("before")
@@ -682,7 +682,7 @@ fn repl_reset_clears_bindings() {
 
 #[test]
 fn repl_function_declare_and_call() {
-    let inputs = &["fn double(n: Int) Int -[]> { return n * 2 }", "double(5)"];
+    let inputs = &["fn double(n: Int) -[]> Int { return n * 2 }", "double(5)"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("ok"),
@@ -729,7 +729,7 @@ fn repl_range_fact_proves_fixed_list_index() {
     let out = run_transcript(
         &[
             "Die :: distinct Int(1..6)",
-            "fn pick(faces: [String#6], roll: Die) String -[]> { return faces[roll.raw() - 1] }",
+            "fn pick(faces: [String#6], roll: Die) -[]> String { return faces[roll.raw() - 1] }",
             "pick([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\"], Die.from_int(3))",
         ],
         None,
@@ -1119,7 +1119,7 @@ fn repl_native_run_uses_stdin_snapshot_not_replaced_temp_path() {
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(
-            b"fn answer() Int -[]> { return 41 }\nprint(\"authoritative\")\nprint(answer())\n:run\n:quit\n",
+            b"fn answer() -[]> Int { return 41 }\nprint(\"authoritative\")\nprint(answer())\n:run\n:quit\n",
         )
         .unwrap();
     drop(stdin);
@@ -1167,7 +1167,7 @@ fn repl_probe_exact_outputs() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
+        "fn add_three(x: Int) -[]> Int { return x + 3 }\n",
     )
     .ok();
     let project_dir = fixture.to_string_lossy().to_string();
@@ -1185,7 +1185,7 @@ fn repl_project_loads_items() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
+        "fn add_three(x: Int) -[]> Int { return x + 3 }\n",
     )
     .expect("write fixture");
 
@@ -1454,7 +1454,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
     let out = run_transcript(
         &[
             "enum State { Ready(Int) }",
-        "fn state_value(s: State) Int -[]> { if s == { .Ready(value) -> { return value } } return 0 }",
+        "fn state_value(s: State) -[]> Int { if s == { .Ready(value) -> { return value } } return 0 }",
             "items: [String] :: [\"jet\", \"repl\"]",
             "items[0]",
             "counts: [String:Int] :: [\"jet\": 2]",
@@ -2311,7 +2311,7 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
     let session = Session::new();
     let doc = Docs::lookup(&session, "List.filter").expect("List.filter has builtin docs");
     assert!(
-        doc.starts_with("List.filter(f: fn(T) Bool) -> List<T>"),
+        doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>"),
         "got: {doc:?}"
     );
     assert!(
@@ -2331,7 +2331,7 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
     assert_eq!(symbol.module, "core.collections");
     assert_eq!(symbol.owner, Some("List"));
     assert_eq!(symbol.member, "filter");
-    assert!(symbol.signature.contains("fn(T) Bool"));
+    assert!(symbol.signature.contains("fn(T) -> Bool"));
     assert!(!symbol.summary.is_empty());
     assert!(!symbol.example.is_empty());
     assert_eq!(symbol.provenance, "builtin");
@@ -2442,7 +2442,7 @@ fn bare_question_name_is_the_primary_docs_spelling() {
 fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
     let out = run_transcript(
         &[
-            "fn answer() Int -[]> { return 1 }",
+            "fn answer() -[]> Int { return 1 }",
             "answer :: 42",
             "?answer",
         ],
@@ -2668,7 +2668,7 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("helper.jet"),
-        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
+        "fn add_three(x: Int) -[]> Int { return x + 3 }\n",
     )
     .unwrap();
     let shell = r#"
@@ -3545,7 +3545,7 @@ fn repl_file_argument_loads_definitions_without_running_entry() {
     let source = fixture.join("defs.jet");
     std::fs::write(
         &source,
-        "fn triple(n: Int) Int -[]> { return n * 3 }\nfn run() { print(\"entry ran\"); }\n",
+        "fn triple(n: Int) -[]> Int { return n * 3 }\nfn run() { print(\"entry ran\") }\n",
     )
     .unwrap();
 
@@ -3604,7 +3604,7 @@ fn repl_project_flag_value_is_not_read_as_the_preload_file() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
         project.join("helper.jet"),
-        "fn helper() Int -[]> { return 7 }\n",
+        "fn helper() -[]> Int { return 7 }\n",
     )
     .unwrap();
 

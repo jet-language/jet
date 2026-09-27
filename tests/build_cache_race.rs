@@ -44,7 +44,7 @@ fn concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache() {
         let dir = root.join(format!("src{i}"));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("main.jet");
-        std::fs::write(&f, format!("fn run() {{\n    print(\"prog-{i}\");\n}}\n")).unwrap();
+        std::fs::write(&f, format!("fn run() {{\n    print(\"prog-{i}\")\n}}\n")).unwrap();
         files.push(f);
     }
 

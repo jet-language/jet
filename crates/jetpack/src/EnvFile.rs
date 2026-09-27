@@ -5,14 +5,14 @@
 //!
 //! ```jet
 //! // env.jet — a Jetpack project environment (dev-shell descriptor)
-//! use jetpack as pkg;
+//! use jetpack as pkg
 //!
-//! pub fn shell() => [JSON] {
+//! pub fn shell() -> [JSON] {
 //!     return [
-//!         pkg.source("nixpkgs");
-//!         pkg.packages(["ripgrep", "fd", "claude-code"]);
-//!         pkg.prompt("jetpack");
-//!     ];
+//!         pkg.source("nixpkgs"),
+//!         pkg.packages(["ripgrep", "fd", "claude-code"]),
+//!         pkg.prompt("jetpack")
+//!     ]
 //! }
 //! ```
 //!
@@ -119,13 +119,13 @@ impl EnvFile {
         for s in &self.named {
             match &s.via {
                 Some(via) => lines.push(format!(
-                    "        pkg.source({}, {}, {});",
+                    "        pkg.source({}, {}, {})",
                     quote_jet_string(&s.name),
                     quote_jet_string(&s.upstream),
                     quote_jet_string(via),
                 )),
                 None => lines.push(format!(
-                    "        pkg.source({}, {});",
+                    "        pkg.source({}, {})",
                     quote_jet_string(&s.name),
                     quote_jet_string(&s.upstream),
                 )),
@@ -133,7 +133,7 @@ impl EnvFile {
         }
         if let Some(default) = &self.default_source {
             lines.push(format!(
-                "        pkg.source({});",
+                "        pkg.source({})",
                 quote_jet_string(published_source(default))
             ));
         }
@@ -143,19 +143,19 @@ impl EnvFile {
             .map(|p| quote_jet_string(p))
             .collect::<Vec<_>>()
             .join(", ");
-        lines.push(format!("        pkg.packages([{pkgs}]);"));
-        lines.push(format!("        pkg.prompt({prompt});"));
+        lines.push(format!("        pkg.packages([{pkgs}])"));
+        lines.push(format!("        pkg.prompt({prompt})"));
         format!(
             "// {file} — a Jetpack project environment\n\
-             use jetpack as pkg;\n\
+             use jetpack as pkg\n\
              \n\
-             pub fn shell() => [JSON] {{\n\
+             pub fn shell() -> [JSON] {{\n\
              \x20   return [\n\
              {body}\n\
-             \x20   ];\n\
+             \x20   ]\n\
              }}\n",
             file = Syntax::ENV_FILE,
-            body = lines.join("\n"),
+            body = lines.join(",\n"),
         )
     }
 }
@@ -420,25 +420,25 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = r#"
-use jetpack as pkg;
-pub fn shell() => [JSON] {
+use jetpack as pkg
+pub fn shell() -> [JSON] {
     return [
-        pkg.source("nixpkgs");
-        pkg.packages(["ripgrep", "fd", "claude-code"]);
-        pkg.prompt("jetpack");
-    ];
+        pkg.source("nixpkgs"),
+        pkg.packages(["ripgrep", "fd", "claude-code"]),
+        pkg.prompt("jetpack")
+    ]
 }
 "#;
 
     const NAMED: &str = r#"
-use jetpack as pkg;
-pub fn shell() => [JSON] {
+use jetpack as pkg
+pub fn shell() -> [JSON] {
     return [
-        pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github");
-        pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github");
-        pkg.packages(["ripgrep@stable", "neovim@unstable"]);
-        pkg.prompt("jetpack");
-    ];
+        pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github"),
+        pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
+        pkg.packages(["ripgrep@stable", "neovim@unstable"]),
+        pkg.prompt("jetpack")
+    ]
 }
 "#;
 
@@ -477,12 +477,12 @@ pub fn shell() => [JSON] {
         // source still declares its provider via the `via` marker; the
         // name→source package index lives in the repo's `pkg.jet`, not here.
         let repo = r#"
-use jetpack as pkg;
-pub fn shell() => [JSON] {
+use jetpack as pkg
+pub fn shell() -> [JSON] {
     return [
-        pkg.source("mine", "./jet-pkgs", "core");
-        pkg.packages(["hello@mine"]);
-    ];
+        pkg.source("mine", "./jet-pkgs", "core"),
+        pkg.packages(["hello@mine"])
+    ]
 }
 "#;
         let ef = parse(repo);
@@ -500,14 +500,8 @@ pub fn shell() => [JSON] {
     fn render_roundtrips_named() {
         let ef = parse(NAMED);
         let rendered = ef.render();
-        assert!(rendered.contains("pub fn shell() => [JSON]"));
-        for line in rendered
-            .lines()
-            .filter(|line| line.trim_start().starts_with("pkg."))
-        {
-            assert!(line.trim_end().ends_with(';'), "directive line: {line}");
-            assert!(!line.trim_end().ends_with(','), "directive line: {line}");
-        }
+        assert!(rendered.contains("pub fn shell() -> [JSON]"));
+        assert!(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"));
         let ef2 = parse(&rendered);
         assert_eq!(ef.named, ef2.named);
         assert_eq!(ef.default_source, ef2.default_source);
@@ -541,7 +535,7 @@ pub fn shell() => [JSON] {
         let (_, diagnostics) = crate::Lexer::lex(&rendered);
         assert!(diagnostics.is_empty(), "{diagnostics:?}\n{rendered}");
         assert!(rendered.contains(
-            r#"pkg.prompt("$(touch pwned); `id`; \"quote\" {{interpolation}}\nnext");"#
+            r#"pkg.prompt("$(touch pwned); `id`; \"quote\" {{interpolation}}\nnext")"#
         ));
 
         let parsed = parse(&rendered);

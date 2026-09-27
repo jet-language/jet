@@ -584,7 +584,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         receiver_slot := resolved_candidate.receiver_offset - 1
         slots := [Int]{receiver_slot}
         source_index := 0
-        for source in resolved_binding.sources {
+        loop source in resolved_binding.sources {
             slots.push(sema_call_bound_slot(resolved_binding, source, lowered[source_index]) + resolved_candidate.receiver_offset)
             source_index += 1
         }
@@ -615,7 +615,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     value := call_value
     if contract_nodes.len() > 0 {
         wrapped := contract_bindings
-        for contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
+        loop contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
         wrapped.push(TStmt.ExprStmt(call_value, span))
         value = sema_tir_expr(result_type, TExprKind.InlineBlock(wrapped), span)
     }

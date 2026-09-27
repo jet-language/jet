@@ -482,7 +482,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         "support-source",
         &scratch.join("support/support.jet"),
-        "pub fn spare() Int -> 7\n",
+        "pub fn spare() -> Int -> 7\n",
     );
     run_jet_ok(
         &scratch.path,

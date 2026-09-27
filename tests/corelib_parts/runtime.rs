@@ -96,11 +96,11 @@ fn option_zip_and_lift2_combinators() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
-fn missing_float() ?Float -> None
-fn multiply_options(x: Float, y: Float) Float {
+fn missing_float() -> ?Float -> None
+fn multiply_options(x: Float, y: Float) -> Float {
     return x * y
 }
-fn choose_multiplier() fn(Float, Float) Float {
+fn choose_multiplier() -> fn(Float, Float) -> Float {
     print("choose")
     return multiply_options
 }
@@ -186,10 +186,10 @@ fn run() {
     let web_source = r#"
 #Target(Web)
 #Target(JS)
-fn add(x: Int, y: Int) Int { return x + y }
+fn add(x: Int, y: Int) -> Int { return x + y }
 
 #Target(JS)
-fn choose() fn(Int, Int) Int {
+fn choose() -> fn(Int, Int) -> Int {
     print("choose")
     return add
 }
@@ -462,7 +462,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn owner_teardown_task() Task<DispatchReport<String>> {
+fn owner_teardown_task() -> Task<DispatchReport<String>> {
     owner_scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()

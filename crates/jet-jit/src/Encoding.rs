@@ -2300,9 +2300,10 @@ fn typed_decode_value(
             let child = typed_child_descriptor(descriptor, descriptor.element, "shared")?;
             let value = typed_slot_raw(typed_decode_value(tree, &child)?, &child)
                 .map_err(json_rt::FieldError::one)?;
-            let shared = Concurrency::with_runtime_mut(|rt| {
-                crate::Memory::shared_alloc_for_persist(rt, value)
-            });
+            let shared = Concurrency::with_runtime_string(|rt| {
+                crate::Memory::shared_alloc_for_persist(rt, value, descriptor.id)
+            })
+            .map_err(json_rt::FieldError::one)?;
             Ok(JetVal::Int(shared))
         }
         runtime_host::RuntimeValueKind::Record => typed_decode_record(tree, descriptor),

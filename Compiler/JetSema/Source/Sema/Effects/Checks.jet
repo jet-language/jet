@@ -83,6 +83,7 @@ pub fn sema_effect_source_from_function(func: Func, module_identity: String) -> 
         effect_via: func.effect_via,
     }
 }
+
 pub fn sema_effect_source_from_function_key(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource {
     source := sema_effect_source_from_function(func, module_identity)
     source.key = key
@@ -98,11 +99,8 @@ pub fn sema_effect_grantable_roots() -> [String] {
 
 fn sema_effect_known_root(root: String) -> Bool {
     if root == "Panic" || root == "Mem" -> return true
-    roots := sema_effect_grantable_roots()
-    index := 0
-    loop index < roots.len() {
-        if roots[index] == root -> return true
-        index += 1
+    loop candidate in sema_effect_grantable_roots() {
+        if candidate == root -> return true
     }
     false
 }
@@ -110,39 +108,38 @@ fn sema_effect_known_root(root: String) -> Bool {
 pub fn sema_effect_root(name: String) -> String {
     base := name
     if base.contains("(") {
-        parts := base.split("(")
+        parts :: base.split("(")
         if parts.len() > 0 -> base = parts[0]
     }
-    parts := base.split(".")
-    if parts.len() == 0 -> return base
-    parts[0]
+    parts :: base.split(".")
+    if parts.len() == 0 -> base else -> parts[0]
 }
 
 fn sema_effect_rank(name: String) -> Int {
-    root := sema_effect_root(name)
-    if root == "Net" -> return 0
-    if root == "FS" -> return 1
-    if root == "IO" -> return 2
-    if root == "DB" -> return 3
-    if root == "Time" -> return 4
-    if root == "Rand" -> return 5
-    if root == "Env" -> return 6
-    if root == "Exec" -> return 7
-    if root == "Log" -> return 8
-    if root == "GPU" -> return 9
-    if root == "FFI" -> return 10
-    if root == "Browser" -> return 11
-    if root == "Secret" -> return 12
-    if root == "Panic" -> return 13
-    if root == "Mem" -> return 14
-    100
+    root :: sema_effect_root(name)
+    if root == {
+        "Net" -> 0
+        "FS" -> 1
+        "IO" -> 2
+        "DB" -> 3
+        "Time" -> 4
+        "Rand" -> 5
+        "Env" -> 6
+        "Exec" -> 7
+        "Log" -> 8
+        "GPU" -> 9
+        "FFI" -> 10
+        "Browser" -> 11
+        "Secret" -> 12
+        "Panic" -> 13
+        "Mem" -> 14
+        else -> 100
+    }
 }
 
 fn sema_effect_set_contains(set: [String], value: String) -> Bool {
-    index := 0
-    loop index < set.len() {
-        if set[index] == value -> return true
-        index += 1
+    loop item in set {
+        if item == value -> return true
     }
     false
 }
@@ -152,8 +149,8 @@ fn sema_effect_set_add(set: &[String], value: String) -> Bool {
     set.push(value)
     index := set.len() - 1
     loop index > 0 {
-        left := sema_effect_rank(set[index - 1])
-        right := sema_effect_rank(set[index])
+        left :: sema_effect_rank(set[index - 1])
+        right :: sema_effect_rank(set[index])
         if left < right || left == right && set[index - 1] <= set[index] -> break
         swap := set[index - 1]
         set[index - 1] = set[index]
@@ -173,7 +170,7 @@ fn sema_effect_set_union(target: &[String], values: [String]) -> Bool {
 
 pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool {
     if bound == effect_name -> return true
-    prefix := "{bound}."
+    prefix :: "{bound}."
     effect_name.starts_with(prefix)
 }
 
@@ -181,21 +178,20 @@ pub fn sema_effect_parse_name(name: String) -> ?String {
     if name == "" || name.starts_with("..") -> return None
     base := name
     if base.contains("(") {
-        parts := base.split("(")
+        parts :: base.split("(")
         if parts.len() != 2 -> return None
-        closing := parts[1].split(")")
+        closing :: parts[1].split(")")
         if closing.len() != 2 || closing[1] != "" -> return None
         base = parts[0]
         if base != "Mem.Alloc" -> return None
-        arguments := closing[0].trim().split(":")
+        arguments :: closing[0].trim().split(":")
         if arguments.len() != 2 || arguments[0].trim() != "above" -> return None
         amount :: Int.parse(arguments[1].trim()) ?? return None
         if amount <= 0 -> return None
     }
-    root := sema_effect_root(base)
+    root :: sema_effect_root(base)
     if !sema_effect_known_root(root) -> return None
-    segments := base.split(".")
-    loop segment in segments {
+    loop segment in base.split(".") {
         if segment == "" -> return None
     }
     Val(name)
@@ -204,7 +200,7 @@ pub fn sema_effect_parse_name(name: String) -> ?String {
 fn sema_effect_without_deny_only(values: [String]) -> [String] {
     result := [String]{}
     loop value in values {
-        root := sema_effect_root(value)
+        root :: sema_effect_root(value)
         if root != "Panic" && root != "Mem" -> sema_effect_set_add(&result, value)
     }
     result
@@ -213,13 +209,9 @@ fn sema_effect_without_deny_only(values: [String]) -> [String] {
 fn sema_effect_uncovered(inferred: [String], bounds: [String]) -> [String] {
     result := [String]{}
     loop effect_name in sema_effect_without_deny_only(inferred) {
-        covered := false
-        loop bound in bounds {
-            if sema_effect_covers(bound, effect_name) {
-                covered = true
-                break
-            }
-        }
+        covered :: loop bound in bounds {
+            if sema_effect_covers(bound, effect_name) -> break true
+        } ?? false
         if !covered -> sema_effect_set_add(&result, effect_name)
     }
     result
@@ -237,21 +229,21 @@ fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] {
     }
     result
 }
+
 pub fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] {
     prohibited := [String]{}
     loop raw in denies {
         effect_name := raw
         if raw.starts_with("!") {
-            pieces := raw.split("!")
+            pieces :: raw.split("!")
             if pieces.len() <= 1 -> next
             effect_name = pieces[1]
         }
-        parsed := sema_effect_parse_name(effect_name)
-        if parsed != None -> sema_effect_set_add(&prohibited, parsed ?? effect_name)
+        parsed :: sema_effect_parse_name(effect_name)
+        if parsed == .Val(value) -> sema_effect_set_add(&prohibited, value)
     }
     sema_effect_covered(inferred, prohibited)
 }
-
 
 fn sema_effect_show(values: [String]) -> String {
     values.join(", ")
@@ -279,8 +271,7 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
             else -> {}
         }
     }
-    if !found -> return None
-    Val(irreversible)
+    if found -> Val(irreversible) else -> None
 }
 
 // The transaction wall follows the canonical `effect … @irreversible`
@@ -289,7 +280,7 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
 // effect in Prelude/Effects.jet changes this fact at the source boundary.
 fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, effect_name: String) -> ?Bool {
     graph :: environment.registration_graph ?? return None
-    canonical_identity := graph.canonical_effect_module_identity
+    canonical_identity :: graph.canonical_effect_module_identity
     if canonical_identity == "" -> return None
     loop module in graph.modules {
         if module.module_identity == canonical_identity {
@@ -303,9 +294,10 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, ef
 pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, effect_name: String) -> ?Bool {
     sema_effect_canonical_irreversible_fact(environment, effect_name)
 }
+
 pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, span: Span) -> Diagnostic {
-    effect_root := sema_effect_root(effect_name)
-    diagnostic := if effect_root == "FFI" -> sema_error("E0746", span, "`{api}` has the `FFI` effect, which can't be rolled back inside a `#Transact` block", "a foreign function can change external state that the compiler cannot undo automatically", "move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse") else -> sema_error("E0746", span, "`{api}` has the `{effect_root}` effect, which can't be rolled back inside a `#Transact` block", "a `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{effect_root}`) leaves committed external state a rollback can't take back", "move this call after the block, or register it with `<handle>.on_commit(() -> {{ … }})` so it runs only on a clean commit")
+    effect_root :: sema_effect_root(effect_name)
+    diagnostic :: if effect_root == "FFI" -> sema_error("E0746", span, "`{api}` has the `FFI` effect, which can't be rolled back inside a `#Transact` block", "a foreign function can change external state that the compiler cannot undo automatically", "move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse") else -> sema_error("E0746", span, "`{api}` has the `{effect_root}` effect, which can't be rolled back inside a `#Transact` block", "a `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{effect_root}`) leaves committed external state a rollback can't take back", "move this call after the block, or register it with `<handle>.on_commit(() -> {{ … }})` so it runs only on a clean commit")
     diagnostic_with_rights(diagnostic, "transaction", [String]{api}, [String]{}, None)
 }
 
@@ -313,8 +305,8 @@ pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String,
 // caller supplies the canonical API spelling because TIR call nodes may no
 // longer retain the registration module/member pair.
 pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, scopes: SemaScopeTable, effect_row: ?[EffectRowEntry], api: String, span: Span, diagnostics: &[Diagnostic]) -> ?Bool {
-    if scopes.transaction_wall_depth <= 0 || effect_row == None -> return Val(true)
-    row :: effect_row ?? [EffectRowEntry]{}
+    if scopes.transaction_wall_depth <= 0 -> return Val(true)
+    row :: effect_row ?? return Val(true)
     loop entry in row {
         if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
         parsed :: sema_effect_parse_name(entry.name) ?? next
@@ -326,17 +318,16 @@ pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, sco
     }
     Val(true)
 }
+
 pub fn sema_effect_call_api(value: TExpr) -> String {
     if value.kind == {
-        .CoreCall(record, _, _, _, _, _, _) -> return "{record.module_name}.{record.member}"
-        .Call(callee, _, _) -> return callee.key
-        .MethodCall(_, method, _, _) -> return method.name
-        .IndirectCall(_, _, _, _) -> return "indirect call"
-        else -> {}
+        .CoreCall(record, _, _, _, _, _, _) -> "{record.module_name}.{record.member}"
+        .Call(callee, _, _) -> callee.key
+        .MethodCall(_, method, _, _) -> method.name
+        .IndirectCall(_, _, _, _) -> "indirect call"
+        else -> "call"
     }
-    "call"
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Diagnostics and explicit audit gates
@@ -351,7 +342,7 @@ fn sema_effect_positive_panic(span: Span) -> Diagnostic {
 }
 
 pub fn sema_effect_check_unsafe_region(reason: ?String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if reason != None && (reason ?? "").len() > 0 -> return true
+    if (reason ?? "").len() > 0 -> return true
     diagnostics.push(sema_error("E3112", span, "this `#Unsafe` block has no reason", "every audited region must record why it cannot break memory safety", "add the reason: `#Unsafe(\"why this is safe\") {{ … }}`"))
     false
 }
@@ -369,9 +360,7 @@ pub fn sema_effect_require_unsafe_call(callee: String, callee_is_unsafe: Bool, a
 
 pub fn sema_effect_check_tfunc_unsafe(function: TFunc, diagnostics: &[Diagnostic]) -> Bool {
     if !function.is_unsafe -> return true
-    if function.unsafe_gate == None -> return sema_effect_check_unsafe_region(None, function.source_span, &diagnostics)
-    gate :: function.unsafe_gate ?? TUnsafeGate{file: "", line: 0, reason: "", enabled: false, fenced: false}
-    sema_effect_check_unsafe_region(Val(gate.reason), function.source_span, &diagnostics)
+    sema_effect_check_unsafe_region(function.unsafe_gate.map((gate) -> gate.reason), function.source_span, &diagnostics)
 }
 
 fn sema_effect_via_unknown_parameter(function: TFunc, parameter: String, span: Span) -> Diagnostic {
@@ -391,37 +380,32 @@ fn sema_effect_apply_via(node: &[SemaEffectNode], node_index: Int, function: TFu
             break
         }
     }
-    if parameter_type == None {
+    callback_type :: parameter_type ?? {
         diagnostics.push(sema_effect_via_unknown_parameter(function, via.name, via.span))
         return
     }
-    callback_type :: parameter_type ?? Type.Named("Unit")
     if callback_type == {
-        .Fn(_, _, effect_bound, _, _, _) -> {
-            if effect_bound == None {
+        .Fn(_, _, effect_bound, _, _, _) -> if effect_bound == {
+            .Val(effect_row) -> loop entry in effect_row {
+                if entry.name.starts_with("..") -> next
+                raw := entry.name
+                if raw.starts_with("!") {
+                    pieces :: raw.split("!")
+                    if pieces.len() > 1 -> raw = pieces[1]
+                }
+                effect_name :: sema_effect_parse_name(raw) ?? {
+                    diagnostics.push(sema_effect_unknown(raw, entry.span))
+                    next
+                }
+                if sema_effect_root(effect_name) == "Panic" {
+                    diagnostics.push(sema_effect_positive_panic(entry.span))
+                    next
+                }
+                sema_effect_node_add_direct(&nodes, node_index, effect_name, entry.span)
+            }
+            .None -> {
                 nodes[node_index].maximal = true
                 nodes[node_index].maximal_span = Val(via.span)
-            } else {
-                effect_row :: effect_bound ?? [EffectRowEntry]{}
-                loop entry in effect_row {
-                    if entry.name.starts_with("..") -> next
-                    raw := entry.name
-                    if raw.starts_with("!") {
-                        pieces := raw.split("!")
-                        if pieces.len() > 1 -> raw = pieces[1]
-                    }
-                    parsed := sema_effect_parse_name(raw)
-                    if parsed == None {
-                        diagnostics.push(sema_effect_unknown(raw, entry.span))
-                        next
-                    }
-                    effect_name :: parsed ?? raw
-                    if sema_effect_root(effect_name) == "Panic" {
-                        diagnostics.push(sema_effect_positive_panic(entry.span))
-                        next
-                    }
-                    sema_effect_node_add_direct(&nodes, node_index, effect_name, entry.span)
-                }
             }
         }
         else -> diagnostics.push(sema_effect_via_not_callback(function, via.name, callback_type, via.span))
@@ -429,7 +413,7 @@ fn sema_effect_apply_via(node: &[SemaEffectNode], node_index: Int, function: TFu
 }
 
 fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnostic {
-    declared := if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
+    declared :: if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
     sema_error("E0740", node.span, "`{node.name}` uses the effect `{sema_effect_show(over)}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those effects", "add `{sema_effect_show(over)}` to the effect list, or stop using it in `{node.name}`")
 }
 
@@ -442,7 +426,7 @@ fn sema_effect_pure_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagn
 }
 
 fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
-    span := node.replayable_span ?? node.span
+    span :: node.replayable_span ?? node.span
     sema_error("E0725", span, "`{node.name}` is `#Replayable` but reaches `{sema_effect_show(reached)}`", "replayable code must use explicit deterministic inputs rather than ambient time, randomness, network, or console IO", "inject a deterministic provider or move the ambient effect outside the replayable function")
 }
 
@@ -470,16 +454,15 @@ fn sema_effect_node_add_edge(nodes: &[SemaEffectNode], node_index: Int, edge: St
 }
 
 fn sema_effect_node_index(nodes: [SemaEffectNode], key: String) -> ?Int {
-    index := 0
-    loop index < nodes.len() {
-        if nodes[index].key == key -> return Val(index)
-        index += 1
+    loop (index, node) in nodes {
+        if node.key == key -> return Val(index)
     }
     None
 }
+
 fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) {
     loop diagnostic in batch {
-        located := sema_diagnostic_with_source_location(diagnostic, source_segments)
+        located :: sema_diagnostic_with_source_location(diagnostic, source_segments)
         all.push(located)
         modules[module_index].diagnostics.push(located)
     }
@@ -532,21 +515,18 @@ fn sema_effect_node_from_source(function: TFunc, source: ?SemaEffectFunctionSour
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
     }
-    if actual.declared_effects != None {
-        effect_row :: actual.declared_effects ?? [EffectRowEntry]{}
+    if actual.declared_effects == .Val(effect_row) {
         loop entry in effect_row {
-            prohibited := entry.name.starts_with("!")
+            prohibited :: entry.name.starts_with("!")
             raw := entry.name
             if prohibited {
-                pieces := entry.name.split("!")
+                pieces :: entry.name.split("!")
                 if pieces.len() > 1 -> raw = pieces[1]
             }
-            parsed := sema_effect_parse_name(raw)
-            if parsed == None {
+            effect_name :: sema_effect_parse_name(raw) ?? {
                 diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
-            effect_name :: parsed ?? raw
             if !prohibited && sema_effect_root(effect_name) == "Panic" {
                 diagnostics.push(sema_effect_positive_panic(entry.span))
                 next
@@ -563,23 +543,18 @@ fn sema_effect_node_from_source(function: TFunc, source: ?SemaEffectFunctionSour
 }
 
 fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, expression: TExpr, diagnostics: &[Diagnostic]) {
-    callee_key := ""
-    if fact.callee != None -> callee_key = (fact.callee ?? SymbolId{key: ""}).key
-    known_callee := callee_key != "" && sema_effect_node_index(nodes, callee_key) != None
+    callee_key :: fact.callee.map((callee) -> callee.key) ?? ""
+    known_callee :: callee_key != "" && sema_effect_node_index(nodes, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
-    row_known := false
-    if fact.facts.effect_bound != None {
-        row_known = true
-        effect_row :: fact.facts.effect_bound ?? [EffectRowEntry]{}
+    row_known :: fact.facts.effect_bound != None
+    if fact.facts.effect_bound == .Val(effect_row) {
         loop entry in effect_row {
-            raw := entry.name
+            raw :: entry.name
             if raw.starts_with("!") -> next
-            parsed := sema_effect_parse_name(raw)
-            if parsed == None {
+            effect_name :: sema_effect_parse_name(raw) ?? {
                 diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
-            effect_name :: parsed ?? raw
             if !known_callee -> sema_effect_node_add_direct(&nodes, node_index, effect_name, fact.span)
         }
     }
@@ -602,7 +577,7 @@ fn sema_effect_find_fact(facts: [SemaCallSiteFact], caller_key: String, span: Sp
     loop fact in facts {
         if fact.caller_key != caller_key -> next
         if sema_effect_span_contains(fact.span, span) || sema_effect_span_contains(span, fact.span) {
-            width := fact.span.end - fact.span.start
+            width :: fact.span.end - fact.span.start
             if width < best_width {
                 best_width = width
                 best = Val(fact)
@@ -641,29 +616,27 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: T
 }
 
 fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr) {
-    callee_key := ""
-    if expression.kind == {
-        .Call(callee, _, _) -> callee_key = callee.key
-        .MethodCall(_, method, _, _) -> callee_key = method.symbol.key
-        .StaticCall(_, _, method, _, _) -> callee_key = method.symbol.key
-        else -> {}
+    callee_key :: if expression.kind == {
+        .Call(callee, _, _) -> callee.key
+        .MethodCall(_, method, _, _) -> method.symbol.key
+        .StaticCall(_, _, method, _, _) -> method.symbol.key
+        else -> ""
     }
-    if callee_key != "" && sema_effect_node_index(nodes, callee_key) != None {
-        sema_effect_node_add_edge(&nodes, node_index, callee_key)
-        return
+    if {
+        callee_key != "" && sema_effect_node_index(nodes, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
+        else -> {
+            nodes[node_index].maximal = true
+            nodes[node_index].maximal_span = Val(expression.span)
+        }
     }
-    nodes[node_index].maximal = true
-    nodes[node_index].maximal_span = Val(expression.span)
 }
-
 
 fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller_key: String) {
     if sema_effect_is_call(expression) {
-        fact := sema_effect_find_fact(facts, caller_key, expression.span)
-        if fact != None {
-            sema_effect_record_fact(&nodes, node_index, fact ?? SemaCallSiteFact{span: expression.span, caller_key: caller_key, callee: None, facts: SemaCallFacts{return_type: Type.Named("Unit"), failure_carrier: TFailureCarrier.Infallible, effect_bound: None, type_args: [Type]{}, default_refs: [FunctionDefaultRef]{} }}, expression, &diagnostics)
-        } else {
-            sema_effect_record_unresolved_call(&nodes, node_index, expression)
+        fact :: sema_effect_find_fact(facts, caller_key, expression.span)
+        if fact == {
+            .Val(value) -> sema_effect_record_fact(&nodes, node_index, value, expression, &diagnostics)
+            .None -> sema_effect_record_unresolved_call(&nodes, node_index, expression)
         }
     }
     if expression.kind == {
@@ -673,11 +646,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
             nodes[node_index].maximal_span = Val(expression.span)
         }
         .RequireStop(_, _, _) | .Never(_) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
-        .Lambda(value) -> {
-            sema_effect_merge_lambda(&nodes, node_index, value)
-            return
-        }
-        .LambdaValue(value) -> {
+        .Lambda(value) | .LambdaValue(value) -> {
             sema_effect_merge_lambda(&nodes, node_index, value)
             return
         }
@@ -692,17 +661,14 @@ fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, funct
     }
 }
 
-
 fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: [SemaCallSiteFact], caller_key: String, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
     if sema_effect_is_call(expression) {
-        fact := sema_effect_find_fact(facts, caller_key, expression.span)
-        if fact != None {
-            value :: fact ?? SemaCallSiteFact{span: expression.span, caller_key: caller_key, callee: None, facts: SemaCallFacts{return_type: Type.Named("Unit"), failure_carrier: TFailureCarrier.Infallible, effect_bound: None, type_args: [Type]{}, default_refs: [FunctionDefaultRef]{} }}
-            if value.callee != None {
-                callee :: value.callee ?? SymbolId{key: ""}
-                target_index := sema_effect_node_index(nodes, callee.key)
-                if target_index != None {
-                    target :: nodes[target_index ?? 0]
+        fact :: sema_effect_find_fact(facts, caller_key, expression.span)
+        if fact == .Val(value) {
+            if value.callee == .Val(callee) {
+                target_index :: sema_effect_node_index(nodes, callee.key)
+                if target_index == .Val(index) {
+                    target :: nodes[index]
                     if target.is_unsafe -> sema_effect_require_unsafe_call(target.name, true, audited, expression.span, &diagnostics)
                 }
             }
@@ -776,31 +742,31 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
             .CountedLoop(_, init, condition, step, _, body, _) -> {
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{init}, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, condition, audited, &diagnostics)
-                if step != None -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{step ?? init}, audited, &diagnostics)
+                if step == .Val(step_statement) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{step_statement}, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .ForRange(_, _, start, end, step, _, body, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, start, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, end, audited, &diagnostics)
-                if step != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step ?? start, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .Range(_, _, source, start, end, step, _, _, body, _) -> {
-                if source != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, source ?? start, audited, &diagnostics)
+                if source == .Val(source_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, source_value, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, start, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, end, audited, &diagnostics)
-                if step != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step ?? start, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .ExprStmt(value, _) | .DeferClose(value, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
             .TaskGroup(_, limit, body, _) -> {
-                if limit != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, limit ?? TExpr{ty: Type.Named("Unit"), kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}, audited, &diagnostics)
+                if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, limit_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .If(condition, then_body, else_body, _, _) -> {
                 sema_effect_check_unsafe_condition(&nodes, facts, caller_key, condition, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, then_body, audited, &diagnostics)
-                if else_body != None -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_body ?? [TStmt]{}, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
             }
             .Loop(_, body, _) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             .While(_, condition, body, _) -> {
@@ -815,7 +781,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
             .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, scrutinee, audited, &diagnostics)
                 loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
-                if else_body != None -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_body ?? [TStmt]{}, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
             }
             .RangeSwitch(subject, arms, else_body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, subject, audited, &diagnostics)
@@ -839,7 +805,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
             .ForIn(_, _, _, source, collection, step, _, _, _, body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, source, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller_key, collection, audited, &diagnostics)
-                if step != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step ?? source, audited, &diagnostics)
+                if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, step_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> {
@@ -851,7 +817,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
                     sema_effect_check_unsafe_expr(&nodes, facts, caller_key, arm.condition, audited, &diagnostics)
                     sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, arm.body, audited, &diagnostics)
                 }
-                if else_body != None -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_body ?? [TStmt]{}, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, else_statements, audited, &diagnostics)
             }
             .Unsafe(_, body) | .UnsafeBlock(_, body, _) -> {
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, true, &diagnostics)
@@ -883,11 +849,11 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
             .GcEdit(_, _, _, _, index_temp, nested, _) -> {
-                if index_temp != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, index_temp ?? TExpr{ty: Type.Named("Unit"), kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}, audited, &diagnostics)
+                if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, index_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{nested}, audited, &diagnostics)
             }
             .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-                if owner != None -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, owner ?? TExpr{ty: Type.Named("Unit"), kind: TExprKind.Unit, span: Span{start: 0, end: 0}, integer_bounds: None, cost: None}, audited, &diagnostics)
+                if owner == .Val(owner_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, owner_value, audited, &diagnostics)
             }
             else -> {
                 loop expression in tir_stmt_children(statement) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, expression, audited, &diagnostics)
@@ -897,7 +863,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
 }
 
 fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String], span: Span) -> Diagnostic {
-    allowed := if bounds.len() == 0 -> "no effects" else -> "`{sema_effect_show(bounds)}`"
+    allowed :: if bounds.len() == 0 -> "no effects" else -> "`{sema_effect_show(bounds)}`"
     sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside, even through a call, must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
 }
 
@@ -906,19 +872,17 @@ pub fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [S
     valid := true
     loop raw in caps {
         if raw.starts_with("..") -> next
-        prohibited := raw.starts_with("!")
+        prohibited :: raw.starts_with("!")
         name := raw
         if prohibited {
-            pieces := raw.split("!")
+            pieces :: raw.split("!")
             if pieces.len() > 1 -> name = pieces[1]
         }
-        parsed := sema_effect_parse_name(name)
-        if parsed == None {
+        effect_name :: sema_effect_parse_name(name) ?? {
             diagnostics.push(sema_effect_unknown(name, span))
             valid = false
             next
         }
-        effect_name :: parsed ?? name
         if !prohibited && sema_effect_root(effect_name) == "Panic" {
             diagnostics.push(sema_effect_positive_panic(span))
             valid = false
@@ -927,7 +891,7 @@ pub fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [S
         if prohibited -> next
         sema_effect_set_add(&bounds, effect_name)
     }
-    over := sema_effect_uncovered(inferred, bounds)
+    over :: sema_effect_uncovered(inferred, bounds)
     if over.len() > 0 {
         diagnostics.push(sema_effect_scope_diagnostic(marker, over, bounds, span))
         valid = false
@@ -936,7 +900,7 @@ pub fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [S
 }
 
 fn sema_effect_callback_diagnostic(over: [String], bounds: [String], span: Span) -> Diagnostic {
-    allowed := if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter allows only `-[{sema_effect_show(bounds)}]>` effects"
+    allowed :: if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter allows only `-[{sema_effect_show(bounds)}]>` effects"
     sema_error("E0747", span, "this callback uses the effect `{sema_effect_show(over)}`, which the parameter doesn't allow", "{allowed}; `{sema_effect_show(over)}` is outside that bound", "pass a callback within the declared effect bound, or widen the parameter's bound")
 }
 
@@ -946,13 +910,11 @@ pub fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [Str
     loop raw in bounds {
         if raw.starts_with("..") -> next
         if raw.starts_with("!") -> next
-        parsed := sema_effect_parse_name(raw)
-        if parsed == None {
+        effect_name :: sema_effect_parse_name(raw) ?? {
             diagnostics.push(sema_effect_unknown(raw, span))
             valid = false
             next
         }
-        effect_name :: parsed ?? raw
         if sema_effect_root(effect_name) == "Panic" {
             diagnostics.push(sema_effect_positive_panic(span))
             valid = false
@@ -960,7 +922,7 @@ pub fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [Str
         }
         sema_effect_set_add(&parsed_bounds, effect_name)
     }
-    over := sema_effect_uncovered(callback_effects, parsed_bounds)
+    over :: sema_effect_uncovered(callback_effects, parsed_bounds)
     if over.len() > 0 {
         diagnostics.push(sema_effect_callback_diagnostic(over, parsed_bounds, span))
         valid = false
@@ -986,9 +948,8 @@ fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] {
     round := 0
     loop changed && round <= nodes.len() + 1 {
         changed = false
-        index := 0
-        loop index < nodes.len() {
-            loop edge in nodes[index].call_edges {
+        loop (index, node) in nodes {
+            loop edge in node.call_edges {
                 if edge == "__jet_panic__" {
                     if sema_effect_set_add(&solved[index], "Panic") -> changed = true
                     next
@@ -996,7 +957,6 @@ fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] {
                 target :: sema_effect_node_index(nodes, edge) ?? next
                 if sema_effect_set_union(&solved[index], solved[target]) -> changed = true
             }
-            index += 1
         }
         round += 1
     }
@@ -1013,38 +973,33 @@ fn sema_effect_secret_diagnostic(node: SemaEffectNode) -> Diagnostic {
 
 fn sema_effect_check_node(node: SemaEffectNode, solved: [String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
-    secret_reached := false
-    loop effect_name in solved {
-        if sema_effect_root(effect_name) == "Secret" {
-            secret_reached = true
-            break
-        }
-    }
-    secret_granted := false
-    loop bound in node.declared {
-        if sema_effect_root(bound) == "Secret" {
-            secret_granted = true
-            break
-        }
-    }
+    secret_reached :: loop effect_name in solved {
+        if sema_effect_root(effect_name) == "Secret" -> break true
+    } ?? false
+    secret_granted :: loop bound in node.declared {
+        if sema_effect_root(bound) == "Secret" -> break true
+    } ?? false
     if secret_reached && !secret_granted {
         diagnostics.push(sema_effect_secret_diagnostic(node))
         valid = false
     }
-    if node.is_pure {
-        over := sema_effect_without_deny_only(solved)
-        if over.len() > 0 {
-            diagnostics.push(sema_effect_pure_diagnostic(node, over))
-            valid = false
+    if {
+        node.is_pure -> {
+            over :: sema_effect_without_deny_only(solved)
+            if over.len() > 0 {
+                diagnostics.push(sema_effect_pure_diagnostic(node, over))
+                valid = false
+            }
         }
-    } else if node.has_declared_row {
-        over := sema_effect_uncovered(solved, node.declared)
-        if over.len() > 0 {
-            diagnostics.push(sema_effect_bound_diagnostic(node, over))
-            valid = false
+        node.has_declared_row -> {
+            over :: sema_effect_uncovered(solved, node.declared)
+            if over.len() > 0 {
+                diagnostics.push(sema_effect_bound_diagnostic(node, over))
+                valid = false
+            }
         }
     }
-    prohibited := sema_effect_covered(solved, node.prohibited)
+    prohibited :: sema_effect_covered(solved, node.prohibited)
     if prohibited.len() > 0 {
         diagnostics.push(sema_effect_prohibited_diagnostic(node, prohibited))
         valid = false
@@ -1052,7 +1007,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], diagnostics: &
     if node.is_replayable {
         forbidden := [String]{}
         loop effect_name in solved {
-            root := sema_effect_root(effect_name)
+            root :: sema_effect_root(effect_name)
             if root == "Time" || root == "Rand" || root == "Net" || root == "IO" -> sema_effect_set_add(&forbidden, effect_name)
         }
         if forbidden.len() > 0 {
@@ -1068,19 +1023,16 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
     nodes := [SemaEffectNode]{}
     results := [SemaEffectModuleResult]{}
     loop module_row in inputs -> results.push(SemaEffectModuleResult{module_identity: module_row.module_identity, functions: module_row.functions, diagnostics: [Diagnostic]{}, complete: true})
-    module_index := 0
-    loop module_index < inputs.len() {
-        module_row := inputs[module_index]
+    loop (module_index, module_row) in inputs {
         loop function in module_row.functions {
             source := sema_effect_source_for(function, module_row.sources)
             function_diagnostics := [Diagnostic]{}
             nodes.push(sema_effect_node_from_source(function, source, module_index, &function_diagnostics))
             sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
         }
-        module_index += 1
     }
 
-    module_index = 0
+    module_index := 0
     loop module_index < inputs.len() {
         module_row := inputs[module_index]
         loop function in module_row.functions {
@@ -1096,34 +1048,26 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         module_index += 1
     }
 
-    solved := sema_effect_solve(nodes)
-    node_index := 0
-    loop node_index < nodes.len() {
+    solved :: sema_effect_solve(nodes)
+    loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
         if !sema_effect_check_node(nodes[node_index], solved[node_index], &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
-        node_index += 1
-    module_index := 0
-    loop module_index < inputs.len() {
+    }
+    loop module_index in 0..<inputs.len() {
         module_row := inputs[module_index]
         functions := module_row.functions
-        function_index := 0
-        loop function_index < functions.len() {
-            node_index :: sema_effect_node_index(nodes, functions[function_index].key) ?? {
-                function_index += 1
-                next
-            }
+        loop function_index in 0..<functions.len() {
+            node_index :: sema_effect_node_index(nodes, functions[function_index].key) ?? next
             functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
-            function_index += 1
         }
         results[module_index].functions = functions
         results[module_index].complete = diagnostics.len() == 0
-        module_index += 1
     }
-    complete := diagnostics.len() == 0
+    complete :: diagnostics.len() == 0
     SemaEffectGraphResult{modules: results, diagnostics: diagnostics, complete: complete}
 }
 

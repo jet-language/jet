@@ -35,8 +35,8 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFun
 
 fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId) -> Bool {
     used_as_ratio := false
-    for block in function.blocks {
-        for instruction in block.instructions {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
             if instruction.operation == {
                 .Convert(_, parameters, _, conversion) -> {
                     call := if conversion == {
@@ -46,7 +46,7 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: Mir
                     if call != None {
                         route_id :: call ?? MirPreludeCallId{value: 0}
                         route_member := ""
-                        for route in ctx.program.prelude_calls {
+                        loop route in ctx.program.prelude_calls {
                             if route.id == route_id -> route_member = route.member
                         }
                         if route_member.starts_with("conversion_") {
@@ -65,7 +65,7 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: Mir
                 if instruction.operation == {
                     .Convert(_, parameters, _, MirConversion.Prelude(call, _, _)) -> {
                         route_member := ""
-                        for route in ctx.program.prelude_calls {
+                        loop route in ctx.program.prelude_calls {
                             if route.id == call -> route_member = route.member
                         }
                         if route_member.starts_with("conversion_") {
@@ -85,6 +85,12 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: Mir
 
 fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> [String] {
     lines := [String]{}
+    if instruction.result != None {
+        value :: instruction.result ?? MirValueId{value: 0}
+        if jet_rust_emit_partial_drop_value(ctx, function, value) != None -> return lines
+        if jet_rust_emit_uninit_fixed_drop_value(function, value) != None -> return lines
+        if jet_rust_emit_partial_projection_only(ctx, function, value) -> return lines
+    }
     if instruction.operation == {
         .Constant(MirConstant.String(_)) -> {
             if instruction.result != None {
@@ -107,7 +113,13 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, in
             loop row in function.places {
                 if row.id == place && row.projections.len() == 0 {
                     if row.base == {
-                        .Local(local) -> lines.push("{jet_rust_emit_local_slot(local)} = None;")
+                        .Local(local) -> {
+                            if jet_rust_emit_local_uninit_fixed_type(function, local) != None {
+                                lines.push("{jet_rust_emit_local_slot(local)} = Some({ctx.config.root_prefix}jet_mem::JetUninitFixed::new());")
+                            } else {
+                                lines.push("{jet_rust_emit_local_slot(local)} = None;")
+                            }
+                        }
                         .Temporary(value) -> lines.push("{jet_rust_emit_value_slot(value)} = None;")
                         else -> lines.push("{jet_rust_emit_place_lvalue(ctx, function, place)} = Default::default();")
                     }
@@ -124,13 +136,14 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, in
 
 fn jet_rust_emit_target_assignment(target: MirBlockId) -> String { "__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};" }
 fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFunction, value: ?MirValueId) -> String {
-    inner := if value != None -> jet_rust_emit_value_move(value ?? MirValueId{value: 0}) else -> "()"
+    if value != None -> return jet_rust_emit_value_move(value ?? panic("MIR Return operand disappeared"))
+    if mir_type_is_unit(function.return_type) -> return "()"
     if function.failure == {
-        .Infallible -> inner
-        .Result(_, _) -> "Ok({inner})"
-        .Optional(_) -> "Ok({inner})"
-        .Diverges(_) -> "match {inner} {{ }}"
-    }
+        .Result(success, _) -> mir_type_is_unit(success)
+        else -> false
+    } -> return "Ok(())"
+    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR non-unit Return has no value", "checked Return terminators need an operand unless the full return is Unit or the Result success type is Unit", Val(function.span))
+    "unreachable!(\"missing MIR Return value\")"
 }
 
 fn jet_rust_emit_drop_edge_matches(action: MirDropEdge, wanted: MirDropEdge) -> Bool {
@@ -182,6 +195,8 @@ fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, pla
                 return "unreachable!(\"non-owned MIR drop\")"
             }
             if partial != None -> return partial ?? "unreachable!(\"missing partial drop\")"
+            uninit_drop := jet_rust_emit_uninit_fixed_drop_place(function, place)
+            if uninit_drop != None -> return uninit_drop ?? "unreachable!(\"missing uninitialized fixed-list drop\")"
             if row.projections.len() > 0 {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a projected place without partial-drop storage", "checked projected drops require a canonical partial-move/drop plan", Val(span))
                 return "unreachable!(\"unsupported projected MIR drop\")"

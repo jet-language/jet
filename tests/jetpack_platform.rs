@@ -152,7 +152,7 @@ fn platform_tier_gate_accepts_data_only_output_without_executable_service() {
     .unwrap();
     fs::write(
         package.join("mathlib.jet"),
-        "module mathlib {\n    pub fn add(a: Int, b: Int) Int { return a + b }\n}\n",
+        "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
     )
     .unwrap();
     fs::write(

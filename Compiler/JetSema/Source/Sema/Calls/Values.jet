@@ -101,7 +101,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     value := call_value
     if contract_nodes.len() > 0 {
         wrapped := contract_bindings
-        for contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
+        loop contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
         wrapped.push(TStmt.ExprStmt(call_value, span))
         value = sema_tir_expr(result_type, TExprKind.InlineBlock(wrapped), span)
     }

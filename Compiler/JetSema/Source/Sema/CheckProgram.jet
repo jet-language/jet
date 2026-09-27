@@ -182,11 +182,11 @@ fn sema_function_view_source_within(declared: ViewSourcePath, inferred: ViewSour
 }
 
 fn sema_function_view_contract_for_slot(map: ViewProvenanceMap, slot: [String]) -> ?ViewProvenance {
-    for entry in map.entries {
+    loop entry in map.entries {
         if sema_function_view_slot_equal(entry.slot, slot) -> return Val(entry.value)
     }
     if slot.len() > 0 {
-        for entry in map.entries {
+        loop entry in map.entries {
             if entry.slot.len() == 0 -> return Val(entry.value)
         }
     }
@@ -200,7 +200,7 @@ fn sema_function_return_view_provenance(func: Func, inferred: ?ViewProvenanceMap
     if inferred != None {
         inferred_map :: inferred ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
         span :: func.return_type_span ?? func.name_span
-        for inferred_entry in inferred_map.entries {
+        loop inferred_entry in inferred_map.entries {
             declared_entry := sema_function_view_contract_for_slot(declared, inferred_entry.slot)
             if declared_entry == None {
                 diagnostics.push(sema_error("E2305", span, "returned view escapes its declared `from` clause", "every return path's owners must stay inside the sources named after `from`", "widen the `from` clause, or stop returning a view from that owner"))
@@ -208,9 +208,9 @@ fn sema_function_return_view_provenance(func: Func, inferred: ?ViewProvenanceMap
                 next
             }
             allowed :: declared_entry ?? ViewProvenance{sources: [ViewSourcePath]{}, mutable: false}
-            for inferred_source in inferred_entry.value.sources {
+            loop inferred_source in inferred_entry.value.sources {
                 source_allowed := false
-                for declared_source in allowed.sources {
+                loop declared_source in allowed.sources {
                     if sema_function_view_source_within(declared_source, inferred_source) -> source_allowed = true
                 }
                 if !source_allowed {
@@ -220,7 +220,7 @@ fn sema_function_return_view_provenance(func: Func, inferred: ?ViewProvenanceMap
             }
         }
         published := [ViewProvenanceEntry]{}
-        for inferred_entry in inferred_map.entries {
+        loop inferred_entry in inferred_map.entries {
             allowed := sema_function_view_contract_for_slot(declared, inferred_entry.slot)
             sources := inferred_entry.value.sources
             if allowed != None {
@@ -229,21 +229,21 @@ fn sema_function_return_view_provenance(func: Func, inferred: ?ViewProvenanceMap
             }
             published.push(ViewProvenanceEntry{slot: inferred_entry.slot, value: ViewProvenance{sources: sources, mutable: inferred_entry.value.mutable}})
         }
-        for declared_entry in declared.entries {
+        loop declared_entry in declared.entries {
             if declared_entry.slot.len() == 0 -> next
             duplicate := false
-            for published_entry in published {
+            loop published_entry in published {
                 if sema_function_view_slot_equal(published_entry.slot, declared_entry.slot) -> duplicate = true
             }
             if !duplicate -> published.push(declared_entry)
         }
         if published.len() == 0 {
             any_write := false
-            for inferred_entry in inferred_map.entries {
+            loop inferred_entry in inferred_map.entries {
                 if inferred_entry.value.mutable -> any_write = true
             }
             merged := [ViewProvenanceEntry]{}
-            for declared_entry in declared.entries {
+            loop declared_entry in declared.entries {
                 if declared_entry.slot.len() == 0 {
                     merged.push(ViewProvenanceEntry{slot: declared_entry.slot, value: ViewProvenance{sources: declared_entry.value.sources, mutable: any_write}})
                 } else {
@@ -267,17 +267,17 @@ fn sema_function_view_maps_equal(left: ?ViewProvenanceMap, right: ?ViewProvenanc
     left_map :: left ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     right_map :: right ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     if left_map.entries.len() != right_map.entries.len() -> return false
-    for left_entry in left_map.entries {
+    loop left_entry in left_map.entries {
         right_entry := None
-        for candidate in right_map.entries {
+        loop candidate in right_map.entries {
             if sema_function_view_slot_equal(left_entry.slot, candidate.slot) -> right_entry = Val(candidate)
         }
         if right_entry == None -> return false
         candidate :: right_entry ?? ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: [ViewSourcePath]{}, mutable: false}}
         if left_entry.value.mutable != candidate.value.mutable || left_entry.value.sources.len() != candidate.value.sources.len() -> return false
-        for left_source in left_entry.value.sources {
+        loop left_source in left_entry.value.sources {
             found := false
-            for right_source in candidate.value.sources {
+            loop right_source in candidate.value.sources {
                 if sema_function_view_source_path_equal(left_source, right_source) -> found = true
             }
             if !found -> return false
@@ -422,14 +422,14 @@ fn sema_function_generic_params(func: Func, graph_option: ?SemaRegistrationGraph
 }
 fn sema_function_merge_generic_params(enclosing: [TGenericParam], current: [TGenericParam]) -> [TGenericParam] {
     merged := [TGenericParam]{}
-    for outer in enclosing {
+    loop outer in enclosing {
         shadowed := false
-        for inner in current {
+        loop inner in current {
             if outer.name == inner.name -> shadowed = true
         }
         if !shadowed -> merged.push(outer)
     }
-    for inner in current -> merged.push(inner)
+    loop inner in current -> merged.push(inner)
     merged
 }
 
@@ -800,21 +800,21 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, registe
     checked.complete && sema_append_function(functions, checked)
 }
 fn sema_check_registered_tfunc_key(module_row: SemaRegistrationModule, name: String) -> ?String {
-    for function in module_row.functions {
+    loop function in module_row.functions {
         if function.declaration.name == name -> return Val(function.symbol.id.key)
     }
     None
 }
 
 fn sema_check_registered_foreign_key(module_row: SemaRegistrationModule, name: String) -> ?String {
-    for function in module_row.foreign_functions {
+    loop function in module_row.foreign_functions {
         if function.declaration.name == name -> return Val(function.symbol.id.key)
     }
     None
 }
 
 fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, provider: SemaCheckedForeignProvider, handle: SemaCheckedForeignHandle) -> ?String {
-    for adapter in provider.close_adapters {
+    loop adapter in provider.close_adapters {
         if adapter.raw_function == handle.close && (adapter.handle_type == handle.typedef_name || adapter.handle_type == handle.jet_name) {
             return sema_check_registered_tfunc_key(module_row, adapter.adapter_function)
         }
@@ -851,7 +851,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
     }
     if check_bodies {
         summary_pass_limit := 0
-        for item in program.items {
+        loop item in program.items {
             if item == {.Func(_) -> summary_pass_limit += 1 else -> {}}
         }
         summary_pass := 0
@@ -940,14 +940,14 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
     foreign_diagnostic_count := diagnostics.len()
     foreign_provider_inputs := [SemaForeignProviderInput]{}
     has_foreign_import_target := false
-    for edge in graph.edges {
+    loop edge in graph.edges {
         if edge.target_module_identity == source_module.module_identity && edge.foreign_binding != None {
             has_foreign_import_target = true
             break
         }
     }
     if has_foreign_import_target {
-        for provider in graph.foreign_providers {
+        loop provider in graph.foreign_providers {
             if provider.module_identity == source_module.module_identity -> foreign_provider_inputs.push(provider)
         }
     }

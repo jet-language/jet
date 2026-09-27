@@ -7239,7 +7239,7 @@ mod tests {
 
     #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {
-        let source = "alias Callback<T> :: fn(*, force: T) Int\nfn run() {}\n";
+        let source = "alias Callback<T> :: fn(*, force: T) -> Int\nfn run() {}\n";
         let (tokens, lex_diags) = crate::Lexer::lex(source);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let program = crate::Parser::parse(&tokens).expect("parse failed");

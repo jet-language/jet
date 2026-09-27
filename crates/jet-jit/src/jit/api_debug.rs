@@ -4,7 +4,8 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use jet_foundation::{
     JitBackend::RunOutcome,
     MIR::{
-        MirArtifactId, MirCoreClosureKind, MirOperation, MirProgram, MirRuntimeValue, MirSelectKind,
+        MirArtifactId, MirCoreClosureKind, MirFunctionId, MirOperation, MirProgram, MirRuntimeValue,
+        MirSelectKind,
         MirSemanticOp, MirTerminator, MirType,
     },
 };
@@ -14,7 +15,8 @@ use super::gap::JitGap;
 use super::resident::{
     ensure_resident_module, fresh_runtime_with_allocator_cap, program_allocator_cap_bytes,
     publish_runtime_decisions, resident_hot_swap, resident_run_fresh,
-    resident_run_fresh_with_values_and_result, resident_teardown,
+    resident_run_fresh_with_function_values_and_result,
+    resident_run_fresh_with_values_and_result, resident_teardown, ResidentHelperAttempt,
 };
 use super::runtime_host::catch_jit_panic;
 use super::safety::{
@@ -23,16 +25,26 @@ use super::safety::{
 use super::tiers::{plan_mir_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::RESIDENT_RUNTIME;
-
-fn entry_gap(program: &MirProgram, artifact: MirArtifactId, reason: impl Into<String>) -> Option<JitGap> {
-    let id = artifact_entry(program, artifact)?;
+fn function_gap(
+    program: &MirProgram,
+    function: MirFunctionId,
+    reason: impl Into<String>,
+) -> Option<JitGap> {
     let name = program
         .functions
         .iter()
-        .find(|function| function.id == id)
-        .map(|function| function.key.clone())
-        .unwrap_or_else(|| "<no entry>".to_string());
-    Some(JitGap::new(id, name, reason))
+        .find(|candidate| candidate.id == function)
+        .map(|candidate| candidate.key.clone())
+        .unwrap_or_else(|| format!("{function:?}"));
+    Some(JitGap::new(function, name, reason))
+}
+
+fn entry_gap(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    reason: impl Into<String>,
+) -> Option<JitGap> {
+    artifact_entry(program, artifact).and_then(|function| function_gap(program, function, reason))
 }
 
 pub fn cranelift_host_supported() -> bool {
@@ -166,40 +178,148 @@ pub(crate) fn try_resident_with_values_and_result(
     values: &[MirRuntimeValue],
     return_type: &MirType,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
-) -> Result<(RunOutcome, MirRuntimeValue), super::tiers::MirTierPlan> {
+) -> ResidentHelperAttempt {
     if !cranelift_host_supported() {
-        return Err(plan_mir_tiers(program, artifact));
+        return ResidentHelperAttempt::NotInvoked(
+            "Cranelift host path is unsupported on this architecture".to_string(),
+        );
     }
     super::types_meta::install_struct_redact(program);
     let plan = plan_mir_tiers(program, artifact);
-    note_jit_execution();
-    match catch_jit_panic("resident typed value entry", || {
-        resident_run_fresh_with_values_and_result(
+    let nested = super::Concurrency::active_runtime_ptr().is_some();
+    let mut invocation_started = false;
+    let execution = catch_jit_panic("resident typed value entry", || {
+        Ok(resident_run_fresh_with_values_and_result(
             program,
             program_allocator_cap_bytes(program),
             artifact,
             release_devtools_policy,
             values,
             return_type,
-        )
-    }) {
-        Ok(outcome) => {
-            let native_fns = plan
-                .rows
-                .iter()
-                .map(|row| (row.function, row.function_name.as_str()))
-                .collect::<Vec<_>>();
-            super::tier_cache::publish_capture(&native_fns, artifact);
+            &mut invocation_started,
+        ))
+    });
+    let attempt = match execution {
+        Ok(attempt) => attempt,
+        Err(reason) if invocation_started => ResidentHelperAttempt::Invoked {
+            outcome: super::resident::resident_invocation_failure_outcome(),
+            value: None,
+            failure: Some(reason),
+        },
+        Err(reason) => ResidentHelperAttempt::NotInvoked(reason),
+    };
+    match &attempt {
+        ResidentHelperAttempt::NotInvoked(_) => super::tier_cache::abort_capture(),
+        ResidentHelperAttempt::Invoked { failure, .. } => {
+            note_jit_execution();
+            if failure.is_some() {
+                super::tier_cache::abort_capture();
+            } else if !nested {
+                let native_fns = plan
+                    .rows
+                    .iter()
+                    .map(|row| (row.function, row.function_name.as_str()))
+                    .collect::<Vec<_>>();
+                super::tier_cache::publish_capture(&native_fns, artifact);
+            }
             record_trace(plan.rows.clone());
             publish_runtime_decisions(program, artifact, &plan.rows);
-            Ok(outcome)
-        }
-        Err(reason) => {
-            let mut plan = plan;
-            plan.gap = entry_gap(program, artifact, reason);
-            Err(plan)
         }
     }
+    attempt
+}
+
+fn catch_nested_resident_helper(
+    run: impl FnOnce() -> ResidentHelperAttempt,
+) -> Result<ResidentHelperAttempt, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(result) => Ok(result),
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
+                .unwrap_or_else(|| "unknown panic payload".to_string());
+            Err(format!(
+                "nested resident typed helper panicked before returning: {detail}"
+            ))
+        }
+    }
+}
+
+pub(crate) fn try_resident_with_function_values_and_result(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+    function: MirFunctionId,
+    values: &[MirRuntimeValue],
+    return_type: &MirType,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> ResidentHelperAttempt {
+    if !cranelift_host_supported() {
+        return ResidentHelperAttempt::NotInvoked(
+            "Cranelift host path is unsupported on this architecture".to_string(),
+        );
+    }
+    super::types_meta::install_struct_redact(program);
+    let plan = super::tiers::plan_mir_tiers_with_roots(program, artifact, helper_roots);
+    if !plan.native.contains(&function) {
+        return ResidentHelperAttempt::NotInvoked(format!(
+            "checked helper function {function:?} is not retained in the native tier"
+        ));
+    }
+    let nested = super::Concurrency::active_runtime_ptr().is_some();
+    let mut invocation_started = false;
+    let run = || {
+        resident_run_fresh_with_function_values_and_result(
+            program,
+            program_allocator_cap_bytes(program),
+            artifact,
+            helper_roots,
+            function,
+            release_devtools_policy,
+            values,
+            return_type,
+            &mut invocation_started,
+        )
+    };
+    let execution = if nested {
+        catch_nested_resident_helper(run)
+    } else {
+        catch_jit_panic("resident typed helper", || Ok(run()))
+    };
+    let attempt = match execution {
+        Ok(attempt) => attempt,
+        Err(reason) if invocation_started => ResidentHelperAttempt::Invoked {
+            outcome: RunOutcome::Ran {
+                stdout: String::new(),
+                stderr: reason.clone(),
+                exit_code: 1,
+            },
+            value: None,
+            failure: Some(reason),
+        },
+        Err(reason) => ResidentHelperAttempt::NotInvoked(reason),
+    };
+    match &attempt {
+        ResidentHelperAttempt::NotInvoked(_) => super::tier_cache::abort_capture(),
+        ResidentHelperAttempt::Invoked { failure, .. } => {
+            note_jit_execution();
+            if failure.is_some() {
+                super::tier_cache::abort_capture();
+            } else if !nested {
+                let native_fns = plan
+                    .rows
+                    .iter()
+                    .map(|row| (row.function, row.function_name.as_str()))
+                    .collect::<Vec<_>>();
+                super::tier_cache::publish_capture(&native_fns, artifact);
+            }
+            record_trace(plan.rows.clone());
+            publish_runtime_decisions(program, artifact, &plan.rows);
+        }
+    }
+    attempt
 }
 pub(crate) fn try_resident_hot_swap(
     program: &MirProgram,

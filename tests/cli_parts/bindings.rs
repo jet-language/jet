@@ -655,8 +655,8 @@ func main() {}
     );
     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
     assert!(generated.contains("pub struct Handle { value: Int }"));
-    assert!(generated.contains("pub fn new_handle(value: Int) Handle ->"));
-    assert!(generated.contains("pub fn consume_handle(handle: Handle) Int ->"));
+    assert!(generated.contains("pub fn new_handle(value: Int) -> Handle ->"));
+    assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int ->"));
 
     fs::write(
         dir.join("main.jet"),
@@ -1008,7 +1008,7 @@ end Geodesy;
     assert!(dir.join(".jet/bindings/ada/libjet_ada_geodesy.a").is_file());
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
     let generated = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.jet")).unwrap();
-    assert!(generated.contains("pub fn double_lat(lat: Float) Float !AdaError -[FFI.Ada]>"));
+    assert!(generated.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float !AdaError"));
     assert!(generated.contains("lat < -90.0 || lat > 90.0"));
     assert!(!generated.contains("=>"));
     let provenance = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.provenance")).unwrap();
@@ -1320,7 +1320,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     let contract = dir.join("callbacks.dart");
     let compute = dir.join("compute.jet");
     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) Int -[FFI.Dart]> {\n    return callbacks.dart_double(value) ?? -1\n}\n\npub fn compute_float(value: Float) Float -[FFI.Dart]> {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) -[FFI.Dart]> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n\npub fn compute_float(value: Float) -[FFI.Dart]> Float {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
     let bind = Command::new(jet())
         .args(["inspect", "bind", "dart"])
         .arg(&contract)
@@ -1347,8 +1347,8 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     assert!(cache.join("callbacks_host.dart").is_file());
     assert!(cache.join("callbacks.provenance").is_file());
     let generated = fs::read_to_string(cache.join("callbacks.jet")).unwrap();
-    assert!(generated.contains("pub fn dart_double(value: Int) Int !DartError -[FFI.Dart]>"));
-    assert!(generated.contains("pub fn dart_half(value: Float) Float !DartError -[FFI.Dart]>"));
+    assert!(generated.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int !DartError"));
+    assert!(generated.contains("pub fn dart_half(value: Float) -[FFI.Dart]> Float !DartError"));
     assert!(!generated.contains("=>"));
     let host = fs::read_to_string(cache.join("callbacks_host.dart")).unwrap();
     assert!(host.contains("NativeCallable<Int64 Function(Int64)>.isolateLocal"));

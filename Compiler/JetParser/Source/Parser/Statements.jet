@@ -5,11 +5,11 @@ fn parser_statement_is_keyword(state: &JetParserState) -> Bool {
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
     if token.kind == TOKEN_IDENT {
-        word := token.payload.decoded
+        word :: token.payload.decoded
         if word == "next" | "defer" -> return true
-        next_kind := parser_kind_at(&state, 1)
+        next_kind :: parser_kind_at(&state, 1)
         if next_kind == TOKEN_COLON_COLON {
-            following_kind := parser_kind_at(&state, 2)
+            following_kind :: parser_kind_at(&state, 2)
             if following_kind == TOKEN_KW_LOOP || following_kind == TOKEN_IDENT -> return true
         }
         if next_kind == TOKEN_COLON_EQ || next_kind == TOKEN_COLON_COLON -> return true
@@ -43,31 +43,26 @@ fn parser_is_subjectless_guard(subject: Expr, span: Span) -> Bool {
 }
 
 fn parser_block_definitely_exits_value_block(statements: [Stmt]) -> Bool {
-    index := 0
-    loop index < statements.len() {
-        if parser_statement_definitely_exits_value_block(statements[index]) -> return true
-        index += 1
+    loop stmt in statements {
+        if parser_statement_definitely_exits_value_block(stmt) -> return true
     }
     false
 }
 
 fn parser_switch_definitely_exits_value_block(subject: Expr, arms: [SwitchArm], else_body: ?[Stmt], span: Span) -> Bool {
     if arms.len() == 0 -> return false
-    fallback_exits := if else_body == {
+    fallback_exits :: if else_body == {
         .Val(body) -> parser_block_definitely_exits_value_block(body)
         .None -> !parser_is_subjectless_guard(subject, span)
     }
-    all_arms_exit := true
-    index := 0
-    loop index < arms.len() && all_arms_exit {
-        if !parser_block_definitely_exits_value_block(arms[index].body) -> all_arms_exit = false
-        index += 1
-    }
-    return all_arms_exit && fallback_exits
+    all_arms_exit :: loop arm in arms {
+        if !parser_block_definitely_exits_value_block(arm.body) -> break false
+    } ?? true
+    all_arms_exit && fallback_exits
 }
 
 fn parser_statement_definitely_exits_value_block(stmt: Stmt) -> Bool {
-    return if stmt == {
+    if stmt == {
         .Return(_, _) -> true
         .Break(_) -> true
         .BreakValue(_, _) -> true
@@ -86,11 +81,7 @@ fn parser_statement_definitely_exits_value_block(stmt: Stmt) -> Bool {
 
 fn parser_loop_labels_with_current(nested_labels: [String], label: ?NamedSpan) -> [String] {
     labels := [String]{}
-    index := 0
-    loop index < nested_labels.len() {
-        labels.push(nested_labels[index])
-        index += 1
-    }
+    loop nested_label in nested_labels -> labels.push(nested_label)
     if label == { .Val(value) -> labels.push(value.name) }
     labels
 }
@@ -100,42 +91,30 @@ fn parser_loop_body_can_break(statements: [Stmt]) -> Bool {
 }
 
 fn parser_loop_body_can_break_inner(statements: [Stmt], nested_labels: [String], allow_unlabelled: Bool) -> Bool {
-    index := 0
-    loop index < statements.len() {
-        stmt :: statements[index]
+    loop stmt in statements {
         can_break := if stmt == {
             .Break(_) -> allow_unlabelled
             .BreakValue(_, _) -> allow_unlabelled
             .BreakLabel(name, _) -> {
-                nested := false
-                label_index := 0
-                loop label_index < nested_labels.len() {
-                    if nested_labels[label_index] == name { nested = true }
-                    label_index += 1
-                }
+                nested :: loop nested_label in nested_labels {
+                    if nested_label == name -> break true
+                } ?? false
                 !nested
             }
             .BreakLabelValue(name, _, _, _) -> {
-                nested := false
-                label_index := 0
-                loop label_index < nested_labels.len() {
-                    if nested_labels[label_index] == name { nested = true }
-                    label_index += 1
-                }
+                nested :: loop nested_label in nested_labels {
+                    if nested_label == name -> break true
+                } ?? false
                 !nested
             }
             .Switch(_, arms, else_body, _) -> {
-                arm_index := 0
-                found := false
-                loop arm_index < arms.len() && !found {
-                    found = parser_loop_body_can_break_inner(arms[arm_index].body, nested_labels, allow_unlabelled)
-                    arm_index += 1
+                found_in_arms :: loop arm in arms {
+                    if parser_loop_body_can_break_inner(arm.body, nested_labels, allow_unlabelled) -> break true
+                } ?? false
+                if else_body == {
+                    .Val(body) -> found_in_arms || parser_loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+                    .None -> found_in_arms
                 }
-                if !found && else_body != None {
-                    body :: else_body ?? [Stmt]{}
-                    found = parser_loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
-                }
-                found
             }
             .Loop(body, _, _, label) -> parser_loop_body_can_break_inner(body, parser_loop_labels_with_current(nested_labels, label), false)
             .While(_, body, _, _, label) -> parser_loop_body_can_break_inner(body, parser_loop_labels_with_current(nested_labels, label), false)
@@ -145,7 +124,6 @@ fn parser_loop_body_can_break_inner(statements: [Stmt], nested_labels: [String],
         }
         if can_break -> return true
         if parser_statement_definitely_exits_value_block(stmt) -> return false
-        index += 1
     }
     false
 }
@@ -165,7 +143,7 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the block")
-    inner := Span{start: open.span.end, end: close.span.start}
+    inner :: Span{start: open.span.end, end: close.span.start}
     state.block_spans.push(inner)
     ParsedBlock{span: parser_cover(open.span, close.span), statements: statements, tail: None}
 }
@@ -206,7 +184,7 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the value block")
-    inner := Span{start: open.span.end, end: close.span.start}
+    inner :: Span{start: open.span.end, end: close.span.start}
     state.block_spans.push(inner)
     ParsedBlock{span: parser_cover(open.span, close.span), statements: statements, tail: tail}
 }
@@ -214,31 +192,40 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
 fn parser_parse_statement(state: &JetParserState) -> Stmt {
     parser_skip_semicolons(&state)
     token :: parser_current(&state)
-    if token.kind == TOKEN_KW_IF -> return parser_parse_if_statement(&state)
-    if token.kind == TOKEN_KW_LOOP -> return parser_parse_loop_statement(&state)
-    if token.kind == TOKEN_RETURN -> return parser_parse_return_statement(&state)
-    if token.kind == TOKEN_BREAK -> return parser_parse_break_statement(&state)
-    if token.kind == TOKEN_KW_YIELD {
-        start :: parser_bump(&state)
-        value :: parser_parse_expression(&state, 1, 0)
-        parser_finish_statement(&state)
-        return Stmt.Yield(value: value.expr, span: parser_cover(start.span, value.span))
-    }
-    if token.kind == TOKEN_HASH -> return parser_parse_marked_statement(&state)
-    if token.kind == TOKEN_IDENT {
-        word := token.payload.decoded
-        if word == "next" {
-            parser_bump(&state)
+    if token.kind == {
+        TOKEN_KW_IF -> parser_parse_if_statement(&state)
+        TOKEN_KW_LOOP -> parser_parse_loop_statement(&state)
+        TOKEN_RETURN -> parser_parse_return_statement(&state)
+        TOKEN_BREAK -> parser_parse_break_statement(&state)
+        TOKEN_KW_YIELD -> {
+            start :: parser_bump(&state)
+            value :: parser_parse_expression(&state, 1, 0)
             parser_finish_statement(&state)
-            return Stmt.Continue(span: token.span)
+            Stmt.Yield(value: value.expr, span: parser_cover(start.span, value.span))
         }
-        if word == "defer" -> return parser_parse_defer_statement(&state)
-        if parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP -> return parser_parse_labeled_loop(&state)
-        binding_kind := parser_kind_at(&state, 1)
-        if binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> return parser_parse_binding_statement(&state)
+        TOKEN_HASH -> parser_parse_marked_statement(&state)
+        TOKEN_IDENT -> {
+            word :: token.payload.decoded
+            if word == {
+                "next" -> {
+                    parser_bump(&state)
+                    parser_finish_statement(&state)
+                    Stmt.Continue(span: token.span)
+                }
+                "defer" -> parser_parse_defer_statement(&state)
+                else -> {
+                    if parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP -> return parser_parse_labeled_loop(&state)
+                    binding_kind :: parser_kind_at(&state, 1)
+                    if {
+                        binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
+                        else -> parser_parse_assignment_or_expression(&state)
+                    }
+                }
+            }
+        }
+        TOKEN_AT -> parser_parse_comptime_binding(&state)
+        else -> parser_parse_assignment_or_expression(&state)
     }
-    if token.kind == TOKEN_AT -> return parser_parse_comptime_binding(&state)
-    parser_parse_assignment_or_expression(&state)
 }
 
 fn parser_parse_if_statement(state: &JetParserState) -> Stmt {
@@ -266,10 +253,9 @@ fn parser_parse_if_statement(state: &JetParserState) -> Stmt {
         end = final_body.span
         break
     }
-    span := parser_cover(start.span, end)
+    span :: parser_cover(start.span, end)
     Stmt.Switch(subject: Expr.Bool(value: true, span: start.span), arms: arms, else_body: else_body, span: span)
 }
-
 
 fn parser_parse_loop_effect_body(state: &JetParserState) -> ParsedBlock {
     if parser_current_kind(&state) == TOKEN_LBRACE -> return parser_parse_block(&state)
@@ -284,22 +270,22 @@ fn parser_parse_loop_after_keyword(state: &JetParserState, start: Span, label: ?
         name :: parser_bump(&state)
         parser_bump(&state)
         collection :: parser_parse_expression(&state, 1, 0)
-        arrow_body := parser_current_kind(&state) == TOKEN_ARROW
+        arrow_body :: parser_current_kind(&state) == TOKEN_ARROW
         body :: parser_parse_loop_effect_body(&state)
-        kind := ForKind.In(collection: collection.expr, step: None)
-        if collection.expr == {
-            .Range(range_start, range_end, exclusive, _) -> kind = ForKind.Range(start: range_start, end: range_end, step: None, exclusive: exclusive)
+        kind :: if collection.expr == {
+            .Range(range_start, range_end, exclusive, _) -> ForKind.Range(start: range_start, end: range_end, step: None, exclusive: exclusive)
+            else -> ForKind.In(collection: collection.expr, step: None)
         }
         return Stmt.For(var: name.payload.decoded, var_span: name.span, var2: None, kind: kind, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label, auto_vectorization: None)
     }
-    body_kind := parser_current_kind(&state)
+    body_kind :: parser_current_kind(&state)
     if body_kind == TOKEN_LBRACE || body_kind == TOKEN_ARROW {
-        arrow_body := body_kind == TOKEN_ARROW
+        arrow_body :: body_kind == TOKEN_ARROW
         body :: parser_parse_loop_effect_body(&state)
         return Stmt.Loop(body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label)
     }
     condition :: parser_parse_expression(&state, 1, 0)
-    arrow_body := parser_current_kind(&state) == TOKEN_ARROW
+    arrow_body :: parser_current_kind(&state) == TOKEN_ARROW
     body :: parser_parse_loop_effect_body(&state)
     Stmt.While(cond: condition.expr, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label)
 }
@@ -365,20 +351,21 @@ fn parser_parse_comptime_binding(state: &JetParserState) -> Stmt {
     Stmt.Val(binding: binding)
 }
 
-
 fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     name :: parser_expect_name(&state, "in a binding")
     sigil :: parser_current(&state)
-    mutable := false
-    if sigil.kind == {
+    mutable :: if sigil.kind == {
         .TOKEN_COLON_EQ | .TOKEN_COLON_COLON -> {
             parser_bump(&state)
-            mutable = sigil.kind == TOKEN_COLON_EQ
+            sigil.kind == TOKEN_COLON_EQ
         }
-        else -> parser_add_error(&state, sigil.span, "expected `:=` or `::` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `::` for immutable")
+        else -> {
+            parser_add_error(&state, sigil.span, "expected `:=` or `::` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `::` for immutable")
+            false
+        }
     }
     value :: parser_parse_expression(&state, 1, 0)
-    binding := ast_binding(name.payload.decoded, name.span, mutable, value.expr, Val(sigil.span))
+    binding :: ast_binding(name.payload.decoded, name.span, mutable, value.expr, Val(sigil.span))
     parser_finish_statement(&state)
     Stmt.Val(binding: binding)
 }
@@ -398,7 +385,7 @@ fn parser_parse_defer_statement(state: &JetParserState) -> Stmt {
 
 fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
     left :: parser_parse_expression(&state, 1, 0)
-    operator := parser_current_kind(&state)
+    operator :: parser_current_kind(&state)
     if parser_is_assignment_operator(operator) {
         op_token :: parser_bump(&state)
         right :: parser_parse_expression(&state, 1, 0)
@@ -415,21 +402,23 @@ fn parser_is_assignment_operator(kind: Int) -> Bool {
 }
 
 fn parser_assignment_binop(kind: Int) -> ?BinOp {
-    if kind == TOKEN_EQ -> return None
-    if kind == TOKEN_PLUS_EQ -> return Val(BinOp.Add)
-    if kind == TOKEN_MINUS_EQ -> return Val(BinOp.Sub)
-    if kind == TOKEN_STAR_EQ -> return Val(BinOp.Mul)
-    if kind == TOKEN_SLASH_EQ -> return Val(BinOp.Div)
-    if kind == TOKEN_SLASH_PERCENT_EQ -> return Val(BinOp.FloorDiv)
-    if kind == TOKEN_PERCENT_EQ -> return Val(BinOp.Mod)
-    if kind == TOKEN_PERCENT_PERCENT_EQ -> return Val(BinOp.Rem)
-    if kind == TOKEN_AMP_EQ -> return Val(BinOp.BitAnd)
-    if kind == TOKEN_PIPE_EQ -> return Val(BinOp.BitOr)
-    if kind == TOKEN_CARET_EQ -> return Val(BinOp.Pow)
-    if kind == TOKEN_TILDE_PIPE_EQ -> return Val(BinOp.BitXor)
-    if kind == TOKEN_SHL_EQ -> return Val(BinOp.Shl)
-    if kind == TOKEN_SHR_EQ -> return Val(BinOp.Shr)
-    None
+    if kind == {
+        TOKEN_EQ -> None
+        TOKEN_PLUS_EQ -> Val(BinOp.Add)
+        TOKEN_MINUS_EQ -> Val(BinOp.Sub)
+        TOKEN_STAR_EQ -> Val(BinOp.Mul)
+        TOKEN_SLASH_EQ -> Val(BinOp.Div)
+        TOKEN_SLASH_PERCENT_EQ -> Val(BinOp.FloorDiv)
+        TOKEN_PERCENT_EQ -> Val(BinOp.Mod)
+        TOKEN_PERCENT_PERCENT_EQ -> Val(BinOp.Rem)
+        TOKEN_AMP_EQ -> Val(BinOp.BitAnd)
+        TOKEN_PIPE_EQ -> Val(BinOp.BitOr)
+        TOKEN_CARET_EQ -> Val(BinOp.Pow)
+        TOKEN_TILDE_PIPE_EQ -> Val(BinOp.BitXor)
+        TOKEN_SHL_EQ -> Val(BinOp.Shl)
+        TOKEN_SHR_EQ -> Val(BinOp.Shr)
+        else -> None
+    }
 }
 
 fn parser_expression_lvalue(state: &JetParserState, expr: Expr, fallback_span: Span) -> LValue {
@@ -464,54 +453,54 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     marker_args := [MarkerCallArg]{ }
     labels := [?CallLabel]{ }
-    index := 0
-    loop index < args.len() {
-        marker_args.push(MarkerCallArg.Expr(value: args[index].expr))
-        labels.push(args[index].label)
-        index += 1
+    loop arg in args {
+        marker_args.push(MarkerCallArg.Expr(value: arg.expr))
+        labels.push(arg.label)
     }
-    marker_span := parser_cover(hash.span, end)
-    marker := Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
+    marker_span :: parser_cover(hash.span, end)
+    marker :: Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
     body :: parser_parse_block(&state)
-    span := parser_cover(hash.span, body.span)
-    if marker.name == "Unsafe" {
-        reason := None
-        audit_expr := None
-        if args.len() > 0 {
-            audit_expr = Val(args[0].expr)
-            reason = parser_expr_literal_string(args[0].expr)
+    span :: parser_cover(hash.span, body.span)
+    if marker.name == {
+        "Unsafe" -> {
+            reason := None
+            audit_expr := None
+            if args.len() > 0 {
+                audit_expr = Val(args[0].expr)
+                reason = parser_expr_literal_string(args[0].expr)
+            }
+            Stmt.Unsafe(audit: reason, audit_expr: audit_expr, body: body.statements, span: span)
         }
-        return Stmt.Unsafe(audit: reason, audit_expr: audit_expr, body: body.statements, span: span)
-    }
-    if marker.name == "Impure" {
-        reason := None
-        reason_expr := None
-        if args.len() > 0 {
-            reason_expr = Val(args[0].expr)
-            reason = parser_expr_literal_string(args[0].expr)
+        "Impure" -> {
+            reason := None
+            reason_expr := None
+            if args.len() > 0 {
+                reason_expr = Val(args[0].expr)
+                reason = parser_expr_literal_string(args[0].expr)
+            }
+            Stmt.Impure(reason: reason, reason_expr: reason_expr, body: body.statements, span: span)
         }
-        return Stmt.Impure(reason: reason, reason_expr: reason_expr, body: body.statements, span: span)
-    }
-    if marker.name == "Reactive" -> return Stmt.Reactive(body: body.statements, span: span)
-    if marker.name == "Shield" -> return Stmt.Shield(body: body.statements, span: span)
-    if marker.name == "Off" | "DebugOnly" -> return Stmt.Switched(marker: marker, body: body.statements, span: span)
-    if marker.name == "Region" {
-        region_name := ""
-        region_span := name.span
-        if args.len() > 0 {
-            if args[0].expr == { .Ident(value, value_span) -> { region_name = value; region_span = value_span } }
+        "Reactive" -> Stmt.Reactive(body: body.statements, span: span)
+        "Shield" -> Stmt.Shield(body: body.statements, span: span)
+        "Off" | "DebugOnly" -> Stmt.Switched(marker: marker, body: body.statements, span: span)
+        "Region" -> {
+            region_name := ""
+            region_span := name.span
+            if args.len() > 0 {
+                if args[0].expr == { .Ident(value, value_span) -> { region_name = value; region_span = value_span } }
+            }
+            Stmt.Region(name: region_name, name_span: region_span, body: body.statements, span: span)
         }
-        return Stmt.Region(name: region_name, name_span: region_span, body: body.statements, span: span)
-    }
-    if marker.name == "Transact" {
-        transaction_name := None
-        transaction_span := None
-        if args.len() > 0 {
-            if args[0].expr == { .Ident(value, value_span) -> { transaction_name = Val(value); transaction_span = Val(value_span) } }
+        "Transact" -> {
+            transaction_name := None
+            transaction_span := None
+            if args.len() > 0 {
+                if args[0].expr == { .Ident(value, value_span) -> { transaction_name = Val(value); transaction_span = Val(value_span) } }
+            }
+            Stmt.Transact(name: transaction_name, name_span: transaction_span, body: body.statements, implicit: false, span: span)
         }
-        return Stmt.Transact(name: transaction_name, name_span: transaction_span, body: body.statements, implicit: false, span: span)
+        else -> Stmt.ScopeMember(name: marker.name, name_span: marker.name_span, args: [Expr]{}, args_span: None, body: body.statements, dsl: true, dot_span: hash.span, span: span)
     }
-    Stmt.ScopeMember(name: marker.name, name_span: marker.name_span, args: [Expr]{}, args_span: None, body: body.statements, dsl: true, dot_span: hash.span, span: span)
 }
 
 fn parser_expr_literal_string(expr: Expr) -> ?String {

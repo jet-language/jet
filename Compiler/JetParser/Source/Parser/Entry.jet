@@ -5,8 +5,7 @@ pub fn parse_source(source: [U8]) -> ParseResult {
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
-    source_end := 0
-    if lexed.tokens.len() > 0 -> source_end = lexed.tokens[lexed.tokens.len() - 1].span.start
+    source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     state := JetParserState{tokens: lexed.tokens, position: 0, diagnostics: lexed.diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
@@ -14,11 +13,12 @@ pub fn parse_lexed(lexed: Lexed) -> ParseResult {
 }
 
 pub fn parse_tokens(tokens: [Token]) -> ParseResult {
-    source_end := 0
-    if tokens.len() > 0 {
-        last :: tokens[tokens.len() - 1]
-        source_end = last.span.end
-        if last.kind == TOKEN_EOF -> source_end = last.span.start
+    source_end :: if {
+        tokens.len() > 0 -> {
+            last :: tokens[tokens.len() - 1]
+            if last.kind == TOKEN_EOF -> last.span.start else -> last.span.end
+        }
+        else -> 0
     }
     state := JetParserState{tokens: tokens, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0}
     program := parser_parse_program(&state)
@@ -32,29 +32,30 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
-        if parser_user_policy_ahead(&state) {
-            declaration := parser_parse_user_policy(&state)
-            if declaration.valid -> program.user_policy_declarations.push(declaration.value)
-        } else if parser_file_directive_ahead(&state) {
-            parser_parse_file_directive(&state, &program)
-        } else if parser_item_ahead(&state) {
-            declaration :: parser_parse_item_or_import(&state)
-            if declaration.import == {
-                .Val(value) -> program.imports.push(value)
-                .None -> {
-                    if declaration.item == {
-                        .Val(value) -> program.items.push(value)
-                        .None -> {
-                            if !declaration.handled {
-                                parser_add_error(&state, parser_current(&state).span, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
-                                parser_recover_statement(&state)
+        if {
+            parser_user_policy_ahead(&state) -> {
+                declaration :: parser_parse_user_policy(&state)
+                if declaration.valid -> program.user_policy_declarations.push(declaration.value)
+            }
+            parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
+            parser_item_ahead(&state) -> {
+                declaration :: parser_parse_item_or_import(&state)
+                if declaration.import == {
+                    .Val(value) -> program.imports.push(value)
+                    .None -> {
+                        if declaration.item == {
+                            .Val(value) -> program.items.push(value)
+                            .None -> {
+                                if !declaration.handled {
+                                    parser_add_error(&state, parser_current(&state).span, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
+                                    parser_recover_statement(&state)
+                                }
                             }
                         }
                     }
                 }
             }
-        } else {
-            program.script_body.push(parser_parse_statement(&state))
+            else -> program.script_body.push(parser_parse_statement(&state))
         }
         parser_skip_semicolons(&state)
         if state.position == before {
@@ -68,7 +69,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
 
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
-    name := parser_lookahead(&state, 1)
+    name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
     if name.payload.decoded == "PubFile" | "NoPrelude" | "Html" -> return true
     name.payload.decoded == "Target" && !parser_hash_leads_to_item(&state)
@@ -76,60 +77,63 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool {
 
 fn parser_parse_file_directive(state: &JetParserState, program: &[Program]) {
     marker :: parser_parse_marker(&state)
-    if marker.name == "PubFile" {
-        program.pub_file = true
-    } else if marker.name == "NoPrelude" {
-        program.no_prelude = true
-    } else if marker.name == "Target" {
-        first := parser_marker_first_expr(marker)
-        if first == {
-            .Val(value) -> {
-                if value == {
-                    .Ident(name, _) -> {
-                        if name == "JS" {
-                            program.web_target_ceiling = Val(WebBucket.JS)
-                        } else if name == "Wasm" {
-                            program.web_target_ceiling = Val(WebBucket.Wasm)
-                        } else {
-                            parser_add_error(&state, marker.span, "unknown file target `{name}`", "`#Target` selects a supported compilation target", "write `#Target(JS)` or `#Target(Wasm)`")
+    if marker.name == {
+        "PubFile" -> program.pub_file = true
+        "NoPrelude" -> program.no_prelude = true
+        "Target" -> {
+            first :: parser_marker_first_expr(marker)
+            if first == {
+                .Val(value) -> {
+                    if value == {
+                        .Ident(name, _) -> {
+                            if name == {
+                                "JS" -> program.web_target_ceiling = Val(WebBucket.JS)
+                                "Wasm" -> program.web_target_ceiling = Val(WebBucket.Wasm)
+                                else -> parser_add_error(&state, marker.span, "unknown file target `{name}`", "`#Target` selects a supported compilation target", "write `#Target(JS)` or `#Target(Wasm)`")
+                            }
+                            program.default_target = Val(name)
                         }
-                        program.default_target = Val(name)
+                        else -> parser_add_error(&state, marker.span, "expected a target name in `#Target`", "target declarations select a compiler target", "write `#Target(JS)` or `#Target(Wasm)`")
                     }
-                    else -> parser_add_error(&state, marker.span, "expected a target name in `#Target`", "target declarations select a compiler target", "write `#Target(JS)` or `#Target(Wasm)`")
                 }
+                .None -> parser_add_error(&state, marker.span, "`#Target` requires a target name", "the target directive must choose a backend bucket", "write `#Target(JS)` or `#Target(Wasm)`")
             }
-            .None -> parser_add_error(&state, marker.span, "`#Target` requires a target name", "the target directive must choose a backend bucket", "write `#Target(JS)` or `#Target(Wasm)`")
         }
-    } else if marker.name == "Html" {
-        first := parser_marker_first_expr(marker)
-        if first == {
-            .Val(value) -> {
-                path := parser_expr_literal_string(value)
-                if path == {
-                    .Val(text) -> program.html_path = Val(text)
-                    .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
+        "Html" -> {
+            first :: parser_marker_first_expr(marker)
+            if first == {
+                .Val(value) -> {
+                    path :: parser_expr_literal_string(value)
+                    if path == {
+                        .Val(text) -> program.html_path = Val(text)
+                        .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
+                    }
                 }
+                .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
             }
-            .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
         }
+        else -> {}
     }
 }
 
 fn parser_item_ahead(state: &JetParserState) -> Bool {
     kind :: parser_current_kind(&state)
-    if parser_comptime_const_ahead(&state, 0) -> return true
-    if parser_item_declaration_ahead_at(&state, 0) -> return true
-    if parser_is_item_keyword(kind) -> return true
-    if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> return true
     token :: parser_current(&state)
-    if token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> return true
-    if kind == TOKEN_HASH -> return parser_hash_leads_to_item(&state)
-    false
+    if {
+        parser_comptime_const_ahead(&state, 0) -> true
+        parser_item_declaration_ahead_at(&state, 0) -> true
+        parser_is_item_keyword(kind) -> true
+        kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> true
+        token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> true
+        kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
+        else -> false
+    }
 }
 
 fn parser_is_item_keyword(kind: Int) -> Bool {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_CONST || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EXTERN || kind == TOKEN_KW_DERIVE
 }
+
 fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool {
     parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
 }
@@ -145,8 +149,11 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool {
             nesting := 1
             loop nesting > 0 && parser_kind_at(&state, offset) != TOKEN_EOF {
                 kind :: parser_kind_at(&state, offset)
-                if kind == TOKEN_LBRACKET -> nesting += 1
-                if kind == TOKEN_RBRACKET -> nesting -= 1
+                if kind == {
+                    TOKEN_LBRACKET -> nesting += 1
+                    TOKEN_RBRACKET -> nesting -= 1
+                    else -> {}
+                }
                 offset += 1
             }
             next
@@ -158,13 +165,16 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool {
             nesting := 1
             offset += 1
             loop nesting > 0 && parser_kind_at(&state, offset) != TOKEN_EOF {
-                kind := parser_kind_at(&state, offset)
-                if kind == TOKEN_LPAREN -> nesting += 1
-                if kind == TOKEN_RPAREN -> nesting -= 1
+                kind :: parser_kind_at(&state, offset)
+                if kind == {
+                    TOKEN_LPAREN -> nesting += 1
+                    TOKEN_RPAREN -> nesting -= 1
+                    else -> {}
+                }
                 offset += 1
             }
         }
     }
-    kind := parser_kind_at(&state, offset)
+    kind :: parser_kind_at(&state, offset)
     parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
 }

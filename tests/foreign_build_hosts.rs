@@ -197,7 +197,7 @@ fn shared_runner_publishes_only_after_a_successful_jet_export() {
         "version = 1\n\n[build.stamp]\ngit = \"runner\"\ndirty = false\ntoolchain = \"1.0.0\"\nat = \"2026-08-29T00:00:00.000000000Z\"\n\n[root]\ndependencies = []\n",
     )
     .unwrap();
-    fs::write(scratch.path.join("library.jet"), "pub fn on_tick(dt: Int) Int -> dt + 1\n").unwrap();
+    fs::write(scratch.path.join("library.jet"), "pub fn on_tick(dt: Int) -> Int -> dt + 1\n").unwrap();
     let fake_jet = scratch.path.join("fake-jet");
     fs::write(
         &fake_jet,

@@ -179,7 +179,7 @@ struct CLIError {
     message: String
 }
 
-fn run() ![FieldError] {
+fn run() -> ![FieldError] {
     raw :: "{{\"message\":\"bad\"}}"
     decoded :: json.decode<CLIError>(raw)
     print(decoded.message)
@@ -210,16 +210,16 @@ pub struct ListReport {
 }
 
 impl ListReport {
-    pub fn label(self) String -> self.status
+    pub fn label(self) -> String -> self.status
 }
 
-pub fn list_json(status: String) String -> {
+pub fn list_json(status: String) -> String {
     return json.to_string(ListReport{schema: \"jet.report/v1\", status: status})
 }
 
-pub fn mk() ListReport -> ListReport{schema: \"jet.report/v1\", status: \"ok\"}
+pub fn mk() -> ListReport -> ListReport{schema: \"jet.report/v1\", status: \"ok\"}
 
-pub fn round_trip(wire: String) String -> {
+pub fn round_trip(wire: String) -> String {
     report :: json.decode<ListReport>(wire) ?? panic(\"declaring module decode\")
     return report.status
 }
@@ -285,7 +285,7 @@ struct ListReport {
     packages: [PackageRow]
 }
 
-pub fn list_json() String -> {
+pub fn list_json() -> String {
     return json.to_string(ListReport{
         schema: \"jet.report/v1\",
         packages: [PackageRow{name: \"jet\"}]
@@ -327,7 +327,7 @@ fn run() {
 /// or forced-interpreter output.
 #[test]
 fn imported_zero_arg_string_result_matches_every_tier() {
-    let plan_src = "pub fn greeting() String -> \"hello\"\n";
+    let plan_src = "pub fn greeting() -> String -> \"hello\"\n";
     let main_src = "\
 use plan
 
@@ -373,7 +373,7 @@ fn imported_byte_buffer_constructor_uses_module_root_in_aot() {
     }
 
     let plan_src = "\
-pub fn bytes() Int -> {
+pub fn bytes() -> Int {
     buffer := Bytes.new()
     buffer.write_u8(7)
     return buffer.len()
@@ -399,10 +399,10 @@ fn run() {
 #[test]
 fn mapped_string_lists_flatten_on_each_hosted_tier() {
     let src = r#"
-fn flatten_words(contents: String) [String] -> {
+fn flatten_words(contents: String) -> [String] {
     return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
 }
-fn flatten_string_rows() [String] -> [[String]]{{"red"}, {"blue", "green"}}.flatten()
+fn flatten_string_rows() -> [String] -> [[String]]{{"red"}, {"blue", "green"}}.flatten()
 fn run() {
     words :: flatten_words("one two\nthree four")
     neighbors :: flatten_words("five six")
@@ -441,7 +441,7 @@ fn run() {
         assert_eq!(stdout, expected, "{stderr}");
     }
     let unsupported_src = r#"
-fn flatten_float_rows(rows: [[Float]]) [Float] -> rows.flatten()
+fn flatten_float_rows(rows: [[Float]]) -> [Float] -> rows.flatten()
 fn run() {
     values :: flatten_float_rows([[Float]{1.5}, [Float]{2.5}])
     print(values.len())
@@ -464,15 +464,15 @@ fn run() {
 #[test]
 fn float_list_arguments_stay_native_on_the_default_tier() {
     let src = r#"
-fn first(values: [Float]) Float -> values.first() ?? 0.0
-fn last(values: [Float]) Float -> values.last() ?? 0.0
-fn sorted_first(values: [Float]) Float -> {
+fn first(values: [Float]) -> Float -> values.first() ?? 0.0
+fn last(values: [Float]) -> Float -> values.last() ?? 0.0
+fn sorted_first(values: [Float]) -> Float {
     sorted_values := values.copy()
     sorted_values.sort()
     return sorted_values.first() ?? 0.0
 }
-fn ordered(left: Float, right: Float) Bool -> left < right
-fn list_ordered(left: [Float], right: [Float]) Bool -> left < right
+fn ordered(left: Float, right: Float) -> Bool -> left < right
+fn list_ordered(left: [Float], right: [Float]) -> Bool -> left < right
 fn run() {
     values :: [Float]{1.0, 2.0}
     print(first(values))
@@ -575,62 +575,62 @@ fn run() {
 #[test]
 fn local_never_calls_cross_the_result_abi_once() {
     let src = r#"
-fn bool_level_10(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_10(left: Bool, right: Bool) -> Bool !Never {
     return left == right
 }
 
-fn bool_level_9(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_9(left: Bool, right: Bool) -> Bool !Never {
     return if {
         left -> bool_level_10(left, right)
         else -> bool_level_10(right, left)
     }
 }
 
-fn bool_level_8(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_8(left: Bool, right: Bool) -> Bool !Never {
     return bool_level_9(left, right)
 }
 
-fn bool_level_7(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_7(left: Bool, right: Bool) -> Bool !Never {
     return if {
         right -> bool_level_8(left, right)
         else -> bool_level_8(right, left)
     }
 }
 
-fn bool_level_6(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_6(left: Bool, right: Bool) -> Bool !Never {
     return bool_level_7(left, right)
 }
 
-fn bool_level_5(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_5(left: Bool, right: Bool) -> Bool !Never {
     return if {
         left -> bool_level_6(left, right)
         else -> bool_level_6(right, left)
     }
 }
 
-fn bool_level_4(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_4(left: Bool, right: Bool) -> Bool !Never {
     return bool_level_5(left, right)
 }
 
-fn bool_level_3(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_3(left: Bool, right: Bool) -> Bool !Never {
     return if {
         right -> bool_level_4(left, right)
         else -> bool_level_4(right, left)
     }
 }
 
-fn bool_level_2(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_2(left: Bool, right: Bool) -> Bool !Never {
     return bool_level_3(left, right)
 }
 
-fn bool_level_1(left: Bool, right: Bool) Bool !Never -> {
+fn bool_level_1(left: Bool, right: Bool) -> Bool !Never {
     return if {
         left -> bool_level_2(left, right)
         else -> bool_level_2(right, left)
     }
 }
 
-fn int_helper(value: Int) Int !Never -> {
+fn int_helper(value: Int) -> Int !Never {
     return value
 }
 
@@ -753,10 +753,10 @@ fn user_method_shadowing_builtin_name() {
 struct Crate {
     items: [Int]
 
-    fn get(self) Int -> {
+    fn get(self) -> Int {
         return 42
     }
-    fn len(self) Int -> {
+    fn len(self) -> Int {
         return 7
     }
 }
@@ -884,7 +884,7 @@ struct Tree {
     value: Int
     child: ?Tree
 }
-fn sum(t: Tree) Int -> {
+fn sum(t: Tree) -> Int {
     total := t.value
 kid ::  t.child 
     if kid == {
@@ -926,7 +926,7 @@ fn borrowed_struct_lit_field_value_cloned() {
 struct Person {
     name: String
 }
-fn make(n: String) Person -> {
+fn make(n: String) -> Person {
     return Person{ name: n }
 }
 fn run() {
@@ -973,7 +973,7 @@ struct Incident {
     title: String
     retries: Int
 }
-fn route(i: Incident) String -> {
+fn route(i: Incident) -> String {
     if i == {
         { kind: \"page\", title, .. } -> { return title }
         { kind: \"ticket\", title, .. } -> { return title }
@@ -1003,7 +1003,7 @@ fn user_enum_variant_if_let_condition() {
     }
     let src = "\
 enum Msg { Ping(Int) Pong }
-fn f(m: Msg) Int -> {
+fn f(m: Msg) -> Int {
     if m == .Ping(n) {
         return n
     } else {
@@ -1028,11 +1028,11 @@ fn fixed_size_list_param_and_field() {
         return;
     }
     let src = "\
-fn double(n: Int) Int -> {
+fn double(n: Int) -> Int {
     return (n * 2)
 }
 struct Grid { row: [Int#3] }
-fn firstof(xs: [Int#3]) Int -> {
+fn firstof(xs: [Int#3]) -> Int {
     return xs[0]
 }
 fn run() {
@@ -1054,7 +1054,7 @@ fn inferred_fixed_list_widens_at_call() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) Int -> {
+fn total(xs: [Int]) -> Int {
     return xs[0] + xs[1] + xs[2]
 }
 fn run() {
@@ -1101,7 +1101,7 @@ fn mixed_switch_non_ident_subject_binds_payload() {
     }
     let src = "\
 struct Holder { val: ?Int }
-fn f(h: Holder) Int -> {
+fn f(h: Holder) -> Int {
     if h.val == {
         .Val(c) -> { return c }
         else -> { return 0 }
@@ -1130,10 +1130,10 @@ fn mixed_switch_non_ident_subject_qualifies_variants() {
     }
     let src = "\
 enum Light { Red Green Yellow }
-fn pick() Light -> {
+fn pick() -> Light {
     return Light.Red
 }
-fn classify() Int -> {
+fn classify() -> Int {
     if pick() == {
         .Red -> { return 1 }
         .Green -> { return 2 }
@@ -1160,7 +1160,7 @@ fn comptime_local_is_literal_data() {
         return;
     }
     let src = "\
-fn build() [Int] -> {
+fn build() -> [Int] {
     xs := [Int]{}
     loop i in 1..3 {
         xs.push(i * 10)
@@ -1182,7 +1182,7 @@ fn run() {
 fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
     let src = r#"
 @TOWER :: 99
-fn choose(tower: Int) Int -> tower
+fn choose(tower: Int) -> Int -> tower
 fn run() {
     print(choose(7))
 }
@@ -1272,10 +1272,10 @@ fn run() {
 #[test]
 fn shared_empty_collections_use_expected_payload_type() {
     let src = r#"
-fn make_map() Shared<[String:String]> -> {
+fn make_map() -> Shared<[String:String]> {
     return shared []
 }
-fn make_list() Shared<[String]> -> {
+fn make_list() -> Shared<[String]> {
     return shared []
 }
 fn run() {
@@ -1609,7 +1609,7 @@ struct Holder {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) Vec2 -> {
+    fn add(self, rhs: Vec2) -> Vec2 {
         return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
@@ -1653,14 +1653,14 @@ fn card_2839_generic_trait_dispatch_tier_parity() {
     let src = r#"
 
 trait Shape {
-    fn area(self) Float
+    fn area(self) -> Float
 }
 
 struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) Float -> self.radius * self.radius
+        fn area(self) -> Float -> self.radius * self.radius
     }
 }
 
@@ -1669,7 +1669,7 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) Float -> self.side * self.side
+    fn area(self) -> Float -> self.side * self.side
 }
 
 fn run() {
@@ -1686,7 +1686,7 @@ fn run() {
 fn card_2835_generic_trait_authority_tier_parity() {
     let pure = r#"
 trait Measure {
-    fn measure(self) Int
+    fn measure(self) -> Int
 }
 
 struct Parcel {
@@ -1694,10 +1694,10 @@ struct Parcel {
 }
 
 impl Parcel.Measure {
-    fn measure(self) Int -> self.n
+    fn measure(self) -> Int -> self.n
 }
 
-fn via<T: Measure>(value: T) Int -> value.measure()
+fn via<T: Measure>(value: T) -> Int -> value.measure()
 
 fn run() {
     print(via(Parcel{n: 5}))
@@ -1709,7 +1709,7 @@ fn run() {
 use core.sys as env
 
 trait Measure {
-    fn measure(self) Int
+    fn measure(self) -> Int
 }
 
 struct Parcel {
@@ -1717,13 +1717,13 @@ struct Parcel {
 }
 
 impl Parcel.Measure {
-    fn measure(self) Int -> {
+    fn measure(self) -> Int {
         value :: env.get("JET_CARD_2835") ?? ""
         return self.n
     }
 }
 
-fn via<T: Measure>(value: T) Int -> value.measure()
+fn via<T: Measure>(value: T) -> Int -> value.measure()
 
 fn run() {
     print(via(Parcel{n: 5}))

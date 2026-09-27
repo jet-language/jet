@@ -103,7 +103,7 @@ fn core_db_implements_driver_trait() {
     let src = r#"
 use core.db as db
 
-fn count_people<T: Driver>(&conn: T) Int !DBError {
+fn count_people<T: Driver>(&conn: T) -> Int !DBError {
     row :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
     found :: row ?? panic("missing")
     missing :: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})
@@ -949,11 +949,11 @@ fn race_cancels_losing_task() {
 use core.tasks as tasks
 use core.time as time
 
-fn fast_nine() Int {
+fn fast_nine() -> Int {
     return 9
 }
 
-fn slow_one() Int {
+fn slow_one() -> Int {
     time.sleep(300ms)
     return 1
 }

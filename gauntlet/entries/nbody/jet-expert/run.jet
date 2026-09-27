@@ -4,16 +4,16 @@ use core.text.fmt as fmt
 #CLI struct Args { steps: Int }
 
 #Inline(Always)
-fn kinetic(v:F64x4,mass:Float) Float ->
+fn kinetic(v:F64x4,mass:Float) -> Float ->
     Float{0.5}*mass*(v*v).sum()
 
 #Inline(Always)
-fn potential(left:F64x4,left_mass:Float,right:F64x4,right_mass:Float) Float -> {
+fn potential(left:F64x4,left_mass:Float,right:F64x4,right_mass:Float) -> Float {
     delta::left-right
     distance_sq::(delta*delta).sum()
     return left_mass*right_mass/math.sqrt(distance_sq)
 }
-fn energy(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x4,m2:Float,p3:F64x4,v3:F64x4,m3:Float,p4:F64x4,v4:F64x4,m4:Float) Float -> {
+fn energy(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x4,m2:Float,p3:F64x4,v3:F64x4,m3:Float,p4:F64x4,v4:F64x4,m4:Float) -> Float {
     total:=kinetic(v0,m0)
     total-=potential(p0,m0,p1,m1)
     total-=potential(p0,m0,p2,m2)

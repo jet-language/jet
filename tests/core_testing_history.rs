@@ -61,11 +61,11 @@ fn run() !Err {
 const CALLBACK_FAILURE_SOURCE: &str = r#"
 use core.testing as api
 
-fn failing_model(commands: [DataTree]) DataTree !Err -> {
+fn failing_model(commands: [DataTree]) -> DataTree !Err {
     return Err("history callback marker")
 }
 
-fn candidate_size(commands: [DataTree]) DataTree {
+fn candidate_size(commands: [DataTree]) -> DataTree {
     DataTree.Int(commands.len())
 }
 

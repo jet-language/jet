@@ -24,6 +24,7 @@ struct JetDriverHostFacts {
     target_triple: ?String
     active_os: ?String
     compiler_identity: ?String
+}
 
 enum JetDriverCompileTarget {
     Native
@@ -183,7 +184,7 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
         if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
         index += 1
     }
-[SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
+    [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
 
 fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {

@@ -46,13 +46,13 @@ pub(crate) struct SourceMirExecution {
 /// Failure before a backend result exists. A Cranelift runtime diagnostic is
 /// deliberately kept in `SourceMirExecution::outcome`, not collapsed into
 /// this carrier/identity error rail.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum SourceMirExecutionError {
     Carrier(String),
     Identity(String),
     Resource(String),
     Backend(String),
-    Session(String),
+    Retirement(jet_jit::SourceExecutionRetirementError),
 }
 
 impl SourceMirExecution {
@@ -82,16 +82,10 @@ impl SourceMirExecution {
                 soft_stop,
                 stdout,
                 stderr,
+                completions: Vec::new(),
             },
         )
-        .map_err(|error| match error {
-            jet_jit::SourceExecutionRetirementError::Session(message) => {
-                SourceMirExecutionError::Session(message)
-            }
-            jet_jit::SourceExecutionRetirementError::Resource(message) => {
-                SourceMirExecutionError::Resource(message)
-            }
-        })
+        .map_err(SourceMirExecutionError::Retirement)
     }
 }
 
@@ -103,7 +97,7 @@ impl std::fmt::Display for SourceMirExecutionError {
             Self::Identity(message) => write!(formatter, "Source MIR execution identity failed: {message}"),
             Self::Resource(message) => write!(formatter, "Source resource activation failed: {message}"),
             Self::Backend(message) => write!(formatter, "Source MIR backend handoff failed: {message}"),
-            Self::Session(message) => write!(formatter, "Source logical session retirement failed: {message}"),
+            Self::Retirement(error) => write!(formatter, "{error}"),
         }
     }
 }

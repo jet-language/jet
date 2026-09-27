@@ -408,9 +408,9 @@ fn render_jet(lib: &str, routines: &[Routine]) -> String {
         o.push_str("pub fn ");
         o.push_str(&r.name);
         params_jet(&mut o, &r.params);
-        o.push(' ');
+        o.push_str(" -[FFI.Ada]> ");
         o.push_str(r.result.jet());
-        o.push_str(" !AdaError -[FFI.Ada]> {\n");
+        o.push_str(" !AdaError {\n");
         for p in &r.params {
             if let Some(c) = &p.constraint {
                 o.push_str("    if ");
@@ -692,8 +692,8 @@ mod tests {
                 result: Scalar::Float,
             }],
         );
-        assert!(source.contains("fn double_lat(lat: Float) Float = \"jet_ada_geo_double_lat\""));
-        assert!(source.contains("pub fn double_lat(lat: Float) Float !AdaError -[FFI.Ada]>"));
+        assert!(source.contains("fn double_lat(lat: Float) -> Float = \"jet_ada_geo_double_lat\""));
+        assert!(source.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float !AdaError"));
         assert!(source.contains("lat < -90.0 || lat > 90.0"));
         assert!(!source.contains("=>"));
     }

@@ -12,11 +12,11 @@ impl StoreErr -> Err {
     return Err("missing")
 }
 
-fn read_store() Int !StoreErr -> {
+fn read_store() -> Int !StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int -> {
+fn get_user() -> Int {
     return Ok(read_store())
 }
 
@@ -63,16 +63,16 @@ impl TargetErr -> Err {
     return Err("converted from target")
 }
 
-fn read() Int !SourceErr -> {
+fn read() -> Int !SourceErr {
     return Err(SourceErr{message: "source failure"})
 }
 
-fn middle() Int !TargetErr -> {
+fn middle() -> Int !TargetErr {
     value :: read()
     return Ok(value)
 }
 
-fn outer() Int -> {
+fn outer() -> Int {
     value :: middle()
     return Ok(value)
 }
@@ -120,11 +120,11 @@ impl SourceErr -> TargetErr {
     return TargetErr.One
 }
 
-fn read() Int !SourceErr -> {
+fn read() -> Int !SourceErr {
     return Err(SourceErr.One)
 }
 
-fn outer() Int !TargetErr -> {
+fn outer() -> Int !TargetErr {
     value :: read()
     return Ok(value)
 }
@@ -145,11 +145,11 @@ enum SourceErr { One }
 #Error
 enum TargetErr { One }
 
-fn read() Int !SourceErr -> {
+fn read() -> Int !SourceErr {
     return Err(SourceErr.One)
 }
 
-fn run() Int !TargetErr -> {
+fn run() -> Int !TargetErr {
     value :: read()
     return Ok(value)
 }
@@ -329,11 +329,11 @@ enum SourceErr { One }
 #Error
 enum TargetErr { One }
 
-fn fetch() Int !SourceErr -> {
+fn fetch() -> Int !SourceErr {
     return Err(SourceErr.One)
 }
 
-fn run() Int !TargetErr -> {
+fn run() -> Int !TargetErr {
     fetch()
     fetch()
     fetch()
@@ -366,7 +366,7 @@ fn run() Int !TargetErr -> {
         .is_some_and(|detail| detail.contains("callee: fetch")));
 
     let fixed = source
-        .replacen("fn fetch() Int !SourceErr", "fn fetch() Int !TargetErr", 1)
+        .replacen("fn fetch() -> Int !SourceErr", "fn fetch() -> Int !TargetErr", 1)
         .replacen("Err(SourceErr.One)", "Err(TargetErr.One)", 1);
     jet::compile(&fixed).expect("changing the named helper domain must clear every site");
 }
@@ -396,11 +396,11 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int !StoreErr -> {
+fn read_store() -> Int !StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int -> {
+fn get_user() -> Int {
     value :: read_store()
     return Ok(value)
 }

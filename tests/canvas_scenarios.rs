@@ -294,17 +294,17 @@ impl Drop for CanvasBrowserPermit {
     }
 }
 
-const DEMO: &str = r#"fn helper() Int -> {
+const DEMO: &str = r#"fn helper() -> Int {
     return 1
 }
 
 /// Squares an integer input for this Canvas example.
-fn square(n: Int) Int -> {
+fn square(n: Int) -> Int {
     return n * n
 }
 
 /// Summarizes a checked value for Canvas hover guidance.
-fn summarize(limit: Int) Int -> {
+fn summarize(limit: Int) -> Int {
     total := square(limit)
     if total > 10 {
         return total
@@ -326,7 +326,7 @@ const CALLBACK_DEMO: &str = r#"fn on_start() {
     print("start")
 }
 
-fn helper() Int -> {
+fn helper() -> Int {
     return 1
 }
 
@@ -335,15 +335,15 @@ fn run() {
 }
 "#;
 
-const DEBUG_DEMO: &str = r#"fn helper() Int -> {
+const DEBUG_DEMO: &str = r#"fn helper() -> Int {
     return 1
 }
 
-fn square(n: Int) Int -> {
+fn square(n: Int) -> Int {
     return n * n
 }
 
-fn summarize(limit: Int) Int -> {
+fn summarize(limit: Int) -> Int {
     total := square(limit)
     if total > 10 {
         return total
@@ -1320,7 +1320,7 @@ impl CanvasCase {
             .expect("write Canvas custom server fixture");
             fs::write(
                 &entry,
-                "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan -> {\n    return b.plan()\n}\n",
+                "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) -> BuildPlan {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None

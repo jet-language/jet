@@ -15,7 +15,7 @@ impl Pattern.CheckedText {
         return Ok(())
     }
 
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return "{value}"
     }
 }
@@ -88,7 +88,7 @@ fn run() {
     assert_plain_string_rejected(
         "checked text return",
         r#"
-fn make() Pattern -> {
+fn make() -> Pattern {
     plain :: "plain"
     return plain
 }

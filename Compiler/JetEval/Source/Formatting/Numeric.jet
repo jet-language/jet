@@ -2,8 +2,8 @@
 //
 // The evaluator must not duplicate the numeric policy in Core/text/fmt.jet.
 // These helpers select the checked Prelude route, resolve its source-owned
-// target through RuntimeBridge, marshal materialized values, and validate the
-// returned String.
+// target through JetEval's source Prelude routes, marshal materialized values,
+// and validate the returned String.
 
 fn jet_eval_format_find_display_debug_row(
     machine: &JetEvalMachine,
@@ -34,7 +34,7 @@ fn jet_eval_format_find_source_row(
     if member == "display" || member == "debug" {
         return jet_eval_format_find_display_debug_row(&machine, member)
     }
-    jet_runtime_bridge_source_row(machine.program, member)
+    jet_eval_source_row(machine.program, member)
 }
 
 fn jet_eval_format_core_source_call(
@@ -47,7 +47,7 @@ fn jet_eval_format_core_source_call(
         jet_eval_unsupported(&machine, span, "core.text.fmt.{member} Prelude route is unavailable")
         return None
     }
-    target :: jet_runtime_bridge_source_target(machine.program, row) ?? {
+    target :: jet_eval_source_target(machine.program, row) ?? {
         jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source target is unavailable")
         return None
     }

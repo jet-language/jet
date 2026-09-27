@@ -2390,7 +2390,7 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("List.filter(f: fn(T) Bool) -> List<T>"),
+        stdout.contains("List.filter(f: fn(T) -> Bool) -> List<T>"),
         "signature missing: {stdout}"
     );
     assert!(

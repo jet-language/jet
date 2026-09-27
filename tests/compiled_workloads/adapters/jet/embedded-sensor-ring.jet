@@ -12,7 +12,7 @@ struct RingBuffer {
 }
 
 impl RingBuffer {
-    fn enqueue(&self, value: Int) Bool -> {
+    fn enqueue(&self, value: Int) -> Bool {
         if self.count == 4 -> return false
         index :: self.tail
         self.slots[index] = value
@@ -21,7 +21,7 @@ impl RingBuffer {
         return true
     }
 
-    fn dequeue(&self) Int -> {
+    fn dequeue(&self) -> Int {
         index :: self.head
         value :: self.slots[index]
         self.head = (self.head + 1) % 4
@@ -30,7 +30,7 @@ impl RingBuffer {
     }
 }
 
-fn fold_digest(digest: Int, step: Int, code: Int, value: Int, head: Int, tail: Int, count: Int) Int -> {
+fn fold_digest(digest: Int, step: Int, code: Int, value: Int, head: Int, tail: Int, count: Int) -> Int {
     value_part := value % 1000003
     if value_part < 0 -> value_part += 1000003
     return (digest * 131 + step * 17 + code * 257 + value_part * 3 + head * 5 + tail * 7 + count * 11) % 1000003

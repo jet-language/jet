@@ -188,16 +188,16 @@ fn run() {
 fn foreign_task_boundary_rejects_non_sendable_captured_state() {
     let source = r#"use c.callback as c
 
-fn increment(value: I32) I32 -[]> {
+fn increment(value: I32) -[]> I32 {
     return value + 1
 }
 
 #Import module c.callback {
-    fn foreign_callback(callback: fn(I32) I32 -[]>, value: I32) I32 = "foreign_callback"
-    fn foreign_async(value: I32) I32 = "foreign_async"
+    fn foreign_callback(callback: fn(I32) -[]> I32, value: I32) -> I32 = "foreign_callback"
+    fn foreign_async(value: I32) -> I32 = "foreign_async"
 }
 
-fn foreign_work() I32 -> {
+fn foreign_work() -> I32 {
     return c.foreign_async(41)
 }
 

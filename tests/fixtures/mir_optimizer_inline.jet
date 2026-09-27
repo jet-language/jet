@@ -1,0 +1,22 @@
+// Source optimizer inlining preserves full Result-carrier returns and failure continuations.
+#Inline(Always) fn optimizer_inline_leaf(value: Int) -> Int { value + 1 }
+
+#Inline(Always) fn optimizer_inline_failure(value: Int) Int {
+    if value < 0 -> return Err("negative")
+    return value + 1
+}
+#Inline(Always) fn optimizer_inline_failure_wrapper(value: Int) Int {
+    optimizer_inline_failure(value)
+}
+
+fn optimizer_inline_caller(value: Int) -> Int {
+    optimizer_inline_leaf(value)
+}
+
+fn run() {
+    print("inline:{optimizer_inline_caller(10)}")
+    if optimizer_inline_failure_wrapper(-1) == {
+        .Ok(_) -> print("failure:missing")
+        .Err(error) -> print("failure:{error.message}")
+    }
+}

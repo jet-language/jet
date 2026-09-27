@@ -15,7 +15,7 @@ use tir_support::{
 
 /// A function the checker cannot see through, so its result is a runtime value
 /// and the operator below is really evaluated by the built program.
-const SEED: &str = "fn seed(n: Int) Int -[]> {\n    return n\n}\n";
+const SEED: &str = "fn seed(n: Int) -[]> Int {\n    return n\n}\n";
 
 /// D-FLOORDIV1=A: `/%` rounds toward negative infinity. Above zero that agrees
 /// with rounding toward zero; below zero it does not, and that is the whole
@@ -374,7 +374,7 @@ fn run() {{
 /// frame before a later shared-Prelude stop is rendered.
 #[test]
 fn jit_restores_caller_source_after_nested_return() {
-    let src = r#"fn leaf(value: Int) Int -[]> {
+    let src = r#"fn leaf(value: Int) -[]> Int {
     return value
 }
 fn caller() {

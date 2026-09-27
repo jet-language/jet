@@ -218,7 +218,7 @@ fn view_escape_is_e0631() {
     let src = r#"
 use core.mem
 
-fn make() Int -> {
+fn make() -> Int {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     return x

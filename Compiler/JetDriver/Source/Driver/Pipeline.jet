@@ -1892,29 +1892,29 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     artifact_plan :: artifact_plan_option ?? return jet_driver_compile_internal_result(load, trace, "the compiler artifact plan is unavailable")
     program_value.artifacts = [MirArtifactPlan]{artifact_plan}
 
-    passes := run_mir_passes(program_value)
-    if passes.error == {
-        Val(pass_error) -> {
+    optimization := optimize_mir_program(program_value)
+    if optimization.error == {
+        Val(optimizer_error) -> {
             pass_location := None
-            if pass_error.function == {
-                Val(function_identity) -> pass_location = jet_driver_source_location_for_mir_function(load, program_value, function_identity, pass_error.span)
+            if optimizer_error.function == {
+                Val(function_identity) -> pass_location = jet_driver_source_location_for_mir_function(load, program_value, function_identity, optimizer_error.span)
                 None -> {}
             }
-            load.diagnostics.push(jet_driver_diagnostic_with_location("E0003", pass_error.span, pass_location, "the checked MIR pass pipeline failed", pass_error.message, "do not emit a package graph rejected by MIR legality validation"))
+            load.diagnostics.push(jet_driver_diagnostic_with_location("E0003", optimizer_error.span, pass_location, "the checked MIR optimizer failed", optimizer_error.message, "do not emit a package graph rejected by MIR legality validation"))
         }
         None -> {}
     }
-    if !passes.complete || passes.program == None || passes.report.coverage.remaining_work.len() > 0 {
+    if !optimization.complete || optimization.program == None || optimization.report.completed.len() != optimization.report.production_order.len() {
         if !jet_driver_has_errors(load.diagnostics) {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the canonical MIR pass pipeline is incomplete", "Rust emission requires the full ordered production pass set with no remaining work", "complete the MIR pass result before requesting an AOT artifact"))
+            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the canonical MIR optimizer is incomplete", "Rust emission requires every declared ordered production optimizer stage to complete", "complete the canonical MIR optimization result before requesting an AOT artifact"))
         }
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
     }
-    optimized_program :: passes.program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
+    optimized_program :: optimization.program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
     if entry_function != None {
         entry_id :: entry_function ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
         if !jet_driver_has_mir_function_id(optimized_program.functions, entry_id) {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the MIR pass result lost the explicit package entry function", "the typed entry binding must survive every MIR pass unchanged", "preserve the selected MirFunctionId through optimization"))
+            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the MIR optimizer result lost the explicit package entry function", "the typed entry binding must survive every optimizer stage unchanged", "preserve the selected MirFunctionId through optimization"))
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
         }
     }

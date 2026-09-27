@@ -754,7 +754,7 @@ fn jet_codegen_index_place(builder: &JetCodegenBuilder, base: TExpr, index: TExp
     if access == MirAccess.Write -> write_call = Val(jet_codegen_index_write_route(&builder, mir_kind, base.ty, carrier))
     locals := [MirPanicLocal]{}
     loop local in location.locals {
-        binding :: jet_codegen_find_binding_for_local(builder, local.local) ?? continue
+        binding :: jet_codegen_find_binding_for_local(builder, local.local) ?? next
         locals.push(MirPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_loc := MirPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
@@ -1338,7 +1338,7 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, expression: TExpr, ki
         .Call(callee, args) -> {
             callee_value := jet_codegen_lower_expr(&builder, callee)
             lowered_args := jet_codegen_signature_call_args(&builder, args, callee.ty)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.IndirectCall(callee_value, lowered_args, [MirType]{}))
+            return jet_codegen_emit_value(&builder, expression.span, jet_codegen_callable_return_type(callee.ty), MirOperation.IndirectCall(callee_value, lowered_args, [MirType]{}))
         }
         .Policy(fn_type, policy_args, policy_conventions, wrapper_name, captures, callee) -> {
             if wrapper_name != None {
@@ -1456,7 +1456,7 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, expression: TExpr, ki
 
 fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, function: String, args: [TExpr]) -> MirValueId {
     values := [MirValueId]{}
-    for argument in args -> values.push(jet_codegen_lower_expr(&builder, argument))
+    loop argument in args -> values.push(jet_codegen_lower_expr(&builder, argument))
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     symbol := "jet_math_{type_name}_{function}"
     module := type_name
@@ -1475,7 +1475,7 @@ fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, expression: TExpr
         }
     }
     borrow_mask := [Bool]{}
-    for _ in args -> borrow_mask.push(false)
+    loop _ in args -> borrow_mask.push(false)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.MathBuiltin, module, function, symbol, args.len(), borrow_mask, None, carrier, MirPreludeAbi.Value)
     math_type := if type_name == {
         "Int" -> Type.Int
@@ -1491,9 +1491,9 @@ fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, expression: TExpr
 fn jet_codegen_enum_definition(builder: &JetCodegenBuilder, enum_type: String) -> TTypeDef {
     identity_option := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, enum_type, builder.generic_type_names)
     identity :: identity_option ?? panic("checked enum literal has no registered nominal type")
-    for semantic_module in builder.modules {
+    loop semantic_module in builder.modules {
         if semantic_module.module_identity != identity.module_identity -> next
-        for definition in semantic_module.declarations.type_defs {
+        loop definition in semantic_module.declarations.type_defs {
             if definition.name == identity.name -> return definition
         }
     }
@@ -1503,7 +1503,7 @@ fn jet_codegen_enum_definition(builder: &JetCodegenBuilder, enum_type: String) -
 fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVariant {
     if definition.kind == {
         .Enum(variants, _) -> {
-            for variant in variants {
+            loop variant in variants {
                 if variant.name == variant_name -> return variant
             }
         }
@@ -1523,7 +1523,7 @@ fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, definition: TType
         .Unit -> return [MirEnumArg]{}
         .Positional(args) -> {
             lowered := [MirEnumArg]{}
-            for argument in args -> lowered.push(MirEnumArg{field: None, value: jet_codegen_lower_enum_argument(&builder, argument), boxed: false})
+            loop argument in args -> lowered.push(MirEnumArg{field: None, value: jet_codegen_lower_enum_argument(&builder, argument), boxed: false})
             return lowered
         }
         .Named(args) -> {
@@ -1534,7 +1534,7 @@ fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, definition: TType
             }
             lowered := [MirEnumArg]{}
             orders := [Int]{}
-            for argument in args {
+            loop argument in args {
                 field_index := None
                 index := 0
                 loop index < fields.len() {
@@ -1583,8 +1583,8 @@ fn jet_codegen_lower_enum_literal(builder: &JetCodegenBuilder, expression: TExpr
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Enum(type_id, variant, args))
 }
 fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> String {
-    for semantic_module in builder.modules {
-        for nominal in semantic_module.nominals {
+    loop semantic_module in builder.modules {
+        loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key -> return nominal.symbol.name
         }
     }
@@ -1594,13 +1594,13 @@ fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> Str
 fn jet_codegen_resolve_trait_method(builder: &JetCodegenBuilder, method: TMethodRef) -> JetCodegenTraitMethod {
     symbol :: method.trait_owner ?? panic("checked trait method call has no trait owner")
     selected := None
-    for semantic_module in builder.modules {
-        for nominal in semantic_module.nominals {
+    loop semantic_module in builder.modules {
+        loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key != symbol.key -> next
             if nominal.kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
-            for definition in semantic_module.declarations.traits {
+            loop definition in semantic_module.declarations.traits {
                 if definition.name != nominal.symbol.name -> next
-                for trait_method in definition.methods {
+                loop trait_method in definition.methods {
                     method_symbol := symbol_id(SymbolKind.Function, semantic_module.module_identity, nominal.symbol.id.key, trait_method.name)
                     if trait_method.name == method.name && method_symbol.key == method.symbol.key {
                         if selected != None -> panic("checked trait method identity is ambiguous")
@@ -1615,7 +1615,7 @@ fn jet_codegen_resolve_trait_method(builder: &JetCodegenBuilder, method: TMethod
 
 fn jet_codegen_method_function(builder: &JetCodegenBuilder, method: TMethodRef) -> ?TFunc {
     selected := None
-    for function in builder.functions {
+    loop function in builder.functions {
         if function.key != method.symbol.key -> next
         if method.operator_identity != None {
             owner_type := if function.kind == {
@@ -1685,7 +1685,7 @@ fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, args: [TCall
     labels := [String]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
-    for parameter in signature.params {
+    loop parameter in signature.params {
         labels.push(parameter.public_label)
         variadic.push(parameter.variadic)
         conventions.push(parameter.access)
@@ -1693,6 +1693,58 @@ fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, args: [TCall
     jet_codegen_lower_call_args_for_signature(&builder, args, labels, variadic, conventions)
 }
 
+fn jet_codegen_checked_function_return_type(function: TFunc, type_args: [Type]) -> Type {
+    return_type := function.ret ?? Type.Named("Unit")
+    if function.generic_params.len() == 0 -> return return_type
+    if function.generic_params.len() != type_args.len() -> panic("checked generic call has incomplete return-type arguments")
+    names := [String]{}
+    loop parameter in function.generic_params -> names.push(parameter.name)
+    sema_inference_substitute_type(return_type, names, type_args)
+}
+
+fn jet_codegen_checked_method_return_type(builder: &JetCodegenBuilder, function: TFunc, receiver_type: Type, type_args: [Type]) -> Type {
+    return_type := jet_codegen_checked_function_return_type(function, type_args)
+    owner_names := jet_codegen_function_type_generic_names(function, builder.modules)
+    if owner_names.len() == 0 -> return return_type
+    owner_args := if jet_codegen_unwrap_pattern_tags(receiver_type) == {
+        .Named(_) -> [Type]{}
+        .Apply(_, args) -> args
+        else -> panic("checked method receiver is not its nominal owner")
+    }
+    if owner_names.len() != owner_args.len() -> panic("checked method receiver has incomplete owner type arguments")
+    sema_inference_substitute_type(return_type, owner_names, owner_args)
+}
+
+fn jet_codegen_callable_return_type(signature: Type) -> Type {
+    if signature == {
+        .Fn(_, ret, _, _, _, _) -> return ret ?? Type.Named("Unit")
+        else -> panic("checked indirect call signature is not callable")
+    }
+}
+fn jet_codegen_expression_call_return_type(builder: &JetCodegenBuilder, expression: TExpr) -> ?Type {
+    if expression.kind == {
+        .Call(callee, type_args, _) -> {
+            if jet_codegen_find_checked_foreign_row(builder.modules, callee.key) != None -> return None
+            target :: jet_codegen_find_function(builder.functions, callee.key) ?? panic("checked call has no TFunc target")
+            return Val(jet_codegen_checked_function_return_type(target, type_args))
+        }
+        .MethodCall(receiver, method, type_args, _) -> {
+            dynamic_trait := jet_codegen_method_trait_dispatch(&builder, receiver, method)
+            target := None
+            if !dynamic_trait -> target = jet_codegen_method_function(&builder, method)
+            if target == None && method.trait_owner != None -> dynamic_trait = true
+            if dynamic_trait -> return Val(jet_codegen_resolve_trait_method(&builder, method).method.return_type)
+            function :: target ?? panic("checked method call has no TFunc target")
+            return Val(jet_codegen_checked_method_return_type(&builder, function, receiver.ty, type_args))
+        }
+        .IndirectCall(_, _, _, signature) -> return Val(jet_codegen_callable_return_type(signature))
+        .FnValue(kind) -> if kind == {
+            .Call(callee, _) -> return Val(jet_codegen_callable_return_type(callee.ty))
+            else -> return None
+        }
+        else -> return None
+    }
+}
 fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
     dynamic_trait := jet_codegen_method_trait_dispatch(&builder, receiver, method)
     target := None
@@ -1701,9 +1753,11 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
     owner := jet_codegen_lower_type_for_function(receiver.ty, builder)
     callee := None
     access := MirAccess.Read
+    call_return_type := expression.ty
     lowered_args := [MirCallArg]{}
     if dynamic_trait {
         trait_method := jet_codegen_resolve_trait_method(&builder, method)
+        call_return_type = trait_method.method.return_type
         trait_access := trait_method.method.self_access ?? panic("checked trait method has no receiver convention")
         access = jet_codegen_lower_access(trait_access)
         trait_symbol :: method.trait_owner ?? panic("checked trait method call has no owner symbol")
@@ -1711,9 +1765,10 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
         method_id := MirTraitMethodId{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
         callee = Val(MirCallee.TraitMethod(method_id, trait_ref, owner))
         lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
-        for argument in jet_codegen_lower_trait_method_args(&builder, args, trait_method.method) -> lowered_args.push(argument)
+        loop argument in jet_codegen_lower_trait_method_args(&builder, args, trait_method.method) -> lowered_args.push(argument)
     } else {
         function :: target ?? panic("checked instance method has no reachable TFunc")
+        call_return_type = jet_codegen_checked_method_return_type(&builder, function, receiver.ty, type_args)
         if function.kind == {
             .Method(convention, _) | .TraitMethod(_, convention, _, _, _) -> access = jet_codegen_lower_access(convention ?? panic("checked method has no receiver convention"))
             else -> panic("checked method target is not an instance function")
@@ -1721,13 +1776,13 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
         function_id := jet_codegen_function_id(function)
         callee = Val(MirCallee.Method(function_id, owner))
         lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
-        for argument in jet_codegen_lower_call_args(&builder, args, function.params) -> lowered_args.push(argument)
+        loop argument in jet_codegen_lower_call_args(&builder, args, function.params) -> lowered_args.push(argument)
         jet_codegen_note_core_module(&builder, function.module_name)
     }
     lowered_types := [MirType]{}
-    for ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
+    loop ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
     resolved_callee := callee ?? panic("checked method call has no resolved MIR callee")
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(resolved_callee, lowered_args, lowered_types))
+    jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call(resolved_callee, lowered_args, lowered_types))
 }
 
 fn jet_codegen_numeric_constant_int(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId {
@@ -2205,9 +2260,9 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, ty: Type) -> ?Type
     identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return None
     owner :: identity ?? return None
-    for semantic_module in builder.modules {
+    loop semantic_module in builder.modules {
         if semantic_module.module_identity != owner.module_identity -> next
-        for definition in semantic_module.declarations.type_defs {
+        loop definition in semantic_module.declarations.type_defs {
             if definition.name != owner.name -> next
             if definition.kind == {
                 .Distinct(base, _) -> return Val(base)
@@ -2219,8 +2274,8 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, ty: Type) -> ?Type
 }
 fn jet_codegen_find_distinct_definition(builder: &JetCodegenBuilder, owner: SymbolId) -> TTypeDef {
     found := None
-    for semantic_module in builder.modules {
-        for definition in semantic_module.declarations.type_defs {
+    loop semantic_module in builder.modules {
+        loop definition in semantic_module.declarations.type_defs {
             if definition.key == owner.key || definition.name == owner.key {
                 if found != None -> panic("checked distinct owner resolves to multiple type definitions")
                 found = Val(definition)
@@ -2246,8 +2301,8 @@ fn jet_codegen_is_default_err_type(builder: &JetCodegenBuilder, ty: Type) -> Boo
     identity := jet_codegen_lower_type_for_function(ty, builder).identity
     if identity == None -> return false
     target_id :: identity ?? return false
-    for semantic_module in builder.modules {
-        for definition in semantic_module.declarations.type_defs {
+    loop semantic_module in builder.modules {
+        loop definition in semantic_module.declarations.type_defs {
             if mir_type_id(definition.key) == target_id && jet_codegen_compiler_builtin(definition, builder.modules) == Val(MirCompilerBuiltin.DefaultErr) -> return true
         }
     }
@@ -2256,9 +2311,9 @@ fn jet_codegen_is_default_err_type(builder: &JetCodegenBuilder, ty: Type) -> Boo
 
 fn jet_codegen_default_err_type(builder: &JetCodegenBuilder) -> Type {
     selected := None
-    for semantic_module in builder.modules {
+    loop semantic_module in builder.modules {
         if semantic_module.module_identity != builder.function.module_identity -> next
-        for definition in semantic_module.declarations.type_defs {
+        loop definition in semantic_module.declarations.type_defs {
             if jet_codegen_compiler_builtin(definition, builder.modules) == Val(MirCompilerBuiltin.DefaultErr) {
                 if selected != None -> panic("current module has multiple compiler-owned default error types")
                 selected = Val(Type.Named(definition.key))
@@ -2337,7 +2392,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
             if target == {
                 .Union(members) -> {
                     matched := false
-                    for member in members {
+                    loop member in members {
                         if type_identity_key(member) == type_identity_key(source_error) {
                             if jet_codegen_union_member_tag(member) != jet_codegen_union_member_tag_name(tag) -> panic("checked union widening tag disagrees with its source member")
                             matched = true
@@ -2379,11 +2434,12 @@ fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, span: Span, conver
 
 fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr, note: ?TExpr, conversion: TTryConvert, file: ?String, line: Int, function: ?String) -> MirValueId {
     input := jet_codegen_lower_expr(&builder, inner)
-    is_result := inner.ty == {
+    input_type := jet_codegen_expression_call_return_type(&builder, inner) ?? inner.ty
+    is_result := input_type == {
         .Result(_, _) -> true
         else -> false
     }
-    is_option := inner.ty == {
+    is_option := input_type == {
         .Option(_) -> true
         else -> false
     }
@@ -2412,7 +2468,7 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: 
 
     jet_codegen_switch_block(&builder, failure_block)
     carrier := builder.function.failure_carrier
-    source_error := if inner.ty == {
+    source_error := if input_type == {
         .Result(_, error) -> error
         else -> Type.Named("Unit")
     }
@@ -2446,7 +2502,7 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: 
                     jet_codegen_lower_contract_return(&builder, Val(failure), expression.span)
                 } else {
                     terminator := MirTerminator.Return(Val(failure))
-                    if jet_codegen_prepare_transaction_exit(&builder, terminator) -> jet_codegen_terminate(&builder, terminator)
+                    _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
                 }
             }
             .Optional(success_type) -> {
@@ -2462,7 +2518,7 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: 
                     jet_codegen_lower_contract_return(&builder, Val(absent), expression.span)
                 } else {
                     terminator := MirTerminator.Return(Val(absent))
-                    if jet_codegen_prepare_transaction_exit(&builder, terminator) -> jet_codegen_terminate(&builder, terminator)
+                    _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
                 }
             }
             .Diverges(_) -> jet_codegen_terminate(&builder, MirTerminator.Unreachable("try failure diverges"))
@@ -2716,7 +2772,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             lowered_args := jet_codegen_lower_call_args(&builder, args, target.params)
             lowered_types := [MirType]{}
             loop ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(MirCallee.User(jet_codegen_function_id(target)), lowered_args, lowered_types))
+            call_return_type := jet_codegen_checked_function_return_type(target, type_args)
+            jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call(MirCallee.User(jet_codegen_function_id(target)), lowered_args, lowered_types))
         }
         .ExternCall(symbol, _, args) -> {
             foreign_row :: jet_codegen_find_checked_foreign_row(builder.modules, symbol) ?? panic("checked extern call has no foreign row")
@@ -2751,10 +2808,11 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
                 }
                 else -> panic("checked indirect-call signature is not callable")
             }
+            call_return_type := jet_codegen_callable_return_type(signature)
             lowered_args := jet_codegen_lower_call_args_for_signature(&builder, args, labels, variadic, conventions)
             lowered_types := [MirType]{}
             loop ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.IndirectCall(callee_value, lowered_args, lowered_types))
+            jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.IndirectCall(callee_value, lowered_args, lowered_types))
         }
         .MethodCall(receiver, method, type_args, args) -> jet_codegen_lower_method_call(&builder, expression, receiver, method, type_args, args)
         .NumericMethod(receiver, operation) -> jet_codegen_lower_numeric_method(&builder, expression, receiver, operation)

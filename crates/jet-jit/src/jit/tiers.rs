@@ -437,8 +437,27 @@ fn append_operation_targets(
     }
 }
 
-fn selected_function_ids(program: &MirProgram, artifact: MirArtifactId) -> BTreeSet<MirFunctionId> {
-    let mut selected = artifact_roots(program, artifact);
+fn selected_function_ids(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> BTreeSet<MirFunctionId> {
+    selected_function_ids_with_roots(program, artifact, &[])
+}
+
+fn seed_roots_with_helpers(
+    mut selected: BTreeSet<MirFunctionId>,
+    helper_roots: &[MirFunctionId],
+) -> BTreeSet<MirFunctionId> {
+    selected.extend(helper_roots.iter().copied());
+    selected
+}
+
+pub(crate) fn selected_function_ids_with_roots(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+) -> BTreeSet<MirFunctionId> {
+    let mut selected = seed_roots_with_helpers(artifact_roots(program, artifact), helper_roots);
     let mut changed = true;
     while changed {
         changed = false;
@@ -459,12 +478,16 @@ fn selected_function_ids(program: &MirProgram, artifact: MirArtifactId) -> BTree
     selected
 }
 
-/// Plan only the transitive function closure rooted in the requested artifact.
-/// A function rejected by sema remains a named per-function interpreter row;
-/// unrelated functions never turn a resident run into a whole-program deopt.
-pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierPlan {
+/// Plan the transitive function closure rooted in an artifact plus explicit
+/// checked private helper roots. Private roots are runtime call authorities,
+/// not MIR artifact-entry mutations or public export rows.
+pub(crate) fn plan_mir_tiers_with_roots(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+) -> MirTierPlan {
     let mut plan = MirTierPlan::default();
-    let selected = selected_function_ids(program, artifact);
+    let selected = selected_function_ids_with_roots(program, artifact, helper_roots);
     for function in program
         .functions
         .iter()
@@ -494,6 +517,32 @@ pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierP
     plan
 }
 
+/// Plan only the transitive function closure rooted in the requested artifact.
+/// A function rejected by sema remains a named per-function interpreter row;
+/// unrelated functions never turn a resident run into a whole-program deopt.
+pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierPlan {
+    plan_mir_tiers_with_roots(program, artifact, &[])
+}
+
 pub(crate) fn mir_function_ids(plan: &MirTierPlan) -> impl Iterator<Item = MirFunctionId> + '_ {
     plan.native.iter().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixed_artifact_and_private_roots_are_planned_together() {
+        let public_entry = MirFunctionId(1);
+        let private_helper = MirFunctionId(2);
+        let selected = seed_roots_with_helpers(
+            BTreeSet::from([public_entry]),
+            &[private_helper],
+        );
+        assert_eq!(
+            selected,
+            BTreeSet::from([public_entry, private_helper])
+        );
+    }
 }

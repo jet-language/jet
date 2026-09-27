@@ -285,7 +285,7 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     .unwrap();
     std::fs::write(
         dir.join("src/cli.jet"),
-        "pub use \"command\" as command;\npub fn run() { print(\"reexport\") }\n",
+        "pub use \"command\" as command\npub fn run() { print(\"reexport\") }\n",
     )
     .unwrap();
     std::fs::write(
@@ -456,7 +456,7 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() Int -> { return 1 }\n",
+        "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() -> Int { return 1 }\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
@@ -499,9 +499,9 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     );
 
     for source in [
-        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\n",
-        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\nfn run() {}\n",
-        "APP :: Output.Executable{ name: \"app\", entry: start }\nAPI :: Output.Service{ name: \"api\", entry: serve }\ndefaults: { run: API };\nfn start() {}\nfn serve() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\nAPI :: Output.Service{ name: \"api\", entry: serve }\ndefaults: { run: API }\nfn start() {}\nfn serve() {}\n",
     ] {
         let stale_default = codes(source, jet::Sema::CompileMode::Run);
         assert!(
@@ -541,7 +541,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
         "E1321",
     );
     reject(
-        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing };\nfn start() {}\nfn run() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n",
         &[],
         "E1321",
     );
@@ -550,7 +550,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
 #[test]
 fn checked_default_selects_one_of_multiple_executables() {
     let bundle = checked_bundle(
-        "ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: TWO };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
+        "ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: TWO }\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );

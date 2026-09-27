@@ -2,6 +2,7 @@
 // diagnostic payload or rebase the aggregate UTF-8 byte spans.
 
 pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
+
 pub struct SemaSourceSegment {
     pub generated: Span
     pub source_file: String
@@ -11,14 +12,12 @@ pub struct SemaSourceSegment {
 }
 
 pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String {
-    index := 0
-    loop index < segments.len() {
-        segment :: segments[index]
+    loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end -> return segment.source_file
-        index += 1
     }
     if fallback_origin == SemaSourceOrigin.Snapshot -> fallback else -> ""
 }
+
 pub struct SemaSourceLocation {
     pub source_path: String
     pub aggregate_start: Int
@@ -31,73 +30,57 @@ pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> ?Se
     candidate := -1
     matches := 0
     if site.start == site.end {
-        index := 0
-        loop index < segments.len() {
-            segment :: segments[index]
+        loop (index, segment) in segments {
             if site.start >= segment.generated.start && site.start < segment.generated.end {
                 candidate = index
                 matches += 1
             }
-            index += 1
         }
         if matches == 0 {
             final_end := segments[0].generated.end
-            index = 1
-            loop index < segments.len() {
+            loop index in 1..<segments.len() {
                 if segments[index].generated.end > final_end -> final_end = segments[index].generated.end
-                index += 1
             }
             if site.start != final_end -> return None
-            index = 0
-            loop index < segments.len() {
-                if segments[index].generated.end == final_end {
+            loop (index, segment) in segments {
+                if segment.generated.end == final_end {
                     candidate = index
                     matches += 1
                 }
-                index += 1
             }
         }
     } else {
-        index := 0
-        loop index < segments.len() {
-            segment :: segments[index]
-            intersects := segment.generated.start < site.end && segment.generated.end > site.start
+        loop (index, segment) in segments {
+            intersects :: segment.generated.start < site.end && segment.generated.end > site.start
             if intersects {
                 if site.start >= segment.generated.start && site.start < segment.generated.end && site.end <= segment.generated.end {
                     candidate = index
                 }
                 matches += 1
             }
-            index += 1
         }
     }
     if matches != 1 || candidate < 0 -> return None
-    segment := segments[candidate]
+    segment :: segments[candidate]
     if segment.source_file == "" || segment.generated.start < 0 || segment.source_start < 0 -> return None
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
 pub fn sema_diagnostic_with_source_location(diagnostic: Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic {
-    if diagnostic.span == None -> return diagnostic
     span :: diagnostic.span ?? return diagnostic
-    location_value := sema_source_location_at(segments, span)
-    if location_value == None {
+    location :: sema_source_location_at(segments, span) ?? {
         diagnostic.source_path = None
         diagnostic.source_offset = None
         diagnostic.source_start = None
         return diagnostic
     }
-    location :: location_value ?? return diagnostic
-    if diagnostic.edit != None {
-        edit :: diagnostic.edit ?? return diagnostic
-        edit_location_value := sema_source_location_at(segments, edit.span)
-        if edit_location_value == None {
+    if diagnostic.edit == .Val(edit) {
+        edit_location :: sema_source_location_at(segments, edit.span) ?? {
             diagnostic.source_path = None
             diagnostic.source_offset = None
             diagnostic.source_start = None
             return diagnostic
         }
-        edit_location :: edit_location_value ?? return diagnostic
         if edit_location.source_path != location.source_path || edit_location.aggregate_start != location.aggregate_start || edit_location.source_start != location.source_start || edit_location.origin != location.origin {
             diagnostic.source_path = None
             diagnostic.source_offset = None
@@ -117,20 +100,16 @@ pub fn sema_diagnostic_with_source_location(diagnostic: Diagnostic, segments: [S
 }
 
 pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) {
-    index := start
-    loop index < diagnostics.len() {
+    loop index in start..<diagnostics.len() {
         diagnostics[index] = sema_diagnostic_with_source_location(diagnostics[index], segments)
-        index += 1
     }
 }
 
 pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> ?Int {
-    segment_index := 0
-    loop segment_index < segments.len() {
-        segment :: segments[segment_index]
+    loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end {
             if segment.line_starts.len() == 0 -> return None
-            local_offset := site.start - segment.generated.start
+            local_offset :: site.start - segment.generated.start
             low := 0
             high := segment.line_starts.len()
             loop low < high {
@@ -144,7 +123,6 @@ pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> ?Int {
             if low == 0 -> return None
             return Val(low)
         }
-        segment_index += 1
     }
     None
 }

@@ -491,7 +491,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_pascal_{lib}");
     let ty = pascal_case(&surface.handle.group);
     let mut output = format!(
-        "use c.{abi} as abi\n\n#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
+        "use c.{abi} as abi\n\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
     );
     for routine in &surface.plain {
         raw_jet(&mut output, &abi, routine, &routine.name);
@@ -517,7 +517,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     output.push_str("pub struct ");
     output.push_str(&ty);
     output.push_str(" {\n    value: Int\n}\n\n");
-    output.push_str("fn error(code: Int) PascalError -> {\n");
+    output.push_str("fn error(code: Int) -> PascalError {\n");
     output.push_str("    if code == 1 -> return PascalError.InvalidHandle\n");
     output.push_str("    if code == 2 -> return PascalError.ResourceLimit\n");
     output.push_str("    return PascalError.Foreign\n}\n\n");
@@ -526,9 +526,9 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         output.push_str("pub fn ");
         output.push_str(&routine.name);
         params_jet(&mut output, &routine.params, 0);
-        output.push(' ');
+        output.push_str(" -> ");
         output.push_str(routine.result.jet());
-        output.push_str(" -> {\n    return abi.");
+        output.push_str(" {\n    return abi.");
         output.push_str(&routine.name);
         call_args(&mut output, &routine.params, 0, None);
         output.push_str("\n}\n\n");
@@ -537,9 +537,9 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     output.push_str("pub fn ");
     output.push_str(&surface.handle.ctor.name);
     params_jet(&mut output, &surface.handle.ctor.params, 0);
-    output.push(' ');
+    output.push_str(" -> ");
     output.push_str(&ty);
-    output.push_str(" !PascalError -> {\n    raw_handle :: abi.");
+    output.push_str(" !PascalError {\n    raw_handle :: abi.");
     output.push_str(&surface.handle.ctor.name);
     call_args(&mut output, &surface.handle.ctor.params, 0, None);
     output.push_str(
@@ -559,9 +559,9 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             output.push_str(": ");
             output.push_str(param.kind.jet());
         }
-        output.push_str(") ");
+        output.push_str(") -> ");
         output.push_str(routine.result.jet());
-        output.push_str(" !PascalError -> {\n    result_value :: abi.");
+        output.push_str(" !PascalError {\n    result_value :: abi.");
         output.push_str(&routine.name);
         call_args(&mut output, &routine.params, 1, Some("handle.value"));
         output.push_str(

@@ -590,7 +590,7 @@ enum Shape {
     Circle(Float)
     Empty
 }
-fn area(s: Shape) Float -> {
+fn area(s: Shape) -> Float {
     if s == {
         .Circle(r) -> return r
         .Empty -> return 0.0
@@ -638,13 +638,13 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 #[test]
 fn parse_option_fn() {
     let src = r#"
-fn find_even(limit: Int) ?Int -> {
+fn find_even(limit: Int) -> ?Int {
     loop i in 1..limit {
         if i % 2 == 0 {
-            return Val(i);
+            return Val(i)
         }
     }
-    return None;
+    return None
 }
 fn run() {}
 "#;
@@ -656,7 +656,7 @@ fn run() {}
 #[test]
 fn parse_value_tail_stays_an_expression_statement() {
     let src = r#"
-fn label() String -> {
+fn label() -> String {
     "label"
 }
 fn run() {}
@@ -833,7 +833,7 @@ fn run() {
 #[test]
 fn parse_bracket_collection_types_and_semicolon_list_items() {
     let src = r#"
-pub fn shell() [JSON] -> {
+pub fn shell() -> [JSON] {
     return [
         JSON.Null;
     ];

@@ -1,0 +1,226 @@
+// Canonical checked-MIR optimization entry point and result contract.
+// The optimizer consumes the shared MIR schema and owns the one target-neutral
+// legality, transformation, proof-fact, and deterministic-order pipeline.
+
+pub enum MirOptimizationErrorKind {
+    InvalidSchema
+    InvalidCfg
+    InvalidDefUse
+    InvalidFact
+}
+
+pub struct MirOptimizationError {
+    pub pass: MirOptimizationPassId
+    pub kind: MirOptimizationErrorKind
+    pub function: ?MirFunctionId
+    pub span: Span
+    pub message: String
+}
+
+pub struct MirOptimizationReport {
+    pub production_order: [MirOptimizationPassId]
+    pub completed: [MirOptimizationPassId]
+    pub inline_calls_expanded: Int
+    pub reachable_blocks_removed: Int
+    pub folded_values: Int
+    pub dead_values_removed: Int
+    pub bounds_facts: Int
+    pub loop_facts: Int
+    pub vector_facts: Int
+    pub fixed_reductions_normalized: Int
+    pub acceleration_facts: Int
+    pub decision_rows: Int
+}
+
+pub struct MirOptimizationResult {
+    pub program: ?MirProgram
+    pub report: MirOptimizationReport
+    pub error: ?MirOptimizationError
+    pub complete: Bool
+}
+
+pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] {
+    [MirOptimizationPassId]{
+        .LegalityVerification,
+        .UnreachableBlockElimination,
+        .CfgSimplification,
+        .ExactConstantFolding,
+        .BoundsCheckElimination,
+        .DeadPureValueElimination,
+        .CanonicalLoopFacts,
+    }
+}
+
+fn mir_optimizer_empty_report() -> MirOptimizationReport {
+    MirOptimizationReport{
+        production_order: mir_optimizer_production_order(),
+        completed: [MirOptimizationPassId]{},
+        inline_calls_expanded: 0,
+        reachable_blocks_removed: 0,
+        folded_values: 0,
+        dead_values_removed: 0,
+        bounds_facts: 0,
+        loop_facts: 0,
+        vector_facts: 0,
+        fixed_reductions_normalized: 0,
+        acceleration_facts: 0,
+        decision_rows: 0,
+    }
+}
+
+fn mir_pass_error(
+    pass: MirOptimizationPassId,
+    kind: MirOptimizationErrorKind,
+    function: ?MirFunctionId,
+    span: Span,
+    message: String,
+) -> MirOptimizationError {
+    MirOptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
+}
+
+fn mir_optimizer_failed(error: MirOptimizationError, report: MirOptimizationReport) -> MirOptimizationResult {
+    MirOptimizationResult{program: None, report: report, error: Val(error), complete: false}
+}
+
+fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -> MirOptimizationResult {
+    MirOptimizationResult{program: Val(program), report: report, error: None, complete: true}
+}
+
+// This is the only public optimization entry. It runs after MIR lowering and
+// before any target adapter; errors are returned rather than repaired locally.
+pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
+    report := mir_optimizer_empty_report()
+    validation :: mir_pass_validate_program(program, .LegalityVerification)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.LegalityVerification, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR legality validation failed"), report)
+    if mir_optimizer_has_complete_seal(program) {
+        report.completed = mir_optimizer_production_order()
+        loop function in program.functions {
+            report.bounds_facts += function.optimization.bounds_facts.len()
+            report.loop_facts += function.optimization.loop_facts.len()
+            report.vector_facts += function.optimization.vector_facts.len()
+            report.acceleration_facts += function.optimization.acceleration_facts.len()
+            report.decision_rows += function.optimization.decision_rows.len()
+        }
+        return mir_optimizer_succeeded(program, report)
+    }
+
+    optimized := program
+    mir_pass_clear_batch_facts(&optimized)
+
+    inline_result := mir_pass_expand_inline_always(&optimized)
+    report.inline_calls_expanded = inline_result.expanded
+    report.reachable_blocks_removed += inline_result.blocks_removed
+    if inline_result.error != None -> return mir_optimizer_failed(inline_result.error ?? mir_pass_error(.LegalityVerification, .InvalidDefUse, None, Span{start: 0, end: 0}, "inline expansion failed"), report)
+    mir_pass_mark(&optimized, .LegalityVerification)
+    report.completed.push(.LegalityVerification)
+    validation = mir_pass_validate_program(optimized, .LegalityVerification)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.LegalityVerification, .InvalidDefUse, None, Span{start: 0, end: 0}, "inline expansion produced invalid MIR"), report)
+
+    before_blocks := mir_pass_block_count(&optimized)
+    mir_pass_eliminate_unreachable(&optimized)
+    report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
+    mir_pass_mark(&optimized, .UnreachableBlockElimination)
+    report.completed.push(.UnreachableBlockElimination)
+    validation = mir_pass_validate_program(optimized, .UnreachableBlockElimination)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.UnreachableBlockElimination, .InvalidCfg, None, Span{start: 0, end: 0}, "unreachable-block elimination produced invalid MIR"), report)
+
+    before_blocks = mir_pass_block_count(&optimized)
+    mir_pass_simplify_cfg(&optimized)
+    report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
+    mir_pass_mark(&optimized, .CfgSimplification)
+    report.completed.push(.CfgSimplification)
+    validation = mir_pass_validate_program(optimized, .CfgSimplification)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CfgSimplification, .InvalidCfg, None, Span{start: 0, end: 0}, "CFG simplification produced invalid MIR"), report)
+
+    report.folded_values = mir_pass_fold_exact_constants(&optimized)
+    mir_pass_mark(&optimized, .ExactConstantFolding)
+    report.completed.push(.ExactConstantFolding)
+    validation = mir_pass_validate_program(optimized, .ExactConstantFolding)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.ExactConstantFolding, .InvalidDefUse, None, Span{start: 0, end: 0}, "constant folding produced invalid MIR"), report)
+
+    report.bounds_facts = mir_pass_derive_bounds(&optimized)
+    mir_pass_mark(&optimized, .BoundsCheckElimination)
+    report.completed.push(.BoundsCheckElimination)
+    validation = mir_pass_validate_program(optimized, .BoundsCheckElimination)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.BoundsCheckElimination, .InvalidFact, None, Span{start: 0, end: 0}, "bounds facts are invalid"), report)
+
+    report.dead_values_removed = mir_pass_eliminate_dead_pure(&optimized)
+    mir_pass_mark(&optimized, .DeadPureValueElimination)
+    report.completed.push(.DeadPureValueElimination)
+    validation = mir_pass_validate_program(optimized, .DeadPureValueElimination)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.DeadPureValueElimination, .InvalidDefUse, None, Span{start: 0, end: 0}, "dead-value elimination produced invalid MIR"), report)
+
+    loop_counts := mir_pass_derive_loop_and_vector_facts(&optimized)
+    report.loop_facts = loop_counts.loops
+    report.vector_facts = loop_counts.vectors
+    reduction_counts := mir_pass_fixed_reduction_normalize(&optimized)
+    report.fixed_reductions_normalized += reduction_counts.normalized
+    report.reachable_blocks_removed += reduction_counts.blocks_removed
+    report.dead_values_removed += reduction_counts.dead_values_removed
+    post_reduction_counts := mir_pass_derive_loop_and_vector_facts(&optimized)
+    report.loop_facts = post_reduction_counts.loops
+    report.vector_facts = post_reduction_counts.vectors
+    reduction_counts = mir_pass_fixed_reduction_normalize(&optimized)
+    report.fixed_reductions_normalized += reduction_counts.normalized
+    report.reachable_blocks_removed += reduction_counts.blocks_removed
+    report.dead_values_removed += reduction_counts.dead_values_removed
+    report.bounds_facts = mir_pass_derive_bounds(&optimized)
+    mir_pass_mark(&optimized, .CanonicalLoopFacts)
+    report.completed.push(.CanonicalLoopFacts)
+    validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CanonicalLoopFacts, .InvalidFact, None, Span{start: 0, end: 0}, "canonical loop facts are invalid"), report)
+
+    report.acceleration_facts = mir_pass_refresh_acceleration_facts(&optimized)
+    mir_pass_canonicalize_program_order(&optimized)
+    validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
+    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CanonicalLoopFacts, .InvalidSchema, None, Span{start: 0, end: 0}, "canonical ordering produced invalid MIR"), report)
+    report.decision_rows = mir_pass_derive_decision_rows(&optimized)
+    mir_pass_sort_decision_rows_for_program(&optimized)
+    digest := mir_program_digest(optimized)
+    loop function in &optimized.functions -> function.optimization.derived_from_digest = Val(digest)
+    mir_optimizer_succeeded(optimized, report)
+}
+
+fn mir_optimizer_has_complete_seal(program: MirProgram) -> Bool {
+    if program.functions.len() == 0 -> return false
+    digest := mir_program_digest(program)
+    expected := mir_optimizer_production_order()
+    loop function in program.functions {
+        if function.optimization.derived_from_digest != Val(digest) -> return false
+        if function.optimization.pass_ids.len() != expected.len() -> return false
+        index := 0
+        loop index < expected.len() {
+            if function.optimization.pass_ids[index] != expected[index] -> return false
+            index += 1
+        }
+    }
+    true
+}
+
+fn mir_pass_clear_batch_facts(program: &MirProgram) {
+    loop function in &program.functions {
+        function.optimization.pass_ids = [MirOptimizationPassId]{}
+        function.optimization.derived_from_digest = None
+        function.optimization.decision_rows = [MirDecisionRow]{}
+        function.optimization.bounds_facts = [MirBoundsFact]{}
+        function.optimization.loop_facts = [MirLoopFact]{}
+        function.optimization.vector_facts = [MirVectorFact]{}
+        function.optimization.checked_vector_facts = [MirVectorFact]{}
+        function.optimization.fusion_facts = [MirFusionFact]{}
+        function.optimization.acceleration_facts = [MirAccelerationFact]{}
+        function.optimization.auto_vectorizable = false
+        function.optimization.no_aliasing = false
+        function.optimization.no_early_exit = false
+        function.optimization.no_cross_iteration_dependencies = false
+    }
+}
+
+fn mir_pass_mark(program: &MirProgram, pass: MirOptimizationPassId) {
+    loop function in &program.functions -> function.optimization.pass_ids.push(pass)
+}
+
+fn mir_pass_block_count(program: &MirProgram) -> Int {
+    total := 0
+    loop function in &program.functions -> total += function.blocks.len()
+    total
+}

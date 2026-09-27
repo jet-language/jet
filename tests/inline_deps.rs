@@ -67,7 +67,7 @@ fn write_textkit_fixture(project: &Path) {
     write(
         project,
         ".jet/inline-deps/textkit/1.4.2/textkit.jet",
-        "pub fn shout(s: String) String {\n    return ~s;\n}\n",
+        "pub fn shout(s: String) -> String {\n    return ~s\n}\n",
     );
 }
 
@@ -86,7 +86,7 @@ fn script_inline_dep_resolves() {
     write(
         &dir,
         "stats.jet",
-        "use textkit#1.4.2;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
+        "use textkit#1.4.2\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
     let out = jet_cmd(&["run", "stats.jet"], &dir);
@@ -112,7 +112,7 @@ fn script_inline_dep_unresolved_is_e1253() {
     write(
         &dir,
         "stats.jet",
-        "use ghostpkg#1.0.0;\n\nfn run() {\n    print(\"never\")\n}\n",
+        "use ghostpkg#1.0.0\n\nfn run() {\n    print(\"never\")\n}\n",
     );
 
     let out = jet_cmd(&["run", "stats.jet"], &dir);
@@ -134,7 +134,7 @@ fn script_inline_dep_unpinned_is_l0203() {
     write(
         &dir,
         "stats.jet",
-        "use textkit#1.4;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
+        "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
     let out = jet_cmd(&["run", "stats.jet"], &dir);
@@ -164,7 +164,7 @@ fn jet_lock_writes_sidecar() {
     write(
         &dir,
         "stats.jet",
-        "use textkit#1.4;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
+        "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
     let out = jet_cmd(&["fetch", "--lock", "stats.jet"], &dir);
@@ -202,7 +202,7 @@ fn jet_lock_unresolved_dep_is_e1253() {
     write(
         &dir,
         "stats.jet",
-        "use ghostpkg#1.0.0;\n\nfn run() {\n    print(\"never\")\n}\n",
+        "use ghostpkg#1.0.0\n\nfn run() {\n    print(\"never\")\n}\n",
     );
     let out = jet_cmd(&["fetch", "--lock", "stats.jet"], &dir);
     assert!(!out.status.success());
@@ -224,7 +224,7 @@ fn jet_init_lifts_uses_into_package_jet() {
     write(
         &dir,
         "stats.jet",
-        "use textkit#1.4;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
+        "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
     let out = jet_cmd(&["init", "stats.jet"], &dir);

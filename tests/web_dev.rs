@@ -2556,12 +2556,12 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
     let entry = dir.join("app.jet");
     fs::write(
         &entry,
-        "fn helper() Int -> {\n    return 1\n}\n\nfn run() {\n    helper()\n}\n",
+        "fn helper() -> Int {\n    return 1\n}\n\nfn run() {\n    helper()\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("helper.jet"),
-        "fn helper() Int -> {\n    return 2\n}\n\nfn use_helper() {\n    helper()\n}\n",
+        "fn helper() -> Int {\n    return 2\n}\n\nfn use_helper() {\n    helper()\n}\n",
     )
     .unwrap();
     fs::write(
@@ -2621,7 +2621,7 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
 
     fs::write(
         dir.join("helper.jet"),
-        "fn helper() Int -> {\n    return 3\n}\n",
+        "fn helper() -> Int {\n    return 3\n}\n",
     )
     .unwrap();
     let (status, body) = http_post(port, "/canvas/query", &search).expect("POST stale search");

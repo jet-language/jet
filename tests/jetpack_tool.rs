@@ -1478,7 +1478,7 @@ fn test_runs_unimported_sibling_jet_tests_and_propagates_failure() {
     .unwrap();
     fs::write(
         project.join("env.jet"),
-        "use jetpack as pkg\npub fn shell() [JSON] -> [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_project@local\"]), pkg.prompt(\"test\")]\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] -> [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_project@local\"]), pkg.prompt(\"test\")]\n",
     )
     .unwrap();
     let output = jetpack()
@@ -1521,7 +1521,7 @@ fn test_check_only_package_without_run_jet_collects_package_tests() {
     .unwrap();
     fs::write(
         project.join("env.jet"),
-        "use jetpack as pkg\npub fn shell() [JSON] -> [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_check_only@local\"]), pkg.prompt(\"test\")]\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] -> [pkg.source(\"local\", \"./\", \"core\"), pkg.packages([\"test_check_only@local\"]), pkg.prompt(\"test\")]\n",
     )
     .unwrap();
     let output = jetpack()

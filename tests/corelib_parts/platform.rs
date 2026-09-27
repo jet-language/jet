@@ -79,7 +79,7 @@ fn core_files_parallel_walk_and_read_count_share_lowering() {
         r#"
 use core.files as fs
 
-fn count_file(path: String, needle: String) Int ->
+fn count_file(path: String, needle: String) -> Int ->
     (fs.read(path) ?? panic("read failed")).count(needle)
 
 fn run() {
@@ -1247,11 +1247,11 @@ fn run() {{
     print(result.success)
     print(result.output)
     if child.stdin.write("late") == {{
-        .Ok(_) -> {{ print("closed:accepted"); }}
+        .Ok(_) -> {{ print("closed:accepted") }}
         .Err(error) -> {{
             if error == {{
-                .Closed(_) -> {{ print("closed:typed"); }}
-                else -> {{ print("closed:wrong"); }}
+                .Closed(_) -> {{ print("closed:typed") }}
+                else -> {{ print("closed:wrong") }}
             }}
         }}
     }}

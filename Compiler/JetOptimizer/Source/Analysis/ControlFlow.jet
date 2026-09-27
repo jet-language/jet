@@ -1,0 +1,287 @@
+// Read-only CFG, dominator, def-use, and identity analyses for canonical MIR.
+pub struct MirOptimizationCfgRow {
+    pub block: MirBlockId
+    pub predecessors: [MirBlockId]
+    pub successors: [MirBlockId]
+    pub reachable: Bool
+}
+
+pub struct MirOptimizationDefUseRow {
+    pub value: MirValueId
+    pub definition_block: ?MirBlockId
+    pub definition_index: ?Int
+    pub use_count: Int
+}
+
+pub struct MirOptimizationFunctionAnalysis {
+    pub cfg: [MirOptimizationCfgRow]
+    pub def_use: [MirOptimizationDefUseRow]
+}
+
+struct MirPassDefinition {
+    pub value: MirValueId
+    pub block: MirBlockId
+    pub index: Int
+}
+
+struct MirPassConstantFact {
+    pub value: MirValueId
+    pub constant: MirConstant
+}
+
+struct MirPassDominatorRow {
+    pub block: MirBlockId
+    pub dominators: [MirBlockId]
+}
+
+// The public analyses are intentionally read-only and use the same edge and
+// operand walkers as the legality pass and transforms.
+pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationFunctionAnalysis {
+    cfg := mir_pass_cfg_rows(function)
+    defs := mir_pass_definitions(function)
+    rows := [MirOptimizationDefUseRow]{}
+    loop value in function.values {
+        definition := mir_pass_find_definition(defs, value.id)
+        rows.push(MirOptimizationDefUseRow{
+            value: value.id,
+            definition_block: definition.map(row -> row.block),
+            definition_index: definition.map(row -> row.index),
+            use_count: mir_pass_value_use_count(function, value.id),
+        })
+    }
+    MirOptimizationFunctionAnalysis{cfg: cfg, def_use: rows}
+}
+
+fn mir_pass_instruction_type(function: MirFunction, value: MirValueId) -> ?MirType {
+    loop block in &function.blocks {
+        loop instruction in &block.instructions {
+            if instruction.result == Val(value) -> return instruction.ty
+        }
+    }
+    None
+}
+
+fn mir_pass_definitions(function: MirFunction) -> [MirPassDefinition] {
+    definitions := [MirPassDefinition]{}
+    loop block in &function.blocks {
+        index := 0
+        loop instruction in &block.instructions {
+            if instruction.result != None {
+                definitions.push(MirPassDefinition{value: instruction.result ?? MirValueId{value: 0}, block: block.id, index: index})
+            }
+            index += 1
+        }
+    }
+    definitions
+}
+
+fn mir_pass_find_definition(definitions: [MirPassDefinition], value: MirValueId) -> ?MirPassDefinition {
+    loop definition in definitions {
+        if definition.value == value -> return Val(definition)
+    }
+    None
+}
+
+fn mir_pass_definition_exists(definitions: [MirPassDefinition], value: MirValueId) -> Bool {
+    mir_pass_find_definition(definitions, value) != None
+}
+
+fn mir_pass_cfg_rows(function: MirFunction) -> [MirOptimizationCfgRow] {
+    reachable := mir_pass_reachable(function)
+    rows := [MirOptimizationCfgRow]{}
+    loop block in &function.blocks {
+        successors := mir_terminator_targets(block.terminator)
+        rows.push(MirOptimizationCfgRow{block: block.id, predecessors: mir_pass_predecessors(function, block.id), successors: successors, reachable: mir_pass_block_id_seen(reachable, block.id)})
+    }
+    rows
+}
+
+fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] {
+    pending := [MirBlockId]{function.entry}
+    reachable := [MirBlockId]{}
+    index := 0
+    loop index < pending.len() {
+        block_id := pending[index]
+        index += 1
+        if !mir_pass_block_id_seen(reachable, block_id) {
+            reachable.push(block_id)
+            block_option := mir_pass_find_block(function.blocks, block_id)
+            if block_option != None {
+                block :: block_option ?? MirBasicBlock{id: block_id, span: Span{start: 0, end: 0}, instructions: [MirInstruction]{}, terminator: MirTerminator.Unreachable("missing")}
+                loop target in mir_terminator_targets(block.terminator) {
+                    if !mir_pass_block_id_seen(reachable, target) -> pending.push(target)
+                }
+            }
+        }
+    }
+    reachable
+}
+
+fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlockId] {
+    predecessors := [MirBlockId]{}
+    loop block in &function.blocks {
+        loop candidate in mir_terminator_targets(block.terminator) {
+            if candidate == target && !mir_pass_block_id_seen(predecessors, block.id) -> predecessors.push(block.id)
+        }
+    }
+    predecessors
+}
+
+fn mir_pass_predecessor(function: MirFunction, source: MirBlockId, target: MirBlockId) -> Bool {
+    predecessors := mir_pass_predecessors(function, target)
+    mir_pass_block_id_seen(predecessors, source)
+}
+
+fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
+    all := [MirBlockId]{}
+    loop block in &function.blocks -> all.push(block.id)
+
+    rows := [MirPassDominatorRow]{}
+    loop block in &function.blocks {
+        if block.id == function.entry -> rows.push(MirPassDominatorRow{block: block.id, dominators: [MirBlockId]{block.id}})
+        else -> rows.push(MirPassDominatorRow{block: block.id, dominators: all})
+    }
+    changed := true
+    rounds := 0
+    loop changed && rounds <= function.blocks.len() + 1 {
+        changed = false
+        rounds += 1
+        loop block in &function.blocks {
+            if block.id != function.entry {
+                predecessors := mir_pass_predecessors(function, block.id)
+                candidate := [MirBlockId]{}
+                if {
+                    predecessors.len() == 0 -> candidate.push(block.id)
+                    else -> {
+                        loop item in all {
+                            present := true
+                            loop predecessor in predecessors {
+                                row :: mir_pass_dominator_row(rows, predecessor)
+                                if row == None || !mir_pass_block_id_seen((row ?? MirPassDominatorRow{block: predecessor, dominators: [MirBlockId]{}}).dominators, item) {
+                                    present = false
+                                    break
+                                }
+                            }
+                            if present -> candidate.push(item)
+                        }
+                        if !mir_pass_block_id_seen(candidate, block.id) -> candidate.push(block.id)
+                    }
+                }
+                row_index := 0
+                loop row_index < rows.len() {
+                    row := rows[row_index]
+                    if row.block == block.id {
+                        if !mir_pass_block_ids_equal(row.dominators, candidate) {
+                            rows[row_index].dominators = candidate
+                            changed = true
+                        }
+                        break
+                    }
+                    row_index += 1
+                }
+            }
+        }
+    }
+    rows
+}
+
+fn mir_pass_dominator_row(rows: [MirPassDominatorRow], block: MirBlockId) -> ?MirPassDominatorRow {
+    loop row in rows {
+        if row.block == block -> return Val(row)
+    }
+    None
+}
+
+fn mir_pass_dominates(rows: [MirPassDominatorRow], definition: MirBlockId, use_block: MirBlockId) -> Bool {
+    row :: mir_pass_dominator_row(rows, use_block) ?? return false
+    mir_pass_block_id_seen(row.dominators, definition)
+}
+
+fn mir_pass_definition_dominates(definition: MirPassDefinition, use_block: MirBlockId, use_index: Int, rows: [MirPassDominatorRow]) -> Bool {
+    if definition.block == use_block -> return definition.index < use_index
+    mir_pass_dominates(rows, definition.block, use_block)
+}
+fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId] {
+    loop place in &places {
+        if place.id == id {
+            values := [MirValueId]{}
+            if place.base == {
+                .Parameter(value) | .Capture(value) | .Temporary(value) -> values.push(value)
+                else -> {}
+            }
+            loop projection in &place.projections {
+                if projection == {
+                    .Index(_, index, _, _, _, _, _) -> values.push(index)
+                    else -> {}
+                }
+            }
+            return values
+        }
+    }
+    [MirValueId]{}
+}
+
+fn mir_pass_value_use_count(function: MirFunction, value: MirValueId) -> Int {
+    count := 0
+    loop place in &function.places {
+        loop used in mir_pass_place_value_uses(function.places, place.id) { if used == value -> count += 1 }
+    }
+    loop scope in &function.scopes {
+        if scope.deadline == Val(value) -> count += 1
+    }
+    loop block in &function.blocks {
+        loop instruction in &block.instructions {
+            loop used in mir_operation_value_uses(instruction.operation) { if used == value -> count += 1 }
+            loop place in mir_pass_operation_place_refs(instruction.operation) {
+                loop used in mir_pass_place_value_uses(function.places, place) { if used == value -> count += 1 }
+            }
+        }
+        loop used in mir_terminator_value_uses(block.terminator) { if used == value -> count += 1 }
+    }
+    count
+}
+
+fn mir_pass_block_id_seen(rows: [MirBlockId], id: MirBlockId) -> Bool {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+fn mir_pass_function_id_seen(rows: [MirFunctionId], id: MirFunctionId) -> Bool {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+fn mir_pass_operation_id_seen(rows: [MirOpId], id: MirOpId) -> Bool {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+fn mir_pass_value_id_seen(rows: [MirValueId], id: MirValueId) -> Bool {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+fn mir_pass_block_exists(blocks: [MirBasicBlock], id: MirBlockId) -> Bool {
+    loop block in &blocks { if block.id == id -> return true }
+    false
+}
+
+fn mir_pass_find_block(blocks: [MirBasicBlock], id: MirBlockId) -> ?MirBasicBlock {
+    loop block in &blocks { if block.id == id -> return Val(block) }
+    None
+}
+
+fn mir_pass_place_exists(places: [MirPlace], id: MirPlaceId) -> Bool {
+    loop place in &places { if place.id == id -> return true }
+    false
+}
+
+fn mir_pass_block_ids_equal(left: [MirBlockId], right: [MirBlockId]) -> Bool {
+    if left.len() != right.len() -> return false
+    loop id in left { if !mir_pass_block_id_seen(right, id) -> return false }
+    true
+}
+// The following legality layer mirrors the Rust verifier's semantic boundary.
+// The generic operand walkers remain the source of truth for SSA uses; these
+// helpers add the checked metadata which cannot be inferred from an operand
+// list (ownership, routes, places, failure carriers, and semantic payloads).

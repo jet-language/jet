@@ -22,7 +22,7 @@ impl Pattern.CheckedText {
         return Ok()
     }
 
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return "{hole}"
     }
 }
@@ -47,12 +47,12 @@ impl Pattern.CheckedText {
         return Err(TextError.Bad)
     }
 
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return "[1]"
     }
 }
 
-fn accepts(text: String) Bool -[]> {
+fn accepts(text: String) -[]> Bool {
     result :: Pattern.from(text)
     result ? value -> return true ! error -> return false
 }
@@ -108,7 +108,7 @@ impl Pattern.CheckedText {
         return Ok()
     }
 
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
@@ -117,12 +117,12 @@ impl PatternError -> Err {
     return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
 }
 
-fn parse(text: String) Pattern -[]> {
+fn parse(text: String) -[]> Pattern {
     pattern :: Pattern.from(text)
     return Ok(pattern)
 }
 
-fn load(text: String) Pattern -[]> {
+fn load(text: String) -[]> Pattern {
     pattern :: parse(text)?("loading pattern")
     return Ok(pattern)
 }
@@ -170,7 +170,7 @@ Pattern :: distinct String
 
 impl Pattern.CheckedText {
     fn check(text: String) !Error -[]> { return }
-    fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
 }
 
 fn run() {}
@@ -192,7 +192,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = Error
     fn check(text: String) !Error -[]> { return }
-    fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
 }
 
 fn run() {

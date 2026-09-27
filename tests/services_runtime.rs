@@ -72,11 +72,11 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
-fn receipt_kind(receipt: ^Delivery) String -> {
+fn receipt_kind(receipt: ^Delivery) -> String {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -187,7 +187,7 @@ use core.time as time
 
 fn worker() {}
 
-fn state_name(delivery: ^Delivery) String -> {
+fn state_name(delivery: ^Delivery) -> String {
     state :: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -265,11 +265,11 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
-fn receipt_kind(receipt: ^Delivery) String -> {
+fn receipt_kind(receipt: ^Delivery) -> String {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -1396,7 +1396,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
@@ -1450,11 +1450,11 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
-fn receipt_kind(receipt: ^Delivery) String -> {
+fn receipt_kind(receipt: ^Delivery) -> String {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -1532,7 +1532,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
@@ -1585,7 +1585,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ^Delivery) Delivery -> {
+fn receipt_id(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
@@ -2203,7 +2203,7 @@ use core.time as time
 
 fn worker() -[]> {}
 
-fn state_name(delivery: ^Delivery) String -> {
+fn state_name(delivery: ^Delivery) -> String {
     state :: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "Pending" }
@@ -2344,7 +2344,7 @@ use core.sys as env
 
 fn worker() -[]> {}
 
-fn state_name(delivery: ^Delivery) String -> {
+fn state_name(delivery: ^Delivery) -> String {
     state :: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "Pending" }

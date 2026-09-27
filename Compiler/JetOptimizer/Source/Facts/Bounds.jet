@@ -1,0 +1,61 @@
+// Checked bounds facts derived from canonical MIR operations and places.
+fn mir_pass_derive_bounds(program: &MirProgram) -> Int {
+    total := 0
+    loop function in &program.functions {
+        facts := [MirBoundsFact]{}
+        blocks := function.blocks
+        places := function.places
+        loop block in blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .Index(_, _, index, kind, _, _, _) -> {
+                        fact := MirBoundsFact{operation: instruction.id, place: None, index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: instruction.span}
+                        mir_pass_bounds_insert(&facts, fact)
+                        total += 1
+                    }
+                    else -> {}
+                }
+                loop place_id in mir_operation_place_uses(instruction.operation) {
+                    loop place in places {
+                        if place.id == place_id {
+                            loop projection in place.projections {
+                                if projection == {
+                                    .Index(kind, index, _, _, _, _, span) -> {
+                                        fact := MirBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
+                                        mir_pass_bounds_insert(&facts, fact)
+                                        total += 1
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        function.optimization.bounds_facts = facts
+    }
+    total
+}
+
+fn mir_pass_bounds_insert(rows: &[MirBoundsFact], fact: MirBoundsFact) {
+    rows.push(fact)
+    index := rows.len() - 1
+    loop index > 0 && mir_pass_bounds_before(rows[index], rows[index - 1]) {
+        previous := rows[index - 1]
+        rows[index - 1] = rows[index]
+        rows[index] = previous
+        index -= 1
+    }
+}
+
+fn mir_pass_bounds_before(left: MirBoundsFact, right: MirBoundsFact) -> Bool {
+    if left.operation.value != right.operation.value -> return left.operation.value < right.operation.value
+    left_place := left.place.map(value -> value.value) ?? -1
+    right_place := right.place.map(value -> value.value) ?? -1
+    if left_place != right_place -> return left_place < right_place
+    left_index := left.index.map(value -> value.value) ?? -1
+    right_index := right.index.map(value -> value.value) ?? -1
+    left_index < right_index
+}
+

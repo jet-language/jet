@@ -1,17 +1,17 @@
 Error [E0120]: `action` was not moved here, so it cannot be returned as-is
-  --> tests/ui/function_contract_laundering.jet:3:48
+  --> tests/ui/function_contract_laundering.jet:3:56
     |
-  3 | fn erase(action: fn(Bool) Int) fn(Bool) Int -> action
-    |                                                ^^^^^^
+  3 | fn erase(action: fn(Bool) -> Int) -> fn(Bool) -> Int { action }
+    |                                                        ^^^^^^
  Why: This function has read access only and does not own the value
  Fix: Return a copy: `return ~action;` — or take ownership with the move marker `^`: `action: ^fn(Bool) Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
 More: jet-lang.dev/e/E0120
 
 Error [E0120]: `action` was not moved here, so it cannot be returned as-is
-  --> tests/ui/function_contract_laundering.jet:5:71
+  --> tests/ui/function_contract_laundering.jet:5:79
     |
-  5 | fn labelled(action: fn(*, force: Bool) Int) fn(*, force: Bool) Int -> action
-    |                                                                       ^^^^^^
+  5 | fn labelled(action: fn(*, force: Bool) -> Int) -> fn(*, force: Bool) -> Int { action }
+    |                                                                               ^^^^^^
  Why: This function has read access only and does not own the value
  Fix: Return a copy: `return ~action;` — or take ownership with the move marker `^`: `action: ^fn(*, force: Bool) Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
 More: jet-lang.dev/e/E0120

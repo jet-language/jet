@@ -5302,8 +5302,8 @@ mod stale_manifest_name_tests {
         let first = PathBuf::from("/virtual/z.jet");
         let second = PathBuf::from("/virtual/a.jet");
         let overlays = [
-            (first.as_path(), "fn z() Int -> { return 1 }\n"),
-            (second.as_path(), "fn a() Int -> { return 2 }\n"),
+            (first.as_path(), "fn z() -> Int { return 1 }\n"),
+            (second.as_path(), "fn a() -> Int { return 2 }\n"),
         ];
         let prepared = prepare_overlay_frontend(&overlays);
 
@@ -5332,8 +5332,8 @@ mod stale_manifest_name_tests {
         let dir = tempdir("staged-frontend-production");
         let entry = dir.join("main.jet");
         let dependency = dir.join("dep.jet");
-        let entry_source = "module dep;\nfn run() Int -> { return dep.value() }\n";
-        let valid_dependency = "pub fn value() Int -> { return 7 }\n";
+        let entry_source = "module dep\nfn run() -> Int { return dep.value() }\n";
+        let valid_dependency = "pub fn value() -> Int { return 7 }\n";
         fs::write(&entry, entry_source).unwrap();
         fs::write(&dependency, valid_dependency).unwrap();
 
@@ -5352,7 +5352,7 @@ mod stale_manifest_name_tests {
             "valid staged batch diagnosed: {diagnostics:?}"
         );
 
-        let invalid_dependency = "pub fn value() Int -> { return 7 }\n::\n";
+        let invalid_dependency = "pub fn value() -> Int { return 7 }\n::\n";
         let invalid_overlays = [
             (entry.as_path(), entry_source),
             (dependency.as_path(), invalid_dependency),

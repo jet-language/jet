@@ -1098,7 +1098,7 @@ mod s61_tests {
                  impossible: !Never\n\
              }\n\
              alias Box<T> :: ?T !IOError\n\
-             fn fetch(value: ?Int !IOError) ?Int !(DbError | TimeoutError) -> value\n\
+             fn fetch(value: ?Int !IOError) -> ?Int !(DbError | TimeoutError) -> value\n\
              fn save() !IOError {}\n\
              fn run() {}\n",
         );
@@ -1139,12 +1139,12 @@ mod s61_tests {
                 if matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_NEVER)
         ));
         let formatted = crate::Formatter::format_source(
-            "fn save() !IOError {}\nfn load() Int !(DbError | TimeoutError) -> 1\n",
+            "fn save() !IOError {}\nfn load() -> Int !(DbError | TimeoutError) -> 1\n",
         )
         .expect("prefix formatter");
         assert!(formatted.contains("fn save() !IOError"), "{formatted}");
         assert!(
-            formatted.contains("fn load() Int !(DbError | TimeoutError)"),
+            formatted.contains("fn load() -> Int !(DbError | TimeoutError)"),
             "{formatted}"
         );
         let contextual =
@@ -1264,7 +1264,7 @@ mod s61_tests {
 
     #[test]
     fn missing_function_body_is_e0081_and_recovers_for_check() {
-        let source = "fn host_open(path: String) Int -[FS]>\nfn run() {}\n";
+        let source = "fn host_open(path: String) -[FS]> Int\nfn run() {}\n";
         let (tokens, lex_diags) = lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         assert!(
@@ -1290,7 +1290,7 @@ mod s61_tests {
             "later items must still parse: {names:?}"
         );
 
-        let source = "fn foo() Int\nfn bar() {}\n";
+        let source = "fn foo() -> Int\nfn bar() {}\n";
         let (tokens, lex_diags) = lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let (prog, diagnostics) =
@@ -1344,8 +1344,8 @@ mod s61_tests {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) @param -> ~self.value
-    fn type_name(self) String -> T.@name
+    fn get_value(self) -> @param -> ~self.value
+    fn type_name(self) -> String -> T.@name
 }
 "#,
         );
@@ -1381,7 +1381,7 @@ derive T.TypeName {
         let source = r#"
 derive T.Debug {
     impl Thing.Debug {
-        fn debug(self) String -> "nested"
+        fn debug(self) -> String -> "nested"
     }
 }
 "#;
@@ -1396,7 +1396,7 @@ derive T.Debug {
 fn build(b: BuildContext) {
     b.generate("made") {
         impl Thing.Debug {
-            fn debug(self) String -> "generated"
+            fn debug(self) -> String -> "generated"
         }
     }
 }
@@ -1413,7 +1413,7 @@ fn build(b: BuildContext) {
             r#"
 @loop T in [Point] {
     impl T {
-        fn generated(self) String -> "generated"
+        fn generated(self) -> String -> "generated"
     }
     #Test("generated") {
         .measure {
@@ -1564,7 +1564,7 @@ fn build(b: BuildContext) {
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-        let src = "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
+        let src = "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1591,7 +1591,7 @@ fn build(b: BuildContext) {
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 -> {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1614,7 +1614,7 @@ fn build(b: BuildContext) {
 
     #[test]
     fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
-        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) Int -> {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) -> Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1862,7 +1862,7 @@ fn build(b: BuildContext) {
     #[test]
     fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
         let program = program(
-            "#Import module c.demo {\n    #ABI(sysv64) fn ping(x: I32) I32 = \"ping\"\n}\n",
+            "#Import module c.demo {\n    #ABI(sysv64) fn ping(x: I32) -> I32 = \"ping\"\n}\n",
         );
         let function = program
             .items
@@ -1915,8 +1915,8 @@ fn build(b: BuildContext) {
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 -> {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
+            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("FFI("), "formatted output keeps the FFI marker: {once}");
@@ -1930,11 +1930,11 @@ fn build(b: BuildContext) {
     fn pub_file_marker_sets_default_visibility() {
         let src = r#"#PubFile
 
-fn greet() String -> {
+fn greet() -> String {
     return "hi"
 }
 
-priv fn secret() Int -> {
+priv fn secret() -> Int {
     return 0
 }
 
@@ -2011,7 +2011,7 @@ fn run() {
     server: Ready()
 }
 
-fn classify(score: Int) Grade -> if {
+fn classify(score: Int) -> Grade -> if {
     score >= 90 -> .A
     score >= 80 -> .B
     else -> .C
@@ -2034,7 +2034,7 @@ fn notify(ready: Bool) -[Net]> {
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
         assert!(
-            once.contains("fn classify(score: Int) Grade -> if {"),
+            once.contains("fn classify(score: Int) -> Grade -> if {"),
             "{once}"
         );
         assert!(once.contains("score >= 90 -> .A"), "{once}");
@@ -2066,7 +2066,7 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn multiline_callable_tail_preserves_its_source_expression() {
         let p = program(
-            "fn double(value: Int) Int -> {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
+            "fn double(value: Int) -> Int {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
         );
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "double" => Some(func),
@@ -2269,7 +2269,7 @@ fn notify(ready: Bool) -[Net]> {
     /// `!` prefix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() ?Int -> None\nfn run() {}\n");
+        let opt = program("fn a() -> ?Int -> None\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -2279,7 +2279,7 @@ fn notify(ready: Bool) -[Net]> {
             "prefix `?Int` must be Optional"
         );
 
-        let res = program("fn b() Int !Err -> Ok(1)\nfn run() {}\n");
+        let res = program("fn b() -> Int !Err -> Ok(1)\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -2292,7 +2292,7 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !Err` must be Result"
         );
 
-        let paren = program("fn c() (?Int) -> None\nfn run() {}\n");
+        let paren = program("fn c() -> (?Int) -> None\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -2309,10 +2309,10 @@ fn notify(ready: Bool) -[Net]> {
             "struct Holder {\n\
                  value: ?Int !IOError\n\
                  nested: [Int !(DbError | TimeoutError)]\n\
-                 callback: fn(?Int !IOError) Int !(DbError | TimeoutError)\n\
+                 callback: fn(?Int !IOError) -> Int !(DbError | TimeoutError)\n\
              }\n\
              alias Box<T> :: ?T !IOError\n\
-             fn fetch(value: ?Int !IOError) Box<?Int !IOError> -> value\n\
+             fn fetch(value: ?Int !IOError) -> Box<?Int !IOError> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed
@@ -2368,8 +2368,8 @@ fn notify(ready: Bool) -[Net]> {
     fn failure_contracts_compose_optional_success_and_error_union() {
         let parsed = program(
             "struct Holder { value: ?Int !IOError }\n\
-             fn fetch(value: ?Int !IOError) Int !(DbError | TimeoutError) -> value\n\
-             fn invoke(callback: fn(?Int !IOError) Int !(DbError | TimeoutError)) ?Int !IOError -> None\n\
+             fn fetch(value: ?Int !IOError) -> Int !(DbError | TimeoutError) -> value\n\
+             fn invoke(callback: fn(?Int !IOError) -> Int !(DbError | TimeoutError)) -> ?Int !IOError -> None\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2408,7 +2408,7 @@ fn notify(ready: Bool) -[Net]> {
             "fn save(path: String) !IOError {}\n\
              fn sync() !Err {}\n\
              fn bounded() !IOError -[FS]> {}\n\
-             fn load() Config !IOError -> {}\n",
+             fn load() -> Config !IOError {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {
@@ -2518,7 +2518,7 @@ fn notify(ready: Bool) -[Net]> {
             "struct Holder {\n\
                  first: Int !Err\n\
                  callback: fn() !Err\n\
-                 fn value(self) Int -> 1\n\
+                 fn value(self) -> Int -> 1\n\
                  second: String\n\
              }\n\
              fn run() {}\n",
@@ -2610,7 +2610,7 @@ fn notify(ready: Bool) -[Net]> {
 
     #[test]
     fn missing_function_body_is_e0081() {
-        let source = "fn greet(name: String) String\nfn run() {}\n";
+        let source = "fn greet(name: String) -> String\nfn run() {}\n";
         let (tokens, lex_diagnostics) = lex(&source);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let diagnostics = parse(&tokens).expect_err("a signature without a body is incomplete");

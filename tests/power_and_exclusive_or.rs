@@ -121,7 +121,7 @@ fn show_exact(value: Int) {
     print(value)
 }
 
-fn raise(base: Int, exponent: Int) Int {
+fn raise(base: Int, exponent: Int) -> Int {
     return base ^ exponent
 }
 
@@ -211,7 +211,7 @@ fn prefix_take_and_copy_survive_the_rebind() {
     let src = r#"
 struct Sword { power: Int }
 
-fn melt(item: ^Sword) Int { return item.power }
+fn melt(item: ^Sword) -> Int { return item.power }
 
 fn run() {
     blade :: Sword{ power: 3 }

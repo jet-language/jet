@@ -1408,10 +1408,15 @@ pub(super) fn lower_expr(
         } => {
             let args = lower_call_args(ctx, args)?;
             let function = ctx.function_id_for(name)?;
+            let call_return_type = ctx
+                .function_registry
+                .call_return_type_for(function, type_args)
+                .map_err(|message| ctx.error(ctx.span(), message))?
+                .unwrap_or_else(|| expr.ty.clone());
             let type_args = lower_mir_types(ctx, type_args)?;
             ctx.emit(
                 "call",
-                Some(expr.ty.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
                     args,
@@ -1722,11 +1727,16 @@ pub(super) fn lower_expr(
             }
             let function_name = format!("{}::close", inner.ty.name());
             let function = ctx.function_id_for(&function_name)?;
+            let call_return_type = ctx
+                .function_registry
+                .method_call_return_type_for(function, &[], &inner.ty)
+                .map_err(|message| ctx.error(ctx.span(), message))?
+                .unwrap_or_else(|| expr.ty.clone());
             let mut arg = ctx.lower_plain_arg(inner)?;
             arg.access = MirAccess::Move;
             ctx.emit(
                 "close",
-                Some(expr.ty.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
                     args: vec![arg],
@@ -2572,47 +2582,58 @@ pub(super) fn lower_expr(
             ..
         } => {
             let owner = ctx.mir_type(&recv.ty)?;
-            let (callee, access) = if matches!(recv.ty.without_user_tags(), Type::TraitObject(_)) {
-                let trait_name = method.trait_owner.as_deref().ok_or_else(|| {
-                    ctx.error(
-                        ctx.span(),
-                        format!(
-                            "trait-object method `{}` is missing its checked trait owner",
-                            method.name
-                        ),
-                    )
-                })?;
-                let (trait_ref, method_id, access) =
-                    ctx.trait_method_identity(trait_name, &method.name)?;
-                let access = access.ok_or_else(|| {
-                    ctx.error(
-                        ctx.span(),
-                        "checked instance trait method has no receiver convention",
-                    )
-                })?;
-                (
-                    MirCallee::TraitMethod {
-                        method: method_id,
-                        trait_ref,
-                        receiver: owner,
-                    },
-                    access,
-                )
-            } else {
-                let function = ctx.function_id_for(&instance_method_lookup(method, &recv.ty))?;
-                let access = ctx
-                    .function_registry
-                    .receiver_access
-                    .get(&function)
-                    .copied()
-                    .ok_or_else(|| {
+            let (callee, access, call_return_type) =
+                if matches!(recv.ty.without_user_tags(), Type::TraitObject(_)) {
+                    let trait_name = method.trait_owner.as_deref().ok_or_else(|| {
                         ctx.error(
                             ctx.span(),
-                            "checked instance method has no receiver convention",
+                            format!(
+                                "trait-object method `{}` is missing its checked trait owner",
+                                method.name
+                            ),
                         )
                     })?;
-                (MirCallee::Method { function, owner }, access)
-            };
+                    let (trait_ref, method_id, access) =
+                        ctx.trait_method_identity(trait_name, &method.name)?;
+                    let access = access.ok_or_else(|| {
+                        ctx.error(
+                            ctx.span(),
+                            "checked instance trait method has no receiver convention",
+                        )
+                    })?;
+                    (
+                        MirCallee::TraitMethod {
+                            method: method_id,
+                            trait_ref,
+                            receiver: owner,
+                        },
+                        access,
+                        ctx.trait_method_return_type(trait_name, &method.name)?,
+                    )
+                } else {
+                    let function = ctx.function_id_for(&instance_method_lookup(method, &recv.ty))?;
+                    let access = ctx
+                        .function_registry
+                        .receiver_access
+                        .get(&function)
+                        .copied()
+                        .ok_or_else(|| {
+                            ctx.error(
+                                ctx.span(),
+                                "checked instance method has no receiver convention",
+                            )
+                        })?;
+                    let call_return_type = ctx
+                        .function_registry
+                        .method_call_return_type_for(function, type_args, &recv.ty)
+                        .map_err(|message| ctx.error(ctx.span(), message))?
+                        .unwrap_or_else(|| expr.ty.clone());
+                    (
+                        MirCallee::Method { function, owner },
+                        access,
+                        call_return_type,
+                    )
+                };
             let receiver = if access == MirAccess::Read {
                 ctx.lower_plain_arg(recv)?
             } else {
@@ -2658,7 +2679,7 @@ pub(super) fn lower_expr(
             let type_args = lower_mir_types(ctx, type_args)?;
             ctx.emit(
                 "method-call",
-                Some(expr.ty.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee,
                     args: lowered,
@@ -2695,12 +2716,16 @@ pub(super) fn lower_expr(
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| crate::AST::Type::Named(owner.clone()));
-                let args = lower_call_args(ctx, args)?;
+                let call_return_type = ctx
+                    .function_registry
+                    .method_call_return_type_for(function, type_args, &owner_ty)
+                    .map_err(|message| ctx.error(ctx.span(), message))?
+                    .unwrap_or_else(|| expr.ty.clone());
                 let owner = ctx.mir_type(&owner_ty)?;
                 let type_args = lower_mir_types(ctx, type_args)?;
                 ctx.emit(
                     "static-call",
-                    Some(expr.ty.clone()),
+                    Some(call_return_type),
                     MirOperation::Call {
                         callee: MirCallee::Associated { function, owner },
                         args,
@@ -3483,11 +3508,12 @@ pub(super) fn lower_expr(
             if try_child_already_propagated(inner) {
                 Ok(input)
             } else {
+                let input_type = ctx.value_source_type(input)?;
                 lower_try_value(
                     ctx,
                     input,
                     &expr.ty,
-                    &inner.ty,
+                    &input_type,
                     note.as_deref(),
                     convert,
                     Some((file, *line, fn_name)),
@@ -5002,7 +5028,7 @@ fn lower_compare_chain_hook(
         .generic_params
         .iter()
         .any(|param| param.name == left_ty.name());
-    let (callee, access) = if generic_receiver {
+    let (callee, access, call_return_type) = if generic_receiver {
         let (trait_ref, method, access) =
             ctx.trait_method_identity(crate::Syntax::TRAIT_COMPARABLE, "compare")?;
         let access = access.ok_or_else(|| {
@@ -5018,6 +5044,7 @@ fn lower_compare_chain_hook(
                 receiver: owner.clone(),
             },
             access,
+            ctx.trait_method_return_type(crate::Syntax::TRAIT_COMPARABLE, "compare")?,
         )
     } else {
         let method = TMethodRef::operator(
@@ -5038,11 +5065,20 @@ fn lower_compare_chain_hook(
                     "checked Comparable method has no receiver convention",
                 )
             })?;
-        (MirCallee::Method { function, owner }, access)
+        let call_return_type = ctx
+            .function_registry
+            .method_call_return_type_for(function, &[], left_ty)
+            .map_err(|message| ctx.error(ctx.span(), message))?
+            .unwrap_or_else(|| Type::Named(crate::Syntax::TYPE_ORDERING.to_string()));
+        (
+            MirCallee::Method { function, owner },
+            access,
+            call_return_type,
+        )
     };
     let ordering = ctx.emit(
         "compare-chain-hook-call",
-        Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+        Some(call_return_type),
         MirOperation::Call {
             callee,
             args: vec![
@@ -5332,13 +5368,6 @@ fn try_child_already_propagated(inner: &TExpr) -> bool {
             target_return: Some(target),
             ..
         } => matches!(target, Type::Result { .. } | Type::Option(_)) && target != &inner.ty,
-        TExprKind::MethodCall { recv, .. } => {
-            matches!(
-                recv.ty.without_user_tags(),
-                Type::Named(name)
-                    if name.ends_with(".Client") || name.ends_with(".Server")
-            )
-        }
         TExprKind::HostCall(host) => matches!(host.as_ref(), THostCall::EnvSet { .. }),
         _ => false,
     }
@@ -5736,15 +5765,21 @@ fn lower_try_failure(
             target,
         } => {
             let function = ctx.function_id_for(conversion_fn)?;
+            let call_return_type = ctx
+                .function_registry
+                .call_return_type_for(function, &[])
+                .map_err(|message| ctx.error(ctx.span(), message))?
+                .unwrap_or_else(|| target.clone());
             let converted = ctx.emit(
                 "try-typed-error-conversion",
-                Some(target.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
                     args: vec![mir_value_arg_with_access(ctx, error, MirAccess::Move)],
                     type_args: Vec::new(),
                 },
             )?;
+[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
             if matches!(
                 target,
                 Type::Named(name) if name == crate::Syntax::TYPE_ERR
@@ -8435,9 +8470,14 @@ fn lower_direct_string_format(
         Err(error) => return Err(error),
     };
     if let Some(function) = direct_function {
+        let call_return_type = ctx
+            .function_registry
+            .method_call_return_type_for(function, &[], value_ty)
+            .map_err(|message| ctx.error(ctx.span(), message))?
+            .unwrap_or_else(|| result.clone());
         return ctx.emit(
             "string-format-user-call",
-            Some(result.clone()),
+            Some(call_return_type),
             MirOperation::Call {
                 callee: MirCallee::User(function),
                 args: vec![mir_value_arg(ctx, value)],
@@ -8445,6 +8485,7 @@ fn lower_direct_string_format(
             },
         );
     }
+[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
     let route = super::string_format_route(
         format,
         value_ty,
@@ -8889,11 +8930,21 @@ fn lower_fn_value(
             ..
         } => ctx.lower_lambda(lambda),
         TFnValueKind::Call { callee, args } => {
+            let called_ty = match callee.ty.without_user_tags() {
+                Type::Fn { ret: Some(ret), .. } => (**ret).clone(),
+                Type::Fn { ret: None, .. } => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                _ => {
+                    return Err(ctx.error(
+                        ctx.span(),
+                        "checked indirect-call callee has no function return type",
+                    ));
+                }
+            };
             let callee = ctx.lower_child(callee)?;
             let args = lower_call_args(ctx, args)?;
             ctx.emit(
                 "indirect-function-call",
-                Some(expr.ty.clone()),
+                Some(called_ty),
                 MirOperation::IndirectCall {
                     callee,
                     args,
@@ -9671,9 +9722,14 @@ fn lower_serde_encode(
             };
             let owner = ctx.mir_type(&owner_ty)?;
             let args = vec![ctx.lower_plain_arg(recv)?];
+            let call_return_type = ctx
+                .function_registry
+                .method_call_return_type_for(function, &[], &owner_ty)
+                .map_err(|message| ctx.error(ctx.span(), message))?
+                .unwrap_or_else(|| expr.ty.clone());
             return ctx.emit(
                 "serde-encode-call",
-                Some(expr.ty.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::Method { function, owner },
                     args,
@@ -9684,6 +9740,7 @@ fn lower_serde_encode(
         Err(error) if missing_function_target(&error) => {}
         Err(error) => return Err(error),
     }
+[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
     if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DATA) {
         return ctx.lower_child(recv);
     }
@@ -9758,9 +9815,14 @@ fn lower_datatree_decode(
             };
             let owner = ctx.mir_type(&owner_ty)?;
             let args = vec![ctx.lower_plain_arg(recv)?];
+            let call_return_type = ctx
+                .function_registry
+                .method_call_return_type_for(function, &[], &owner_ty)
+                .map_err(|message| ctx.error(ctx.span(), message))?
+                .unwrap_or_else(|| expr.ty.clone());
             return ctx.emit(
                 "datatree-decode-call",
-                Some(expr.ty.clone()),
+                Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::Associated { function, owner },
                     args,

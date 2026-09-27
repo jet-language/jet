@@ -245,7 +245,7 @@ fn init_clean_project(dir: &Path, name: &str, version: &str) {
     write(
         dir,
         "run.jet",
-        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hi\"); }\n",
+        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hi\") }\n",
     );
     for args in &[
         vec!["init", "-b", "main"],
@@ -365,10 +365,10 @@ fn replacement_surface(
     };
     let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
     surface.public_symbols = vec![
-        PublicSymbol::new("pad_left", "fn(String, Int) String")
+        PublicSymbol::new("pad_left", "fn(String, Int) -> String")
             .with_effects(&["pure"])
             .with_errors(&["ValueError"]),
-        PublicSymbol::new("trim", "fn(String) String").with_effects(&["pure"]),
+        PublicSymbol::new("trim", "fn(String) -> String").with_effects(&["pure"]),
     ];
     surface.examples = vec!["examples/replacement/pad.jet".to_string()];
     surface.goldens = vec![GoldenFixture::new("pad_left_basic", "  hi\n")];
@@ -1656,8 +1656,8 @@ fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
         &(min_manifest("app", "0.1.0")
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
-    write(&denied, "ui.jet", "use db;\nfn run() -[IO]> { }\n");
-    write(&denied, "db.jet", "pub fn value() Int -> 1\n");
+    write(&denied, "ui.jet", "use db\nfn run() -[IO]> { }\n");
+    write(&denied, "db.jet", "pub fn value() -> Int -> 1\n");
     let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
         .expect_err("a denied import edge must fail during loading");
     assert_eq!(first_diag_code(&error), "E0619");
@@ -1694,9 +1694,9 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
     write(
         &root,
         "ui.jet",
-        "use db;\nfn run() -[IO]> { print(db.value()) }\n",
+        "use db\nfn run() -[IO]> { print(db.value()) }\n",
     );
-    write(&root, "db.jet", "pub fn value() Int -> 1\n");
+    write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
     let mut bundle = jet::Loader::load_entry(shown).expect("allowed edge must load");
@@ -1808,8 +1808,8 @@ fn denied_import_boundary_fact_reaches_structure_inspection() {
         &(min_manifest("app", "0.1.0")
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
-    write(&root, "ui.jet", "use db;\nfn run() { }\n");
-    write(&root, "db.jet", "pub fn value() Int -> 1\n");
+    write(&root, "ui.jet", "use db\nfn run() { }\n");
+    write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
 
@@ -1915,7 +1915,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int -> {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -1944,7 +1944,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(stale_project.join("package.jet"), &manifest_text).unwrap();
     fs::write(
         &artifact,
-        "// jet-ffi-descriptor=stale\npub fn scatter() Int -> {\n    return 7\n}\n",
+        "// jet-ffi-descriptor=stale\npub fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     let stale_manifest =
@@ -1965,7 +1965,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int -> {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -2263,7 +2263,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
         &(min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [IO] } }\n"),
     );
     let entry = tmp.join("run.jet");
-    fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
+    fs::write(&entry, "fn run() { print(\"hi\") }\n").unwrap();
 
     let result = jet::compile_with_path("", &entry.to_string_lossy());
     assert!(
@@ -2292,7 +2292,7 @@ fn cli_build_prints_effect_summary() {
     write(
         &tmp,
         "hello.jet",
-        "use core.files as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
+        "use core.files as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\") }\n",
     );
 
     let out = jet_cmd(&["build", "hello.jet"], &tmp, &store);
@@ -2330,7 +2330,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     write(
         &tmp,
         "netdep/netdep.jet",
-        "use core.net as net\npub fn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\"); }\n",
+        "use core.net as net\npub fn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\") }\n",
     );
 
     write(
@@ -2342,7 +2342,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     write(
         &tmp,
         "run.jet",
-        "use netdep;\nfn run() { netdep.ping(); }\n",
+        "use netdep\nfn run() { netdep.ping() }\n",
     );
 
     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
@@ -2407,7 +2407,7 @@ fn cli_build_lint_never_blocks_by_default() {
     write(
         &tmp,
         "run.jet",
-        "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
+        "struct Invoice { price: Float }\nfn run() { print(\"hi\") }\n",
     );
 
     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
@@ -2456,7 +2456,7 @@ fn cli_build_enforces_lint_policy_e1293() {
     write(
         &tmp,
         "run.jet",
-        "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
+        "struct Invoice { price: Float }\nfn run() { print(\"hi\") }\n",
     );
 
     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
@@ -2492,7 +2492,7 @@ fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
     write(
         &tmp,
         "run.jet",
-        "fn run() { unused_binding :: 1; print(\"hi\"); }\n",
+        "fn run() { unused_binding :: 1; print(\"hi\") }\n",
     );
 
     let warning = jet_cmd(&["build", "run.jet"], &tmp, &store);
@@ -2558,7 +2558,7 @@ fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
             .find_map(|line| line.strip_prefix("// @lint_policy_config "))
             .expect("lint policy code fixture must carry a manifest sample"),
     );
-    write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
+    write(&tmp, "run.jet", "fn run() { print(\"hi\") }\n");
 
     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -2755,7 +2755,7 @@ fn tree_hash_changes_on_content_change() {
     write(&tmp, "a.jet", "fn foo() {}");
     let h1 = jet::SHA256::tree_hash(&tmp);
 
-    write(&tmp, "a.jet", "fn foo() { print(\"hello\"); }");
+    write(&tmp, "a.jet", "fn foo() { print(\"hello\") }");
     let h2 = jet::SHA256::tree_hash(&tmp);
     assert_ne!(h1, h2, "tree hash must change when file content changes");
 
@@ -2843,7 +2843,7 @@ fn store_ensure_path_dep_creates_entry() {
     write(
         &src,
         "mylib.jet",
-        "pub fn hello() => String { return \"hi\"; }\n",
+        "pub fn hello() -> String { return \"hi\" }\n",
     );
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
@@ -3255,7 +3255,7 @@ fn path_dep_compiles_ok() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() => String { return \"hello!\"; }\n",
+        "pub fn greet() -> String { return \"hello!\" }\n",
     );
 
     // Root project with path dep.
@@ -3267,7 +3267,7 @@ fn path_dep_compiles_ok() {
     let entry = tmp.join("run.jet");
     fs::write(
         &entry,
-        "use greeter;\nfn run() { print(greeter.greet()); }\n",
+        "use greeter\nfn run() { print(greeter.greet()) }\n",
     )
     .unwrap();
 
@@ -3411,7 +3411,7 @@ fn toolchain_only_lock_keeps_declared_path_unlocked() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() => String { return \"hi\"; }\n",
+        "pub fn greet() -> String { return \"hi\" }\n",
     );
     let manifest_text =
         manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
@@ -3458,7 +3458,7 @@ fn toolchain_mismatch_emits_e1208() {
         "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n",
     );
     let entry = tmp.join("run.jet");
-    fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
+    fs::write(&entry, "fn run() { print(\"hi\") }\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
         .expect_err("toolchain mismatch must fail with E1208");
@@ -3852,7 +3852,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
+    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init bare repo.
@@ -4966,7 +4966,7 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
+    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
@@ -5061,7 +5061,7 @@ fn git_dep_branch_update_rewrites_lock() {
     write(
         &clone,
         "extra.jet",
-        "pub fn extra() => Int { return 99; }\n",
+        "pub fn extra() -> Int { return 99 }\n",
     );
     Command::new("git")
         .args(["add", "."])
@@ -5276,7 +5276,7 @@ struct GreetingArgs {
     #Doc("name to greet") name: String{"Jet"}
 }
 
-fn greet(name: String) String -> {
+fn greet(name: String) -> String {
     return "hello, {name}"
 }
 
@@ -5529,7 +5529,7 @@ fn cli_build_sbom_writes_spdx() {
     let tmp = tmp_dir("cli_build_sbom");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
-    write(&tmp, "hello.jet", "fn run() { print(\"hi\"); }\n");
+    write(&tmp, "hello.jet", "fn run() { print(\"hi\") }\n");
 
     let out = jet_cmd(&["build", "--sbom", "hello.jet"], &tmp, &store);
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -5574,7 +5574,7 @@ fn cli_vendor_dir_flag_relocates() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() => String { return \"hi\"; }\n",
+        "pub fn greet() -> String { return \"hi\" }\n",
     );
     write(
         &tmp,
@@ -5654,7 +5654,7 @@ fn cli_end_to_end_new_then_add_path() {
     // 2. Create a local lib for `jet add --path`.
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
-    write(&lib, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
+    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
 
     // 3. jet add mylib --path ../mylib (from inside the project)
     let proj = tmp.join("myapp");
@@ -5694,7 +5694,7 @@ fn cli_add_path_into_inline_empty_deps_table() {
     );
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
-    write(&lib, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
+    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
 
     let out = jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store);
     assert!(
@@ -5766,7 +5766,7 @@ fn cli_corrupt_manifest_has_one_diagnostic_across_package_commands() {
         "package.jet",
         &(min_manifest("app", "0.1.0") + "\ndeps: {\n}\nunknown: ../broken,\n"),
     );
-    write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
+    write(&tmp, "run.jet", "fn run() { print(\"hi\") }\n");
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
 
@@ -5813,7 +5813,7 @@ fn semver_break_e2601() {
     let old_api = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) Int".into(),
+        signature: "fn parse(raw: String) -> Int".into(),
     }];
     let new_api: Vec<ApiItem> = vec![]; // removed
 
@@ -5842,7 +5842,7 @@ fn returned_view_source_union_change_feeds_e1218_and_e2601() {
     let item = |source: &str| ApiItem {
         kind: "fn".into(),
         name: "pick".into(),
-        signature: format!("fn pick(left: [Int], right: [Int]) View<Int> ; view_source = {source}"),
+        signature: format!("fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = {source}"),
     };
     let changes = diff_public_api(
         &[item("parameter:0;access:read;path:range")],
@@ -5877,7 +5877,7 @@ fn capability_sigil_frozen_in_public_api() {
 
     let write_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: &Account, amount: Int) Int -> {
+pub fn deposit(a: &Account, amount: Int) -> Int {
     a.balance = a.balance + amount
     return a.balance
 }
@@ -5898,7 +5898,7 @@ pub fn deposit(a: &Account, amount: Int) Int -> {
     // Same signature, only the capability sigil differs (read instead of write).
     let read_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: Account, amount: Int) Int -> { return a.balance + amount }
+pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 ";
     let f2 = dir.join("read.jet");
     fs::write(&f2, read_src).unwrap();
@@ -5936,7 +5936,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0) }\n";
+    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = jet::Publish::extract_public_api_for_package(
@@ -5971,7 +5971,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0) }\n";
+    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
     let changed_api = jet::Publish::extract_public_api_for_package(
@@ -5987,7 +5987,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
 
-    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() CelsiusPoint -> { return CelsiusPoint.from_float(20.0) }\n";
+    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let affine_path = dir.join("affine.jet");
     fs::write(&affine_path, affine).unwrap();
     let affine_api = jet::Publish::extract_public_api_for_package(
@@ -5995,7 +5995,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         affine_path.to_str().unwrap(),
         "physics",
     );
-    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() CelsiusPoint -> { return CelsiusPoint.from_float(20.0) }\n";
+    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let shifted_path = dir.join("shifted.jet");
     fs::write(&shifted_path, shifted).unwrap();
     let shifted_api = jet::Publish::extract_public_api_for_package(
@@ -6006,8 +6006,8 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
 
     let length_generic =
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -> { return value }\n";
-    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) Q -> { return value }\n";
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
+    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
     let length_path = dir.join("length_generic.jet");
     let time_path = dir.join("time_generic.jet");
     fs::write(&length_path, length_generic).unwrap();
@@ -6057,8 +6057,8 @@ fn inferred_public_effect_drift_is_breaking() {
     let dir = tmp_dir("effect_api_drift");
     let pure_path = dir.join("pure.jet");
     let io_path = dir.join("io.jet");
-    let pure = "pub fn report() Int -> { return 1 }\n";
-    let io = "pub fn report() Int -> { print(\"report\"); return 1 }\n";
+    let pure = "pub fn report() -> Int { return 1 }\n";
+    let io = "pub fn report() -> Int { print(\"report\"); return 1 }\n";
     fs::write(&pure_path, pure).unwrap();
     fs::write(&io_path, io).unwrap();
 
@@ -6149,7 +6149,7 @@ fn public_effect_metadata_preserves_symbolic_rows() {
 
     let dir = tmp_dir("effect_api_open_row");
     let path = dir.join("open.jet");
-    let source = "pub fn invoke<E>(act: fn() Int -[..E]>) Int -[..E]> { return act(); }\n";
+    let source = "pub fn invoke<E>(act: fn() -[..E]> Int) -[..E]> Int { return act() }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -6165,8 +6165,8 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) Int -[IO]>; }\n";
-    let new = "pub trait Render { fn draw(self) Int -[GPU]>; }\n";
+    let old = "pub trait Render { fn draw(self) -[IO]> Int; }\n";
+    let new = "pub trait Render { fn draw(self) -[GPU]> Int; }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
@@ -6197,7 +6197,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
     // canonical Length family instead (card #1765/#1769 root cause: the
     // prior fixture redeclared the family and shadowed the very identity
     // it meant to assert on).
-    let source = "pub trait Measure { fn scale(value: Meter) Meter; }\n";
+    let source = "pub trait Measure { fn scale(value: Meter) -> Meter; }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -6284,7 +6284,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() => String { return \"hi\"; }\n",
+        "pub fn greet() -> String { return \"hi\" }\n",
     );
 
     // Project that depends on it.
@@ -6296,7 +6296,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "run.jet",
-        "use greeter;\nfn run() { print(greeter.greet()); }\n",
+        "use greeter\nfn run() { print(greeter.greet()) }\n",
     );
 
     let entry = tmp.join("run.jet");
@@ -6588,7 +6588,7 @@ fn e1218_breaking_change_under_minor_bump() {
     let old = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) Int".into(),
+        signature: "fn parse(raw: String) -> Int".into(),
     }];
     let new: Vec<ApiItem> = vec![]; // parse removed
     let breaking = diff_public_api(&old, &new);
@@ -6687,7 +6687,7 @@ fn cli_publish_refuses_dirty_git_tree() {
 
     // Create a minimal project.
     write(&tmp, "package.jet", &min_manifest("dirtypkg", "1.0.0"));
-    write(&tmp, "run.jet", "fn run() { print(\"hello\"); }\n");
+    write(&tmp, "run.jet", "fn run() { print(\"hello\") }\n");
 
     // Init git, commit everything (clean tree first).
     for cmd_args in &[
@@ -6860,7 +6860,7 @@ fn cli_concurrent_publish_keeps_one_immutable_version() {
     write(
         &right,
         "run.jet",
-        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"different bytes\"); }\n",
+        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"different bytes\") }\n",
     );
     for args in &[vec!["add", "."], vec!["commit", "-m", "different source"]] {
         Command::new("git")
@@ -8331,12 +8331,12 @@ fn pub_package_function_is_visible_inside_project_scope() {
     let s = Scratch::new("same");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) fn secret() => String {\n    return \"ok\"\n}\n",
+        "pub(package) fn secret() -> String {\n    return \"ok\"\n}\n",
     )
     .unwrap();
     fs::write(
         s.join("run.jet"),
-        "use helper;\n\nfn run() {\n    print(helper.secret())\n}\n",
+        "use helper\n\nfn run() {\n    print(helper.secret())\n}\n",
     )
     .unwrap();
 
@@ -8361,7 +8361,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         app.join("run.jet"),
-        "use dep;\n\nfn run() {\n    print(dep.secret())\n}\n",
+        "use dep\n\nfn run() {\n    print(dep.secret())\n}\n",
     )
     .unwrap();
     fs::write(
@@ -8371,7 +8371,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         dep.join("dep.jet"),
-        "pub(package) fn secret() => String {\n    return \"hidden\"\n}\n",
+        "pub(package) fn secret() -> String {\n    return \"hidden\"\n}\n",
     )
     .unwrap();
 
@@ -8387,12 +8387,12 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     let s = Scratch::new("type");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() => Secret{ value: \"ok\" }\n",
+        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() -> Secret -> Secret{ value: \"ok\" }\n",
     )
     .unwrap();
     fs::write(
         s.join("run.jet"),
-        "use helper;\n\nfn run() {\n    s :: helper.make()\n    print(s.value)\n}\n",
+        "use helper\n\nfn run() {\n    s :: helper.make()\n    print(s.value)\n}\n",
     )
     .unwrap();
 
@@ -9162,7 +9162,7 @@ fn locked_build_rejects_manifest_lock_git_identity_mismatches() {
     write(
         &source,
         "mylib.jet",
-        "pub fn answer() Int -> { return 42 }\n",
+        "pub fn answer() -> Int { return 42 }\n",
     );
 
     assert!(
@@ -9245,7 +9245,7 @@ fn locked_build_rejects_manifest_lock_git_identity_mismatches() {
     write(
         &tmp,
         "run.jet",
-        "use mylib;\nfn run() { print(mylib.answer()); }\n",
+        "use mylib\nfn run() { print(mylib.answer()) }\n",
     );
     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
     let store = tmp.join("store");

@@ -7,10 +7,10 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign,
-    MirForeignAbi, MirForeignLanguage, MirHandleId, MirHandleToken, MirProgram, MirRuntimeValue,
-    MirScalarKind, MirStructLayout, MirType, MirTypeDefKind, MirTypeId, MirTypeKind,
-    MirVariantPayload,
+    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign, MirForeignAbi,
+    MirForeignId, MirForeignLanguage, MirHandleId, MirHandleToken, MirLinkUnitId, MirProgram,
+    MirRuntimeValue, MirScalarKind, MirStructLayout, MirType, MirTypeDefKind, MirTypeId,
+    MirTypeKind, MirVariantPayload,
 };
 use jet_codegen::Comptime::{AmbientMirExternResult, AmbientMirExternWriteback};
 use jet_rt::JetVal;
@@ -222,7 +222,7 @@ type JitCallbackStart =
 #[derive(Clone)]
 struct FfiEntrySpec {
     wrapper_name: String,
-    /// Checked opaque-handle identity for each original parameter slot.
+    params: Vec<ParamAbi>,
     /// `None` is deliberate for scalar/string/list carriers; this must not
     /// collapse mixed handle rows to the foreign return-handle identity.
     param_handles: Vec<Option<MirHandleId>>,
@@ -232,6 +232,7 @@ struct FfiEntrySpec {
     ret_type: Option<MirType>,
     handle: Option<MirHandleId>,
     close_handle: Option<MirHandleId>,
+}
 
 #[derive(Clone)]
 struct FfiEntry {
@@ -280,6 +281,7 @@ struct FfiState {
     clear_panic_hook_fn: unsafe extern "C" fn(),
     free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
     take_failure_fn: unsafe extern "C" fn() -> i8,
+    artifact_identity: String,
     by_wrapper: HashMap<String, FfiEntry>,
     close_by_handle: HashMap<MirHandleId, String>,
     records: HashMap<MirTypeId, FfiRecordDesc>,
@@ -930,14 +932,18 @@ pub(crate) fn bridge_wrapper_name(foreign: &MirForeign) -> String {
     }
 }
 
-fn bridge_path(
+fn bridge_path_for_links(
     program: &MirProgram,
     artifact: &jet_foundation::MIR::MirArtifactPlan,
+    selected_links: Option<&std::collections::BTreeSet<MirLinkUnitId>>,
 ) -> Option<std::path::PathBuf> {
     if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
         return Some(path);
     }
     artifact.links.iter().find_map(|link_id| {
+        if selected_links.is_some_and(|selected| !selected.contains(link_id)) {
+            return None;
+        }
         program
             .links
             .iter()
@@ -952,6 +958,72 @@ fn bridge_path(
             })
             .map(|artifact| std::path::PathBuf::from(&artifact.path))
     })
+}
+
+fn source_helper_bridge_path(
+    program: &MirProgram,
+    artifact: &jet_foundation::MIR::MirArtifactPlan,
+    link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
+    needs_data_provider: bool,
+) -> Option<std::path::PathBuf> {
+    if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
+        return Some(path);
+    }
+    if !link_ids.is_empty() {
+        return bridge_path_for_links(program, artifact, Some(link_ids));
+    }
+    if !needs_data_provider {
+        return None;
+    }
+    artifact.links.iter().find_map(|link_id| {
+        let link = program.links.iter().find(|link| link.id == *link_id)?;
+        if !link.target_applicability.cranelift {
+            return None;
+        }
+        link.artifacts
+            .iter()
+            .find(|artifact| {
+                matches!(
+                    artifact.kind,
+                    jet_foundation::MIR::MirLinkArtifactKind::DynamicLibrary
+                )
+            })
+            .map(|artifact| std::path::PathBuf::from(&artifact.path))
+    })
+}
+
+#[cfg(unix)]
+fn ensure_source_helper_data_provider(
+    state: &mut FfiState,
+    path: Option<&std::path::Path>,
+    needs_data_provider: bool,
+) -> Result<(), String> {
+    if needs_data_provider && state.arrow_provider_lease.is_none() {
+        let path = path.ok_or_else(|| {
+            "jit ffi: Source helper needs an Arrow Data provider, but no Cranelift-applicable dynamic link is available".to_string()
+        })?;
+        state.arrow_provider_lease = Some(load_arrow_provider(path)?);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_source_helper_data_provider(
+    _state: &mut FfiState,
+    _path: Option<&std::path::Path>,
+    needs_data_provider: bool,
+) -> Result<(), String> {
+    if needs_data_provider {
+        return Err("jit ffi: cdylib load unsupported on this host".into());
+    }
+    Ok(())
+}
+
+fn bridge_path(
+    program: &MirProgram,
+    artifact: &jet_foundation::MIR::MirArtifactPlan,
+) -> Option<std::path::PathBuf> {
+    bridge_path_for_links(program, artifact, None)
 }
 
 /// Resolve a nominal MIR type against the checked lifecycle rows. Never infer
@@ -1010,14 +1082,49 @@ fn mir_bridge_specs(
     program: &MirProgram,
     artifact: &jet_foundation::MIR::MirArtifactPlan,
 ) -> Result<Vec<FfiEntrySpec>, BindError> {
+    mir_bridge_specs_selected(program, artifact, None)
+}
+
+fn mir_bridge_specs_for_helpers(
+    program: &MirProgram,
+    artifact: &jet_foundation::MIR::MirArtifactPlan,
+    helper_foreigns: &std::collections::BTreeSet<MirForeignId>,
+) -> Result<Vec<FfiEntrySpec>, BindError> {
+    mir_bridge_specs_selected(program, artifact, Some(helper_foreigns))
+}
+
+fn mir_bridge_specs_selected(
+    program: &MirProgram,
+    artifact: &jet_foundation::MIR::MirArtifactPlan,
+    helper_foreigns: Option<&std::collections::BTreeSet<MirForeignId>>,
+) -> Result<Vec<FfiEntrySpec>, BindError> {
     let records = record_descriptors(program)?;
     let mut specs = Vec::new();
     for foreign in &program.foreign {
+        if helper_foreigns.is_some_and(|selected| !selected.contains(&foreign.id)) {
+            continue;
+        }
         let in_module = artifact.modules.contains(&foreign.module_id);
         let in_link = foreign
             .link
             .is_some_and(|link_id| artifact.links.contains(&link_id));
-        if !(in_module || in_link) || !target_applicable(foreign, artifact.target) {
+        if !(in_module || in_link) {
+            if helper_foreigns.is_some() {
+                return Err(BindError::Message(format!(
+                    "jit ffi: helper foreign `{}` is outside artifact `{}`",
+                    foreign.name, artifact.name
+                )));
+            }
+            continue;
+        }
+        if let Some(_) = helper_foreigns {
+            if !foreign.target_applicability.cranelift {
+                return Err(BindError::Message(format!(
+                    "jit ffi: helper foreign `{}` is not applicable to Cranelift",
+                    foreign.name
+                )));
+            }
+        } else if !target_applicable(foreign, artifact.target) {
             continue;
         }
         let params = foreign
@@ -1562,7 +1669,14 @@ pub(crate) fn bind_mir_ffi(
             return Ok(());
         }
         let records = record_descriptors(program)?;
-        return load_cdylib(&path, &entries, records, true).map_err(BindError::Message);
+        return load_cdylib(
+            &path,
+            &entries,
+            records,
+            true,
+            artifact.artifact_identity.clone(),
+        )
+        .map_err(BindError::Message);
     }
     let path = path.ok_or_else(|| {
         BindError::Message(format!(
@@ -1571,8 +1685,251 @@ pub(crate) fn bind_mir_ffi(
         ))
     })?;
     let records = record_descriptors(program)?;
-    load_cdylib(&path, &entries, records, needs_data_provider).map_err(BindError::Message)
+    load_cdylib(
+        &path,
+        &entries,
+        records,
+        needs_data_provider,
+        artifact.artifact_identity.clone(),
+    )
+    .map_err(BindError::Message)
 }
+pub(crate) struct SourceHelperFfiBinding {
+    owns_binding: bool,
+}
+
+impl Drop for SourceHelperFfiBinding {
+    fn drop(&mut self) {
+        if self.owns_binding {
+            clear_ffi();
+        }
+    }
+}
+
+fn source_helper_entry_matches_spec(entry: &FfiEntry, spec: &FfiEntrySpec) -> bool {
+    let same_parameter_types = entry.param_types.len() == spec.param_types.len()
+        && entry
+            .param_types
+            .iter()
+            .zip(&spec.param_types)
+            .all(|(entry, spec)| entry.same_checked_type(spec));
+    let same_return_type = match (entry.ret_type.as_ref(), spec.ret_type.as_ref()) {
+        (None, None) => true,
+        (Some(entry), Some(spec)) => entry.same_checked_type(spec),
+        _ => false,
+    };
+    entry.params == spec.params
+        && entry.param_handles == spec.param_handles
+        && same_parameter_types
+        && entry.param_access == spec.param_access
+        && entry.ret == spec.ret
+        && same_return_type
+        && entry.handle == spec.handle
+        && entry.close_handle == spec.close_handle
+}
+
+#[cfg(unix)]
+fn extend_source_helper_ffi_state(
+    state: &mut FfiState,
+    entries: &[FfiEntrySpec],
+) -> Result<(), String> {
+    let mut additions = Vec::with_capacity(entries.len());
+    for spec in entries {
+        if let Some(existing) = state.by_wrapper.get(&spec.wrapper_name) {
+            if !source_helper_entry_matches_spec(existing, spec) {
+                return Err(format!(
+                    "jit ffi: active wrapper `{}` disagrees with the checked Source helper ABI",
+                    spec.wrapper_name
+                ));
+            }
+            continue;
+        }
+        if let Some(handle) = spec.close_handle {
+            if state
+                .close_by_handle
+                .get(&handle)
+                .is_some_and(|wrapper| wrapper != &spec.wrapper_name)
+            {
+                return Err(format!(
+                    "jit ffi: active close wrapper for handle {handle:?} disagrees with the checked Source helper ABI"
+                ));
+            }
+        }
+        if spec.ret == RetAbi::String && state.free_fn.is_none() {
+            return Err(format!(
+                "jit ffi: active bridge cannot release the String result for `{}`",
+                spec.wrapper_name
+            ));
+        }
+        let symbol = if spec.params.contains(&ParamAbi::Callback) {
+            format!("{}_callback_start", spec.wrapper_name)
+        } else {
+            format!("{}_cabi", spec.wrapper_name)
+        };
+        let c_name =
+            CString::new(symbol.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
+        let raw_ptr = unsafe { dlsym(state.handle, c_name.as_ptr()) };
+        if raw_ptr.is_null() {
+            return Err(format!(
+                "jit ffi: active bridge is missing symbol `{symbol}` required by the Source helper"
+            ));
+        }
+        let callback_start = spec
+            .params
+            .contains(&ParamAbi::Callback)
+            .then(|| unsafe {
+                std::mem::transmute::<*mut c_void, JitCallbackStart>(raw_ptr)
+            });
+        additions.push((spec, raw_ptr, callback_start));
+    }
+
+    for (spec, raw_ptr, callback_start) in additions {
+        state.by_wrapper.insert(
+            spec.wrapper_name.clone(),
+            FfiEntry {
+                params: spec.params.clone(),
+                param_handles: spec.param_handles.clone(),
+                param_types: spec.param_types.clone(),
+                param_access: spec.param_access.clone(),
+                ret: spec.ret,
+                ret_type: spec.ret_type.clone(),
+                handle: spec.handle,
+                close_handle: spec.close_handle,
+                ptr: raw_ptr as *const (),
+                callback_start,
+            },
+        );
+        if let Some(handle) = spec.close_handle {
+            state
+                .close_by_handle
+                .insert(handle, spec.wrapper_name.clone());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn extend_source_helper_ffi_state(
+    state: &mut FfiState,
+    entries: &[FfiEntrySpec],
+) -> Result<(), String> {
+    let _ = (state, entries);
+    Err("jit ffi: cdylib extension unsupported on this host".into())
+}
+
+pub(crate) fn bind_mir_ffi_for_source_helper(
+    program: &MirProgram,
+    artifact_id: MirArtifactId,
+    foreign_ids: &std::collections::BTreeSet<MirForeignId>,
+    link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
+    needs_data_provider: bool,
+) -> Result<SourceHelperFfiBinding, String> {
+    if foreign_ids.is_empty() && !needs_data_provider {
+        return Ok(SourceHelperFfiBinding {
+            owns_binding: false,
+        });
+    }
+    let artifact = program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == artifact_id)
+        .ok_or_else(|| format!("jit ffi: artifact {artifact_id:?} is missing"))?;
+    if !matches!(
+        artifact.target,
+        MirArtifactTarget::RustAot | MirArtifactTarget::Cranelift
+    ) {
+        return Err(format!(
+            "jit ffi: artifact `{}` is not executable by the Source helper native tier",
+            artifact.name
+        ));
+    }
+    for foreign_id in foreign_ids {
+        let mut matches = program
+            .foreign
+            .iter()
+            .filter(|foreign| foreign.id == *foreign_id);
+        let foreign = matches
+            .next()
+            .ok_or_else(|| format!("jit ffi: helper foreign {foreign_id:?} is missing"))?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "jit ffi: helper foreign {foreign_id:?} resolves to multiple rows"
+            ));
+        }
+        if !foreign.target_applicability.cranelift {
+            return Err(format!(
+                "jit ffi: helper foreign `{}` is not applicable to Cranelift",
+                foreign.name
+            ));
+        }
+        if let Some(link_id) = foreign.link {
+            if !link_ids.contains(&link_id) {
+                return Err(format!(
+                    "jit ffi: helper foreign `{}` has no checked Cranelift link authority",
+                    foreign.name
+                ));
+            }
+        } else if !artifact.modules.contains(&foreign.module_id) {
+            return Err(format!(
+                "jit ffi: helper foreign `{}` is outside artifact `{}`",
+                foreign.name, artifact.name
+            ));
+        }
+    }
+
+    let entries = mir_bridge_specs_for_helpers(program, artifact, foreign_ids)
+        .map_err(|error| match error {
+            BindError::Message(message) => message,
+        })?;
+    let path = source_helper_bridge_path(program, artifact, link_ids, needs_data_provider);
+    {
+        let mut state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(state) = state.as_mut() {
+            if state.artifact_identity != artifact.artifact_identity {
+                return Err(
+                    "jit ffi: the active bridge does not match the Source helper artifact"
+                        .to_string(),
+                );
+            }
+            extend_source_helper_ffi_state(state, &entries)?;
+            ensure_source_helper_data_provider(
+                state,
+                path.as_deref(),
+                needs_data_provider,
+            )?;
+            return Ok(SourceHelperFfiBinding {
+                owns_binding: false,
+            });
+        }
+    }
+
+    let Some(path) = path else {
+        let requirement = if needs_data_provider && foreign_ids.is_empty() {
+            "an Arrow Data provider"
+        } else if needs_data_provider {
+            "a bridge for foreign calls and an Arrow Data provider"
+        } else {
+            "a bridge for foreign calls"
+        };
+        return Err(format!(
+            "jit ffi: Source helper artifact `{}` needs {requirement}, but has no Cranelift-applicable dynamic link",
+            artifact.name
+        ));
+    };
+    let records = record_descriptors(program).map_err(|error| match error {
+        BindError::Message(message) => message,
+    })?;
+    load_cdylib(
+        &path,
+        &entries,
+        records,
+        needs_data_provider,
+        artifact.artifact_identity.clone(),
+    )?;
+    Ok(SourceHelperFfiBinding { owns_binding: true })
+}
+
+
 
 pub(crate) fn clear_ffi() {
     if !shutdown_jit_callbacks() {
@@ -1679,10 +2036,11 @@ fn load_cdylib(
     entries: &[FfiEntrySpec],
     records: HashMap<MirTypeId, FfiRecordDesc>,
     needs_data_provider: bool,
+    artifact_identity: String,
 ) -> Result<(), String> {
     #[cfg(not(unix))]
     {
-        let _ = (path, entries, records, needs_data_provider);
+        let _ = (path, entries, records, needs_data_provider, artifact_identity);
         return Err("jit ffi: cdylib load unsupported on this host".into());
     }
     #[cfg(unix)]
@@ -1819,6 +2177,7 @@ fn load_cdylib(
             clear_panic_hook_fn,
             free_fn,
             take_failure_fn,
+            artifact_identity,
             by_wrapper,
             close_by_handle,
             records,
@@ -4815,6 +5174,7 @@ mod tests {
             clear_panic_hook_fn: test_clear_panic_hook,
             free_fn: None,
             take_failure_fn: test_take_failure,
+            artifact_identity: String::new(),
             by_wrapper: HashMap::new(),
             close_by_handle: HashMap::new(),
             records: HashMap::new(),
@@ -4856,6 +5216,51 @@ mod tests {
             callback_start: None,
         }
     }
+
+    #[test]
+    fn source_helper_wrapper_reuse_requires_the_checked_abi() {
+        let int = MirType::from_kind(MirTypeKind::Int);
+        let entry = FfiEntry {
+            params: vec![ParamAbi::Int],
+            param_handles: vec![None],
+            param_types: vec![int.clone()],
+            param_access: vec![MirAccess::Read],
+            ret: RetAbi::Int,
+            ret_type: Some(int.clone()),
+            handle: None,
+            close_handle: None,
+            ptr: std::ptr::null(),
+            callback_start: None,
+        };
+        let spec = FfiEntrySpec {
+            wrapper_name: "source_helper".to_string(),
+            params: vec![ParamAbi::Int],
+            param_handles: vec![None],
+            param_types: vec![int.clone()],
+            param_access: vec![MirAccess::Read],
+            ret: RetAbi::Int,
+            ret_type: Some(int),
+            handle: None,
+            close_handle: None,
+        };
+        assert!(source_helper_entry_matches_spec(&entry, &spec));
+
+        let mut incompatible = spec;
+        incompatible.params = vec![ParamAbi::Bool];
+        incompatible.param_types = vec![MirType::from_kind(MirTypeKind::Bool)];
+        incompatible.ret = RetAbi::Bool;
+        incompatible.ret_type = Some(MirType::from_kind(MirTypeKind::Bool));
+        assert!(!source_helper_entry_matches_spec(&entry, &incompatible));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn source_helper_rejects_a_missing_data_provider_library() {
+        let mut state = test_state();
+        let error = ensure_source_helper_data_provider(&mut state, None, true).unwrap_err();
+        assert!(error.contains("Arrow Data provider"));
+        assert!(state.arrow_provider_lease.is_none());
+    }
+
     unsafe extern "C" fn test_uniform_writeback(
         args: *const FfiSlot,
         argc: usize,

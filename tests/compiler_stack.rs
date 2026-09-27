@@ -13,7 +13,7 @@ fn run() {
 "#;
 
 const COMPOSITE_IF_SOURCE: &str = r#"
-struct Work { callback: fn() Int }
+struct Work { callback: fn() -> Int }
 fn both(values: &[Int], work: Work) { values.push(work.callback()) }
 fn run() {
     values := [1, 2]
@@ -27,7 +27,7 @@ fn run() {
 "#;
 
 const COMPOSITE_FALLBACK_SOURCE: &str = r#"
-fn both(values: &[Int], callback: fn() Int) { values.push(callback()) }
+fn both(values: &[Int], callback: fn() -> Int) { values.push(callback()) }
 fn run() {
     values := [1, 2]
     both(&values, Val(() -> values.len()) ?? () -> 0)
@@ -163,7 +163,7 @@ fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
 }
 
 const JIT_ENTRY_SOURCE: &str = r#"
-fn twice(n: Int) Int -> {
+fn twice(n: Int) -> Int {
     return n + n
 }
 fn run() {
@@ -338,7 +338,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
 
 fn parenthesized_source(levels: usize) -> String {
     format!(
-        "fn nested() Int -> {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
+        "fn nested() -> Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
         "(".repeat(levels),
         ")".repeat(levels)
     )

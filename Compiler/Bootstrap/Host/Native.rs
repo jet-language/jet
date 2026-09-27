@@ -13,7 +13,7 @@ use crate::Codegen::MIRRust::{
     MirRustAotMetadata, MirRustCallableMetadata, MirRustConfig, MirRustTraitMetadata,
     MirRustTraitMethodMetadata, MirRustVariantMetadata,
 };
-use jet_foundation::MIR::{MirFieldId, MirProgram, MirType, MirTypeId};
+use jet_jit::SourceResources::SourceResourceRetireError;
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::path::Path;
@@ -376,13 +376,17 @@ pub(crate) fn invoke_with_authority<R>(
 /// Failure while binding the private generated callback to the exact carriers
 /// emitted for the same MIR artifact. These failures are deliberately raised
 /// before mutating the generated source buffer.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum BootstrapHostCodecError {
     MissingType(String),
     MissingField { owner: String, field: String },
     MissingVariant { owner: String, variant: String },
     MissingEntry(String),
     InvalidMetadata(String),
+    ResourceRetirement {
+        cause: Box<BootstrapHostCodecError>,
+        retirement: SourceResourceRetireError,
+    },
 }
 
 impl fmt::Display for BootstrapHostCodecError {
@@ -397,8 +401,13 @@ impl fmt::Display for BootstrapHostCodecError {
             }
             Self::MissingEntry(name) => write!(formatter, "bootstrap codec entry `{name}` is not emitted"),
             Self::InvalidMetadata(detail) => write!(formatter, "invalid bootstrap codec metadata: {detail}"),
-        }
+            Self::ResourceRetirement { cause, retirement } => write!(
+                formatter,
+                "{cause}; Source resource retirement failed: {}",
+                retirement.error
+            ),
     }
+}
 }
 /// Source-coupled bindings emitted by one Rust artifact.
 ///
@@ -630,6 +639,25 @@ impl<'a> BootstrapCodecSymbols<'a> {
     ) -> Result<String, BootstrapHostCodecError> {
         Ok(self.variant_symbol(owner, variant)?.to_string())
     }
+    pub(crate) fn callable_symbol(
+        &self,
+        source_name: &str,
+    ) -> Result<&str, BootstrapHostCodecError> {
+        let mut rows = self
+            .metadata
+            .callables
+            .iter()
+            .filter(|row| row.source_name == source_name);
+        let row = rows
+            .next()
+            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(source_name.to_string()))?;
+        if rows.next().is_some() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "Source callable `{source_name}` has an ambiguous emitted symbol"
+            )));
+        }
+        Ok(row.metadata.symbol.as_str())
+    }
     pub(crate) fn trait_symbol(&self, name: &str) -> Result<&str, BootstrapHostCodecError> {
         self.metadata
             .traits
@@ -705,7 +733,7 @@ fn bootstrap_required_type_names() -> &'static [&'static str] {
         "MirLinkUnitId",
         "MirCallbackId",
         "MirHandleId",
-        "JetEvalForeignWriteback",
+        "JetEvalHostWriteback",
         "TComptimeValue",
         "JetEvalRuntimeValue",
         "JetEvalHostArgument",
@@ -767,12 +795,174 @@ fn bootstrap_required_callable<'a>(
     metadata: &'a BootstrapBindingDescriptor,
     name: &str,
 ) -> Result<&'a MirRustCallableMetadata, BootstrapHostCodecError> {
-    metadata
+    Ok(&checked_bootstrap_callable(metadata, name)?.metadata)
+}
+
+#[derive(Clone, Debug)]
+struct BootstrapNativeHelperRoots {
+    roots: Vec<jet_foundation::MIR::MirFunctionId>,
+    task_callback_invoke: jet_foundation::MIR::MirFunctionId,
+    task_root_release: jet_foundation::MIR::MirFunctionId,
+    owned_root_drop: jet_foundation::MIR::MirFunctionId,
+    owned_callback_result_drop: jet_foundation::MIR::MirFunctionId,
+    callback_transfer: jet_foundation::MIR::MirFunctionId,
+    callback_release: jet_foundation::MIR::MirFunctionId,
+    task_root_take: jet_foundation::MIR::MirFunctionId,
+    task_root_cleanup_root: jet_foundation::MIR::MirFunctionId,
+    owned_root_cleanup_clone: jet_foundation::MIR::MirFunctionId,
+    owned_root_drop_values: jet_foundation::MIR::MirFunctionId,
+    shared_payload_finalize: jet_foundation::MIR::MirFunctionId,
+    host_type_shape: jet_foundation::MIR::MirFunctionId,
+}
+
+fn checked_bootstrap_callable<'a>(
+    metadata: &'a BootstrapBindingDescriptor,
+    name: &str,
+) -> Result<&'a BootstrapCallableBinding, BootstrapHostCodecError> {
+    let mut rows = metadata
         .callables
         .iter()
-        .find(|callable| callable.source_name == name)
-        .map(|callable| &callable.metadata)
-        .ok_or_else(|| BootstrapHostCodecError::MissingEntry(name.to_string()))
+        .filter(|row| row.source_name == name);
+    let row = rows
+        .next()
+        .ok_or_else(|| BootstrapHostCodecError::MissingEntry(name.to_string()))?;
+    if rows.next().is_some() {
+        return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+            "Source callable `{name}` has ambiguous checked bindings"
+        )));
+    }
+    Ok(row)
+}
+
+fn checked_bootstrap_native_helper_roots(
+    metadata: &BootstrapBindingDescriptor,
+    program: &MirProgram,
+    artifact_id: jet_foundation::MIR::MirArtifactId,
+) -> Result<BootstrapNativeHelperRoots, BootstrapHostCodecError> {
+    use jet_foundation::MIR::{MirArtifactTarget, MirFunctionId};
+
+    let artifact = program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == artifact_id)
+        .ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(
+            "native helper artifact is absent from checked MIR".to_string(),
+        ))?;
+    if artifact.target != MirArtifactTarget::RustAot {
+        return Err(BootstrapHostCodecError::InvalidMetadata(
+            "native helper roots require the canonical Rust AOT compiler artifact".to_string(),
+        ));
+    }
+    let seeds = [
+        "jet_eval_task_callback_invoke",
+        "jet_eval_task_root_release",
+        "jet_eval_owned_root_drop",
+        "jet_eval_owned_root_drop_callback_result",
+        "jet_eval_callback_transfer",
+        "jet_eval_task_root_take",
+        "jet_eval_callback_release",
+        "jet_eval_task_root_cleanup_root",
+        "jet_eval_owned_root_cleanup_clone",
+        "jet_eval_owned_root_drop_values",
+        "jet_eval_shared_payload_finalize",
+        "jet_eval_host_type_shape_from_program",
+    ];
+    let mut roots = BTreeMap::<u32, MirFunctionId>::new();
+    for name in seeds {
+        let binding = checked_bootstrap_callable(metadata, name)?;
+        if binding.metadata.symbol.is_empty() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "Source callable `{name}` has an empty emitted symbol"
+            )));
+        }
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == binding.metadata.function)
+            .ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(format!(
+                "checked private Source helper `{name}` is absent from MIR"
+            )))?;
+        if !artifact.modules.contains(&function.module_id)
+            || !function.capture_params.is_empty()
+            || !function.target_applicability.rust_aot
+            || !function.target_applicability.interpreter
+        {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "checked private Source helper `{name}` is not capture-free and executable in artifact {artifact_id:?}"
+            )));
+        }
+        if roots.insert(function.id.0, function.id).is_some() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "checked native helper `{name}` aliases another private helper ID"
+            )));
+        }
+    }
+    let task_callback_invoke =
+        checked_bootstrap_callable(metadata, "jet_eval_task_callback_invoke")?
+            .metadata
+            .function;
+    let task_root_release = checked_bootstrap_callable(metadata, "jet_eval_task_root_release")?
+        .metadata
+        .function;
+    let owned_root_drop = checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop")?
+        .metadata
+        .function;
+    let owned_callback_result_drop =
+        checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop_callback_result")?
+            .metadata
+            .function;
+    let callback_transfer =
+        checked_bootstrap_callable(metadata, "jet_eval_callback_transfer")?
+            .metadata
+            .function;
+    let task_root_take = checked_bootstrap_callable(metadata, "jet_eval_task_root_take")?
+        .metadata
+        .function;
+    let callback_release = checked_bootstrap_callable(metadata, "jet_eval_callback_release")?
+        .metadata
+        .function;
+    let task_root_cleanup_root =
+        checked_bootstrap_callable(metadata, "jet_eval_task_root_cleanup_root")?
+            .metadata
+            .function;
+    let owned_root_cleanup_clone =
+        checked_bootstrap_callable(metadata, "jet_eval_owned_root_cleanup_clone")?
+            .metadata
+            .function;
+    let owned_root_drop_values =
+        checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop_values")?
+            .metadata
+            .function;
+    let host_type_shape =
+        checked_bootstrap_callable(metadata, "jet_eval_host_type_shape_from_program")?
+            .metadata
+            .function;
+    let shared_payload_finalize =
+        checked_bootstrap_callable(metadata, "jet_eval_shared_payload_finalize")?
+            .metadata
+            .function;
+    Ok(BootstrapNativeHelperRoots {
+        roots: roots.into_values().collect(),
+        task_callback_invoke,
+        task_root_release,
+        owned_root_drop,
+        owned_callback_result_drop,
+        callback_release,
+        callback_transfer,
+        task_root_take,
+        task_root_cleanup_root,
+        owned_root_cleanup_clone,
+        owned_root_drop_values,
+        host_type_shape,
+        shared_payload_finalize,
+    })
+}
+
+fn bootstrap_required_callable<'a>(
+    metadata: &'a BootstrapBindingDescriptor,
+    name: &str,
+) -> Result<&'a MirRustCallableMetadata, BootstrapHostCodecError> {
+    Ok(&checked_bootstrap_callable(metadata, name)?.metadata)
 }
 
 fn validate_bootstrap_numeric_callable_type(
@@ -867,6 +1057,12 @@ pub(crate) fn append_bootstrap_host_glue(
         ));
     }
 
+    let native_helper_roots = checked_bootstrap_native_helper_roots(
+        bindings,
+        program,
+        config.execution.artifact,
+    )?;
+
     let mut glue = String::new();
     emit_bootstrap_type_codec(&mut glue, &symbols)?;
     emit_bootstrap_value_codec(&mut glue, &symbols)?;
@@ -876,6 +1072,7 @@ pub(crate) fn append_bootstrap_host_glue(
     crate::compiler_bootstrap_runtime_mir_codec::append_runtime_mir_codec(&mut glue, &symbols)?;
     crate::compiler_bootstrap_entry_codec::append_bootstrap_entry_codec(
         &mut glue,
+        bindings,
         &symbols,
         program,
         entry.metadata.function,
@@ -884,6 +1081,13 @@ pub(crate) fn append_bootstrap_host_glue(
     emit_bootstrap_callback(&mut glue, &symbols)?;
     emit_bootstrap_foreign_callback(&mut glue, &symbols)?;
     emit_bootstrap_native_adapter_impl(&mut glue, &symbols)?;
+    emit_bootstrap_native_execution_helpers(
+        &mut glue,
+        bindings,
+        &symbols,
+        program,
+        &native_helper_roots,
+    )?;
     emit_bootstrap_web_asset_provider(&mut glue, &symbols)?;
 
     emit_bootstrap_manifest_adapter(&mut glue, &symbols)?;
@@ -894,10 +1098,6 @@ pub(crate) fn append_bootstrap_host_glue(
         &eval_runtime_config.symbol,
     )?;
 
-    let eval_config_host_adapter_field = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
-    let eval_config_numeric_unit_field =
-        symbols.field_symbol("JetEvalConfig", "numeric_unit_conversion_exact")?;
-    let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
     writeln!(
         glue,
         "fn __jet_bootstrap_numeric_unit_conversion_exact(\n\
@@ -918,41 +1118,67 @@ pub(crate) fn append_bootstrap_host_glue(
          }}\n",
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    let request_type = &entry.parameter_types[0];
-    let result_type = &entry.return_type;
-    let entry_symbol = &entry.symbol;
-    let runtime_config_symbol = &eval_runtime_config.symbol;
-    writeln!(
-        glue,
-        "#[doc(hidden)]\n\
-         struct __JetBootstrapCompileLease {{\n\
-             result: {result_type},\n\
-             resources: ::jet_jit::SourceResources::SourceResourceSession,\n\
-             runtime_config: {eval_config_type},\n\
-         }}\n\
-         #[doc(hidden)]\n\
-         pub fn __jet_bootstrap_compile_with_native(\n\
-             mut __jet_request: {request_type},\n\
-         ) -> Result<__JetBootstrapCompileLease, crate::BootstrapHostCodecError> {{\n\
-             let __jet_resources = ::jet_jit::SourceResources::SourceResourceSession::new();\n\
-             let __jet_root_lease = __jet_resources.retain_root()\n\
-                 .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n\
-             __jet_request.{request_eval_config}.{eval_config_host_adapter_field} = Ok(Box::new(__JetBootstrapNativeAdapter::new(__jet_root_lease)));\n\
-             __jet_request.{request_eval_config}.{eval_config_numeric_unit_field} = Ok(__jet_bootstrap_numeric_unit_conversion_exact);\n\
-             let __jet_runtime_config = {runtime_config_symbol}(&__jet_request.{request_eval_config});\n\
-             let __jet_result = {{\n\
-                 let _activation = __jet_resources.activate();\n\
-                 {entry_symbol}(__jet_request)\n\
-             }};\n\
-             Ok(__JetBootstrapCompileLease {{ result: __jet_result, resources: __jet_resources, runtime_config: __jet_runtime_config }})\n\
-         }}\n",
-        request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?,
-        eval_config_host_adapter_field = eval_config_host_adapter_field,
-        eval_config_numeric_unit_field = eval_config_numeric_unit_field,
-        eval_config_type = eval_config_type,
-        runtime_config_symbol = runtime_config_symbol,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    glue.push_str(
+        r#"#[doc(hidden)]
+pub(crate) const __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY: &str =
+    "jet_eval.numeric_unit_conversion_exact";
+fn __jet_bootstrap_native_numeric_unit_conversion(
+    call: &mut ::jet_jit::SourceInterfaces::NativeCallableCall,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    let identity = call.identity().ok_or_else(|| "numeric-unit native call has no checked identity".to_string())?;
+    if identity.key.as_str() != __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY {
+        return Err("numeric-unit native call has a different registration key".to_string());
+    }
+    if call.signature().parameters.len() != 5 || call.argument(5).is_some() {
+        return Err("numeric-unit native call does not have the exact five-argument signature".to_string());
+    }
+    let value = match call.argument(0).map(|argument| &argument.value) {
+        Some(::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false }) => *value,
+        _ => return Err("numeric-unit native call argument 0 is not checked Float".to_string()),
+    };
+    let read_string = |index| -> Result<&str, String> {
+        match call.argument(index).map(|argument| &argument.value) {
+            Some(::jet_foundation::MIR::MirRuntimeValue::String(value)) => Ok(value),
+            _ => Err(format!("numeric-unit native call argument {index} is not checked String")),
+        }
+    };
+    let scale_num = read_string(1)?;
+    let scale_den = read_string(2)?;
+    let offset_num = read_string(3)?;
+    let offset_den = read_string(4)?;
+    let return_type = call.signature().return_type.as_ref()
+        .ok_or_else(|| "numeric-unit native callable has no checked return type".to_string())?;
+    let ::jet_foundation::MIR::MirTypeKind::Option(element) = return_type.kind() else {
+        return Err("numeric-unit native callable does not return checked optional Float".to_string());
+    };
+    if !matches!(element.kind(), ::jet_foundation::MIR::MirTypeKind::Float) {
+        return Err("numeric-unit native callable does not return checked optional Float".to_string());
+    }
+    match ::jet_foundation::jet_unit_conversion_exact(
+        value,
+        scale_num,
+        scale_den,
+        offset_num,
+        offset_den,
+    ) {
+        Some(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(
+            ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false },
+        ))),
+        None => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent {
+            element: (**element).clone(),
+        }),
+    }
+}
+"#,
+    );
+    emit_bootstrap_native_compile_entry(
+        &mut glue,
+        bindings,
+        &symbols,
+        entry.metadata,
+        &eval_runtime_config.symbol,
+        &native_helper_roots,
+    )?;
 
     // `root_prefix` is deliberately read here so a future source-coupled
     // emitter can reject an incompatible root before this private splice is
@@ -967,6 +1193,2297 @@ pub(crate) fn append_bootstrap_host_glue(
     Ok(())
 
 }
+fn emit_bootstrap_native_execution_helpers(
+    out: &mut String,
+    _bindings: &BootstrapBindingDescriptor,
+    symbols: &BootstrapCodecSymbols<'_>,
+    _program: &MirProgram,
+    helpers: &BootstrapNativeHelperRoots,
+) -> Result<(), BootstrapHostCodecError> {
+    let source_program = symbols.type_symbol("MirProgram")?;
+    let eval_config = symbols.type_symbol("JetEvalConfig")?;
+    let span_type = symbols.type_symbol("Span")?;
+    let task_callback_root = symbols.field_binding("JetEvalTaskCallbackInvokeResult", "root")?;
+    let task_callback_result = symbols.field_binding("JetEvalTaskCallbackInvokeResult", "result")?;
+    let task_callback_reusable =
+        symbols.field_binding("JetEvalTaskCallbackInvokeResult", "reusable")?;
+    let task_callback_cleanup_root =
+        symbols.field_binding("JetEvalTaskCallbackInvokeResult", "cleanup_root")?;
+    let owned_drop_disposition = symbols.field_binding("JetEvalOwnedRootDropResult", "disposition")?;
+    let result_complete = symbols.field_symbol("JetEvalResult", "complete")?;
+    let result_value = symbols.field_symbol("JetEvalResult", "value")?;
+    let result_error = symbols.field_symbol("JetEvalResult", "error")?;
+    let result_internal_problem = symbols.field_symbol("JetEvalResult", "internal_problem")?;
+    let result_stdout = symbols.field_symbol("JetEvalResult", "stdout")?;
+    let result_stderr = symbols.field_symbol("JetEvalResult", "stderr")?;
+    let result_soft_stop = symbols.field_symbol("JetEvalResult", "soft_stop")?;
+    let result_exit_code = symbols.field_symbol("JetEvalResult", "exit_code")?;
+    let error_diagnostic = symbols.field_symbol("JetEvalError", "diagnostic")?;
+    let diagnostic_code = symbols.field_symbol("Diagnostic", "code")?;
+    let diagnostic_what = symbols.field_symbol("Diagnostic", "what")?;
+    let internal_problem_message = symbols.field_symbol("JetEvalInternalProblem", "message")?;
+
+
+    let task_callback_invoke = helpers.task_callback_invoke.0.to_string();
+    let task_root_release = helpers.task_root_release.0.to_string();
+    let owned_root_drop = helpers.owned_root_drop.0.to_string();
+    let owned_callback_result_drop = helpers.owned_callback_result_drop.0.to_string();
+    let owned_callback_result_drop_symbol =
+        symbols.callable_symbol("jet_eval_owned_root_drop_callback_result")?;
+    let start_deopt = symbols.callable_symbol("jet_eval_start_deopt")?;
+    let result_host_projection = symbols.callable_symbol("jet_eval_result_host_projection")?;
+    let retire_result = symbols.callable_symbol("jet_eval_retire_result")?;
+    let callback_invoke_symbol =
+        symbols.callable_symbol("jet_eval_task_callback_invoke")?;
+    let root_release_symbol = symbols.callable_symbol("jet_eval_task_root_release")?;
+    let owned_drop_symbol = symbols.callable_symbol("jet_eval_owned_root_drop")?;
+    let callback_root_field = task_callback_root.field.0.to_string();
+    let callback_result_field = task_callback_result.field.0.to_string();
+    let callback_reusable_field = task_callback_reusable.field.0.to_string();
+    let callback_cleanup_root_field = task_callback_cleanup_root.field.0.to_string();
+    let owned_drop_disposition_field = owned_drop_disposition.field.0.to_string();
+
+    let generated = r#"
+struct __JetBootstrapNativeRetirementFailure {
+    failure: ::jet_jit::SourceExecutionRetirementFailureKind,
+    retirement: ::jet_jit::SourceExecutionRetirement,
+    resources: Option<::jet_jit::SourceResources::SourceResourceSession>,
+    lease: Option<::jet_jit::SourceResources::SourceResourceLease>,
+}
+
+enum __JetBootstrapNativeHelperRetirement {
+    Complete(::jet_jit::SourceExecutionRetirement),
+    Failed(__JetBootstrapNativeRetirementFailure),
+}
+
+enum __JetBootstrapNativeHelperExecution {
+    InvocationFailure(::jet_jit::SourceHelperInvocationError),
+    Complete {
+        retirement: __JetBootstrapNativeHelperRetirement,
+        tier: ::jet_jit::SourceExecutionTier,
+        validation_error: Option<String>,
+    },
+}
+
+struct __JetBootstrapNativeTaskCallbackOutput {
+    task_root: Option<__JetBootstrapNativePacket>,
+    callback_result: Option<__JetBootstrapNativePacket>,
+    reusable: bool,
+    tier: crate::BootstrapFactoryTier,
+    retirement_failure: Option<__JetBootstrapNativeRetirementFailure>,
+    invocation_failure: Option<::jet_jit::SourceHelperInvocationError>,
+    execution_error: Option<String>,
+    cleanup_root: Option<__JetBootstrapNativePacket>,
+    span: __SPAN__,
+}
+
+fn __jet_bootstrap_native_record_field_refs<'a>(
+    program: &'a ::jet_foundation::MIR::MirProgram,
+    record_type: &::jet_foundation::MIR::MirType,
+    record_value: &'a ::jet_foundation::MIR::MirRuntimeValue,
+    field_ids: &[::jet_foundation::MIR::MirFieldId],
+) -> Result<Vec<(&'a ::jet_foundation::MIR::MirType, &'a ::jet_foundation::MIR::MirRuntimeValue)>, String> {
+    use ::jet_foundation::MIR::{MirRuntimeValue as V, MirTypeDefKind as D};
+    let type_id = record_type.nominal_id()
+        .ok_or_else(|| "Source helper output is not a checked record type".to_string())?;
+    let definition = program.types.iter().find(|row| row.id == type_id)
+        .ok_or_else(|| "Source helper output record type is absent from checked MIR".to_string())?;
+    let D::Struct { fields, .. } = &definition.kind else {
+        return Err("Source helper output is not a checked record".to_string());
+    };
+    crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+        program, record_type, record_value, 0,
+    )?;
+    let V::Struct { fields: values, .. } = record_value else {
+        return Err("Source helper output carrier is not a checked record".to_string());
+    };
+    let mut positions = Vec::with_capacity(field_ids.len());
+    for field_id in field_ids {
+        let (index, field) = fields.iter().enumerate()
+            .find(|(_, field)| field.id == *field_id)
+            .ok_or_else(|| format!("Source helper output field {:?} is absent", field_id))?;
+        positions.push((index, &field.ty));
+    }
+    if positions.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err("Source helper output fields are not in checked declaration order".to_string());
+    }
+    let mut projected = Vec::with_capacity(positions.len());
+    let mut wanted = 0;
+    for (index, (_, value)) in values.iter().enumerate() {
+        if let Some((position, field_type)) = positions.get(wanted) {
+            if *position == index {
+                projected.push((*field_type, value));
+                wanted += 1;
+            }
+        }
+    }
+    if wanted != positions.len() {
+        return Err("Source helper output omitted a checked requested field".to_string());
+    }
+    Ok(projected)
+}
+
+fn __jet_bootstrap_native_record_fields(
+    program: &::jet_foundation::MIR::MirProgram,
+    record_type: &::jet_foundation::MIR::MirType,
+    record_value: ::jet_foundation::MIR::MirRuntimeValue,
+    field_ids: &[::jet_foundation::MIR::MirFieldId],
+) -> Result<Vec<(::jet_foundation::MIR::MirType, ::jet_foundation::MIR::MirRuntimeValue)>, String> {
+    use ::jet_foundation::MIR::{MirRuntimeValue as V, MirTypeDefKind as D};
+    let type_id = record_type.nominal_id()
+        .ok_or_else(|| "Source helper output is not a checked record type".to_string())?;
+    let definition = program.types.iter().find(|row| row.id == type_id)
+        .ok_or_else(|| "Source helper output record type is absent from checked MIR".to_string())?;
+    let D::Struct { fields, .. } = &definition.kind else {
+        return Err("Source helper output is not a checked record".to_string());
+    };
+    crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+        program, record_type, &record_value, 0,
+    )?;
+    let V::Struct { fields: values, .. } = record_value else {
+        return Err("Source helper output carrier is not a checked record".to_string());
+    };
+    let mut positions = Vec::with_capacity(field_ids.len());
+    for field_id in field_ids {
+        let (index, field) = fields.iter().enumerate()
+            .find(|(_, field)| field.id == *field_id)
+            .ok_or_else(|| format!("Source helper output field {:?} is absent", field_id))?;
+        positions.push((index, field.ty.clone()));
+    }
+    if positions.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err("Source helper output fields are not in checked declaration order".to_string());
+    }
+    let mut projected = Vec::with_capacity(positions.len());
+    let mut wanted = 0;
+    for (index, (_, value)) in values.into_iter().enumerate() {
+        if let Some((position, field_type)) = positions.get(wanted) {
+            if *position == index {
+                projected.push((field_type.clone(), value));
+                wanted += 1;
+            }
+        }
+    }
+    if wanted != positions.len() {
+        return Err("Source helper output omitted a checked requested field".to_string());
+    }
+    Ok(projected)
+}
+
+fn __jet_bootstrap_native_preflight_source_helper(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    helper_roots: &[::jet_foundation::MIR::MirFunctionId],
+    helper_function: ::jet_foundation::MIR::MirFunctionId,
+    entry_values: &[::jet_foundation::MIR::MirRuntimeValue],
+) -> Result<::jet_foundation::MIR::MirType, String> {
+    if matches!(adapter.root.execution_policy, crate::BootstrapFactoryTier::Aot) {
+        return Err("AOT Source helpers must use their checked Rust symbol".to_string());
+    }
+    if helper_roots.is_empty() || !helper_roots.contains(&helper_function) {
+        return Err(format!("Source helper {helper_function:?} is not an authorized private root"));
+    }
+    if live_resources.arena().is_retired().map_err(|error| error.to_string())? {
+        return Err("Source resource arena is retired".to_string());
+    }
+    let artifact = adapter.root.program.artifacts.iter()
+        .find(|row| row.id == adapter.root.artifact)
+        .ok_or_else(|| "Source helper artifact is absent from checked MIR".to_string())?;
+    let function = adapter.root.program.functions.iter()
+        .find(|row| row.id == helper_function)
+        .ok_or_else(|| format!("checked Source helper {helper_function:?} is missing"))?;
+    if !artifact.modules.contains(&function.module_id)
+        || !function.capture_params.is_empty()
+        || !function.target_applicability.interpreter
+        || function.params.len() != entry_values.len()
+        || function.params.iter().any(|parameter| parameter.variadic)
+    {
+        return Err(format!("Source helper {helper_function:?} is outside its checked entry ABI"));
+    }
+    if matches!(adapter.root.execution_policy, crate::BootstrapFactoryTier::CraneliftJit)
+        && !function.target_applicability.cranelift
+    {
+        return Err(format!("Source helper {helper_function:?} is not enabled for Cranelift"));
+    }
+    for (parameter, value) in function.params.iter().zip(entry_values) {
+        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+            adapter.root.program.as_ref(),
+            &parameter.ty,
+            value,
+            0,
+        )?;
+    }
+    Ok(function.return_type.clone())
+}
+
+fn __jet_bootstrap_native_execute_source_helper(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    helper_roots: &[::jet_foundation::MIR::MirFunctionId],
+    helper_function: ::jet_foundation::MIR::MirFunctionId,
+    entry_values: Vec<::jet_foundation::MIR::MirRuntimeValue>,
+    source_program: &::std::sync::Arc<__SOURCE_PROGRAM__>,
+    config: &__EVAL_CONFIG__,
+ ) -> __JetBootstrapNativeHelperExecution {
+    let return_type = match __jet_bootstrap_native_preflight_source_helper(
+        adapter,
+        live_resources,
+        helper_roots,
+        helper_function,
+        &entry_values,
+    ) {
+        Ok(return_type) => return_type,
+        Err(message) => {
+            return __JetBootstrapNativeHelperExecution::InvocationFailure(
+                ::jet_jit::SourceHelperInvocationError::not_invoked(
+                    ::jet_jit::SourceDeoptError::InvalidRequest(message),
+                    entry_values,
+                    live_resources.clone(),
+                ),
+            );
+        }
+    };
+    let execution_policy = match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => {
+            return __JetBootstrapNativeHelperExecution::InvocationFailure(
+                ::jet_jit::SourceHelperInvocationError::not_invoked(
+                    ::jet_jit::SourceDeoptError::InvalidRequest(
+                        "AOT Source helpers must use their checked Rust symbol".to_string(),
+                    ),
+                    entry_values,
+                    live_resources.clone(),
+                ),
+            );
+        }
+        crate::BootstrapFactoryTier::CraneliftJit =>
+            ::jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        crate::BootstrapFactoryTier::SourceInterpreterDeopt =>
+            ::jet_jit::SourceExecutionPolicy::SourceOnly,
+    };
+    let resume_adapter = adapter.clone();
+    let resume_program = source_program.clone();
+    let resume_config = config.clone();
+    let helper = match ::jet_jit::execute_source_helper_entry(
+        adapter.root.program.as_ref(),
+        adapter.root.artifact,
+        helper_roots,
+        helper_function,
+        live_resources,
+        entry_values,
+        execution_policy,
+        &::jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
+        move |request| __jet_bootstrap_native_resume_source(
+            &resume_adapter,
+            &resume_program,
+            &resume_config,
+            request,
+        ),
+    ) {
+        Ok(helper) => helper,
+        Err(error) =>
+            return __JetBootstrapNativeHelperExecution::InvocationFailure(error),
+    };
+
+    let prior_error = if !matches!(
+        &helper.outcome,
+        ::jet_foundation::JitBackend::RunOutcome::Ran { .. }
+    ) {
+        Some(format!("Source helper execution failed: {:?}", helper.outcome))
+    } else if let Some(value) = helper.value.as_ref() {
+        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+            adapter.root.program.as_ref(),
+            &return_type,
+            value,
+            0,
+        ).err()
+    } else {
+        Some("Source helper execution produced no checked result value".to_string())
+    };
+    let tier = helper.tier;
+    match helper.retire() {
+        Ok(retirement) => {
+            let validation_error = prior_error
+                .or_else(|| match retirement.outcome.as_ref() {
+                    Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. }) => None,
+                    Some(outcome) => Some(format!("Source helper retirement failed: {outcome:?}")),
+                    None => Some("Source helper retirement produced no execution outcome".to_string()),
+                })
+                .or_else(|| {
+                    retirement.value.as_ref().map_or_else(
+                        || Some("Source helper retirement produced no checked result value".to_string()),
+                        |value| crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+                            adapter.root.program.as_ref(),
+                            &return_type,
+                            value,
+                            0,
+                        ).err(),
+                    )
+                });
+            __JetBootstrapNativeHelperExecution::Complete {
+                retirement: __JetBootstrapNativeHelperRetirement::Complete(retirement),
+                tier,
+                validation_error,
+            }
+        }
+        Err(error) => {
+            let (failure, retirement, resources, lease) = error.into_parts();
+            let validation_error = prior_error
+                .or_else(|| match retirement.outcome.as_ref() {
+                    Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. }) => None,
+                    Some(outcome) => Some(format!("Source helper retirement failed: {outcome:?}")),
+                    None => Some("Source helper retirement produced no execution outcome".to_string()),
+                })
+                .or_else(|| {
+                    retirement.value.as_ref().map_or_else(
+                        || Some("Source helper retirement produced no checked result value".to_string()),
+                        |value| crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+                            adapter.root.program.as_ref(),
+                            &return_type,
+                            value,
+                            0,
+                        ).err(),
+                    )
+                });
+            __JetBootstrapNativeHelperExecution::Complete {
+                retirement: __JetBootstrapNativeHelperRetirement::Failed(
+                    __JetBootstrapNativeRetirementFailure {
+                        failure,
+                        retirement,
+                        resources,
+                        lease,
+                    },
+                ),
+                tier,
+                validation_error,
+            }
+        }
+    }
+}
+
+fn __jet_bootstrap_native_resume_source(
+    adapter: &__JetBootstrapNativeAdapter,
+    source_program: &::std::sync::Arc<__SOURCE_PROGRAM__>,
+    config: &__EVAL_CONFIG__,
+    request: ::jet_jit::SourceDeoptRequest,
+) -> Result<::jet_jit::SourceDeoptReply, String> {
+    if !request.entry {
+        return Err("mid-function Source resume has no retained Source continuation".to_string());
+    }
+    if request.snapshot.identity.execution != adapter.root.execution
+        || request.snapshot.identity.function != request.function
+    {
+        return Err("Source helper entry handoff identity differs from the checked compiler execution".to_string());
+    }
+    if request.entry_params.len() != request.entry_values.len() {
+        return Err("Source helper entry handoff parameter/value counts disagree".to_string());
+    }
+    let function = adapter.root.program.functions.iter()
+        .find(|row| row.id == request.function)
+        .ok_or_else(|| format!("Source helper entry function {:?} is absent", request.function))?;
+    if !adapter.root.program.artifacts.iter()
+        .find(|row| row.id == adapter.root.artifact)
+        .is_some_and(|artifact| artifact.modules.contains(&function.module_id))
+        || !function.capture_params.is_empty()
+        || !function.target_applicability.interpreter
+        || function.params.len() != request.entry_params.len()
+    {
+        return Err("Source helper entry function is outside its checked private helper roots".to_string());
+    }
+    for (actual, checked) in request.entry_params.iter().zip(function.params.iter()) {
+        if actual.index != checked.index
+            || actual.name != checked.name
+            || actual.span != checked.span
+            || !actual.ty.same_checked_type(&checked.ty)
+            || actual.access != checked.access
+            || actual.ownership != checked.ownership
+            || actual.public_label != checked.public_label
+            || actual.variadic != checked.variadic
+            || actual.default_present != checked.default_present
+        {
+            return Err("Source helper entry parameters differ from checked MIR".to_string());
+        }
+    }
+    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
+    let mut source_args = Vec::with_capacity(request.entry_values.len());
+    for (parameter, value) in function.params.iter().zip(request.entry_values) {
+        let path = vec![function.name.clone(), parameter.name.clone()];
+        source_args.push(__jet_bootstrap_entry_host_value_from_runtime(
+            value,
+            &parameter.ty,
+            adapter.root.program.as_ref(),
+            &path,
+            &physical,
+            0,
+        )?);
+    }
+    let span = crate::compiler_bootstrap_diagnostic_codec::__jet_bootstrap_span_from_host(
+        &function.span,
+    )?;
+    let mut result = __JET_EVAL_START_DEOPT__(
+        source_program.as_ref(),
+        config,
+        request.function,
+        source_args,
+    );
+    if let Some(problem) = result.__RESULT_INTERNAL_PROBLEM__.as_ref().ok() {
+        let detail = format!("Source helper interpreter reported an internal problem: {}", problem.__INTERNAL_PROBLEM_MESSAGE__);
+        return if __JET_EVAL_RETIRE_RESULT__(&mut result, span) {
+            Err(detail)
+        } else {
+            Err(format!("{detail}; Source helper result session retirement failed"))
+        };
+    }
+    if let Some(error) = result.__RESULT_ERROR__.as_ref().ok() {
+        let detail = format!(
+            "Source helper interpreter reported {}: {}",
+            error.__ERROR_DIAGNOSTIC__.__DIAGNOSTIC_CODE__,
+            error.__ERROR_DIAGNOSTIC__.__DIAGNOSTIC_WHAT__,
+        );
+        return if __JET_EVAL_RETIRE_RESULT__(&mut result, span) {
+            Err(detail)
+        } else {
+            Err(format!("{detail}; Source helper result session retirement failed"))
+        };
+    }
+    let stdout = result.__RESULT_STDOUT__.clone();
+    let stderr = result.__RESULT_STDERR__.clone();
+    let soft_stop = result.__RESULT_SOFT_STOP__;
+    let exit_code = result.__RESULT_EXIT_CODE__
+        .as_ref()
+        .ok()
+        .and_then(|value| value.to_i64())
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(0);
+    let helper_return_type = &function.return_type;
+    let value = if !result.__RESULT_COMPLETE__ && !soft_stop {
+        Err("Source helper interpreter stopped without a result or soft-stop".to_string())
+    } else if result.__RESULT_VALUE__.as_ref().ok().is_some() {
+        match __JET_EVAL_RESULT_HOST_PROJECTION__(&result, span) {
+            Ok(host_value) => __jet_bootstrap_native_host_value_to_runtime(
+                adapter,
+                &mut result,
+                host_value,
+                helper_return_type,
+                span,
+            ).map(Some),
+            Err(_) => Err("Source helper result value could not be projected through its retained Source machine".to_string()),
+        }
+    } else {
+        Ok(None)
+    };
+    let retired = __JET_EVAL_RETIRE_RESULT__(&mut result, span);
+    let value = match (value, retired) {
+        (Ok(value), true) => value,
+        (Err(error), true) => return Err(error),
+        (Ok(_), false) => return Err("Source helper deopt result session retirement failed".to_string()),
+        (Err(error), false) => return Err(format!("{error}; Source helper result session retirement failed")),
+    };
+    Ok(::jet_jit::SourceDeoptReply {
+        bits: 0,
+        outcome: Some(::jet_foundation::JitBackend::RunOutcome::Ran {
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            exit_code,
+        }),
+        value,
+        session: None,
+        soft_stop,
+        stdout,
+        stderr,
+    })
+}
+
+
+fn __jet_bootstrap_native_task_callback_output_from_runtime(
+    adapter: &__JetBootstrapNativeAdapter,
+    helper_value: ::jet_foundation::MIR::MirRuntimeValue,
+    tier: ::jet_jit::SourceExecutionTier,
+    retirement_failure: Option<__JetBootstrapNativeRetirementFailure>,
+    execution_error: Option<String>,
+    span: __SPAN__,
+) -> __JetBootstrapNativeTaskCallbackOutput {
+    let helper = match adapter.root.program.functions.iter()
+        .find(|row| row.id == adapter.root.task_callback_invoke)
+    {
+        Some(helper) => helper,
+        None => return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: None,
+            callback_result: None,
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some("checked task callback helper disappeared".to_string()),
+            cleanup_root: None,
+            span,
+        },
+    };
+    let fields = match __jet_bootstrap_native_record_fields(
+        adapter.root.program.as_ref(),
+        &helper.return_type,
+        helper_value,
+        &[
+            ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_ROOT_FIELD_ID__),
+            ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_RESULT_FIELD_ID__),
+            ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_REUSABLE_FIELD_ID__),
+            ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_CLEANUP_ROOT_FIELD_ID__),
+        ],
+    ) {
+        Ok(fields) => fields,
+        Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: None,
+            callback_result: None,
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some(error),
+            cleanup_root: None,
+            span,
+        },
+    };
+    let mut fields = fields.into_iter();
+    let Some((root_type, root_value)) = fields.next() else {
+        return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: None,
+            callback_result: None,
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some("task callback helper omitted its updated root".to_string()),
+            cleanup_root: None,
+            span,
+        };
+    };
+    let Some((result_type, result_value)) = fields.next() else {
+        return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: Some((root_type, root_value)),
+            callback_result: None,
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some("task callback helper omitted its callback result".to_string()),
+            cleanup_root: None,
+            span,
+        };
+    };
+    let Some((reusable_type, reusable_value)) = fields.next() else {
+        return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: Some((root_type, root_value)),
+            callback_result: Some((result_type, result_value)),
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some("task callback helper omitted reusable state".to_string()),
+            cleanup_root: None,
+            span,
+        };
+    };
+    let Some((cleanup_root_type, cleanup_root_value)) = fields.next() else {
+        return __JetBootstrapNativeTaskCallbackOutput {
+            task_root: Some((root_type, root_value)),
+            callback_result: Some((result_type, result_value)),
+            reusable: false,
+            tier: adapter.root.execution_policy,
+            retirement_failure,
+            invocation_failure: None,
+            execution_error: Some("task callback helper omitted its independent cleanup root".to_string()),
+            cleanup_root: None,
+            span,
+        };
+    };
+    let (reusable, execution_error) = match reusable_value {
+        ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => (value, execution_error),
+        _ => (
+            false,
+            Some(format!(
+                "checked task callback reusable field has type `{}`",
+                reusable_type.canonical_key(),
+            )),
+        ),
+    };
+    let tier = match tier {
+        ::jet_jit::SourceExecutionTier::Native => crate::BootstrapFactoryTier::CraneliftJit,
+        ::jet_jit::SourceExecutionTier::Source => crate::BootstrapFactoryTier::SourceInterpreterDeopt,
+    };
+    __JetBootstrapNativeTaskCallbackOutput {
+        task_root: Some((root_type, root_value)),
+        callback_result: Some((result_type, result_value)),
+        reusable,
+        tier,
+        retirement_failure,
+        invocation_failure: None,
+        execution_error,
+        cleanup_root: Some((cleanup_root_type, cleanup_root_value)),
+        span,
+    }
+}
+
+fn __jet_bootstrap_native_task_callback_not_invoked(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    task_root: Option<__JetBootstrapNativePacket>,
+    args: Vec<::jet_foundation::MIR::MirRuntimeValue>,
+    span: __SPAN__,
+    message: String,
+) -> __JetBootstrapNativeTaskCallbackOutput {
+    let mut entry_values = Vec::with_capacity(2);
+    if let Some((_, root_value)) = task_root {
+        entry_values.push(root_value);
+    }
+    entry_values.push(::jet_foundation::MIR::MirRuntimeValue::List(args));
+    __JetBootstrapNativeTaskCallbackOutput {
+        task_root: None,
+        callback_result: None,
+        reusable: false,
+        tier: adapter.root.execution_policy,
+        retirement_failure: None,
+        invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+            ::jet_jit::SourceDeoptError::InvalidRequest(message),
+            entry_values,
+            live_resources.clone(),
+        )),
+        execution_error: None,
+        cleanup_root: None,
+        span,
+    }
+}
+
+fn __jet_bootstrap_native_task_callback_invocation_failure(
+    adapter: &__JetBootstrapNativeAdapter,
+    error: ::jet_jit::SourceHelperInvocationError,
+    span: __SPAN__,
+) -> __JetBootstrapNativeTaskCallbackOutput {
+    __JetBootstrapNativeTaskCallbackOutput {
+        task_root: None,
+        callback_result: None,
+        reusable: false,
+        tier: adapter.root.execution_policy,
+        retirement_failure: None,
+        invocation_failure: Some(error),
+        execution_error: None,
+        cleanup_root: None,
+        span,
+    }
+}
+
+fn __jet_bootstrap_native_task_callback_invoke(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    task_root: Option<__JetBootstrapNativePacket>,
+    args: Vec<::jet_foundation::MIR::MirRuntimeValue>,
+    span: __SPAN__,
+) -> __JetBootstrapNativeTaskCallbackOutput {
+    let output_span = span.clone();
+    let engine_config = match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => None,
+        crate::BootstrapFactoryTier::CraneliftJit
+        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+            let Some(root_packet) = task_root.as_ref() else {
+                return __jet_bootstrap_native_task_callback_not_invoked(
+                    adapter,
+                    live_resources,
+                    None,
+                    args,
+                    output_span,
+                    "Source task callback has no checked task-root packet".to_string(),
+                );
+            };
+            match __jet_bootstrap_native_adapter_callback_config(
+                adapter,
+                root_packet,
+                live_resources,
+            ) {
+                Ok(config) => Some(config),
+                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
+                    adapter,
+                    live_resources,
+                    task_root,
+                    args,
+                    output_span,
+                    error,
+                ),
+            }
+        }
+    };
+    let Some((root_type, root_value)) = task_root else {
+        return __jet_bootstrap_native_task_callback_not_invoked(
+            adapter,
+            live_resources,
+            None,
+            args,
+            output_span,
+            "Source task callback has no checked task-root packet".to_string(),
+        );
+    };
+    let Some(helper) = adapter.root.program.functions.iter()
+        .find(|row| row.id == adapter.root.task_callback_invoke)
+    else {
+        return __jet_bootstrap_native_task_callback_not_invoked(
+            adapter,
+            live_resources,
+            Some((root_type, root_value)),
+            args,
+            output_span,
+            "checked task callback helper disappeared".to_string(),
+        );
+    };
+    let Some(root_parameter) = helper.params.first() else {
+        return __jet_bootstrap_native_task_callback_not_invoked(
+            adapter,
+            live_resources,
+            Some((root_type, root_value)),
+            args,
+            output_span,
+            "checked task callback helper has no task-root parameter".to_string(),
+        );
+    };
+    if !root_type.same_checked_type(&root_parameter.ty) {
+        return __jet_bootstrap_native_task_callback_not_invoked(
+            adapter,
+            live_resources,
+            Some((root_type, root_value)),
+            args,
+            output_span,
+            "Source task callback root type differs from its checked helper parameter".to_string(),
+        );
+    }
+    if let Err(error) = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+        adapter.root.program.as_ref(),
+        &root_type,
+        &root_value,
+        0,
+    ) {
+        return __jet_bootstrap_native_task_callback_not_invoked(
+            adapter,
+            live_resources,
+            Some((root_type, root_value)),
+            args,
+            output_span,
+            error,
+        );
+    }
+    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
+    match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => {
+            let mut source_root = match __jet_bootstrap_entry_jet_eval_task_root_from_runtime(
+                &root_type,
+                root_value,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(source_root) => source_root,
+                Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: None,
+                    callback_result: None,
+                    reusable: false,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some(error.error),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            let Some(helper) = adapter.root.program.functions.iter()
+                .find(|row| row.id == adapter.root.task_callback_invoke)
+            else {
+                return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: None,
+                    callback_result: None,
+                    reusable: false,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some("checked task callback helper disappeared".to_string()),
+                    cleanup_root: None,
+                    span: output_span,
+                };
+            };
+            let value_type = match helper.params.get(1).map(|parameter| parameter.ty.kind()) {
+                Some(::jet_foundation::MIR::MirTypeKind::List(value_type)) => value_type.as_ref(),
+                Some(::jet_foundation::MIR::MirTypeKind::FixedList { elem, .. }) => elem.as_ref(),
+                _ => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: None,
+                    callback_result: None,
+                    reusable: false,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some("checked task callback helper has no runtime-value list argument".to_string()),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            let source_args = match args.into_iter().map(|value| {
+                __jet_bootstrap_entry_jet_eval_runtime_value_from_runtime(
+                    value_type,
+                    value,
+                    &adapter.root.program,
+                    &physical,
+                ).map_err(|error| error.error)
+            }).collect::<Result<Vec<_>, String>>() {
+                Ok(source_args) => source_args,
+                Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: None,
+                    callback_result: None,
+                    reusable: false,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some(error),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            let source_result = __JET_TASK_CALLBACK_INVOKE__(
+                &mut source_root,
+                &source_args,
+                Box::new(adapter.clone()),
+                span,
+            );
+            let root_packet = __jet_bootstrap_entry_jet_eval_task_root_to_runtime(
+                &source_result.__TASK_CALLBACK_ROOT_FIELD__,
+                &adapter.root.program,
+                &physical,
+            );
+            let (root_type, root_value) = match root_packet {
+                Ok(packet) => packet,
+                Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: None,
+                    callback_result: None,
+                    reusable: source_result.__TASK_CALLBACK_REUSABLE_FIELD__,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some(error),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            let result_packet = __jet_bootstrap_entry_jet_eval_callback_result_to_runtime(
+                &source_result.__TASK_CALLBACK_RESULT_FIELD__,
+                &adapter.root.program,
+                &physical,
+            );
+            let (result_type, result_value) = match result_packet {
+                Ok(packet) => packet,
+                Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: Some((root_type, root_value)),
+                    callback_result: None,
+                    reusable: source_result.__TASK_CALLBACK_REUSABLE_FIELD__,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some(error),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            let cleanup_packet = __jet_bootstrap_entry_jet_eval_owned_root_to_runtime(
+                &source_result.__TASK_CALLBACK_CLEANUP_ROOT_FIELD__,
+                &adapter.root.program,
+                &physical,
+            );
+            let cleanup_root = match cleanup_packet {
+                Ok(packet) => packet,
+                Err(error) => return __JetBootstrapNativeTaskCallbackOutput {
+                    task_root: Some((root_type, root_value)),
+                    callback_result: Some((result_type, result_value)),
+                    reusable: source_result.__TASK_CALLBACK_REUSABLE_FIELD__,
+                    tier: crate::BootstrapFactoryTier::Aot,
+                    retirement_failure: None,
+                    invocation_failure: None,
+                    execution_error: Some(error),
+                    cleanup_root: None,
+                    span: output_span,
+                },
+            };
+            __JetBootstrapNativeTaskCallbackOutput {
+                task_root: Some((root_type, root_value)),
+                callback_result: Some((result_type, result_value)),
+                reusable: source_result.__TASK_CALLBACK_REUSABLE_FIELD__,
+                tier: crate::BootstrapFactoryTier::Aot,
+                retirement_failure: None,
+                invocation_failure: None,
+                execution_error: None,
+                cleanup_root: Some(cleanup_root),
+                span: output_span,
+            }
+        }
+        crate::BootstrapFactoryTier::CraneliftJit
+        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
+                &physical,
+                &adapter.root.receiver_type,
+                &adapter.physical_binding(),
+            ) {
+                Ok(adapter_value) => adapter_value,
+                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
+                    adapter,
+                    live_resources,
+                    Some((root_type, root_value)),
+                    args,
+                    output_span,
+                    error,
+                ),
+            };
+            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
+                &span,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(span_value) => span_value,
+                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
+                    adapter,
+                    live_resources,
+                    Some((root_type, root_value)),
+                    args,
+                    output_span,
+                    error,
+                ),
+            };
+            let Some(engine_config) = engine_config else {
+                return __jet_bootstrap_native_task_callback_not_invoked(
+                    adapter,
+                    live_resources,
+                    Some((root_type, root_value)),
+                    args,
+                    output_span,
+                    "callback engine config was not projected from the task root".to_string(),
+                );
+            };
+            let helper_output = __jet_bootstrap_native_execute_source_helper(
+                adapter,
+                live_resources,
+                &adapter.root.helper_roots,
+                adapter.root.task_callback_invoke,
+                vec![
+                    root_value,
+                    ::jet_foundation::MIR::MirRuntimeValue::List(args),
+                    adapter_value,
+                    span_value,
+                ],
+                &adapter.root.program,
+                &engine_config,
+            );
+            match helper_output {
+                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
+                    __jet_bootstrap_native_task_callback_invocation_failure(
+                        adapter,
+                        error,
+                        output_span,
+                    ),
+                __JetBootstrapNativeHelperExecution::Complete {
+                    retirement,
+                    tier,
+                    validation_error,
+                } => match retirement {
+                    __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
+                        match retirement.value.take() {
+                            Some(helper_value) =>
+                                __jet_bootstrap_native_task_callback_output_from_runtime(
+                                    adapter,
+                                    helper_value,
+                                    tier,
+                                    None,
+                                    validation_error,
+                                    output_span,
+                                ),
+                            None => __JetBootstrapNativeTaskCallbackOutput {
+                                task_root: None,
+                                callback_result: None,
+                                reusable: false,
+                                tier: adapter.root.execution_policy,
+                                retirement_failure: None,
+                                invocation_failure: None,
+                                execution_error: validation_error.or_else(|| Some(
+                                    "task callback helper retired without its output packet".to_string(),
+                                )),
+                                cleanup_root: None,
+                                span: output_span,
+                            },
+                        }
+                    }
+                    __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
+                        match failure.retirement.value.take() {
+                            Some(helper_value) =>
+                                __jet_bootstrap_native_task_callback_output_from_runtime(
+                                    adapter,
+                                    helper_value,
+                                    tier,
+                                    Some(failure),
+                                    validation_error,
+                                    output_span,
+                                ),
+                            None => __JetBootstrapNativeTaskCallbackOutput {
+                                task_root: None,
+                                callback_result: None,
+                                reusable: false,
+                                tier: adapter.root.execution_policy,
+                                retirement_failure: Some(failure),
+                                invocation_failure: None,
+                                execution_error: validation_error.or_else(|| Some(
+                                    "task callback helper retirement failure has no output packet".to_string(),
+                                )),
+                                cleanup_root: None,
+                                span: output_span,
+                            },
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+fn __jet_bootstrap_native_task_root_release_invocation_failure(
+    _adapter: &__JetBootstrapNativeAdapter,
+    error: ::jet_jit::SourceHelperInvocationError,
+) -> __JetBootstrapNativeTaskRootReleaseOutput {
+    __JetBootstrapNativeTaskRootReleaseOutput {
+        callback_result: None,
+        tier: None,
+        invocation_failure: Some(error),
+        retirement_failure: None,
+        execution_error: None,
+    }
+}
+
+fn __jet_bootstrap_native_task_root_release(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    task_root: __JetBootstrapNativePacket,
+    span: __SPAN__,
+) -> __JetBootstrapNativeTaskRootReleaseOutput {
+    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
+    let helper = match adapter.root.program.functions.iter()
+        .find(|row| row.id == adapter.root.task_root_release)
+    {
+        Some(helper) => helper,
+        None => return __JetBootstrapNativeTaskRootReleaseOutput {
+            callback_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked task-root release helper disappeared".to_string(),
+                ),
+                vec![task_root.1],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        },
+    };
+    let Some(root_parameter) = helper.params.first() else {
+        return __JetBootstrapNativeTaskRootReleaseOutput {
+            callback_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked task-root release helper has no root parameter".to_string(),
+                ),
+                vec![task_root.1],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    if !task_root.0.same_checked_type(&root_parameter.ty) {
+        return __JetBootstrapNativeTaskRootReleaseOutput {
+            callback_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "Source task-root release packet type differs from its checked helper parameter".to_string(),
+                ),
+                vec![task_root.1],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    }
+    if let Err(error) = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+        adapter.root.program.as_ref(),
+        &task_root.0,
+        &task_root.1,
+        0,
+    ) {
+        return __JetBootstrapNativeTaskRootReleaseOutput {
+            callback_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                vec![task_root.1],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    }
+    match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => {
+            let mut source_root = match __jet_bootstrap_entry_jet_eval_task_root_from_runtime(
+                &task_root.0,
+                task_root.1,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(source_root) => source_root,
+                Err(error) => return __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: None,
+                    tier: None,
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error.error),
+                },
+            };
+            let source_result = __JET_TASK_ROOT_RELEASE__(
+                &mut source_root,
+                Box::new(adapter.clone()),
+                span,
+            );
+            match __jet_bootstrap_entry_jet_eval_callback_result_to_runtime(
+                &source_result,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(packet) => __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: Some(packet),
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+                Err(error) => __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error),
+                },
+            }
+        }
+        crate::BootstrapFactoryTier::CraneliftJit
+        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
+                &physical,
+                &adapter.root.receiver_type,
+                &adapter.physical_binding(),
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![task_root.1],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
+                &span,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![task_root.1],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
+                adapter,
+                &task_root,
+                live_resources,
+            ) {
+                Ok(config) => config,
+                Err(error) => return __JetBootstrapNativeTaskRootReleaseOutput {
+                    callback_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![task_root.1],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let helper_execution = __jet_bootstrap_native_execute_source_helper(
+                adapter,
+                live_resources,
+                &adapter.root.helper_roots,
+                adapter.root.task_root_release,
+                vec![task_root.1, adapter_value, span_value],
+                &adapter.root.program,
+                &engine_config,
+            );
+            match helper_execution {
+                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
+                    __jet_bootstrap_native_task_root_release_invocation_failure(adapter, error),
+                __JetBootstrapNativeHelperExecution::Complete {
+                    retirement,
+                    tier,
+                    validation_error,
+                } => {
+                    let helper = adapter.root.program.functions.iter()
+                        .find(|row| row.id == adapter.root.task_root_release);
+                    let Some(helper) = helper else {
+                        return __JetBootstrapNativeTaskRootReleaseOutput {
+                            callback_result: None,
+                            tier: Some(tier),
+                            invocation_failure: None,
+                            retirement_failure: None,
+                            execution_error: Some("checked task-root release helper disappeared".to_string()),
+                        };
+                    };
+                    match retirement {
+                        __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
+                            let callback_result = retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = callback_result.is_none();
+                            __JetBootstrapNativeTaskRootReleaseOutput {
+                                callback_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: None,
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "task-root release helper produced no result packet".to_string(),
+                                )),
+                            }
+                        }
+                        __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
+                            let callback_result = failure.retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = callback_result.is_none();
+                            __JetBootstrapNativeTaskRootReleaseOutput {
+                                callback_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: Some(failure),
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "task-root release helper retirement failure has no result packet".to_string(),
+                                )),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+fn __jet_bootstrap_native_owned_drop_invocation_failure(
+    _adapter: &__JetBootstrapNativeAdapter,
+    _helper_function: ::jet_foundation::MIR::MirFunctionId,
+    error: ::jet_jit::SourceHelperInvocationError,
+) -> __JetBootstrapNativeOwnedDropOutput {
+    __JetBootstrapNativeOwnedDropOutput {
+        drop_result: None,
+        tier: None,
+        invocation_failure: Some(error),
+        retirement_failure: None,
+        execution_error: None,
+    }
+}
+
+fn __jet_bootstrap_native_owned_root_drop(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    root: __JetBootstrapNativePacket,
+    value: ::jet_foundation::MIR::MirRuntimeValue,
+    span: __SPAN__,
+) -> __JetBootstrapNativeOwnedDropOutput {
+    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
+    let Some(helper) = adapter.root.program.functions.iter()
+        .find(|row| row.id == adapter.root.owned_root_drop)
+    else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked owned-root drop helper disappeared".to_string(),
+                ),
+                vec![root.1, value],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    let Some(root_parameter) = helper.params.first() else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked owned-root drop helper has no root parameter".to_string(),
+                ),
+                vec![root.1, value],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    let Some(value_parameter) = helper.params.get(1) else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked owned-root drop helper has no value parameter".to_string(),
+                ),
+                vec![root.1, value],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    if !root.0.same_checked_type(&root_parameter.ty) {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "Source owned-root drop packet type differs from its checked helper parameter".to_string(),
+                ),
+                vec![root.1, value],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    }
+    let validation_error = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+        adapter.root.program.as_ref(),
+        &root.0,
+        &root.1,
+        0,
+    ).err().or_else(|| {
+        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+            adapter.root.program.as_ref(),
+            &value_parameter.ty,
+            &value,
+            0,
+        ).err()
+    });
+    if let Some(error) = validation_error {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                vec![root.1, value],
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    }
+    match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => {
+            let source_root = match __jet_bootstrap_entry_jet_eval_owned_root_from_runtime(
+                &root.0,
+                root.1,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(source_root) => source_root,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error.error),
+                },
+            };
+            let source_value = match __jet_bootstrap_entry_jet_eval_runtime_value_from_runtime(
+                &value_parameter.ty,
+                value,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(source_value) => source_value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error.error),
+                },
+            };
+            let source_result = __JET_OWNED_ROOT_DROP__(
+                &source_root,
+                source_value,
+                Box::new(adapter.clone()),
+                span,
+            );
+            match __jet_bootstrap_entry_jet_eval_owned_root_drop_result_to_runtime(
+                &source_result,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(packet) => __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: Some(packet),
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+                Err(error) => __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error),
+                },
+            }
+        }
+        crate::BootstrapFactoryTier::CraneliftJit
+        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
+                &physical,
+                &adapter.root.receiver_type,
+                &adapter.physical_binding(),
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![root.1, value],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
+                &span,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![root.1, value],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
+                adapter,
+                &root,
+                live_resources,
+            ) {
+                Ok(config) => config,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        vec![root.1, value],
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            match __jet_bootstrap_native_execute_source_helper(
+                adapter,
+                live_resources,
+                &adapter.root.helper_roots,
+                adapter.root.owned_root_drop,
+                vec![root.1, value, adapter_value, span_value],
+                &adapter.root.program,
+                &engine_config,
+            ) {
+                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
+                    __jet_bootstrap_native_owned_drop_invocation_failure(
+                        adapter,
+                        adapter.root.owned_root_drop,
+                        error,
+                    ),
+                __JetBootstrapNativeHelperExecution::Complete {
+                    retirement,
+                    tier,
+                    validation_error,
+                } => {
+                    let Some(helper) = adapter.root.program.functions.iter()
+                        .find(|row| row.id == adapter.root.owned_root_drop)
+                    else {
+                        return __JetBootstrapNativeOwnedDropOutput {
+                            drop_result: None,
+                            tier: Some(tier),
+                            invocation_failure: None,
+                            retirement_failure: None,
+                            execution_error: Some("checked owned-root drop helper disappeared".to_string()),
+                        };
+                    };
+                    match retirement {
+                        __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
+                            let drop_result = retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = drop_result.is_none();
+                            __JetBootstrapNativeOwnedDropOutput {
+                                drop_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: None,
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "owned-root drop helper produced no result packet".to_string(),
+                                )),
+                            }
+                        }
+                        __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
+                            let drop_result = failure.retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = drop_result.is_none();
+                            __JetBootstrapNativeOwnedDropOutput {
+                                drop_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: Some(failure),
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "owned-root drop helper retirement failure has no result packet".to_string(),
+                                )),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+fn __jet_bootstrap_native_callback_result_drop(
+    adapter: &__JetBootstrapNativeAdapter,
+    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
+    root: __JetBootstrapNativePacket,
+    callback_result: Option<__JetBootstrapNativePacket>,
+    span: __SPAN__,
+) -> __JetBootstrapNativeOwnedDropOutput {
+    let Some(callback_result) = callback_result else {
+        let unit = ::jet_foundation::MIR::MirRuntimeValue::Enum {
+            type_name: "JetEvalRuntimeValue".to_string(),
+            variant: "Data".to_string(),
+            args: vec![(
+                None,
+                ::jet_foundation::MIR::MirRuntimeValue::Enum {
+                    type_name: "TComptimeValue".to_string(),
+                    variant: "Unit".to_string(),
+                    args: Vec::new(),
+                },
+            )],
+        };
+        return __jet_bootstrap_native_owned_root_drop(adapter, live_resources, root, unit, span);
+    };
+    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
+    let mut entry_values = vec![root.1, callback_result.1];
+    let Some(helper) = adapter.root.program.functions.iter()
+        .find(|row| row.id == adapter.root.owned_callback_result_drop)
+    else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked callback-result cleanup helper disappeared".to_string(),
+                ),
+                entry_values,
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    let Some(root_parameter) = helper.params.first() else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked callback-result cleanup helper has no OwnedRoot parameter".to_string(),
+                ),
+                entry_values,
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    let Some(result_parameter) = helper.params.get(1) else {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(
+                    "checked callback-result cleanup helper has no callback result parameter".to_string(),
+                ),
+                entry_values,
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    };
+    let validation_error = if !root.0.same_checked_type(&root_parameter.ty) {
+        Some("OwnedRoot packet type differs from the checked callback-result cleanup helper".to_string())
+    } else if !callback_result.0.same_checked_type(&result_parameter.ty) {
+        Some("callback result packet type differs from the checked cleanup helper".to_string())
+    } else {
+        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+            adapter.root.program.as_ref(),
+            &root.0,
+            &entry_values[0],
+            0,
+        )
+        .err()
+        .or_else(|| crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+            adapter.root.program.as_ref(),
+            &callback_result.0,
+            &entry_values[1],
+            0,
+        ).err())
+    };
+    if let Some(error) = validation_error {
+        return __JetBootstrapNativeOwnedDropOutput {
+            drop_result: None,
+            tier: None,
+            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                entry_values,
+                live_resources.clone(),
+            )),
+            retirement_failure: None,
+            execution_error: None,
+        };
+    }
+    match adapter.root.execution_policy {
+        crate::BootstrapFactoryTier::Aot => {
+            let root_value = entry_values.remove(0);
+            let callback_value = entry_values.remove(0);
+            let source_root = match __jet_bootstrap_entry_jet_eval_owned_root_from_runtime(
+                &root.0,
+                root_value,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error.error),
+                },
+            };
+            let source_result = match __jet_bootstrap_entry_jet_eval_callback_result_from_runtime(
+                &callback_result.0,
+                callback_value,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error.error),
+                },
+            };
+            let source_result = __JET_OWNED_CALLBACK_RESULT_DROP__(
+                &source_root,
+                source_result,
+                Box::new(adapter.clone()),
+                span,
+            );
+            match __jet_bootstrap_entry_jet_eval_owned_root_drop_result_to_runtime(
+                &source_result,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(packet) => __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: Some(packet),
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+                Err(error) => __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: Some(::jet_jit::SourceExecutionTier::Native),
+                    invocation_failure: None,
+                    retirement_failure: None,
+                    execution_error: Some(error),
+                },
+            }
+        }
+        crate::BootstrapFactoryTier::CraneliftJit
+        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+            let callback_config_packet = (root.0.clone(), entry_values[0].clone());
+            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
+                &physical,
+                &adapter.root.receiver_type,
+                &adapter.physical_binding(),
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        entry_values,
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
+                &span,
+                &adapter.root.program,
+                &physical,
+            ) {
+                Ok(value) => value,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        entry_values,
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
+                adapter,
+                &callback_config_packet,
+                live_resources,
+            ) {
+                Ok(config) => config,
+                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
+                    drop_result: None,
+                    tier: None,
+                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
+                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
+                        entry_values,
+                        live_resources.clone(),
+                    )),
+                    retirement_failure: None,
+                    execution_error: None,
+                },
+            };
+            entry_values.push(adapter_value);
+            entry_values.push(span_value);
+            match __jet_bootstrap_native_execute_source_helper(
+                adapter,
+                live_resources,
+                &adapter.root.helper_roots,
+                adapter.root.owned_callback_result_drop,
+                entry_values,
+                &adapter.root.program,
+                &engine_config,
+            ) {
+                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
+                    __jet_bootstrap_native_owned_drop_invocation_failure(
+                        adapter,
+                        adapter.root.owned_callback_result_drop,
+                        error,
+                    ),
+                __JetBootstrapNativeHelperExecution::Complete {
+                    retirement,
+                    tier,
+                    validation_error,
+                } => {
+                    let Some(helper) = adapter.root.program.functions.iter()
+                        .find(|row| row.id == adapter.root.owned_callback_result_drop)
+                    else {
+                        return __JetBootstrapNativeOwnedDropOutput {
+                            drop_result: None,
+                            tier: Some(tier),
+                            invocation_failure: None,
+                            retirement_failure: None,
+                            execution_error: Some("checked callback-result cleanup helper disappeared".to_string()),
+                        };
+                    };
+                    match retirement {
+                        __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
+                            let drop_result = retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = drop_result.is_none();
+                            __JetBootstrapNativeOwnedDropOutput {
+                                drop_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: None,
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "callback-result cleanup helper produced no result packet".to_string(),
+                                )),
+                            }
+                        }
+                        __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
+                            let drop_result = failure.retirement.value.take()
+                                .map(|value| (helper.return_type.clone(), value));
+                            let missing_result = drop_result.is_none();
+                            __JetBootstrapNativeOwnedDropOutput {
+                                drop_result,
+                                tier: Some(tier),
+                                invocation_failure: None,
+                                retirement_failure: Some(failure),
+                                execution_error: validation_error.or_else(|| missing_result.then(
+                                    || "callback-result cleanup helper retirement failure has no result packet".to_string(),
+                                )),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    let generated = generated
+        .replace("__SOURCE_PROGRAM__", source_program)
+        .replace("__EVAL_CONFIG__", eval_config)
+        .replace("__SPAN__", span_type)
+        .replace("__TASK_CALLBACK_INVOKE_ID__", &task_callback_invoke)
+        .replace("__TASK_ROOT_RELEASE_ID__", &task_root_release)
+        .replace("__OWNED_ROOT_DROP_ID__", &owned_root_drop)
+        .replace("__OWNED_CALLBACK_RESULT_DROP_ID__", &owned_callback_result_drop)
+        .replace("__JET_EVAL_START_DEOPT__", start_deopt)
+        .replace("__JET_EVAL_RESULT_HOST_PROJECTION__", result_host_projection)
+        .replace("__JET_EVAL_RETIRE_RESULT__", retire_result)
+        .replace("__JET_TASK_CALLBACK_INVOKE__", callback_invoke_symbol)
+        .replace("__JET_TASK_ROOT_RELEASE__", root_release_symbol)
+        .replace("__JET_OWNED_ROOT_DROP__", owned_drop_symbol)
+        .replace("__JET_OWNED_CALLBACK_RESULT_DROP__", owned_callback_result_drop_symbol)
+        .replace("__TASK_CALLBACK_ROOT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "root")?)
+        .replace("__TASK_CALLBACK_RESULT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "result")?)
+        .replace("__TASK_CALLBACK_REUSABLE_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "reusable")?)
+        .replace("__TASK_CALLBACK_CLEANUP_ROOT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "cleanup_root")?)
+        .replace("__TASK_CALLBACK_ROOT_FIELD_ID__", &callback_root_field)
+        .replace("__TASK_CALLBACK_RESULT_FIELD_ID__", &callback_result_field)
+        .replace("__TASK_CALLBACK_REUSABLE_FIELD_ID__", &callback_reusable_field)
+        .replace("__TASK_CALLBACK_CLEANUP_ROOT_FIELD_ID__", &callback_cleanup_root_field)
+        .replace("__OWNED_DROP_DISPOSITION_FIELD_ID__", &owned_drop_disposition_field)
+        .replace("__OWNED_DROP_DISPOSITION_TYPE__", "\"JetEvalOwnedRootDropDisposition\"")
+        .replace("__RESULT_COMPLETE__", result_complete)
+        .replace("__RESULT_VALUE__", result_value)
+        .replace("__RESULT_ERROR__", result_error)
+        .replace("__RESULT_INTERNAL_PROBLEM__", result_internal_problem)
+        .replace("__RESULT_STDOUT__", result_stdout)
+        .replace("__RESULT_STDERR__", result_stderr)
+        .replace("__RESULT_SOFT_STOP__", result_soft_stop)
+        .replace("__RESULT_EXIT_CODE__", result_exit_code)
+        .replace("__ERROR_DIAGNOSTIC__", error_diagnostic)
+        .replace("__DIAGNOSTIC_CODE__", diagnostic_code)
+        .replace("__DIAGNOSTIC_WHAT__", diagnostic_what)
+        .replace("__INTERNAL_PROBLEM_MESSAGE__", internal_problem_message)
+        .replace("__JET_NATIVE_CALLBACK_OUTPUT__", "__JetBootstrapNativeTaskCallbackOutput")
+        .replace("__JET_NATIVE_OWNED_DROP_OUTPUT__", "__JetBootstrapNativeOwnedDropOutput");
+    out.push_str(&generated);
+    Ok(())
+}
+
+fn emit_bootstrap_native_compile_entry(
+    out: &mut String,
+    _bindings: &BootstrapBindingDescriptor,
+    symbols: &BootstrapCodecSymbols<'_>,
+    entry: &MirRustCallableMetadata,
+    runtime_config_symbol: &str,
+    helpers: &BootstrapNativeHelperRoots,
+) -> Result<(), BootstrapHostCodecError> {
+    let eval_config = symbols.type_symbol("JetEvalConfig")?;
+    let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
+    let request_host_adapter = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
+    let request_numeric = symbols.field_symbol("JetEvalConfig", "numeric_unit_conversion_exact")?;
+    let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
+    let numeric_field = symbols.field_binding("JetEvalConfig", "numeric_unit_conversion_exact")?;
+    let native_callable_binding = symbols.type_symbol("JetEvalNativeCallableBinding")?;
+    let native_binding_identity = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
+    let native_callable_key = symbols.field_symbol("JetEvalNativeCallableBinding", "key")?;
+    let native_callable_type =
+        symbols.field_symbol("JetEvalNativeCallableBinding", "callable_type")?;
+    let entry_id = entry.function.0.to_string();
+    let entry_symbol = &entry.symbol;
+    let helper_roots = helpers
+        .roots
+        .iter()
+        .map(|id| format!("::jet_foundation::MIR::MirFunctionId({})", id.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let task_callback_invoke = helpers.task_callback_invoke.0.to_string();
+    let task_root_release = helpers.task_root_release.0.to_string();
+    let owned_root_drop = helpers.owned_root_drop.0.to_string();
+    let owned_callback_result_drop = helpers.owned_callback_result_drop.0.to_string();
+    let callback_transfer = helpers.callback_transfer.0.to_string();
+    let callback_release = helpers.callback_release.0.to_string();
+    let task_root_take = helpers.task_root_take.0.to_string();
+    let task_root_cleanup_root = helpers.task_root_cleanup_root.0.to_string();
+    let owned_root_cleanup_clone = helpers.owned_root_cleanup_clone.0.to_string();
+    let owned_root_drop_values = helpers.owned_root_drop_values.0.to_string();
+    let shared_payload_finalize = helpers.shared_payload_finalize.0.to_string();
+    let host_type_shape = helpers.host_type_shape.0.to_string();
+    let generated = r#"
+#[doc(hidden)]
+fn __jet_bootstrap_native_collect_shared_payload_types(
+    program: &::jet_foundation::MIR::MirProgram,
+) -> ::std::collections::BTreeMap<String, ::jet_foundation::MIR::MirType> {
+    use ::jet_foundation::MIR::MirTypeKind as K;
+
+    fn visit(
+        ty: &::jet_foundation::MIR::MirType,
+        payloads: &mut ::std::collections::BTreeMap<
+            String,
+            ::jet_foundation::MIR::MirType,
+        >,
+    ) {
+        match ty.kind() {
+            K::Shared(inner) => {
+                payloads
+                    .entry(inner.canonical_key())
+                    .or_insert_with(|| inner.as_ref().clone());
+                visit(inner, payloads);
+            }
+            K::List(inner)
+            | K::Option(inner)
+            | K::FixedList { elem: inner, .. }
+            | K::InlineRange { base: inner, .. }
+            | K::Tagged { inner, .. }
+            | K::Quantity { base: inner, .. } => visit(inner, payloads),
+            K::Map { key, value } => {
+                visit(key, payloads);
+                visit(value, payloads);
+            }
+            K::Result { ok, err } => {
+                visit(ok, payloads);
+                visit(err, payloads);
+            }
+            K::Fn(signature) => {
+                for parameter in &signature.params {
+                    visit(parameter, payloads);
+                }
+                if let Some(result) = &signature.ret {
+                    visit(result, payloads);
+                }
+            }
+            K::SendFn { params, ret, .. } => {
+                for parameter in params {
+                    visit(parameter, payloads);
+                }
+                if let Some(result) = ret {
+                    visit(result, payloads);
+                }
+            }
+            K::Apply { args, .. } => {
+                for argument in args {
+                    visit(argument, payloads);
+                }
+            }
+            K::Tuple(fields) => {
+                for (_, field_type) in fields {
+                    visit(field_type, payloads);
+                }
+            }
+            K::Union(variants) => {
+                for variant in variants {
+                    visit(variant, payloads);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut payloads = ::std::collections::BTreeMap::new();
+    for ty in &program.type_instances {
+        visit(ty, &mut payloads);
+    }
+    payloads
+}
+
+struct __JetBootstrapCompileLease {
+    result: __COMPILE_RESULT__,
+    resources: ::jet_jit::SourceResources::SourceResourceSession,
+    runtime_config: __EVAL_CONFIG__,
+    selected_factory_tier: crate::BootstrapFactoryTier,
+    actual_factory_tier: crate::BootstrapFactoryTier,
+}
+
+#[doc(hidden)]
+pub fn __jet_bootstrap_compile_with_native(
+    mut __jet_request: __COMPILE_REQUEST__,
+    __jet_selected_tier: crate::BootstrapFactoryTier,
+    __jet_execution: &crate::Codegen::MIRRust::MirRustExecutionConfig,
+) -> Result<__JetBootstrapCompileLease, crate::BootstrapHostCodecError> {
+    let __jet_compiler_image = crate::__jet_bootstrap_compiler_image()
+        .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;
+    let __jet_image_entry = __jet_compiler_image.header.entry_function;
+    if __jet_image_entry != ::jet_foundation::MIR::MirFunctionId(__ENTRY_ID__) {
+        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image entry differs from the checked generated factory".to_string(),
+        ));
+    }
+    if __jet_execution.artifact != __jet_compiler_image.header.artifact {
+        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
+            "requested compiler factory artifact differs from the embedded canonical image".to_string(),
+        ));
+    }
+    let __jet_image_execution = __jet_compiler_image.program
+        .execution_identity(Some(__jet_compiler_image.header.artifact))
+        .map_err(|error| crate::BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    if __jet_image_execution != __jet_compiler_image.header.identity {
+        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image execution identity changed before factory invocation".to_string(),
+        ));
+    }
+    let __jet_image_artifact = __jet_compiler_image.program.artifacts.iter()
+        .find(|artifact| artifact.id == __jet_compiler_image.header.artifact)
+        .ok_or_else(|| crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image artifact is absent from its checked MIR".to_string(),
+        ))?;
+    if __jet_image_artifact.target != ::jet_foundation::MIR::MirArtifactTarget::RustAot {
+        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image is not the checked Rust AOT compiler factory root".to_string(),
+        ));
+    }
+    let __jet_image_factory = __jet_compiler_image.program.functions.iter()
+        .find(|function| function.id == __jet_image_entry)
+        .ok_or_else(|| crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image factory function is absent".to_string(),
+        ))?;
+    if !__jet_image_factory.capture_params.is_empty() {
+        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
+            "restored compiler image factory unexpectedly captures values".to_string(),
+        ));
+    }
+
+    let mut __jet_resources = Some(
+        ::jet_jit::SourceResources::SourceResourceSession::new(),
+    );
+    let mut __jet_runtime_config: Option<__EVAL_CONFIG__> = None;
+    let __jet_result = (|| -> Result<__JetBootstrapCompileLease, String> {
+        let __jet_resource_session = __jet_resources.as_ref()
+            .ok_or_else(|| "Source resource session is absent".to_string())?;
+        let __jet_root_lease = __jet_resource_session.retain_root()?;
+        let __jet_bindings = ::std::sync::Arc::new(
+            ::jet_jit::SourceInterfaces::NativeInterfaceBindings::new(),
+        );
+        let __jet_receiver_field = crate::__jet_bootstrap_entry_field_type(
+            __jet_compiler_image.program.as_ref(),
+            ::jet_foundation::MIR::MirTypeId(__HOST_FIELD_OWNER__),
+            ::jet_foundation::MIR::MirFieldId(__HOST_FIELD_ID__),
+        )?;
+        let __jet_receiver_type = __jet_receiver_field.option_inner()
+            .ok_or_else(|| "checked JetEvalConfig.host_adapter lost its Option leaf".to_string())?
+            .clone();
+        let __jet_template = __jet_bootstrap_native_adapter_template(
+            &__jet_bindings,
+            __jet_compiler_image.program.as_ref(),
+            __jet_compiler_image.header.artifact,
+            __jet_receiver_type.clone(),
+        )?;
+        let (__jet_numeric_object, __jet_numeric_identity) =
+            __jet_bootstrap_native_numeric_callable_template(
+                &__jet_bindings,
+                __jet_compiler_image.program.as_ref(),
+                __jet_compiler_image.header.artifact,
+            )?;
+        let __jet_numeric_type = crate::__jet_bootstrap_entry_field_type(
+            __jet_compiler_image.program.as_ref(),
+            ::jet_foundation::MIR::MirTypeId(__NUMERIC_FIELD_OWNER__),
+            ::jet_foundation::MIR::MirFieldId(__NUMERIC_FIELD_ID__),
+        )?;
+        let __jet_numeric_callable_type = __jet_numeric_type.option_inner()
+            .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?
+            .clone();
+        if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
+            return Err("numeric callable template differs from the exact checked config field".to_string());
+        }
+        let __jet_numeric_binding = __NATIVE_BINDING_CALLABLE__ {
+            __NATIVE_CALLABLE_KEY__: __jet_numeric_identity.key.clone(),
+            __NATIVE_CALLABLE_TYPE__: __jet_numeric_identity.callable_type.clone(),
+        };
+        let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
+            &__jet_root_lease,
+            __jet_compiler_image.program.as_ref(),
+            __jet_compiler_image.header.artifact,
+            vec!["JetEvalConfig".to_string(), "numeric_unit_conversion_exact".to_string()],
+            __NATIVE_BINDING_IDENTITY__::Callable(__jet_numeric_binding),
+            ::jet_jit::SourceResources::SourceNativeBindingIdentity::Callable(
+                __jet_numeric_identity,
+            ),
+            __jet_numeric_object,
+            false,
+        )?;
+        let __jet_native_adapter = __JetBootstrapNativeAdapter::new_with_bindings(
+            __jet_root_lease,
+            __jet_bindings,
+            __jet_compiler_image.program.clone(),
+            __MACHINE_ABI_SHAPE__,
+            __SHARED_PAYLOAD_SHAPES__,
+            __jet_compiler_image.header.artifact,
+            __jet_receiver_type,
+            __jet_template,
+            vec![__jet_numeric_registration],
+            vec![__HELPER_ROOTS__],
+            ::jet_foundation::MIR::MirFunctionId(__TASK_CALLBACK_INVOKE_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_RELEASE_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_DROP_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__OWNED_CALLBACK_RESULT_DROP_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__CALLBACK_TRANSFER_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__CALLBACK_RELEASE_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_TAKE_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_CLEANUP_ROOT_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_CLEANUP_CLONE_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_DROP_VALUES_ID__),
+            ::jet_foundation::MIR::MirFunctionId(__SHARED_PAYLOAD_FINALIZE_ID__),
+            __jet_selected_tier,
+        )?;
+        __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_ADAPTER__ =
+            Ok(Box::new(__jet_native_adapter.clone()));
+        __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_NUMERIC__ =
+            Ok(__jet_bootstrap_native_numeric_wrapper_for_adapter(&__jet_native_adapter)?);
+        __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
+        let __jet_source_helper_context = __jet_runtime_config.as_ref()
+            .ok_or_else(|| "Source runtime config disappeared before helper execution".to_string())?;
+        let _activation = __jet_resource_session.activate();
+
+        let (__jet_result, __jet_actual_factory_tier) = match __jet_selected_tier {
+            crate::BootstrapFactoryTier::Aot => (
+                match __jet_image_entry {
+                    ::jet_foundation::MIR::MirFunctionId(__ENTRY_ID__) => __FACTORY_SYMBOL__(__jet_request),
+                    _ => return Err("restored compiler image selected an unknown generated factory entry".to_string()),
+                },
+                crate::BootstrapFactoryTier::Aot,
+            ),
+            crate::BootstrapFactoryTier::CraneliftJit
+            | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+                let __jet_physical = __JetBootstrapNativePhysicalBindings::new(&__jet_native_adapter);
+                let __jet_request_value = __jet_bootstrap_entry_request_to_runtime(
+                    __jet_request,
+                    __jet_compiler_image.program.clone(),
+                    &__jet_physical,
+                )?;
+                let (__jet_value, __jet_tier) = __jet_bootstrap_native_execute_source_helper(
+                    &__jet_native_adapter,
+                    &__jet_native_adapter.resources,
+                    &[__jet_image_entry],
+                    __jet_image_entry,
+                    vec![__jet_request_value],
+                    &__jet_compiler_image.source_program,
+                    __jet_source_helper_context,
+                )?;
+                let __jet_function = __jet_compiler_image.program.functions.iter()
+                    .find(|function| function.id == __jet_image_entry)
+                    .ok_or_else(|| "checked private factory root disappeared".to_string())?;
+                let __jet_result = __jet_bootstrap_entry_result_from_runtime(
+                    &__jet_function.return_type,
+                    __jet_value,
+                    &__jet_compiler_image.program,
+                    &__jet_physical,
+                ).map_err(|error| error.error)?;
+                let __jet_tier = match __jet_tier {
+                    ::jet_jit::SourceExecutionTier::Native => crate::BootstrapFactoryTier::CraneliftJit,
+                    ::jet_jit::SourceExecutionTier::Source => crate::BootstrapFactoryTier::SourceInterpreterDeopt,
+                };
+                (__jet_result, __jet_tier)
+            }
+        };
+        drop(_activation);
+        drop(__jet_source_helper_context);
+        drop(__jet_resource_session);
+        Ok(__JetBootstrapCompileLease {
+            result: __jet_result,
+            resources: __jet_resources.take()
+                .ok_or_else(|| "Source resource session was consumed before factory completion".to_string())?,
+            runtime_config: __jet_runtime_config.take()
+                .ok_or_else(|| "Source runtime config was consumed before factory completion".to_string())?,
+            selected_factory_tier: __jet_selected_tier,
+            actual_factory_tier: __jet_actual_factory_tier,
+        })
+    })();
+
+    match __jet_result {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            let cause = crate::BootstrapHostCodecError::InvalidMetadata(error);
+            let retirement = match __jet_resources.take() {
+                Some(resources) => resources.retire(),
+                None => Ok(()),
+            };
+            drop(__jet_runtime_config);
+            match retirement {
+                Ok(()) => Err(cause),
+                Err(retirement) => Err(crate::BootstrapHostCodecError::ResourceRetirement {
+                    cause: Box::new(cause),
+                    retirement,
+                }),
+            }
+        }
+    }
+}
+"#;
+    let generated = generated
+        .replace("__COMPILE_RESULT__", &entry.return_type)
+        .replace("__EVAL_CONFIG__", eval_config)
+        .replace("__COMPILE_REQUEST__", &entry.parameter_types[0])
+        .replace("__ENTRY_ID__", &entry_id)
+        .replace("__HELPER_ROOTS__", &helper_roots)
+        .replace("__TASK_CALLBACK_INVOKE_ID__", &task_callback_invoke)
+        .replace("__TASK_ROOT_RELEASE_ID__", &task_root_release)
+        .replace("__OWNED_ROOT_DROP_ID__", &owned_root_drop)
+        .replace("__OWNED_CALLBACK_RESULT_DROP_ID__", &owned_callback_result_drop)
+        .replace("__CALLBACK_TRANSFER_ID__", &callback_transfer)
+        .replace("__CALLBACK_RELEASE_ID__", &callback_release)
+        .replace("__TASK_ROOT_TAKE_ID__", &task_root_take)
+        .replace("__TASK_ROOT_CLEANUP_ROOT_ID__", &task_root_cleanup_root)
+        .replace("__OWNED_ROOT_CLEANUP_CLONE_ID__", &owned_root_cleanup_clone)
+        .replace("__OWNED_ROOT_DROP_VALUES_ID__", &owned_root_drop_values)
+        .replace("__SHARED_PAYLOAD_FINALIZE_ID__", &shared_payload_finalize)
+        .replace("__HOST_TYPE_SHAPE_ID__", &host_type_shape)
+        .replace("__HOST_FIELD_OWNER__", &host_field.owner.0.to_string())
+        .replace("__HOST_FIELD_ID__", &host_field.field.0.to_string())
+        .replace("__NUMERIC_FIELD_OWNER__", &numeric_field.owner.0.to_string())
+        .replace("__NUMERIC_FIELD_ID__", &numeric_field.field.0.to_string())
+        .replace("__NATIVE_BINDING_CALLABLE__", native_callable_binding)
+        .replace("__NATIVE_BINDING_IDENTITY__", native_binding_identity)
+        .replace("__NATIVE_CALLABLE_KEY__", native_callable_key)
+        .replace("__NATIVE_CALLABLE_TYPE__", native_callable_type)
+        .replace("__REQUEST_EVAL_CONFIG__", request_eval_config)
+        .replace("__REQUEST_HOST_ADAPTER__", request_host_adapter)
+        .replace("__REQUEST_NUMERIC__", request_numeric)
+        .replace("__RUNTIME_CONFIG__", runtime_config_symbol)
+        .replace("__FACTORY_SYMBOL__", &entry.symbol);
+    out.push_str(&generated);
+    Ok(())
+}
+
 
 fn emit_bootstrap_host_factory(
     out: &mut String,
@@ -1100,19 +3617,21 @@ fn emit_bootstrap_host_factory(
             "pub(crate) fn __jet_bootstrap_compile_from_host(\n",
             "    __jet_snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,\n",
             "    __jet_requested_target: {target_type},\n",
+            "    __jet_selected_tier: crate::BootstrapFactoryTier,\n",
+            "    __jet_execution: &crate::Codegen::MIRRust::MirRustExecutionConfig,\n",
             ") -> Result<crate::BootstrapJetCompileResult<{mir_program_type}, {eval_config_type}>, crate::BootstrapHostCodecError> {{\n",
             "    let __jet_request = __jet_bootstrap_request_from_host(__jet_snapshot, __jet_requested_target)?;\n",
-            "    let __jet_result = __jet_bootstrap_compile_with_native(__jet_request)?;\n",
+            "    let __jet_result = __jet_bootstrap_compile_with_native(__jet_request, __jet_selected_tier, __jet_execution)?;\n",
+            "    let mut __jet_runtime_config = Some(__jet_result.runtime_config);\n",
             "    let __jet_output = {{\n",
             "        let _activation = __jet_result.resources.activate();\n",
-            "        __jet_bootstrap_bindings_from_result(__jet_result.result, __jet_snapshot, __jet_result.runtime_config)\n",
-            "            .map_err(crate::BootstrapHostCodecError::InvalidMetadata)\n",
+            "        __jet_bootstrap_bindings_from_result(__jet_result.result, __jet_snapshot, &mut __jet_runtime_config, __jet_result.selected_factory_tier, __jet_result.actual_factory_tier)\n",
             "    }};\n",
             "    match __jet_output {{\n",
             "        Ok(mut output) => {{ output.resources = Some(__jet_result.resources); Ok(output) }},\n",
             "        Err(error) => match __jet_result.resources.retire() {{\n",
             "            Ok(()) => Err(error),\n",
-            "            Err(retirement) => Err(crate::BootstrapHostCodecError::InvalidMetadata(format!(\"{{error:?}}; Source resource retirement failed: {{retirement}}\"))),\n",
+            "            Err(retirement) => Err(crate::BootstrapHostCodecError::ResourceRetirement {{ cause: Box::new(error), retirement }}),\n",
             "        }},\n",
             "    }}\n",
             "}}\n",
@@ -1353,7 +3872,9 @@ fn emit_bootstrap_manifest_adapter(
             "pub(crate) fn __jet_bootstrap_bindings_from_result(\n",
             "    {value}: {result_type},\n",
             "    snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,\n",
-            "    runtime_config: {eval_config_type},\n",
+            "    runtime_config: &mut Option<{eval_config_type}>,\n",
+            "    selected_factory_tier: crate::BootstrapFactoryTier,\n",
+            "    actual_factory_tier: crate::BootstrapFactoryTier,\n",
             ") -> Result<crate::BootstrapJetCompileResult<{mir_program_type}, {eval_config_type}>, String> {{\n",
             "    let internal_problem = ({value}).{result_internal_problem}.as_ref().ok().cloned();\n",
             "    let complete = ({value}).{result_complete};\n",
@@ -1381,15 +3902,15 @@ fn emit_bootstrap_manifest_adapter(
             "        command_record: artifacts.{web_command_record}.clone(),\n",
             "    }});\n",
             "    if internal_problem.is_some() || !complete {{\n",
-            "        return Ok(crate::BootstrapJetCompileResult {{ complete, emitted_source: None, bindings: None, source_program, runtime_config, mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    if runtime_artifact.is_some() {{\n",
             "        if mir.is_none() || entry_function.is_none() {{ return Err(\"complete Source runtime result has no typed MIR or entry function\".to_string()); }}\n",
-            "        return Ok(crate::BootstrapJetCompileResult {{ complete, emitted_source: None, bindings: None, source_program, runtime_config, mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    if web_artifact.is_some() || web_artifacts.is_some() {{\n",
             "        if web_artifact.is_none() || web_artifacts.is_none() || mir.is_none() || entry_function.is_none() {{ return Err(\"complete Web result has no exact artifact, artifacts, MIR, or entry function\".to_string()); }}\n",
-            "        return Ok(crate::BootstrapJetCompileResult {{ complete, emitted_source: None, bindings: None, source_program, runtime_config, mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    let manifest = ({value}).{result_manifest}.as_ref().ok().ok_or_else(|| \"complete bootstrap compiler result has no Rust emission manifest\".to_string())?;\n",
             "    let callables = manifest.{manifest_callables}.iter().map(|row| Ok((({row}).{callable_source_name}.clone(), crate::Codegen::MIRRust::MirRustCallableMetadata {{\n",
@@ -1452,7 +3973,7 @@ fn emit_bootstrap_manifest_adapter(
             "        return_type: ({row}).{trait_method_return_type}.clone(),\n",
             "    }})).collect::<Result<Vec<_>, String>>()?;\n",
             "    let bindings = {descriptor}::from_rows(callables, types, fields, variants, traits, trait_methods);\n",
-            "    Ok(crate::BootstrapJetCompileResult {{ complete: true, emitted_source: Some(source), bindings: Some(bindings), source_program, runtime_config, mir, entry_function, runtime_artifact, web_artifact: None, web_artifacts: None, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }})\n",
+            "    Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete: true, emitted_source: Some(source), bindings: Some(bindings), source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact: None, web_artifacts: None, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }})\n",
             "}}\n",
         ),
         value = "value",
@@ -1977,7 +4498,12 @@ fn emit_bootstrap_type_codec(
                      ok: Box::new(__jet_bootstrap_type_to_host(ok)?),
                      err: Box::new(__jet_bootstrap_type_to_host(err)?),
                  }},
-                 {fn_kind}(_) | {send_fn}(_, _, _) => return Err(\"function carriers are not native Prelude data\".to_string()),
+                 {fn_kind}(signature) => ::jet_foundation::MIR::MirTypeKind::Fn(__jet_bootstrap_mir_MirFunctionSignature_to_host(signature)?),
+                 {send_fn}(params, ret, conventions) => ::jet_foundation::MIR::MirTypeKind::SendFn {{
+                     params: params.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
+                     ret: ret.as_ref().ok().map(|ret| __jet_bootstrap_type_to_host(ret).map(Box::new)).transpose()?,
+                     conventions.iter().map(__jet_bootstrap_mir_MirAccess_to_host).collect::<Result<Vec<_>, _>>()?,
+                 }},
                  {apply}(name, args) => ::jet_foundation::MIR::MirTypeKind::Apply {{
                      name: ::jet_foundation::MIR::MirNominalRef {{
                          id: __jet_bootstrap_type_id_to_host(&name.{nominal_id})?,
@@ -2045,7 +4571,15 @@ fn emit_bootstrap_type_codec(
                  ::jet_foundation::MIR::MirTypeKind::Shared(inner) => {shared}(__jet_bootstrap_type_from_host(inner)?),
                  ::jet_foundation::MIR::MirTypeKind::Option(inner) => {option}(__jet_bootstrap_type_from_host(inner)?),
                  ::jet_foundation::MIR::MirTypeKind::Result {{ ok, err }} => {result}(__jet_bootstrap_type_from_host(ok)?, __jet_bootstrap_type_from_host(err)?),
-                 ::jet_foundation::MIR::MirTypeKind::Fn(_) | ::jet_foundation::MIR::MirTypeKind::SendFn {{ .. }} => return Err(\"function carriers are not native Prelude data\".to_string()),
+                 ::jet_foundation::MIR::MirTypeKind::Fn(signature) => {fn_kind}(__jet_bootstrap_mir_MirFunctionSignature_from_host(signature)?),
+                 ::jet_foundation::MIR::MirTypeKind::SendFn {{ params, ret, conventions }} => {send_fn}(
+                     params.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
+                     match ret.as_deref() {{
+                         Some(ret) => Ok(__jet_bootstrap_type_from_host(ret)?),
+                         None => Err(::jet_foundation::Outcome::JetAbsent),
+                     }},
+                     conventions.iter().map(__jet_bootstrap_mir_MirAccess_from_host).collect::<Result<Vec<_>, _>>()?,
+                 ),
                  ::jet_foundation::MIR::MirTypeKind::Apply {{ name, args }} => {apply}({mir_nominal_ref} {{
                      {nominal_id}: __jet_bootstrap_type_id_from_host(name.id)?,
                      {nominal_name}: name.name.clone(),
@@ -2069,7 +4603,10 @@ fn emit_bootstrap_type_codec(
              }};
              Ok({mir_type} {{
                  {type_kind}: kind,
-                 {type_identity}: value.identity.as_ref().map(__jet_bootstrap_type_id_from_host).transpose()?,
+                 {type_identity}: match value.identity.as_ref() {{
+                     Some(identity) => Ok(__jet_bootstrap_type_id_from_host(*identity)?),
+                     None => Err(::jet_foundation::Outcome::JetAbsent),
+                 }},
                  {type_layout}: __jet_bootstrap_layout_from_host(&value.layout)?,
              }})
          }}"
@@ -2187,6 +4724,11 @@ fn emit_bootstrap_value_codec(
         "Closure",
         "Address",
         "SharedCell",
+        "Shared",
+        "SharedWeak",
+        "SharedGuard",
+        "SharedSnapshot",
+        "Condition",
         "RangeCursor",
         "ListCursor",
         "ForeignHandle",
@@ -2459,7 +5001,7 @@ fn emit_bootstrap_value_codec(
                  {eval_aggregate}(aggregate) => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
                  {eval_runtime_failure}(_, _) => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
                  {eval_host_cursor}(_, _, _, _) => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
-                 {eval_closure}(_, _) | {eval_address}(_, _, _) | {eval_shared}(_, _) | {eval_range}(_, _, _, _, _) | {eval_list_cursor}(_, _, _) => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
+                {eval_closure}(_, _) | {eval_address}(_, _, _) | {eval_shared}(_, _) | {eval_shared_owner}(_) | {eval_shared_weak}(_) | {eval_shared_guard}(_) | {eval_shared_snapshot}(_) | {eval_condition}(_) | {eval_range}(_, _, _, _, _) | {eval_list_cursor}(_, _, _) => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
              }}
          }}
          fn __jet_bootstrap_eval_to_host(value: &{eval}) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
@@ -2492,6 +5034,11 @@ fn emit_bootstrap_value_codec(
         eval_closure = eval_variant("Closure"),
         eval_address = eval_variant("Address"),
         eval_shared = eval_variant("SharedCell"),
+        eval_shared_owner = eval_variant("Shared"),
+        eval_shared_weak = eval_variant("SharedWeak"),
+        eval_shared_guard = eval_variant("SharedGuard"),
+        eval_shared_snapshot = eval_variant("SharedSnapshot"),
+        eval_condition = eval_variant("Condition"),
         eval_range = eval_variant("RangeCursor"),
         eval_list_cursor = eval_variant("ListCursor"),
     )
@@ -2777,6 +5324,8 @@ fn emit_bootstrap_source_resource_bridge(
     let host_value = symbols.type_symbol("JetEvalHostValue")?;
     let host_result_outcome = symbols.field_symbol("JetEvalHostResult", "outcome")?;
     let host_result_transfers = symbols.field_symbol("JetEvalHostResult", "transfers")?;
+    let host_result_writebacks = symbols.field_symbol("JetEvalHostResult", "writebacks")?;
+    let host_writeback = symbols.type_symbol("JetEvalHostWriteback")?;
     let transfer_argument = symbols.field_symbol("JetEvalHostTransfer", "argument")?;
     let transfer_path = symbols.field_symbol("JetEvalHostTransfer", "path")?;
     let transfer_token = symbols.field_symbol("JetEvalHostTransfer", "token")?;
@@ -2786,11 +5335,6 @@ fn emit_bootstrap_source_resource_bridge(
     let host_core_owner = symbols.type_symbol("JetEvalHostCoreOwner")?;
     let host_core_owner_fact = symbols.field_symbol("JetEvalHostCoreOwner", "fact")?;
     let host_core_owner_ty = symbols.field_symbol("JetEvalHostCoreOwner", "ty")?;
-    let eval_machine = symbols.type_symbol("JetEvalMachine")?;
-    let machine_program = symbols.field_symbol("JetEvalMachine", "program")?;
-    let program_core_owners = symbols.field_symbol("MirProgram", "core_owners")?;
-    let core_owner_id = symbols.field_symbol("MirCoreOwner", "id")?;
-    let type_id_value = symbols.field_symbol("MirTypeId", "value")?;
     let source_handle = symbols.type_symbol("MirHandleId")?;
     let handle_value = symbols.field_symbol("MirHandleId", "value")?;
     let row_module = symbols.field_symbol("MirPreludeCall", "module_name")?;
@@ -2821,17 +5365,22 @@ fn emit_bootstrap_source_resource_bridge(
 
     writeln!(
         out,
-r#"fn __jet_bootstrap_host_reply_with_transfers(
+r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              outcome: {host_outcome},
              transfers: Vec<{host_transfer}>,
+             writebacks: Vec<{host_writeback}>,
          ) -> {host_result} {{
              {host_result} {{
                  {host_result_transfers}: transfers,
+                 {host_result_writebacks}: writebacks,
                  {host_result_outcome}: outcome,
              }}
          }}
+         fn __jet_bootstrap_host_reply_with_transfers(outcome: {host_outcome}, transfers: Vec<{host_transfer}>) -> {host_result} {{
+             __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, transfers, Vec::new())
+         }}
          fn __jet_bootstrap_host_reply(outcome: {host_outcome}) -> {host_result} {{
-             __jet_bootstrap_host_reply_with_transfers(outcome, Vec::new())
+             __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, Vec::new(), Vec::new())
          }}
          fn __jet_bootstrap_shape_owner(shape: &{shape}) -> Result<{host_owner}, String> {{
              let mut node_index = __jet_bootstrap_source_index(&shape.{shape_root}, "host resource type root")?;
@@ -2847,10 +5396,16 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
              }}
              Err("host resource type shape cycles through result wrappers".to_string())
          }}
-        fn __jet_bootstrap_core_owner_from_shape(
-            machine: &{eval_machine},
+        fn __jet_bootstrap_core_owner_from_shape<T, P>(
+            machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
             shape: &{shape},
-        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String> {{
+            compiler_program: &::jet_foundation::MIR::MirProgram,
+            physical: &P,
+        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String>
+        where
+            T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
+            P: crate::BootstrapEntryPhysicalBindings,
+        {{
             let owner = __jet_bootstrap_shape_owner(shape)?;
             let core_owner = match &owner {{
                 {host_owner_core}(core_owner) => core_owner,
@@ -2864,21 +5419,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
             if name.id != fact.nominal_id || owner_type.identity.is_some_and(|identity| identity != fact.nominal_id) {{
                 return Err("checked Core resource type disagrees with its registered nominal identity".to_string());
             }}
-            let mut registered = false;
-            for row in machine.{machine_program}.{program_core_owners}.iter() {{
-                let row_id = __jet_bootstrap_source_u64(&row.{core_owner_id}.{type_id_value}, "Core owner registration ID")?;
-                if row_id == fact.id.0 {{
-                    if registered {{
-                        return Err("checked Core owner registration ID is not unique".to_string());
-                    }}
-                    let row_fact = __jet_bootstrap_mir_MirCoreOwner_to_host(row)?;
-                    if row_fact != fact {{
-                        return Err("checked Core owner fact disagrees with its registered MIR row".to_string());
-                    }}
-                    registered = true;
-                }}
-            }}
-            if !registered {{
+            if !crate::__jet_bootstrap_entry_verify_core_owner(machine, &fact, compiler_program, physical)? {{
                 return Err("checked Core owner fact is absent from the active MIR program".to_string());
             }}
             let core_kind = ::jet_jit::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
@@ -2972,14 +5513,20 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
                  .map_err(|_| "Source resource capability is outside i64".to_string())?;
              Ok(({mir_handle}(handle), raw))
          }}
-         fn __jet_bootstrap_native_source_resource_call(
-             machine: &{eval_machine},
+         fn __jet_bootstrap_native_source_resource_call<T, P>(
+             machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
              row: &{row},
             args: &[{host_argument}],
              result_shape: Option<&{shape}>,
              arg_shapes: &[{shape}],
              span: {span},
-         ) -> Option<Result<{host_result}, ::jet_foundation::Outcome::JetAbsent>> {{
+             compiler_program: &::jet_foundation::MIR::MirProgram,
+             physical: &P,
+         ) -> Option<Result<{host_result}, ::jet_foundation::Outcome::JetAbsent>>
+         where
+             T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
+             P: crate::BootstrapEntryPhysicalBindings,
+         {{
              let module = row.{row_module}.as_str();
              let member = row.{row_member}.as_str();
              let symbol = __jet_bootstrap_symbol_name(&row.{row_symbol});
@@ -2994,11 +5541,11 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
                  let Some(source_shape) = arg_shapes.first() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop initializer has no checked source type shape".to_string())));
                  }};
-                let (typed_handle, _, _, _, core_kind) = match __jet_bootstrap_core_owner_from_shape(machine, source_shape) {{
+                let (checked_handle, _, _, _, core_kind) = match __jet_bootstrap_core_owner_from_shape(machine, source_shape, compiler_program, physical) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
-                if typed_handle != source_handle {{
+                if checked_handle != source_handle {{
                     return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source handle disagrees with its checked Core owner shape".to_string())));
                 }}
                  let step_args = match __jet_bootstrap_eval_to_host(&args[1].{host_argument_value}) {{
@@ -3115,7 +5662,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
                  let Some(result_shape) = result_shape else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no checked result type shape".to_string())));
                  }};
-                let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape) {{
+                let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
@@ -3141,7 +5688,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
                  let Some(result_shape) = result_shape else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no checked result type shape".to_string())));
                  }};
-                let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape) {{
+                let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
@@ -3153,7 +5700,8 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
              }}
              None
          }}
-         fn __jet_bootstrap_native_handle_call(
+         fn __jet_bootstrap_native_handle_call<T>(
+             _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
              operation: String,
              handle: {source_handle},
              raw: jet_foundation::Numeric::JetInt,
@@ -3174,7 +5722,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
                  return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string()));
              }};
              match arena.release_resource(handle, raw) {{
-                Ok(()) => Ok(__jet_bootstrap_host_reply({result_value}({host_data}({ct_unit}))),
+                Ok(()) => Ok(__jet_bootstrap_host_reply({result_value}({host_data}({ct_unit})))),
                  Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
              }}
          }}"#,
@@ -3197,11 +5745,6 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
         host_owner_core = host_owner_core,
         host_core_owner_fact = host_core_owner_fact,
         host_core_owner_ty = host_core_owner_ty,
-        eval_machine = eval_machine,
-        machine_program = machine_program,
-        program_core_owners = program_core_owners,
-        core_owner_id = core_owner_id,
-        type_id_value = type_id_value,
         result_value = result_value,
         result_runtime_failure = result_runtime_failure,
         eval_foreign_handle = eval_foreign_handle,
@@ -3222,6 +5765,8 @@ r#"fn __jet_bootstrap_host_reply_with_transfers(
         host_transfer = host_transfer,
         host_result_outcome = host_result_outcome,
         host_result_transfers = host_result_transfers,
+        host_result_writebacks = host_result_writebacks,
+        host_writeback = host_writeback,
         transfer_argument = transfer_argument,
         transfer_path = transfer_path,
         transfer_token = transfer_token,
@@ -3238,26 +5783,12 @@ fn emit_bootstrap_callback(
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
     let row = symbols.type_symbol("MirPreludeCall")?;
-    let symbol = symbols.type_symbol("MirSymbol")?;
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-    let eval = symbols.type_symbol("JetEvalRuntimeValue")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
-    let eval_machine = symbols.type_symbol("JetEvalMachine")?;
     let host_result = symbols.type_symbol("JetEvalHostResult")?;
     let host_outcome = symbols.type_symbol("JetEvalHostOutcome")?;
     let span = symbols.type_symbol("Span")?;
-    let row_module = symbols.field_symbol("MirPreludeCall", "module_name")?;
-    let row_member = symbols.field_symbol("MirPreludeCall", "member")?;
-    let row_family = symbols.field_symbol("MirPreludeCall", "family")?;
-    let row_abi = symbols.field_symbol("MirPreludeCall", "abi")?;
-    let row_fallibility = symbols.field_symbol("MirPreludeCall", "fallibility")?;
-    let row_effect_name = symbols.field_symbol("MirPreludeCall", "effect_name")?;
-    let sig_arity = symbols.field_symbol("MirCallSignature", "arity")?;
-    let sig_max_arity = symbols.field_symbol("MirCallSignature", "max_arity")?;
-    let sig_borrow_mask = symbols.field_symbol("MirCallSignature", "borrow_mask")?;
-    let symbol_prelude = symbols.variant_path("MirSymbol", "Prelude")?;
-    let symbol_runtime = symbols.variant_path("MirSymbol", "Runtime")?;
     let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
     let result_effect = symbols.variant_path("JetEvalHostOutcome", "Effect")?;
     let result_control = symbols.variant_path("JetEvalHostOutcome", "Control")?;
@@ -3266,18 +5797,11 @@ fn emit_bootstrap_callback(
     let internal_problem_span = symbols.field_symbol("JetEvalInternalProblem", "span")?;
     let internal_problem_message = symbols.field_symbol("JetEvalInternalProblem", "message")?;
     let result_internal_problem = symbols.variant_path("JetEvalHostOutcome", "InternalProblem")?;
-    let host_result_outcome = symbols.field_symbol("JetEvalHostResult", "outcome")?;
-    let host_result_transfers = symbols.field_symbol("JetEvalHostResult", "transfers")?;
     let error_source = symbols.variant_path("JetEvalErrorKind", "Source")?;
 
     writeln!(
         out,
-        "fn __jet_bootstrap_symbol_name(value: &{symbol}) -> &str {{
-             match value {{
-                 {symbol_prelude}(name) | {symbol_runtime}(name) => name.as_str(),
-             }}
-         }}
-        fn __jet_bootstrap_host_failure_outcome(span: {span}, detail: String) -> {host_outcome} {{
+        "fn __jet_bootstrap_host_failure_outcome(span: {span}, detail: String) -> {host_outcome} {{
             {result_internal_problem}({internal_problem} {{
                 {internal_problem_span}: Ok(span),
                 {internal_problem_message}: detail,
@@ -3286,16 +5810,22 @@ fn emit_bootstrap_callback(
         fn __jet_bootstrap_host_failure(span: {span}, detail: String) -> {host_result} {{
             __jet_bootstrap_host_reply(__jet_bootstrap_host_failure_outcome(span, detail))
         }}
-         fn __jet_bootstrap_native_host_call(
-             machine: &{eval_machine},
+         fn __jet_bootstrap_native_host_call<T, P>(
+             machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
              row: {row},
              args: Vec<{host_argument}>,
              result_shape: ::std::result::Result<{shape}, ::jet_foundation::Outcome::JetAbsent>,
              arg_shapes: Vec<{shape}>,
              span: {span},
-         ) -> ::std::result::Result<{host_result}, ::jet_foundation::Outcome::JetAbsent> {{
+             compiler_program: &::jet_foundation::MIR::MirProgram,
+             physical: &P,
+         ) -> ::std::result::Result<{host_result}, ::jet_foundation::Outcome::JetAbsent>
+         where
+             T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
+             P: crate::BootstrapEntryPhysicalBindings,
+         {{
              let result_shape = result_shape.as_ref().ok();
-             if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, &row, &args, result_shape, &arg_shapes, span) {{
+             if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, &row, &args, result_shape, &arg_shapes, span, compiler_program, physical) {{
                  return outcome;
              }}
              let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{
@@ -3306,29 +5836,16 @@ fn emit_bootstrap_callback(
                  Ok(value) => value,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
-             let arity = match ({row}).{row_signature}.{sig_arity}.to_string_rep().parse::<usize>() {{
-                 Ok(value) => value,
-                 Err(_) => return Ok(__jet_bootstrap_host_failure(span, \"Prelude arity is not a usize\".to_string())),
-             }};
-             let max_arity = match ({row}).{row_signature}.{sig_max_arity}.to_string_rep().parse::<usize>() {{
-                 Ok(value) => value,
-                 Err(_) => return Ok(__jet_bootstrap_host_failure(span, \"Prelude maximum arity is not a usize\".to_string())),
-             }};
              let native_span = match __jet_bootstrap_span_to_host(&span) {{
                  Ok(value) => value,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
-             let outcome = crate::Codegen::NativePreludeBridge::ambient_call_route(
-                 ({row}).{row_module}.as_str(),
-                 ({row}).{row_member}.as_str(),
-                 __jet_bootstrap_symbol_name(&({row}).{row_symbol}),
-                 arity,
-                ({row}).{row_family}.to_string_rep().as_str(),
-                ({row}).{row_abi}.to_string_rep().as_str(),
-                ({row}).{row_fallibility}.to_string_rep().as_str(),
-                ({row}).{row_effect_name}.as_ref().ok().map(|effect| effect.as_str()),
-                 max_arity,
-                 &({row}).{row_signature}.{sig_borrow_mask},
+             let native_row = match __jet_bootstrap_mir_MirPreludeCall_to_host(&row) {{
+                 Ok(row) => row,
+                 Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
+             }};
+             let outcome = crate::Codegen::NativePreludeBridge::ambient_call(
+                 &native_row,
                  native_args,
                  native_result_ty,
                  native_span,
@@ -3355,7 +5872,6 @@ fn emit_bootstrap_callback(
          }}"
         ,
         host_outcome = host_outcome,
-        value = "value",
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     Ok(())
@@ -3375,10 +5891,10 @@ fn emit_bootstrap_foreign_callback(
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
     let host_result = symbols.type_symbol("JetEvalHostResult")?;
-    let writeback = symbols.type_symbol("JetEvalForeignWriteback")?;
+    let host_writeback = symbols.type_symbol("JetEvalHostWriteback")?;
+    let host_writeback_argument = symbols.field_symbol("JetEvalHostWriteback", "argument")?;
+    let host_writeback_value = symbols.field_symbol("JetEvalHostWriteback", "value")?;
     let span = symbols.type_symbol("Span")?;
-    let writeback_argument = symbols.field_symbol("JetEvalForeignWriteback", "argument")?;
-    let writeback_value = symbols.field_symbol("JetEvalForeignWriteback", "value")?;
     let param_index = symbols.field_symbol("MirParam", "index")?;
     let param_name = symbols.field_symbol("MirParam", "name")?;
     let param_span = symbols.field_symbol("MirParam", "span")?;
@@ -3461,7 +5977,7 @@ fn emit_bootstrap_foreign_callback(
     let access_read = symbols.variant_path("MirAccess", "Read")?;
     let access_write = symbols.variant_path("MirAccess", "Write")?;
     let access_move = symbols.variant_path("MirAccess", "Move")?;
-    let result_foreign = symbols.variant_path("JetEvalHostOutcome", "Foreign")?;
+    let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
     let result_failure = symbols.variant_path("JetEvalHostOutcome", "Failure")?;
     let error_source = symbols.variant_path("JetEvalErrorKind", "Source")?;
 
@@ -3591,7 +6107,8 @@ fn emit_bootstrap_foreign_callback(
                  undo_function,
              }})
          }}
-         fn __jet_bootstrap_native_foreign_call(
+         fn __jet_bootstrap_native_foreign_call<T>(
+             _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
              row: {foreign},
              args: Vec<{host_argument}>,
              span: {span},
@@ -3621,15 +6138,19 @@ fn emit_bootstrap_foreign_callback(
                      }};
                      let writebacks = match result.writebacks.iter().map(|writeback| {{
                          let argument = i64::try_from(writeback.parameter).map_err(|_| \"foreign writeback index exceeds Jet Int\".to_string())?;
-                         Ok({writeback} {{
-                             {writeback_argument}: jet_foundation::Numeric::JetInt::from_i64(argument),
-                             {writeback_value}: __jet_bootstrap_host_value_from_runtime(&writeback.value)?,
+                         Ok({host_writeback} {{
+                             {host_writeback_argument}: jet_foundation::Numeric::JetInt::from_i64(argument),
+                             {host_writeback_value}: __jet_bootstrap_host_value_from_runtime(&writeback.value)?,
                          }})
                      }}).collect::<Result<Vec<_>, String>>() {{
                          Ok(value) => value,
                          Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
                      }};
-                    Ok(__jet_bootstrap_host_reply({result_foreign}(value, writebacks)))
+                     Ok(__jet_bootstrap_host_reply_with_transfers_and_writebacks(
+                         {result_value}(value),
+                         Vec::new(),
+                         writebacks,
+                     ))
                  }}
              }}
          }}"

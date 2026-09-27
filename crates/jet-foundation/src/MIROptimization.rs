@@ -4944,6 +4944,9 @@ fn expand_inline_always(program: &mut MirProgram) {
                     {
                         continue;
                     }
+                    if inline_has_return_drop(callee) {
+                        continue;
+                    }
                     site = Some((block_index, instruction_index, instruction.clone(), target_id));
                     break;
                 }
@@ -4985,6 +4988,13 @@ fn expand_inline_always(program: &mut MirProgram) {
             break;
         }
     }
+}
+
+fn inline_has_return_drop(callee: &MirFunction) -> bool {
+    callee
+        .drops
+        .iter()
+        .any(|drop| matches!(&drop.edge, MirDropEdge::Return))
 }
 
 fn inline_target_id(operation: &MirOperation) -> Option<MirFunctionId> {
@@ -5056,6 +5066,7 @@ fn inline_call(
         return false;
     };
     if inline_target_id(&call_instruction.operation) != Some(callee.id)
+        || inline_has_return_drop(callee)
         || callee.capture_params.len() != 0
         || (caller.generator.is_none() && callee.generator.is_some())
         || block_index >= caller.blocks.len()
@@ -15692,5 +15703,229 @@ mod ownership_guard_tests {
         function.places.push(alias);
         function.blocks[0].instructions.extend(write_flag(16, MirPlaceId(2), true));
         rejects_second_move(&function);
+    }
+    fn inline_guard_function(
+        id: u64,
+        name: &str,
+        inline_always: bool,
+        instructions: Vec<MirInstruction>,
+    ) -> MirFunction {
+        let span = Span::new(0, 100);
+        MirFunction {
+            id: MirFunctionId(id),
+            module_id: crate::MIR::MirModuleId(0),
+            source_file: crate::MIR::MirSourceFileId(stable_id(
+                "mir-source-file",
+                "inline-drop-guard.jet",
+            )),
+            key: format!("test::{name}"),
+            module: "test".into(),
+            name: name.into(),
+            span,
+            kind: crate::MIR::MirFunctionKind::Jet,
+            form: crate::MIR::MirFunctionForm::TopLevel,
+            visibility: crate::MIR::MirVisibility::Private,
+            target_applicability: Default::default(),
+            web_bucket: None,
+            web_marker: None,
+            generic_params: Vec::new(),
+            capture_params: Vec::new(),
+            params: Vec::new(),
+            declared_return: None,
+            return_type: MirType::from_kind(MirTypeKind::Tuple(Vec::new())),
+            failure: MirFailureCarrier::Infallible,
+            effects: Default::default(),
+            captures: None,
+            generator: None,
+            optimization: Default::default(),
+            is_unsafe: false,
+            unsafe_gate: None,
+            is_pure: false,
+            memo_bound: None,
+            is_reactive: false,
+            reactive_upgrades: Vec::new(),
+            is_inline: false,
+            is_inline_always: inline_always,
+            is_scalar: false,
+            kernel_proof: None,
+            gc_return: false,
+            return_view_provenance: None,
+            web_param_reconstructions: Vec::new(),
+            blocks: vec![block(
+                0,
+                instructions,
+                MirTerminator::Return { value: None },
+            )],
+            entry: MirBlockId(0),
+            locals: Vec::new(),
+            values: Vec::new(),
+            places: Vec::new(),
+            scopes: Vec::new(),
+            drops: Vec::new(),
+            foreign_language: None,
+        }
+    }
+
+    fn inline_return_drop_callee() -> MirFunction {
+        let mut function = inline_guard_function(
+            2,
+            "inline_return_drop_callee",
+            true,
+            vec![
+                instruction(
+                    1,
+                    MirOperation::Constant(MirConstant::String("owned".into())),
+                    Some(MirTypeKind::String),
+                ),
+                instruction(
+                    2,
+                    MirOperation::WritePlace {
+                        place: MirPlaceId(3),
+                        value: MirValueId(1),
+                    },
+                    None,
+                ),
+            ],
+        );
+        let span = Span::new(1, 2);
+        let ty = MirType::from_kind(MirTypeKind::String);
+        function.locals.push(MirLocal {
+            id: MirLocalId(3),
+            name: "owned".into(),
+            span,
+            ty: ty.clone(),
+            place: MirPlaceId(3),
+            mutable: true,
+            ownership: MirOwnership::Owned,
+            comptime: false,
+            uninit: false,
+            arena_view: false,
+            string_view: false,
+            gc_root: false,
+        });
+        function.places.extend([
+            MirPlace {
+                id: MirPlaceId(3),
+                span,
+                ty: ty.clone(),
+                base: MirPlaceBase::Local(MirLocalId(3)),
+                projections: Vec::new(),
+                access: MirAccess::Write,
+                persist_key: None,
+            },
+            MirPlace {
+                id: MirPlaceId(4),
+                span,
+                ty: ty.clone(),
+                base: MirPlaceBase::Local(MirLocalId(3)),
+                projections: Vec::new(),
+                access: MirAccess::Move,
+                persist_key: None,
+            },
+        ]);
+        function
+            .values
+            .push((MirValueId(1), ty, span, MirOwnership::Owned));
+        function.drops.push(MirDropAction {
+            place: MirPlaceId(4),
+            edge: MirDropEdge::Return,
+            span,
+        });
+        function
+    }
+
+    #[test]
+    fn inline_always_keeps_return_drop_facts_callee_scoped() {
+        let bad_callee = inline_return_drop_callee();
+        let bad_call = instruction(
+            20,
+            MirOperation::Call {
+                callee: MirCallee::User(bad_callee.id),
+                args: Vec::new(),
+                type_args: Vec::new(),
+            },
+            None,
+        );
+        let mut direct_caller =
+            inline_guard_function(10, "direct_caller", false, vec![bad_call.clone()]);
+        assert!(!inline_call(
+            &mut direct_caller,
+            &bad_callee,
+            0,
+            0,
+            &bad_call,
+        ));
+        assert_eq!(
+            inline_target_id(&direct_caller.blocks[0].instructions[0].operation),
+            Some(bad_callee.id),
+        );
+        assert!(direct_caller.drops.is_empty());
+
+        let good_callee = inline_guard_function(3, "inline_good", true, Vec::new());
+        let good_call = instruction(
+            21,
+            MirOperation::Call {
+                callee: MirCallee::User(good_callee.id),
+                args: Vec::new(),
+                type_args: Vec::new(),
+            },
+            None,
+        );
+        let caller =
+            inline_guard_function(1, "candidate_caller", false, vec![bad_call, good_call]);
+        let mut program = MirProgram {
+            cffi: crate::MIR::MirCffiFacts::default(),
+            schema_version: crate::MIR::MIR_SCHEMA_VERSION,
+            package_identity: "inline-drop-guard".into(),
+            facts: crate::MIR::MirPackageFacts::default(),
+            names: crate::MIR::MirNameFacts::default(),
+            modules: Vec::new(),
+            imports: Vec::new(),
+            types: Vec::new(),
+            traits: Vec::new(),
+            core_owners: Vec::new(),
+            impls: Vec::new(),
+            constants: Vec::new(),
+            fields: Vec::new(),
+            source_files: Vec::new(),
+            functions: vec![caller, bad_callee, good_callee],
+            foreign: Vec::new(),
+            links: Vec::new(),
+            callbacks: Vec::new(),
+            handles: Vec::new(),
+            jobs: Vec::new(),
+            tests: Vec::new(),
+            harnesses: Vec::new(),
+            artifacts: Vec::new(),
+            core_calls: Vec::new(),
+            prelude_calls: Vec::new(),
+            type_instances: Vec::new(),
+            codec_migrations: std::collections::HashMap::new(),
+            unreachable: Vec::new(),
+        };
+        expand_inline_always(&mut program);
+
+        let caller = program
+            .functions
+            .iter()
+            .find(|function| function.id == MirFunctionId(1))
+            .unwrap();
+        let remaining_targets = caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| inline_target_id(&instruction.operation))
+            .collect::<Vec<_>>();
+        assert_eq!(remaining_targets, vec![MirFunctionId(2)]);
+        assert!(caller.drops.is_empty());
+        let callee = program
+            .functions
+            .iter()
+            .find(|function| function.id == MirFunctionId(2))
+            .unwrap();
+        assert!(callee
+            .drops
+            .iter()
+            .any(|drop| matches!(&drop.edge, MirDropEdge::Return)));
     }
 }

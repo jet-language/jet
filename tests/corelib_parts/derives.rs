@@ -185,14 +185,14 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) DataTree -> {
+    fn encode(self) -> DataTree {
         m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ![FieldError] -> {
+    fn decode(tree: DataTree) -> Email ![FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
@@ -240,10 +240,10 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
+    fn encode(self) -> DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) HandEmail ![FieldError] -> {
+    fn decode(tree: DataTree) -> HandEmail ![FieldError] {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
@@ -294,8 +294,8 @@ use core.encoding.json as json
 #Codable
 struct Boxed<T> { value: T }
 
-fn generic_encode<T: Encode>(value: T) String -> json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) T ![FieldError] -> json.decode<T>(wire)
+fn generic_encode<T: Encode>(value: T) -> String -> json.to_string(value)
+fn generic_decode<T: Decode>(wire: String) -> T ![FieldError] -> json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
@@ -333,7 +333,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ![FieldError] -> {
+    fn decode(tree: DataTree) -> Email ![FieldError] {
         value := tree.field("address") ?? DataTree.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
@@ -510,12 +510,12 @@ struct Inner { note: ?String }
 struct Envelope {
     inner: Inner
 
-    fn borrowed(self) String -> {
+    fn borrowed(self) -> String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
 
-    fn owned(^self) String -> {
+    fn owned(^self) -> String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
@@ -745,13 +745,13 @@ fn user_derive_orphan_rule_allows_either_local_side() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 derive T.RemoteLabel {
-    fn remote_label(self) String -> "remote:{T.@name}"
+    fn remote_label(self) -> String -> "remote:{T.@name}"
 }
 
 #LocalLabel
 pub struct RemoteType { pub value: Int }
 
-pub fn remote_type_label() String -> {
+pub fn remote_type_label() -> String {
     value := RemoteType{ value: 2 }
     return value.local_label()
 }
@@ -760,7 +760,7 @@ pub fn remote_type_label() String -> {
 use labels
 
 derive T.LocalLabel {
-    fn local_label(self) String -> "local:{T.@name}"
+    fn local_label(self) -> String -> "local:{T.@name}"
 }
 
 #RemoteLabel
@@ -807,7 +807,7 @@ derive T.LayoutFacts {
     selected_offset :: selected.offset
     reflected_offset :: reflected.fields[0].offset
     name :: T.reflect().name
-    fn layout_facts(self) String -> "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
+    fn layout_facts(self) -> String -> "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
 }
 
 #LayoutFacts
@@ -898,8 +898,8 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) @param -> ~self.value
-    fn type_name(self) String -> T.@name
+    fn get_value(self) -> @param -> ~self.value
+    fn type_name(self) -> String -> T.@name
 }
 
 #TypeName
@@ -953,11 +953,11 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) fn(Int) Int -> ~self.callback
+    fn duplicate(self) -> fn(Int) -> Int -> ~self.callback
 }
 
 #CopyCallback
-struct Handler { callback: fn(Int) Int }
+struct Handler { callback: fn(Int) -> Int }
 
 fn run() { print(0) }
 "#;
@@ -986,7 +986,7 @@ marker AddFields(@sites: [.Type]) {
     @loop field in target.@fields {
         method :: "field_{field.@name}"
         impl @type_name {
-            fn @method(self) String -> field.@name
+            fn @method(self) -> String -> field.@name
         }
     }
 }
@@ -1000,7 +1000,7 @@ struct Person { first: String  last: String }
 
 @loop T in [Person] {
     impl T {
-        fn generated(self) String -> "generated"
+        fn generated(self) -> String -> "generated"
     }
 }
 
@@ -1098,11 +1098,11 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
-fn pick() Int -> {
+fn pick() -> Int {
     return 0
 }
 
-fn encoded(e: Email, i: Int) String -> {
+fn encoded(e: Email, i: Int) -> String {
     shallow := DataTree.Text(~e.addr)
     nested := DataTree.Text(~e.nested.text)
     indexed := DataTree.Text(~e.items[0].text)
@@ -1113,7 +1113,7 @@ fn encoded(e: Email, i: Int) String -> {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) DataTree -> {
+fn slice_data(xs: [DataTree]) -> DataTree {
     return DataTree.Array(xs[0..1])
 }
 

@@ -8,19 +8,19 @@
 //    accepted must never establish generated success.
 // 3. `bad_post`: an accepted input whose `#Post` fails is failure evidence.
 
-#[Pre(n < 10, "n must stay below ten")] fn strict(n: Int) Int -> {
+#Pre(n < 10, "n must stay below ten") fn strict(n: Int) -> Int {
     return n + 1
 }
 
-#[Pre(n > -100, "n must exceed negative one hundred")] fn outer(n: Int) Int -> {
+#Pre(n > -100, "n must exceed negative one hundred") fn outer(n: Int) -> Int {
     return strict(n)
 }
 
-#[Pre(n < 0 && n > 0, "no input can satisfy this")] fn impossible(n: Int) Int -> {
+#Pre(n < 0 && n > 0, "no input can satisfy this") fn impossible(n: Int) -> Int {
     return n
 }
 
-#[Pre(n > 0, "n must be positive"), Post(result < 0, "result must be negative")] fn bad_post(n: Int) Int -> {
+#[Pre(n > 0, "n must be positive"), Post(result < 0, "result must be negative")] fn bad_post(n: Int) -> Int {
     return n
 }
 

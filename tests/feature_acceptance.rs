@@ -582,23 +582,23 @@ fn static_guarantees_shared_engine() {
 Die :: distinct Int(1..6)
 
 #[Pre(n >= 0, "n non-negative"), Post(result >= 0, "result non-negative")]
-fn absish(n: Int) Int -> {
+fn absish(n: Int) -> Int {
     return n
 }
 
-#Scrub(Input) fn clean(raw: #Input String) String -> {
+#Scrub(Input) fn clean(raw: #Input String) -> String {
     return raw
 }
 
-#Replayable fn add(a: Int, b: Int) Int -> {
+#Replayable fn add(a: Int, b: Int) -> Int {
     return a + b
 }
 
-fn stamp(path: String) String -[FS]> {
+fn stamp(path: String) -[FS]> String {
     return path
 }
 
-fn pick(faces: [String#6], roll: Die) String -> {
+fn pick(faces: [String#6], roll: Die) -> String {
     return faces[roll.raw() - 1]
 }
 

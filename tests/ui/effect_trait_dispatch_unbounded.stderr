@@ -1,8 +1,8 @@
 Error [E0743]: Dynamic call `Shape::area` has no effect bound
-  --> tests/ui/effect_trait_dispatch_unbounded.jet:5:39
+  --> tests/ui/effect_trait_dispatch_unbounded.jet:5:41
     |
-  5 | fn clean(shape: Shape) Int -[]> shape.area()
-    |                                       ^^^^
+  5 | fn clean(shape: Shape) -[]> Int { shape.area() }
+    |                                         ^^^^
  Why: A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound
  Fix: Declare an effect row on `Shape::area`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function
 More: jet-lang.dev/e/E0743

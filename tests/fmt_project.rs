@@ -677,17 +677,17 @@ fn simplify_mode_is_stable_across_a_project() {
         write(
             &dir,
             "examples/answer.jet",
-            "fn answer() Int -> {\n    return 42\n}\n",
+            "fn answer() -> Int {\n    return 42\n}\n",
         ),
         write(
             &dir,
             "tests/double.jet",
-            "fn double(value: Int) Int -> {\n    return value * 2\n}\n",
+            "fn double(value: Int) -> Int {\n    return value * 2\n}\n",
         ),
         write(
             &dir,
             "docs/spec/reference/sample.jet",
-            "fn label() String -> {\n    return \"sample\"\n}\n",
+            "fn label() -> String {\n    return \"sample\"\n}\n",
         ),
     ];
     let corpus = [
@@ -703,12 +703,12 @@ fn simplify_mode_is_stable_across_a_project() {
         .output()
         .unwrap();
     assert_eq!(first.status.code(), Some(0));
-    assert_eq!(read(&sources[0]), "fn answer() Int -> 42\n");
+    assert_eq!(read(&sources[0]), "fn answer() -> Int -> 42\n");
     assert_eq!(
         read(&sources[1]),
-        "fn double(value: Int) Int -> value * 2\n"
+        "fn double(value: Int) -> Int -> value * 2\n"
     );
-    assert_eq!(read(&sources[2]), "fn label() String -> \"sample\"\n");
+    assert_eq!(read(&sources[2]), "fn label() -> String -> \"sample\"\n");
 
     let before_second: Vec<Vec<u8>> = sources
         .iter()
@@ -738,7 +738,7 @@ fn map_type_spacing_is_project_stable() {
     let f = write(
         &dir,
         "main.jet",
-        "fn read(values: [String: Int]) [String: Int] -> {\n    return [\"key\": 1]\n}\n",
+        "fn read(values: [String: Int]) -> [String: Int] {\n    return [\"key\": 1]\n}\n",
     );
 
     let first = Command::new(jet())
@@ -750,7 +750,7 @@ fn map_type_spacing_is_project_stable() {
     assert_eq!(first.status.code(), Some(0));
     assert_eq!(
         read(&f),
-        "fn read(values: [String:Int]) [String:Int] -> { return [\"key\": 1] }\n"
+        "fn read(values: [String:Int]) -> [String:Int] { return [\"key\": 1] }\n"
     );
 
     let before = read(&f);
@@ -799,7 +799,7 @@ fn explicit_copy_format_matches_copy_audit() {
     // no longer name a function; `make` matches the canonical fixture in
     // `tests/fixtures/policy_copies_explicit/run.jet`.
     let source = "\
-fn make() String {
+fn make() -> String {
     owner := \"a@b\"
     domain :: owner.after(\"@\")
     return domain

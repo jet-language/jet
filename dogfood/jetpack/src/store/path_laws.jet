@@ -3,12 +3,12 @@ pub struct PathLawError {
     pub message: String
 }
 
-fn reserved_stem(name: String) String !PathLawError -> {
+fn reserved_stem(name: String) -> String !PathLawError {
     pieces :: name.split(".").to_list()
     return Ok(pieces.get(0) ?? name)
 }
 
-pub fn validate_component(name: String) Bool !PathLawError -> {
+pub fn validate_component(name: String) -> Bool !PathLawError {
     if name == "" -> return Err(PathLawError{message: "path component is empty"})
     if name == "." || name == ".." {
         return Err(PathLawError{message: "path component is traversal"})
@@ -30,7 +30,7 @@ pub fn validate_component(name: String) Bool !PathLawError -> {
     return Ok(true)
 }
 
-pub fn validate_relative_path(path: String) Bool !PathLawError -> {
+pub fn validate_relative_path(path: String) -> Bool !PathLawError {
     if path == "" -> return Ok(true)
     if path.starts_with("/") || path.ends_with("/") {
         return Err(PathLawError{message: "relative path is absolute or has an empty edge"})
@@ -45,7 +45,7 @@ pub fn validate_relative_path(path: String) Bool !PathLawError -> {
     return Ok(true)
 }
 
-pub fn reject_casefold_collisions(names: [String]) Bool !PathLawError -> {
+pub fn reject_casefold_collisions(names: [String]) -> Bool !PathLawError {
     seen := [String:String]{}
     loop name in names {
         validate_component(~name) ?? return Err(PathLawError{message: "directory contains an unsafe name"})

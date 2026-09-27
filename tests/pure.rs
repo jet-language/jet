@@ -40,7 +40,7 @@ fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
 #[test]
 fn pure_fn_compiles() {
     let src = r#"
-fn add(a: Int, b: Int) Int -[]> {
+fn add(a: Int, b: Int) -[]> Int {
     return a + b
 }
 fn run() {
@@ -55,7 +55,7 @@ fn run() {
 #[test]
 fn pure_fn_impure_call_is_e3401() {
     let src = r#"
-fn bad() Int -[]> {
+fn bad() -[]> Int {
     print("side effect")
     return 42
 }
@@ -80,7 +80,7 @@ fn run() {
 #[test]
 fn pure_fn_impure_gate_still_fires_e3401() {
     let src = r#"
-fn bad() Int -[]> {
+fn bad() -[]> Int {
     #Impure("side effect") {
         print("ambient")
     }
@@ -113,7 +113,7 @@ fn run() {
 #[test]
 fn pure_fn_comptime_block_is_excluded_from_runtime_check() {
     let src = r#"
-fn good() Int -[]> {
+fn good() -[]> Int {
     @ {
         print("build-time only")
     }
@@ -167,10 +167,10 @@ fn run() {
 #[test]
 fn pure_fn_calling_pure_fn_is_ok() {
     let src = r#"
-fn square(n: Int) Int -[]> {
+fn square(n: Int) -[]> Int {
     return n * n
 }
-fn cube(n: Int) Int -[]> {
+fn cube(n: Int) -[]> Int {
     return n * square(n)
 }
 fn run() {
@@ -189,7 +189,7 @@ fn run() {
 #[test]
 fn pub_pure_fn_compiles() {
     let src = r#"
-pub fn double(n: Int) Int -[]> {
+pub fn double(n: Int) -[]> Int {
     return n * 2
 }
 fn run() {
@@ -208,11 +208,11 @@ fn run() {
 #[test]
 fn pure_fn_calling_impure_user_fn_is_e3401() {
     let src = r#"
-fn read_value() Int -> {
+fn read_value() -> Int {
     print("side effect")
     return 1
 }
-fn compute() Int -[]> {
+fn compute() -[]> Int {
     return read_value()
 }
 fn run() {
@@ -232,11 +232,11 @@ fn run() {
 #[test]
 fn pure_fn_checks_calls_in_range_bounds() {
     let src = r#"
-fn read_bound() Int -> {
+fn read_bound() -> Int {
     print("side effect")
     return 2
 }
-fn bad() Range -[]> {
+fn bad() -[]> Range {
     return 0..read_bound()
 }
 fn run() {
@@ -362,7 +362,7 @@ fn transitive_range_bound_is_e3401() {
     use std::collections::HashMap;
 
     let src = r#"
-fn impure_bound() Int -> {
+fn impure_bound() -> Int {
     print("oops")
     return 2
 }
@@ -456,7 +456,7 @@ fn transitive_clean_program_no_error() {
     use std::collections::HashMap;
 
     let src = r#"
-fn square(n: Int) Int -[]> {
+fn square(n: Int) -[]> Int {
     return n * n
 }
 fn run() {
@@ -663,7 +663,7 @@ fn store_rollback_invalid_gen() {
 #[test]
 fn eval_type_error_gives_precise_diagnostic_not_e0956() {
     // `"string" + 5` is a String/Int type mismatch — sema must catch this.
-    let src = r#"fn run() Int -[]> { return "string" + 5 }"#;
+    let src = r#"fn run() -[]> Int { return "string" + 5 }"#;
     let diags = jet::check_for_eval(src, "test_eval_type.jet");
     assert!(
         !diags.is_empty(),
@@ -686,11 +686,11 @@ fn eval_type_error_gives_precise_diagnostic_not_e0956() {
 /// `check_for_eval` passes for a valid typed eval program.
 #[test]
 fn eval_valid_typed_run_passes_sema() {
-    let src = r#"fn run() Int -[]> { return 2 + 3 }"#;
+    let src = r#"fn run() -[]> Int { return 2 + 3 }"#;
     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
     assert!(
         diags.is_empty(),
-        "`fn run() Int -[]>` with correct body should pass sema, got: {:?}",
+        "`fn run() -[]> Int ->` with correct body should pass sema, got: {:?}",
         diags
     );
 }

@@ -15,26 +15,26 @@ use core.files as fs
 // FEATURE_CLAIM: claim.product-boundaries | Jetpack is documented as a separate environment product.
 // FEATURE_CLAIMS:END
 
-fn current_attr(link: String, current: String) HTML -> {
+fn current_attr(link: String, current: String) -> HTML {
     if link == current -> return HTML{" aria-current=\"page\""}
     HTML{""}
 }
 
-fn error_href(prefix: String) String -> "{prefix}e/index.html"
+fn error_href(prefix: String) -> String { "{prefix}e/index.html" }
 
-fn code_card(file: String, code: HTML) HTML -> HTML{"""
+fn code_card(file: String, code: HTML) -> HTML { HTML{""" }
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div></div>
     """}
 
-fn code_card_out(file: String, code: HTML, command: String, output: HTML) HTML -> HTML{"""
+fn code_card_out(file: String, code: HTML, command: String, output: HTML) -> HTML { HTML{""" }
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div><div class="code-out"><span class="ps">$ jet run {command}</span><br>{output}</div></div>
     """}
 
-fn cta_buttons(prefix: String) HTML -> HTML{"""
+fn cta_buttons(prefix: String) -> HTML { HTML{""" }
     <div class="hero-ctas"><a class="btn btn-primary" href="{prefix}install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a><a class="btn btn-ghost" href="https://github.com/jet-language/jet">GitHub</a></div>
     """}
 
-fn page_shell(title: String, description: String, body: HTML, prefix: String, current: String) HTML -> {
+fn page_shell(title: String, description: String, body: HTML, prefix: String, current: String) -> HTML {
     tour_attr :: current_attr("tour", current)
     install_attr :: current_attr("install", current)
     error_attr :: current_attr("error", current)
@@ -94,7 +94,7 @@ fn page_shell(title: String, description: String, body: HTML, prefix: String, cu
     """}
 }
 
-fn hello_code() HTML -> HTML{"""
+fn hello_code() -> HTML { HTML{""" }
     <span class="c">// Your first program. `fn run` is where running starts.</span>
     <span class="k">fn</span> <span class="f">run</span>() {{
         <span class="f">print</span>(<span class="s">"hello, world"</span>)
@@ -102,7 +102,7 @@ fn hello_code() HTML -> HTML{"""
     }}
     """}
 
-fn values_code() HTML -> HTML{"""
+fn values_code() -> HTML { HTML{""" }
     <span class="k">fn</span> <span class="f">run</span>() {{
         name <span class="g">::</span> <span class="s">"Jet"</span>
         year <span class="g">::</span> <span class="n">2026</span>
@@ -113,7 +113,7 @@ fn values_code() HTML -> HTML{"""
     }}
     """}
 
-fn signature_code() HTML -> HTML{"""
+fn signature_code() -> HTML { HTML{""" }
     <span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
     <span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
 
@@ -125,7 +125,7 @@ fn signature_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> {{ <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }}
     """}
 
-fn pattern_code() HTML -> HTML{"""
+fn pattern_code() -> HTML { HTML{""" }
     <span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {{
         <span class="k">if</span> c == {{
             .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{
@@ -142,7 +142,7 @@ fn pattern_code() HTML -> HTML{"""
     }}
     """}
 
-fn failure_code() HTML -> HTML{"""
+fn failure_code() -> HTML { HTML{""" }
     <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
 
     <span class="k">fn</span> <span class="f">run</span>() {{
@@ -151,7 +151,7 @@ fn failure_code() HTML -> HTML{"""
     }}
     """}
 
-fn defaults_code() HTML -> HTML{"""
+fn defaults_code() -> HTML { HTML{""" }
     <span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
     <span class="c">// `height: Int{{width}}` fills height with whatever width was given.</span>
     <span class="k">struct</span> <span class="t">Rect</span> {{
@@ -174,7 +174,7 @@ fn defaults_code() HTML -> HTML{"""
     }}
     """}
 
-fn loops_code() HTML -> HTML{"""
+fn loops_code() -> HTML { HTML{""" }
     <span class="k">fn</span> <span class="f">run</span>() {{
         values <span class="g">::</span> [<span class="t">Int</span>]{{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}}
         doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
@@ -191,7 +191,7 @@ fn loops_code() HTML -> HTML{"""
         lazy <span class="g">::</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
     """}
 
-fn concurrency_code() HTML -> HTML{"""
+fn concurrency_code() -> HTML { HTML{""" }
     <span class="k">fn</span> <span class="f">run</span>() {{
         <span class="c">// Join discharges the duty and yields the value.</span>
         joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
@@ -218,7 +218,7 @@ fn concurrency_code() HTML -> HTML{"""
     }}
     """}
 
-fn files_code() HTML -> HTML{"""
+fn files_code() -> HTML { HTML{""" }
     <span class="k">use</span> core.files <span class="k">as</span> fs
 
     <span class="k">fn</span> <span class="f">run</span>() {{
@@ -230,7 +230,7 @@ fn files_code() HTML -> HTML{"""
     }}
     """}
 
-fn diag_block() HTML -> HTML{"""
+fn diag_block() -> HTML { HTML{""" }
     <div class="diag"><span class="e">Error [E0112]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
       <span class="loc">--&gt; broken.jet:4:26</span>
         |
@@ -241,7 +241,7 @@ fn diag_block() HTML -> HTML{"""
     <span class="more">More: jet-lang.dev/e/E0112</span></div>
     """}
 
-fn index_body() HTML -> HTML{"""
+fn index_body() -> HTML { HTML{""" }
       <section class="wrap hero">
         <div class="hero-grid">
           <div>
@@ -420,7 +420,7 @@ fn index_body() HTML -> HTML{"""
       </section>
     """}
 
-fn tour_body() HTML -> {
+fn tour_body() -> HTML {
     hello :: code_card_out("examples/features/basics/hello.jet", hello_code(), "examples/features/basics/hello.jet", HTML{"hello, world"})
     values :: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
     signature :: code_card_out("examples/features/basics/signature_shape.jet", signature_code(), "examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
@@ -521,7 +521,7 @@ fn tour_body() HTML -> {
     """}
 }
 
-fn install_body() HTML -> {
+fn install_body() -> HTML {
     nix_term :: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">nix --extra-experimental-features "nix-command flakes" \\</span>
         <span class="cmd">profile install github:jet-language/jet</span>
@@ -590,7 +590,7 @@ fn install_body() HTML -> {
     """}
 }
 
-fn error_body() HTML -> {
+fn error_body() -> HTML {
     diag :: diag_block()
     HTML{"""
     <section class="wrap page">

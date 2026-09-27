@@ -566,7 +566,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn writer_io(writer: &cbor.CBORWriter) Bool -[IO]> {{
+fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
@@ -780,7 +780,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_io(reader: &cbor.CBORReader) Bool -[IO]> {{
+fn reader_io(reader: &cbor.CBORReader) -[IO]> Bool {{
     repeated :: reader.next()
     if repeated == {{
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
@@ -789,7 +789,7 @@ fn reader_io(reader: &cbor.CBORReader) Bool -[IO]> {{
     return false
 }}
 
-fn writer_io(writer: &cbor.CBORWriter) Bool -[IO]> {{
+fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO

@@ -51,7 +51,7 @@ fn list_literal_index_slice_and_iteration() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) Int -[]> {
+fn total(xs: [Int]) -[]> Int {
     sum := 0
     loop x in xs {
         sum = (sum + x)
@@ -226,7 +226,7 @@ fn run() {
 #[test]
 fn bare_run_rejects_non_unit_entry_contract() {
     let src = r#"
-fn run() Int -> {
+fn run() -> Int {
     return 42
 }
 "#;
@@ -330,7 +330,7 @@ fn run() {
 #[test]
 fn card_2254_map_hoist_rejects_unknown_calls() {
     let src = r#"
-fn observe(value: Int) Int -> {
+fn observe(value: Int) -> Int {
     return value
 }
 fn run() {
@@ -618,7 +618,7 @@ fn run() {
 #[test]
 fn card_2872_exact_int_division_family_uses_hot_kernels() {
     let src = r#"
-fn probe(value: Int) Int -> {
+fn probe(value: Int) -> Int {
     return (value /% 3) + (value % 3) + (value %% 3) + (value << 1) + (value >> 1)
 }
 fn run() {
@@ -716,7 +716,7 @@ struct Person {
     name: String
     age: Int
 }
-fn name_of(p: Person) String -[]> {
+fn name_of(p: Person) -[]> String {
     return ~p.name
 }
 fn run() {
@@ -742,11 +742,11 @@ fn user_method_with_scalar_args() {
 struct Calc {
     base: Int
 
-    fn add(self, x: Int, y: Int) Int -[]> {
+    fn add(self, x: Int, y: Int) -[]> Int {
         return ((self.base + x) + y)
     }
 }
-fn calc(c: Calc) Int -[]> {
+fn calc(c: Calc) -[]> Int {
     return c.add(10, 20)
 }
 fn run() {
@@ -771,11 +771,11 @@ fn user_method_with_string_arg_implicit_clone() {
 struct Crate {
     label: String
 
-    fn combine(self, other: String) String -[]> {
+    fn combine(self, other: String) -[]> String {
         return \"{self.label}-{other}\"
     }
 }
-fn calc(b: Crate) String -[..E]> {
+fn calc(b: Crate) -[..E]> String {
     name :: \"x\"
     return b.combine(name)
 }
@@ -802,9 +802,9 @@ struct Pair {
     a: Int
     b: Int
 }
-fn align(left: D, right: D) Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
 impl D.Add {
-    fn add(self, rhs: D) D -> {
+    fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)
         return D{value: pair.a + pair.b}
     }
@@ -828,17 +828,17 @@ fn trait_impl_method_call_no_mangle() {
     }
     let src = "\
 trait Named {
-    fn label(self) String
+    fn label(self) -> String
 }
 struct Dog {
     sound: String
 }
 impl Dog.Named {
-    fn label(self) String -> {
+    fn label(self) -> String {
         return \"dog\"
     }
 }
-fn describe(d: Dog) String -> {
+fn describe(d: Dog) -> String {
     return d.label()
 }
 fn run() {
@@ -863,14 +863,14 @@ enum Light {
     Red
     Green
 
-    fn code(self) Int -[]> {
+    fn code(self) -[]> Int {
         if self == {
             .Red -> { return 1 }
             .Green -> { return 2 }
         }
     }
 }
-fn calc(l: Light) Int -[]> {
+fn calc(l: Light) -[]> Int {
     return l.code()
 }
 fn run() {
@@ -890,7 +890,7 @@ fn map_literal_with_entries() {
         return;
     }
     let src = "\
-fn scores() [String:Int] -[]> {
+fn scores() -[]> [String:Int] {
     return [\"a\": 1, \"b\": 2]
 }
 fn run() {
@@ -922,10 +922,10 @@ fn static_constructor_and_self_getter() {
 struct Counter {
     n: Int
 
-    fn make(v: Int) Counter -[]> {
+    fn make(v: Int) -[]> Counter {
         return Counter{ n: v }
     }
-    fn value(self) Int -[]> {
+    fn value(self) -[]> Int {
         return self.n
     }
 }
@@ -950,7 +950,7 @@ fn mut_self_method_body() {
 struct Acc {
     total: Int
 
-    fn doubled(&self) Int -[]> {
+    fn doubled(&self) -[]> Int {
         return (self.total + self.total)
     }
 }
@@ -977,10 +977,10 @@ enum Sign {
     Neg
     Zero
 
-    fn make_pos() Sign -[]> {
+    fn make_pos() -[]> Sign {
         return Sign.Pos
     }
-    fn to_num(self) Int -[]> {
+    fn to_num(self) -[]> Int {
         if self == {
             .Pos -> { return 1 }
             .Neg -> { return 0 }
@@ -1011,13 +1011,13 @@ struct Vec2 {
     x: Int
     y: Int
 
-    fn make(x: Int, y: Int) Vec2 -[]> {
+    fn make(x: Int, y: Int) -[]> Vec2 {
         return Vec2{ x: x, y: y }
     }
-    fn sum(self) Int -[]> {
+    fn sum(self) -[]> Int {
         return (self.x + self.y)
     }
-    fn shifted(self, dx: Int) Vec2 -[]> {
+    fn shifted(self, dx: Int) -[]> Vec2 {
         return Vec2{ x: (self.x + dx), y: self.y }
     }
 }
@@ -1048,7 +1048,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) Int !ParseError -> {
+fn parse_age(raw: Int) -> Int !ParseError {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -1057,7 +1057,7 @@ fn parse_age(raw: Int) Int !ParseError -> {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) Int !ParseError -> {
+fn load(raw: Int) -> Int !ParseError {
     n :: parse_age(raw)
     return Ok((n + 1))
 }
@@ -1082,13 +1082,13 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) Int !Err -> {
+fn checked(x: Int) -> Int !Err {
     if x == 0 {
         return Err(\"zero\")
     }
     return Ok((100 /% x))
 }
-fn safe(x: Int) Int -> {
+fn safe(x: Int) -> Int {
     return checked(x) ?? return -1
 }
 fn run() {
@@ -1109,7 +1109,7 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) (?Float) -[]> {
+fn first_even(limit: Int) -[]> ?Float {
     loop i in 1..limit {
         if (i % 2) == 0 {
             return Val(Float.from_int(i))
@@ -1139,7 +1139,7 @@ struct Profile {
 struct Account {
     details: Profile
 }
-fn handle_of(a: (?Account)) (?String) -[]> {
+fn handle_of(a: (?Account)) -[]> (?String) {
     return a?.details?.handle
 }
 fn run() {
@@ -1167,7 +1167,7 @@ fn list_builtin_methods() {
         return;
     }
     let src = "\
-fn build() [Int] -[]> {
+fn build() -[]> [Int] {
     xs := [3, 1, 2]
     xs.push(5)
     xs.insert(0, 0)
@@ -1199,7 +1199,7 @@ fn list_insert_bounds_have_release_tier_parity() {
         return;
     }
     let valid = r#"
-fn insert_at(index: Int) [Int] -[]> {
+fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
     values.insert(index, 2)
     return values
@@ -1217,7 +1217,7 @@ fn run() {
     );
 
     let negative = r#"
-fn insert_at(index: Int) [Int] -[]> {
+fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
     values.insert(index, 2)
     return values
@@ -1233,7 +1233,7 @@ fn run() {
     );
 
     let too_large = r#"
-fn insert_at(index: Int) [Int] -[]> {
+fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
     values.insert(index, 2)
     return values
@@ -1287,7 +1287,7 @@ fn run() {
 #[test]
 fn copied_string_slice_uses_string_builtin() {
     let src = "\
-fn strip_hash(reference: String) String -> {
+fn strip_hash(reference: String) -> String {
     text := ~reference
     if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len() - 1)
     return text
@@ -1342,7 +1342,7 @@ fn set_algebra_methods() {
         return;
     }
     let src = "\
-fn sorted(xs: [Int]) [Int] -[]> {
+fn sorted(xs: [Int]) -[]> [Int] {
     ys := ~xs
     ys.sort()
     return ys
@@ -1464,7 +1464,7 @@ fn run() {
 #[test]
 fn eager_container_adapters_and_lazy_opt_in() {
     let src = "\
-fn count_and_keep(n: Int, visits: Cell<Int>) Bool -> {
+fn count_and_keep(n: Int, visits: Cell<Int>) -> Bool {
     visits.edit(count -> count += 1)
     return n % 2 == 0
 }
@@ -1527,12 +1527,12 @@ fn list_and_map_remove() {
         return;
     }
     let src = "\
-fn drop_first(xs: [Int]) Int -[]> {
+fn drop_first(xs: [Int]) -[]> Int {
     ys := ~xs
     r := ys.remove(0, .Slot)
     return ys.len()
 }
-fn drop_key(m: [String:Int]) Int -[]> {
+fn drop_key(m: [String:Int]) -[]> Int {
     m2 := ~m
     r := m2.remove(\"a\")
     return m2.len()
@@ -1770,7 +1770,7 @@ fn fallible_when_match() {
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) Int !ClassifyError -> {
+fn classify(x: Int) -> Int !ClassifyError {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }
@@ -1854,7 +1854,7 @@ fn run() {
 #[test]
 fn collection_mutation_intents_preserve_declared_contracts() {
     let src = r#"
-fn count_work(work: &[Int]) Int -> {
+fn count_work(work: &[Int]) -> Int {
     visits := 0
     loop work.len() > 0 {
         _value :: work.pop() ?? -1

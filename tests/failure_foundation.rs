@@ -23,7 +23,7 @@ enum StoreFailure {
 }
 
 // Omitted contract: the effective route is Int !Err.
-fn implicit(value: Int) Int -> {
+fn implicit(value: Int) -> Int {
     if value == 0 {
         return Err("implicit")
     }
@@ -31,7 +31,7 @@ fn implicit(value: Int) Int -> {
 }
 
 // Expert opt-out: a named error domain.
-fn explicit(value: Int) Int !TypedFailure -> {
+fn explicit(value: Int) -> Int !TypedFailure {
     if value == 0 {
         return Err(TypedFailure.Bad)
     }
@@ -39,7 +39,7 @@ fn explicit(value: Int) Int !TypedFailure -> {
 }
 
 // Expert opt-out: an error union widens a member failure.
-fn union(value: Int) Int !(TypedFailure | OtherFailure) -> {
+fn union(value: Int) -> Int !(TypedFailure | OtherFailure) {
     if value == 0 {
         return Err(TypedFailure.Bad)
     }
@@ -51,20 +51,20 @@ impl StoreFailure -> Err {
     return Err("converted")
 }
 
-fn converted(value: Int) Int !StoreFailure -> {
+fn converted(value: Int) -> Int !StoreFailure {
     if value == 0 {
         return Err(StoreFailure.Missing)
     }
     return value
 }
 
-fn contextual_source() Int -> Err("context", code: "E_CONTEXT", cause: Err("root"))
+fn contextual_source() -> Int -> Err("context", code: "E_CONTEXT", cause: Err("root"))
 
 // `?(text)` keeps the original structured error while adding one context hop.
-fn contextual() Int -> contextual_source()?("loading")
+fn contextual() -> Int -> contextual_source()?("loading")
 
 // Optional success still rides the Result-shaped carrier.
-fn optional_success(value: Int) ?Int -> {
+fn optional_success(value: Int) -> ?Int {
     if value == 0 {
         return None
     }
@@ -78,21 +78,21 @@ fn unit_success(fail: Bool) {
     }
 }
 
-fn unit_caller(fail: Bool) Int -> {
+fn unit_caller(fail: Bool) -> Int {
     unit_success(fail)
     return 7
 }
 
 // Function values retain their fallible contract.
-fn apply(callback: fn(Int) Int, value: Int) Int -> callback(value)
+fn apply(callback: fn(Int) -> Int, value: Int) -> Int -> callback(value)
 
 // Generic call results use the same automatic propagation rule.
-fn generic_forward<T>(value: T) T -> value
+fn generic_forward<T>(value: T) -> T -> value
 
-fn generic_caller(value: Int) Int -> generic_forward<Int>(implicit(value))
+fn generic_caller(value: Int) -> Int -> generic_forward<Int>(implicit(value))
 
 // No reachable failure: the !Never proof is a valid contract.
-fn impossible() Int !Never -> 7
+fn impossible() -> Int !Never -> 7
 
 fn run() {
     print(implicit(2) ?? -1)
@@ -144,7 +144,7 @@ enum TestFailure {
     Missing
 }
 
-fn optional_success_result(value: Int) ?Int !TestFailure -> {
+fn optional_success_result(value: Int) -> ?Int !TestFailure {
     if value == -1 {
         return Err(TestFailure.Missing)
     }
@@ -171,23 +171,23 @@ fn never_contract_rejects_every_reachable_failure_route() {
         (
             "explicit propagation",
             r#"
-fn fail() Int -> Err("bad")
-fn impossible() Int !Never -> fail()?("unreachable")
+fn fail() -> Int -> Err("bad")
+fn impossible() -> Int !Never -> fail()?("unreachable")
 fn run() {}
 "#,
         ),
         (
             "implicit direct return",
             r#"
-fn fail() Int -> Err("bad")
-fn impossible() Int !Never -> fail()
+fn fail() -> Int -> Err("bad")
+fn impossible() -> Int !Never -> fail()
 fn run() {}
 "#,
         ),
         (
             "implicit statement propagation",
             r#"
-fn fail() Int -> Err("bad")
+fn fail() -> Int -> Err("bad")
 fn impossible() !Never {
     fail()
 }
@@ -197,8 +197,8 @@ fn run() {}
         (
             "implicit branch propagation",
             r#"
-fn fail() Int -> Err("bad")
-fn impossible(value: Bool) Int !Never -> {
+fn fail() -> Int -> Err("bad")
+fn impossible(value: Bool) -> Int !Never {
     if value {
         fail()
     }
@@ -243,7 +243,7 @@ fn stop(message: String) {
     panic(message)
 }
 
-fn load_name(found: Bool) String -> {
+fn load_name(found: Bool) -> String {
     return if found -> { "Ada" } else -> { stop("name missing") }
 }
 

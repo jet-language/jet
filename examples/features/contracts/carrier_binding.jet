@@ -9,7 +9,7 @@ enum CarrierFixtureError {
 
 // Explicit Option: result is the declared Option carrier (Direct mode).
 // Post checks the returned carrier for both Val and None.
-#[Post(result == .Val(value) || result == None, "explicit option carrier")]
+#Post(result == .Val(value) || result == None, "explicit option carrier")
 fn explicit_option(value: Int) -> ?Int {
     if value < 0 -> return None
     return Val(value)
@@ -17,7 +17,7 @@ fn explicit_option(value: Int) -> ?Int {
 
 // Explicit Result: result is the declared Result carrier (Direct mode).
 // Post checks the returned carrier for both Ok and Err.
-#[Post(result == Ok(value) || result == Err(CarrierFixtureError.Rejected), "explicit result carrier")]
+#Post(result == Ok(value) || result == Err(CarrierFixtureError.Rejected), "explicit result carrier")
 fn explicit_result(value: Int) -> Int !CarrierFixtureError {
     if value < 0 -> return Err(CarrierFixtureError.Rejected)
     return Ok(value)
@@ -25,7 +25,7 @@ fn explicit_result(value: Int) -> Int !CarrierFixtureError {
 
 // Implicit carrier: the declared Int is wrapped in Result(Int, Err), so Post
 // binds the successful Int payload (ResultPayload mode) and skips Err.
-#[Post(result > value, "implicit payload success")]
+#Post(result > value, "implicit payload success")
 fn implicit_result(value: Int) -> Int {
     if value < 0 -> return Err("negative")
     return value + 1
@@ -33,7 +33,7 @@ fn implicit_result(value: Int) -> Int {
 
 // A read precondition borrows the caller's collection once; the owner remains
 // usable after the call.
-#[Pre(values.len() > 0, "borrowed owner remains live")]
+#Pre(values.len() > 0, "borrowed owner remains live")
 fn borrowed_precondition(values: [Int]) -> Int {
     return values[0]
 }

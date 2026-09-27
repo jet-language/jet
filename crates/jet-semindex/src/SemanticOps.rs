@@ -247,9 +247,9 @@ mod semantic_op_tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let path = root.join("run.jet");
-        fs::write(&path, "fn report() Int -[]> { return 1 }\nfn run() {}\n").unwrap();
+        fs::write(&path, "fn report() -[]> Int { return 1 }\nfn run() {}\n").unwrap();
         let before = crate::open(&path).unwrap();
-        fs::write(&path, "fn summarize() Int -[]> { return 1 }\nfn run() {}\n").unwrap();
+        fs::write(&path, "fn summarize() -[]> Int { return 1 }\nfn run() {}\n").unwrap();
         let after = crate::open(&path).unwrap();
 
         let operations = semantic_rename_ops(&before, &after);
@@ -267,10 +267,10 @@ mod semantic_op_tests {
         let receipt_dir = root.join(".jet/codemods");
         fs::create_dir_all(&receipt_dir).unwrap();
         let before_hash = jet_foundation::SHA256::sha256_hex(
-            "fn report() Int -[]> { return 1 }\nfn run() {}\n".as_bytes(),
+            "fn report() -[]> Int { return 1 }\nfn run() {}\n".as_bytes(),
         );
         let after_hash = jet_foundation::SHA256::sha256_hex(
-            "fn summarize() Int -[]> { return 1 }\nfn run() {}\n".as_bytes(),
+            "fn summarize() -[]> Int { return 1 }\nfn run() {}\n".as_bytes(),
         );
         fs::write(
             receipt_dir.join("rename.log.json"),

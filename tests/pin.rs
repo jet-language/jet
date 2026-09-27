@@ -142,7 +142,7 @@ struct Node {
 fn moving_a_pinned_place_is_e0219() {
     let src = format!(
         r#"{NODE}
-fn consume(n: ^Node) Int {{ return n.payload }}
+fn consume(n: ^Node) -> Int {{ return n.payload }}
 
 fn run() {{
     node := Node{{payload: 7, hops: 0}}
@@ -190,7 +190,7 @@ fn the_promise_ends_with_the_pin_scope() {
     // contract is a loan, not a permanent property of the place.
     let src = format!(
         r#"{NODE}
-fn consume(n: ^Node) Int {{ return n.payload }}
+fn consume(n: ^Node) -> Int {{ return n.payload }}
 
 fn run() {{
     node := Node{{payload: 7, hops: 0}}
@@ -262,7 +262,7 @@ struct Queue {{
     head: Pin<Node>
 }}
 
-fn takes_pin(n: ^Pin<Node>) Int {{ return n.payload }}
+fn takes_pin(n: ^Pin<Node>) -> Int {{ return n.payload }}
 
 fn run() {{
     node := Node{{payload: 7, hops: 0}}
@@ -281,7 +281,7 @@ fn run() {{
 fn a_pin_cannot_escape_its_owner_scope() {
     let src = format!(
         r#"{NODE}
-fn make() Pin<Node> {{
+fn make() -> Pin<Node> {{
     node := Node{{payload: 7, hops: 0}}
     return mem.pin(&node)
 }}
@@ -447,7 +447,7 @@ struct Queue {{
     head: Pin<Node>
 }}
 
-fn attach(label: String, node: &Node) Queue from node {{
+fn attach(label: String, node: &Node) -> Queue from node {{
     return Queue{{label: ~label, head: mem.pin(&node)}}
 }}
 
@@ -500,7 +500,7 @@ struct SelfNode {
     self_addr: Int
 }
 
-fn wire_self(node: &SelfNode) Pin<SelfNode> {
+fn wire_self(node: &SelfNode) -> Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }

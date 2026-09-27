@@ -398,7 +398,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     value := call_value
     if contract_nodes.len() > 0 {
         wrapped := contract_bindings
-        for contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
+        loop contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
         wrapped.push(TStmt.ExprStmt(call_value, call.name_span))
         value = sema_tir_expr(result_type, TExprKind.InlineBlock(wrapped), call.name_span)
     }

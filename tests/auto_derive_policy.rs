@@ -442,7 +442,7 @@ struct Missing { value: Int }
 struct Manual { value: Int }
 
 impl Manual.Debug {
-    fn debug(self) String { return "manual" }
+    fn debug(self) -> String { return "manual" }
 }
 
 fn run() {
@@ -656,7 +656,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     .unwrap();
     std::fs::write(
         app.join("main.jet"),
-        "use dep;\nstruct AppType { value: Int }\nstruct ImportedOuter { value: dep.DepType }\nfn reject(value: ImportedOuter) { print(value) }\nfn run() {}\n",
+        "use dep\nstruct AppType { value: Int }\nstruct ImportedOuter { value: dep.DepType }\nfn reject(value: ImportedOuter) { print(value) }\nfn run() {}\n",
     )
     .unwrap();
     std::fs::write(

@@ -29,7 +29,7 @@ pub struct RealizeResult {
     pub payload_entries: [String]
 }
 
-fn record_text(tree: DataTree, field: String) String !RealizeError -> {
+fn record_text(tree: DataTree, field: String) -> String !RealizeError {
     value :: tree.field(~field) ?? {
         return Err(RealizeError{message: "provider result field {field} is missing"})
     }
@@ -39,7 +39,7 @@ fn record_text(tree: DataTree, field: String) String !RealizeError -> {
     return Ok(text)
 }
 
-fn validate_record_shape(tree: DataTree) Bool !RealizeError -> {
+fn validate_record_shape(tree: DataTree) -> Bool !RealizeError {
     if tree == .Object(entries) {
         keys :: entries.keys().to_list()
         if keys.len() != 7 {
@@ -56,7 +56,7 @@ fn validate_record_shape(tree: DataTree) Bool !RealizeError -> {
     return Err(RealizeError{message: "provider result must be a JSON object"})
 }
 
-fn ingest_realized(store_root: String, provider: String, request: store.IngestRequest) RealizeResult !RealizeError -> {
+fn ingest_realized(store_root: String, provider: String, request: store.IngestRequest) -> RealizeResult !RealizeError {
     reference :: request.reference.copy()
     ingested :: store.ingest(~store_root, request) ?? {
         return Err(RealizeError{message: "ingest failed: {err.message}"})
@@ -74,7 +74,7 @@ fn ingest_realized(store_root: String, provider: String, request: store.IngestRe
     })
 }
 
-fn recorded_request(request: RealizeRequest) RealizeRequest !RealizeError -> {
+fn recorded_request(request: RealizeRequest) -> RealizeRequest !RealizeError {
     if request.source.trim() == "" {
         return Err(RealizeError{message: "recorded provider result path is required"})
     }
@@ -162,7 +162,7 @@ fn recorded_request(request: RealizeRequest) RealizeRequest !RealizeError -> {
     })
 }
 
-pub fn realize(store_root: String, request: RealizeRequest) RealizeResult !RealizeError -> {
+pub fn realize(store_root: String, request: RealizeRequest) -> RealizeResult !RealizeError {
     if request.provider == "local" || request.provider == "prefetched" {
         if request.expected_hash.trim() == "" {
             return Err(RealizeError{message: "{request.provider} realization requires an expected hash"})

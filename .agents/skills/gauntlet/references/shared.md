@@ -14,7 +14,7 @@ close it.
 ## Authorship and level playing field
 
 Every headline implementation—Jet, every port, and every fixture—is authored by
-a Luna max worker. Use `.agents/skills/orchestration/SKILL.md` for dispatch.
+a Luna xhigh worker. Use `.agents/skills/orchestration/SKILL.md` for dispatch.
 Use the same author and reasoning budget on both sides. Record authoring cost in
 `entry.json`: worker turns, retries, and diagnostics hit.
 

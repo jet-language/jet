@@ -24,7 +24,7 @@ fn run() {
 
 const BORROWED_SOURCE: &str = r###"
 use core.mem
-fn read(value: &Int) Int -> {
+fn read(value: &Int) -> Int {
     cell :: value
     #Unsafe("the borrowed value is live in the caller") {
         addr :: mem.address_of(cell)

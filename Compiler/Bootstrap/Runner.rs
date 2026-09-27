@@ -7,7 +7,7 @@
 // parses Jet source, re-runs sema, or infers route policy.
 
 use crate::Codegen::MIRRust::{MirRustAotMetadata, MirRustConfig};
-use crate::{append_bootstrap_host_glue, BootstrapBindingDescriptor, BootstrapHostCodecError};
+use crate::{append_bootstrap_host_glue, BootstrapBindingDescriptor, BootstrapEntryCodec, BootstrapHostCodecError};
 use crate::compiler_bootstrap_host::{
     invoke_with_authority, AuthorizedSourceLease, AuthorizedSourceSnapshot,
 };
@@ -16,7 +16,9 @@ use jet_foundation::JitBackend::RunOutcome;
 use jet_foundation::MIR::{
     MirArtifactId, MirArtifactTarget, MirFunctionId, MirProgram, MirRuntimeValue,
 };
-use jet_jit::SourceResources::{SourceResourceLease, SourceResourceSession};
+use jet_jit::SourceResources::{
+    SourceResourceLease, SourceResourceRetireError, SourceResourceSession,
+};
 use std::path::Path;
 use std::fmt::Write as _;
 
@@ -67,6 +69,8 @@ pub(crate) enum BootstrapBackendArtifact<'a> {
 /// Result decoded from the generated Jet compiler. Incomplete user compiles
 /// keep their diagnostics but intentionally carry no backend source or rows.
 pub(crate) struct BootstrapJetCompileResult<SourceProgram = (), RuntimeConfig = ()> {
+    pub(crate) selected_factory_tier: BootstrapFactoryTier,
+    pub(crate) actual_factory_tier: BootstrapFactoryTier,
     pub(crate) complete: bool,
     pub(crate) emitted_source: Option<String>,
     pub(crate) bindings: Option<BootstrapBindingDescriptor>,
@@ -92,11 +96,14 @@ pub(crate) type BootstrapSourceResumeFactory<'a, SourceProgram, RuntimeConfig> =
     Box<dyn FnOnce(SourceProgram, RuntimeConfig, SourceResourceLease) -> BootstrapSourceResume + 'a>;
 
 pub(crate) struct BootstrapRunOutput<BackendOutput, SourceProgram = (), RuntimeConfig = ()> {
+    pub(crate) selected_factory_tier: BootstrapFactoryTier,
+    pub(crate) actual_factory_tier: BootstrapFactoryTier,
     pub(crate) complete: bool,
     pub(crate) backend: Option<BackendOutput>,
     pub(crate) web_artifacts: Option<BootstrapWebArtifacts>,
     pub(crate) outcome: Option<RunOutcome>,
     pub(crate) value: Option<MirRuntimeValue>,
+    pub(crate) completion_owner: BootstrapRunCompletionOwner,
     pub(crate) soft_stop: bool,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -113,6 +120,250 @@ pub(crate) struct BootstrapRunOutput<BackendOutput, SourceProgram = (), RuntimeC
     pub(crate) artifact: Option<MirArtifactId>,
 }
 
+/// Result of finishing a Runner-owned completion receiver. Ready completions
+/// must be consumed/dropped before calling again; Pending reports explicit
+/// Source-root liveness and never treats a strong-count snapshot as retirement.
+#[derive(Debug)]
+pub(crate) enum BootstrapRunCompletionFinish {
+    Ready(Vec<jet_jit::SourceExecutionCompletion>),
+    Pending {
+        retirement_requested: bool,
+        retained_roots: usize,
+        open_callback_sessions: usize,
+        pending_jobs: usize,
+    },
+    Complete {
+        failures: Vec<jet_jit::JetTaskFailure>,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum BootstrapRunCompletionFinishError {
+    Retirement {
+        error: SourceResourceRetireError,
+        completions: Vec<jet_jit::SourceExecutionCompletion>,
+        callback_failures: Vec<jet_jit::JetTaskFailure>,
+    },
+    State(String),
+    Unrouted(jet_jit::SourceExecutionCompletion),
+}
+
+#[derive(Default)]
+struct BootstrapRunCallbackJobState {
+    complete: bool,
+    failures: Vec<jet_jit::JetTaskFailure>,
+    failures_delivered: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct BootstrapRunCompletionOwner {
+    scope: jet_jit::SourceExecutionCompletionScope,
+    resources: Option<SourceResourceSession>,
+    callback_jobs: Option<std::sync::Arc<dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner>>,
+    callback_job_state: std::sync::Arc<std::sync::Mutex<BootstrapRunCallbackJobState>>,
+    allow_resource_retirement: bool,
+}
+
+impl std::fmt::Debug for BootstrapRunCompletionOwner {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BootstrapRunCompletionOwner")
+            .field("resources_present", &self.resources.is_some())
+            .field("callback_jobs_present", &self.callback_jobs.is_some())
+            .field("allow_resource_retirement", &self.allow_resource_retirement)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BootstrapRunCompletionOwner {
+    pub(crate) fn new(scope: jet_jit::SourceExecutionCompletionScope) -> Self {
+        Self {
+            scope,
+            resources: None,
+            callback_jobs: None,
+            callback_job_state: std::sync::Arc::default(),
+            allow_resource_retirement: false,
+        }
+    }
+
+    pub(crate) fn set_resources(&mut self, resources: SourceResourceSession) {
+        self.resources = Some(resources);
+    }
+    pub(crate) fn allow_resource_retirement(&mut self) {
+        self.allow_resource_retirement = true;
+    }
+
+    pub(crate) fn register_callback_jobs(
+        &mut self,
+        callback_jobs: std::sync::Arc<
+            dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner,
+        >,
+    ) -> Result<(), std::sync::Arc<dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner>> {
+        if self.callback_jobs.is_some() {
+            return Err(callback_jobs);
+        }
+        self.callback_jobs = Some(callback_jobs);
+        Ok(())
+    }
+
+    pub(crate) fn completion_scope(&self) -> jet_jit::SourceExecutionCompletionScope {
+        self.scope.clone()
+    }
+
+    /// Call after consuming returned runtime values and retiring escaped
+    /// callback/task owners. A Ready batch is an exact typed delivery obligation;
+    /// call again after consuming it to prove all jobs and physical resources retired.
+    pub(crate) fn finish(
+        &self,
+    ) -> Result<BootstrapRunCompletionFinish, BootstrapRunCompletionFinishError> {
+        let completions = self.scope.drain();
+        if !completions.is_empty() {
+            return Ok(BootstrapRunCompletionFinish::Ready(completions));
+        }
+        let (open_callback_sessions, pending_jobs, callback_jobs_pending) = {
+            let mut state = self
+                .callback_job_state
+                .lock()
+                .map_err(|error| BootstrapRunCompletionFinishError::State(error.to_string()))?;
+            if state.complete {
+                (0, 0, false)
+            } else {
+                match &self.callback_jobs {
+                    Some(callback_jobs) => match callback_jobs.drain() {
+                        jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                            open_callback_sessions,
+                            pending_jobs,
+                        } => (open_callback_sessions, pending_jobs, true),
+                        jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
+                            failures,
+                        } => {
+                            state.complete = true;
+                            state.failures = failures;
+                            (0, 0, false)
+                        }
+                    },
+                    None => {
+                        state.complete = true;
+                        (0, 0, false)
+                    }
+                }
+            }
+        };
+        let completions = self.scope.drain();
+        if !completions.is_empty() {
+            return Ok(BootstrapRunCompletionFinish::Ready(completions));
+        }
+        if callback_jobs_pending {
+            let (retirement_requested, retained_roots) = self.resource_liveness()?;
+            return Ok(BootstrapRunCompletionFinish::Pending {
+                retirement_requested,
+                retained_roots,
+                open_callback_sessions,
+                pending_jobs,
+            });
+        }
+        let Some(resources) = &self.resources else {
+            return Ok(BootstrapRunCompletionFinish::Complete {
+                failures: self.take_callback_failures()?,
+            });
+        };
+        let (retirement_requested, retained_roots) = self.resource_liveness()?;
+        if retained_roots != 0 || !retirement_requested {
+            return Ok(BootstrapRunCompletionFinish::Pending {
+                retirement_requested,
+                retained_roots,
+                open_callback_sessions,
+                pending_jobs,
+            });
+        }
+        let retired = resources
+            .arena()
+            .is_retired()
+            .map_err(BootstrapRunCompletionFinishError::State)?;
+        if retired {
+            return Ok(BootstrapRunCompletionFinish::Complete {
+                failures: self.take_callback_failures()?,
+            });
+        }
+        if !self.allow_resource_retirement {
+            return Ok(BootstrapRunCompletionFinish::Pending {
+                retirement_requested,
+                retained_roots,
+                open_callback_sessions,
+                pending_jobs,
+            });
+        }
+        let newly_retired = match self.scope.with_current(|| resources.retire()) {
+            Ok(completions) => completions,
+            Err(error) => {
+                return Err(BootstrapRunCompletionFinishError::Retirement {
+                    error,
+                    completions: self.scope.drain(),
+                    callback_failures: self.take_callback_failures()?,
+                });
+            }
+        };
+        for completion in newly_retired {
+            if let Err(completion) = self
+                .scope
+                .with_current(|| jet_jit::SourceExecutionCompletionScope::record_current(completion))
+            {
+                return Err(BootstrapRunCompletionFinishError::Unrouted(completion));
+            }
+        }
+        let completions = self.scope.drain();
+        if !completions.is_empty() {
+            return Ok(BootstrapRunCompletionFinish::Ready(completions));
+        }
+        let (retirement_requested, retained_roots) = self.resource_liveness()?;
+        let retired = resources
+            .arena()
+            .is_retired()
+            .map_err(BootstrapRunCompletionFinishError::State)?;
+        if retired {
+            Ok(BootstrapRunCompletionFinish::Complete {
+                failures: self.take_callback_failures()?,
+            })
+        } else {
+            Ok(BootstrapRunCompletionFinish::Pending {
+                retirement_requested,
+                retained_roots,
+                open_callback_sessions,
+                pending_jobs,
+            })
+        }
+    }
+    fn take_callback_failures(
+        &self,
+    ) -> Result<Vec<jet_jit::JetTaskFailure>, BootstrapRunCompletionFinishError> {
+        let mut state = self
+            .callback_job_state
+            .lock()
+            .map_err(|error| BootstrapRunCompletionFinishError::State(error.to_string()))?;
+        if !state.complete {
+            return Err(BootstrapRunCompletionFinishError::State(
+                "callback job failures requested before the job owner reached Complete".to_string(),
+            ));
+        }
+        if state.failures_delivered {
+            return Ok(Vec::new());
+        }
+        state.failures_delivered = true;
+        Ok(std::mem::take(&mut state.failures))
+    }
+}
+
+impl<BackendOutput, SourceProgram, RuntimeConfig>
+    BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>
+{
+    pub(crate) fn finish_source_completions(
+        &self,
+    ) -> Result<BootstrapRunCompletionFinish, BootstrapRunCompletionFinishError> {
+        self.completion_owner.finish()
+    }
+}
+
+
 /// Failure while moving one authority-pinned generated result into the
 /// permitted backend. Authority failures remain distinct from carrier/codec
 /// failures so callers cannot mistake an input change for a compiler result.
@@ -124,10 +375,57 @@ pub(crate) enum BootstrapRunError {
         error: BootstrapHostCodecError,
         reports: Vec<jet_foundation::Report::ReportEnvelope>,
     },
+    CompilerInternalResourceRetirement {
+        error: BootstrapHostCodecError,
+        reports: Vec<jet_foundation::Report::ReportEnvelope>,
+        retirement: SourceResourceRetireError,
+    },
     SourceRuntime(String),
-    ResourceRetirement(String),
-
+    SourceRuntimeResourceRetirement {
+        error: String,
+        retirement: SourceResourceRetireError,
+    },
+    ResourceRetirement(SourceResourceRetireError),
+    SourceExecution(jet_jit::SourceDeoptError),
+    SourceExecutionResourceRetirement {
+        execution: jet_jit::SourceDeoptError,
+        retirement: SourceResourceRetireError,
+    },
+    SourceExecutionRetirement(jet_jit::SourceExecutionRetirementError),
+    UnroutedCompletion(jet_jit::SourceExecutionCompletion),
+    WithCompletionOwner {
+        error: Box<BootstrapRunError>,
+        completion_owner: BootstrapRunCompletionOwner,
+    },
 }
+
+impl BootstrapRunError {
+    pub(crate) fn finish_source_completions(
+        &self,
+    ) -> Result<BootstrapRunCompletionFinish, BootstrapRunCompletionFinishError> {
+        match self {
+            Self::WithCompletionOwner {
+                completion_owner, ..
+            } => completion_owner.finish(),
+            _ => Ok(BootstrapRunCompletionFinish::Complete { failures: Vec::new() }),
+        }
+    }
+
+    fn preserves_pending_retirement_error(&self) -> bool {
+        match self {
+            Self::CompilerInternalResourceRetirement { .. }
+            | Self::ResourceRetirement(_)
+            | Self::SourceRuntimeResourceRetirement { .. }
+            | Self::SourceExecutionResourceRetirement { .. }
+            | Self::SourceExecutionRetirement(_) => true,
+            Self::WithCompletionOwner { error, .. } => {
+                error.preserves_pending_retirement_error()
+            }
+            _ => false,
+        }
+    }
+}
+
 impl From<AuthorityError> for BootstrapRunError {
     fn from(error: AuthorityError) -> Self {
         Self::Authority(error)
@@ -197,6 +495,12 @@ pub(crate) fn prepare_bootstrap_artifact_from_aot(
             "stage-zero jet_bootstrap_compile entry cannot capture values".to_string(),
         ));
     }
+    if !entry.target_applicability.rust_aot {
+        return Err(BootstrapHostCodecError::InvalidMetadata(
+            "stage-zero jet_bootstrap_compile root is not Rust AOT-applicable".to_string(),
+        ));
+    }
+    BootstrapEntryCodec::new(program, &bindings, compiler_entry_function)?;
     let compiler_artifact = config.execution.artifact;
     let artifact_plan = program
         .artifacts
@@ -208,14 +512,10 @@ pub(crate) fn prepare_bootstrap_artifact_from_aot(
             ))
         })?;
     if artifact_plan.target != MirArtifactTarget::RustAot
-        || artifact_plan
-            .entry
-            .as_ref()
-            .and_then(|entry| entry.function)
-            != Some(compiler_entry_function)
+        || !artifact_plan.modules.contains(&entry.module_id)
     {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "stage-zero compiler artifact is not the Rust AOT jet_bootstrap_compile entry"
+            "stage-zero compiler artifact does not contain the private Rust AOT compiler factory root"
                 .to_string(),
         ));
     }
@@ -226,7 +526,6 @@ pub(crate) fn prepare_bootstrap_artifact_from_aot(
         compiler_entry_function,
         source_authority,
         |program| Ok(program.clone()),
-        jet_foundation::MIR::mir_program_image_bytes,
     )
     .map_err(|error| {
         BootstrapHostCodecError::InvalidMetadata(format!(
@@ -281,10 +580,10 @@ fn append_embedded_compiler_image(
         "];\n\
          #[doc(hidden)]\n\
          pub(crate) fn __jet_bootstrap_restore_compiler_image() -> Result<\n\
-             crate::compiler_bootstrap_compiler_image::RestoredCompilerImage<::jet_foundation::MIR::MirProgram>,\n\
+             crate::compiler_bootstrap_compiler_image::RestoredCompilerImage<crate::MirProgram>,\n\
              crate::compiler_bootstrap_compiler_image::CompilerImageError,\n\
          > {\n\
-             crate::compiler_bootstrap_compiler_image::restore_compiler_image_for_digest(\n\
+             crate::compiler_bootstrap_compiler_image::restore_compiler_image(\n\
                  __JET_BOOTSTRAP_COMPILER_IMAGE_BYTES,\n\
                  __JET_BOOTSTRAP_COMPILER_SOURCE_AUTHORITY_DIGEST,\n",
     );
@@ -301,9 +600,30 @@ fn append_embedded_compiler_image(
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     source.push_str(
-        "                 ::jet_foundation::MIR::mir_program_from_image_bytes,\n\
-         |program| Ok(program.clone()),\n\
+        "                 crate::__jet_bootstrap_mir_program_from_host,\n\
+         crate::__jet_bootstrap_mir_program_to_host,\n\
              )\n\
+         }\n",
+    );
+    source.push_str(
+        "\n#[doc(hidden)]\n\
+         struct __JetBootstrapCompilerImage {\n\
+             header: crate::compiler_bootstrap_compiler_image::CompilerImageHeader,\n\
+             source_program: ::std::sync::Arc<crate::MirProgram>,\n\
+             program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
+         }\n\
+         #[doc(hidden)]\n\
+         static __JET_BOOTSTRAP_COMPILER_IMAGE: ::std::sync::OnceLock<Result<::std::sync::Arc<__JetBootstrapCompilerImage>, String>> = ::std::sync::OnceLock::new();\n\
+         #[doc(hidden)]\n\
+         fn __jet_bootstrap_compiler_image() -> Result<::std::sync::Arc<__JetBootstrapCompilerImage>, String> {\n\
+             __JET_BOOTSTRAP_COMPILER_IMAGE.get_or_init(|| {\n\
+                 let restored = __jet_bootstrap_restore_compiler_image().map_err(|error| error.to_string())?;\n\
+                 Ok(::std::sync::Arc::new(__JetBootstrapCompilerImage {\n\
+                     header: restored.header,\n\
+                     source_program: ::std::sync::Arc::new(restored.source_program),\n\
+                     program: ::std::sync::Arc::new(restored.program),\n\
+                 }))\n\
+             }).clone()\n\
          }\n",
     );
     Ok(())
@@ -326,18 +646,89 @@ pub(crate) fn invoke_bootstrap_entry<Output>(
 pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig>(
     lease: &AuthorizedSourceLease,
     config: &MirRustConfig<'_>,
+    factory_tier: BootstrapFactoryTier,
     factory: impl FnOnce(
         &AuthorizedSourceSnapshot,
+        BootstrapFactoryTier,
+        &crate::Codegen::MIRRust::MirRustExecutionConfig,
+        &mut BootstrapRunCompletionOwner,
     ) -> Result<BootstrapJetCompileResult<SourceProgram, RuntimeConfig>, BootstrapHostCodecError>,
     backend: impl FnOnce(BootstrapBackendArtifact<'_>) -> BackendOutput,
     source_resume_factory: Option<
         BootstrapSourceResumeFactory<'_, SourceProgram, RuntimeConfig>,
     >,
+    compiler_image_archiver: impl FnOnce(
+        &SourceProgram,
+        &MirProgram,
+        MirArtifactId,
+        MirFunctionId,
+        &AuthorizedSourceSnapshot,
+    ) -> Result<Vec<u8>, BootstrapHostCodecError>,
 ) -> Result<
     BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>,
     BootstrapRunError,
 > {
-    let result = invoke_bootstrap_entry(lease, factory)??;
+    let scope = jet_jit::SourceExecutionCompletionScope::new();
+    let mut completion_owner = BootstrapRunCompletionOwner::new(scope.clone());
+    let result = scope.with_current(|| {
+        run_bootstrap_artifact_inner(
+            lease,
+            config,
+            factory_tier,
+            factory,
+            backend,
+            source_resume_factory,
+            compiler_image_archiver,
+            &scope,
+            &mut completion_owner,
+        )
+    });
+    match result {
+        Ok(mut output) => {
+            output.completion_owner.allow_resource_retirement = true;
+            Ok(output)
+        }
+        Err(error) => {
+            completion_owner.allow_resource_retirement =
+                !error.preserves_pending_retirement_error();
+            Err(BootstrapRunError::WithCompletionOwner {
+                error: Box::new(error),
+                completion_owner,
+            })
+        }
+    }
+}
+
+fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
+    lease: &AuthorizedSourceLease,
+    config: &MirRustConfig<'_>,
+    factory_tier: BootstrapFactoryTier,
+    factory: impl FnOnce(
+        &AuthorizedSourceSnapshot,
+        BootstrapFactoryTier,
+        &crate::Codegen::MIRRust::MirRustExecutionConfig,
+        &mut BootstrapRunCompletionOwner,
+    ) -> Result<BootstrapJetCompileResult<SourceProgram, RuntimeConfig>, BootstrapHostCodecError>,
+    backend: impl FnOnce(BootstrapBackendArtifact<'_>) -> BackendOutput,
+    source_resume_factory: Option<
+        BootstrapSourceResumeFactory<'_, SourceProgram, RuntimeConfig>,
+    >,
+    compiler_image_archiver: impl FnOnce(
+        &SourceProgram,
+        &MirProgram,
+        MirArtifactId,
+        MirFunctionId,
+        &AuthorizedSourceSnapshot,
+    ) -> Result<Vec<u8>, BootstrapHostCodecError>,
+    completion_scope: &jet_jit::SourceExecutionCompletionScope,
+    completion_owner: &mut BootstrapRunCompletionOwner,
+) -> Result<
+    BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>,
+    BootstrapRunError,
+> {
+    let result = invoke_bootstrap_entry(lease, |snapshot| {
+        factory(snapshot, factory_tier, &config.execution, completion_owner)
+    })??;
     let BootstrapJetCompileResult {
         complete,
         emitted_source,
@@ -356,31 +747,58 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         internal_problem,
         reports,
         resources,
+        selected_factory_tier,
+        actual_factory_tier,
     } = result;
+    completion_owner.set_resources(resources.clone());
+    let actual_tier_is_valid = match (factory_tier, actual_factory_tier) {
+        (BootstrapFactoryTier::Aot, BootstrapFactoryTier::Aot)
+        | (
+            BootstrapFactoryTier::CraneliftJit,
+            BootstrapFactoryTier::CraneliftJit | BootstrapFactoryTier::SourceInterpreterDeopt,
+        )
+        | (
+            BootstrapFactoryTier::SourceInterpreterDeopt,
+            BootstrapFactoryTier::SourceInterpreterDeopt,
+        ) => true,
+        _ => false,
+    };
+    if selected_factory_tier != factory_tier || !actual_tier_is_valid {
+        retire_bootstrap_resources(resources, completion_scope)?;
+        return Err(BootstrapRunError::Codec(
+            BootstrapHostCodecError::InvalidMetadata(
+                "compiler factory selected/actual tier provenance disagrees with the invocation"
+                    .to_string(),
+            ),
+        ));
+    }
     if let Some(problem) = internal_problem {
-        if let Err(error) = retire_bootstrap_resources(resources) {
-            return Err(BootstrapRunError::CompilerInternal {
-                error: BootstrapHostCodecError::InvalidMetadata(format!(
-                    "Jet compiler internal failure: {problem}; Source resource retirement also failed: {error}"
-                )),
-                reports,
-            });
-        }
-        return Err(BootstrapRunError::CompilerInternal {
-            error: BootstrapHostCodecError::InvalidMetadata(format!(
-                "Jet compiler internal failure: {problem}"
-            )),
-            reports,
-        });
+        let error = BootstrapHostCodecError::InvalidMetadata(format!(
+            "Jet compiler internal failure: {problem}"
+        ));
+        return match retire_bootstrap_resources(resources, completion_scope) {
+            Ok(()) => Err(BootstrapRunError::CompilerInternal { error, reports }),
+            Err(BootstrapRunError::ResourceRetirement(retirement)) => {
+                Err(BootstrapRunError::CompilerInternalResourceRetirement {
+                    error,
+                    reports,
+                    retirement,
+                })
+            }
+            Err(error) => Err(error),
+        };
     }
     if !complete {
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Ok(BootstrapRunOutput {
+            selected_factory_tier,
+            actual_factory_tier,
             complete: false,
             backend: None,
             web_artifacts: None,
             outcome: None,
             value: None,
+            completion_owner: completion_owner.clone(),
             soft_stop: comptime_soft_stop,
             stdout: String::new(),
             stderr: String::new(),
@@ -391,14 +809,14 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             comptime_exit_code,
             reports,
             source_program,
-            runtime_config,
+            runtime_config: None,
             mir,
             entry_function,
             artifact: runtime_artifact.or(web_artifact),
         });
     }
     if runtime_artifact.is_some() && (web_artifact.is_some() || web_artifacts.is_some()) {
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
             BootstrapHostCodecError::InvalidMetadata(
                 "complete compiler result selected both Source runtime and Web artifacts"
@@ -408,7 +826,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
     }
     if let Some(artifact) = runtime_artifact {
         let Some(program) = mir else {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(
                     "complete Source runtime result has no typed MIR".to_string(),
@@ -416,7 +834,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             ));
         };
         let Some(entry_function) = entry_function else {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(
                     "complete Source runtime result has no checked entry function".to_string(),
@@ -424,7 +842,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             ));
         };
         let Some(source_program) = source_program else {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(
                     "complete Source runtime result has no retained Source program".to_string(),
@@ -432,7 +850,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             ));
         };
         let Some(runtime_config) = runtime_config else {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(
                     "complete Source runtime result has no runtime configuration".to_string(),
@@ -451,7 +869,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             .iter()
             .find(|function| function.id == entry_function)
         else {
-            retire_bootstrap_resources(Some(resources))?;
+            retire_bootstrap_resources(Some(resources), completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(format!(
                     "Source runtime entry function {entry_function:?} is absent from checked MIR"
@@ -459,7 +877,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             ));
         };
         if !entry.params.is_empty() || !entry.capture_params.is_empty() {
-            retire_bootstrap_resources(Some(resources))?;
+            retire_bootstrap_resources(Some(resources), completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(format!(
                     "Source runtime entry `{}` requires parameters or captures, but bootstrap supplies none",
@@ -470,25 +888,35 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         let root_lease = match resources.retain_root() {
             Ok(root_lease) => root_lease,
             Err(error) => {
-                if let Err(retirement) = resources.retire() {
-                    return Err(BootstrapRunError::SourceRuntime(format!(
-                        "cannot retain Source resource root: {error}; physical retirement also failed: {retirement}"
-                    )));
-                }
-                return Err(BootstrapRunError::SourceRuntime(format!(
-                    "cannot retain Source resource root: {error}"
-                )));
+                return match resources.retire() {
+                    Ok(completions) => {
+                        record_source_completions(completion_scope, completions)?;
+                        Err(BootstrapRunError::SourceRuntime(format!(
+                            "cannot retain Source resource root: {error}"
+                        )))
+                    }
+                    Err(retirement) => Err(
+                        BootstrapRunError::SourceRuntimeResourceRetirement {
+                            error: format!("cannot retain Source resource root: {error}"),
+                            retirement,
+                        },
+                    ),
+                };
             }
         };
         let Some(source_resume_factory) = source_resume_factory else {
-            if let Err(retirement) = resources.retire() {
-                return Err(BootstrapRunError::SourceRuntime(format!(
-                    "Source runtime callback factory is unavailable; physical resource retirement also failed: {retirement}"
-                )));
-            }
-            return Err(BootstrapRunError::SourceRuntime(
-                "Source runtime callback factory is unavailable".to_string(),
-            ));
+            return match resources.retire() {
+                Ok(completions) => {
+                    record_source_completions(completion_scope, completions)?;
+                    Err(BootstrapRunError::SourceRuntime(
+                        "Source runtime callback factory is unavailable".to_string(),
+                    ))
+                }
+                Err(retirement) => Err(BootstrapRunError::SourceRuntimeResourceRetirement {
+                    error: "Source runtime callback factory is unavailable".to_string(),
+                    retirement,
+                }),
+            };
         };
         let resume = source_resume_factory(source_program, runtime_config, root_lease);
         let execution = match jet_jit::execute_source_entry(
@@ -502,29 +930,39 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         ) {
             Ok(execution) => execution,
             Err(error) => {
-                if let Err(retire_error) = resources.retire() {
-                    return Err(BootstrapRunError::SourceRuntime(format!(
-                        "{error}; physical Source resource retirement also failed: {retire_error}"
-                    )));
-                }
-                return Err(BootstrapRunError::SourceRuntime(error.to_string()));
+                return match resources.retire() {
+                    Ok(completions) => {
+                        record_source_completions(completion_scope, completions)?;
+                        Err(BootstrapRunError::SourceExecution(error))
+                    }
+                    Err(retirement) => Err(
+                        BootstrapRunError::SourceExecutionResourceRetirement {
+                            execution: error,
+                            retirement,
+                        },
+                    ),
+                };
             }
         };
         let mut execution = execution;
         let adopted_value = execution.value.take();
         let retired = execution
             .retire()
-            .map_err(|error| BootstrapRunError::SourceRuntime(error.to_string()))?;
+            .map_err(BootstrapRunError::SourceExecutionRetirement)?;
         let exit_code = match &retired.outcome {
             Some(RunOutcome::Ran { exit_code, .. }) => Some(i64::from(*exit_code)),
             Some(RunOutcome::Problems(_)) | None => None,
         };
+        record_source_completions(completion_scope, retired.completions)?;
         return Ok(BootstrapRunOutput {
+            selected_factory_tier,
+            actual_factory_tier,
             complete: true,
             backend: None,
             web_artifacts: None,
             outcome: retired.outcome,
             value: retired.value.or(adopted_value),
+            completion_owner: completion_owner.clone(),
             stdout: retired.stdout,
             stderr: retired.stderr,
             exit_code,
@@ -542,7 +980,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
     }
     if web_artifact.is_some() || web_artifacts.is_some() {
         let (Some(artifact), Some(web_artifacts)) = (web_artifact, web_artifacts) else {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(
                     "complete Web result must carry both its exact artifact and full artifact set"
@@ -554,13 +992,16 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             artifact,
             artifacts: &web_artifacts,
         });
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Ok(BootstrapRunOutput {
+            selected_factory_tier,
+            actual_factory_tier,
             complete: true,
             backend: Some(backend_output),
             web_artifacts: Some(web_artifacts),
             outcome: None,
             value: None,
+            completion_owner: completion_owner.clone(),
             soft_stop: comptime_soft_stop,
             stdout: String::new(),
             stderr: String::new(),
@@ -571,14 +1012,14 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
             comptime_exit_code,
             reports,
             source_program,
-            runtime_config,
+            runtime_config: None,
             mir,
             entry_function,
             artifact: Some(artifact),
         });
     }
     let Some(source) = emitted_source else {
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
             BootstrapHostCodecError::InvalidMetadata(
                 "complete native compiler result has no emitted Rust source".to_string(),
@@ -586,7 +1027,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         ));
     };
     let Some(bindings) = bindings else {
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
             BootstrapHostCodecError::InvalidMetadata(
                 "complete native compiler result has no Rust binding manifest".to_string(),
@@ -594,37 +1035,144 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         ));
     };
     let Some(program) = mir.as_ref() else {
-        retire_bootstrap_resources(resources)?;
+        retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
             BootstrapHostCodecError::InvalidMetadata(
                 "complete native compiler result has no checked MIR program".to_string(),
             ),
         ));
     };
-    let native_artifact = mir
-        .as_ref()
-        .zip(entry_function)
-        .and_then(|(program, entry)| {
-            entry_artifact_for_target(program, entry, MirArtifactTarget::RustAot)
-        });
-    let artifact = match prepare_bootstrap_artifact(source, program, config, bindings) {
+    let compiler_image = match crate::__jet_bootstrap_compiler_image() {
+        Ok(image) => image,
+        Err(error) => {
+            retire_bootstrap_resources(resources, completion_scope)?;
+            return Err(BootstrapRunError::Codec(
+                BootstrapHostCodecError::InvalidMetadata(format!(
+                    "cannot restore canonical compiler image before native emission: {error}"
+                )),
+            ));
+        }
+    };
+    let source_authority_digest =
+        crate::compiler_bootstrap_compiler_image::compiler_image_source_authority_digest(
+            lease.snapshot(),
+        );
+    let compiling_canonical_source =
+        source_authority_digest == compiler_image.header.source_authority_digest;
+    let Some(source_program_ref) = source_program.as_ref() else {
+        retire_bootstrap_resources(resources, completion_scope)?;
+        return Err(BootstrapRunError::Codec(
+            BootstrapHostCodecError::InvalidMetadata(
+                "complete native compiler result has no typed Source MIR".to_string(),
+            ),
+        ));
+    };
+    let (native_artifact, image_bytes, image_authority_digest, image_artifact, image_root) =
+        if compiling_canonical_source {
+            let compiler_root = match checked_compiler_factory_root(program, &bindings) {
+                Ok(root) => root,
+                Err(error) => {
+                    retire_bootstrap_resources(resources, completion_scope)?;
+                    return Err(BootstrapRunError::Codec(error));
+                }
+            };
+            if compiler_image.header.entry_function != compiler_root {
+                retire_bootstrap_resources(resources, completion_scope)?;
+                return Err(BootstrapRunError::Codec(
+                    BootstrapHostCodecError::InvalidMetadata(
+                        "canonical compiler image private root differs from the checked source factory"
+                            .to_string(),
+                    ),
+                ));
+            }
+            let Some(native_artifact) =
+                artifact_for_function_target(program, compiler_root, MirArtifactTarget::RustAot)
+            else {
+                retire_bootstrap_resources(resources, completion_scope)?;
+                return Err(BootstrapRunError::Codec(
+                    BootstrapHostCodecError::InvalidMetadata(
+                        "canonical compiler source has no exact Rust AOT artifact containing its private factory root"
+                            .to_string(),
+                    ),
+                ));
+            };
+            let image_bytes = match compiler_image_archiver(
+                source_program_ref,
+                program,
+                native_artifact,
+                compiler_root,
+                lease.snapshot(),
+            ) {
+                Ok(image) => image,
+                Err(error) => {
+                    retire_bootstrap_resources(resources, completion_scope)?;
+                    return Err(BootstrapRunError::Codec(error));
+                }
+            };
+            (
+                native_artifact,
+                image_bytes,
+                source_authority_digest,
+                native_artifact,
+                compiler_root,
+            )
+        } else {
+            let native_artifact = match entry_function {
+                Some(entry_function) => {
+                    entry_artifact_for_target(program, entry_function, MirArtifactTarget::RustAot)
+                }
+                None => single_artifact_for_target(program, MirArtifactTarget::RustAot),
+            };
+            let Some(native_artifact) = native_artifact else {
+                retire_bootstrap_resources(resources, completion_scope)?;
+                return Err(BootstrapRunError::Codec(
+                    BootstrapHostCodecError::InvalidMetadata(
+                        "complete native result has no unique exact Rust AOT output artifact"
+                            .to_string(),
+                    ),
+                ));
+            };
+            (
+                native_artifact,
+                crate::__JET_BOOTSTRAP_COMPILER_IMAGE_BYTES.to_vec(),
+                compiler_image.header.source_authority_digest,
+                compiler_image.header.artifact,
+                compiler_image.header.entry_function,
+            )
+        };
+    let mut output_config = (*config).clone();
+    output_config.execution.artifact = native_artifact;
+    let mut artifact = match prepare_bootstrap_artifact(source, program, &output_config, bindings) {
         Ok(artifact) => artifact,
         Err(error) => {
-            retire_bootstrap_resources(resources)?;
+            retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(error));
         }
     };
+    if let Err(error) = append_embedded_compiler_image(
+        &mut artifact.source,
+        &image_bytes,
+        image_authority_digest,
+        image_artifact,
+        image_root,
+    ) {
+        retire_bootstrap_resources(resources, completion_scope)?;
+        return Err(BootstrapRunError::Codec(error));
+    }
     let backend_output = backend(BootstrapBackendArtifact::NativeRust {
         source: artifact.source,
         bindings: artifact.bindings,
     });
-    retire_bootstrap_resources(resources)?;
+    retire_bootstrap_resources(resources, completion_scope)?;
     Ok(BootstrapRunOutput {
+        selected_factory_tier,
+        actual_factory_tier,
         complete: true,
         backend: Some(backend_output),
         web_artifacts: None,
         outcome: None,
         value: None,
+        completion_owner: completion_owner.clone(),
         soft_stop: comptime_soft_stop,
         stdout: String::new(),
         stderr: String::new(),
@@ -635,20 +1183,36 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
         comptime_exit_code,
         reports,
         source_program,
-        runtime_config,
+        runtime_config: None,
         mir,
         entry_function,
-        artifact: native_artifact,
+        artifact: Some(native_artifact),
     })
+}
+
+fn record_source_completions(
+    scope: &jet_jit::SourceExecutionCompletionScope,
+    completions: Vec<jet_jit::SourceExecutionCompletion>,
+) -> Result<(), BootstrapRunError> {
+    for completion in completions {
+        if let Err(completion) =
+            scope.with_current(|| jet_jit::SourceExecutionCompletionScope::record_current(completion))
+        {
+            return Err(BootstrapRunError::UnroutedCompletion(completion));
+        }
+    }
+    Ok(())
 }
 
 fn retire_bootstrap_resources(
     resources: Option<SourceResourceSession>,
+    completion_scope: &jet_jit::SourceExecutionCompletionScope,
 ) -> Result<(), BootstrapRunError> {
     if let Some(resources) = resources {
-        resources
+        let completions = resources
             .retire()
             .map_err(BootstrapRunError::ResourceRetirement)?;
+        record_source_completions(completion_scope, completions)?;
     }
     Ok(())
 }
@@ -669,6 +1233,71 @@ fn entry_artifact_for_target(
     let artifact = matches.next()?.id;
     matches.next().is_none().then_some(artifact)
 }
+fn checked_compiler_factory_root(
+    program: &MirProgram,
+    bindings: &BootstrapBindingDescriptor,
+) -> Result<MirFunctionId, BootstrapHostCodecError> {
+    let mut entries = bindings
+        .callables
+        .iter()
+        .filter(|callable| callable.source_name == "jet_bootstrap_compile");
+    let entry = entries.next().ok_or_else(|| {
+        BootstrapHostCodecError::MissingEntry("jet_bootstrap_compile".to_string())
+    })?;
+    if entries.next().is_some() {
+        return Err(BootstrapHostCodecError::InvalidMetadata(
+            "compiler MIR has multiple private jet_bootstrap_compile roots".to_string(),
+        ));
+    }
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.id == entry.metadata.function)
+        .ok_or_else(|| {
+            BootstrapHostCodecError::InvalidMetadata(
+                "private jet_bootstrap_compile root is absent from checked MIR".to_string(),
+            )
+        })?;
+    if !function.capture_params.is_empty() || !function.target_applicability.rust_aot {
+        return Err(BootstrapHostCodecError::InvalidMetadata(
+            "private jet_bootstrap_compile root must be capture-free and Rust AOT-applicable"
+                .to_string(),
+        ));
+    }
+    BootstrapEntryCodec::new(program, bindings, function.id)?;
+    Ok(function.id)
+}
+
+fn artifact_for_function_target(
+    program: &MirProgram,
+    function: MirFunctionId,
+    target: MirArtifactTarget,
+) -> Option<MirArtifactId> {
+    let module = program
+        .functions
+        .iter()
+        .find(|row| row.id == function)?
+        .module_id;
+    let mut matches = program
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.target == target && artifact.modules.contains(&module));
+    let artifact = matches.next()?.id;
+    matches.next().is_none().then_some(artifact)
+}
+
+fn single_artifact_for_target(
+    program: &MirProgram,
+    target: MirArtifactTarget,
+) -> Option<MirArtifactId> {
+    let mut matches = program
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.target == target);
+    let artifact = matches.next()?.id;
+    matches.next().is_none().then_some(artifact)
+}
+
 /// Package the canonical Host and Runner modules into the private emitted
 /// crate. The backend keeps the generated prefix untouched, including its
 /// library/entry attributes; this suffix only links the real source modules
@@ -730,6 +1359,7 @@ fn package_bootstrap_artifact(
     source.push_str("#[path = ");
     source.push_str(&rust_string_literal(&entry_codec_path));
     source.push_str("]\nmod compiler_bootstrap_entry_codec;\n\n");
+    source.push_str("pub(crate) use compiler_bootstrap_entry_codec::{BootstrapEntryCodec, BootstrapEntryPhysicalBindings, BootstrapEntryValue};\n\n");
     source.push_str("#[path = ");
     source.push_str(&rust_string_literal(&compiler_image_path));
     source.push_str("]\nmod compiler_bootstrap_compiler_image;\n");
@@ -766,23 +1396,51 @@ fn package_bootstrap_artifact(
          };\n\
          \n\
          #[doc(hidden)]\n\
-         pub(crate) fn __jet_bootstrap_run_from_host<BackendOutput, SourceProgram, RuntimeConfig>(\n\
-             lease: &crate::compiler_bootstrap_host::AuthorizedSourceLease,\n\
-             config: &crate::Codegen::MIRRust::MirRustConfig<'_>,\n\
-             factory: impl FnOnce(&crate::compiler_bootstrap_host::AuthorizedSourceSnapshot) -> Result<crate::BootstrapJetCompileResult<SourceProgram, RuntimeConfig>, crate::BootstrapHostCodecError>,\n\
-             backend: impl FnOnce(crate::compiler_bootstrap_runner::BootstrapBackendArtifact<'_>) -> BackendOutput,\n\
-             source_resume_factory: Option<crate::compiler_bootstrap_runner::BootstrapSourceResumeFactory<'_, SourceProgram, RuntimeConfig>>,\n\
-         ) -> Result<\n\
-             crate::compiler_bootstrap_runner::BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>,\n\
-             crate::compiler_bootstrap_runner::BootstrapRunError,\n\
-         >\n\
-         {\n\
-             crate::compiler_bootstrap_runner::run_bootstrap_artifact(\n\
-                 lease,\n\
-                 config,\n\
-                 factory,\n\
-                 backend,\n\
+         pub(crate) fn __jet_bootstrap_run_from_host<BackendOutput, RuntimeConfig>(
+             lease: &crate::compiler_bootstrap_host::AuthorizedSourceLease,
+             config: &crate::Codegen::MIRRust::MirRustConfig<'_>,
+             factory_tier: crate::BootstrapFactoryTier,
+             factory: impl FnOnce(\n\
+                 &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,\n\
+                 crate::BootstrapFactoryTier,\n\
+                 &crate::Codegen::MIRRust::MirRustExecutionConfig,\n\
+                 &mut crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner,\n\
+             ) -> Result<crate::BootstrapJetCompileResult<crate::MirProgram, RuntimeConfig>, crate::BootstrapHostCodecError>,\n\
+             backend: impl FnOnce(crate::compiler_bootstrap_runner::BootstrapBackendArtifact<'_>) -> BackendOutput,
+             source_resume_factory: Option<crate::compiler_bootstrap_runner::BootstrapSourceResumeFactory<'_, crate::MirProgram, RuntimeConfig>>,
+         ) -> Result<
+             crate::compiler_bootstrap_runner::BootstrapRunOutput<BackendOutput, crate::MirProgram, RuntimeConfig>,
+             crate::compiler_bootstrap_runner::BootstrapRunError,
+         >
+         {
+             crate::compiler_bootstrap_runner::run_bootstrap_artifact(
+                 lease,
+                 config,
+                 factory_tier,
+                 factory,
+                 backend,
                  source_resume_factory,\n\
+                 |source_program, program, artifact, entry, snapshot| {\n\
+                     let compiler_image = crate::__jet_bootstrap_compiler_image()\n\
+                         .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n\
+                     let source_authority_digest =\n\
+                         crate::compiler_bootstrap_compiler_image::compiler_image_source_authority_digest(snapshot);\n\
+                     if source_authority_digest != compiler_image.header.source_authority_digest\n\
+                         || entry != compiler_image.header.entry_function {\n\
+                         return Err(crate::BootstrapHostCodecError::InvalidMetadata(\n\
+                             \"private compiler-image archive root differs from canonical source authority\".to_string(),\n\
+                         ));\n\
+                     }\n\
+                     crate::compiler_bootstrap_compiler_image::archive_compiler_image(\n\
+                         source_program,\n\
+                         program,\n\
+                         artifact,\n\
+                         entry,\n\
+                         snapshot,\n\
+                         crate::__jet_bootstrap_mir_program_to_host,\n\
+                     )\n\
+                     .map_err(|error| crate::BootstrapHostCodecError::InvalidMetadata(format!(\"cannot archive checked compiler MIR image: {error}\")))\n\
+                 },\n\
              )\n\
          }\n",
     );

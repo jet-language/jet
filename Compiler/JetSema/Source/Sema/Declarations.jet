@@ -20,19 +20,13 @@ pub fn sema_effective_return_type(return_type: ?Type) -> Type {
 fn sema_callable_policy_string_text(parts: [StrPart]) -> String {
     if parts.len() != 1 -> return "<string>"
     if parts[0] == {
-        .Lit(text) -> return "\"{text}\""
-        else -> {}
+        .Lit(text) -> "\"{text}\""
+        else -> "<string>"
     }
-    "<string>"
 }
 
 fn sema_callable_policy_call_text(call: Call) -> String {
-    args := [String]{}
-    index := 0
-    loop index < call.args.len() {
-        args.push(sema_callable_policy_argument_text(call.args[index].expr))
-        index += 1
-    }
+    args :: loop argument in call.args -> sema_callable_policy_argument_text(argument.expr)
     "{call.name}({args.join(", ")})"
 }
 
@@ -52,43 +46,30 @@ fn sema_callable_policy_argument_text(expr: Expr) -> String {
 
 fn sema_callable_policies(func: Func) -> CallablePolicyChain {
     policies := [CallablePolicy]{}
-    marker_index := 0
-    loop marker_index < func.markers.len() {
-        marker :: func.markers[marker_index]
+    loop marker in func.markers {
         if marker.name == "Policy" {
-            arg_index := 0
-            loop arg_index < marker.args.len() {
-                if marker.args[arg_index] == {
+            loop argument in marker.args {
+                if argument == {
                     .Expr(value) -> {
                         if value == {
                             .Call(call) -> {
-                                arguments := [String]{}
-                                call_arg_index := 0
-                                loop call_arg_index < call.args.len() {
-                                    arguments.push(sema_callable_policy_argument_text(call.args[call_arg_index].expr))
-                                    call_arg_index += 1
-                                }
+                                arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
                                 policies.push(CallablePolicy{name: call.name, arguments: arguments})
                             }
                         }
                     }
                 }
-                arg_index += 1
             }
         }
-        marker_index += 1
     }
     CallablePolicyChain{policies: policies}
 }
 
 fn sema_function_param_types(func: Func) -> [Type] {
     params := [Type]{}
-    index := 0
-    loop index < func.params.len() {
-        parameter :: func.params[index]
+    loop parameter in func.params {
         ty :: type_with_effective_fn_returns(parameter.ty)
         if parameter.variadic -> params.push(Type.List(ty)) else -> params.push(ty)
-        index += 1
     }
     params
 }
@@ -96,19 +77,15 @@ fn sema_function_param_types(func: Func) -> [Type] {
 fn sema_function_param_contract(func: Func) -> ?[CallContractRow] {
     contract := [CallContractRow]{}
     has_contract := false
-    index := 0
-    loop index < func.params.len() {
-        parameter :: func.params[index]
+    loop parameter in func.params {
         label := parameter.name
-        implicit_local_label := parameter.zone == ParamZone.Either && parameter.public_label == None
+        implicit_local_label :: parameter.zone == ParamZone.Either && parameter.public_label == None
         if parameter.public_label != None -> label = (parameter.public_label ?? CallLabel{name: "", span: parameter.name_span}).name
         if parameter.zone == ParamZone.PositionalOnly || implicit_local_label -> label = ""
         contract.push(CallContractRow{label: label, zone: parameter.zone})
         if label != "" || parameter.zone != ParamZone.Either -> has_contract = true
-        index += 1
     }
-    if has_contract -> return Val(contract)
-    None
+    if has_contract -> Val(contract) else -> None
 }
 
 fn sema_function_call_metadata(func: Func, owner: SymbolId, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
@@ -116,21 +93,18 @@ fn sema_function_call_metadata(func: Func, owner: SymbolId, fallback_source_file
     defaults := [?FunctionDefaultRef]{}
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
-    index := 0
-    loop index < func.params.len() {
-        parameter :: func.params[index]
+    loop (index, parameter) in func.params {
         names.push(parameter.name)
         variadic.push(parameter.variadic)
         conventions.push(parameter.convention)
-        if parameter.default != None {
-            default_expr :: parameter.default ?? Expr.Unit(span: parameter.name_span)
-            span :: expr_span(default_expr)
-            source_file :: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
-            defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
-        } else {
-            defaults.push(None)
+        if parameter.default == {
+            .Val(default_expr) -> {
+                span :: expr_span(default_expr)
+                source_file :: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
+                defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
+            }
+            else -> defaults.push(None)
         }
-        index += 1
     }
     FunctionCallMetadata{
         names: names,
@@ -142,8 +116,7 @@ fn sema_function_call_metadata(func: Func, owner: SymbolId, fallback_source_file
 }
 
 pub fn sema_function_symbol_type(func: Func, owner: SymbolId, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
-    effect_bound := None
-    if func.is_pure -> effect_bound = Val([EffectRowEntry]{})
+    effect_bound :: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn(
         sema_function_param_types(func),
         Val(sema_effective_return_type(func.return_type)),

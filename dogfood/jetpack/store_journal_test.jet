@@ -2,7 +2,7 @@ use core.crypto as crypto
 use core.files as fs
 use "src/store/journal"
 
-fn test_root(name: String) String -> {
+fn test_root(name: String) -> String {
     return Path.home().join(".cache").join("jet-dogfood").join("journal-tests").join(name).to_string()
 }
 
@@ -10,7 +10,7 @@ fn cleanup(path: String) {
     if fs.exists(~path) -> fs.remove_all(path) ?? panic("journal fixture cleanup failed")
 }
 
-fn journal_path(root: String) String -> {
+fn journal_path(root: String) -> String {
     return Path.from(root).join("hangar").join("closure-db").join("journal").to_string()
 }
 
@@ -18,7 +18,7 @@ fn append_record(root: String, key: String, value: String) {
     journal.append(~root, journal.JournalRecord{key: key, value: value, deleted: false}) ?? panic("journal append failed")
 }
 
-fn transaction_count(root: String) Int -> {
+fn transaction_count(root: String) -> Int {
     path :: journal_path(root)
     entries :: fs.list_dir(~path) ?? panic("journal transaction listing failed")
     count := 0

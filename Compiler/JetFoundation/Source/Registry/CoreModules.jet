@@ -29,7 +29,7 @@ pub fn core_module_has_type(module_name: String, name: String) -> Bool {
 }
 
 fn core_module_type_leaf(name: String) -> String {
-    bytes := name.bytes()
+    bytes :: name.bytes()
     namespace_separator := -1
     module_separator := -1
     index := 0
@@ -42,17 +42,15 @@ fn core_module_type_leaf(name: String) -> String {
             index += 1
         }
     }
-    if namespace_separator >= 0 {
-        return String.from_bytes(bytes[namespace_separator + 2..bytes.len()]) ?? name
+    if {
+        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..bytes.len()]) ?? name
+        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..bytes.len()]) ?? name
+        else -> name
     }
-    if module_separator >= 0 {
-        return String.from_bytes(bytes[module_separator + 1..bytes.len()]) ?? name
-    }
-    name
 }
 
 pub fn core_type_modules(name: String) -> [String] {
-    leaf := core_module_type_leaf(name)
+    leaf :: core_module_type_leaf(name)
     modules := [String]{}
     loop row in @CORE_MODULE_EXPORTS {
         if core_module_export_has_name(row.type_exports, leaf) -> modules.push(row.module_name)

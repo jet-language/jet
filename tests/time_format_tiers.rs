@@ -86,7 +86,7 @@ fn local_date_display_with_trait_signature_matches_across_tiers() {
 use core.time as time
 
 trait BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) Bool
+    fn is_business_day(self, date: LocalDate) -> Bool
 }
 
 fn run() {

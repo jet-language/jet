@@ -152,7 +152,7 @@ fn append_send_method(
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {handle} !Err -> {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
@@ -177,7 +177,7 @@ fn append_recv_method(
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {handle} !Err -> {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     }

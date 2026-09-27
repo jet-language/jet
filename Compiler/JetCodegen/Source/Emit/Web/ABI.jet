@@ -129,7 +129,7 @@ fn jet_web_wasm_export_success_type(function: MirFunction) -> MirType {
     }
 }
 
-fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunction, out: &mut [String]) {
+fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunction, out: &[String]) {
     if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> return
     if function.form != MirFunctionForm.TopLevel || function.capture_params.len() != 0 {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export is not a top-level capture-free function", function.name, Val(function.span))
@@ -164,7 +164,7 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunctio
     out.push("")
 }
 
-fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunction], out: &mut [String]) {
+fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunction], out: &[String]) {
     names := [String]{}
     loop function in functions {
         if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> next
@@ -175,6 +175,6 @@ fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunc
             }
         }
         names.push(function.name)
-        jet_web_emit_wasm_export_bridge(ctx, function, out)
+        jet_web_emit_wasm_export_bridge(ctx, function, &out)
     }
 }

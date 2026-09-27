@@ -115,7 +115,10 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] {
 }
 
 fn jet_ring_is_namespace_only(module_name: String) -> Bool {
-    module_name == "core.mem.scope" || module_name == "core.net.mime" || module_name == "core.net.url" || module_name == "core.time.expiring"
+    if module_name == {
+        "core.mem.scope" | "core.net.mime" | "core.net.url" | "core.time.expiring" -> true
+        else -> false
+    }
 }
 
 fn jet_ring_is_closure_marker(usage: String) -> Bool {
@@ -139,7 +142,7 @@ pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String {
 }
 
 pub fn jet_ring_parse_manifest_layer(value: String) -> ?MirRuntimeLayer {
-    trimmed := value.trim()
+    trimmed :: value.trim()
     if trimmed == {
         "core" -> Val(MirRuntimeLayer.Core)
         "alloc" -> Val(MirRuntimeLayer.Alloc)
@@ -149,9 +152,11 @@ pub fn jet_ring_parse_manifest_layer(value: String) -> ?MirRuntimeLayer {
 }
 
 fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer {
-    if module_name == "core" || module_name == "core.prelude" || module_name == "core.math" || module_name == "core.units" || module_name == "core.perf" || module_name == "core.mem.scope" -> return MirRuntimeLayer.Core
-    if module_name == "core.mem" || module_name == "core.math.random" || module_name == "core.crypto" || module_name == "core.crypto.random" || module_name == "core.crypto.uuid" || module_name == "core.crypto.vault" || module_name == "core.encoding" || module_name == "core.encoding.json" || module_name == "core.encoding.jsonl" || module_name == "core.encoding.csv" || module_name == "core.encoding.toml" || module_name == "core.encoding.yaml" || module_name == "core.encoding.xml" || module_name == "core.encoding.cbor" || module_name == "core.encoding.hex" || module_name == "core.encoding.base64" || module_name == "core.encoding.base32" || module_name == "core.text" || module_name == "core.text.fmt" || module_name == "core.reflect" || module_name == "core.compiler" || module_name == "core.game" || module_name == "core.reactive.loadable" || module_name == "core.event" || module_name == "core.compute" || module_name == "core.compute.solve" || module_name == "core.time.expiring" || module_name == "core.reactive" || module_name == "core.data" || module_name == "core.data.plot" || module_name == "core.data.sketch.hll" || module_name == "core.data.sketch.tdigest" || module_name == "core.data.sketch.cms" || module_name == "core.data.sketch.reservoir" || module_name == "core.log" || module_name == "core.regex" || module_name == "core.net.url" || module_name == "core.net.mime" -> return MirRuntimeLayer.Alloc
-    MirRuntimeLayer.Std
+    if module_name == {
+        "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> MirRuntimeLayer.Core
+        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> MirRuntimeLayer.Alloc
+        else -> MirRuntimeLayer.Std
+    }
 }
 
 pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer {
@@ -160,54 +165,62 @@ pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer {
 
 fn jet_ring_helper_layer(module_name: String, helper: String) -> ?MirRuntimeLayer {
     if helper.len() == 0 -> return None
-    if module_name == "core.math" || module_name == "core.units" || module_name == "core.perf" || module_name == "core.mem.scope" -> return Val(MirRuntimeLayer.Core)
-    if module_name == "core.mem" {
-        if helper == "Ptr" || helper == "from_addr" || helper == "volatile_read" || helper == "volatile_write" || helper == "address_of" || helper == "pin" || helper == "Pin" -> return Val(MirRuntimeLayer.Core)
+    if module_name == {
+        "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> Val(MirRuntimeLayer.Core)
+        "core.mem" -> if helper == {
+            "Ptr" | "from_addr" | "volatile_read" | "volatile_write" | "address_of" | "pin" | "Pin" -> Val(MirRuntimeLayer.Core)
+            else -> None
+        }
+        "core.text" -> if helper == {
+            "Cursor" | "caseless_eq" | "display_width" | "scalar_count" | "byte_count" | "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" | "starts_any" | "ends_any" -> Val(MirRuntimeLayer.Core)
+            else -> None
+        }
+        "core.time" -> if helper == {
+            "from_unix_ms" | "from_unix_seconds" | "from_unix_microseconds" | "from_unix_nanoseconds" | "from_timestamp" | "days_in_month" | "is_leap_year" | "period" | "period_days" | "period_months" | "period_years" | "utc" -> Val(MirRuntimeLayer.Core)
+            else -> None
+        }
+        "core.net" -> if helper == {
+            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "socket_addr" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" -> Val(MirRuntimeLayer.Alloc)
+            else -> None
+        }
+        "core.net.url" | "core.net.mime" -> Val(MirRuntimeLayer.Alloc)
+        "core.files" -> if helper == {
+            "typed_head" | "path_from" | "path_join" | "path_parent" | "path_extension" | "path_stem" | "path_normalize" -> Val(MirRuntimeLayer.Alloc)
+            else -> None
+        }
+        "core.crypto" -> if helper == {
+            "__nominal__" | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Digest256" | "Digest512" | "sha256" | "blake3" | "sha512" | "constant_time_equal_bytes" | "constant_time_equal" | "verify" | "sign" -> Val(MirRuntimeLayer.Core)
+            "file_seal" | "file_open" -> Val(MirRuntimeLayer.Std)
+            else -> None
+        }
+        "core.archive" -> if helper == {
+            "zip_decompress" | "crc32" | "adler32" | "deflate" | "inflate" | "zip_names_json" | "tar_names_json" -> Val(MirRuntimeLayer.Alloc)
+            else -> None
+        }
+        "core.email" -> if helper == {
+            "Address" | "Message" | "Attachment" | "Envelope" | "RecipientPolicy" | "Limits" | "address" | "attachment" | "message" | "envelope" | "serialize" -> Val(MirRuntimeLayer.Alloc)
+            else -> None
+        }
+        else -> None
     }
-    if module_name == "core.text" {
-        if helper == "Cursor" || helper == "caseless_eq" || helper == "display_width" || helper == "scalar_count" || helper == "byte_count" || helper == "is_alphabetic" || helper == "is_numeric" || helper == "is_whitespace" || helper == "is_ascii" || helper == "starts_any" || helper == "ends_any" -> return Val(MirRuntimeLayer.Core)
-    }
-    if module_name == "core.time" {
-        if helper == "from_unix_ms" || helper == "from_unix_seconds" || helper == "from_unix_microseconds" || helper == "from_unix_nanoseconds" || helper == "from_timestamp" || helper == "days_in_month" || helper == "is_leap_year" || helper == "period" || helper == "period_days" || helper == "period_months" || helper == "period_years" || helper == "utc" -> return Val(MirRuntimeLayer.Core)
-    }
-    if module_name == "core.net" {
-        if helper == "ip_addr" || helper == "ip_to_string" || helper == "ip_is_ipv4" || helper == "socket_addr" || helper == "socket_addr_parse" || helper == "socket_host" || helper == "socket_port" || helper == "socket_to_string" || helper == "error_operation" || helper == "error_address" || helper == "error_name" || helper == "error_message" || helper == "error_os_code" -> return Val(MirRuntimeLayer.Alloc)
-    }
-    if module_name == "core.net.url" || module_name == "core.net.mime" -> return Val(MirRuntimeLayer.Alloc)
-    if module_name == "core.files" {
-        if helper == "typed_head" || helper == "path_from" || helper == "path_join" || helper == "path_parent" || helper == "path_extension" || helper == "path_stem" || helper == "path_normalize" -> return Val(MirRuntimeLayer.Alloc)
-    }
-    if module_name == "core.crypto" {
-        if helper == "__nominal__" || helper == "Secret" || helper == "SigningKey" || helper == "VerifyKey" || helper == "X25519SecretKey" || helper == "X25519PublicKey" || helper == "SharedSecret" || helper == "Signature" || helper == "Digest256" || helper == "Digest512" || helper == "sha256" || helper == "blake3" || helper == "sha512" || helper == "constant_time_equal_bytes" || helper == "constant_time_equal" || helper == "verify" || helper == "sign" -> return Val(MirRuntimeLayer.Core)
-        if helper == "file_seal" || helper == "file_open" -> return Val(MirRuntimeLayer.Std)
-    }
-    if module_name == "core.archive" {
-        if helper == "zip_decompress" || helper == "crc32" || helper == "adler32" || helper == "deflate" || helper == "inflate" || helper == "zip_names_json" || helper == "tar_names_json" -> return Val(MirRuntimeLayer.Alloc)
-    }
-    if module_name == "core.email" {
-        if helper == "Address" || helper == "Message" || helper == "Attachment" || helper == "Envelope" || helper == "RecipientPolicy" || helper == "Limits" || helper == "address" || helper == "attachment" || helper == "message" || helper == "envelope" || helper == "serialize" -> return Val(MirRuntimeLayer.Alloc)
-    }
-    None
 }
 
 pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer {
     if usage.starts_with("core::") {
-        bytes := usage.bytes()
-        rest := String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
-        if rest == "json" || rest == "bytes" -> return MirRuntimeLayer.Alloc
-        if rest == "from_bytes" || rest == "from_bytes_lossy" -> return MirRuntimeLayer.Core
-        return MirRuntimeLayer.Std
+        bytes :: usage.bytes()
+        rest :: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
+        return if rest == {
+            "json" | "bytes" -> MirRuntimeLayer.Alloc
+            "from_bytes" | "from_bytes_lossy" -> MirRuntimeLayer.Core
+            else -> MirRuntimeLayer.Std
+        }
     }
     parts := usage.split("::")
     module_name := parts[0]
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        index := 1
-        loop index < parts.len() {
-            helper_parts.push(parts[index])
-            index += 1
-        }
+        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
@@ -219,11 +232,7 @@ fn jet_ring_dependency_keys(usage: String) -> [String] {
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        index := 1
-        loop index < parts.len() {
-            helper_parts.push(parts[index])
-            index += 1
-        }
+        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     dependencies := [String]{}
@@ -241,11 +250,7 @@ fn jet_ring_dependency_keys(usage: String) -> [String] {
         module_parts := module_name.split(".")
         if module_parts.len() > 1 {
             parent_parts := [String]{}
-            index := 0
-            loop index + 1 < module_parts.len() {
-                parent_parts.push(module_parts[index])
-                index += 1
-            }
+            loop index in 0..<module_parts.len() - 1 -> parent_parts.push(module_parts[index])
             parent := parent_parts.join(".")
             if parent.starts_with("core") -> jet_ring_insert_string(&dependencies, parent)
         }
@@ -300,11 +305,7 @@ pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] 
     closure := [JetRingLayerFact]{}
     loop pending.len() > 0 {
         current := pending[0]
-        index := 1
-        loop index < pending.len() {
-            pending[index - 1] = pending[index]
-            index += 1
-        }
+        loop index in 1..<pending.len() -> pending[index - 1] = pending[index]
         _ := pending.pop()
         already_classified := false
         loop row in closure {
@@ -326,8 +327,7 @@ pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] 
 }
 
 pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] {
-    keys := [String]{}
-    loop row in jet_ring_classify_prelude_closure(roots) -> keys.push(row.key)
+    keys :: loop row in jet_ring_classify_prelude_closure(roots) -> row.key
     keys
 }
 
@@ -385,7 +385,7 @@ fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int {
 }
 
 fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartId) {
-    order := jet_ring_runtime_part_order(part)
+    order :: jet_ring_runtime_part_order(part)
     index := 0
     loop index < rows.len() {
         if rows[index] == part -> return

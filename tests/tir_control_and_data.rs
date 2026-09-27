@@ -19,7 +19,7 @@ const RESULT_HANDLER_PACKAGE: &str =
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int -> {
+fn classify(ok: Bool) -> Int {
     if ok { return 7 }
     return Err("bad")
 }
@@ -27,8 +27,22 @@ fn classify(ok: Bool) Int -> {
 fn run() -[IO]> {
     #FX(authority: IO) {
         authority.with("IO")
-        classify(true) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
-        classify(false) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
+        classify(true) ? ok -> {
+            print("ok")
+            print(ok)
+            0
+        } ! _error -> {
+            print("error")
+            0
+        }
+        classify(false) ? ok -> {
+            print("ok")
+            print(ok)
+            0
+        } ! _error -> {
+            print("error")
+            0
+        }
     }
 }
 "#;
@@ -43,7 +57,7 @@ fn run() -[IO]> {
 #[test]
 fn result_handler_evaluates_effectful_receiver_once_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int -[IO]> {
+fn classify(ok: Bool) -[IO]> Int {
     print("source")
     if ok { return 7 }
     return Err("bad")
@@ -69,7 +83,7 @@ fn run() -[IO]> {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int -> {
+fn choose(ok: Bool) -> Int {
     if ok { return 7 }
     return Err("bad")
 }
@@ -97,25 +111,25 @@ fn run() {
 #[test]
 fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
     let src = r#"
-fn choose<T>(value: ^T, ok: Bool) T -> {
+fn choose<T>(value: ^T, ok: Bool) -> T {
     if ok { return value }
     return Err("bad")
 }
 
-fn choose_text(value: ^String, ok: Bool) String -> {
+fn choose_text(value: ^String, ok: Bool) -> String {
     if ok { return value }
     return Err("bad")
 }
 
-fn owned(ok: Bool) String -> {
+fn owned(ok: Bool) -> String {
     return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T -> {
+fn generic<T>(value: ^T, ok: Bool) -> T {
     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
-fn nested(value: Int, ok: Bool) Int -> {
+fn nested(value: Int, ok: Bool) -> Int {
     return choose<Int>(^value, ok) ? success -> {
         choose<Int>(^success, ok) ? nested_success -> nested_success + 1 ! _nested_failure -> 0
     } ! _failure -> 0
@@ -170,14 +184,14 @@ fn result_handler_example_matches_all_execution_tiers() {
 #[test]
 fn braced_value_tails_and_arm_tables_agree_on_all_tiers() {
     let src = r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String {
     if value == {
         1 -> { "one" }
         else -> { "other" }
     }
 }
 
-fn early(flag: Bool) String -> {
+fn early(flag: Bool) -> String {
     if flag { return "early" }
     "late"
 }
@@ -198,7 +212,7 @@ fn run() {
 #[test]
 fn nested_return_if_keeps_live_value_branch_type() {
     let src = r#"
-fn nested_return_if(value: DataTree, right: DataTree) Bool !Never -> {
+fn nested_return_if(value: DataTree, right: DataTree) -> Bool !Never {
     return if value == {
         .Text(left_text) -> {
             return if right == {
@@ -245,15 +259,15 @@ fn run() {
 #[test]
 fn value_block_tails_report_unit_and_lint_old_arm_table_shape() {
     let invalid = r#"
-fn semicolon() Int -> {
-    1;
+fn semicolon() -> Int {
+    1
 }
 
-fn declaration() Int -> {
+fn declaration() -> Int {
     value :: 1
 }
 
-fn assignment() Int -> {
+fn assignment() -> Int {
     value := 0
     value = 1
 }
@@ -269,7 +283,7 @@ fn run() {}
         .all(|diagnostic| diagnostic.span.is_some()));
 
     let lintable = r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String {
     if value == {
         // Keep the arm comment.
         1 -> return /* keep value comment */ "one"
@@ -313,11 +327,11 @@ fn run() {}
     assert!(!fixed.contains("return"), "fixed source:\n{fixed}");
 
     let semicolon_lintable = r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String {
     if value == {
-        1 -> return "one";
+        1 -> return "one"
     }
-    return "other";
+    return "other"
 }
 
 fn run() {}
@@ -350,9 +364,12 @@ fn run() {}
     .expect("the generated value table must compile after semicolon removal");
 
     let effectful = r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String {
     if value == {
-        1 -> { print("side"); return "one" }
+        1 -> {
+            print("side")
+            return "one"
+        }
         else -> { return "other" }
     }
 }
@@ -370,11 +387,11 @@ fn run() {}
 #[test]
 fn value_blocks_keep_early_exits_and_reject_statement_tails() {
     let valid = r#"
-fn choose(flag: Bool) Int -> {
+fn choose(flag: Bool) -> Int {
     if flag -> { return 1 } else -> { 2 }
 }
 
-fn fallback(value: ?Int) Int -> {
+fn fallback(value: ?Int) -> Int {
     value ?? { return 9 }
 }
 
@@ -388,11 +405,11 @@ fn run() {
 
     for (name, source, expected_code) in [
         (
-            "nested_semicolon",
+            "nested_statement_tail",
             r#"
-fn nested(flag: Bool) Int -> {
+fn nested(flag: Bool) -> Int {
     if {
-        flag -> { print("side"); }
+        flag -> { print("side") }
         else -> { print("other") }
     }
 }
@@ -403,7 +420,7 @@ fn run() {}
         (
             "nested_declaration",
             r#"
-fn nested(flag: Bool) Int -> {
+fn nested(flag: Bool) -> Int {
     if flag -> { value :: 1 } else -> { print("other") }
 }
 fn run() {}
@@ -413,10 +430,10 @@ fn run() {}
             "E0003",
         ),
         (
-            "fallback_semicolon",
+            "fallback_statement_tail",
             r#"
-fn fallback(value: ?Int) Int -> {
-    value ?? { print("side"); }
+fn fallback(value: ?Int) -> Int {
+    value ?? { print("side") }
 }
 fn run() {}
 "#,
@@ -438,7 +455,7 @@ fn run() {}
 #[test]
 fn value_tail_divergence_and_loop_flow_are_deterministic() {
     let valid = r#"
-fn nested(flag: Bool) Int -> {
+fn nested(flag: Bool) -> Int {
     // Both nested branches leave without a value.
     if {
         flag -> { panic("then") }
@@ -446,24 +463,24 @@ fn nested(flag: Bool) Int -> {
     }
 }
 
-fn infinite() Int -> {
+fn infinite() -> Int {
     loop {
         panic("stop")
     }
 }
 
-fn infinite_true() Int -> {
+fn infinite_true() -> Int {
     loop true {
         next
     }
 }
 
-fn unreachable() Int -> {
+fn unreachable() -> Int {
     return 1
-    print(2);
+    print(2)
 }
 
-fn fallback(value: ?Int) Int -> {
+fn fallback(value: ?Int) -> Int {
     value ?? {
         if {
             true -> { panic("missing") }
@@ -472,11 +489,11 @@ fn fallback(value: ?Int) Int -> {
     }
 }
 
-fn unit_panic() () {
+fn unit_panic() -> () {
     panic("unit")
 }
 
-fn unit_loop() () {
+fn unit_loop() -> () {
     loop {
         panic("unit")
     }
@@ -488,7 +505,7 @@ fn run() {}
         .expect("diverging and unreachable tails should compile");
 
     let finite = r#"
-fn finite() Int -> {
+fn finite() -> Int {
     loop {
         break
     }
@@ -509,7 +526,7 @@ fn run() {}
 #[test]
 fn default_err_value_and_typed_err_arm_have_distinct_shapes() {
     let src = r#"
-fn make() Err -> {
+fn make() -> Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
@@ -590,9 +607,9 @@ enum NarrowError { Narrow }
 #Error
 enum OtherError { Other }
 
-fn narrow() Int !NarrowError -> Err(NarrowError.Narrow)
+fn narrow() -> Int !NarrowError -> Err(NarrowError.Narrow)
 
-fn widen() Int !(NarrowError | OtherError) -> narrow()
+fn widen() -> Int !(NarrowError | OtherError) -> narrow()
 
 fn run() {
     print(widen() ?? 7)
@@ -624,47 +641,47 @@ fn implicit_failure_propagation_covers_call_positions() {
 struct Holder {
     value: Int
 
-    fn bump(self, by: Int) Int -> {
+    fn bump(self, by: Int) -> Int {
         return add(self.value + by)
     }
 }
 
-fn source(value: Int) Int -> {
+fn source(value: Int) -> Int {
     if value == 0 {
         return Err("source failed")
     }
     return value
 }
 
-fn add(value: Int) Int -> value + 1
+fn add(value: Int) -> Int -> value + 1
 
-fn is_zero(value: Int) Bool -> value == 0
+fn is_zero(value: Int) -> Bool -> value == 0
 
-fn argument(value: Int) Int -> {
+fn argument(value: Int) -> Int {
     return add(source(value))
 }
 
-fn nested(value: Int) Int -> {
+fn nested(value: Int) -> Int {
     return source(value) + 1
 }
 
-fn branch(value: Int) Int -> {
+fn branch(value: Int) -> Int {
     if is_zero(value) {
         source(value)
     }
     return value
 }
 
-fn branch_value(value: Int) Int -> {
+fn branch_value(value: Int) -> Int {
     return if is_zero(value) -> { source(value) } else -> { value + 1 }
 }
 
-fn closure(value: Int) Int -> {
+fn closure(value: Int) -> Int {
     worker :: (n: Int) Int -> source(n) + 1
     return worker(value)
 }
 
-fn method(value: Int) Int -> {
+fn method(value: Int) -> Int {
     holder :: Holder{ value: source(value) }
     return add(holder.bump(1))
 }
@@ -691,22 +708,22 @@ fn run() {
 #[test]
 fn implicit_failure_propagation_in_map_and_filter_callbacks() {
     let src = r#"
-fn source(value: Int) Int -> {
+fn source(value: Int) -> Int {
     if value == 0 {
         return Err("source failed")
     }
     return value
 }
 
-fn source_flag(value: Int) Bool -> {
+fn source_flag(value: Int) -> Bool {
     if value == 0 {
         return Err("source failed")
     }
     return value > 1
 }
 
-fn add_one(value: Int) Int -> value + 1
-fn retain_flag(value: Bool) Bool -> value
+fn add_one(value: Int) -> Int -> value + 1
+fn retain_flag(value: Bool) -> Bool -> value
 
 fn run() {
     values :: [1, 2]
@@ -783,7 +800,7 @@ struct Grid {
 impl Grid.Index {
     type Key = Int
     type Value = Int
-    fn get(self, key: Int) ?Int -> {
+    fn get(self, key: Int) -> ?Int {
         if key < 0 || key >= self.cells.len() -> return None
         return Val(self.cells[key].value)
     }
@@ -1107,7 +1124,7 @@ fn arithmetic_and_helper_call() {
         return;
     }
     let src = "\
-fn double(n: Int) Int -> {
+fn double(n: Int) -> Int {
     return (n * 2)
 }
 fn run() {
@@ -1158,7 +1175,7 @@ fn if_expression_and_string_param() {
         return;
     }
     let src = "\
-fn shout(s: String) String -> {
+fn shout(s: String) -> String {
     return \"{s}!\"
 }
 fn run() {
@@ -1180,7 +1197,7 @@ fn if_else_chain_and_return() {
         return;
     }
     let src = "\
-fn label(n: Int) String -> {
+fn label(n: Int) -> String {
     if ((n % 15) == 0) {
         return \"FizzBuzz\"
     } else if ((n % 3) == 0) {
@@ -1207,7 +1224,10 @@ fn discarded_if_does_not_unify_mixed_tail_values() {
     let src = r#"
 fn branch(flag: Bool) -[IO]> {
     if {
-        flag -> { print("returned"); 7 }
+        flag -> {
+            print("returned")
+            7
+        }
         else -> { print("value") }
     }
 }
@@ -1259,7 +1279,10 @@ fn parenthesized_discarded_if_matches_direct_form() {
     let src = r#"
 fn branch(flag: Bool) -[IO]> {
     (if {
-        flag -> { print("paren-returned"); 11 }
+        flag -> {
+            print("paren-returned")
+            11
+        }
         else -> { print("paren-value") }
     })
 }
@@ -1283,7 +1306,7 @@ fn run() -[IO]> {
 #[test]
 fn discarded_result_handler_evaluates_subject_once_without_tail_unification() {
     let src = r#"
-fn classify(ok: Bool) Int -[IO]> {
+fn classify(ok: Bool) -[IO]> Int {
     print("subject")
     if ok {
         return 5
@@ -1292,7 +1315,10 @@ fn classify(ok: Bool) Int -[IO]> {
 }
 
 fn handle(ok: Bool) -[IO]> {
-        classify(ok) ? _success -> { print("success") } ! _failure -> { print("failure"); 9 }
+        classify(ok) ? _success -> { print("success") } ! _failure -> {
+            print("failure")
+            9
+        }
 }
 
 fn run() -[IO]> {
@@ -1353,7 +1379,7 @@ fn subjectless_guards_order_totality_and_nested_forms() {
         return;
     }
     let src = r#"
-fn check(note: String, answer: Bool) Bool -> {
+fn check(note: String, answer: Bool) -> Bool {
     print(note)
     return answer
 }
@@ -1394,7 +1420,7 @@ enum Choice {
     B(Int)
 }
 
-fn choose(note: String, value: Int) Choice -> {
+fn choose(note: String, value: Int) -> Choice {
     print(note)
     return Choice.A(value)
 }
@@ -1437,11 +1463,11 @@ struct Counter {
     n: Int
 }
 impl Counter {
-    fn bumped(self) Int -> {
+    fn bumped(self) -> Int {
         return (self.n + 1)
     }
 }
-fn add(a: Int, b: Int) Int -> {
+fn add(a: Int, b: Int) -> Int {
     return (a + b)
 }
 fn run() {
@@ -1482,7 +1508,7 @@ struct Raw {
     value: Int
 }
 
-fn hold(value: Int | Raw) Int | Raw -> {
+fn hold(value: Int | Raw) -> Int | Raw {
     return ~value
 }
 
@@ -1515,7 +1541,7 @@ struct WriteOnly {
 }
 
 impl WriteOnly.Encode {
-    fn encode(self) DataTree -> {
+    fn encode(self) -> DataTree {
         return DataTree.Text("write")
     }
 }
@@ -1730,7 +1756,7 @@ fn range_values_store_pass_return_loop_and_slice() {
         return;
     }
     let src = "\
-fn identity(band: ^Range) Range -> {
+fn identity(band: ^Range) -> Range {
     return band
 }
 fn run() {
@@ -1839,7 +1865,7 @@ fn yielding_and_result_loops_compile_and_run() {
         return;
     }
     let src = r#"
-fn find(xs: [Int]) Int -> {
+fn find(xs: [Int]) -> Int {
     found :: loop {
         loop x in xs {
             if x > 2 -> break(found, x)
@@ -1849,7 +1875,7 @@ fn find(xs: [Int]) Int -> {
     found
 }
 
-fn outer_result() Int -> {
+fn outer_result() -> Int {
     result :: loop {
         ignored :: loop {
             break(result, 9)
@@ -1859,9 +1885,9 @@ fn outer_result() Int -> {
     result
 }
 
-fn identity(value: Int) Int -> value
+fn identity(value: Int) -> Int -> value
 
-fn nested_binary_exit() Int -> {
+fn nested_binary_exit() -> Int {
     result :: loop {
         ignored :: (loop {
             break(result, 11)
@@ -1872,7 +1898,7 @@ fn nested_binary_exit() Int -> {
     result
 }
 
-fn nested_call_exit() Int -> {
+fn nested_call_exit() -> Int {
     result :: loop {
         ignored :: identity(loop {
             break(result, 12)
@@ -1883,7 +1909,7 @@ fn nested_call_exit() Int -> {
     result
 }
 
-fn nested_condition_exit() Int -> {
+fn nested_condition_exit() -> Int {
     result :: loop {
         if (loop {
             break(result, 13)
@@ -1896,7 +1922,7 @@ fn nested_condition_exit() Int -> {
     result
 }
 
-fn counted_init_exit() Int -> {
+fn counted_init_exit() -> Int {
     result :: loop {
         loop i := (loop {
             break(result, 14)
@@ -1909,7 +1935,7 @@ fn counted_init_exit() Int -> {
     result
 }
 
-fn counted_step_exit() Int -> {
+fn counted_step_exit() -> Int {
     result :: loop {
         loop i := 0, i < 2 {
             i = (loop {
@@ -1922,7 +1948,7 @@ fn counted_step_exit() Int -> {
     result
 }
 
-fn value_if_exit() Int -> {
+fn value_if_exit() -> Int {
     result :: loop {
         ignored :: if true -> {
             break(result, 16)
@@ -1982,12 +2008,12 @@ fn unified_loop_headers_stride_and_next_edges() {
         return;
     }
     let src = r#"
-fn source() [Int] -> {
+fn source() -> [Int] {
     print("source")
     return [0, 1, 2, 3, 4, 5, 6]
 }
 
-fn stride() Int -> {
+fn stride() -> Int {
     print("stride")
     return 3
 }
@@ -2012,11 +2038,11 @@ fn run() {
     assert_eq!(stdout, "source\nstride\n0\n3\n6\nstate 2\n");
 
     let invalid = r#"
-fn source() [Int] -> {
+fn source() -> [Int] {
     print("source")
     return [1]
 }
-fn stride() Int -> {
+fn stride() -> Int {
     print("stride")
     return 0
 }
@@ -2051,10 +2077,10 @@ struct Point {
     x: Int
     y: Int
 }
-fn sum_pt(p: Point) Int -> {
+fn sum_pt(p: Point) -> Int {
     return (p.x + p.y)
 }
-fn origin() Point -> {
+fn origin() -> Point {
     return Point{ x: 0, y: 0 }
 }
 fn run() {
@@ -2114,7 +2140,7 @@ struct Outer {
     inner: Inner
     label: Int
 }
-fn deep(o: Outer) Int -> {
+fn deep(o: Outer) -> Int {
     return (o.inner.v + o.label)
 }
 fn run() {
@@ -2142,14 +2168,14 @@ enum Light {
     Yellow
     Green
 }
-fn next(light: Light) Light -> {
+fn next(light: Light) -> Light {
     if light == {
         .Red -> { return Light.Yellow }
         .Yellow -> { return Light.Green }
         .Green -> { return Light.Red }
     }
 }
-fn label(light: Light) String -> {
+fn label(light: Light) -> String {
     if light == {
         .Red -> { return \"stop\" }
         .Yellow -> { return \"caution\" }
@@ -2171,7 +2197,7 @@ fn data_tree_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers() {
         return;
     }
     let src = r#"
-fn classify(tree: DataTree) String -> {
+fn classify(tree: DataTree) -> String {
     if tree == {
         .Object(entries) -> { return "object:{entries.len()}" }
         .Int(_) -> { return "int" }
@@ -2205,7 +2231,7 @@ enum Conn {
     Idle(Int)
     Closed
 }
-fn describe(c: Conn) String -> {
+fn describe(c: Conn) -> String {
     if c == {
         .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }
         .Blocked(id) -> { return \"blocked:{id}\" }
@@ -2242,10 +2268,10 @@ enum Shape {
     Circle(Float)
     Rect(w: Float, h: Float)
 }
-fn area(Circle(r: Float)) Float -> {
+fn area(Circle(r: Float)) -> Float {
     return r * r
 }
-fn area(Rect(w: Float, h: Float)) Float -> {
+fn area(Rect(w: Float, h: Float)) -> Float {
     return w * h
 }
 fn run() {
@@ -2270,7 +2296,7 @@ enum HTTP {
     Good(Int)
     Fail(Int)
 }
-fn classify(r: HTTP) String -> {
+fn classify(r: HTTP) -> String {
     if r == {
         .Good(200..299) -> { return \"success\" }
         .Good(400..499) -> { return \"client error\" }
@@ -2313,7 +2339,7 @@ fn arm_head_range_dispatch() {
         return;
     }
     let src = "\
-fn grade(score: Int) String -> {
+fn grade(score: Int) -> String {
     if score == {
         0..59 -> { return \"F\" }
         60..69 -> { return \"D\" }
@@ -2339,7 +2365,7 @@ fn literal_dispatch_emits_nested_comparisons_and_preserves_order() {
     let table = compile(
         "tir_branch_table",
         r#"
-fn dense(n: Int) String -> {
+fn dense(n: Int) -> String {
     if n == {
         1 -> { return "one" }
         2 -> { return "two" }
@@ -2347,14 +2373,14 @@ fn dense(n: Int) String -> {
         else -> { return "other" }
     }
 }
-fn sparse(n: Int) String -> {
+fn sparse(n: Int) -> String {
     if n == {
         1 -> { return "one" }
         100 -> { return "hundred" }
         else -> { return "other" }
     }
 }
-fn truth(flag: Bool) String -> {
+fn truth(flag: Bool) -> String {
     if flag == {
         true -> { return "yes" }
         false -> { return "no" }
@@ -2420,7 +2446,7 @@ fn run() {
     let ordered = compile(
         "tir_branch_ordered",
         r#"
-fn subject() Int -> { return 7 }
+fn subject() -> Int { return 7 }
 fn run() {
     if subject() == {
         0..3 -> { print("low") }
@@ -2462,22 +2488,22 @@ fn user_arithmetic_hooks_preserve_values_on_all_tiers() {
 struct Money { cents: Int }
 
 impl Money.Add {
-    fn add(self, rhs: Money) Money -> {
+    fn add(self, rhs: Money) -> Money {
         return Money{ cents: self.cents + rhs.cents }
     }
 }
 impl Money.Sub {
-    fn sub(self, rhs: Money) Money -> {
+    fn sub(self, rhs: Money) -> Money {
         return Money{ cents: self.cents - rhs.cents }
     }
 }
 impl Money.Mul {
-    fn mul(self, rhs: Money) Money -> {
+    fn mul(self, rhs: Money) -> Money {
         return Money{ cents: self.cents * rhs.cents }
     }
 }
 impl Money.Div {
-    fn div(self, rhs: Money) Money -> {
+    fn div(self, rhs: Money) -> Money {
         return Money{ cents: self.cents /% rhs.cents }
     }
 }

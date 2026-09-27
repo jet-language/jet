@@ -899,7 +899,7 @@ mod tests {
     #[test]
     fn snapshot_source_inserts_return_arrow() {
         assert_eq!(
-            snapshot_signature_source("fn gcd(a: Int, b: Int) Int").as_deref(),
+            snapshot_signature_source("fn gcd(a: Int, b: Int) -> Int").as_deref(),
             Some("fn gcd(a: Int, b: Int) -> Int {}"),
         );
     }
@@ -907,8 +907,8 @@ mod tests {
     #[test]
     fn snapshot_source_handles_nested_function_types() {
         assert_eq!(
-            snapshot_signature_source("fn apply(callback: fn(Int) Int) Int").as_deref(),
-            Some("fn apply(callback: fn(Int) Int) -> Int {}"),
+            snapshot_signature_source("fn apply(callback: fn(Int) -> Int) -> Int").as_deref(),
+            Some("fn apply(callback: fn(Int) -> Int) -> Int {}"),
         );
     }
 }

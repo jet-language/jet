@@ -36,10 +36,10 @@ fn tower_datatree_policy_rejects_duplicate_generic_ladders() {
         .evaluate_source(
             TOWER_DATATREE_POLICY_SITE,
             r#"
-fn duplicate_equal(left: DataTree, right: DataTree) Bool -> { return true }
-fn arrays_semantically_equal(left: [DataTree], right: [DataTree]) Bool -> { return true }
-fn truthy(value: DataTree) Bool -> { return true }
-fn javascript_truthy_duplicate(value: DataTree) Bool -> { return true }
+fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }
+fn arrays_semantically_equal(left: [DataTree], right: [DataTree]) -> Bool { return true }
+fn truthy(value: DataTree) -> Bool { return true }
+fn javascript_truthy_duplicate(value: DataTree) -> Bool { return true }
 "#,
         )
         .expect("synthetic Tower source parses");

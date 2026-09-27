@@ -460,7 +460,7 @@ where
 
 fn clear_active_runtime_sentry_state() {
     // JIT sentry guards and frames are thread-local, so the resident runtime
-    // boundary must release their Foundation state before this TLS slot is
+    // boundary must release their Foundation state before the TLS slot is
     // cleared or the worker thread can tear down.
     crate::Memory::reset_jit_sentry_state();
 }
@@ -478,6 +478,21 @@ pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
         if previous != p as usize {
             HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel);
         }
+    }
+}
+
+pub(crate) struct ActiveRuntimeScope {
+    previous: Option<*mut super::JitRuntime>,
+}
+
+pub(crate) fn activate_local_runtime(ptr: *mut super::JitRuntime) -> ActiveRuntimeScope {
+    let previous = ACTIVE_RUNTIME.with(|slot| slot.replace(Some(ptr)));
+    ActiveRuntimeScope { previous }
+}
+
+impl Drop for ActiveRuntimeScope {
+    fn drop(&mut self) {
+        ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = self.previous.take());
     }
 }
 
@@ -2639,5 +2654,39 @@ mod tests {
         );
 
         ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    #[test]
+    fn nested_helper_local_runtime_scope_restores_outer_on_success_and_failure() {
+        let policy = jet_pkg_model::Package::ReleaseDevtoolsPolicy::default();
+        let mut outer = super::super::resident::fresh_runtime(policy.clone());
+        let mut child = super::super::resident::fresh_runtime(policy);
+        let outer_ptr = &mut outer as *mut super::super::JitRuntime;
+        let child_ptr = &mut child as *mut super::super::JitRuntime;
+        let previous = active_runtime_ptr();
+
+        let outer_scope = activate_local_runtime(outer_ptr);
+        {
+            let _child_scope = activate_local_runtime(child_ptr);
+            assert_eq!(active_runtime_ptr(), Some(child_ptr));
+        }
+        assert_eq!(active_runtime_ptr(), Some(outer_ptr));
+
+        let failed: Result<(), &str> = {
+            let _child_scope = activate_local_runtime(child_ptr);
+            Err("nested helper failed")
+        };
+        assert_eq!(failed, Err("nested helper failed"));
+        assert_eq!(active_runtime_ptr(), Some(outer_ptr));
+        let panicked = catch_unwind(AssertUnwindSafe(|| {
+            let _child_scope = activate_local_runtime(child_ptr);
+            panic!("nested helper unwound");
+        }));
+        assert!(panicked.is_err());
+        assert_eq!(active_runtime_ptr(), Some(outer_ptr));
+
+        drop(outer_scope);
+        assert_eq!(active_runtime_ptr(), previous);
+
     }
 }

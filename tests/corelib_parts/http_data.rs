@@ -6,7 +6,7 @@ fn core_email_policy_envelope_and_reports_are_real_jet_values() {
     let src = r#"
 use core.email as email
 
-fn error_text(problem: email.EmailError) String {
+fn error_text(problem: email.EmailError) -> String {
     if problem == {
         .Configuration(_, _, _, _) -> { return "matched" }
         .TLS(_, _, _, _) -> { return "tls-error" }
@@ -1001,12 +1001,12 @@ struct Budget {
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) Bool {
+fn must_stay_deferred(ticket: Ticket) -> Bool {
     panic("lazy filter ran before collect")
     return false
 }
 
-fn missing_minutes() ?Float -> None
+fn missing_minutes() -> ?Float -> None
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"

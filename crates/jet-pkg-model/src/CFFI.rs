@@ -4100,7 +4100,7 @@ mod tests {
 
     #[test]
     fn stale_generated_descriptor_is_rejected_before_loading() {
-        let source = "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {\n    fn ping() Int = \"ping\"\n}\n";
+        let source = "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {\n    fn ping() -> Int = \"ping\"\n}\n";
         let mut diagnostics = Vec::new();
         let mut modules = Vec::new();
         load_cache_source(

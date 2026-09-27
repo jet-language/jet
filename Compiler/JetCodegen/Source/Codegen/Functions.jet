@@ -303,7 +303,7 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: [TFunc], m
         Val(tag) -> Val(jet_codegen_lower_c_enum_tag(tag))
     }
     derives := [MirTraitId]{}
-    loop name in definition.derives -> derives.push(mir_trait_id(name))
+    loop name in definition.derives -> derives.push(jet_codegen_lower_type_derive_trait_id(name, modules, definition.module_identity))
     return MirTypeDef{
         id: mir_type_id(definition.key),
         module_id: mir_module_id(definition.module_identity),
@@ -485,10 +485,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: [TFunc], m
     trait_name := definition.trait_ref ?? definition.trait_name
     trait_ref := if trait_name == {
         None -> None
-        Val(name) -> {
-            resolved := jet_codegen_resolve_trait_ref(modules, name, definition.module_identity)
-            if resolved != None -> resolved else -> Val(mir_trait_ref(name))
-        }
+        Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(modules, name, definition.module_identity))
     }
     associated_types := [MirAssociatedTypeValue]{}
     loop value in definition.associated_types {
@@ -1069,7 +1066,7 @@ fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: &JetCodegenBuild
 
 fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParameter, index: Int) {
     access := jet_codegen_lower_access(parameter.convention)
-    value := jet_codegen_emit_value(&builder, parameter.span, parameter.ty, MirOperation.Parameter(index, parameter.name))
+    value := jet_codegen_emit_mir_type(&builder, parameter.span, jet_codegen_lower_type_for_function(parameter.ty, builder), mir_ownership_from_access(access), MirOperation.Parameter(index, parameter.name))
     _ := jet_codegen_bind_local(&builder, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
     builder.params.push(MirParam{
         index: index,
@@ -1140,7 +1137,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
         None -> MirAccess.Read
         Val(value) -> jet_codegen_lower_access(value)
     }
-    value := jet_codegen_emit_value(&builder, span, owner_type, MirOperation.Parameter(index, "self"))
+    value := jet_codegen_emit_mir_type(&builder, span, jet_codegen_lower_type_for_function(owner_type, builder), mir_ownership_from_access(access), MirOperation.Parameter(index, "self"))
     local := TLocal{
         name: "self",
         span: span,
@@ -1251,8 +1248,8 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
         access := if moved -> MirAccess.Move else if facts.mutable.contains(capture.source) -> MirAccess.Write else -> MirAccess.Read
-        ownership := if moved || cloned -> mir_owned_ownership() else -> mir_ownership_from_access(access)
-        value := jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.Capture(slot))
+        ownership := if moved -> mir_ownership_from_access(MirAccess.Move) else if cloned -> mir_owned_ownership() else -> mir_ownership_from_access(access)
+        value := jet_codegen_emit_mir_type(&builder, lambda.source_span, jet_codegen_lower_type_for_function(capture.ty, builder), ownership, MirOperation.Capture(slot))
         builder.capture_params.push(MirCaptureParam{
             slot: slot,
             name: capture.source,
@@ -1266,7 +1263,8 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
             source_local.name = capture.source
             _ := jet_codegen_bind_capture_local(&builder, source_local, capture.ty, value, access, ownership, false)
         }
-        _ := jet_codegen_bind_capture_local(&builder, capture.local, capture.ty, value, access, ownership, false)
+        place := jet_codegen_bind_capture_local(&builder, capture.local, capture.ty, value, access, ownership, false)
+        if moved -> jet_codegen_register_drop_live(&builder, place, capture.ty, ownership, true)
         slot += 1
     }
 }
@@ -1299,11 +1297,11 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
     } else {
         value :: expression ?? panic("checked expression fragment lost its expression")
         lowered_value := jet_codegen_lower_expr(&builder, value)
-        if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MirTerminator.Return(Val(lowered_value)))
+        if jet_codegen_current_is_open(builder) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MirTerminator.Return(Val(lowered_value)), -1)
     }
     if jet_codegen_current_is_open(builder) {
         if {
-            type_is_unit_callable_return(return_source) -> jet_codegen_terminate(&builder, MirTerminator.Return(None))
+            type_is_unit_callable_return(return_source) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MirTerminator.Return(None), -1)
             else -> panic("checked non-Unit TFunc falls through during MIR lowering")
         }
     }
@@ -1619,7 +1617,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         place := jet_codegen_lower_place_for_access(&builder, TPlace.Local(outer_local), outer_access)
         if borrowed {
             captures.push(MirCaptureOperand.Place(place))
-            continue
+            next
         }
         value := if cloned {
             read := jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.ReadPlace(place))
@@ -2058,18 +2056,50 @@ fn jet_codegen_add_needed_trait(reference: MirTraitRef, known: [MirTraitId], nee
     loop prior in needed {
         if prior.id == reference.id -> return
     }
-    needed.push(reference)
+    native_name := jet_codegen_native_rust_derive_name_for_id(reference.id)
+    if native_name != None {
+        expected :: native_name ?? panic("native derive identity disappeared")
+        if reference.name != expected -> panic("native derive reference name disagrees with its canonical identity")
+        return
+    }
+    compiler_owned_name := jet_codegen_compiler_owned_trait_name_for_id(reference.id)
+    if compiler_owned_name != None {
+        expected :: compiler_owned_name ?? panic("compiler-owned trait identity disappeared")
+        if reference.name != expected -> panic("compiler-owned trait reference name disagrees with its canonical identity")
+        needed.push(MirTraitRef{id: reference.id, name: expected})
+        return
+    }
+    if jet_codegen_is_checked_text_trait_id(reference.id) {
+        if reference.name != "CheckedText" -> panic("CheckedText reference name disagrees with its canonical identity")
+        return
+    }
+    panic("MIR trait reference has no declared or registered builtin identity")
+}
+
+fn jet_codegen_add_needed_derived_trait(id: MirTraitId, known: [MirTraitId], needed: &[MirTraitRef]) {
+    loop known_id in known {
+        if known_id == id -> return
+    }
+    if jet_codegen_native_rust_derive_name_for_id(id) != None -> return
+    compiler_owned_name := jet_codegen_compiler_owned_trait_name_for_id(id)
+    if compiler_owned_name != None {
+        name :: compiler_owned_name ?? panic("compiler-owned derive identity disappeared")
+        jet_codegen_add_needed_trait(MirTraitRef{id: id, name: name}, known, needed)
+        return
+    }
+    if jet_codegen_is_checked_text_trait_id(id) -> return
+    panic("MIR derive identity has no declared or registered builtin trait")
 }
 
 fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MirAssociatedTypeDecl] {
     names := [String]{}
-    if name == "Iterator" || name.ends_with("::Iterator") -> names.push("Item")
-    if name == "Iterable" || name.ends_with("::Iterable") -> names.push("Iter")
-    if name == "Index" || name.ends_with("::Index") {
+    if name == "Iterator" -> names.push("Item")
+    if name == "Iterable" -> names.push("Iter")
+    if name == "Index" {
         names.push("Key")
         names.push("Value")
     }
-    if name == "Rollback" || name.ends_with("::Rollback") -> names.push("Snapshot")
+    if name == "Rollback" -> names.push("Snapshot")
     associated := [MirAssociatedTypeDecl]{}
     loop value in names -> associated.push(MirAssociatedTypeDecl{name: value, span: Span{start: 0, end: 0}})
     associated
@@ -2095,7 +2125,7 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MirTraitDef], impls: [MirImplD
         }
     }
     loop definition in types {
-        loop derived_trait in definition.derives -> jet_codegen_add_needed_trait(MirTraitRef{id: derived_trait, name: "derive#{derived_trait.value}"}, known, &needed)
+        loop derived_trait in definition.derives -> jet_codegen_add_needed_derived_trait(derived_trait, known, &needed)
         loop parameter in definition.generic_params {
             loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
         }
@@ -2105,19 +2135,22 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MirTraitDef], impls: [MirImplD
     if traits.len() == 0 && impls.len() > 0 -> module_id = impls[0].module_id
     if traits.len() == 0 && impls.len() == 0 && functions.len() > 0 -> module_id = functions[0].module_id
     loop reference in needed {
+        name_option := jet_codegen_compiler_owned_trait_name_for_id(reference.id)
+        if name_option == None -> panic("only registered compiler-owned traits may be synthesized without declarations")
+        name :: name_option ?? panic("compiler-owned trait identity disappeared")
+        if reference.name != name -> panic("synthesized trait name disagrees with its canonical identity")
         traits.push(MirTraitDef{
             id: reference.id,
             module_id: module_id,
-            key: reference.name,
-            name: reference.name,
+            key: name,
+            name: name,
             span: Span{start: 0, end: 0},
             visibility: MirVisibility.Public,
-            associated_types: jet_codegen_synthesized_trait_associated_types(reference.name),
+            associated_types: jet_codegen_synthesized_trait_associated_types(name),
             methods: [MirTraitMethod]{},
         })
     }
 }
-
 fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> String {
     text := name.trim()
     if module_identity == "" -> return text
@@ -2348,11 +2381,11 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     loop function in nested_functions -> all_function_rows.push(function)
 
     core_owners := [MirCoreOwner]{}
-    for semantic_module in modules {
-        for owner in semantic_module.declarations.core_builtin_owners {
+    loop semantic_module in modules {
+        loop owner in semantic_module.declarations.core_builtin_owners {
             lowered := jet_codegen_lower_core_builtin_owner(owner, semantic_module)
             duplicate := false
-            for existing in core_owners {
+            loop existing in core_owners {
                 if existing.id == lowered.id || existing.key == lowered.key {
                     if existing.module_id != lowered.module_id || existing.nominal_id != lowered.nominal_id || existing.key != lowered.key || existing.name != lowered.name || existing.ownership != lowered.ownership -> panic("conflicting checked Core builtin owner identity")
                     duplicate = true

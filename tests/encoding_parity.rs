@@ -642,19 +642,19 @@ struct Row {
     value: Int
 }
 
-fn json_parse_error() String -[]> {
+fn json_parse_error() -[]> String {
     json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
 }
 
-fn json_decode_error() String -[]> {
+fn json_decode_error() -[]> String {
     json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
 }
 
-fn toml_parse_error() String -[]> {
+fn toml_parse_error() -[]> String {
     toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
 }
 
-fn yaml_parse_error() String -[]> {
+fn yaml_parse_error() -[]> String {
     yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
 }
 
@@ -748,7 +748,7 @@ struct Packet {
 @ROOT :: hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
 @PACKET :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
-fn gap() String -[]> {
+fn gap() -[]> String {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
     actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
@@ -806,11 +806,11 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) DataTree -> DataTree.Text("wire")
+    fn encode(self) -> DataTree -> DataTree.Text("wire")
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) Token ![FieldError] -[]> {
+    fn decode(tree: DataTree) -[]> Token ![FieldError] {
         value :: tree.text()
         if value != "wire" {
             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
@@ -843,7 +843,7 @@ struct Packet {
     letter: Char
 }
 
-fn resident() String -[]> {
+fn resident() -[]> String {
     value := Packet{
         display_name: "Ada",
         token: Token{ raw: "ignored" },
@@ -864,7 +864,7 @@ fn resident() String -[]> {
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
-fn forced_deopt(seed: String) String -[]> {
+fn forced_deopt(seed: String) -[]> String {
     folded := text.casefold(seed)
     if folded != "strasse" { panic("casefold") }
     value := Packet{
@@ -986,7 +986,7 @@ migration Profile {
     add host_name: String = "localhost"
 }
 
-fn decode_old() String -[]> {
+fn decode_old() -[]> String {
     bytes :: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
@@ -1000,7 +1000,7 @@ fn decode_old() String -[]> {
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn forced_deopt() String -[]> {
+fn forced_deopt() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     bytes :: [U8]{
         0xa3,
@@ -1015,7 +1015,7 @@ fn forced_deopt() String -[]> {
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn failed_change() String -[]> {
+fn failed_change() -[]> String {
     bytes :: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
@@ -1096,25 +1096,25 @@ struct Strict {
     known: Int
 }
 
-fn published() String -[]> {
+fn published() -[]> String {
     value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
     return json.to_string(value)
 }
 
-fn plain() String -[]> {
+fn plain() -[]> String {
     value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
     return json.to_string(value)
 }
 
-fn strict() String -[]> {
+fn strict() -[]> String {
     json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
 }
 
-fn malformed() String -[]> {
+fn malformed() -[]> String {
     json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
 }
 
-fn forced_deopt() String -[]> {
+fn forced_deopt() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     return published()
 }
@@ -1182,39 +1182,39 @@ use core.text as text
 #CodableAsBase
 Severity :: distinct Int(0..10)
 
-fn invalid_i8_rejected() Bool -[]> {
+fn invalid_i8_rejected() -[]> Bool {
     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_u32_rejected() Bool -[]> {
+fn invalid_u32_rejected() -[]> Bool {
     cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_f32_rejected() Bool -[]> {
+fn invalid_f32_rejected() -[]> Bool {
     cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_fixed_rejected() Bool -[]> {
+fn invalid_fixed_rejected() -[]> Bool {
     cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_range_rejected() Bool -[]> {
+fn invalid_range_rejected() -[]> Bool {
     cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
 }
 
-fn invalid_i8_error() String -[]> {
+fn invalid_i8_error() -[]> String {
     cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn invalid_u8_error() String -[]> {
+fn invalid_u8_error() -[]> String {
     cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn invalid_fixed_bytes_error() String -[]> {
+fn invalid_fixed_bytes_error() -[]> String {
     cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
-fn forced_deopt() String -[]> {
+fn forced_deopt() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
     unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
@@ -1493,10 +1493,10 @@ fn custom_encode_survives_containers() {
 use core.encoding.json as json
 struct Token { raw: String }
 impl Token.Encode {
-    fn encode(self) DataTree -> DataTree.Text("wire")
+    fn encode(self) -> DataTree -> DataTree.Text("wire")
 }
-fn token() ?Token -> Val(Token{raw: "raw"})
-fn empty() ?Token -> None
+fn token() -> ?Token -> Val(Token{raw: "raw"})
+fn empty() -> ?Token -> None
 fn run() {
     print(json.to_string([Token{raw: "raw"}]))
     print(json.to_string(token()))
@@ -1693,7 +1693,7 @@ fn run() {
     assert_aot_dev_stream_parity("csv-stream", &stream_fixture("csv", csv));
 
     let xml = r#"
-fn xml_name(local: String) DataTree -[]> {
+fn xml_name(local: String) -[]> DataTree {
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -1928,7 +1928,7 @@ use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 
-fn terminal_limit_probe() String -[FS]> {
+fn terminal_limit_probe() -[FS]> String {
     bad_path := "@DIR@/bad.json"
     limits := encoding.EncodingLimits.safe()
     limits.max_total_bytes = Val(5)
@@ -1941,7 +1941,7 @@ fn terminal_limit_probe() String -[FS]> {
     return "unreachable"
 }
 
-fn malformed_reader_probe() String -[FS]> {
+fn malformed_reader_probe() -[FS]> String {
     files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
     input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")

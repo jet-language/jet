@@ -3,7 +3,7 @@ use core.[encoding.json, files, process]
 struct Task { id: Int, text: String, done: Bool }
 struct Store { tasks: [Task] }
 
-fn load() [Task] !(IOError | [FieldError]) -> {
+fn load() -> [Task] !(IOError | [FieldError]) {
     if !files.exists("tasks.json") -> return Ok([])
     raw :: files.read("tasks.json")
     store :: json.decode<Store>(raw)

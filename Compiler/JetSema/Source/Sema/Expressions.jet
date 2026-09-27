@@ -395,13 +395,13 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
     if scopes.frames.len() > 0 -> caller_module = scopes.frames[0].owner
     caller_package := environment.package_identity
     loop graph_module in graph.modules {
-        for nominal in graph_module.nominals {
+        loop nominal in graph_module.nominals {
             owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
             if owner_name != receiver_name -> next
             owner_inference :: sema_infer_registered_nominal(nominal, graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
             if !owner_inference.complete || !owner_inference.compatible -> next
             owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
-            for implementation in graph_module.impls {
+            loop implementation in graph_module.impls {
                 if !sema_expr_operator_target_matches(implementation, nominal) -> next
                 if implementation.trait_name != Val(trait_name) -> next
                 if require_commutative && implementation.operator_marker != Val(OperatorMarker.Commutative) -> next
@@ -411,13 +411,13 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                 if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> next
                 trait_symbol := implementation.trait_symbol
                 if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
-                for function in implementation.methods {
+                loop function in implementation.methods {
                     if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
                     specialized := function
                     specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
                     candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                     duplicate := false
-                    for existing in candidates {
+                    loop existing in candidates {
                         if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
                             duplicate = true
                         }
@@ -429,17 +429,17 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                 .SourceAst(item) -> {
                     if item == {
                         .Struct(definition) -> {
-                            for block in definition.trait_impls {
+                            loop block in definition.trait_impls {
                                 if block.trait_name != trait_name -> next
                                 if require_commutative && block.operator_marker != Val(OperatorMarker.Commutative) -> next
                                 block_rhs := block.operator_rhs ?? owner_type
                                 block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                                 if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
                                 trait_symbol :: sema_type_graph_trait_symbol(graph, graph_module.module_identity, trait_name)
-                                for source_method in block.methods {
+                                loop source_method in block.methods {
                                     if source_method.name != method -> next
                                     registered := None
-                                    for function in nominal.methods {
+                                    loop function in nominal.methods {
                                         if function.declaration.span == source_method.span -> registered = Val(function)
                                     }
                                     function :: registered ?? next
@@ -448,7 +448,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                                     specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
                                     candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                                     duplicate := false
-                                    for existing in candidates {
+                                    loop existing in candidates {
                                         if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
                                             duplicate = true
                                         }
@@ -458,17 +458,17 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                             }
                         }
                         .Enum(definition) -> {
-                            for block in definition.trait_impls {
+                            loop block in definition.trait_impls {
                                 if block.trait_name != trait_name -> next
                                 if require_commutative && block.operator_marker != Val(OperatorMarker.Commutative) -> next
                                 block_rhs := block.operator_rhs ?? owner_type
                                 block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                                 if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
                                 trait_symbol :: sema_type_graph_trait_symbol(graph, graph_module.module_identity, trait_name)
-                                for source_method in block.methods {
+                                loop source_method in block.methods {
                                     if source_method.name != method -> next
                                     registered := None
-                                    for function in nominal.methods {
+                                    loop function in nominal.methods {
                                         if function.declaration.span == source_method.span -> registered = Val(function)
                                     }
                                     function :: registered ?? next
@@ -477,7 +477,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                                     specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
                                     candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                                     duplicate := false
-                                    for existing in candidates {
+                                    loop existing in candidates {
                                         if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
                                             duplicate = true
                                         }
@@ -493,8 +493,8 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
             }
         }
     }
-    for graph_module in graph.modules {
-        for implementation in graph_module.impls {
+    loop graph_module in graph.modules {
+        loop implementation in graph_module.impls {
             if implementation.target_type_name != receiver_name -> next
             if implementation.trait_name != Val(trait_name) -> next
             if require_commutative && implementation.operator_marker != Val(OperatorMarker.Commutative) -> next
@@ -503,11 +503,11 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
             if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
             trait_symbol := implementation.trait_symbol
             if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
-            for function in implementation.methods {
+            loop function in implementation.methods {
                 if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
                 candidate :: sema_expr_operator_candidate_from_function(function, graph, owner_type, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                 duplicate := false
-                for existing in candidates {
+                loop existing in candidates {
                     if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
                         duplicate = true
                     }

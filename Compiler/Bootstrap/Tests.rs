@@ -15,6 +15,11 @@ use jet_foundation::MIR::{
 const BOOTSTRAP_PROJECT_RELATIVE: &str = ".cache/jet-luna/compiler-bootstrap/project";
 const BOOTSTRAP_ENTRY_RELATIVE: &str = "src/compiler.jet";
 const SMALL_ENTRY_RELATIVE: &str = "main.jet";
+const TASK_ROOTS_FIXTURE_SOURCE: &str = include_str!("../JetEval/Tests/TaskRoots.jet");
+const CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE: &str =
+    include_str!("../../tests/fixtures/core_files_partial_move_siblings.jet");
+const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
+    include_str!("../../tests/fixtures/uninit_fixed_partial_exit.jet");
 const SMALL_PROGRAM_SOURCE: &str = r#"@SOURCE_TEXT :: "π🙂"
 @SOURCE_LIST :: [Int]{7, 8}
 @SOURCE_BYTES :: @SOURCE_TEXT.bytes()
@@ -126,10 +131,177 @@ const EXACT_DIVISION_FIXTURE_TWO_EXPECTED: &str = "10/3\ntrue\ntrue\n";
 /// It is an executable harness entry, not a compiler callback: the generated
 /// Jet factory and the packaged Runner remain the only compilation path.
 const GENERATED_ARTIFACT_MAIN: &str = r#"
+struct BootstrapTaskRootsCursorState {
+    close_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl ::jet_foundation::MIR::MirNativeCursorState for BootstrapTaskRootsCursorState {
+    fn has_next(&mut self) -> Result<bool, ::jet_foundation::MIR::MirNativeCursorError> {
+        Ok(false)
+    }
+    fn value(
+        &mut self,
+    ) -> Result<
+        ::jet_foundation::MIR::MirRuntimeValue,
+        ::jet_foundation::MIR::MirNativeCursorError,
+    > {
+        Ok(::jet_foundation::MIR::MirRuntimeValue::Unit)
+    }
+    fn advance(&mut self) -> Result<(), ::jet_foundation::MIR::MirNativeCursorError> {
+        Ok(())
+    }
+}
+impl Drop for BootstrapTaskRootsCursorState {
+    fn drop(&mut self) {
+        self.close_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+fn assert_source_completion_retired(
+    completion: ::jet_jit::SourceExecutionCompletion,
+) {
+    match completion.disposition {
+        ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+            retirement: Some(
+                ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+            ),
+            ..
+        } => {
+            assert!(
+                matches!(
+                    retirement.outcome.as_ref(),
+                    Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. })
+                ),
+                "bootstrap returned a failed Source completion: {retirement:?}",
+            );
+            for nested in retirement.completions {
+                assert_source_completion_retired(nested);
+            }
+        }
+        disposition => panic!("bootstrap returned an incomplete Source completion: {disposition:?}"),
+    }
+}
+
+fn finish_source_completion_owner(
+    owner: &crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner,
+) {
+    loop {
+        match owner.finish() {
+            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Ready(completions)) => {
+                for completion in completions {
+                    assert_source_completion_retired(completion);
+                }
+            }
+            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Pending {
+                retirement_requested,
+                retained_roots,
+                open_callback_sessions,
+                pending_jobs,
+            }) => panic!(
+                "bootstrap retained Source work: retirement_requested={retirement_requested}, retained_roots={retained_roots}, open_callback_sessions={open_callback_sessions}, pending_jobs={pending_jobs}"
+            ),
+            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Complete { failures }) => {
+                assert!(failures.is_empty(), "bootstrap callback jobs failed: {failures:?}");
+                break;
+            }
+            Err(error) => panic!("bootstrap Source completion finish failed: {error:?}"),
+        }
+    }
+}
+
+#[doc(hidden)]
+fn assert_private_compiler_image_root(
+    image: &__JetBootstrapCompilerImage,
+    bindings: &crate::BootstrapBindingDescriptor,
+) {
+    let mut roots = bindings
+        .callables
+        .iter()
+        .filter(|callable| callable.source_name == "jet_bootstrap_compile");
+    let root = roots
+        .next()
+        .unwrap_or_else(|| panic!("compiler bindings have no private factory root"));
+    assert!(
+        roots.next().is_none(),
+        "compiler bindings have multiple private factory roots"
+    );
+    let root_id = root.metadata.function.clone();
+    let artifact = image
+        .program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == image.header.artifact)
+        .unwrap_or_else(|| panic!("compiler image artifact is absent from its MIR"));
+    assert_eq!(
+        artifact.target,
+        ::jet_foundation::MIR::MirArtifactTarget::RustAot
+    );
+    assert!(
+        artifact.entry.is_none(),
+        "private compiler factory root must not become a public artifact entry"
+    );
+    assert_eq!(image.header.entry_function, root_id);
+    let function = image
+        .program
+        .functions
+        .iter()
+        .find(|function| function.id == root_id)
+        .unwrap_or_else(|| panic!("private compiler factory root is absent from checked MIR"));
+    assert_eq!(function.name, "jet_bootstrap_compile");
+    assert!(function.capture_params.is_empty());
+    assert!(function.target_applicability.rust_aot);
+    assert!(artifact.modules.contains(&function.module_id));
+    crate::BootstrapEntryCodec::new(&image.program, bindings, root_id)
+        .unwrap_or_else(|error| panic!("private compiler factory root ABI is invalid: {error}"));
+}
+fn bootstrap_fixture_function<'a>(
+    program: &'a ::jet_foundation::MIR::MirProgram,
+    source_file: ::jet_foundation::MIR::MirSourceFileId,
+    name: &str,
+) -> &'a ::jet_foundation::MIR::MirFunction {
+    let mut functions = program
+        .functions
+        .iter()
+        .filter(|function| function.source_file == source_file && function.name == name);
+    let function = functions
+        .next()
+        .unwrap_or_else(|| panic!("fixture MIR has no exact `{name}` function"));
+    assert!(
+        functions.next().is_none(),
+        "fixture MIR has multiple exact `{name}` functions"
+    );
+    function
+}
+
+fn bootstrap_mir_calls_target(
+    function: &::jet_foundation::MIR::MirFunction,
+    target: ::jet_foundation::MIR::MirFunctionId,
+) -> bool {
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .any(|instruction| match &instruction.operation {
+            ::jet_foundation::MIR::MirOperation::Call { callee, .. } => match callee {
+                ::jet_foundation::MIR::MirCallee::User(function) => *function == target,
+                ::jet_foundation::MIR::MirCallee::Associated { function, .. }
+                | ::jet_foundation::MIR::MirCallee::Method { function, .. } => *function == target,
+                _ => false,
+            },
+            _ => false,
+        })
+}
 #[doc(hidden)]
 fn main() {
     let mode = std::env::var("JET_BOOTSTRAP_MODE")
         .unwrap_or_else(|error| panic!("bootstrap mode is unavailable: {error}"));
+    let factory_tier_name = std::env::var("JET_BOOTSTRAP_FACTORY_TIER")
+        .unwrap_or_else(|_| "aot".to_string());
+    let factory_tier = match factory_tier_name.as_str() {
+        "aot" => crate::BootstrapFactoryTier::Aot,
+        "cranelift-jit" => crate::BootstrapFactoryTier::CraneliftJit,
+        "source-interpreter-deopt" => crate::BootstrapFactoryTier::SourceInterpreterDeopt,
+        _ => panic!("unknown bootstrap factory tier `{factory_tier_name}`"),
+    };
     let source_root = std::env::var("JET_BOOTSTRAP_SOURCE_ROOT")
         .unwrap_or_else(|error| panic!("bootstrap source root is unavailable: {error}"));
     let entry = std::env::var("JET_BOOTSTRAP_ENTRY")
@@ -180,28 +352,503 @@ fn main() {
             .unwrap_or_else(|error| panic!("present type identity decoding failed: {error}"));
         assert_eq!(absent_roundtrip.identity, None);
         assert_eq!(present_roundtrip.identity, present.identity);
-        std::fs::write(&output_path, "identity=absent,present\n")
+        let expected_trait =
+            ::jet_foundation::MIR::MirTraitRef::from_name("JetEvalHostAdapter");
+        let trait_ty = ::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::TraitObject(vec![expected_trait.clone()]),
+        );
+        let trait_carrier = crate::__jet_bootstrap_type_from_host(&trait_ty)
+            .unwrap_or_else(|error| panic!("trait object identity encoding failed: {error}"));
+        let trait_roundtrip = crate::__jet_bootstrap_type_to_host(&trait_carrier)
+            .unwrap_or_else(|error| panic!("trait object identity decoding failed: {error}"));
+        let trait_bounds = match trait_roundtrip.kind() {
+            ::jet_foundation::MIR::MirTypeKind::TraitObject(bounds) => bounds,
+            _ => panic!("trait object roundtrip changed its MIR kind"),
+        };
+        assert_eq!(trait_bounds, &[expected_trait]);
+        let zero_trait_ty = ::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::TraitObject(vec![
+                ::jet_foundation::MIR::MirTraitRef {
+                    id: ::jet_foundation::MIR::MirTraitId(0),
+                    name: "JetEvalHostAdapter".to_string(),
+                },
+            ]),
+        );
+        assert!(crate::__jet_bootstrap_type_from_host(&zero_trait_ty).is_err());
+        std::fs::write(&output_path, "identity=absent,present\ntrait=exact-id-name\n")
             .unwrap_or_else(|error| panic!("cannot write optional codec result: {error}"));
         std::fs::write(
             &receipt_path,
-            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\n",
+            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\ntrait_id_name=roundtrip\ntrait_zero=rejected\n",
         )
         .unwrap_or_else(|error| panic!("cannot write optional codec receipt: {error}"));
         return;
     }
 
+    if mode == "optimizer-evidence" {
+        let compiler_image = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("optimizer-evidence compiler image restore failed: {error}"));
+        let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
+            compiler_image.header.artifact,
+        );
+        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let mut completion_owner =
+            crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
+                completion_scope.clone(),
+            );
+        let mut result = completion_scope
+            .with_current(|| {
+                crate::__jet_bootstrap_compile_from_host(
+                    lease.snapshot(),
+                    crate::__jet_bootstrap_native_compile_target(),
+                    factory_tier,
+                    &execution,
+                    &mut completion_owner,
+                )
+            })
+            .unwrap_or_else(|error| panic!("optimizer-evidence compiler factory failed: {error}"));
+        assert!(result.complete, "compiler-source optimizer evidence did not compile");
+        let program = result
+            .mir
+            .as_ref()
+            .unwrap_or_else(|| panic!("optimizer-evidence result has no optimized MIR"));
+        let pipeline_file = program
+            .source_files
+            .iter()
+            .find(|file| file.path.ends_with("Compiler/JetOptimizer/Source/Pipeline.jet"))
+            .unwrap_or_else(|| panic!("optimizer evidence is not bound to compiler-source Pipeline MIR"));
+        let optimizer = bootstrap_fixture_function(program, pipeline_file.id, "optimize_mir_program");
+        let inline_pass =
+            bootstrap_fixture_function(program, pipeline_file.id, "mir_pass_expand_inline_always");
+        let inline_pass_call_retained = bootstrap_mir_calls_target(optimizer, inline_pass.id);
+        assert!(
+            inline_pass_call_retained,
+            "compiler-source optimizer entry lost its checked inline-expansion pass"
+        );
+        if let Some(resources) = result.resources.take() {
+            completion_owner.set_resources(resources);
+        }
+        drop(result.runtime_config.take());
+        completion_owner.allow_resource_retirement();
+        finish_source_completion_owner(&completion_owner);
+        let evidence = "mode=optimizer-evidence\nsource_file=Compiler/JetOptimizer/Source/Pipeline.jet\noptimizer_entry=optimize_mir_program\ninline_pass=mir_pass_expand_inline_always\ninline_pass_call_retained=true\n";
+        std::fs::write(&output_path, evidence)
+            .unwrap_or_else(|error| panic!("cannot write compiler-source optimizer evidence: {error}"));
+        std::fs::write(&receipt_path, evidence)
+            .unwrap_or_else(|error| panic!("cannot write compiler-source optimizer receipt: {error}"));
+        return;
+    }
+    if mode == "task-roots" {
+        let compiler_image = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("task-root compiler image restore failed: {error}"));
+        let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
+            compiler_image.header.artifact,
+        );
+        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let mut completion_owner =
+            crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
+                completion_scope.clone(),
+            );
+        let mut result = completion_scope
+            .with_current(|| {
+                crate::__jet_bootstrap_compile_from_host(
+                    lease.snapshot(),
+                    crate::__jet_bootstrap_native_compile_target(),
+                    factory_tier,
+                    &execution,
+                    &mut completion_owner,
+                )
+            })
+            .unwrap_or_else(|error| panic!("task-root compiler factory failed: {error}"));
+        assert!(result.complete, "task-root fixture compiler source did not compile");
+        let bindings = result
+            .bindings
+            .as_ref()
+            .unwrap_or_else(|| panic!("task-root compiler result has no binding descriptor"));
+        assert_private_compiler_image_root(&compiler_image, bindings);
+        let mut source_program = result
+            .source_program
+            .take()
+            .unwrap_or_else(|| panic!("task-root compiler result has no typed Source MIR"));
+        let mut runtime_config = result
+            .runtime_config
+            .take()
+            .unwrap_or_else(|| panic!("task-root compiler result has no runtime config"));
+        let resources = result
+            .resources
+            .take()
+            .unwrap_or_else(|| panic!("task-root compiler result has no Source resource session"));
+        completion_owner.set_resources(resources.clone());
 
-    let (complete, source, callable_count, type_count, field_count, variant_count, reports) =
-        if mode == "factory" {
-            let result = crate::compiler_bootstrap_runner::invoke_bootstrap_entry(
-                &lease,
-                |snapshot| crate::__jet_bootstrap_compile_from_host(snapshot, crate::__jet_bootstrap_native_compile_target()),
+        let mut owners = source_program.functions.iter().filter(|function| {
+            function.name == "jet_eval_task_roots_fixture_escaping_callback_owner"
+        });
+        let owner = owners
+            .next()
+            .unwrap_or_else(|| panic!("task-root Source MIR has no exact callback owner"));
+        assert!(owners.next().is_none(), "task-root Source MIR has multiple exact callback owners");
+        assert!(owner.capture_params.is_empty(), "fixture callback owner unexpectedly captures values");
+        assert_eq!(owner.params.len(), 1, "fixture callback owner lost its checked seed parameter");
+        let mut closure_targets = owner
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Closure { function, .. } => Some(function.clone()),
+                _ => None,
+            });
+        let callback_id = closure_targets
+            .next()
+            .unwrap_or_else(|| panic!("task-root callback owner has no checked closure construction"));
+        assert!(
+            closure_targets.next().is_none(),
+            "task-root callback owner has multiple checked closure constructions"
+        );
+        let callback = source_program
+            .functions
+            .iter()
+            .find(|function| function.id == callback_id)
+            .unwrap_or_else(|| panic!("task-root closure target is absent from checked Source MIR"));
+        assert_eq!(callback.capture_params.len(), 1);
+        let capture_facts = callback
+            .captures
+            .as_ref()
+            .unwrap_or_else(|| panic!("task-root callback has no checked capture facts"));
+        assert!(capture_facts.escapes, "task-root callback is not escaping");
+        assert!(
+            capture_facts.moved.is_empty(),
+            "task-root callback unexpectedly moves its capture"
+        );
+        assert!(
+            callback.target_applicability.interpreter,
+            "task-root callback target is not enabled for Source execution"
+        );
+
+        let close_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cursor_handle = ::jet_jit::SourceResources::loop_cursor_handle_id();
+        let cursor_state = BootstrapTaskRootsCursorState {
+            close_count: close_count.clone(),
+        };
+        let cursor = ::jet_foundation::MIR::MirNativeCursor::new(cursor_state);
+        let capability = resources
+            .arena()
+            .insert_cursor(cursor_handle, cursor)
+            .unwrap_or_else(|error| panic!("cannot register task-root Source cursor: {error}"));
+        let source_cursor_handle = crate::MirHandleId {
+            value: ::jet_foundation::Numeric::JetInt::from_str(
+                &capability.handle.0.to_string(),
             )
-            .unwrap_or_else(|error| panic!("generated Jet factory authority call failed: {error:?}"))
-            .unwrap_or_else(|error| panic!("generated Jet compiler codec failed: {error:?}"));
-            if let Some(resources) = result.resources.as_ref() {
-                resources.retire().unwrap_or_else(|error| panic!("generated Jet factory source resource retirement failed: {error}"));
+            .unwrap_or_else(|error| panic!("cursor handle ID is not a Jet Int: {error}")),
+        };
+        let source_cursor_raw = ::jet_foundation::Numeric::JetInt::from_i64(capability.raw);
+        let fixture_ok = crate::jet_eval_task_roots_fixture(
+            &mut source_program,
+            &mut runtime_config,
+            callback_id,
+            source_cursor_handle,
+            source_cursor_raw,
+            crate::Span {
+                start: ::jet_foundation::Numeric::JetInt::from_i64(0),
+                end: ::jet_foundation::Numeric::JetInt::from_i64(0),
+            },
+        );
+        assert!(fixture_ok, "Source task-root fixture did not complete cleanly");
+        assert_eq!(
+            close_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the real arena-backed cursor must close exactly once at its last alias"
+        );
+        let mut finalizers = result
+            .mir
+            .as_ref()
+            .unwrap_or_else(|| panic!("task-root result has no checked MIR"))
+            .functions
+            .iter()
+            .filter(|function| function.name == "jet_eval_shared_payload_finalize");
+        let finalizer = finalizers
+            .next()
+            .unwrap_or_else(|| panic!("task-root MIR has no checked Shared payload finalizer"));
+        assert!(
+            finalizers.next().is_none(),
+            "task-root MIR has multiple checked Shared payload finalizers"
+        );
+        let shared_finalizer = finalizer.id;
+        let shared_finalizer_return_type = finalizer.return_type.clone();
+        fn assert_shared_finalizer_completed(
+            completion: ::jet_jit::SourceExecutionCompletion,
+            helper: ::jet_foundation::MIR::MirFunctionId,
+            mir: &::jet_foundation::MIR::MirProgram,
+            return_type: &::jet_foundation::MIR::MirType,
+        ) {
+            assert_eq!(completion.function, Some(helper));
+            match completion.disposition {
+                ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                    retirement: Some(
+                        ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                    ),
+                    writebacks,
+                    ..
+                } => {
+                    assert!(writebacks.is_empty(), "Shared payload finalizer has writeback debt");
+                    assert!(
+                        matches!(
+                            retirement.outcome.as_ref(),
+                            Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. })
+                        ),
+                        "Shared payload finalizer failed: {retirement:?}"
+                    );
+                    assert!(retirement.stdout.is_empty());
+                    assert!(retirement.stderr.is_empty());
+                    assert!(retirement.completions.is_empty());
+                    let value = retirement
+                        .value
+                        .as_ref()
+                        .unwrap_or_else(|| panic!("Shared payload finalizer omitted its checked return value"));
+                    crate::compiler_bootstrap_entry_codec::validate_runtime_value(
+                        mir,
+                        return_type,
+                        value,
+                        0,
+                    )
+                    .unwrap_or_else(|error| panic!("Shared finalizer return value violates its checked MIR type: {error}"));
+                    let ::jet_foundation::MIR::MirRuntimeValue::Struct {
+                        type_name,
+                        fields,
+                    } = value
+                    else {
+                        panic!("Shared payload finalizer returned a non-record: {value:?}");
+                    };
+                    assert_eq!(type_name, "JetEvalOwnedRootDropResult");
+                    fn field<'a>(
+                        fields: &'a [(String, ::jet_foundation::MIR::MirRuntimeValue)],
+                        name: &str,
+                    ) -> &'a ::jet_foundation::MIR::MirRuntimeValue {
+                        fields
+                            .iter()
+                            .find(|(field, _)| field == name)
+                            .map(|(_, value)| value)
+                            .unwrap_or_else(|| panic!("Shared finalizer result omitted `{name}`"))
+                    }
+                    assert!(matches!(
+                        field(fields, "disposition"),
+                        ::jet_foundation::MIR::MirRuntimeValue::Enum {
+                            type_name,
+                            variant,
+                            args,
+                        } if type_name == "JetEvalOwnedRootDropDisposition"
+                            && variant == "Cleaned"
+                            && args.is_empty()
+                    ));
+                    assert!(matches!(
+                        field(fields, "failure"),
+                        ::jet_foundation::MIR::MirRuntimeValue::Absent { .. }
+                    ));
+                    assert!(matches!(
+                        field(fields, "internal_problem"),
+                        ::jet_foundation::MIR::MirRuntimeValue::Absent { .. }
+                    ));
+                    assert!(matches!(
+                        field(fields, "stdout"),
+                        ::jet_foundation::MIR::MirRuntimeValue::String(value) if value.is_empty()
+                    ));
+                    assert!(matches!(
+                        field(fields, "stderr"),
+                        ::jet_foundation::MIR::MirRuntimeValue::String(value) if value.is_empty()
+                    ));
+                }
+                disposition => panic!(
+                    "Shared payload finalizer did not produce an invoked completion: {disposition:?}"
+                ),
             }
+        }
+        let shared_parent_lease = resources
+            .retain_root()
+            .unwrap_or_else(|error| panic!("cannot retain shared task-root parent: {error}"));
+        let shared_child_lease = shared_parent_lease.clone();
+        let shared_arena = resources.arena();
+        let shared_consumer_ok = completion_scope.with_current(|| {
+            let shared_carrier = {
+                let _activation = shared_parent_lease.activate();
+                crate::jet_eval_task_roots_fixture_shared_produce(
+                    &mut source_program,
+                    &mut runtime_config,
+                    crate::Span {
+                        start: ::jet_foundation::Numeric::JetInt::from_i64(0),
+                        end: ::jet_foundation::Numeric::JetInt::from_i64(0),
+                    },
+                )
+            }
+            .unwrap_or_else(|| panic!("Source shared task-root producer did not return its carrier"));
+            for completion in resources
+                .retire()
+                .unwrap_or_else(|error| panic!("task-root Source resource retirement failed: {error:?}"))
+            {
+                if let Err(completion) =
+                    ::jet_jit::SourceExecutionCompletionScope::record_current(completion)
+                {
+                    panic!("task-root parent produced an unrouted completion: {completion:?}");
+                }
+            }
+            assert!(
+                resources
+                    .is_retirement_requested()
+                    .unwrap_or_else(|error| panic!("cannot inspect Source retirement request: {error}")),
+                "Source parent retirement request was not retained"
+            );
+            assert!(
+                !shared_arena
+                    .is_retired()
+                    .unwrap_or_else(|error| panic!("cannot inspect Source arena retirement: {error}")),
+                "the retained task root did not defer parent retirement"
+            );
+            assert!(
+                resources
+                    .retained_root_count()
+                    .unwrap_or_else(|error| panic!("cannot inspect Source task roots: {error}"))
+                    > 0,
+                "the deferred Source parent lost its counted task root"
+            );
+            drop(shared_parent_lease);
+            assert!(
+                !shared_arena
+                    .is_retired()
+                    .unwrap_or_else(|error| panic!("cannot inspect Source arena retirement: {error}")),
+                "dropping the producer alias retired the parent while B still owned its root"
+            );
+            assert!(
+                resources
+                    .retained_root_count()
+                    .unwrap_or_else(|error| panic!("cannot inspect Source task roots: {error}"))
+                    > 0,
+                "the consumer task root did not retain parent resources"
+            );
+            let shared_consumer_ok = {
+                let _activation = shared_child_lease.activate();
+                crate::jet_eval_task_roots_fixture_shared_consume(
+                    &mut source_program,
+                    &mut runtime_config,
+                    shared_carrier,
+                    crate::Span {
+                        start: ::jet_foundation::Numeric::JetInt::from_i64(0),
+                        end: ::jet_foundation::Numeric::JetInt::from_i64(0),
+                    },
+                )
+            };
+            assert!(
+                shared_consumer_ok,
+                "Source consumer did not finish/finalize the transferred shared root"
+            );
+            drop(shared_child_lease);
+            drop(runtime_config);
+            drop(source_program);
+            shared_consumer_ok
+        });
+        let mut finalizer_completions = 0;
+        let mut outer_b_finished = false;
+        loop {
+            match completion_owner
+                .finish()
+                .unwrap_or_else(|error| panic!("outer B Shared completion finish failed: {error:?}"))
+            {
+                crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Ready(completions) => {
+                    for completion in completions {
+                        assert_shared_finalizer_completed(
+                            completion,
+                            shared_finalizer,
+                            result.mir.as_ref().expect("checked MIR remains owned by the compile result"),
+                            &shared_finalizer_return_type,
+                        );
+                        finalizer_completions += 1;
+                    }
+                }
+                crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Pending {
+                    retirement_requested,
+                    retained_roots,
+                    open_callback_sessions,
+                    pending_jobs,
+                } => panic!(
+                    "outer B retained Shared work after consumption: retirement_requested={retirement_requested}, retained_roots={retained_roots}, open_callback_sessions={open_callback_sessions}, pending_jobs={pending_jobs}"
+                ),
+                crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Complete { failures } => {
+                    assert!(failures.is_empty(), "outer B callback jobs failed: {failures:?}");
+                    outer_b_finished = true;
+                    break;
+                }
+        }
+        }
+        assert!(shared_consumer_ok, "Source shared consumer did not complete");
+        assert_eq!(
+            finalizer_completions,
+            1,
+            "outer B did not receive exactly the late A shared-payload finalizer receipt"
+        );
+        assert!(outer_b_finished, "outer B did not finish after its completion was consumed");
+        let shared_payload_finalizer_completed = finalizer_completions == 1 && outer_b_finished;
+        assert!(
+            shared_payload_finalizer_completed,
+            "outer B did not complete the exact A finalizer obligation"
+        );
+        assert_eq!(
+            resources
+                .retained_root_count()
+                .unwrap_or_else(|error| panic!("cannot inspect final task-root resource leases: {error}")),
+            0,
+            "task-root Source resource lease leaked"
+        );
+        assert!(
+            shared_arena
+                .is_retired()
+                .unwrap_or_else(|error| panic!("cannot inspect final Source arena retirement: {error}")),
+            "deferred parent did not retire after the consumer released its root"
+        );
+        std::fs::write(&output_path, "task-roots=passed\n")
+            .unwrap_or_else(|error| panic!("cannot write task-root result: {error}"));
+        std::fs::write(
+            &receipt_path,
+            format!(
+                "mode=task-roots\nstatus=passed\nselected_factory_tier={:?}\nactual_factory_tier={:?}\ncallback_capture_params=1\ncallback_escapes=true\ncallback_moves=0\ncursor_close_count=1\nshared_producer_machine_retired=true\nshared_parent_retirement_requested=true\nshared_parent_retirement_deferred=true\nshared_consumer_completed={}\nshared_payload_finalizer_completed={}\nretained_roots=0\n",
+                result.selected_factory_tier,
+                result.actual_factory_tier,
+                shared_consumer_ok,
+                shared_payload_finalizer_completed,
+            ),
+        )
+            .unwrap_or_else(|error| panic!("cannot write task-root receipt: {error}"));
+        return;
+    }
+    let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
+        if mode == "factory" {
+            let compiler_image = crate::__jet_bootstrap_compiler_image()
+                .unwrap_or_else(|error| panic!("factory compiler image restore failed: {error}"));
+            let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
+                compiler_image.header.artifact,
+            );
+            let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+            let mut completion_owner =
+                crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
+                    completion_scope.clone(),
+                );
+            let mut result = completion_scope
+                .with_current(|| {
+                    crate::compiler_bootstrap_runner::invoke_bootstrap_entry(
+                        &lease,
+                        |snapshot| crate::__jet_bootstrap_compile_from_host(
+                            snapshot,
+                            crate::__jet_bootstrap_native_compile_target(),
+                            factory_tier,
+                            &execution,
+                            &mut completion_owner,
+                        ),
+                    )
+                })
+                .unwrap_or_else(|error| panic!("generated Jet factory authority call failed: {error:?}"))
+                .unwrap_or_else(|error| panic!("generated Jet compiler codec failed: {error:?}"));
+            if let Some(resources) = result.resources.take() {
+                completion_owner.set_resources(resources);
+            }
+            drop(result.runtime_config.take());
+            completion_owner.allow_resource_retirement();
+            finish_source_completion_owner(&completion_owner);
             let counts = result.bindings.as_ref().map_or((0, 0, 0, 0), |bindings| {
                 (
                     bindings.callables.len(),
@@ -218,10 +865,14 @@ fn main() {
                 counts.2,
                 counts.3,
                 result.reports,
+                result.selected_factory_tier,
+                result.actual_factory_tier,
             )
         } else if mode == "runner" {
+            let compiler_image = crate::__jet_bootstrap_compiler_image()
+                .unwrap_or_else(|error| panic!("stage-zero compiler image restore failed: {error}"));
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
-                ::jet_foundation::MIR::MirArtifactId(0),
+                compiler_image.header.artifact,
             );
             let config = crate::Codegen::MIRRust::MirRustConfig {
                 target: ::jet_foundation::Layout::TargetLayout::host(),
@@ -229,17 +880,102 @@ fn main() {
                 root_prefix: "crate::".to_string(),
                 execution,
             };
-            let result = crate::__jet_bootstrap_run_from_host(
+            fn assert_source_completion_retired(
+                completion: ::jet_jit::SourceExecutionCompletion,
+            ) {
+                match completion.disposition {
+                    ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                        retirement: Some(
+                            ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                        ),
+                        ..
+                    } => {
+                        assert!(
+                            matches!(
+                                retirement.outcome.as_ref(),
+                                Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. })
+                            ),
+                            "Runner returned a failed source execution completion: {retirement:?}",
+                        );
+                        for nested in retirement.completions {
+                            assert_source_completion_retired(nested);
+                        }
+                    }
+                    disposition => panic!(
+                        "Runner returned an incomplete source execution completion: {disposition:?}"
+                    ),
+                }
+            }
+            let mut result = match crate::__jet_bootstrap_run_from_host(
                 &lease,
                 &config,
-                |snapshot| crate::__jet_bootstrap_compile_from_host(snapshot, crate::__jet_bootstrap_native_compile_target()),
+                factory_tier,
+                |snapshot, tier, execution, completion_owner| crate::__jet_bootstrap_compile_from_host(
+                    snapshot,
+                    crate::__jet_bootstrap_native_compile_target(),
+                    tier,
+                    execution,
+                    completion_owner,
+                ),
                 |artifact| match artifact {
                     crate::BootstrapBackendArtifact::NativeRust { source, .. } => source,
                     crate::BootstrapBackendArtifact::Web { .. } => panic!("Runner fixture unexpectedly produced a Web artifact"),
                 },
                 None,
-            )
-                .unwrap_or_else(|error| panic!("generated Jet Runner failed: {error:?}"));
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    loop {
+                        match error.finish_source_completions() {
+                            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Ready(completions)) => {
+                                for completion in completions {
+                                    assert_source_completion_retired(completion);
+                                }
+                            }
+                            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Pending {
+                                retirement_requested,
+                                retained_roots,
+                                open_callback_sessions,
+                                pending_jobs,
+                            }) => panic!(
+                                "failed Runner result retained Source work: retirement_requested={retirement_requested}, retained_roots={retained_roots}, open_callback_sessions={open_callback_sessions}, pending_jobs={pending_jobs}; error={error:?}"
+                            ),
+                            Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Complete { failures }) => {
+                                assert!(failures.is_empty(), "failed Runner callback jobs failed: {failures:?}");
+                                break;
+                            }
+                            Err(finish_error) => {
+                                panic!("failed Runner result could not finish Source work: {finish_error:?}; error={error:?}")
+                            }
+                        }
+                    }
+                    panic!("generated Jet Runner failed: {error:?}");
+                }
+            };
+            drop(result.value.take());
+            drop(result.runtime_config.take());
+            loop {
+                match result.finish_source_completions() {
+                    Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Ready(completions)) => {
+                        for completion in completions {
+                            assert_source_completion_retired(completion);
+                        }
+                    }
+                    Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Pending {
+                        retirement_requested,
+                        retained_roots,
+                        open_callback_sessions,
+                        pending_jobs,
+                    }) => panic!(
+                        "generated Jet Runner returned before Source owners retired: retirement_requested={retirement_requested}, retained_roots={retained_roots}, open_callback_sessions={open_callback_sessions}, pending_jobs={pending_jobs}"
+                    ),
+                    Ok(crate::compiler_bootstrap_runner::BootstrapRunCompletionFinish::Complete { failures }) => {
+                        assert!(failures.is_empty(), "generated Jet Runner callback jobs failed: {failures:?}");
+                        break;
+                    }
+                    Err(error) => panic!("generated Jet Runner Source completion finish failed: {error:?}"),
+                }
+            }
             (
                 result.complete,
                 result.backend,
@@ -248,6 +984,8 @@ fn main() {
                 0,
                 0,
                 result.reports,
+                result.selected_factory_tier,
+                result.actual_factory_tier,
             )
         } else {
             panic!("unknown private bootstrap mode `{mode}`")
@@ -262,6 +1000,7 @@ fn main() {
         "mode={mode}\ncomplete={complete}\nsource_bytes={source_bytes}\ncallables={callable_count}\ntypes={type_count}\nfields={field_count}\nvariants={variant_count}\nreport_count={}\n",
         reports.len(),
     );
+    receipt.push_str(&format!("selected_factory_tier={selected_tier:?}\nactual_factory_tier={actual_tier:?}\n"));
     for report in reports {
         receipt.push_str("report_json=");
         receipt.push_str(&report.json());
@@ -385,10 +1124,61 @@ fn bootstrap_private_self_compile_harness() {
         "jet_bootstrap_stage_zero",
         &stage_zero_source,
     );
+    let task_roots_output = session.join("task-roots.out");
+    let task_roots_receipt = session.join("task-roots.receipt");
+    run_generated_artifact(
+        &stage_zero_binary,
+        "task-roots",
+        &compiler_project,
+        BOOTSTRAP_ENTRY_RELATIVE,
+        &task_roots_output,
+        &task_roots_receipt,
+    );
+    assert_task_roots_receipt(&task_roots_output, &task_roots_receipt);
+    for (tier_name, selected, actual) in [
+        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
+        ("source-interpreter-deopt", "SourceInterpreterDeopt", &["SourceInterpreterDeopt"][..]),
+    ] {
+        let output = session.join(format!("{tier_name}-task-roots.out"));
+        let receipt = session.join(format!("{tier_name}-task-roots.receipt"));
+        run_generated_artifact_with_tier(
+            &stage_zero_binary,
+            "task-roots",
+            &compiler_project,
+            BOOTSTRAP_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+            tier_name,
+        );
+        assert_task_roots_receipt_for_tier(&output, &receipt, selected, actual);
+    }
 
     let small_project = session.join("small-program");
     let small_entry = write_small_program(&small_project);
     assert_optional_codec_roundtrip(&stage_zero_binary, &small_project, &session, "stage-zero");
+    for (tier_name, selected, actual) in [
+        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
+        ("source-interpreter-deopt", "SourceInterpreterDeopt", &["SourceInterpreterDeopt"][..]),
+    ] {
+        for mode in ["factory", "runner"] {
+            let output = session.join(format!("{tier_name}-{mode}.rs"));
+            let receipt = session.join(format!("{tier_name}-{mode}.receipt"));
+            run_generated_artifact_with_tier(
+                &stage_zero_binary,
+                mode,
+                &small_project,
+                SMALL_ENTRY_RELATIVE,
+                &output,
+                &receipt,
+                tier_name,
+            );
+            match mode {
+                "factory" => assert_factory_receipt_for_tier(&receipt, selected, actual),
+                "runner" => assert_runner_receipt_for_tier(&receipt, selected, actual),
+                _ => unreachable!(),
+            }
+        }
+    }
     let stage_zero_small_source = session.join("stage-zero-small.rs");
     let stage_zero_small_receipt = session.join("stage-zero-small.receipt");
     run_generated_artifact(
@@ -413,6 +1203,17 @@ fn bootstrap_private_self_compile_harness() {
         "jet_bootstrap_small_stage_zero",
         &stage_zero_small_rust,
     );
+    let image_reuse_output = session.join("user-image-reuse.rs");
+    let image_reuse_receipt = session.join("user-image-reuse.receipt");
+    run_generated_artifact(
+        &stage_zero_small_binary,
+        "factory",
+        &small_project,
+        SMALL_ENTRY_RELATIVE,
+        &image_reuse_output,
+        &image_reuse_receipt,
+    );
+    assert_factory_receipt(&image_reuse_receipt);
     assert_small_program_runs(&stage_zero_small_binary, "stage zero");
 
     source_lease.revalidate().unwrap_or_else(|error| {
@@ -449,6 +1250,18 @@ fn bootstrap_private_self_compile_harness() {
         "distinct generated compiler artifacts must not reuse one identity"
     );
     assert_optional_codec_roundtrip(&stage_one_binary, &small_project, &session, "stage-one");
+    source_lease.revalidate().unwrap_or_else(|error| {
+        panic!("compiler source authority changed before stage-one non-AOT source runs: {error:?}")
+    });
+    assert_non_aot_compiler_source_artifacts(
+        &stage_one_binary,
+        &compiler_project,
+        &session,
+        "stage-one",
+    );
+    source_lease.revalidate().unwrap_or_else(|error| {
+        panic!("compiler source authority changed after stage-one non-AOT source runs: {error:?}")
+    });
 
     let stage_one_small_source = session.join("stage-one-small.rs");
     let stage_one_small_receipt = session.join("stage-one-small.receipt");
@@ -514,6 +1327,20 @@ fn bootstrap_private_self_compile_harness() {
         "distinct generated compiler artifacts must not reuse one identity"
     );
     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
+    source_lease.revalidate().unwrap_or_else(|error| {
+        panic!("compiler source authority changed before stage-two non-AOT source runs: {error:?}")
+    });
+    assert_non_aot_compiler_source_artifacts(
+        &stage_two_binary,
+        &compiler_project,
+        &session,
+        "stage-two",
+    );
+    assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
+    source_lease.revalidate().unwrap_or_else(|error| {
+        panic!("compiler source authority changed after stage-two non-AOT source runs: {error:?}")
+    });
+    assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
 
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
@@ -717,6 +1544,80 @@ fn bootstrap_private_self_compile_harness() {
             expected,
         );
     }
+    let partial_move_project = session.join("core-files-partial-move-siblings");
+    write_source_fixture_project(
+        &partial_move_project,
+        SOURCE_FIXTURE_MANIFEST,
+        CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE,
+    );
+    let partial_move_expected_stdout = "true\n".repeat(25);
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "core_files_partial_move_siblings",
+        &partial_move_project,
+        &partial_move_expected_stdout,
+    );
+    for (tier_name, selected, actual_tiers) in [
+        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
+        ("source-interpreter", "SourceInterpreter", &["SourceInterpreter"][..]),
+    ] {
+        let label = format!("core_files_partial_move_siblings-{tier_name}");
+        compile_and_run_source_fixture_with_tier(
+            &stage_two_binary,
+            repo,
+            &session,
+            &label,
+            &partial_move_project,
+            &partial_move_expected_stdout,
+            tier_name,
+            selected,
+            actual_tiers,
+        );
+    }
+    let uninit_partial_exit_project = session.join("uninit-fixed-partial-exit");
+    write_source_fixture_project(
+        &uninit_partial_exit_project,
+        SOURCE_FIXTURE_MANIFEST,
+        UNINIT_FIXED_PARTIAL_EXIT_SOURCE,
+    );
+    let uninit_partial_exit_expected_stdout = "7\n";
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "uninit_fixed_partial_exit",
+        &uninit_partial_exit_project,
+        uninit_partial_exit_expected_stdout,
+    );
+    for (tier_name, selected, actual_tiers) in [
+        (
+            "cranelift-jit",
+            "CraneliftJit",
+            &["CraneliftJit", "SourceInterpreterDeopt"][..],
+        ),
+        (
+            "source-interpreter",
+            "SourceInterpreter",
+            &["SourceInterpreter"][..],
+        ),
+    ] {
+        let label = format!("uninit_fixed_partial_exit-{tier_name}");
+        compile_and_run_source_fixture_with_tier(
+            &stage_two_binary,
+            repo,
+            &session,
+            &label,
+            &uninit_partial_exit_project,
+            uninit_partial_exit_expected_stdout,
+            tier_name,
+            selected,
+            actual_tiers,
+        );
+    }
+
+
 
     let handle_lifetime_project = session.join("native-handle-lifetimes");
     let handle_lifetime_manifest = format!(
@@ -785,6 +1686,23 @@ fn assemble_compiler_sources(repo: &Path) {
         .output()
         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
     assert_command_success("bootstrap assembler", &output);
+    let compiler_entry = home_path()
+        .join(BOOTSTRAP_PROJECT_RELATIVE)
+        .join(BOOTSTRAP_ENTRY_RELATIVE);
+    let mut compiler_source = fs::read_to_string(&compiler_entry).unwrap_or_else(|error| {
+        panic!(
+            "cannot read assembled compiler fixture `{}`: {error}",
+            compiler_entry.display()
+        )
+    });
+    compiler_source.push_str("\n\n");
+    compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE);
+    fs::write(&compiler_entry, compiler_source).unwrap_or_else(|error| {
+        panic!(
+            "cannot add task-root fixture to the private compiler unit `{}`: {error}",
+            compiler_entry.display()
+        )
+    });
 }
 
 fn write_small_program(project: &Path) -> PathBuf {
@@ -815,6 +1733,62 @@ fn write_source_fixture_project(project: &Path, manifest: &str, source: &str) ->
         panic!("cannot write source fixture `{}`: {error}", entry.display())
     });
     entry
+}
+fn assert_mir_optimizer_fixtures(binary: &Path, repo: &Path, session: &Path) {
+    let fixtures = [
+        (
+            "inline",
+            "tests/fixtures/mir_optimizer_inline.jet",
+            "inline:11\nfailure:negative\n",
+        ),
+        (
+            "loops",
+            "tests/fixtures/mir_optimizer_loops.jet",
+            "true true true true false\n",
+        ),
+        (
+            "source_regressions",
+            "tests/fixtures/mir_optimizer_source_regressions.jet",
+            "unit:body\ntrue true true true true true true\n",
+        ),
+    ];
+    for (name, fixture_path, expected_stdout) in fixtures {
+        let fixture_source = fs::read_to_string(repo.join(fixture_path)).unwrap_or_else(|error| {
+            panic!("cannot read MIR optimizer fixture `{fixture_path}`: {error}")
+        });
+        let project = session.join(format!("optimizer-{name}"));
+        write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &fixture_source);
+        let generated_source = session.join(format!("optimizer-{name}.rs"));
+        let receipt = session.join(format!("optimizer-{name}.receipt"));
+        run_generated_artifact(
+            binary,
+            "factory",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &generated_source,
+            &receipt,
+        );
+        assert_factory_receipt(&receipt);
+        let generated_source = fs::read_to_string(&generated_source).unwrap_or_else(|error| {
+            panic!("cannot read generated MIR optimizer backend for `{name}`: {error}")
+        });
+        let backend_project = session.join(format!("optimizer-{name}-backend"));
+        let (backend_binary, _) = build_backend_artifact(
+            repo,
+            &backend_project,
+            &format!("jet_bootstrap_optimizer_{name}"),
+            &generated_source,
+        );
+        let output = Command::new(&backend_binary)
+            .output()
+            .unwrap_or_else(|error| panic!("cannot execute MIR optimizer fixture `{name}`: {error}"));
+        assert_command_success(&format!("MIR optimizer fixture `{name}`"), &output);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected_stdout,
+            "generated compiler changed MIR optimizer fixture `{name}` behavior"
+        );
+    }
 }
 
 fn build_local_c_provider(root: &Path, library: &str, source: &str) {
@@ -882,6 +1856,44 @@ fn compile_and_run_source_fixture(
         String::from_utf8_lossy(&output.stdout),
         expected_stdout,
         "generated `{label}` fixture output differs from its executable source contract"
+    );
+}
+fn compile_and_run_source_fixture_with_tier(
+    compiler: &Path,
+    repo: &Path,
+    session: &Path,
+    label: &str,
+    project: &Path,
+    expected_stdout: &str,
+    tier: &str,
+    selected_tier: &str,
+    actual_tiers: &[&str],
+) {
+    let raw_source = session.join(format!("{label}.raw.rs"));
+    let receipt = session.join(format!("{label}.receipt"));
+    run_generated_artifact_with_tier(
+        compiler,
+        "runner",
+        project,
+        SMALL_ENTRY_RELATIVE,
+        &raw_source,
+        &receipt,
+        tier,
+    );
+    assert_runner_receipt_for_tier(&receipt, selected_tier, actual_tiers);
+    let source = fs::read_to_string(&raw_source).unwrap_or_else(|error| {
+        panic!("generated {tier} compiler did not emit `{}`: {error}", raw_source.display())
+    });
+    let backend_project = session.join(format!("{label}-backend"));
+    let (binary, _) = build_backend_artifact(repo, &backend_project, label, &source);
+    let output = Command::new(&binary)
+        .output()
+        .unwrap_or_else(|error| panic!("cannot execute generated {tier} `{label}` fixture: {error}"));
+    assert_command_success(&format!("generated {tier} `{label}` fixture"), &output);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        expected_stdout,
+        "generated {tier} compiler output differs from the executable Source fixture contract"
     );
 }
 
@@ -1285,8 +2297,29 @@ fn run_generated_artifact(
     output_path: &Path,
     receipt_path: &Path,
 ) {
+    run_generated_artifact_with_tier(
+        binary,
+        mode,
+        source_root,
+        entry,
+        output_path,
+        receipt_path,
+        "aot",
+    );
+}
+
+fn run_generated_artifact_with_tier(
+    binary: &Path,
+    mode: &str,
+    source_root: &Path,
+    entry: &str,
+    output_path: &Path,
+    receipt_path: &Path,
+    tier: &str,
+) {
     let result = Command::new(binary)
         .env("JET_BOOTSTRAP_MODE", mode)
+        .env("JET_BOOTSTRAP_FACTORY_TIER", tier)
         .env("JET_BOOTSTRAP_SOURCE_ROOT", source_root)
         .env("JET_BOOTSTRAP_ENTRY", entry)
         .env("JET_BOOTSTRAP_OUTPUT", output_path)
@@ -1309,22 +2342,83 @@ fn run_generated_artifact(
     );
 }
 
+fn assert_tier_provenance(receipt: &str, selected: &str, actual_tiers: &[&str]) -> &str {
+    let actual = receipt
+        .lines()
+        .find_map(|line| line.strip_prefix("actual_factory_tier="))
+        .unwrap_or_else(|| panic!("factory receipt has no actual-tier provenance"));
+    assert!(
+        receipt
+            .lines()
+            .any(|line| line.strip_prefix("selected_factory_tier=") == Some(selected)),
+        "factory receipt selected a tier other than {selected}"
+    );
+    assert!(
+        actual_tiers.contains(&actual),
+        "factory actual tier {actual} is not allowed for selected tier {selected}"
+    );
+    actual
+}
+
 fn assert_factory_receipt(path: &Path) {
+    assert_factory_receipt_for_tier(path, "Aot", &["Aot"]);
+}
+
+fn assert_factory_receipt_for_tier(path: &Path, selected: &str, actual_tiers: &[&str]) {
     let receipt = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read factory receipt `{}`: {error}", path.display()));
     assert!(receipt.lines().any(|line| line == "mode=factory"));
     assert!(receipt.lines().any(|line| line == "complete=true"));
+    assert_tier_provenance(&receipt, selected, actual_tiers);
     assert_receipt_count_at_least(&receipt, "source_bytes", 1);
     assert_receipt_count_at_least(&receipt, "callables", 1);
 }
 
 fn assert_runner_receipt(path: &Path) {
+    assert_runner_receipt_for_tier(path, "Aot", &["Aot"]);
+}
+
+fn assert_runner_receipt_for_tier(path: &Path, selected: &str, actual_tiers: &[&str]) {
     let receipt = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read Runner receipt `{}`: {error}", path.display()));
     assert!(receipt.lines().any(|line| line == "mode=runner"));
     assert!(receipt.lines().any(|line| line == "complete=true"));
+    assert_tier_provenance(&receipt, selected, actual_tiers);
     assert_receipt_count_at_least(&receipt, "source_bytes", 1);
 }
+
+fn assert_task_roots_receipt(output_path: &Path, receipt_path: &Path) {
+    assert_task_roots_receipt_for_tier(output_path, receipt_path, "Aot", &["Aot"]);
+}
+
+fn assert_task_roots_receipt_for_tier(
+    output_path: &Path,
+    receipt_path: &Path,
+    selected: &str,
+    actual_tiers: &[&str],
+) {
+    let output = fs::read_to_string(output_path).unwrap_or_else(|error| {
+        panic!(
+            "cannot read task-root fixture output `{}`: {error}",
+            output_path.display()
+        )
+    });
+    assert_eq!(output, "task-roots=passed\n");
+    let receipt = fs::read_to_string(receipt_path).unwrap_or_else(|error| {
+        panic!(
+            "cannot read task-root fixture receipt `{}`: {error}",
+            receipt_path.display()
+        )
+    });
+    let actual = assert_tier_provenance(&receipt, selected, actual_tiers);
+    assert_eq!(
+        receipt,
+        format!(
+            "mode=task-roots\nstatus=passed\nselected_factory_tier={selected}\nactual_factory_tier={actual}\ncallback_capture_params=1\ncallback_escapes=true\ncallback_moves=0\ncursor_close_count=1\nshared_producer_machine_retired=true\nshared_parent_retirement_requested=true\nshared_parent_retirement_deferred=true\nshared_consumer_completed=true\nshared_payload_finalizer_completed=true\nretained_roots=0\n"
+        )
+    );
+}
+
 
 fn assert_optional_codec_roundtrip(binary: &Path, project: &Path, session: &Path, stage: &str) {
     let output = session.join(format!("{stage}-optional-roundtrip.txt"));
@@ -1348,6 +2442,67 @@ fn assert_optional_codec_roundtrip(binary: &Path, project: &Path, session: &Path
         "identity=absent,present\n"
     );
 }
+fn assert_non_aot_compiler_source_artifacts(
+    binary: &Path,
+    compiler_project: &Path,
+    session: &Path,
+    stage: &str,
+) {
+    for (tier, selected) in [
+        ("cranelift-jit", "CraneliftJit"),
+        ("source-interpreter", "SourceInterpreter"),
+    ] {
+        let actual_tiers: &[&str] = if tier == "cranelift-jit" {
+            &["CraneliftJit", "SourceInterpreterDeopt"]
+        } else {
+            &["SourceInterpreter"]
+        };
+        for mode in ["factory", "runner"] {
+            let name = format!("{stage}-compiler-source-{tier}-{mode}");
+            let output = session.join(format!("{name}.rs"));
+            let receipt = session.join(format!("{name}.receipt"));
+            run_generated_artifact_with_tier(
+                binary,
+                mode,
+                compiler_project,
+                BOOTSTRAP_ENTRY_RELATIVE,
+                &output,
+                &receipt,
+                tier,
+            );
+            match mode {
+                "factory" => assert_factory_receipt_for_tier(&receipt, selected, actual_tiers),
+                "runner" => assert_runner_receipt_for_tier(&receipt, selected, actual_tiers),
+                _ => unreachable!("only factory and runner modes are exercised"),
+            }
+            assert!(
+                output.is_file(),
+                "{stage} {tier} {mode} did not emit a full compiler-source backend artifact"
+            );
+        }
+    }
+}
+
+fn assert_mir_optimizer_compiler_source(binary: &Path, compiler_project: &Path, session: &Path) {
+    let output = session.join("compiler-source-optimizer-evidence.out");
+    let receipt = session.join("compiler-source-optimizer-evidence.receipt");
+    run_generated_artifact(
+        binary,
+        "optimizer-evidence",
+        compiler_project,
+        BOOTSTRAP_ENTRY_RELATIVE,
+        &output,
+        &receipt,
+    );
+    let evidence = fs::read_to_string(&receipt)
+        .unwrap_or_else(|error| panic!("cannot read compiler-source optimizer evidence: {error}"));
+    assert_eq!(
+        evidence,
+        "mode=optimizer-evidence\nsource_file=Compiler/JetOptimizer/Source/Pipeline.jet\noptimizer_entry=optimize_mir_program\ninline_pass=mir_pass_expand_inline_always\ninline_pass_call_retained=true\n",
+        "stage-two MIR did not retain the compiler-source optimizer entry and inline pass"
+    );
+}
+
 
 fn receipt_reports(path: &Path) -> Vec<String> {
     let receipt = fs::read_to_string(path)

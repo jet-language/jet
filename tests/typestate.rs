@@ -17,10 +17,10 @@ struct Settlement {
 }
 
 impl Settlement {
-    #Transition(_, Queued) fn begin() Settlement -[]> { return Settlement{} }
-    #Transition(Queued, Approved) fn approve(self: ^Settlement) Settlement -[]> { return self }
-    #Transition(Approved, Settled) fn settle(self: ^Settlement) Settlement -[]> { return self }
-    #State(Settled) fn report(self) String -[]> { return "settled" }
+    #Transition(_, Queued) fn begin() -[]> Settlement { return Settlement{} }
+    #Transition(Queued, Approved) fn approve(self: ^Settlement) -[]> Settlement { return self }
+    #Transition(Approved, Settled) fn settle(self: ^Settlement) -[]> Settlement { return self }
+    #State(Settled) fn report(self) -[]> String { return "settled" }
 }
 
 @STATE_INFO :: Settlement.reflect()
@@ -63,16 +63,16 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) Reservation -[]> {
+    #Transition(_, Pending) fn book(guest: String) -[]> Reservation {
         return Reservation{ guest: ~guest }
     }
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation -[]> {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation {
         return self
     }
-    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) Reservation -[]> {
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -[]> Reservation {
         return self
     }
-    #State(CheckedIn) fn room_key(self) String -[]> {
+    #State(CheckedIn) fn room_key(self) -[]> String {
         return "key"
     }
 }
@@ -135,7 +135,7 @@ fn no_typestate_is_inert() {
     let src = r#"
 struct Box { n: Int }
 impl Box {
-    fn get(self) Int -[]> { return self.n }
+    fn get(self) -[]> Int { return self.n }
 }
 fn run() {
     b :: Box{ n: 1 }
@@ -159,10 +159,10 @@ struct Crate {
 }
 
 impl Crate {
-    #Transition(_, Full) fn fill(data: Int) Crate -[]> {
+    #Transition(_, Full) fn fill(data: Int) -[]> Crate {
         return Crate{ data: data }
     }
-    #State(Stuffed) fn get(self) Int -[]> {
+    #State(Stuffed) fn get(self) -[]> Int {
         return self.data
     }
 }
@@ -189,7 +189,7 @@ struct Crate {
 }
 
 impl Crate {
-    #Transition(_, Stuffed) fn fill(data: Int) Crate -[]> {
+    #Transition(_, Stuffed) fn fill(data: Int) -[]> Crate {
         return Crate{ data: data }
     }
 }
@@ -208,7 +208,7 @@ fn unknown_transition_from_state_is_e0151() {
     let src = r#"
 struct Crate { state { Full, Empty } }
 impl Crate {
-    #Transition(Gone, Full) fn fill() Crate -[]> { return Crate{} }
+    #Transition(Gone, Full) fn fill() -[]> Crate { return Crate{} }
 }
 fn run() {}
 "#;
@@ -295,11 +295,11 @@ struct Door {
 }
 
 impl Door {
-    #Transition(_, Door.State.Closed) fn new() Door -[]> { return Door{} }
-    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) Door -[]> {
+    #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }
+    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {
         return self
     }
-    #State(Door.State.Closed) fn inspect(self: ^Door) String -[]> {
+    #State(Door.State.Closed) fn inspect(self: ^Door) -[]> String {
         next := self.open()
         return "closed"
     }
@@ -330,16 +330,16 @@ struct Box<T> {
 }
 
 impl Box {
-    #Transition(_, Empty) fn new(value: ^T) Box<T> -[]> {
+    #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> {
         return Box<T>{ value: value }
     }
-    #Transition(Empty, Full) fn fill(self: ^Box<T>) Box<T> -[]> {
+    #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> {
         return self
     }
 }
 
 impl Box {
-    #State(Full) fn read(self) T -[]> {
+    #State(Full) fn read(self) -[]> T {
         return self.value
     }
 }
@@ -484,9 +484,9 @@ struct Gate {
 }
 
 impl Gate {
-    #Transition(_, Closed) fn new(w: Int) Gate -[]> { return Gate{ w: w } }
-    #Transition(Closed, Closed) fn hold(self: ^Gate) Gate -[]> { return self }
-    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
+    #Transition(_, Closed) fn new(w: Int) -[]> Gate { return Gate{ w: w } }
+    #Transition(Closed, Closed) fn hold(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
 }
 
 fn run() {
@@ -514,9 +514,9 @@ fn duplicate_transition_keeps_method_duplicate_diagnostic() {
     let src = r#"
 struct Gate { state { Closed, Reopened } }
 impl Gate {
-    #Transition(_, Closed) fn new() Gate -[]> { return Gate{} }
-    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
-    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
+    #Transition(_, Closed) fn new() -[]> Gate { return Gate{} }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
 }
 fn run() {}
 "#;
@@ -534,9 +534,9 @@ struct Flow {
     state { Start, Done, Cancelled, Orphan }
 }
 impl Flow {
-    #Transition(_, Start) fn start() Flow -[]> { return Flow{} }
-    #Transition(Start, Done) fn done(self: ^Flow) Flow -[]> { return self }
-    #Transition(Start, Cancelled) fn cancel(self: ^Flow) Flow -[]> { return self }
+    #Transition(_, Start) fn start() -[]> Flow { return Flow{} }
+    #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
+    #Transition(Start, Cancelled) fn cancel(self: ^Flow) -[]> Flow { return self }
 }
     fn run() {}
 "#;
@@ -553,7 +553,7 @@ fn no_entry_graph_does_not_invent_reachability() {
     let src = r#"
 struct Flow { state { Start, Done } }
 impl Flow {
-    #Transition(Start, Done) fn done(self: ^Flow) Flow -[]> { return self }
+    #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
 }
 fn run() {}
     "#;
@@ -571,12 +571,12 @@ struct Order {
 }
 
 impl Order {
-    #Transition(_, Draft) fn start(id: Int) Order -[]> { return Order{ id: id } }
-    #Transition(Draft, Confirmed) fn confirm(self: ^Order) Order -[]> { return self }
-    #Transition(Draft, Cancelled) fn cancel(self: ^Order) Order -[]> { return self }
-    #Transition(Confirmed, Closed) fn close(self: ^Order) Order -[]> { return self }
-    #Transition(Cancelled, Closed) fn archive(self: ^Order) Order -[]> { return self }
-    #State(Confirmed) fn ship(self) Int -[]> { return self.id }
+    #Transition(_, Draft) fn start(id: Int) -[]> Order { return Order{ id: id } }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order { return self }
+    #State(Confirmed) fn ship(self) -[]> Int { return self.id }
 }
 "#;
 

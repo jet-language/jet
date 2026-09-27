@@ -32,7 +32,7 @@ pub struct JournalRecovery {
     pub compacted: Bool
 }
 
-fn empty_recovery() JournalRecovery -> {
+fn empty_recovery() -> JournalRecovery {
     return JournalRecovery{
         records: [JournalRecord]{},
         replay_order: [JournalRecord]{},
@@ -43,18 +43,18 @@ fn empty_recovery() JournalRecovery -> {
     }
 }
 
-fn journal_dir(root: String) String !Err -> {
+fn journal_dir(root: String) -> String !Err {
     if root.trim() == "" -> return Err("journal root is required")
     return Ok(Path.from(root).join("hangar").join("closure-db").join("journal").to_string())
 }
 
-fn ensure_journal_dir(root: String) String !Err -> {
+fn ensure_journal_dir(root: String) -> String !Err {
     journal :: journal_dir(root)
     fs.create_dir_all(~journal) ?? return Err("journal directory cannot be created")
     return Ok(journal)
 }
 
-fn transaction_base(sequence: Int) String !Err -> {
+fn transaction_base(sequence: Int) -> String !Err {
     if sequence <= 0 -> return Err("journal sequence must be positive")
     digits :: sequence.to_string()
     if digits.len() > 20 -> return Err("journal sequence exceeds filename width")
@@ -63,7 +63,7 @@ fn transaction_base(sequence: Int) String !Err -> {
     return Ok(padded)
 }
 
-fn transaction_sequence(name: String) ?Int -> {
+fn transaction_sequence(name: String) -> ?Int {
     if !name.ends_with(".txn") || name.len() < 26 -> return None
     if name.slice(20, 20) != "-" -> return None
     prefix :: ~name.slice(0, 19)
@@ -72,11 +72,11 @@ fn transaction_sequence(name: String) ?Int -> {
     return Val(sequence)
 }
 
-fn transaction_path(journal: String, name: String) String -> {
+fn transaction_path(journal: String, name: String) -> String {
     return Path.from(journal).join(name).to_string()
 }
 
-fn transaction_names(journal: String) [String] !Err -> {
+fn transaction_names(journal: String) -> [String] !Err {
     if !fs.exists(~journal) -> return Ok([String]{})
     entries :: fs.list_dir(~journal) ?? return Err("journal directory cannot be read")
     names := [String]{}
@@ -88,7 +88,7 @@ fn transaction_names(journal: String) [String] !Err -> {
     return Ok(names)
 }
 
-fn next_sequence(journal: String) Int !Err -> {
+fn next_sequence(journal: String) -> Int !Err {
     names :: transaction_names(~journal)
     highest := 0
     loop name in names {
@@ -98,18 +98,18 @@ fn next_sequence(journal: String) Int !Err -> {
     return Ok(highest + 1)
 }
 
-fn decode_hex(encoded: String) [U8] !Err -> {
+fn decode_hex(encoded: String) -> [U8] !Err {
     bytes :: hex.decode(encoded) ?? return Err("journal hex field is invalid")
     return Ok(bytes)
 }
 
-fn decode_text(encoded: String) String !Err -> {
+fn decode_text(encoded: String) -> String !Err {
     bytes :: decode_hex(encoded)
     text :: String.from_bytes(~bytes) ?? return Err("journal text field is not UTF-8")
     return Ok(text)
 }
 
-fn render_record(record: JournalRecord) String -> {
+fn render_record(record: JournalRecord) -> String {
     key :: hex.encode(record.key.bytes())
     if record.deleted -> return "delete\t{key}\n"
     value :: hex.encode(record.value.bytes())
@@ -119,14 +119,14 @@ fn render_record(record: JournalRecord) String -> {
 
 // Public for synthetic fixtures: callers can create a canonical body, then
 // append checksum and write a filename when exercising crash recovery.
-pub fn render_transaction(transaction: JournalTransaction) String -> {
+pub fn render_transaction(transaction: JournalTransaction) -> String {
     out := "jet-closure-journal-v1\nkind\t{transaction.kind}\n"
     records :: transaction.records
     loop record in records -> out += render_record(~record)
     return out
 }
 
-fn write_transaction(journal: String, transaction: JournalTransaction) String !Err -> {
+fn write_transaction(journal: String, transaction: JournalTransaction) -> String !Err {
     sequence :: transaction.sequence
     body :: render_transaction(transaction)
     checksum :: crypto.sha256(body.bytes()).hex()
@@ -143,7 +143,7 @@ fn write_transaction(journal: String, transaction: JournalTransaction) String !E
 
 // Append is the journal commit path. Every write stays under root/hangar and
 // publishes only after the partial frame has been synced and renamed.
-pub fn append(root: String, record: JournalRecord) String !Err -> {
+pub fn append(root: String, record: JournalRecord) -> String !Err {
     journal :: ensure_journal_dir(root)
     sequence :: next_sequence(~journal)
     transaction := JournalTransaction{
@@ -155,7 +155,7 @@ pub fn append(root: String, record: JournalRecord) String !Err -> {
     return Ok(path)
 }
 
-fn body_checksum(raw: String) String !Err -> {
+fn body_checksum(raw: String) -> String !Err {
     frame :: raw.cut_last("checksum\t") ?? return Err("journal checksum is missing")
     if !frame.after.ends_with("\n") -> return Err("journal checksum frame is truncated")
     checksum :: ~frame.after.remove_suffix("\n")
@@ -168,14 +168,14 @@ fn body_checksum(raw: String) String !Err -> {
     return Ok(body)
 }
 
-fn duplicate_record(records: [JournalRecord], key: String) Bool -> {
+fn duplicate_record(records: [JournalRecord], key: String) -> Bool {
     loop record in records {
         if record.key == key -> return true
     }
     return false
 }
 
-fn parse_transaction(raw: String, sequence: Int) JournalTransaction !Err -> {
+fn parse_transaction(raw: String, sequence: Int) -> JournalTransaction !Err {
     body :: body_checksum(raw)
     lines :: body.lines()
     if lines.len() < 2 || lines[0] != "jet-closure-journal-v1" {
@@ -234,7 +234,7 @@ fn parse_transaction(raw: String, sequence: Int) JournalTransaction !Err -> {
     return Ok(JournalTransaction{sequence: sequence, kind: kind, records: records})
 }
 
-fn apply_current(recovery: JournalRecovery, record: JournalRecord) JournalRecovery !Err -> {
+fn apply_current(recovery: JournalRecovery, record: JournalRecord) -> JournalRecovery !Err {
     old_records :: recovery.records
     old_order :: recovery.replay_order
     transaction_count :: recovery.transaction_count
@@ -269,7 +269,7 @@ fn apply_current(recovery: JournalRecovery, record: JournalRecord) JournalRecove
     }
 }
 
-fn mark_recovered_partial(recovery: JournalRecovery) JournalRecovery -> {
+fn mark_recovered_partial(recovery: JournalRecovery) -> JournalRecovery {
     return JournalRecovery{
         records: recovery.records,
         replay_order: recovery.replay_order,
@@ -280,7 +280,7 @@ fn mark_recovered_partial(recovery: JournalRecovery) JournalRecovery -> {
     }
 }
 
-fn reset_snapshot_state(recovery: JournalRecovery) JournalRecovery -> {
+fn reset_snapshot_state(recovery: JournalRecovery) -> JournalRecovery {
     return JournalRecovery{
         records: [JournalRecord]{},
         replay_order: [JournalRecord]{},
@@ -291,7 +291,7 @@ fn reset_snapshot_state(recovery: JournalRecovery) JournalRecovery -> {
     }
 }
 
-fn count_transaction(recovery: JournalRecovery, bytes: Int) JournalRecovery -> {
+fn count_transaction(recovery: JournalRecovery, bytes: Int) -> JournalRecovery {
     return JournalRecovery{
         records: recovery.records,
         replay_order: recovery.replay_order,
@@ -302,7 +302,7 @@ fn count_transaction(recovery: JournalRecovery, bytes: Int) JournalRecovery -> {
     }
 }
 
-fn mark_compacted(recovery: JournalRecovery) JournalRecovery -> {
+fn mark_compacted(recovery: JournalRecovery) -> JournalRecovery {
     return JournalRecovery{
         records: recovery.records,
         replay_order: recovery.replay_order,
@@ -315,7 +315,7 @@ fn mark_compacted(recovery: JournalRecovery) JournalRecovery -> {
 
 // Replay committed `.txn` files in lexical filename order. Partial files are
 // crash artifacts and are removed exactly as the shipped recovery does.
-pub fn recover(root: String) JournalRecovery !Err -> {
+pub fn recover(root: String) -> JournalRecovery !Err {
     journal :: journal_dir(root)
     recovery := empty_recovery()
     if !fs.exists(~journal) -> return Ok(recovery)
@@ -346,7 +346,7 @@ pub fn recover(root: String) JournalRecovery !Err -> {
 
 // Write and commit one canonical snapshot before deleting any older txn. The
 // count threshold is strict (>64); the byte threshold needs >1 txn and >4 MiB.
-pub fn compact_if_needed(root: String) JournalRecovery !Err -> {
+pub fn compact_if_needed(root: String) -> JournalRecovery !Err {
     journal :: journal_dir(root)
     current :: recover(~root)
     names :: transaction_names(~journal)

@@ -17,12 +17,12 @@ module ml {
         pub reduction: [Float]
     }
 
-    pub fn tensor(values: [Float], shape: [Int]) Tensor -> {
+    pub fn tensor(values: [Float], shape: [Int]) -> Tensor {
         source :: compute.from_list(values) ?? panic("ml tensor values")
         return compute.reshape(source, shape) ?? panic("ml tensor shape")
     }
 
-    pub fn tensor_demo() TensorReceipt -> {
+    pub fn tensor_demo() -> TensorReceipt {
         row :: compute.vec(2, 1.0) ?? panic("ml tensor row")
         wide :: compute.broadcast_to(row, [2, 2]) ?? panic("ml tensor broadcast")
         bias :: tensor([0.5, 1.5], [2])
@@ -56,7 +56,7 @@ module ml {
         pub indices: [Int]
     }
 
-    pub fn parity_dataset(count: Int, seed: Int) Dataset -> {
+    pub fn parity_dataset(count: Int, seed: Int) -> Dataset {
         bounded := count
         if bounded < 0 -> bounded = 0
         samples := [Int]{}
@@ -86,7 +86,7 @@ module ml {
         }
     }
 
-    pub fn loader_batches(data: Dataset, batch_size: Int, epoch: Int, shuffle: Bool) [Batch] -> {
+    pub fn loader_batches(data: Dataset, batch_size: Int, epoch: Int, shuffle: Bool) -> [Batch] {
         if batch_size <= 0 -> panic("ml loader batch size must be positive")
         order := data.samples.copy()
         if shuffle {
@@ -108,7 +108,7 @@ module ml {
         return batches
     }
 
-    pub fn collate_inputs(data: Dataset, batch: Batch) Tensor -> {
+    pub fn collate_inputs(data: Dataset, batch: Batch) -> Tensor {
         values := [Float]{}
         loop sample in batch.indices {
             offset := sample * data.feature_width
@@ -117,7 +117,7 @@ module ml {
         return tensor(values, [batch.indices.len(), data.feature_width])
     }
 
-    pub fn collate_targets(data: Dataset, batch: Batch) Tensor -> {
+    pub fn collate_targets(data: Dataset, batch: Batch) -> Tensor {
         values := [Float]{}
         loop sample in batch.indices {
             offset := sample * data.target_width
@@ -126,12 +126,12 @@ module ml {
         return tensor(values, [batch.indices.len(), data.target_width])
     }
 
-    pub fn predict(w1: Tensor, w2: Tensor, inputs: Tensor) Tensor -> {
+    pub fn predict(w1: Tensor, w2: Tensor, inputs: Tensor) -> Tensor {
         hidden :: compute.matmul(inputs, w1) ?? panic("ml hidden matmul")
         return compute.matmul(hidden, w2) ?? panic("ml output matmul")
     }
 
-    pub fn training_loss(w1: Tensor, w2: Tensor, inputs: Tensor, targets: Tensor) Tensor -> {
+    pub fn training_loss(w1: Tensor, w2: Tensor, inputs: Tensor, targets: Tensor) -> Tensor {
         prediction :: predict(w1, w2, inputs)
         return compute.mse_loss(prediction, targets) ?? panic("ml training loss")
     }
@@ -148,7 +148,7 @@ module ml {
         pub batches: Int
     }
 
-    pub fn train_two_layer(epochs: Int, batch_size: Int, seed: Int, learning_rate: Float) TrainingReceipt -> {
+    pub fn train_two_layer(epochs: Int, batch_size: Int, seed: Int, learning_rate: Float) -> TrainingReceipt {
         if epochs < 0 -> panic("ml training epochs must be non-negative")
         data :: parity_dataset(4, seed)
         w1 := compute.eye(2) ?? panic("ml w1")
@@ -192,7 +192,7 @@ module ml {
         pub restored: TwoLayerModel
     }
 
-    pub fn model_state_round_trip(path: String, model: TwoLayerModel) ModelStateReceipt -> {
+    pub fn model_state_round_trip(path: String, model: TwoLayerModel) -> ModelStateReceipt {
         wire_w1 :: compute.serialize(model.w1) ?? panic("ml model w1 serialize")
         wire_w2 :: compute.serialize(model.w2) ?? panic("ml model w2 serialize")
         wire :: "{wire_w1}\n{wire_w2}"
@@ -232,14 +232,14 @@ module ml {
         pub score: Float
     }
 
-    pub fn embedding_vector(id: Int) [Float] -> [
+    pub fn embedding_vector(id: Int) -> [Float] { [ }
         Float{id},
         Float{id % 7},
         Float{id % 11},
         Float{id % 13},
     ]
 
-    pub fn exact_embedding_index(count: Int) EmbeddingIndex -> {
+    pub fn exact_embedding_index(count: Int) -> EmbeddingIndex {
         bounded := count
         if bounded < 0 -> bounded = 0
         vectors := [Embedding]{}
@@ -247,7 +247,7 @@ module ml {
         return EmbeddingIndex{vectors: vectors, dimensions: 4}
     }
 
-    pub fn cosine_similarity(left: [Float], right: [Float]) Float -> {
+    pub fn cosine_similarity(left: [Float], right: [Float]) -> Float {
         if left.len() != right.len() -> panic("ml cosine dimensions")
         if left.len() == 0 -> panic("ml cosine empty vector")
         dot := 0.0
@@ -262,7 +262,7 @@ module ml {
         return dot / (math.sqrt(left_norm) * math.sqrt(right_norm))
     }
 
-    pub fn top_k_embeddings(index: EmbeddingIndex, query: [Float], limit: Int) [EmbeddingHit] -> {
+    pub fn top_k_embeddings(index: EmbeddingIndex, query: [Float], limit: Int) -> [EmbeddingHit] {
         if limit <= 0 -> return [EmbeddingHit]{}
         if query.len() != index.dimensions -> panic("ml embedding dimensions")
         hits := [EmbeddingHit]{}
@@ -311,19 +311,19 @@ module ml {
         pub messages: [ChatMessage]
     }
 
-    pub fn user_message(content: String) ChatMessage -> ChatMessage{
+    pub fn user_message(content: String) -> ChatMessage { ChatMessage{ }
         role: "user",
         content: content,
         tool_call_id: None,
     }
 
-    pub fn tool_result_turn(call_id: String, content: String) ChatMessage -> ChatMessage{
+    pub fn tool_result_turn(call_id: String, content: String) -> ChatMessage { ChatMessage{ }
         role: "tool",
         content: content,
         tool_call_id: Val(call_id),
     }
 
-    pub fn chat_request(model: String, messages: [ChatMessage]) String -> {
+    pub fn chat_request(model: String, messages: [ChatMessage]) -> String {
         return json.to_string(ChatRequest{model: model, stream: true, messages: messages})
     }
 
@@ -338,7 +338,7 @@ module ml {
         pub content: String
     }
 
-    fn parse_sse_event(data: String) SseEvent -> {
+    fn parse_sse_event(data: String) -> SseEvent {
         if data == "[DONE]" {
             return SseEvent{
                 data: data,
@@ -388,7 +388,7 @@ module ml {
         }
     }
 
-    pub fn read_sse(body: String) [SseEvent] -> {
+    pub fn read_sse(body: String) -> [SseEvent] {
         events := [SseEvent]{}
         current := ""
         loop line in body.split("\n") {
@@ -414,7 +414,7 @@ module ml {
         return events
     }
 
-    pub fn stream_chat(endpoint: String, request_body: String) [SseEvent] !HTTPError -> {
+    pub fn stream_chat(endpoint: String, request_body: String) -> [SseEvent] !HTTPError {
         request :: http_client.request("POST", endpoint)
             .body(request_body)
             .header("content-type", "application/json")
@@ -435,7 +435,7 @@ module ml {
         pub transcript: [String]
     }
 
-    pub fn bounded_tool_loop(endpoint: String, model: String, prompt: String, max_steps: Int) ToolLoopReceipt !HTTPError -> {
+    pub fn bounded_tool_loop(endpoint: String, model: String, prompt: String, max_steps: Int) -> ToolLoopReceipt !HTTPError {
         limit := max_steps
         if limit < 0 -> limit = 0
         messages := [ChatMessage]{user_message(prompt)}
@@ -495,7 +495,7 @@ module ml {
         pub reason: String
     }
 
-    pub fn f32_gpu_receipt() DeviceReceipt -> {
+    pub fn f32_gpu_receipt() -> DeviceReceipt {
         seed :: compute.matrix(1, 1, 2.0) ?? panic("ml GPU seed")
         f32_seed :: compute.matmul_f32_tile(seed, seed) ?? panic("ml GPU F32")
         requested :: compute.device_vulkan()
@@ -535,7 +535,7 @@ module ml {
         pub result_check: Bool
     }
 
-    fn run_incumbent(command: String, script: String, expected: Float) IncumbentReceipt -> {
+    fn run_incumbent(command: String, script: String, expected: Float) -> IncumbentReceipt {
         outcome :: process.cmd([command, "-c", script])
             .stdout(.Capture)
             .stderr(.Capture)
@@ -579,11 +579,11 @@ module ml {
         }
     }
 
-    fn numpy_script(rows: Int, inner: Int, cols: Int, repeats: Int) String -> {
+    fn numpy_script(rows: Int, inner: Int, cols: Int, repeats: Int) -> String {
         return "import json,time,numpy as np; left=np.ones(({rows},{inner})); right=np.full(({inner},{cols}),2.0); started=time.perf_counter_ns(); results=[left@right for _ in range({repeats})]; result=results[-1]; elapsed=int((time.perf_counter_ns()-started)/1000000); print('{{\"elapsed_ms\":'+str(elapsed)+',\"first\":'+str(float(result[0,0]))+',\"checked\":'+str(bool(np.all(result=={inner}*2.0))).lower()+'}}')"
     }
 
-    fn pytorch_script(rows: Int, inner: Int, cols: Int, repeats: Int) String -> {
+    fn pytorch_script(rows: Int, inner: Int, cols: Int, repeats: Int) -> String {
         return "import json,time,torch; left=torch.ones(({rows},{inner})); right=torch.full(({inner},{cols}),2.0); started=time.perf_counter_ns(); results=[left@right for _ in range({repeats})]; result=results[-1]; elapsed=int((time.perf_counter_ns()-started)/1000000); print('{{\"elapsed_ms\":'+str(elapsed)+',\"first\":'+str(float(result[0,0]))+',\"checked\":'+str(bool(torch.all(result=={inner}*2.0).item())).lower()+'}}')"
     }
 
@@ -600,7 +600,7 @@ module ml {
         pub pytorch: IncumbentReceipt
     }
 
-    pub fn matmul_benchmark(rows: Int, inner: Int, cols: Int, repetitions: Int, tier: String) MatmulBenchmark -> {
+    pub fn matmul_benchmark(rows: Int, inner: Int, cols: Int, repetitions: Int, tier: String) -> MatmulBenchmark {
         bounded_rows := rows
         bounded_inner := inner
         bounded_cols := cols
@@ -639,14 +639,14 @@ module ml {
         }
     }
 
-    pub fn open_core_gates() [String] -> [
+    pub fn open_core_gates() -> [String] { [ }
         "#2772: compute.gradient closure path is not executable across all tiers",
         "#2769: Tensor values cannot yet be carried in user model structs",
         "#2779: checker/runtime slowdown blocks the 10,000-vector exact scan",
         "#2778: accelerator availability and cross-tier placement proof remain open",
     ]
 
-    pub fn future_commands() [String] -> [
+    pub fn future_commands() -> [String] { [ }
         "scripts/agent/jet-env jet run examples/features/math/ml_battery",
         "scripts/agent/jet-env jet build examples/features/math/ml_battery --release",
         "scripts/agent/jet-env jet build examples/features/math/ml_battery --target native --verbose",

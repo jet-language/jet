@@ -24,21 +24,18 @@ fn parser_parse_protocol(state: &JetParserState, modifiers: ParsedItemModifiers)
 fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
     start :: parser_current(&state)
     sender :: parser_expect_name(&state, "for a protocol message sender")
-    direction := ProtocolDirection.ClientToServer
-    expected := "server"
-    if sender.payload.decoded == "client" {
-        direction = ProtocolDirection.ClientToServer
-        expected = "server"
-    } else if sender.payload.decoded == "server" {
-        direction = ProtocolDirection.ServerToClient
-        expected = "client"
-    } else {
-        parser_protocol_error(&state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
+    endpoint :: if sender.payload.decoded == {
+        "client" -> (direction: ProtocolDirection.ClientToServer, expected: "server")
+        "server" -> (direction: ProtocolDirection.ServerToClient, expected: "client")
+        else -> {
+            parser_protocol_error(&state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
+            (direction: ProtocolDirection.ClientToServer, expected: "server")
+        }
     }
     if parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
         arrow :: parser_bump(&state)
         receiver :: parser_expect_name(&state, "for the retired protocol receiver")
-        if receiver.payload.decoded != expected {
+        if receiver.payload.decoded != endpoint.expected {
             parser_protocol_error(&state, receiver.span, "the protocol receiver must be the opposite endpoint", "an endpoint-pair spelling still names the receiving endpoint", "write only the sender and remove the receiver arrow")
         }
         parser_protocol_error(&state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
@@ -62,7 +59,7 @@ fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
         }
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a protocol message payload")
-    ProtocolMessage{direction: direction, name: message.payload.decoded, name_span: message.span, fields: fields, span: parser_cover(start.span, close.span)}
+    ProtocolMessage{direction: endpoint.direction, name: message.payload.decoded, name_span: message.span, fields: fields, span: parser_cover(start.span, close.span)}
 }
 
 fn parser_protocol_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {

@@ -687,7 +687,7 @@ fn budget_failure_has_human_github_projection_and_exit_one() {
 #[test]
 fn budget_imported_declaration_reports_owning_module_location() {
     let dir = budget_project("budget_imported_source", 10);
-    fs::write(dir.join("src/run.jet"), "module perf_defs;\nfn run() {}\n").unwrap();
+    fs::write(dir.join("src/run.jet"), "module perf_defs\nfn run() {}\n").unwrap();
     fs::write(dir.join("src/perf_defs.jet"), r#"module perf.package {
     budgets: [Budget{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
 }

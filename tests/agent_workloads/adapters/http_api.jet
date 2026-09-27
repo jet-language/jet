@@ -10,7 +10,7 @@ struct Request {
     role: String
 }
 
-fn handle(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn handle(req: HTTPRequest) -> HTTPResponse !HTTPError {
     request :: req.json<Request>() ?? return Ok(http_server.response(400, "invalid-json"))
     if request.name == "" -> return Ok(http_server.response(422, "invalid-name"))
     return Ok(http_server.response(200, "accepted|{request.name}|{request.role}"))

@@ -57,7 +57,7 @@ struct Phase3Observed {
     store_tree: [String]
 }
 
-fn package_root() String -> {
+fn package_root() -> String {
     cwd :: sys.current_dir() ?? panic("phase3 cannot read current directory")
     local :: Path.from(cwd)
     if fs.exists(local.join("package.jet")) -> return local.to_string()
@@ -66,11 +66,11 @@ fn package_root() String -> {
     panic("phase3 cannot find dogfood/jetpack package")
 }
 
-fn transcript_path() String -> {
+fn transcript_path() -> String {
     return Path.from(package_root()).join("tests").join("transcripts").join("phase3.json").to_string()
 }
 
-fn store_root(name: String) String -> {
+fn store_root(name: String) -> String {
     return Path.home().join(".cache").join("jet-dogfood").join("jetpack-phase3").join(name).to_string()
 }
 
@@ -95,7 +95,7 @@ fn cleanup_node(path: String) {
 
 fn cleanup(path: String) { cleanup_node(path) }
 
-fn mode_text(mode: Int) String -> {
+fn mode_text(mode: Int) -> String {
     bits :: mode % 0o1000
     owner :: (bits /% 64) % 8
     group :: (bits /% 8) % 8
@@ -103,7 +103,7 @@ fn mode_text(mode: Int) String -> {
     return "0{owner}{group}{other}"
 }
 
-fn store_tree(root: String) [String] -> {
+fn store_tree(root: String) -> [String] {
     entries :: fs.walk(root) ?? panic("phase3 store tree cannot be read")
     tree := [String]{}
     loop entry in entries {
@@ -147,7 +147,7 @@ fn payload_tree_node(path: String, relative: String, tree: &[String]) {
     panic("phase3 payload has an unsupported file kind")
 }
 
-fn payload_tree(root: String, expected_hash: String) [String] -> {
+fn payload_tree(root: String, expected_hash: String) -> [String] {
     payload :: Path.from(root).join("hangar").join("objects").join(expected_hash).to_string()
     if !fs.exists(~payload) -> panic("phase3 payload object is missing")
     tree := [String]{}
@@ -155,7 +155,7 @@ fn payload_tree(root: String, expected_hash: String) [String] -> {
     return tree
 }
 
-fn invoke(case: Phase3Case, project: String, root: String) Phase3Observed -> {
+fn invoke(case: Phase3Case, project: String, root: String) -> Phase3Observed {
     jet_bin :: sys.get("JET_BIN") ?? panic("phase3 requires JET_BIN")
     if !jet_bin.starts_with("/") -> panic("phase3 requires an absolute JET_BIN")
     home :: Path.home().to_string()
@@ -179,12 +179,12 @@ fn invoke(case: Phase3Case, project: String, root: String) Phase3Observed -> {
     }
 }
 
-fn checked_in() Phase3Collection -> {
+fn checked_in() -> Phase3Collection {
     raw :: fs.read(Path.from(transcript_path())) ?? panic("phase3 transcript is missing")
     return json.decode<Phase3Collection>(raw) ?? panic("phase3 transcript is invalid")
 }
 
-fn case_for(cases: [Phase3Case], name: String) Phase3Case -> {
+fn case_for(cases: [Phase3Case], name: String) -> Phase3Case {
     loop case in cases {
         if case.name == name -> return case
     }

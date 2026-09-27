@@ -21,6 +21,8 @@ fn run() {
 }
 "#;
 
+const PARTIAL_EXIT_SOURCE: &str = include_str!("fixtures/uninit_fixed_partial_exit.jet");
+
 const WHOLE_VALUE_SOURCE: &str = r#"
 use core.mem
 
@@ -101,6 +103,70 @@ fn fixed_uninit_index_fill_is_resident_jit_safe() {
     assert!(
         common::cranelift_resident_safe(&bundle) && compiled.is_ok(),
         "fixed uninit fill must stay on the resident JIT tier: safety={detail:?}, compile={compiled:?}"
+    );
+}
+
+#[test]
+fn partial_uninit_fixed_backing_exits_through_resident_jit() {
+    if !jet_jit::cranelift_host_supported() {
+        return;
+    }
+    let scratch = common::Scratch::new("jet_uninit_fixed_partial_exit_jit");
+    let root = &scratch.path;
+    write_test_package(root, TIR_TEST_PACKAGE);
+    let entry = root.join("main.jet");
+    fs::write(&entry, PARTIAL_EXIT_SOURCE).unwrap();
+    let shown = entry.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert!(
+        common::cranelift_lowers(&bundle),
+        "partial fixed-uninit fixture must lower to resident JIT: {}",
+        common::cranelift_lower_error(&bundle)
+    );
+    assert!(
+        common::cranelift_resident_safe(&bundle),
+        "partial fixed-uninit fixture must be resident-safe: {}",
+        common::cranelift_resident_safe_detail(&bundle)
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "resident JIT stderr: {stderr}");
+            assert!(stderr.is_empty(), "resident JIT stderr: {stderr}");
+            assert_eq!(stdout, "7\n");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("partial fixed-uninit fixture failed: {diagnostics:?}")
+        }
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "partial fixed-uninit fixture must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "partial fixed-uninit fixture must stay resident without deopt or fallback"
+    );
+}
+
+#[test]
+fn partial_uninit_fixed_backing_exit_agrees_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "uninit_fixed_partial_exit",
+        PARTIAL_EXIT_SOURCE,
+        "7\n",
     );
 }
 

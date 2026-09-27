@@ -79,7 +79,7 @@ fn qualified_io_input_or_return() {
     }
     let src = "\
 use core.term as io
-fn collect() [String] -[IO]> {
+fn collect() -[IO]> [String] {
     out := [String]{}
     loop true {
         line :: io.input(\"> \") ?? return ~out
@@ -125,17 +125,17 @@ fn generic_fns_and_trait_object_dispatch() {
     }
     let src = "\
 trait Shape {
-    fn area(self) Float
-    fn name(self) String
+    fn area(self) -> Float
+    fn name(self) -> String
 }
 struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) Float -[]> {
+        fn area(self) -[]> Float {
             return ((3.14159 * self.radius) * self.radius)
         }
-        fn name(self) String -[]> {
+        fn name(self) -[]> String {
             return \"circle\"
         }
     }
@@ -144,14 +144,14 @@ struct Square {
     side: Float
 }
 impl Square.Shape {
-    fn area(self) Float -[]> {
+    fn area(self) -[]> Float {
         return (self.side * self.side)
     }
-    fn name(self) String -[]> {
+    fn name(self) -[]> String {
         return \"square\"
     }
 }
-fn largest<T: Comparable>(xs: [T]) (?T) -[]> {
+fn largest<T: Comparable>(xs: [T]) -[]> ?T {
     if xs.len() == 0 {
         return None
     }
@@ -205,12 +205,12 @@ enum VisitError {
     Stop
 }
 trait Shape {
-    fn name(self) String -[]>
+    fn name(self) -[]> String
 }
 struct Circle {
     radius: Float
     impl Shape {
-        fn name(self) String -[]> {
+        fn name(self) -[]> String {
             return \"circle\"
         }
     }
@@ -219,16 +219,16 @@ struct Square {
     side: Float
 }
 impl Square.Shape {
-    fn name(self) String -[]> {
+    fn name(self) -[]> String {
         return \"square\"
     }
 }
-fn visit_ok(s: Shape) Unit !VisitError -> {
+fn visit_ok(s: Shape) !VisitError {
     name :: s.name() ?? \"unreachable\"
     print(name)
     return
 }
-fn visit_fail(s: Shape) Unit !VisitError -> {
+fn visit_fail(s: Shape) !VisitError {
     name :: s.name() ?? \"unreachable\"
     print(name)
     if name == \"circle\" {
@@ -236,16 +236,16 @@ fn visit_fail(s: Shape) Unit !VisitError -> {
     }
     return
 }
-fn consume_plain() Unit -[]> {
+fn consume_plain() -[]> Unit {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> {})
 }
-fn consume_ok() Unit !VisitError -> {
+fn consume_ok() !VisitError {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_ok(s))
     return
 }
-fn consume_fail() Unit !VisitError -> {
+fn consume_fail() !VisitError {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_fail(s))
     return
@@ -274,13 +274,13 @@ fn trait_object_list_boxes_local_implementing_values() {
     }
     let src = "\
 trait Sink {
-    fn absorb(self, value: Float) Float
+    fn absorb(self, value: Float) -> Float
 }
 struct Holder {
     offset: Float
 
     impl Sink {
-        fn absorb(self, value: Float) Float -[]> {
+        fn absorb(self, value: Float) -[]> Float {
             return value + self.offset
         }
     }
@@ -356,7 +356,7 @@ fn borrowed_parameter_option_fallback_materializes_copy() {
 struct Config {
     path: ?String
 }
-fn selected(config: Config) String -[]> {
+fn selected(config: Config) -[]> String {
     return config.path ?? \"default.toml\"
 }
 fn run() {
@@ -538,8 +538,8 @@ fn read_text(text: String) { print(text) }
 fn read_list(values: [Int]) { print(values.len()) }
 fn read_generic<T>(value: T) { print(7) }
 fn read_nested(branch: Branch) { print(branch.leaf.text) }
-fn apply(f: fn(Int) Int, value: Int) Int -[]> { return f(value) }
-fn increment(value: Int) Int -[]> { return value + 1 }
+fn apply(f: fn(Int) -> Int, value: Int) -[]> Int { return f(value) }
+fn increment(value: Int) -[]> Int { return value + 1 }
 fn edit(values: &[Int]) { values[0] = 9 }
 fn consume(text: ^String) { print(text) }
 
@@ -573,28 +573,28 @@ fn generic_inherent_methods_use_per_method_clone_bounds() {
     }
     let src = r#"
 trait Measure {
-    fn measure(self) Int
+    fn measure(self) -> Int
 }
 
 struct Holder<T> {
-    reader: fn(T) Int
+    reader: fn(T) -> Int
 
-    fn inspect(self) Int -[]> {
+    fn inspect(self) -[]> Int {
         return 1
     }
 
-    fn copy_tagged(self, value: #Input T) #Input T -[]> {
+    fn copy_tagged(self, value: #Input T) -[]> #Input T {
         return ~value
     }
 }
 
-fn increment(value: Int) Int -[]> { return value + 1 }
-fn read_callback(value: fn(Int) Int) Int -[]> { return 1 }
-fn read_measure(value: Measure) Int -[]> { return 2 }
-fn read_string(value: String) Int -[]> { return value.len() }
+fn increment(value: Int) -[]> Int { return value + 1 }
+fn read_callback(value: fn(Int) -> Int) -[]> Int { return 1 }
+fn read_measure(value: Measure) -[]> Int { return 2 }
+fn read_string(value: String) -[]> Int { return value.len() }
 
 fn run() {
-    callbacks :: Holder<fn(Int) Int>{reader: read_callback}
+    callbacks :: Holder<fn(Int) -> Int>{reader: read_callback}
     measures :: Holder<Measure>{reader: read_measure}
     strings :: Holder<String>{reader: read_string}
     print(callbacks.inspect())
@@ -611,7 +611,7 @@ fn run() {
 #[test]
 fn path_parent_exhaustive_match_preserves_option_shape() {
     let src = r#"
-fn classify(path: Path) String -[]> {
+fn classify(path: Path) -[]> String {
     parent :: path.parent()
     if parent == {
         .Val(next) -> return "present:{next.to_string()}"

@@ -670,7 +670,7 @@ fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn same_bytes(left: [U8], right: [U8]) Bool {
+fn same_bytes(left: [U8], right: [U8]) -> Bool {
     if left.len() != right.len() { return false }
     loop index in 0..<left.len() {
         if left[index] != right[index] { return false }
@@ -678,7 +678,7 @@ fn same_bytes(left: [U8], right: [U8]) Bool {
     return true
 }
 
-fn summarize() String {
+fn summarize() -> String {
     plain :: [U8]{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
     utf8_bom :: [U8]{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
     utf16 :: [U8]{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
@@ -742,7 +742,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree !XMLError) String {
+fn show(result: DataTree !XMLError) -> String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -802,7 +802,7 @@ fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn summarize(source: String) String {
+fn summarize(source: String) -> String {
     doc := xml.parse(source) ?? panic("xml")
     root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
@@ -871,7 +871,7 @@ fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-fn show64(text: String) String {
+fn show64(text: String) -> String {
     if base64.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -879,7 +879,7 @@ fn show64(text: String) String {
     return "unreachable"
 }
 
-fn show64url(text: String) String {
+fn show64url(text: String) -> String {
     if base64.decode_url(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -887,7 +887,7 @@ fn show64url(text: String) String {
     return "unreachable"
 }
 
-fn show32(text: String) String {
+fn show32(text: String) -> String {
     if base32.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }

@@ -216,7 +216,7 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: ?Expr, args: [Call
                 loop place_index < source_places.len() {
                     place := sema_ownership_append_view_source_projections(source_places[place_index], source_path.projections, span)
                     duplicate := false
-                    for existing in places {
+                    loop existing in places {
                         if sema_call_view_place_equal(existing, place) -> duplicate = true
                     }
                     if !duplicate -> places.push(place)

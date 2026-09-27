@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const LEGACY_TEMPLATE: &str = r#"
-fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
     #Impure("exercise the typed legacy bridge") {
         tc :: b.toolchain("native", "x86_64-linux")
         identity :: b.signing("builder", "ci")
@@ -176,7 +176,7 @@ module workspace {
     members: ["./packages/a", "./packages/b"]
 }
 
-fn build(b: BuildContext) BuildPlan -[Exec]> {
+fn build(b: BuildContext) -[Exec]> BuildPlan {
     #Impure("workspace must observe member b") {
         action :: b.action(
             "workspace-order",
@@ -211,13 +211,13 @@ fn build(b: BuildContext) BuildPlan -[Exec]> {
     fs::write(
         packages.join("a").join("run.jet"),
         r#"
-fn build(b: BuildContext) BuildPlan -[Exec]> {
+fn build(b: BuildContext) -[Exec]> BuildPlan {
     #Impure("member a records execution") {
         action :: b.action(
             "a-order",
             [],
             ["a/a.jet"],
-            ["sh", "-c", "printf 'fn a_ready() Int -> 1' > a/a.jet"],
+            ["sh", "-c", "printf 'fn a_ready() -> Int -> 1' > a/a.jet"],
             ["Exec"]
         )
         target :: b.add_library("a", ["run.jet"], [action])
@@ -235,13 +235,13 @@ fn run() {}
         r#"
 use a
 
-fn build(b: BuildContext) BuildPlan -[Exec]> {
+fn build(b: BuildContext) -[Exec]> BuildPlan {
     #Impure("member b records its realized package") {
         action :: b.action(
             "b-order",
             [],
             ["b/b.jet"],
-            ["sh", "-c", "printf 'fn b_ready() Int -> 1' > b/b.jet"],
+            ["sh", "-c", "printf 'fn b_ready() -> Int -> 1' > b/b.jet"],
             ["Exec"]
         )
         target :: b.add_library("b", ["run.jet"], [action])

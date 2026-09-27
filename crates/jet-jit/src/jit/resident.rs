@@ -16,8 +16,9 @@ use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
 use super::deopt::clear_deopt_state;
 use super::functions_compile::{
-    compile_program, compile_typed_entry_adapter, install_finalized_iterable_hooks,
-    redefine_mir_functions, CompiledMirProgram,
+    compile_program_with_roots, compile_typed_entry_adapter, install_finalized_iterable_hooks,
+    redefine_mir_functions, register_finalized_jit_closure_targets, CompiledMirProgram,
+    SourceHelperCompileClosure,
 };
 use super::runtime_host::{new_jit_module, EntryErrorType, ResidentHotSwapPlan, ResidentModule};
 use super::safety::artifact_entry;
@@ -212,7 +213,11 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         default_error_type: None,
         trait_object_types: HashMap::new(),
         native_interface_carriers: HashMap::new(),
-        native_shared_carriers: HashMap::new(),
+        native_shared_interops: HashMap::new(),
+        native_shared_roots: HashMap::new(),
+        native_shared_guards: HashMap::new(),
+        next_native_shared_guard_token: i64::MIN,
+        native_shared_handles: HashMap::new(),
         invocation_carrier_epoch: 1,
         next_invocation_carrier_token: 1,
         jit_closure_targets: HashMap::new(),
@@ -251,6 +256,8 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         next_option_lift2_thunk: 0,
         next_shared_txn_thunk: 0,
         jit_callables: Vec::new(),
+        jit_callable_env_lifetimes: Vec::new(),
+        jit_callable_env_by_handle: HashMap::new(),
         scope_guards: Vec::new(),
         transactions: Vec::new(),
         atexit_handlers: Vec::new(),
@@ -304,6 +311,8 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         gc_edges: Vec::new(),
         pools: Vec::new(),
         shareds: Vec::new(),
+        shared_weak_owners: HashMap::new(),
+        shared_snapshots: HashMap::new(),
         conditions: Vec::new(),
         shared_guard_states: HashMap::new(),
         expirings: Vec::new(),
@@ -439,14 +448,27 @@ pub(crate) fn ensure_resident_module(
     artifact: MirArtifactId,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Result<(), String> {
+    ensure_resident_module_with_roots(program, artifact, release_devtools_policy, &[])
+}
+
+pub(crate) fn ensure_resident_module_with_roots(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    helper_roots: &[MirFunctionId],
+) -> Result<(), String> {
     let main_returns_result = main_returns_result(program, artifact);
     let main_error_type = main_error_type(program, artifact);
     let main_returns_app = main_returns_app(program, artifact);
     let main_serves_app = main_serves_app(program, artifact);
-    crate::CLI::prepare_cli_from_mir(program, artifact);
-    crate::Ffi::bind_mir_ffi(program, artifact).map_err(|err| match err {
-        crate::Ffi::BindError::Message(message) => message,
-    })?;
+    if helper_roots.is_empty() {
+        crate::CLI::prepare_cli_from_mir(program, artifact);
+        crate::Ffi::bind_mir_ffi(program, artifact).map_err(|err| match err {
+            crate::Ffi::BindError::Message(message) => message,
+        })?;
+    } else {
+        super::functions_compile::source_helper_compile_closure(program, artifact, helper_roots)?;
+    }
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
         let (mut module, host) = new_jit_module()?;
@@ -458,8 +480,18 @@ pub(crate) fn ensure_resident_module(
                     program_allocator_cap_bytes(program),
                 )
             });
-        let compiled = compile_program(&mut module, &host, program, artifact, &mut runtime)?;
-        install_cli_function_pointers(&module, &compiled)?;
+        let compiled = compile_program_with_roots(
+            &mut module,
+            &host,
+            program,
+            artifact,
+            &mut runtime,
+            helper_roots,
+            None,
+        )?;
+        if helper_roots.is_empty() {
+            install_cli_function_pointers(&module, &compiled)?;
+        }
         install_finalized_iterable_hooks(&module, &mut runtime, &compiled)?;
         runtime.snapshot_compile_strings();
         install_program_source(&mut runtime, program);
@@ -485,14 +517,18 @@ pub(crate) fn ensure_resident_module(
         RESIDENT_RUNTIME.with(|rt_slot| {
             let mut rt_guard = rt_slot.borrow_mut();
             let runtime = rt_guard.as_mut().ok_or("resident runtime missing")?;
-            let compiled = compile_program(
+            let compiled = compile_program_with_roots(
                 &mut resident.module,
                 &resident.host,
                 program,
                 artifact,
                 runtime,
+                helper_roots,
+                None,
             )?;
-            install_cli_function_pointers(&resident.module, &compiled)?;
+            if helper_roots.is_empty() {
+                install_cli_function_pointers(&resident.module, &compiled)?;
+            }
             install_finalized_iterable_hooks(&resident.module, runtime, &compiled)?;
             runtime.snapshot_compile_strings();
             install_program_source(runtime, program);
@@ -526,6 +562,38 @@ fn ensure_typed_entry_adapter(
         Ok(())
     })
 }
+
+fn ensure_typed_helper_adapter_in_module(
+    module: &mut dyn Module,
+    function_row: &MirFunction,
+) -> Result<(cranelift_module::FuncId, cranelift_module::FuncId), String> {
+    let function = function_row.id;
+    let target = match module.get_name(&mir_fn_name(function)) {
+        Some(FuncOrDataId::Func(id)) => id,
+        Some(_) => {
+            return Err(format!(
+                "Source helper function {function:?} has a non-function resident symbol"
+            ))
+        }
+        None => {
+            return Err(format!(
+                "Source helper function {function:?} was not retained by the artifact"
+            ))
+        }
+    };
+    let adapter_name = format!("__jet_typed_entry_adapter_{}", function.0);
+    let typed_target = match module.get_name(&adapter_name) {
+        Some(FuncOrDataId::Func(id)) => id,
+        Some(_) => {
+            return Err(format!(
+                "Source helper adapter for {function:?} has a non-function resident symbol"
+            ))
+        }
+        None => compile_typed_entry_adapter(module, target, function_row)?,
+    };
+    Ok((target, typed_target))
+}
+
 
 fn invoke_word_entry(code: *const u8, args: &[i64]) -> Result<i64, String> {
     match args {
@@ -579,22 +647,42 @@ fn invoke_word_entry(code: *const u8, args: &[i64]) -> Result<i64, String> {
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    resident_invoke_inner(None, None).map(|(outcome, _)| outcome)
+    resident_invoke_inner(None, None, None, None).map(|(outcome, _)| outcome)
 }
-
 
 pub(crate) fn resident_invoke_with_words_and_value(
     words: &[i64],
     return_type: &MirType,
+    invocation_started: &mut bool,
 ) -> Result<(RunOutcome, MirRuntimeValue), String> {
-    let (outcome, value) = resident_invoke_inner(Some(words), Some(return_type))?;
-    let value = value.ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())?;
+    let (outcome, value) =
+        resident_invoke_inner(None, Some(words), Some(return_type), Some(invocation_started))?;
+    let value = value
+        .ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())?;
+    Ok((outcome, value))
+}
+
+pub(crate) fn resident_invoke_function_with_words_and_value(
+    target: cranelift_module::FuncId,
+    typed_target: Option<cranelift_module::FuncId>,
+    words: &[i64],
+    return_type: &MirType,
+) -> Result<(RunOutcome, MirRuntimeValue), String> {
+    let (outcome, value) =
+        resident_invoke_inner(Some((target, typed_target)), Some(words), Some(return_type), None)?;
+    let value = value
+        .ok_or_else(|| "typed Cranelift helper did not produce a typed return value".to_string())?;
     Ok((outcome, value))
 }
 
 fn resident_invoke_inner(
+    function: Option<(
+        cranelift_module::FuncId,
+        Option<cranelift_module::FuncId>,
+    )>,
     words: Option<&[i64]>,
     typed_return: Option<&MirType>,
+    mut invocation_started: Option<&mut bool>,
 ) -> Result<(RunOutcome, Option<MirRuntimeValue>), String> {
     let (code, typed_code, main_returns_result, main_returns_app, main_serves_app, main_error_type) =
         RESIDENT_MODULE.with(|slot| -> Result<_, String> {
@@ -606,16 +694,27 @@ fn resident_invoke_inner(
                 .module
                 .finalize_definitions()
                 .map_err(|error| error.to_string())?;
-            Ok((
-                resident.module.get_finalized_function(resident.main_id),
-                resident
-                    .typed_entry_id
-                    .map(|id| resident.module.get_finalized_function(id)),
-                resident.main_returns_result,
-                resident.main_returns_app,
-                resident.main_serves_app,
-                resident.main_error_type,
-            ))
+            if let Some((target, typed_target)) = function {
+                Ok((
+                    resident.module.get_finalized_function(target),
+                    typed_target.map(|id| resident.module.get_finalized_function(id)),
+                    false,
+                    false,
+                    false,
+                    None,
+                ))
+            } else {
+                Ok((
+                    resident.module.get_finalized_function(resident.main_id),
+                    resident
+                        .typed_entry_id
+                        .map(|id| resident.module.get_finalized_function(id)),
+                    resident.main_returns_result,
+                    resident.main_returns_app,
+                    resident.main_serves_app,
+                    resident.main_error_type,
+                ))
+            }
         })?;
 
     if words.is_some() && typed_code.is_none() {
@@ -635,10 +734,13 @@ fn resident_invoke_inner(
         let mut typed_handle = None;
         Concurrency::set_active_runtime(Some(ptr));
         jet_codegen::scheduler::jet_observe_runtime_start_from_env(Vec::new());
-        jet_codegen::scheduler::jet_scheduler_task_completion_begin();
+        let mut completion = jet_codegen::scheduler::jet_scheduler_task_completion_begin();
         if let Some(args) = words {
             let typed_code = typed_code
                 .ok_or("typed Cranelift entry adapter is unavailable for this function")?;
+            if let Some(started) = invocation_started.as_deref_mut() {
+                *started = true;
+            }
             let handle = invoke_word_entry(typed_code, args)?;
             typed_handle = Some(handle);
             if main_returns_result {
@@ -687,8 +789,8 @@ fn resident_invoke_inner(
         }
         if runtime.host_fault {
         }
-        jet_codegen::scheduler::jet_scheduler_task_completion_drain();
-        jet_codegen::scheduler::jet_scheduler_task_completion_end();
+        completion.drain();
+        drop(completion);
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
         super::runtime_host::run_jit_atexit_handlers(runtime);
@@ -787,10 +889,10 @@ pub(crate) fn resident_run_fresh(
         release_devtools_policy,
         None,
         None,
+        None,
     )
     .map(|(outcome, _)| outcome)
 }
-
 
 pub(crate) fn resident_run_fresh_with_values_and_result(
     program: &MirProgram,
@@ -799,19 +901,384 @@ pub(crate) fn resident_run_fresh_with_values_and_result(
     release_devtools_policy: &ReleaseDevtoolsPolicy,
     values: &[MirRuntimeValue],
     return_type: &MirType,
-) -> Result<(RunOutcome, MirRuntimeValue), String> {
-    resident_run_fresh_inner(
+    invocation_started: &mut bool,
+) -> ResidentHelperAttempt {
+    let result = resident_run_fresh_inner(
         program,
         cap_bytes,
         artifact,
         release_devtools_policy,
         Some(values),
         Some(return_type),
+        Some(invocation_started),
+    );
+    match result {
+        Ok((outcome, Some(value))) => ResidentHelperAttempt::Invoked {
+            outcome,
+            value: Some(value),
+            failure: None,
+            writebacks: Vec::new(),
+        },
+        Ok((outcome, None)) => ResidentHelperAttempt::Invoked {
+            outcome,
+            value: None,
+            failure: Some("typed Cranelift entry did not produce a typed return value".to_string()),
+            writebacks: Vec::new(),
+        },
+        Err(error) if *invocation_started => ResidentHelperAttempt::Invoked {
+            outcome: resident_invocation_failure_outcome(),
+            value: None,
+            failure: Some(error),
+            writebacks: Vec::new(),
+        },
+        Err(error) => ResidentHelperAttempt::NotInvoked(error),
+    }
+}
+
+pub(crate) struct ResidentHelperWriteback {
+    pub parameter_index: usize,
+    pub value: MirRuntimeValue,
+}
+
+pub(crate) enum ResidentHelperAttempt {
+    NotInvoked(String),
+    Invoked {
+        outcome: RunOutcome,
+        value: Option<MirRuntimeValue>,
+        failure: Option<String>,
+        writebacks: Vec<ResidentHelperWriteback>,
+    },
+}
+
+pub(crate) fn resident_run_fresh_with_function_values_and_result(
+    program: &MirProgram,
+    cap_bytes: Option<u64>,
+    artifact: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+    function: MirFunctionId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    values: &[MirRuntimeValue],
+    return_type: &MirType,
+    invocation_started: &mut bool,
+) -> ResidentHelperAttempt {
+    if let Err(error) = jet_rt::__gc::initialize_trace() {
+        return ResidentHelperAttempt::NotInvoked(error.to_string());
+    }
+    let closure = match super::functions_compile::source_helper_compile_closure(
+        program,
+        artifact,
+        helper_roots,
+    ) {
+        Ok(closure) => closure,
+        Err(error) => return ResidentHelperAttempt::NotInvoked(error),
+    };
+    if let Err(error) = crate::Ffi::bind_mir_ffi_for_source_helper(
+        program,
+        artifact,
+        &closure.foreigns,
+        &closure.links,
+        closure.needs_data_provider,
+    ) {
+        return ResidentHelperAttempt::NotInvoked(error);
+    }
+    resident_run_private_helper(
+        program,
+        cap_bytes,
+        artifact,
+        helper_roots,
+        &closure,
+        function,
+        release_devtools_policy,
+        values,
+        return_type,
+        invocation_started,
     )
-    .and_then(|(outcome, value)| {
-        value
-            .map(|value| (outcome, value))
-            .ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())
+}
+
+fn resident_run_private_helper(
+    program: &MirProgram,
+    cap_bytes: Option<u64>,
+    artifact: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+    source_helper_closure: &SourceHelperCompileClosure,
+    function_id: MirFunctionId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    values: &[MirRuntimeValue],
+    return_type: &MirType,
+    invocation_started: &mut bool,
+) -> ResidentHelperAttempt {
+    let prepared = (|| {
+        let (mut module, host) = new_jit_module()?;
+        let mut runtime = fresh_runtime_with_allocator_cap(
+            release_devtools_policy.clone(),
+            cap_bytes,
+        );
+        let compiled = compile_program_with_roots(
+            &mut module,
+            &host,
+            program,
+            artifact,
+            &mut runtime,
+            helper_roots,
+            Some(source_helper_closure),
+        )?;
+        install_finalized_iterable_hooks(&module, &mut runtime, &compiled)?;
+        runtime.snapshot_compile_strings();
+        install_program_source(&mut runtime, program);
+        let function = program
+            .functions
+            .iter()
+            .find(|candidate| candidate.id == function_id)
+            .ok_or_else(|| format!("Source helper function {function_id:?} is missing"))?;
+        let words = values
+            .iter()
+            .zip(&function.params)
+            .enumerate()
+            .map(|(parameter_index, (value, parameter))| {
+                let type_id = super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
+                    format!(
+                        "typed parameter `{}` has no runtime type identity",
+                        parameter.name
+                    )
+                })?;
+                let value =
+                    super::runtime_host::encode_jit_cell_value(&mut runtime, value, type_id)?;
+                if parameter.access == MirAccess::Write {
+                    let mut slot = Box::new(value);
+                    let address = (&mut *slot as *mut i64) as i64;
+                    write_arguments.push(ResidentWriteArgumentSlot {
+                        parameter_index,
+                        type_id,
+                        raw: slot,
+                    });
+                    Ok(address)
+                } else {
+                    Ok(value)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (_, typed_target) = ensure_typed_helper_adapter_in_module(&mut module, function)?;
+        module
+            .finalize_definitions()
+            .map_err(|error| error.to_string())?;
+        let typed_code = module.get_finalized_function(typed_target);
+        Ok((module, host, runtime, typed_code, words, write_arguments))
+    })();
+    let (module, host, mut runtime, typed_code, words, write_arguments) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return ResidentHelperAttempt::NotInvoked(error),
+    };
+    let runtime_ptr = &mut runtime as *mut JitRuntime;
+    let invocation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resident_invoke_private_helper(
+            runtime_ptr,
+            typed_code,
+            &words,
+            return_type,
+            invocation_started,
+        )
+    }));
+    let (writebacks, writeback_failure) = if *invocation_started {
+        resident_decode_helper_writebacks(&mut runtime, &write_arguments)
+    } else {
+        (Vec::new(), None)
+    };
+    let combine_failure = |failure: Option<String>| match (failure, writeback_failure.as_ref()) {
+        (Some(failure), Some(writeback)) => {
+            Some(format!("{failure}; writable output projection failed: {writeback}"))
+        }
+        (Some(failure), None) => Some(failure),
+        (None, Some(writeback)) => {
+            Some(format!("writable output projection failed: {writeback}"))
+        }
+        (None, None) => None,
+    };
+    let attempt = match invocation {
+        Ok(Ok((outcome, value))) => ResidentHelperAttempt::Invoked {
+            outcome,
+            value: Some(value),
+            failure: combine_failure(None),
+            writebacks,
+        },
+        Ok(Err(error)) if !*invocation_started => ResidentHelperAttempt::NotInvoked(error),
+        Ok(Err(error)) => ResidentHelperAttempt::Invoked {
+            outcome: resident_helper_failure_outcome(&runtime),
+            value: None,
+            failure: combine_failure(Some(error)),
+            writebacks,
+        },
+        Err(payload) if !*invocation_started => {
+            ResidentHelperAttempt::NotInvoked(panic_message(payload.as_ref()))
+        }
+        Err(payload) => {
+            let error = panic_message(payload.as_ref());
+            ResidentHelperAttempt::Invoked {
+                outcome: resident_helper_failure_outcome(&runtime),
+                value: None,
+                failure: combine_failure(Some(error)),
+                writebacks,
+            }
+        }
+    };
+    reset_run_heap(&mut runtime);
+    drop(host);
+    drop(module);
+    attempt
+}
+
+struct ResidentWriteArgumentSlot {
+    parameter_index: usize,
+    type_id: u64,
+    raw: Box<i64>,
+}
+
+fn resident_decode_helper_writebacks(
+    runtime: &mut JitRuntime,
+    slots: &[ResidentWriteArgumentSlot],
+) -> (Vec<ResidentHelperWriteback>, Option<String>) {
+    let mut writebacks = Vec::with_capacity(slots.len());
+    let mut failure = None;
+    for slot in slots {
+        match super::runtime_host::decode_jit_cell_value(runtime, *slot.raw, slot.type_id) {
+            Ok(value) => writebacks.push(ResidentHelperWriteback {
+                parameter_index: slot.parameter_index,
+                value,
+            }),
+            Err(error) => {
+                if failure.is_none() {
+                    failure = Some(error);
+                }
+            }
+        }
+    }
+    (writebacks, failure)
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
+        .unwrap_or_else(|| "unknown panic payload".to_string())
+}
+
+fn resident_helper_failure_outcome(runtime: &JitRuntime) -> RunOutcome {
+    RunOutcome::Ran {
+        stdout: runtime.stdout.clone(),
+        stderr: runtime.stderr.clone(),
+        exit_code: runtime.exit_code.unwrap_or(1),
+    }
+}
+pub(crate) fn resident_invocation_failure_outcome() -> RunOutcome {
+    RESIDENT_RUNTIME.with(|slot| match slot.borrow().as_ref() {
+        Some(runtime) => resident_helper_failure_outcome(runtime),
+        None => RunOutcome::Ran {
+            stdout: String::new(),
+            stderr: "resident runtime missing after typed invocation".to_string(),
+            exit_code: 1,
+        },
+    })
+}
+
+fn resident_invoke_private_helper(
+    runtime_ptr: *mut JitRuntime,
+    typed_code: *const u8,
+    words: &[i64],
+    return_type: &MirType,
+    invocation_started: &mut bool,
+) -> Result<(RunOutcome, MirRuntimeValue), String> {
+    if words.len() > 8 {
+        return Err(format!(
+            "typed Cranelift entry adapter received {} arguments; maximum is eight",
+            words.len()
+        ));
+    }
+    let _active_runtime = Concurrency::activate_local_runtime(runtime_ptr);
+    Concurrency::with_runtime_string(|runtime| {
+        runtime.invocations += 1;
+        runtime.stdout.clear();
+        runtime.stderr.clear();
+        runtime.results.clear();
+        runtime.errors.clear();
+        Ok(())
+    })?;
+    jet_foundation::Outcome::jet_journey_reset();
+    jet_codegen::scheduler::jet_observe_runtime_start_from_env(Vec::new());
+    let mut completion = jet_codegen::scheduler::jet_scheduler_task_completion_begin();
+    *invocation_started = true;
+    let handle = invoke_word_entry(typed_code, words)?;
+    completion.drain();
+    drop(completion);
+    Concurrency::settle_pending_after_native();
+    jet_codegen::scheduler::jet_scheduler_drain();
+    Concurrency::with_runtime_string(|runtime| {
+        super::runtime_host::run_jit_atexit_handlers(runtime);
+        if let Some(report) = jet_codegen::scheduler::jet_observe_parked_tasks_report() {
+            runtime.stderr.push_str(&report.rendered);
+            runtime.exit_code = Some(report.exit_code);
+        }
+        Ok(())
+    })?;
+    jet_codegen::scheduler::jet_scheduler_drain_after_exit();
+    jet_codegen::task_group::jet_task_deadline_clear_pending();
+    Concurrency::with_runtime_result("resident runtime missing".to_string(), |runtime| {
+        let type_id = super::runtime_host::runtime_type_id(return_type)
+            .ok_or_else(|| "typed return has no runtime type identity".to_string())?;
+        let value = super::runtime_host::decode_jit_cell_value(runtime, handle, type_id)?;
+        if let Some(stderr) = runtime.deadline_exceeded.take() {
+            let mut stderr = stderr;
+            if !stderr.ends_with('\n') {
+                stderr.push('\n');
+            }
+            let stdout = runtime.stdout.clone();
+            return Ok((
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code: 70,
+                },
+                value,
+            ));
+        }
+        if let Some(outcome) = take_host_fault_outcome(runtime) {
+            return Ok((outcome, value));
+        }
+        if let Some(message) = runtime.take_trap() {
+            if message == "__jet_rich_panic__" || runtime.exit_code.is_some() {
+                let exit_code = runtime.exit_code.take().unwrap_or(1);
+                let stdout = runtime.stdout.clone();
+                let stderr = runtime.stderr.clone();
+                return Ok((
+                    RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    },
+                    value,
+                ));
+            }
+            let stdout = runtime.stdout.clone();
+            let stderr = runtime.stderr.clone();
+            return Ok((
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code: 1,
+                },
+                value,
+            ));
+        }
+        let stdout = runtime.stdout.clone();
+        let stderr = runtime.stderr.clone();
+        let exit_code = runtime.exit_code.take().unwrap_or(0);
+        Ok((
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            },
+            value,
+        ))
     })
 }
 
@@ -822,6 +1289,7 @@ fn resident_run_fresh_inner(
     release_devtools_policy: &ReleaseDevtoolsPolicy,
     values: Option<&[MirRuntimeValue]>,
     return_type: Option<&MirType>,
+    mut invocation_started: Option<&mut bool>,
 ) -> Result<(RunOutcome, Option<MirRuntimeValue>), String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
@@ -832,7 +1300,12 @@ fn resident_run_fresh_inner(
         ))
     });
     super::tier_cache::begin_capture();
-    let compiled = ensure_resident_module(program, artifact, release_devtools_policy);
+    let compiled = ensure_resident_module_with_roots(
+        program,
+        artifact,
+        release_devtools_policy,
+        &[],
+    );
     if compiled.is_err() {
         super::tier_cache::abort_capture();
     }
@@ -843,7 +1316,7 @@ fn resident_run_fresh_inner(
                 .ok_or_else(|| format!("MIR artifact {artifact:?} has no entry function"))?;
             if !function.capture_params.is_empty() || function.params.len() != values.len() {
                 return Err(format!(
-                    "typed Cranelift entry expected {} parameters, got {} values",
+                    "typed Cranelift function expected {} parameters, got {} values",
                     function.params.len(),
                     values.len()
                 ));
@@ -859,7 +1332,7 @@ fn resident_run_fresh_inner(
                     .map(|(value, parameter)| {
                         if parameter.access == MirAccess::Write {
                             return Err(format!(
-                                "typed Cranelift entry cannot marshal writable parameter `{}`",
+                                "typed Cranelift function cannot marshal writable parameter `{}`",
                                 parameter.name
                             ));
                         }
@@ -890,9 +1363,12 @@ fn resident_run_fresh_inner(
     let outcome = match words {
         Some(words) => {
             let return_type = return_type.ok_or_else(|| {
-                "typed Cranelift entry has values but no checked return type".to_string()
+                "typed Cranelift function has values but no checked return type".to_string()
             })?;
-            resident_invoke_with_words_and_value(words, return_type)
+            let invocation_started = invocation_started
+                .as_deref_mut()
+                .ok_or_else(|| "typed Source entry lacks invocation tracking".to_string())?;
+            resident_invoke_with_words_and_value(words, return_type, invocation_started)
                 .map(|(outcome, value)| (outcome, Some(value)))
         }
         None => resident_invoke().map(|outcome| (outcome, None)),
@@ -1051,8 +1527,10 @@ fn install_selected_cli_function_pointers(
     Ok(())
 }
 
+
 fn resident_redefine(
     program: &MirProgram,
+    artifact: MirArtifactId,
     plan: &ResidentHotSwapPlan,
     resident: &mut ResidentModule,
     runtime: &mut JitRuntime,
@@ -1094,39 +1572,13 @@ fn resident_redefine(
         .module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
-    for function_id in &selected_ids {
-        let Some(function_row) = program.functions.iter().find(|row| row.id == *function_id) else {
-            return Err(format!("MIR closure function {:?} is missing", function_id));
-        };
-        let Some(FuncOrDataId::Func(compiled_id)) =
-            resident.module.get_name(&mir_fn_name(*function_id))
-        else {
-            return Err(format!(
-                "MIR closure function {:?} has no finalized definition",
-                function_id
-            ));
-        };
-        let pointer = resident.module.get_finalized_function(compiled_id);
-        if pointer.is_null() {
-            return Err(format!(
-                "MIR closure function {:?} has no finalized function address",
-                function_id
-            ));
-        }
-        let capture_type_ids = function_row
-            .capture_params
-            .iter()
-            .map(|parameter| {
-                super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
-                    format!(
-                        "MIR closure {:?} capture has no runtime type identity",
-                        function_id
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        runtime.install_jit_closure_target(*function_id, pointer as i64, capture_type_ids);
-    }
+    register_finalized_jit_closure_targets(
+        &resident.module,
+        program,
+        artifact,
+        selected_ids.iter().copied(),
+        runtime,
+    )?;
     runtime.snapshot_compile_strings();
     install_program_source(runtime, program);
     Ok(ResidentRedefineStatus::Applied)
@@ -1162,7 +1614,7 @@ pub(crate) fn resident_hot_swap(
                 let Some(runtime) = rt_guard.as_mut() else {
                     return Ok(ResidentRedefineStatus::Unsupported);
                 };
-                resident_redefine(program, &plan, resident, runtime)
+                resident_redefine(program, artifact, &plan, resident, runtime)
             })
         })?;
         if matches!(status, ResidentRedefineStatus::Applied) {

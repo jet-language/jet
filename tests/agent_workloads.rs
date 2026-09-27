@@ -2484,7 +2484,7 @@ fn production_process_limits_authority_and_descendant_cleanup() {
 
     let source = r#"use core.process as process
 
-fn limit_blocked() Bool -> {
+fn limit_blocked() -> Bool {
     process.cmd(["printf", "12345"])
         .stdout(.Capture)
         .stderr(.Capture)
@@ -2493,7 +2493,7 @@ fn limit_blocked() Bool -> {
     return false
 }
 
-fn authority_refused() Bool -> {
+fn authority_refused() -> Bool {
     policy :: Authority.from_rights(["Net:example.com"])
     process.cmd(["printf", "authority"]).under(policy).plan() ?? return true
     return false

@@ -90,18 +90,18 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
     let scratch = Scratch::new("machine-output-envelope");
     fs::write(
         scratch.join("run.jet"),
-        "fn square(n: Int) Int -> n * n\n\nfn run() { square(2) }\n",
+        "fn square(n: Int) -> Int -> n * n\n\nfn run() { square(2) }\n",
     )
     .unwrap();
     fs::write(scratch.join("env.jet"), "module env.dev { }\n").unwrap();
     fs::write(
         scratch.join("before.jet"),
-        "fn square(n: Int) Int -> n * n\n\nfn run() { square(2) }\n",
+        "fn square(n: Int) -> Int -> n * n\n\nfn run() { square(2) }\n",
     )
     .unwrap();
     fs::write(
         scratch.join("after.jet"),
-        "fn square(n: Int) Int -> n * n + 1\n\nfn run() { square(2) }\n",
+        "fn square(n: Int) -> Int -> n * n + 1\n\nfn run() { square(2) }\n",
     )
     .unwrap();
 

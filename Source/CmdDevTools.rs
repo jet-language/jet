@@ -8142,9 +8142,9 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 
     // Full sema type-check with CompileMode::Eval — runs all type/ownership
-    // checks and accepts value-returning `pure fn run() => T`
-    // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
-    // their precise diagnostics rather than falling through to E0956.
+    // checks and accepts a value-returning `pure fn run() -> T`. This ensures
+    // type errors (e.g. `"string" + 5`) surface with their precise diagnostics
+    // rather than falling through to E0956.
     {
         let type_diags = jet::check_for_eval(&source_for_parse, file);
         if !type_diags.is_empty() {

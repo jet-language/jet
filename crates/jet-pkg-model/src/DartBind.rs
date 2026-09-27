@@ -557,7 +557,7 @@ fn matching_close(source: &str, open: usize) -> Option<usize> {
 fn render_jet(lib: &str, functions: &[Function]) -> String {
     let abi = format!("jet_dart_{lib}");
     let mut out =
-        format!("#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n");
+        format!("#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n");
     for f in functions {
         out.push_str("    fn ");
         out.push_str(&f.jet);
@@ -574,9 +574,9 @@ fn render_jet(lib: &str, functions: &[Function]) -> String {
         out.push_str("pub fn ");
         out.push_str(&f.jet);
         jet_params(&mut out, &f.params);
-        out.push(' ');
+        out.push_str(" -[FFI.Dart]> ");
         out.push_str(f.result.jet());
-        out.push_str(" !DartError -[FFI.Dart]> {\n    result :: abi.");
+        out.push_str(" !DartError {\n    result :: abi.");
         out.push_str(&f.jet);
         call_args(&mut out, &f.params);
         out.push_str("\n    code :: abi.take_error()\n    if code == 1 { return Err(DartError.NotInitialized) }\n    if code == 2 { return Err(DartError.CallbackUnavailable) }\n    return Ok(result)\n}\n\n");
@@ -1062,9 +1062,9 @@ mod tests {
         )
         .unwrap();
         let jet = super::render_jet("callbacks", &functions);
-        assert!(jet.contains("fn dart_double(value: Int) Int ="));
-        assert!(jet.contains("pub fn dart_double(value: Int) Int !DartError -[FFI.Dart]>"));
-        assert!(jet.contains("fn dart_half(value: Float) Float ="));
+        assert!(jet.contains("fn dart_double(value: Int) -> Int ="));
+        assert!(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int !DartError"));
+        assert!(jet.contains("fn dart_half(value: Float) -> Float ="));
         assert!(!jet.contains("=>"));
 
         let c = super::render_c("callbacks", &functions);

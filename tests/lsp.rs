@@ -1850,7 +1850,7 @@ fn lsp_execute_command_impact_returns_report() {
         return;
     }
     let source =
-        "fn add(a: Int, b: Int) Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
+        "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
     let uri = "file:///tmp/lsp_execute_impact_test.jet";
 
     run_transcript(
@@ -2118,7 +2118,7 @@ fn lsp_completion_returns_items() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet(name: String) {\n    print(name);\n}\nfn connect(host: String, /, *, timeout seconds: Int{30}) String {\n    return host;\n}\nfn run() {\n    \n}\n";
+    let source = "fn greet(name: String) {\n    print(name)\n}\nfn connect(host: String, /, *, timeout seconds: Int{30}) -> String {\n    return host\n}\nfn run() {\n    \n}\n";
     let uri = "file:///tmp/lsp_completion_test.jet";
 
     run_transcript(
@@ -2147,7 +2147,7 @@ fn lsp_completion_returns_items() {
                     "items".to_string(),
                     "greet".to_string(),
                     "connect".to_string(),
-                    "fn connect(host: String, /, *, timeout seconds: Int) String -[]>".to_string(),
+                    "fn connect(host: String, /, *, timeout seconds: Int) -[]> String".to_string(),
                 ]),
             },
             TranscriptStep::Send {
@@ -2207,7 +2207,7 @@ fn lsp_completion_returns_snippets_and_auto_imports() {
     std::fs::create_dir_all(root.join("src")).expect("create LSP source dirs");
     std::fs::write(
         root.join("app/store.jet"),
-        "fn ImportedHelper() Int {\n    return 1\n}\nfn run() {}\n",
+        "fn ImportedHelper() -> Int {\n    return 1\n}\nfn run() {}\n",
     )
     .expect("write imported module");
     let path = root.join("src/main.jet");
@@ -2482,7 +2482,7 @@ fn lsp_signature_help_returns_active_parameter() {
     if !jet.exists() {
         return;
     }
-    let source = "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) String -[IO]> {\n    return host;\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
+    let source = "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -[IO]> String {\n    return host\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
     let call_start = source
         .find("connect(\"db\", tls: true, timeout: 5)")
@@ -2515,7 +2515,7 @@ fn lsp_signature_help_returns_active_parameter() {
                     uri, tls_position.line, tls_position.character
                 ),
                 expect_contains: Some(vec![
-                    "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) String -[IO]>"
+                    "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) -[IO]> String"
                         .to_string(),
                     "\"activeParameter\":2".to_string(),
                     "tls enabled: Bool".to_string(),
@@ -2545,7 +2545,7 @@ fn lsp_document_symbol_returns_checked_outline() {
     if !jet.exists() {
         return;
     }
-    let source = "struct Point { x: Int }\nenum Color { Red Green }\nfn add(a: Int, b: Int) Int {\n    return a + b;\n}\n";
+    let source = "struct Point { x: Int }\nenum Color { Red Green }\nfn add(a: Int, b: Int) -> Int {\n    return a + b\n}\n";
     let uri = "file:///tmp/lsp_document_symbol_test.jet";
 
     run_transcript(
@@ -2608,7 +2608,7 @@ fn lsp_document_symbol_returns_symbols_for_imported_package_module() {
     let imported_path = root.join("app/plan.jet");
     let main_source = "use app.plan\nfn run() {}\n";
     let imported_source =
-        "struct ImportedPlan { value: Int }\nfn imported_helper(value: Int) Int {\n    return value;\n}\n";
+        "struct ImportedPlan { value: Int }\nfn imported_helper(value: Int) -> Int {\n    return value\n}\n";
     fs::write(&main_path, main_source).expect("write imported symbol root module");
     fs::write(&imported_path, imported_source).expect("write imported symbol module");
 
@@ -2716,7 +2716,7 @@ fn lsp_wave2_navigation_features() {
     if !jet.exists() {
         return;
     }
-    let source = "// file note one\n// file note two\n\nfn add(a: Int, b: Int) Int {\n    total :: a + b\n    return total\n}\n\nfn run() {\n    value :: add(1, 2)\n    print(value)\n}\n";
+    let source = "// file note one\n// file note two\n\nfn add(a: Int, b: Int) -> Int {\n    total :: a + b\n    return total\n}\n\nfn run() {\n    value :: add(1, 2)\n    print(value)\n}\n";
     let uri = "file:///tmp/lsp_wave2_nav_test.jet";
 
     run_transcript(
@@ -2800,7 +2800,7 @@ fn lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) Int {\n    return a + b\n}\n\nfn caller() {\n    result :: add(1, 2)\n    print(result)\n}\n\nfn run() {\n    caller()\n}\n";
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\n\nfn caller() {\n    result :: add(1, 2)\n    print(result)\n}\n\nfn run() {\n    caller()\n}\n";
     let uri = "file:///tmp/lsp_wave3_power_test.jet";
     let add_item = format!(
         r#"{{"name":"add","kind":12,"uri":"{}","range":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}},"selectionRange":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}}}}"#,
@@ -2906,7 +2906,7 @@ fn lsp_type_hierarchy_trait_impls() {
     if !jet.exists() {
         return;
     }
-    let source = "trait Renderable {\n    fn render(self) String\n}\n\nstruct Button {\n    label: String\n    impl Renderable {\n        fn render(self) String {\n            return self.label\n        }\n    }\n}\n\nfn run() {\n    b :: Button{label: \"ok\"}\n    print(b.render())\n}\n";
+    let source = "trait Renderable {\n    fn render(self) -> String\n}\n\nstruct Button {\n    label: String\n    impl Renderable {\n        fn render(self) -> String {\n            return self.label\n        }\n    }\n}\n\nfn run() {\n    b :: Button{label: \"ok\"}\n    print(b.render())\n}\n";
     let uri = "file:///tmp/lsp_type_hierarchy_test.jet";
     let button_item = format!(r#"{{"name":"Button","kind":23,"uri":"{}"}}"#, uri);
     let trait_item = format!(r#"{{"name":"Renderable","kind":11,"uri":"{}"}}"#, uri);
@@ -3058,7 +3058,7 @@ fn lsp_hover_returns_signature() {
         return;
     }
     let source =
-        "fn add(a: Int, b: Int) Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
+        "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_hover_test.jet";
 
     run_transcript(
@@ -3095,7 +3095,7 @@ fn lsp_hover_returns_signature() {
 
 #[test]
 fn lsp_hover_projects_typestate_graph_facts() {
-    let source = "struct Door {\n    state { Closed, Open, Orphan }\n}\nimpl Door {\n    #Transition(_, Closed) fn close() Door -[]> { return Door{} }\n    #Transition(Closed, Open) fn open(self: ^Door) Door -[]> { return self }\n}\nfn run() {}\n";
+    let source = "struct Door {\n    state { Closed, Open, Orphan }\n}\nimpl Door {\n    #Transition(_, Closed) fn close() -[]> Door { return Door{} }\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }\n}\nfn run() {}\n";
     let uri = "file:///tmp/lsp_typestate_graph_test.jet";
 
     run_transcript(
@@ -3143,7 +3143,7 @@ fn lsp_hover_projects_typestate_graph_facts() {
 
 #[test]
 fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
-    let source = "fn add(a: Int, b: Int) Int { return a + b; }\n";
+    let source = "fn add(a: Int, b: Int) -> Int { return a + b }\n";
     let uri = "file:///tmp/lsp_cancel_test.jet";
     run_transcript(
         source,
@@ -3204,7 +3204,7 @@ fn lsp_overlapping_edits_latest_checked_revision_wins() {
     const COSTLY_CALLERS: usize = 256;
     let source_for = |marker: &str| {
         let mut source = format!(
-            "fn target(value: Int) Int {{ return value }}\nfn {marker}() Int {{ return target(1) }}\n"
+            "fn target(value: Int) -> Int {{ return value }}\nfn {marker}() -> Int {{ return target(1) }}\n"
         );
         for index in 0..COSTLY_CALLERS {
             source.push_str(&format!(
@@ -3330,7 +3330,7 @@ fn lsp_overlapping_edits_latest_checked_revision_wins() {
 
 #[test]
 fn lsp_accepts_hidden_generic_constructor_arguments() {
-    let source = "struct Box<T> {\n    value: T\n}\nimpl Box {\n    fn new(value: ^T) Box<T> { return Box<T>{ value: value } }\n}\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}\n";
+    let source = "struct Box<T> {\n    value: T\n}\nimpl Box {\n    fn new(value: ^T) -> Box<T> { return Box<T>{ value: value } }\n}\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}\n";
     let uri = "file:///tmp/lsp_generic_constructor_infer.jet";
 
     run_transcript(
@@ -3408,7 +3408,7 @@ fn lsp_rename_produces_workspace_edit() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n    greet()\n}\n";
     let uri = "file:///tmp/lsp_rename_test.jet";
 
     run_transcript(
@@ -3454,8 +3454,8 @@ fn lsp_checked_identity_and_versioned_rename() {
     let root = common::Scratch::new("lsp-checked-rename");
     fs::write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn shadow(letter: Int) { print(letter) }\n";
-    let scoring = "pub fn letter(score: Int) String -> \"A\"\n";
-    let util = "pub fn letter(score: Int) String -> \"unrelated\"\n";
+    let scoring = "pub fn letter(score: Int) -> String -> \"A\"\n";
+    let util = "pub fn letter(score: Int) -> String -> \"unrelated\"\n";
     let sources = [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)];
     for (name, source) in sources {
         fs::write(root.join(name), source).unwrap();
@@ -3584,7 +3584,7 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
     let root = common::Scratch::new("lsp-imported-reports");
     fs::write(root.join("package.jet"), "name: \"reports\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use \"scoring\"\nfn run() { print(scoring.letter(91)) }\n";
-    let scoring = "pub fn letter(score: Int, offset: Int) String -> {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
+    let scoring = "pub fn letter(score: Int, offset: Int) -> String {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
     let file_uri = |name: &str| format!("file://{}", root.join(name).display())
         .replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29");
     let main_uri = file_uri("run.jet");
@@ -3688,7 +3688,7 @@ fn lsp_definition_returns_location() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n}\n";
     let uri = "file:///tmp/lsp_def_test.jet";
 
     run_transcript(
@@ -3737,7 +3737,7 @@ impl Pattern.CheckedText {
     fn check(text: String) !PatternError -[]> {
         return
     }
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
@@ -3851,7 +3851,7 @@ fn lsp_definition_foreign_declaration_uses_checked_jet_boundary() {
         return;
     }
     let source = r#"extern rust "std" {
-    fn rust_max(a: Int, b: Int) Int = "std::cmp::max"
+    fn rust_max(a: Int, b: Int) -> Int = "std::cmp::max"
 }
 fn run() {
     rust_max(1, 2)
@@ -4259,12 +4259,12 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
 
     let source = r#"#Test("semantic") {
 }
-#Unsafe("audit") fn archive(name: ^String, slot: &Int) String {
+#Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
     saved :: copy name
     return saved
 }
-fn clean(x: Int) Int -[]> { return x }
-fn retain(window: View<Int>) View<Int> { return window }
+fn clean(x: Int) -[]> Int { return x }
+fn retain(window: View<Int>) -> View<Int> { return window }
 fn run() {
     old :: 1
     while :: 2
@@ -4286,7 +4286,7 @@ fn run() {
     }
     outer :: loop { next(outer) }
 }
-fn next() Int { return 1 }
+fn next() -> Int { return 1 }
 "#;
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
 
@@ -4482,7 +4482,7 @@ fn lsp_inlay_hints_return_call_parameter_names() {
     if !jet.exists() {
         return;
     }
-    let source = "fn clamp(value: Int, low: Int, high: Int) Int { return value }\nfn run() { print(clamp(12, 0, 10)) }\n";
+    let source = "fn clamp(value: Int, low: Int, high: Int) -> Int { return value }\nfn run() { print(clamp(12, 0, 10)) }\n";
     let uri = "file:///tmp/lsp_call_parameter_hints.jet";
 
     run_transcript(
@@ -4527,7 +4527,7 @@ fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
     if !jet.exists() {
         return;
     }
-    let source = "trait DrawThing {\n    fn render(self) String\n}\n\nstruct Widget {\n    title: String\n}\n\nimpl Widget {\n    fn size(self) Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) String {\n        return self.title\n    }\n}\n\nfn run() {\n    w :: Widget{title: \"ok\"}\n    print(w.render())\n}\n";
+    let source = "trait DrawThing {\n    fn render(self) -> String\n}\n\nstruct Widget {\n    title: String\n}\n\nimpl Widget {\n    fn size(self) -> Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) -> String {\n        return self.title\n    }\n}\n\nfn run() {\n    w :: Widget{title: \"ok\"}\n    print(w.render())\n}\n";
     let uri = "file:///tmp/lsp_breadcrumb_hint_test.jet";
 
     run_transcript(
@@ -4553,8 +4553,8 @@ fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "+ fn size() Int -[]>".to_string(),
-                    "+ fn render() String -[]>".to_string(),
+                    "+ fn size() -[]> Int".to_string(),
+                    "+ fn render() -[]> String".to_string(),
                 ]),
             },
             TranscriptStep::Send {
@@ -4571,7 +4571,7 @@ fn lsp_references_finds_all_uses() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n    greet()\n}\n";
     let uri = "file:///tmp/lsp_refs_test.jet";
 
     run_transcript(
@@ -5140,7 +5140,7 @@ fn c40_is_keyword_real_keywords_recognized() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n}\n";
     let uri = "file:///tmp/c40_rename_keyword.jet";
 
     // `if` is a real keyword; rename to it must fail.
@@ -5194,7 +5194,7 @@ fn c40_is_keyword_switch_not_a_keyword() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n}\n";
     let uri = "file:///tmp/c40_rename_switch.jet";
 
     run_transcript(
@@ -5238,7 +5238,7 @@ fn c40_is_keyword_import_not_a_keyword() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet()\n}\n";
     let uri = "file:///tmp/c40_rename_import.jet";
 
     run_transcript(
@@ -5281,7 +5281,7 @@ fn c40_keyword_like_identifier_usable_as_variable() {
     // are regular identifiers. Use current Jet binding syntax (:: sigil).
     let diags = jet::check_document(
         "c40_kw_in_ident.jet",
-        "fn run() {\n    printer :: \"hp\";\n    in_count :: 3;\n    sprint :: 9.8;\n}\n",
+        "fn run() {\n    printer :: \"hp\"\n    in_count :: 3\n    sprint :: 9.8\n}\n",
     );
     // None of the diagnostics should claim these identifiers are keywords.
     for d in &diags {
@@ -5313,7 +5313,7 @@ fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
 
     // `switch` — paused retired syntax, not a keyword; was wrongly in JET_KEYWORDS
     {
-        let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
+        let source = "fn greet() {}\nfn run() {\n    greet()\n}\n";
         let uri = "file:///tmp/c40_drift_switch.jet";
         run_transcript(
             source,

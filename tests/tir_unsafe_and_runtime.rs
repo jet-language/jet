@@ -39,7 +39,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) Int -> {
+fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -86,7 +86,7 @@ fn mem_address_of_never_folds_plain_or_parenthesized() {
             "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) Int -> {{
+fn read_reg(addr: Int) -> Int {{
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }}
@@ -136,7 +136,7 @@ fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be valid\")
-fn read_reg(addr: Int) Int -> {
+fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -236,7 +236,7 @@ cell :: 1337
 fn ffi_capability_edge_uses_shared_sentry_prelude() {
     let src = r#"
 extern rust "std" {
-    fn borrow(s: &String) String = "std::mem::take"
+    fn borrow(s: &String) -> String = "std::mem::take"
 }
 fn run() {
     value := "hi"
@@ -449,7 +449,7 @@ fn run() {
 ";
     let expired_stack_source = "\
 use core.mem
-fn leak() Int -> {
+fn leak() -> Int {
     cell :: 1337
     return mem.address_of(cell)
 }
@@ -463,7 +463,7 @@ fn run() {
 ";
     let expired_recursive_source = "\
 use core.mem
-fn leak(depth: Int) Int -> {
+fn leak(depth: Int) -> Int {
     cell :: depth
     if depth == 0 {
         return mem.address_of(cell)
@@ -561,16 +561,16 @@ struct Pair<T> {
     first: T
     second: T
 }
-fn make_pair<T>(a: T, b: T) Pair<T> -> {
+fn make_pair<T>(a: T, b: T) -> Pair<T> {
     return Pair<T>{first: ~a, second: ~b}
 }
 struct Stack<T> {
     items: [T]
 }
-fn empty_stack<T>() Stack<T> -> {
+fn empty_stack<T>() -> Stack<T> {
     return Stack<T>{items: []}
 }
-fn push<T>(s: Stack<T>, item: T) Stack<T> -> {
+fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
     dup := ~s
     dup.items.push(item)
     return dup
@@ -605,7 +605,7 @@ fn foreign_struct_construction() {
     .unwrap();
     let main_src = "\
 use \"note\"
-fn make() Note -> {
+fn make() -> Note {
     return note.Note{ title: \"hello\", pages: 3 }
 }
 fn run() {
@@ -757,7 +757,7 @@ fn polymorphic_core_specials() {
 use core.math as math
 use core.math.random as random
 use core.term as io
-fn calc() Int -> {
+fn calc() -> Int {
     a :: math.abs((-5))
     b :: math.min(3, 7)
     c :: math.max(3, 7)
@@ -796,7 +796,7 @@ fn http_request_response_accessors() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) HTTPResponse -> {
+fn handle(req: HTTPRequest) -> HTTPResponse {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
@@ -804,7 +804,7 @@ fn handle(req: HTTPRequest) HTTPResponse -> {
     body :: \"m={m} p={p}\"
     return server.response(200, body)
 }
-fn describe(resp: HTTPResponse) String -> {
+fn describe(resp: HTTPResponse) -> String {
     s :: resp.status()
     b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"
@@ -829,7 +829,7 @@ fn task_spawn_join() {
         return;
     }
     let src = "\
-fn sum_range(first: Int, last: Int) Int -> {
+fn sum_range(first: Int, last: Int) -> Int {
     total := 0
     loop n in first..last {
         total = (total + n)
@@ -1005,7 +1005,7 @@ fn task_all() {
         return;
     }
     let src = r#"
-fn work(value: Int, turns: Int) Int -> {
+fn work(value: Int, turns: Int) -> Int {
     total := value
     loop _ in 1..turns {
         total += 1
@@ -1034,14 +1034,14 @@ fn named_task_all_maps_reverse_completion_by_field_name() {
     }
     let src = r#"
 
-fn slow() String -> {
+fn slow() -> String {
     turns := 0
     loop _ in 0..<50000 {
         turns += 1
     }
     return "slow"
 }
-fn fast() Int -> {
+fn fast() -> Int {
     return 7
 }
 fn run() {
@@ -1064,11 +1064,11 @@ fn task_failure_rail() {
     let src = r#"
 use core.time as time
 
-fn boom() Int -> {
+fn boom() -> Int {
     panic("boom")
     return 0
 }
-fn deadline() Int -> {
+fn deadline() -> Int {
     #Context(deadline: 0) {
         time.sleep(1ms)
     }
@@ -1157,7 +1157,7 @@ fn task_all_allows_nested_task_in_every_tier() {
         return;
     }
     let src = "\
-fn nested(value: Int) Int -> {
+fn nested(value: Int) -> Int {
     inner :: task value + 1
     return inner.join() ?? 0
 }
@@ -1259,10 +1259,10 @@ fn run() {
 #[test]
 fn task_all_consumes_branches_once() {
     let valid = r#"
-fn first() Int -> {
+fn first() -> Int {
     return 10
 }
-fn second() Int -> {
+fn second() -> Int {
     return 20
 }
 fn run() {
@@ -1286,7 +1286,7 @@ fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
     let src = "\
 use core.time as time
 
-fn slow(value: Int) Int -> {
+fn slow(value: Int) -> Int {
     time.sleep(1ms)
     return value
 }
@@ -1465,14 +1465,14 @@ fn method_call_collection_iteration() {
         return;
     }
     let src = "\
-fn count_chars(s: String) Int -> {
+fn count_chars(s: String) -> Int {
     n := 0
     loop c in s.chars() {
         n+= 1
     }
     return n
 }
-fn join_words(s: String) String -> {
+fn join_words(s: String) -> String {
     out := \"\"
     loop w in s.split(\",\") {
         out = \"{out}[{w}]\"
@@ -1498,7 +1498,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: ?Int) String -> {
+fn describe(x: ?Int) -> String {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -1507,7 +1507,7 @@ fn describe(x: ?Int) String -> {
     }
     return \"?\"
 }
-fn first_even(xs: [Int]) Int -> {
+fn first_even(xs: [Int]) -> Int {
     out := [Int]{}
     i := 0
     loop i < xs.len() {
@@ -1536,32 +1536,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: ?Int) Int -> {
+fn from_ne(x: ?Int) -> Int {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: ?Int) Int -> {
+fn from_else(x: ?Int) -> Int {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: ?Int) Int -> {
+fn and_tail(x: ?Int) -> Int {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: ?Int) Int -> {
+fn still_binds(x: ?Int) -> Int {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: ?String) String -> {
+fn text_ne(x: ?String) -> String {
     if x != None {
         return x
     }
@@ -1624,7 +1624,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() ?Int -> { return Val(1) }
+fn get() -> ?Int { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)
@@ -1670,12 +1670,12 @@ fn run() {
 #[test]
 fn card_2840_owned_task_join_helper_tier_parity() {
     let src = r#"
-fn boom() Int -> {
+fn boom() -> Int {
     panic("x")
     return 0
 }
 
-fn joined(handle: ^Task<Int>) Int -> handle.join() ?? 91
+fn joined(handle: ^Task<Int>) -> Int -> handle.join() ?? 91
 
 fn run() {
     task.group g {
@@ -1714,8 +1714,8 @@ fn spawned_diverging_callee_keeps_later_bindings_in_scope() {
         return;
     }
     let src = r#"
-fn value(n: Int) Int -> n
-fn boom() Int -> {
+fn value(n: Int) -> Int -> n
+fn boom() -> Int {
     panic("boom")
     return 0
 }

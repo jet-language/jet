@@ -2602,7 +2602,7 @@ fn mir_digest_db_metadata_debug(value: ?MirDbQueryMetadata) -> String {
         None -> "None"
         Val(row) -> {
             tables := [String]{}
-            for fact in row.table_facts -> tables.push("MirDbTableFact {{ table_id: {mir_digest_debug_quote(fact.table_id)}, read: {mir_digest_debug_bool(fact.read)}, write: {mir_digest_debug_bool(fact.write)} }}")
+            loop fact in row.table_facts -> tables.push("MirDbTableFact {{ table_id: {mir_digest_debug_quote(fact.table_id)}, read: {mir_digest_debug_bool(fact.read)}, write: {mir_digest_debug_bool(fact.write)} }}")
             "Some(MirDbQueryMetadata {{ source_file: {row.source_file.value}, source_path: {mir_digest_debug_quote(row.source_path)}, source_span: {row.source_span.start}..{row.source_span.end}, statement_identity: {mir_digest_debug_quote(row.statement_identity)}, table_facts: [{tables.join(", ")}] }})"
         }
     }

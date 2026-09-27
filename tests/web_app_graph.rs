@@ -32,7 +32,7 @@ fn example_app_hello_graph_records_policy_and_modes() {
         env!("CARGO_MANIFEST_DIR")
     );
     let facts = check_facts(&path);
-    let graph = facts.web_app.expect("fn run() App graph");
+    let graph = facts.web_app.expect("fn run() -> App graph");
     assert!(graph.shared_tir);
     assert_eq!(graph.hydration, "dev-overlay");
     assert_eq!(graph.routes.len(), 1);
@@ -53,7 +53,7 @@ fn server_function_action_exposes_checked_wire_contract() {
         "{}/examples/features/web/web_app.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    let graph = check_facts(&path).web_app.expect("fn run() App graph");
+    let graph = check_facts(&path).web_app.expect("fn run() -> App graph");
     let action = graph.actions.iter().find(|action| action.name == "save").unwrap();
     assert!(!action.input_type.is_empty());
     assert!(!action.output_type.is_empty());
@@ -132,18 +132,18 @@ fn query_graph_facts_keep_explicit_key_and_dependency_identity() {
         r#"use core.web as web
 #Target(Web)
 use core.web.query as query
-fn home() WebPage -> {
+fn home() -> WebPage {
     first :: query.subscribe("orders")
     second :: query.subscribe("orders")
     return web.page("Orders", first.get())
 }
-fn run() App -> { return web.app().route("/", home).csr() }
+fn run() -> App { return web.app().route("/", home).csr() }
 "#,
     )
     .unwrap();
     let graph = check_facts(root.join("app.jet").to_str().unwrap())
         .web_app
-        .expect("fn run() App graph");
+        .expect("fn run() -> App graph");
     assert_eq!(graph.queries.len(), 1);
     assert_eq!(graph.queries[0].key, "orders");
     assert_eq!(graph.queries[0].footprint, "ext:orders");
@@ -159,8 +159,8 @@ fn routes_from_expands_convention_files() {
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
-fn about_page() WebPage -> { return web.page("About", "us") }
-fn run() App -> { return web.app().routes(from: "routes").ssr() }
+fn about_page() -> WebPage { return web.page("About", "us") }
+fn run() -> App { return web.app().routes(from: "routes").ssr() }
 "#,
     )
     .unwrap();
@@ -226,8 +226,8 @@ fn collision_and_stray_and_dynamic_diagnose() {
         root.join("collision.jet"),
         r#"use core.web as web
 #Target(Web)
-fn home() WebPage { return web.page("h", "b") }
-fn run() App { return web.app().route("/", home).routes(from: "routes").csr() }
+fn home() -> WebPage { return web.page("h", "b") }
+fn run() -> App { return web.app().route("/", home).routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -238,7 +238,7 @@ fn run() App { return web.app().route("/", home).routes(from: "routes").csr() }
         root.join("stray.jet"),
         r#"use core.web as web
 #Target(Web)
-fn run() App { return web.app().routes(from: "routes").csr() }
+fn run() -> App { return web.app().routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -249,8 +249,8 @@ fn run() App { return web.app().routes(from: "routes").csr() }
         root.join("dynamic.jet"),
         r#"use core.web as web
 #Target(Web)
-fn pick() Int { return 1 }
-fn run() App {
+fn pick() -> Int { return 1 }
+fn run() -> App {
     return web.app().route("/", pick()).csr()
 }
 "#,
@@ -268,10 +268,10 @@ fn render_modes_mount_island_and_shared_tir() {
         root.join("app.jet"),
         r#"use core.web as web
 #Target(Web)
-fn home() WebPage -> { return web.page("H", "b") }
-fn dash() WebPage -> { return web.page("D", "b") }
+fn home() -> WebPage { return web.page("H", "b") }
+fn dash() -> WebPage { return web.page("D", "b") }
 fn plugins(prefix: String) {}
-fn run() App -> {
+fn run() -> App {
     return web.app()
         .route("/", home)
         .ssg()

@@ -175,7 +175,7 @@ mod tests {
     name: "lsp-inline"
 }
 
-pub(package) fn secret() => String {
+pub(package) fn secret() -> String {
     return "ok"
 }
 
@@ -205,7 +205,7 @@ fn run() {
     #[test]
     fn symbol_db_finds_function() {
         let src =
-            "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
+            "fn greet(name: String) {\n    print(name)\n}\nfn run() {\n    greet(\"world\")\n}\n";
         let (_project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -216,7 +216,7 @@ fn run() {
 
     #[test]
     fn hover_returns_function_signature() {
-        let src = "fn add(a: Int, b: Int) Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
+        let src = "fn add(a: Int, b: Int) -> Int { return a + b }\nfn run() { r :: add(1, 2) }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -258,7 +258,7 @@ fn run() {
 
     #[test]
     fn hover_shows_callable_access_defaults_and_policies() {
-        let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String{\"user\"}) Int { return 1 }\nfn run() {}\n";
+        let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String{\"user\"}) -> Int { return 1 }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(diagnostics
             .iter()
@@ -322,7 +322,7 @@ fn run() {
         let project = TestProject::new();
         std::fs::write(
             project.root.join("library.jet"),
-            "pub fn render(#Root value: Int) Int { return value }\n",
+            "pub fn render(#Root value: Int) -> Int { return value }\n",
         )
         .expect("write imported root-call library");
         let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
@@ -473,7 +473,7 @@ fn run() {
 
     #[test]
     fn rename_basic_function() {
-        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet() }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -485,7 +485,7 @@ fn run() {
 
     #[test]
     fn rename_rejects_keyword() {
-        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet() }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -495,7 +495,7 @@ fn run() {
 
     #[test]
     fn rename_rejects_reserved_double_underscore_name() {
-        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet() }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let (tokens, _) = crate::Lexer::lex(src);
@@ -504,7 +504,7 @@ fn run() {
 
     #[test]
     fn rename_preserves_identifier_case_category() {
-        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet() }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -515,7 +515,7 @@ fn run() {
 
     #[test]
     fn rename_uses_semantic_category_for_uncased_unicode_names() {
-        let src = "fn 日本語() {}\nfn run() { 日本語(); }\n";
+        let src = "fn 日本語() {}\nfn run() { 日本語() }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -676,7 +676,7 @@ fn run() {}
 
     #[test]
     fn inlay_hints_for_bare_call_parameter_names() {
-        let src = "fn clamp(value: Int, low: Int, high: Int) Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
+        let src = "fn clamp(value: Int, low: Int, high: Int) -> Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(
             diagnostics.is_empty(),
@@ -763,7 +763,7 @@ fn run() {
 
     #[test]
     fn hover_and_completion_use_same_semantic_fact() {
-        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) Int { return a + b }\nfn run() {\n    \n}\n";
+        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -799,7 +799,7 @@ fn run() {
 
     #[test]
     fn failure_contract_hover_teaches_default_and_explicit_routes() {
-        let src = "#Error\nenum Problem { Bad }\nfn default_helper() Int { return 1 }\nfn explicit_helper() Int !Problem -> { return Ok(1) }\nfn run() {}\n";
+        let src = "#Error\nenum Problem { Bad }\nfn default_helper() -> Int { return 1 }\nfn explicit_helper() -> Int !Problem { return Ok(1) }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(diagnostics.is_empty(), "contract fixture should check: {diagnostics:#?}");
         let bundle = bundle.expect("bundle");
@@ -843,10 +843,10 @@ enum PatternError { Bad }
 Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
-    fn check(text: String) () !PatternError -[]> {
+    fn check(text: String) !PatternError -[]> {
         return
     }
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
@@ -895,7 +895,7 @@ fn run() {
     #[test]
     fn completion_exposes_public_labels_and_parameter_zones() {
         let src =
-            "fn connect(host: String, /, *, timeout seconds: Int{30}) String {\n    return host\n}\nfn run() {\n    \n}\n";
+            "fn connect(host: String, /, *, timeout seconds: Int{30}) -> String {\n    return host\n}\nfn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
@@ -905,7 +905,7 @@ fn run() {
             .expect("connect completion");
         assert_eq!(
             item.detail.as_deref(),
-            Some("fn connect(host: String, /, *, timeout seconds: Int) String")
+            Some("fn connect(host: String, /, *, timeout seconds: Int) -> String")
         );
     }
 
@@ -925,7 +925,7 @@ fn run() {
 
     #[test]
     fn completion_exposes_call_for_function_value_param() {
-        let src = "fn run(callback: fn(Int) Int) {\n    callback.call(1)\n}\n";
+        let src = "fn run(callback: fn(Int) -> Int) {\n    callback.call(1)\n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.find("callback.call").unwrap() + "callback.ca".len();

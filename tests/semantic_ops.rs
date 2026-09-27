@@ -15,8 +15,8 @@ fn fixture(name: &str) -> (PathBuf, PathBuf) {
 #[test]
 fn tool_fix_pairing_records_rename_and_blame_reads_the_receipt() {
     let (root, path) = fixture("rename");
-    let before = "fn report() Int -[]> { return 1 }\nfn run() { print(report()) }\n";
-    let after = "fn summarize() Int -[]> { return 1 }\nfn run() { print(summarize()) }\n";
+    let before = "fn report() -[]> Int { return 1 }\nfn run() { print(report()) }\n";
+    let after = "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n";
     fs::write(&path, before).unwrap();
     let before_index = open(&path).expect("before index");
     fs::write(&path, after).unwrap();
@@ -47,7 +47,7 @@ fn tool_fix_pairing_records_rename_and_blame_reads_the_receipt() {
 #[test]
 fn blame_matches_recorded_targets_without_text_inference() {
     let (root, path) = fixture("receipt");
-    let source = "fn summarize() Int -[]> { return 1 }\nfn run() { print(summarize()) }\n";
+    let source = "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n";
     fs::write(&path, source).unwrap();
     let index = open(&path).expect("index");
     let op = SemanticOp {

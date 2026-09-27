@@ -90,7 +90,7 @@ pub const BUILTIN_TAGS: &[&str] = &["Input", "PII", "Secret", "Credential"];
 pub const KW_STATE: &str = "State";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) Reservation -> …`.
+/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) -> Reservation`.
 /// Declares a function that consumes a value in state `Pending` and yields one in
 /// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
 /// returns the next"). The from-state may be `_` for an **entry** transition (a

@@ -469,7 +469,7 @@ fn every_response_binding_renderer_uses_the_shared_decoder_policy() {
         .collect::<Vec<_>>();
     assert_eq!(response_producers.len(), 7);
 
-    let source = "fn decode_response(raw: String, code: Int) DataTree !Err -> { return Ok(DataTree.Null) }";
+    let source = "fn decode_response(raw: String, code: Int) -> DataTree !Err { return Ok(DataTree.Null) }";
     for producer in response_producers {
         let violations = policy
             .evaluate_generated(&producer.selector, source)
@@ -569,7 +569,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     let converted_unit = policy
         .evaluate_source(
             "examples/features/types/unit_family.jet",
-            "fn subtotal(price: Usd, qty: Int) Usd -> { Usd.from_float(price.raw() * Float.from_int(qty)) }",
+            "fn subtotal(price: Usd, qty: Int) -> Usd { Usd.from_float(price.raw() * Float.from_int(qty)) }",
         )
         .unwrap();
     assert!(converted_unit
@@ -626,7 +626,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     let generic_policy = policy
         .evaluate_source(
             "dogfood/tower/run.jet",
-            "fn duplicate_equal(left: DataTree, right: DataTree) Bool -> { return true }",
+            "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }",
         )
         .unwrap();
     assert!(generic_policy
@@ -635,7 +635,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     let named_policy = policy
         .evaluate_source(
             "dogfood/tower/run.jet",
-            "fn javascript_truthy(value: DataTree) Bool -> { return true }",
+            "fn javascript_truthy(value: DataTree) -> Bool { return true }",
         )
         .unwrap();
     assert!(!named_policy
@@ -795,7 +795,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
     let unused_request = policy
         .evaluate_source(
             "tests/agent_workloads/adapters/http_api.jet",
-            "fn handle(req: HTTPRequest) HTTPResponse -> { return response }",
+            "fn handle(req: HTTPRequest) -> HTTPResponse { return response }",
         )
         .unwrap();
     assert!(unused_request
@@ -804,7 +804,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
     let used_request = policy
         .evaluate_source(
             "tests/agent_workloads/adapters/http_api.jet",
-            "fn handle(req: HTTPRequest) HTTPResponse -> { return req.response() }",
+            "fn handle(req: HTTPRequest) -> HTTPResponse { return req.response() }",
         )
         .unwrap();
     assert!(!used_request
@@ -894,7 +894,7 @@ fn generated_decoder_policy_requires_the_canonical_decoder_symbol() {
     let violations = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_other(raw: String, code: Int) DataTree !Err -> { return Ok(DataTree.Null) }",
+            "fn decode_other(raw: String, code: Int) -> DataTree !Err { return Ok(DataTree.Null) }",
         )
         .unwrap();
     assert_eq!(violations.len(), 1);
@@ -907,7 +907,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let raw_json = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) DataTree !Err -> { return Ok(json.parse(raw)) }",
+            "fn decode_response(raw: String, code: Int) -> DataTree !Err { return Ok(json.parse(raw)) }",
         )
         .unwrap();
     assert!(raw_json.is_empty(), "raw JSON override is distinct: {raw_json:?}");
@@ -915,7 +915,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let ordinary = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) DataTree !Err -> {
+            "fn decode_response(raw: String, code: Int) -> DataTree !Err {
     response :: json.parse(raw)
     ok :: response.field(\"ok\")
     return Ok(response)

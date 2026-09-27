@@ -53,11 +53,9 @@ fn sema_core_string_contains(values: [String], value: String) -> Bool {
 
 fn sema_core_string_add(values: &[String], value: String) {
     if value == "" || sema_core_string_contains(values, value) -> return
-    index := 0
-    loop index < values.len() {
-        if value < values[index] -> break
-        index += 1
-    }
+    index :: loop (index, existing) in values {
+        if value < existing -> break index
+    } ?? values.len()
     values.push(value)
     cursor := values.len() - 1
     loop cursor > index {
@@ -68,49 +66,31 @@ fn sema_core_string_add(values: &[String], value: String) {
 }
 pub fn sema_core_type_uses_default_int(ty: Type) -> Bool {
     if ty == {
-        .Int -> return true
+        .Int -> true
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) |
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return sema_core_type_uses_default_int(inner)
-        .Map(key, _, value) -> {
-            if sema_core_type_uses_default_int(key) -> return true
-            return sema_core_type_uses_default_int(value)
-        }
-        .Result(ok, err) -> {
-            if sema_core_type_uses_default_int(ok) -> return true
-            return sema_core_type_uses_default_int(err)
-        }
-        .Tuple(fields) -> {
-            loop field in fields {
-                if sema_core_type_uses_default_int(field.ty) -> return true
-            }
-            return false
-        }
-        .Union(members) -> {
-            loop member in members {
-                if sema_core_type_uses_default_int(member) -> return true
-            }
-            return false
-        }
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_core_type_uses_default_int(inner)
+        .Map(key, _, value) -> sema_core_type_uses_default_int(key) || sema_core_type_uses_default_int(value)
+        .Result(ok, err) -> sema_core_type_uses_default_int(ok) || sema_core_type_uses_default_int(err)
+        .Tuple(fields) -> loop field in fields {
+            if sema_core_type_uses_default_int(field.ty) -> break true
+        } ?? false
+        .Union(members) -> loop member in members {
+            if sema_core_type_uses_default_int(member) -> break true
+        } ?? false
         .Fn(params, ret, _, _, _, _) -> {
-            loop parameter in params {
-                if sema_core_type_uses_default_int(parameter) -> return true
-            }
-            if ret != None {
-                value :: ret ?? return false
-                if sema_core_type_uses_default_int(value) -> return true
-            }
-            return false
+            params_have_default_int :: loop parameter in params {
+                if sema_core_type_uses_default_int(parameter) -> break true
+            } ?? false
+            if params_have_default_int -> return true
+            return_type :: ret ?? return false
+            sema_core_type_uses_default_int(return_type)
         }
-        .Apply(_, args) -> {
-            loop argument in args {
-                if sema_core_type_uses_default_int(argument) -> return true
-            }
-            return false
-        }
-        else -> return false
+        .Apply(_, args) -> loop argument in args {
+            if sema_core_type_uses_default_int(argument) -> break true
+        } ?? false
+        else -> false
     }
 }
-
 
 fn sema_core_generated_root_add(roots: &[String], root: String) {
     sema_core_string_add(&roots, root)
@@ -119,13 +99,12 @@ fn sema_core_generated_root_add(roots: &[String], root: String) {
 
 fn sema_core_generated_receiver_key(receiver: Expr) -> String {
     if receiver == {
-        .Ident(name, _) -> return name
+        .Ident(name, _) -> name
         .Field(base, member, _) -> {
-            prefix := sema_core_generated_receiver_key(base)
-            if prefix == "" -> return member
-            return "{prefix}.{member}"
+            prefix :: sema_core_generated_receiver_key(base)
+            if prefix == "" -> member else -> "{prefix}.{member}"
         }
-        else -> return ""
+        else -> ""
     }
 }
 
@@ -176,14 +155,18 @@ fn sema_core_generated_shadowed(markers: [String], name: String) -> Bool {
 
 
 fn sema_core_generated_core_module(module_name: String) -> Bool {
-    module_name == "core.mem" || module_name == "core.compute"
+    if module_name == {
+        "core.mem" | "core.compute" -> true
+        else -> false
+    }
 }
 
-
 fn sema_core_generated_core_type(module_name: String, type_name: String) -> Bool {
-    if module_name == "core.mem" -> return type_name == "Pool" || type_name == "Cell" || type_name == "Id"
-    if module_name == "core.compute" -> return type_name == "Vec" || type_name == "Matrix"
-    false
+    if module_name == {
+        "core.mem" -> type_name == "Pool" || type_name == "Cell" || type_name == "Id"
+        "core.compute" -> type_name == "Vec" || type_name == "Matrix"
+        else -> false
+    }
 }
 
 
@@ -358,9 +341,10 @@ fn sema_core_generated_direct_item_roots(items: [Item], used: &[String], spans: 
 fn sema_core_generated_roots_from_used(used: [String]) -> [String] {
     roots := [String]{}
     loop usage in used {
-        if usage == "core.args::spec" || usage == "core.mem::pool_shared" ||
-            usage == "core.compute::shape_alias" || usage == "core.validate::field_error" {
-            sema_core_generated_root_add(&roots, usage)
+        if usage == {
+            "core.args::spec" | "core.mem::pool_shared" |
+            "core.compute::shape_alias" | "core.validate::field_error" -> sema_core_generated_root_add(&roots, usage)
+            else -> {}
         }
     }
     roots
@@ -387,14 +371,12 @@ pub fn sema_core_generated_roots(graph: SemaRegistrationGraph, registration_modu
 
 
 fn sema_core_import_add(imports: &[SemaCoreImport], row: SemaCoreImport) {
-    index := 0
-    loop index < imports.len() {
-        if imports[index].alias == row.alias {
+    loop existing in imports {
+        if existing.alias == row.alias {
             // Registration is authoritative. Keep the first resolved binding
             // when an inline source repeats an alias.
             return
         }
-        index += 1
     }
     imports.push(row)
 }
@@ -446,10 +428,8 @@ fn sema_core_module_and_helper(usage: String) -> [String] {
     parts := usage.split("::")
     if parts.len() <= 1 -> return [String]{parts[0]}
     helper_parts := [String]{}
-    index := 1
-    loop index < parts.len() {
+    loop index in 1..<parts.len() {
         helper_parts.push(parts[index])
-        index += 1
     }
     [String]{parts[0], helper_parts.join("::")}
 }
@@ -494,39 +474,54 @@ fn sema_core_note_builtin_math_type(name: String, registered: [String], used: &[
 }
 
 fn sema_core_is_math_type(name: String) -> Bool {
-    name == "F32x4" || name == "F64x2" || name == "F32x8" || name == "F64x4" ||
-    name == "I8x16" || name == "I16x8" || name == "I32x4" || name == "I64x2" ||
-    name == "U8x16" || name == "U16x8" || name == "U32x4" || name == "U64x2" ||
-    name == "I8x32" || name == "I16x16" || name == "I32x8" || name == "I64x4" ||
-    name == "U8x32" || name == "U16x16" || name == "U32x8" || name == "U64x4" ||
-    name == "Vec2" || name == "Vec3" || name == "Vec4" || name == "Mat3" || name == "Mat4"
+    if name == {
+        "F32x4" | "F64x2" | "F32x8" | "F64x4" |
+        "I8x16" | "I16x8" | "I32x4" | "I64x2" |
+        "U8x16" | "U16x8" | "U32x4" | "U64x2" |
+        "I8x32" | "I16x16" | "I32x8" | "I64x4" |
+        "U8x32" | "U16x16" | "U32x8" | "U64x4" |
+        "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4" -> true
+        else -> false
+    }
 }
 
 fn sema_core_is_geometry_type(name: String) -> Bool {
-    name == "Point2" || name == "Delta2" || name == "Transform" || name == "Transform2" ||
-    name == "Ray2" || name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" ||
-    name == "CameraPoint" || name == "DevicePoint" || name == "ScreenDelta" || name == "WorldDelta" ||
-    name == "ViewDelta" || name == "CameraDelta" || name == "DeviceDelta"
+    if name == {
+        "Point2" | "Delta2" | "Transform" | "Transform2" |
+        "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
+        "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" |
+        "ViewDelta" | "CameraDelta" | "DeviceDelta" -> true
+        else -> false
+    }
 }
 
 fn sema_core_is_http_nominal(name: String) -> Bool {
-    name == "HTTPMethod" || name == "HTTPStatus" || name == "HTTPVersion" ||
-    name == "HTTPHeaderName" || name == "HTTPHeaderValue" || name == "HTTPHeaders" || name == "HTTPBody"
+    if name == {
+        "HTTPMethod" | "HTTPStatus" | "HTTPVersion" |
+        "HTTPHeaderName" | "HTTPHeaderValue" | "HTTPHeaders" | "HTTPBody" -> true
+        else -> false
+    }
 }
 
 fn sema_core_is_crypto_nominal(name: String) -> Bool {
-    leaf_parts := name.split(".")
-    leaf := if leaf_parts.len() > 0 -> leaf_parts[leaf_parts.len() - 1] else -> name
-    leaf == "Secret" || leaf == "SigningKey" || leaf == "VerifyKey" ||
-    leaf == "X25519SecretKey" || leaf == "X25519PublicKey" || leaf == "SharedSecret" ||
-    leaf == "Signature" || leaf == "Sealed" || leaf == "WrappedKey" ||
-    leaf == "Digest256" || leaf == "Digest512" || leaf == "PasswordHash"
+    leaf_parts :: name.split(".")
+    leaf :: if leaf_parts.len() > 0 -> leaf_parts[leaf_parts.len() - 1] else -> name
+    if leaf == {
+        "Secret" | "SigningKey" | "VerifyKey" |
+        "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" |
+        "Signature" | "Sealed" | "WrappedKey" |
+        "Digest256" | "Digest512" | "PasswordHash" -> true
+        else -> false
+    }
 }
 
 fn sema_core_is_data_type(name: String) -> Bool {
-    name == "JSON" || name == "Json" || name == "YAML" || name == "Yaml" ||
-    name == "CSV" || name == "Csv" || name == "TOML" || name == "Toml" ||
-    name == "XML" || name == "Xml" || name == "DataTree"
+    if name == {
+        "JSON" | "Json" | "YAML" | "Yaml" |
+        "CSV" | "Csv" | "TOML" | "Toml" |
+        "XML" | "Xml" | "DataTree" -> true
+        else -> false
+    }
 }
 
 
@@ -597,23 +592,21 @@ fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans
 }
 
 fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name: String, span: ?Span) {
-    if name == "Regex" {
-        sema_core_note_usage(&used, &spans, "core.regex::literal", span)
-        return
+    if name == {
+        "Regex" -> sema_core_note_usage(&used, &spans, "core.regex::literal", span)
+        "URL" | "Url" -> sema_core_note_usage(&used, &spans, "core.net.url::typed_head", span)
+        "Path" -> sema_core_note_usage(&used, &spans, "core.files::typed_head", span)
+        "DateTime" -> sema_core_note_usage(&used, &spans, "core.time::typed_head", span)
+        else -> {}
     }
-    if name == "URL" || name == "Url" -> sema_core_note_usage(&used, &spans, "core.net.url::typed_head", span)
-    if name == "Path" -> sema_core_note_usage(&used, &spans, "core.files::typed_head", span)
-    if name == "DateTime" -> sema_core_note_usage(&used, &spans, "core.time::typed_head", span)
 }
 fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool {
-    bytes := name.bytes()
-    suffix_bytes := suffix.bytes()
+    bytes :: name.bytes()
+    suffix_bytes :: suffix.bytes()
     if bytes.len() != 9 + suffix_bytes.len() -> return false
     if bytes[0] != (U8{0}) || bytes[1] != (U8{106}) || bytes[2] != (U8{101}) || bytes[3] != (U8{116}) || bytes[4] != (U8{46}) || bytes[5] != (U8{116}) || bytes[6] != (U8{97}) || bytes[7] != (U8{115}) || bytes[8] != (U8{107}) -> return false
-    index := 0
-    loop index < suffix_bytes.len() {
+    loop index in 0..<suffix_bytes.len() {
         if bytes[index + 9] != suffix_bytes[index] -> return false
-        index += 1
     }
     true
 }
@@ -758,13 +751,17 @@ fn sema_core_generated_type(module_name: String, type_name: String) -> Bool {
 }
 
 fn sema_core_import_usage_is_known(row: SemaCoreImport, fallback: String) -> Bool {
-    if row.item != None -> return true
-    core_module_has_member(row.module_name, fallback)
+    if row.item == {
+        .Val(_) -> true
+        .None -> core_module_has_member(row.module_name, fallback)
+    }
 }
 
 fn sema_core_import_usage(row: SemaCoreImport, fallback: String) -> String {
-    if row.item != None -> return "{row.module_name}::{row.item ?? fallback}"
-    "{row.module_name}::{fallback}"
+    if row.item == {
+        .Val(item) -> "{row.module_name}::{item}"
+        .None -> "{row.module_name}::{fallback}"
+    }
 }
 
 pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String {
@@ -789,7 +786,7 @@ fn sema_core_collect_typed_literal_body(body: TypedLitBody, imports: [SemaCoreIm
 
 fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if expr == {
-.Call(call) -> {
+        .Call(call) -> {
             if call.name == "input" -> sema_core_note_usage(&used, &spans, "core.term::input", Val(call.name_span))
             if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(&used, &spans, "core.math::__precise__", Val(call.name_span))
             sema_core_note_builtin_math_type(call.name, registered, &used, &spans, Val(call.name_span))
@@ -845,7 +842,14 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             if sema_core_is_internal_task_key(recv_name, "") || sema_core_is_internal_task_key(recv_type_name, ".surface") || sema_core_is_internal_task_key(recv_type_name, ".group.surface") -> sema_core_note_usage(&used, &spans, "core.concurrency::task", Val(method_span))
             if recv_type != None -> sema_core_note_builtin_math_type(recv_type_name, registered, &used, &spans, Val(method_span))
             if (recv_type_name == "Float" || recv_type_name == "F32") && (method == "is_nan" || method == "is_infinite" || method == "is_finite") -> sema_core_note_usage(&used, &spans, "core.math::__scalar_predicates__", Val(method_span))
-            if method == "trim_start" || method == "trim_end" || method == "pad_start" || method == "pad_end" || method == "is_alphabetic" || method == "is_numeric" || method == "is_whitespace" || method == "is_ascii" || method == "to_title" || method == "is_lower" || method == "is_upper" || method == "capitalize" || method == "swapcase" || method == "normalize" || method == "last_index_of" || method == "remove_prefix" || method == "remove_suffix" -> sema_core_note_usage(&used, &spans, "core.text::__string_surface__", Val(method_span))
+            if method == {
+                "trim_start" | "trim_end" | "pad_start" | "pad_end" |
+                "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" |
+                "to_title" | "is_lower" | "is_upper" | "capitalize" |
+                "swapcase" | "normalize" | "last_index_of" |
+                "remove_prefix" | "remove_suffix" -> sema_core_note_usage(&used, &spans, "core.text::__string_surface__", Val(method_span))
+                else -> {}
+            }
             if recv_type_name == "Decimal" || recv_type_name == "Fraction" || recv_type_name == "Complex" -> sema_core_note_usage(&used, &spans, "core.math::__precise__", Val(method_span))
             if sema_core_is_crypto_nominal(recv_type_name) -> sema_core_note_usage(&used, &spans, "core.crypto::__nominal__.{method}", Val(method_span))
             if sema_core_is_http_nominal(recv_type_name) || sema_core_is_http_nominal(recv_name) -> sema_core_note_usage(&used, &spans, "core.http::__nominal__", Val(method_span))

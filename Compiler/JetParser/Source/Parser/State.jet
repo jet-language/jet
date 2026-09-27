@@ -54,15 +54,13 @@ fn parser_current(state: &JetParserState) -> Token {
 }
 
 fn parser_lookahead_forward(state: JetParserState, start: Int, skip: Int) -> Token {
-    index := start
     remaining := skip
-    loop index < state.tokens.len() {
+    loop index in start..<state.tokens.len() {
         kind :: state.tokens[index].kind
         if !parser_is_trivia(kind) {
             if remaining == 0 -> return state.tokens[index]
             remaining -= 1
         }
-        index += 1
     }
     parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
 }
@@ -112,7 +110,7 @@ fn parser_bump(state: &JetParserState) -> Token {
 
 fn parser_type_close_here(state: &JetParserState) -> Bool {
     if state.pending_type_gt -> return true
-    kind := parser_current(&state).kind
+    kind :: parser_current(&state).kind
     kind == TOKEN_GT || kind == TOKEN_SHR
 }
 
@@ -177,12 +175,15 @@ fn parser_skip_semicolons(state: &JetParserState) {
 fn parser_recover_statement(state: &JetParserState) {
     loop {
         kind :: parser_current_kind(&state)
-        if kind == TOKEN_EOF || kind == TOKEN_RBRACE -> break
-        if kind == TOKEN_SEMI {
-            parser_bump(&state)
-            break
+        if kind == {
+            TOKEN_EOF -> break
+            TOKEN_RBRACE -> break
+            TOKEN_SEMI -> {
+                parser_bump(&state)
+                break
+            }
+            else -> parser_bump(&state)
         }
-        parser_bump(&state)
     }
 }
 

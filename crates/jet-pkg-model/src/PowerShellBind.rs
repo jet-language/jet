@@ -233,15 +233,15 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     let abi = format!("jet_pwsh_{lib}");
     let mut out = format!(
         r#"#Import module c.{abi} {{
-    fn open() Int = "{abi}_open"
-    fn take_error() Int = "{abi}_take_error"
+    fn open() -> Int = "{abi}_open"
+    fn take_error() -> Int = "{abi}_take_error"
     fn cancel(handle: Int) = "{abi}_cancel"
     fn close(handle: Int) = "{abi}_close"
 "#
     );
     for function in functions {
         out.push_str(&format!(
-            "    fn {}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{}\"\n",
+            "    fn {}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{}\"\n",
             function.jet, function.jet
         ));
     }
@@ -277,7 +277,7 @@ pub enum PowerShellError {{
 
 pub fn close(session: ^Session) {}
 
-pub fn open() Session !PowerShellError -> {
+pub fn open() -> Session !PowerShellError {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
     return Ok(Session{ value: handle })
@@ -290,7 +290,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
     for function in functions {
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
-            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PowerShellError -> {{
+            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree !PowerShellError {{
     raw :: {}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -610,8 +610,8 @@ mod tests {
         let jet = super::render_jet("ops", &functions);
         let worker = super::render_worker(&functions);
         assert!(jet.contains("pub fn get_stateful("));
-        assert!(jet.contains("fn open() Int ="));
-        assert!(jet.contains("pub fn open() Session !PowerShellError -> {"));
+        assert!(jet.contains("fn open() -> Int ="));
+        assert!(jet.contains("pub fn open() -> Session !PowerShellError {"));
         assert!(jet.contains("Session{ value: handle }"));
         assert!(!jet.contains("=>"));
         assert!(!jet.contains("Session.{"));

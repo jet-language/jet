@@ -206,7 +206,7 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn missing() Int -> #Todo
+fn missing() -> Int -> #Todo
 fn run() {
     resource := Resource{ name: "todo" }
     print("body")
@@ -222,7 +222,7 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn recurse(n: Int) Int {
+fn recurse(n: Int) -> Int {
     return recurse(n + 1)
 }
 fn run() {
@@ -259,9 +259,9 @@ impl Resource.Close {
     fn close(^self) { print("close {self.name}") }
 }
 impl Resource {
-    fn handoff(^self) Resource { return self }
+    fn handoff(^self) -> Resource { return self }
 }
-fn relay(^resource: Resource) Resource { return resource }
+fn relay(^resource: Resource) -> Resource { return resource }
 fn consume(^resource: Resource) { print("consume {resource.name}") }
 fn run() {
     first := Resource{ name: "transfer" }
@@ -326,7 +326,7 @@ impl Resource.Close {
     }
 }
 
-fn fail() Int !String {
+fn fail() -> Int !String {
     return Err("stop")
 }
 
@@ -337,7 +337,7 @@ fn returned() {
     return
 }
 
-fn questioned() Int !String {
+fn questioned() -> Int !String {
     resource := Resource{ name: "question" }
     defer close(^resource)
     value := fail()
@@ -404,7 +404,7 @@ fn run() {
 fn ordinary_scope_drop_and_reasoned_drop_remain_separate() {
     let src = r#"
 struct Value { number: Int }
-fn maybe() Int !String { return Err("unused") }
+fn maybe() -> Int !String { return Err("unused") }
 fn run() {
     value := Value{ number: 1 }
     print(value.number)

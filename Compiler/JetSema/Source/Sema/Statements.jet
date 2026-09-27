@@ -242,14 +242,14 @@ fn sema_stmt_for_in_type_requires_owned_iteration(ty: Type) -> Bool {
         .Apply(name, args) -> {
             if name == "ViewMut" -> return false
             if name == "Task" -> return true
-            for arg in args {
+            loop arg in args {
                 if sema_stmt_for_in_type_requires_owned_iteration(arg) -> return true
             }
             return false
         }
         .List(inner) | .FixedList(inner, _) -> return sema_stmt_for_in_type_requires_owned_iteration(inner)
         .Tuple(fields) -> {
-            for field in fields {
+            loop field in fields {
                 if sema_stmt_for_in_type_requires_owned_iteration(field.ty) -> return true
             }
             return false
@@ -275,8 +275,8 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, collection_
     graph :: graph_option ?? return None
     collection_identity := type_identity_key(collection_type)
     iterable_impl := None
-    for module in graph.modules {
-        for implementation in module.impls {
+    loop module in graph.modules {
+        loop implementation in module.impls {
             if implementation.trait_name != Val("Iterable") || implementation.target_identity_key != collection_identity -> next
             iterable_impl = Val(implementation)
         }
@@ -284,18 +284,18 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, collection_
     iterable :: iterable_impl ?? return None
     iter_type := None
     iter_symbol := None
-    for associated in iterable.associated_types {
+    loop associated in iterable.associated_types {
         if associated.symbol.name == "Iter" -> iter_type = Val(associated.ty)
     }
-    for method in iterable.methods {
+    loop method in iterable.methods {
         if method.declaration.name == "iter" -> iter_symbol = Val(method.symbol.id.key)
     }
     resolved_iter_type :: iter_type ?? return None
     if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
     iterator_identity := type_identity_key(resolved_iter_type)
     iterator_impl := None
-    for module in graph.modules {
-        for implementation in module.impls {
+    loop module in graph.modules {
+        loop implementation in module.impls {
             if implementation.trait_name != Val("Iterator") || implementation.target_identity_key != iterator_identity -> next
             iterator_impl = Val(implementation)
         }
@@ -303,10 +303,10 @@ fn sema_stmt_for_in_iterable_fact(environment: SemaScopeEnvironment, collection_
     iterator :: iterator_impl ?? return None
     item_type := None
     next_symbol := None
-    for associated in iterator.associated_types {
+    loop associated in iterator.associated_types {
         if associated.symbol.name == "Item" -> item_type = Val(associated.ty)
     }
-    for method in iterator.methods {
+    loop method in iterator.methods {
         if method.declaration.name == "next" -> next_symbol = Val(method.symbol.id.key)
     }
     item :: item_type ?? return None
@@ -531,7 +531,7 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: ?TForInMethod,
 
 fn sema_stmt_for_in_columnar(environment: SemaScopeEnvironment, item_type: Type) -> Bool {
     item_name :: sema_stmt_for_in_layout_type_name(item_type) ?? return false
-    for definition in environment.checked_types {
+    loop definition in environment.checked_types {
         if definition.name == item_name && definition.layout == Val(TStructLayout.Columnar) -> return true
     }
     false
@@ -680,11 +680,11 @@ fn sema_stmt_local_view_facts_for_expr(expr: Expr, scopes: SemaScopeTable, state
         .Ident(name, _) -> {
             symbol :: sema_scope_resolve(scopes, name) ?? return [SemaCallReturnViewFact]{}
             result := [SemaCallReturnViewFact]{}
-            for local_fact in context.local_view_provenance {
+            loop local_fact in context.local_view_provenance {
                 if local_fact.carrier_key != symbol.id.key -> next
                 projected_expr := expr
                 projectable := true
-                for part in local_fact.output_path {
+                loop part in local_fact.output_path {
                     member := part
                     if part.starts_with(".") -> member = part.slice(1, part.len())
                     if part.starts_with("[") || part == "*" {
@@ -702,7 +702,7 @@ fn sema_stmt_local_view_facts_for_expr(expr: Expr, scopes: SemaScopeTable, state
         .Field(base, member, _) | .OptField(base, member, _, _, _) -> {
             source := sema_stmt_local_view_facts_for_expr(base, scopes, &state, context)
             result := [SemaCallReturnViewFact]{}
-            for fact in source {
+            loop fact in source {
                 if fact.slot.len() == 0 || (fact.slot[0] != member && fact.slot[0] != ".{member}") -> next
                 slot := [String]{}
                 index := 1
@@ -720,7 +720,7 @@ fn sema_stmt_local_view_facts_for_expr(expr: Expr, scopes: SemaScopeTable, state
 }
 
 fn sema_stmt_store_local_view_provenance(carrier_key: String, facts: [SemaCallReturnViewFact], context: &SemaCheckContext) {
-    for fact in facts {
+    loop fact in facts {
         context.local_view_provenance.push(SemaLocalViewProvenance{carrier_key: carrier_key, output_path: fact.slot, access: fact.access, sources: fact.sources})
     }
 }
@@ -741,7 +741,7 @@ fn sema_stmt_view_owner_path(slot: [String]) -> [String] {
 }
 
 fn sema_stmt_call_view_has_dynamic_source(fact: SemaCallReturnViewFact) -> Bool {
-    for source in fact.sources {
+    loop source in fact.sources {
         if source.source == {
             .Receiver | .Parameter(_) -> return true
             .Static(_, _) -> {}
@@ -758,7 +758,7 @@ fn sema_stmt_record_call_view_return(state: &SemaOwnershipState, fact: SemaCallR
     } else if sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 {
         if !sema_ownership_record_view_returns(&state, [SemaOwnershipPlace]{}, fact.access, slot, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, &provenance, span, &diagnostics) -> valid = false
     }
-    for source in fact.sources {
+    loop source in fact.sources {
         if source.source == {
             .Static(_, _) -> if !sema_stmt_record_static_view_return(&provenance, slot, source, fact.access, span, &diagnostics) -> valid = false
             else -> {}
@@ -796,7 +796,7 @@ fn sema_stmt_record_return_views(expr: Expr, ty: Type, scopes: SemaScopeTable, s
         valid := true
         direct_view := sema_stmt_view_access(ty) != None
         saw_direct := false
-        for fact in local_facts {
+        loop fact in local_facts {
             if !direct_view || fact.slot.len() == 0 {
                 saw_direct = true
                 if !sema_stmt_record_call_view_return(&state, fact, fact.slot, scopes, &context, expr_span(expr), &diagnostics) -> valid = false
@@ -831,7 +831,7 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     if call_facts.len() > 0 {
         owner_facts := [SemaOwnershipCallViewFact]{}
         valid := true
-        for fact in call_facts {
+        loop fact in call_facts {
             if fact.places.len() > 0 {
                 owner_facts.push(SemaOwnershipCallViewFact{output_path: sema_stmt_view_owner_path(fact.slot), access: fact.access, places: fact.places})
             } else if sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 {
@@ -848,7 +848,7 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     if local_facts.len() > 0 {
         owner_facts := [SemaOwnershipCallViewFact]{}
         valid := true
-        for fact in local_facts {
+        loop fact in local_facts {
             if fact.places.len() > 0 {
                 owner_facts.push(SemaOwnershipCallViewFact{output_path: sema_stmt_view_owner_path(fact.slot), access: fact.access, places: fact.places})
             } else if sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 {
@@ -953,14 +953,14 @@ fn sema_stmt_transaction_lvalue_root(target: LValue) -> ?String {
 }
 
 fn sema_stmt_transaction_add_root(name: String, roots: &[String]) {
-    for existing in roots {
+    loop existing in roots {
         if existing == name -> return
     }
     roots.push(name)
 }
 
 fn sema_stmt_transaction_collect_roots(statements: [Stmt], roots: &[String]) {
-    for statement in statements {
+    loop statement in statements {
         if statement == {
             .Assign(target, _, _, _) -> {
                 root := sema_stmt_transaction_lvalue_root(target)
@@ -984,7 +984,7 @@ fn sema_stmt_transaction_collect_roots(statements: [Stmt], roots: &[String]) {
             .For(_, _, _, _, body, _, _, _, _) -> sema_stmt_transaction_collect_roots(body, &roots)
             .CountedLoop(_, _, _, body, _, _, _) -> sema_stmt_transaction_collect_roots(body, &roots)
             .Switch(_, arms, else_body, _) -> {
-                for arm in arms -> sema_stmt_transaction_collect_roots(arm.body, &roots)
+                loop arm in arms -> sema_stmt_transaction_collect_roots(arm.body, &roots)
                 if else_body != None -> sema_stmt_transaction_collect_roots(else_body ?? [Stmt]{}, &roots)
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
@@ -1019,8 +1019,8 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
     }
     graph :: environment.registration_graph ?? return None
     nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? return None
-    for graph_module in graph.modules {
-        for implementation in graph_module.impls {
+    loop graph_module in graph.modules {
+        loop implementation in graph_module.impls {
             trait_matches := implementation.trait_name == Val("Rollback")
             if implementation.trait_symbol != None {
                 trait :: implementation.trait_symbol ?? return None
@@ -1030,7 +1030,7 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
             trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, implementation)
             snapshot_method := None
             restore_method := None
-            for method in implementation.methods {
+            loop method in implementation.methods {
                 method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner.map((value) -> value.id), operator_identity: None}
                 if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
                 if method.symbol.name == "restore" -> restore_method = Val(method_ref)
@@ -1047,7 +1047,7 @@ fn sema_stmt_transaction_rollback_methods(ty: Type, environment: SemaScopeEnviro
 
 fn sema_stmt_transaction_snapshots(roots: [String], scopes: SemaScopeTable, environment: SemaScopeEnvironment) -> [TTransactionSnapshot] {
     snapshots := [TTransactionSnapshot]{}
-    for name in roots {
+    loop name in roots {
         index := sema_scope_resolve_index(scopes, name)
         if index == None -> next
         binding :: scopes.bindings[index ?? 0]
@@ -1081,7 +1081,7 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
         .Lambda(_) | .LambdaValue(_) -> return false
         .InlineBlock(body) -> return sema_stmt_tir_statements_touch_shared(body)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            for child in tir_if_cond_children(condition) {
+            loop child in tir_if_cond_children(condition) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             if sema_stmt_tir_statements_touch_shared(then_body) -> return true
@@ -1091,12 +1091,12 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            for child in tir_pattern_children(ok_pattern) {
+            loop child in tir_pattern_children(ok_pattern) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             if sema_stmt_tir_statements_touch_shared(ok_body) -> return true
             if sema_stmt_tir_expr_touches_shared(ok_value) -> return true
-            for child in tir_pattern_children(err_pattern) {
+            loop child in tir_pattern_children(err_pattern) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             if sema_stmt_tir_statements_touch_shared(err_body) -> return true
@@ -1118,7 +1118,7 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
         }
         else -> {}
     }
-    for child in tir_expr_children(value) {
+    loop child in tir_expr_children(value) {
         if sema_stmt_tir_expr_touches_shared(child) -> return true
     }
     false
@@ -1159,17 +1159,17 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
     if statement == {
         .Transact(_, _, _, _, _) -> false
         .ContractScope(pre, body, post, _, _) -> {
-            for contract in pre {
+            loop contract in pre {
                 if sema_stmt_tir_contract_touches_shared(contract) -> return true
             }
             if sema_stmt_tir_statements_touch_shared(body) -> return true
-            for contract in post {
+            loop contract in post {
                 if sema_stmt_tir_contract_touches_shared(contract) -> return true
             }
             false
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            for child in tir_pattern_children(pattern) {
+            loop child in tir_pattern_children(pattern) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             if sema_stmt_tir_expr_touches_shared(init) -> return true
@@ -1205,7 +1205,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
             sema_stmt_tir_statements_touch_shared(body)
         }
         .If(condition, then_body, else_body, _, _) -> {
-            for child in tir_if_cond_children(condition) {
+            loop child in tir_if_cond_children(condition) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             if sema_stmt_tir_statements_touch_shared(then_body) -> return true
@@ -1218,8 +1218,8 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         }
         .Match(subject, arms, _, _) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            for arm in arms {
-                for child in tir_pattern_children(arm.pattern) {
+            loop arm in arms {
+                loop child in tir_pattern_children(arm.pattern) {
                     if sema_stmt_tir_expr_touches_shared(child) -> return true
                 }
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
@@ -1228,8 +1228,8 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         }
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
             if sema_stmt_tir_expr_touches_shared(scrutinee) -> return true
-            for arm in arms {
-                for child in tir_pattern_children(arm.pattern) {
+            loop arm in arms {
+                loop child in tir_pattern_children(arm.pattern) {
                     if sema_stmt_tir_expr_touches_shared(child) -> return true
                 }
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
@@ -1238,7 +1238,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            for arm in arms {
+            loop arm in arms {
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
             }
             sema_stmt_tir_statements_touch_shared(else_body)
@@ -1254,7 +1254,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_stmt_tir_statements_touch_shared(body)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            for arm in arms {
+            loop arm in arms {
                 if sema_stmt_tir_expr_touches_shared(arm.condition) -> return true
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
             }
@@ -1262,7 +1262,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         }
         .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> sema_stmt_tir_statements_touch_shared(body)
         .ContextBlock(guards, body, _) -> {
-            for guard in guards {
+            loop guard in guards {
                 if sema_stmt_tir_expr_touches_shared(guard.value) -> return true
             }
             sema_stmt_tir_statements_touch_shared(body)
@@ -1283,7 +1283,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         }
         .Reactive(_, _) -> false
         else -> {
-            for child in tir_stmt_children(statement) {
+            loop child in tir_stmt_children(statement) {
                 if sema_stmt_tir_expr_touches_shared(child) -> return true
             }
             false
@@ -1292,7 +1292,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
 }
 
 fn sema_stmt_tir_statements_touch_shared(statements: [TStmt]) -> Bool {
-    for statement in statements {
+    loop statement in statements {
         if sema_stmt_tir_statement_touches_shared(statement) -> return true
     }
     false
@@ -2009,7 +2009,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: ?Type, environment
                 if !nested.complete {
                     complete = false
                 } else {
-                    for checked_statement in nested.value {
+                    loop checked_statement in nested.value {
                         output.push(checked_statement)
                     }
                 }

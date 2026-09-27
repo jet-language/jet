@@ -63,7 +63,7 @@ struct FactEntry {
     provenance: String
 }
 
-fn json_manifest(value: manifest_model.Manifest) DataTree !PlanError -> {
+fn json_manifest(value: manifest_model.Manifest) -> DataTree !PlanError {
     deps := [DataTree]{}
     loop dep in value.deps {
         deps.push(DataTree.Object([
@@ -87,7 +87,7 @@ fn json_manifest(value: manifest_model.Manifest) DataTree !PlanError -> {
     ])
 }
 
-fn json_lock(value: lock_model.LockFile) DataTree !PlanError -> {
+fn json_lock(value: lock_model.LockFile) -> DataTree !PlanError {
     packages := [DataTree]{}
     loop package in value.packages {
         packages.push(DataTree.Object([
@@ -103,7 +103,7 @@ fn json_lock(value: lock_model.LockFile) DataTree !PlanError -> {
     ])
 }
 
-fn valid_name(name: String) Bool !PlanError -> {
+fn valid_name(name: String) -> Bool !PlanError {
     if name == "" || !name.is_ascii() {
         return false
     }
@@ -125,13 +125,13 @@ fn valid_name(name: String) Bool !PlanError -> {
     return true
 }
 
-fn same_profile(left: Profile, right: Profile) Bool !PlanError -> {
+fn same_profile(left: Profile, right: Profile) -> Bool !PlanError {
     return left.extends == right.extends
         && left.packages == right.packages
         && left.collisions.equal(right.collisions)
 }
 
-fn brace_delta(line: String) Int !PlanError -> {
+fn brace_delta(line: String) -> Int !PlanError {
     depth := 0
     quoted := false
     escaped := false
@@ -161,7 +161,7 @@ fn brace_delta(line: String) Int !PlanError -> {
     return depth
 }
 
-fn split_top_level(text: String) [String] !PlanError -> {
+fn split_top_level(text: String) -> [String] !PlanError {
     values := [String]{}
     current := ""
     square_depth := 0
@@ -227,7 +227,7 @@ fn split_top_level(text: String) [String] !PlanError -> {
     return Ok(values)
 }
 
-fn scalar(raw: String, context: String) String !PlanError -> {
+fn scalar(raw: String, context: String) -> String !PlanError {
     value := ~raw.trim()
     if value.ends_with(",") || value.ends_with(";") {
         value = ~value.slice(0, value.len() - 2).trim()
@@ -254,7 +254,7 @@ fn scalar(raw: String, context: String) String !PlanError -> {
     return Ok(value)
 }
 
-fn list_inner(raw: String, context: String) String !PlanError -> {
+fn list_inner(raw: String, context: String) -> String !PlanError {
     value := ~raw.trim()
     if !value.starts_with("[") || !value.ends_with("]") {
         return Err(PlanError{message: "profile field {context}: expected a list"})
@@ -265,7 +265,7 @@ fn list_inner(raw: String, context: String) String !PlanError -> {
     return Ok(~value.slice(1, value.len() - 2).trim())
 }
 
-fn parse_string_list(raw: String, context: String) [String] !PlanError -> {
+fn parse_string_list(raw: String, context: String) -> [String] !PlanError {
     inner :: list_inner(~raw, ~context)
     values := [String]{}
     if inner == "" {
@@ -281,7 +281,7 @@ fn parse_string_list(raw: String, context: String) [String] !PlanError -> {
     return Ok(values)
 }
 
-fn normalize_package_ref(raw: String) String !PlanError -> {
+fn normalize_package_ref(raw: String) -> String !PlanError {
     value :: scalar(~raw, "packages")
     if value == "" {
         return Err(PlanError{message: "profile packages: empty package reference"})
@@ -306,7 +306,7 @@ fn normalize_package_ref(raw: String) String !PlanError -> {
     return Ok("{value}@default")
 }
 
-fn parse_package_list(raw: String) [String] !PlanError -> {
+fn parse_package_list(raw: String) -> [String] !PlanError {
     inner :: list_inner(~raw, "packages")
     packages := [String]{}
     if inner == "" {
@@ -349,7 +349,7 @@ fn parse_package_list(raw: String) [String] !PlanError -> {
     return Ok(packages)
 }
 
-fn parse_collisions(raw: String, profile_name: String) [String:String] !PlanError -> {
+fn parse_collisions(raw: String, profile_name: String) -> [String:String] !PlanError {
     value := ~raw.trim()
     if !value.starts_with("{{") || !value.ends_with("}}") {
         return Err(PlanError{message: "profile {profile_name} field collisions: expected a map"})
@@ -376,7 +376,7 @@ fn parse_collisions(raw: String, profile_name: String) [String:String] !PlanErro
     return Ok(collisions)
 }
 
-fn parse_profile_body(profile_name: String, body: String) Profile !PlanError -> {
+fn parse_profile_body(profile_name: String, body: String) -> Profile !PlanError {
     extends := [String]{}
     packages := [String]{}
     collisions := [String:String]{}
@@ -427,7 +427,7 @@ fn parse_profile_body(profile_name: String, body: String) Profile !PlanError -> 
     })
 }
 
-fn finish_profile(name: String, body_lines: [String]) Profile !PlanError -> {
+fn finish_profile(name: String, body_lines: [String]) -> Profile !PlanError {
     body := ~body_lines.join("\n").trim()
     if body.ends_with(",") {
         body = ~body.remove_suffix(",").trim()
@@ -439,7 +439,7 @@ fn finish_profile(name: String, body_lines: [String]) Profile !PlanError -> {
     return parse_profile_body(~name, ~body)
 }
 
-fn parse_profiles(source: String) [Profile] !PlanError -> {
+fn parse_profiles(source: String) -> [Profile] !PlanError {
     profiles := [Profile]{}
     active := false
     depth := 0
@@ -524,7 +524,7 @@ fn parse_profiles(source: String) [Profile] !PlanError -> {
     return Ok(profiles)
 }
 
-fn profile_index(profiles: [Profile], name: String) Int !PlanError -> {
+fn profile_index(profiles: [Profile], name: String) -> Int !PlanError {
     loop (index, profile) in profiles {
         if profile.name == name {
             return index
@@ -533,7 +533,7 @@ fn profile_index(profiles: [Profile], name: String) Int !PlanError -> {
     return -1
 }
 
-fn cycle_text(stack: [String], name: String) String !PlanError -> {
+fn cycle_text(stack: [String], name: String) -> String !PlanError {
     cycle := [String]{}
     started := false
     loop item in stack {
@@ -548,7 +548,7 @@ fn cycle_text(stack: [String], name: String) String !PlanError -> {
     return cycle.join(" -> ")
 }
 
-fn merge_parent_packages(target: [PackageSeed], source: [PackageSeed]) [PackageSeed] !PlanError -> {
+fn merge_parent_packages(target: [PackageSeed], source: [PackageSeed]) -> [PackageSeed] !PlanError {
     out := target
     loop package in source {
         found := -1
@@ -580,7 +580,7 @@ fn merge_parent_packages(target: [PackageSeed], source: [PackageSeed]) [PackageS
     return out
 }
 
-fn resolve_profile(name: String, profiles: [Profile], stack: [String]) Resolved !PlanError -> {
+fn resolve_profile(name: String, profiles: [Profile], stack: [String]) -> Resolved !PlanError {
     if stack.contains(name) {
         return Err(PlanError{message: "profile inheritance cycle: {cycle_text(~stack, ~name)}"})
     }
@@ -661,7 +661,7 @@ fn resolve_profile(name: String, profiles: [Profile], stack: [String]) Resolved 
     return Ok(resolved)
 }
 
-fn merge_string_list(left: [String], right: [String]) [String] !PlanError -> {
+fn merge_string_list(left: [String], right: [String]) -> [String] !PlanError {
     out := left
     loop value in right {
         if !out.contains(value) {
@@ -671,7 +671,7 @@ fn merge_string_list(left: [String], right: [String]) [String] !PlanError -> {
     return out
 }
 
-fn parse_selector(raw: String) Selector !PlanError -> {
+fn parse_selector(raw: String) -> Selector !PlanError {
     selector := Selector{
         raw: "",
         version: "",
@@ -743,7 +743,7 @@ fn parse_selector(raw: String) Selector !PlanError -> {
     return Ok(selector)
 }
 
-fn parse_reference(raw: String) RefParts !PlanError -> {
+fn parse_reference(raw: String) -> RefParts !PlanError {
     normalized :: normalize_package_ref(~raw)
     at :: normalized.last_index_of("@") ?? return Err(PlanError{message: "package reference {normalized}: missing source"})
     if at <= 0 || at >= normalized.len() - 1 {
@@ -786,7 +786,7 @@ fn parse_reference(raw: String) RefParts !PlanError -> {
     })
 }
 
-fn provider_for_source(source: String) String !PlanError -> {
+fn provider_for_source(source: String) -> String !PlanError {
     if source == "default" || source == "nixpkgs" {
         return "nix"
     }
@@ -799,19 +799,19 @@ fn provider_for_source(source: String) String !PlanError -> {
     return ~source
 }
 
-fn external_provider(provider: String) Bool !PlanError -> {
+fn external_provider(provider: String) -> Bool !PlanError {
     return ["jet-registry", "npm", "pypi", "cargo", "swiftpm", "maven", "nuget", "conan", "vcpkg", "github", "homebrew", "binary", "cran", "luarocks", "ruby", "perl", "php"].contains(provider)
 }
 
-fn selector_exact(selector: Selector) Bool !PlanError -> {
+fn selector_exact(selector: Selector) -> Bool !PlanError {
     return selector.version != "" || selector.revision != "" || selector.digest != ""
 }
 
-fn fact_entry(key: String, value: String, provenance: String) FactEntry !PlanError -> {
+fn fact_entry(key: String, value: String, provenance: String) -> FactEntry !PlanError {
     return FactEntry{key: key, value: value, provenance: provenance}
 }
 
-fn facts_json(entries: [FactEntry]) DataTree !PlanError -> {
+fn facts_json(entries: [FactEntry]) -> DataTree !PlanError {
     sorted := entries.copy()
     sorted.sort_by((entry: FactEntry) -> entry.key)
     fields := [String:DataTree]{}
@@ -821,7 +821,7 @@ fn facts_json(entries: [FactEntry]) DataTree !PlanError -> {
     return DataTree.Object(fields)
 }
 
-fn selector_json(selector: Selector) DataTree !PlanError -> {
+fn selector_json(selector: Selector) -> DataTree !PlanError {
     features := [DataTree]{}
     loop feature in selector.features {
         features.push(DataTree.Text(~feature))
@@ -837,7 +837,7 @@ fn selector_json(selector: Selector) DataTree !PlanError -> {
     ])
 }
 
-fn provider_facts_json(raw: String, target: String, source: String, provider: String, profile: String, provenance: String, selector: Selector) DataTree !PlanError -> {
+fn provider_facts_json(raw: String, target: String, source: String, provider: String, profile: String, provenance: String, selector: Selector) -> DataTree !PlanError {
     facts := [FactEntry]{
         fact_entry("provider.name", ~provider, "ref"),
         fact_entry("provider.target", ~target, "ref"),
@@ -877,7 +877,7 @@ fn provider_facts_json(raw: String, target: String, source: String, provider: St
     ])
 }
 
-fn make_package_fact(seed: PackageSeed, profile: String) PackageFact !PlanError -> {
+fn make_package_fact(seed: PackageSeed, profile: String) -> PackageFact !PlanError {
     parts :: parse_reference(~seed.raw)
     provider :: provider_for_source(~parts.source)
     if external_provider(~provider) && !selector_exact(~parts.selector) {
@@ -897,7 +897,7 @@ fn make_package_fact(seed: PackageSeed, profile: String) PackageFact !PlanError 
     })
 }
 
-fn json_collisions(collisions: [String:String]) DataTree !PlanError -> {
+fn json_collisions(collisions: [String:String]) -> DataTree !PlanError {
     keys := collisions.keys().to_list()
     keys.sort()
     fields := [String:DataTree]{}
@@ -908,7 +908,7 @@ fn json_collisions(collisions: [String:String]) DataTree !PlanError -> {
     return DataTree.Object(fields)
 }
 
-fn json_package(package: PackageFact) DataTree !PlanError -> {
+fn json_package(package: PackageFact) -> DataTree !PlanError {
     upstream := DataTree.Null
     if package.upstream != "" {
         upstream = DataTree.Text(~package.upstream)
@@ -933,11 +933,11 @@ fn json_package(package: PackageFact) DataTree !PlanError -> {
     ])
 }
 
-fn framed(key: String, value: String) String !PlanError -> {
+fn framed(key: String, value: String) -> String !PlanError {
     return "{key}\t{value.bytes().len()}\t{value}\n"
 }
 
-fn provider_fact_map(packages: [PackageFact]) DataTree !PlanError -> {
+fn provider_fact_map(packages: [PackageFact]) -> DataTree !PlanError {
     sorted := packages.copy()
     sorted.sort_by((package: PackageFact) -> package.raw)
     fields := [String:DataTree]{}
@@ -947,7 +947,7 @@ fn provider_fact_map(packages: [PackageFact]) DataTree !PlanError -> {
     return DataTree.Object(fields)
 }
 
-pub fn render(project_root: String, name: String) String !PlanError -> {
+pub fn render(project_root: String, name: String) -> String !PlanError {
     selected_name := ~name.trim()
     if selected_name == "" {
         selected_name = "dogfood"

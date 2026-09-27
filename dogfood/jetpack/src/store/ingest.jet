@@ -28,13 +28,13 @@ pub struct IngestResult {
     pub payload_entries: [String]
 }
 
-fn absolute_path(raw: String, label: String) String !IngestError -> {
+fn absolute_path(raw: String, label: String) -> String !IngestError {
     if raw.trim() == "" -> return Err(IngestError{message: "{label} is required"})
     absolute :: fs.absolute(Path.from(raw).normalize()) ?? return Err(IngestError{message: "{label} cannot be resolved"})
     return Ok(absolute)
 }
 
-fn ensure_directory(path: String, label: String) Bool !IngestError -> {
+fn ensure_directory(path: String, label: String) -> Bool !IngestError {
     if fs.exists(~path) {
         stat :: fs.stat(~path) ?? return Err(IngestError{message: "{label} cannot be inspected"})
         if stat.is_symlink || !stat.is_dir {
@@ -50,7 +50,7 @@ fn ensure_directory(path: String, label: String) Bool !IngestError -> {
     return Ok(true)
 }
 
-fn remove_tree_if_present(path: String, label: String) Bool !IngestError -> {
+fn remove_tree_if_present(path: String, label: String) -> Bool !IngestError {
     if !fs.exists(~path) -> return Ok(true)
     stat :: fs.stat(~path) ?? return Err(IngestError{message: "{label} cannot be inspected"})
     if stat.is_symlink {
@@ -70,16 +70,16 @@ fn remove_tree_if_present(path: String, label: String) Bool !IngestError -> {
     return Ok(true)
 }
 
-fn fail_after_stage(stage_output: String, error: IngestError) IngestResult !IngestError -> {
+fn fail_after_stage(stage_output: String, error: IngestError) -> IngestResult !IngestError {
     _ :: remove_tree_if_present(~stage_output, "staging path")
     return Err(error)
 }
 
-fn same_stat(left: Stat, right: Stat) Bool !IngestError -> {
+fn same_stat(left: Stat, right: Stat) -> Bool !IngestError {
     return Ok(left.is_file == right.is_file && left.is_dir == right.is_dir && left.is_symlink == right.is_symlink && left.size == right.size && left.mode == right.mode)
 }
 
-fn directory_names(path: String) [String] !IngestError -> {
+fn directory_names(path: String) -> [String] !IngestError {
     entries :: fs.list_dir(~path) ?? return Err(IngestError{message: "directory {path} cannot be read"})
     names := [String]{}
     loop entry in entries -> names.push(entry.name)
@@ -88,7 +88,7 @@ fn directory_names(path: String) [String] !IngestError -> {
     return Ok(names)
 }
 
-fn relative_depth(path: String) Int !IngestError -> {
+fn relative_depth(path: String) -> Int !IngestError {
     depth := 0
     loop byte in path.bytes() {
         if byte == 47 -> depth += 1
@@ -98,7 +98,7 @@ fn relative_depth(path: String) Int !IngestError -> {
 
 // Native source links are retained as links, but every relative target must
 // remain below the source root. Links are never resolved during copy or hash.
-fn validate_relative_link(link_relative: String, target: String) Bool !IngestError -> {
+fn validate_relative_link(link_relative: String, target: String) -> Bool !IngestError {
     if target.starts_with("/") || target.contains("\\") {
         return Err(IngestError{message: "symlink {link_relative} is absolute or contains a backslash"})
     }
@@ -118,7 +118,7 @@ fn validate_relative_link(link_relative: String, target: String) Bool !IngestErr
     return Ok(true)
 }
 
-fn validate_destination(path: String, store_root: String, label: String) Bool !IngestError -> {
+fn validate_destination(path: String, store_root: String, label: String) -> Bool !IngestError {
     candidate :: Path.from(~path).normalize()
     base :: Path.from(~store_root).normalize()
     if !candidate.is_within(~base) {
@@ -127,7 +127,7 @@ fn validate_destination(path: String, store_root: String, label: String) Bool !I
     return Ok(true)
 }
 
-fn copy_node(source: String, destination: String, source_root: String, relative: String, store_root: String) Bool !IngestError -> {
+fn copy_node(source: String, destination: String, source_root: String, relative: String, store_root: String) -> Bool !IngestError {
     validate_destination(~destination, ~store_root, "copy destination") ?? return Err(IngestError{message: "copy destination leaves the store root"})
     stat_before :: fs.stat(~source) ?? return Err(IngestError{message: "source {relative} cannot be inspected"})
     if stat_before.is_symlink {
@@ -189,7 +189,7 @@ fn copy_node(source: String, destination: String, source_root: String, relative:
     return Err(IngestError{message: "source path {relative} has an unsupported file kind"})
 }
 
-fn seal_node(path: String) Bool !IngestError -> {
+fn seal_node(path: String) -> Bool !IngestError {
     stat :: fs.stat(~path) ?? return Err(IngestError{message: "staged path cannot be inspected while sealing"})
     if stat.is_symlink -> return Ok(true)
     if stat.is_dir {
@@ -207,7 +207,7 @@ fn seal_node(path: String) Bool !IngestError -> {
     return Ok(true)
 }
 
-fn push_u64(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
+fn push_u64(hasher: &crypto.Hasher, value: Int) -> Bool !IngestError {
     encoded :: U64.from_int(value) ?? return Err(IngestError{message: "archive length is outside U64"})
     frame := Bytes.new()
     frame.write_u64_be(encoded)
@@ -215,7 +215,7 @@ fn push_u64(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
     return Ok(true)
 }
 
-fn push_u32(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
+fn push_u32(hasher: &crypto.Hasher, value: Int) -> Bool !IngestError {
     encoded :: U32.from_int(value) ?? return Err(IngestError{message: "archive mode is outside U32"})
     frame := Bytes.new()
     frame.write_u32_be(encoded)
@@ -223,20 +223,20 @@ fn push_u32(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
     return Ok(true)
 }
 
-fn push_bytes(hasher: &crypto.Hasher, bytes: [U8]) Bool !IngestError -> {
+fn push_bytes(hasher: &crypto.Hasher, bytes: [U8]) -> Bool !IngestError {
     push_u64(&hasher, bytes.len()) ?? return Err(IngestError{message: "archive byte length cannot be encoded"})
     hasher.update(bytes)
     return Ok(true)
 }
 
-fn archive_header(hasher: &crypto.Hasher, kind: U8, relative: String, mode: Int) Bool !IngestError -> {
+fn archive_header(hasher: &crypto.Hasher, kind: U8, relative: String, mode: Int) -> Bool !IngestError {
     hasher.update([kind])
     push_bytes(&hasher, relative.bytes()) ?? return Err(IngestError{message: "archive path cannot be encoded"})
     push_u32(&hasher, mode) ?? return Err(IngestError{message: "archive mode cannot be encoded"})
     return Ok(true)
 }
 
-fn archive_node(path: String, relative: String, hasher: &crypto.Hasher) Bool !IngestError -> {
+fn archive_node(path: String, relative: String, hasher: &crypto.Hasher) -> Bool !IngestError {
     stat :: fs.stat(~path) ?? return Err(IngestError{message: "archive path {relative} cannot be inspected"})
     if stat.is_dir {
         archive_header(&hasher, 68, ~relative, stat.mode) ?? return Err(IngestError{message: "archive directory {relative} cannot be framed"})
@@ -274,7 +274,7 @@ fn archive_node(path: String, relative: String, hasher: &crypto.Hasher) Bool !In
     return Err(IngestError{message: "archive path {relative} has an unsupported file kind"})
 }
 
-fn archive_hash(root: String) String !IngestError -> {
+fn archive_hash(root: String) -> String !IngestError {
     hasher := crypto.Hasher.new()
     hasher.update("jet-hangar-archive-v1".bytes())
     hasher.update([0])
@@ -282,7 +282,7 @@ fn archive_hash(root: String) String !IngestError -> {
     return Ok("sha256-{hasher.digest()}")
 }
 
-fn projection_entries(root: String, relative: String, out: &[String]) Bool !IngestError -> {
+fn projection_entries(root: String, relative: String, out: &[String]) -> Bool !IngestError {
     stat :: fs.stat(~root) ?? return Err(IngestError{message: "tree path {relative} cannot be inspected"})
     if stat.is_symlink {
         target :: fs.read_link(~root) ?? return Err(IngestError{message: "tree symlink {relative} cannot be read"})
@@ -308,7 +308,7 @@ fn projection_entries(root: String, relative: String, out: &[String]) Bool !Inge
     return Err(IngestError{message: "tree path {relative} has an unsupported file kind"})
 }
 
-fn metadata_json(request: IngestRequest, output_hash: String, payload_root: String) String !IngestError -> {
+fn metadata_json(request: IngestRequest, output_hash: String, payload_root: String) -> String !IngestError {
     empty := DataTree.Text("")
     platform := DataTree.Text("native")
     return Ok(json.to_string(DataTree.Object([
@@ -336,7 +336,7 @@ fn metadata_json(request: IngestRequest, output_hash: String, payload_root: Stri
     ])))
 }
 
-fn safe_entry_id(name: String, version: String, reference: String, payload_root: String) String !IngestError -> {
+fn safe_entry_id(name: String, version: String, reference: String, payload_root: String) -> String !IngestError {
     laws.validate_component(~name) ?? return Err(IngestError{message: "package name is unsafe"})
     if version != "" {
         laws.validate_component(~version) ?? return Err(IngestError{message: "package version is unsafe"})
@@ -347,7 +347,7 @@ fn safe_entry_id(name: String, version: String, reference: String, payload_root:
     return Ok("{name}-{version}-{short}")
 }
 
-pub fn ingest(store_root: String, request: IngestRequest) IngestResult !IngestError -> {
+pub fn ingest(store_root: String, request: IngestRequest) -> IngestResult !IngestError {
     root :: absolute_path(~store_root, "store root")
     ensure_directory(~root, "store root") ?? return Err(IngestError{message: "store root cannot be prepared"})
     hangar :: Path.from(root).join("hangar").to_string()

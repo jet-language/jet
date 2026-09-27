@@ -280,7 +280,7 @@ fn jet_web_js_copy_schema_key(ty: MirType, bindings: JetWebCopyBindings) -> Stri
     "{key};bindings={rows.join(\"\")}"
 }
 
-fn jet_web_js_copy_add_absent(keys: &mut [String], rows: &mut [String]) -> String {
+fn jet_web_js_copy_add_absent(keys: &[String], rows: &[String]) -> String {
     key := "jet.absent"
     if !keys.contains(key) {
         keys.push(key)
@@ -300,7 +300,7 @@ fn jet_web_js_copy_definition(ctx: &JetWebEmitContext, ty: MirType) -> ?MirTypeD
     None
 }
 
-fn jet_web_js_copy_bindings(ctx: &JetWebEmitContext, ty: MirType, parent: JetWebCopyBindings, keys: &mut [String], rows: &mut [String]) -> JetWebCopyBindings {
+fn jet_web_js_copy_bindings(ctx: &JetWebEmitContext, ty: MirType, parent: JetWebCopyBindings, keys: &[String], rows: &[String]) -> JetWebCopyBindings {
     child := JetWebCopyBindings{names: [String]{}, keys: [String]{}}
     loop name in parent.names { child.names.push(name) }
     loop key in parent.keys { child.keys.push(key) }
@@ -320,7 +320,7 @@ fn jet_web_js_copy_bindings(ctx: &JetWebEmitContext, ty: MirType, parent: JetWeb
             }
             loop index in 0..args.len() {
                 child.names.push(row.generic_params[index].name)
-                child.keys.push(jet_web_js_copy_schema_for_type(ctx, args[index], parent, keys, rows))
+                child.keys.push(jet_web_js_copy_schema_for_type(ctx, args[index], parent, &keys, &rows))
             }
         }
         else -> {}
@@ -328,7 +328,7 @@ fn jet_web_js_copy_bindings(ctx: &JetWebEmitContext, ty: MirType, parent: JetWeb
     child
 }
 
-fn jet_web_js_copy_schema_for_type(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &mut [String], rows: &mut [String]) -> String {
+fn jet_web_js_copy_schema_for_type(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &[String], rows: &[String]) -> String {
     if ty.kind == {
         .Apply(name, args) -> {
             if args.len() == 0 {
@@ -338,10 +338,10 @@ fn jet_web_js_copy_schema_for_type(ctx: &JetWebEmitContext, ty: MirType, binding
         }
         else -> {}
     }
-    jet_web_js_copy_collect_type(ctx, ty, bindings, keys, rows)
+    jet_web_js_copy_collect_type(ctx, ty, bindings, &keys, &rows)
     jet_web_js_copy_schema_key(ty, bindings)
 }
-fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &mut [String], rows: &mut [String]) -> String {
+fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &[String], rows: &[String]) -> String {
     loop handle in ctx.program.handles {
         if mir_type_same_checked_type(handle.ty, ty) -> return "kind: \"opaque\""
         handle_name := if handle.ty.kind == {
@@ -364,42 +364,42 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
         .String | .Char -> return "kind: \"text\""
         .Fn(_) | .SendFn(_, _, _) -> return "kind: \"callable\""
         .List(inner) | .FixedList(inner, _) -> {
-            item := jet_web_js_copy_schema_for_type(ctx, inner, bindings, keys, rows)
+            item := jet_web_js_copy_schema_for_type(ctx, inner, bindings, &keys, &rows)
             return "kind: \"list\", item: {jet_web_js_quote(item)}"
         }
         .Map(key, value) -> {
-            key_schema := jet_web_js_copy_schema_for_type(ctx, key, bindings, keys, rows)
-            value_schema := jet_web_js_copy_schema_for_type(ctx, value, bindings, keys, rows)
+            key_schema := jet_web_js_copy_schema_for_type(ctx, key, bindings, &keys, &rows)
+            value_schema := jet_web_js_copy_schema_for_type(ctx, value, bindings, &keys, &rows)
             return "kind: \"map\", key: {jet_web_js_quote(key_schema)}, value: {jet_web_js_quote(value_schema)}"
         }
         .Option(inner) -> {
-            absent := jet_web_js_copy_add_absent(keys, rows)
-            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, keys, rows)
+            absent := jet_web_js_copy_add_absent(&keys, &rows)
+            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, &keys, &rows)
             return "kind: \"enum\", clean: true, variants: [[\"Err\", [{jet_web_js_quote(absent)}]], [\"Ok\", [{jet_web_js_quote(inner_schema)}]]]"
         }
         .Result(ok, err) -> {
-            ok_schema := jet_web_js_copy_schema_for_type(ctx, ok, bindings, keys, rows)
-            err_schema := jet_web_js_copy_schema_for_type(ctx, err, bindings, keys, rows)
+            ok_schema := jet_web_js_copy_schema_for_type(ctx, ok, bindings, &keys, &rows)
+            err_schema := jet_web_js_copy_schema_for_type(ctx, err, bindings, &keys, &rows)
             return "kind: \"enum\", variants: [[\"Ok\", [{jet_web_js_quote(ok_schema)}]], [\"Err\", [{jet_web_js_quote(err_schema)}]]]"
         }
         .Shared(inner) -> {
-            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, keys, rows)
+            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, &keys, &rows)
             return "kind: \"shared\", inner: {jet_web_js_quote(inner_schema)}"
         }
         .InlineRange(base, _, _) | .Quantity(base, _) -> {
-            base_schema := jet_web_js_copy_schema_for_type(ctx, base, bindings, keys, rows)
+            base_schema := jet_web_js_copy_schema_for_type(ctx, base, bindings, &keys, &rows)
             return "kind: \"transparent\", inner: {jet_web_js_quote(base_schema)}"
         }
         .Tagged(marker, inner) -> {
             marker_name := mir_tag_name(marker)
             if mir_tag_is_identity_bearing(marker) || marker_name == "expiring_secret.loan" || marker_name == "core.crypto" || marker_name.ends_with("Secret") -> return "kind: \"opaque\""
-            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, keys, rows)
+            inner_schema := jet_web_js_copy_schema_for_type(ctx, inner, bindings, &keys, &rows)
             return "kind: \"transparent\", inner: {jet_web_js_quote(inner_schema)}"
         }
         .Tuple(fields) -> {
             rendered := [String]{}
             loop field in fields {
-                field_schema := jet_web_js_copy_schema_for_type(ctx, field.ty, bindings, keys, rows)
+                field_schema := jet_web_js_copy_schema_for_type(ctx, field.ty, bindings, &keys, &rows)
                 rendered.push("[{jet_web_js_quote(field.name)}, {jet_web_js_quote(field_schema)}]")
             }
             return "kind: \"record\", fields: [{rendered.join(\", \")}]"
@@ -418,14 +418,14 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
                 return "kind: \"opaque\""
             }
             row :: definition ?? return "kind: \"opaque\""
-            field_bindings := jet_web_js_copy_bindings(ctx, ty, bindings, keys, rows)
+            field_bindings := jet_web_js_copy_bindings(ctx, ty, bindings, &keys, &rows)
             if row.kind == {
                 .Struct(fields, _) -> {
                     loop field in fields { if field.skip -> return "kind: \"opaque\"" }
                     rendered := [String]{}
                     loop field in fields {
                         if field.computed -> next
-                        field_schema := jet_web_js_copy_schema_for_type(ctx, field.ty, field_bindings, keys, rows)
+                        field_schema := jet_web_js_copy_schema_for_type(ctx, field.ty, field_bindings, &keys, &rows)
                         rendered.push("[{jet_web_js_quote(field.name)}, {jet_web_js_quote(field_schema)}]")
                     }
                     return "kind: \"record\", fields: [{rendered.join(\", \")}]"
@@ -436,10 +436,10 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
                         fields := [String]{}
                         if variant.payload == {
                             .Unit -> {}
-                            .Single(value) -> fields.push(jet_web_js_quote(jet_web_js_copy_schema_for_type(ctx, value, field_bindings, keys, rows)))
+                            .Single(value) -> fields.push(jet_web_js_copy_schema_for_type(ctx, value, field_bindings, &keys, &rows))
                             .Named(named) -> {
                                 loop field in named {
-                                    if field.skip -> fields.push("null") else -> fields.push(jet_web_js_quote(jet_web_js_copy_schema_for_type(ctx, field.ty, field_bindings, keys, rows)))
+                                    if field.skip -> fields.push("null") else -> fields.push(jet_web_js_quote(jet_web_js_copy_schema_for_type(ctx, field.ty, field_bindings, &keys, &rows)))
                                 }
                             }
                         }
@@ -448,11 +448,11 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
                     return "kind: \"enum\", variants: [{rendered.join(\", \")}]"
                 }
                 .Distinct(base, _) -> {
-                    base_schema := jet_web_js_copy_schema_for_type(ctx, base, field_bindings, keys, rows)
+                    base_schema := jet_web_js_copy_schema_for_type(ctx, base, field_bindings, &keys, &rows)
                     return "kind: \"transparent\", inner: {jet_web_js_quote(base_schema)}"
                 }
                 .Alias(target) -> {
-                    target_schema := jet_web_js_copy_schema_for_type(ctx, target, field_bindings, keys, rows)
+                    target_schema := jet_web_js_copy_schema_for_type(ctx, target, field_bindings, &keys, &rows)
                     return "kind: \"transparent\", inner: {jet_web_js_quote(target_schema)}"
                 }
                 .UnitFamily(_) -> return "kind: \"opaque\""
@@ -463,11 +463,11 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
     }
 }
 
-fn jet_web_js_copy_collect_type(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &mut [String], rows: &mut [String]) -> String {
+fn jet_web_js_copy_collect_type(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebCopyBindings, keys: &[String], rows: &[String]) -> String {
     key := jet_web_js_copy_schema_key(ty, bindings)
     if keys.contains(key) -> return key
     keys.push(key)
-    shape := jet_web_js_copy_shape(ctx, ty, bindings, keys, rows)
+    shape := jet_web_js_copy_shape(ctx, ty, bindings, &keys, &rows)
     rows.push("[{jet_web_js_quote(key)}, {{ type: {jet_web_js_quote(key)}, {shape} }}]")
     key
 }
@@ -476,16 +476,16 @@ fn jet_web_js_copy_type_facts(ctx: &JetWebEmitContext) -> String {
     keys := [String]{}
     rows := [String]{}
     bindings := JetWebCopyBindings{names: [String]{}, keys: [String]{}}
-    loop ty in ctx.program.type_instances -> jet_web_js_copy_collect_type(ctx, ty, bindings, &mut keys, &mut rows)
-    loop constant in ctx.program.constants -> jet_web_js_copy_collect_type(ctx, constant.ty, bindings, &mut keys, &mut rows)
+    loop ty in ctx.program.type_instances -> jet_web_js_copy_collect_type(ctx, ty, bindings, &keys, &rows)
+    loop constant in ctx.program.constants -> jet_web_js_copy_collect_type(ctx, constant.ty, bindings, &keys, &rows)
     loop function in ctx.program.functions {
-        jet_web_js_copy_collect_type(ctx, function.return_type, bindings, &mut keys, &mut rows)
-        loop parameter in function.params -> jet_web_js_copy_collect_type(ctx, parameter.ty, bindings, &mut keys, &mut rows)
-        loop capture in function.capture_params -> jet_web_js_copy_collect_type(ctx, capture.ty, bindings, &mut keys, &mut rows)
-        loop value in function.values -> jet_web_js_copy_collect_type(ctx, value.ty, bindings, &mut keys, &mut rows)
-        loop place in function.places -> jet_web_js_copy_collect_type(ctx, place.ty, bindings, &mut keys, &mut rows)
+        jet_web_js_copy_collect_type(ctx, function.return_type, bindings, &keys, &rows)
+        loop parameter in function.params -> jet_web_js_copy_collect_type(ctx, parameter.ty, bindings, &keys, &rows)
+        loop capture in function.capture_params -> jet_web_js_copy_collect_type(ctx, capture.ty, bindings, &keys, &rows)
+        loop value in function.values -> jet_web_js_copy_collect_type(ctx, value.ty, bindings, &keys, &rows)
+        loop place in function.places -> jet_web_js_copy_collect_type(ctx, place.ty, bindings, &keys, &rows)
     }
-    loop handle in ctx.program.handles -> jet_web_js_copy_collect_type(ctx, handle.ty, bindings, &mut keys, &mut rows)
+    loop handle in ctx.program.handles -> jet_web_js_copy_collect_type(ctx, handle.ty, bindings, &keys, &rows)
     lines := [String]{"const __jet_copy_type_facts = new Map(["}
     loop row in rows -> lines.push("  {row},")
     lines.push("]);")
@@ -1350,9 +1350,9 @@ fn jet_web_js_closure_expression(ctx: &JetWebEmitContext, enclosing: MirFunction
     loop parameter in function.capture_params {
         if parameter.slot < 0 || parameter.slot >= captures.len() {
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture slot is out of range", "checked capture slots index the emitted closure environment", Val(enclosing.span))
-            continue
+            next
         }
-        schema := jet_web_js_copy_collect_type(ctx, parameter.ty, JetWebCopyBindings{names: [String]{}, keys: [String]{}}, &mut keys, &mut rows)
+        schema := jet_web_js_copy_collect_type(ctx, parameter.ty, JetWebCopyBindings{names: [String]{}, keys: [String]{}}, &keys, &rows)
         value := if parameter.access == MirAccess.Move -> "captured[{parameter.slot}]" else -> "captured[{parameter.slot}].value"
         capture_values.push("jet_testing_history_web_capture({value}, {jet_web_js_quote(schema)}, types, active)")
     }
@@ -1662,7 +1662,7 @@ fn jet_web_js_panic_locals(ctx: &JetWebEmitContext, function: MirFunction, conte
         loop row in function.locals { if row.id == local.local -> place = Val(row.place) }
         if place == None {
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR panic context local is missing", "checked panic locals must resolve to function local places", Val(function.span))
-            continue
+            next
         }
         value := jet_web_js_read_place(ctx, function, place ?? MirPlaceId{value: 0})
         rendered.push("{jet_web_js_quote(local.name)} + \" = \" + jet_debug({value})")

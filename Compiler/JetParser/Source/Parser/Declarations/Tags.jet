@@ -13,15 +13,17 @@ fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifier
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         field :: parser_expect_name(&state, "for a tag policy field")
         parser_expect(&state, TOKEN_COLON, "after a tag policy field")
-        values := parser_tag_path_list(&state)
-        if field.payload.decoded == "deny" {
-            if deny.len() > 0 -> parser_tag_error(&state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
-            deny = values
-        } else if field.payload.decoded == "from" {
-            if from.len() > 0 -> parser_tag_error(&state, field.span, "tag `from` is repeated", "each tag policy field is declared once", "keep one `from: [...]` field")
-            from = values
-        } else {
-            parser_tag_error(&state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths", "write `deny: [...]` or `from: [...]`")
+        values :: parser_tag_path_list(&state)
+        if field.payload.decoded == {
+            "deny" -> {
+                if deny.len() > 0 -> parser_tag_error(&state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
+                deny = values
+            }
+            "from" -> {
+                if from.len() > 0 -> parser_tag_error(&state, field.span, "tag `from` is repeated", "each tag policy field is declared once", "keep one `from: [...]` field")
+                from = values
+            }
+            else -> parser_tag_error(&state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths", "write `deny: [...]` or `from: [...]`")
         }
         if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }

@@ -30,7 +30,7 @@ pub(crate) enum DecoderProtocol {
 pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> String {
     match protocol {
         DecoderProtocol::StandardEnvelope => format!(
-            r#"fn decode_response(raw: String, code: Int) DataTree !{error} -> {{
+            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
     if code == {{
         1 -> {{ return Err({error}.NotRunning) }}
         2 -> {{ return Err({error}.Timeout) }}
@@ -48,7 +48,7 @@ pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> 
 "#,
         ),
         DecoderProtocol::LuaRawJson => format!(
-            r#"fn decode_response(raw: String, code: Int) DataTree !{error} -> {{
+            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
     decode_status(code)
     value := json.parse(raw) ?? return Err({error}.Protocol)
     return Ok(value)
@@ -62,7 +62,7 @@ pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> 
 /// Emit the Lua status adapter shared by response and table-view calls.
 pub(crate) fn render_lua_decode_status(error: &str) -> String {
     format!(
-        r#"fn decode_status(code: Int) Bool !{error} -> {{
+            r#"fn decode_status(code: Int) -> Bool !{error} {{
     if code == 1 -> return Err({error}.NotRunning)
     if code == 2 -> return Err({error}.Timeout)
     if code == 3 -> return Err({error}.Cancelled)
@@ -875,7 +875,7 @@ impl BindingPlan {
                     self.operation.name
                 ));
                 source.push_str(&format!(
-                    "pub fn {}({}: &[U8]) {} -> {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
+                    "pub fn {}({}: &[U8]) -> {} {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
                     self.operation.name,
                     pointer_count.pointer_parameter,
                     self.operation.result_type,

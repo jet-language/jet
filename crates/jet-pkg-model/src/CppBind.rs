@@ -120,7 +120,7 @@ impl Scalar {
             Self::Int => "Int",
             Self::Float => "Float",
             Self::Bool => "Bool",
-            Self::Callback => "fn(Int) Int -[]>",
+            Self::Callback => "fn(Int) -[]> Int",
         }
     }
 
@@ -1343,7 +1343,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
     let descriptor = cpp_descriptor_stamp();
     let mut out = format!(
-        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
+        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
     );
     for class in &surface.classes {
         let name = snake(&class.name);
@@ -1374,7 +1374,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             function.jet_name
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) CppError -[]> {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
@@ -1383,7 +1383,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         ));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") {} !CppError -[FFI.Cpp]> {{\n    value :: abi.{name}_new(",
+            ") -[FFI.Cpp]> {} !CppError {{\n    value :: abi.{name}_new(",
             class.name
         ));
         jet_args(&mut out, &class.ctor);
@@ -1401,7 +1401,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") {} !CppError -[FFI.Cpp]> {{\n        result_value :: abi.{name}_{}(self.value",
+                ") -[FFI.Cpp]> {} !CppError {{\n        result_value :: abi.{name}_{}(self.value",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -1420,7 +1420,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("pub fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") {} !CppError -[FFI.Cpp]> {{\n    result_value :: abi.{}(",
+            ") -[FFI.Cpp]> {} !CppError {{\n    result_value :: abi.{}(",
             function.result.jet(),
             function.jet_name
         ));
@@ -1729,7 +1729,7 @@ mod tests {
         assert!(result
             .source
             .contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
-        assert!(result.source.contains("fn add(value: Int) Int ="));
+        assert!(result.source.contains("fn add(value: Int) -> Int ="));
         assert!(result.source.contains("Int !CppError -[FFI.Cpp]>"));
         assert!(!result.source.contains("=>"));
         assert!(result

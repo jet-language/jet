@@ -10,7 +10,7 @@ pub policy audit(topic: String) {
 }
 
 #Policy(audit("users.load"))
-fn load_user() Int -> 7
+fn load_user() -> Int -> 7
 "#;
     let (tokens, lexer_diagnostics) = Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
@@ -54,7 +54,7 @@ fn user_policy_apply_keeps_a_callable_binding() {
     wrap(call) { return "{topic}:{call()}" }
 }
 
-fn load_user() String -> "ok"
+fn load_user() -> String -> "ok"
 
 fn run() {
     selected :: apply(audit("users.load"), load_user)

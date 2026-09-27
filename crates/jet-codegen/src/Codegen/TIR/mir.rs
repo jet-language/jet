@@ -181,6 +181,8 @@ pub(super) struct FunctionRegistry {
     /// MIR call lowering.  Transaction Rollback lowering uses this fact for
     /// its synthesized snapshot value; it must not guess an associated type.
     return_types: HashMap<MirFunctionId, Option<Type>>,
+    generic_params: HashMap<MirFunctionId, Vec<String>>,
+    owner_types: HashMap<MirFunctionId, Type>,
     pub(super) receiver_access: HashMap<MirFunctionId, MirAccess>,
 }
 
@@ -196,6 +198,8 @@ impl FunctionRegistry {
             by_owner_method: HashMap::new(),
             by_identity: HashMap::new(),
             return_types: HashMap::new(),
+            owner_types: HashMap::new(),
+            generic_params: HashMap::new(),
             receiver_access: HashMap::new(),
         };
         // Resolve stable-ID hash collisions from a canonical identity order.
@@ -243,6 +247,13 @@ impl FunctionRegistry {
                 }
                 TFuncKind::TopLevel => None,
             };
+            if let Some(owner_type) = match &function.kind {
+                TFuncKind::Method { owner_type, .. }
+                | TFuncKind::TraitMethod { owner_type, .. } => Some(owner_type),
+                TFuncKind::TopLevel => None,
+            } {
+                registry.owner_types.insert(id, owner_type.clone());
+            }
             if let Some(access) = receiver {
                 registry
                     .receiver_access
@@ -250,6 +261,14 @@ impl FunctionRegistry {
             }
             registry.by_identity.insert(identity, id);
             registry.return_types.insert(id, function.ret.clone());
+            registry.generic_params.insert(
+                id,
+                function
+                    .generic_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+            );
             registry
                 .by_key
                 .entry(function.key.clone())
@@ -318,6 +337,93 @@ impl FunctionRegistry {
     }
     pub(super) fn return_type_for(&self, id: MirFunctionId) -> Option<Type> {
         self.return_types.get(&id).cloned().flatten()
+    }
+    pub(super) fn call_return_type_for(
+        &self,
+        id: MirFunctionId,
+        type_args: &[Type],
+    ) -> Result<Option<Type>, &'static str> {
+        let Some(return_type) = self.return_types.get(&id) else {
+            return Err("checked call target has no return-type fact");
+        };
+        let Some(return_type) = return_type else {
+            return Ok(None);
+        };
+        let generic_params = self
+            .generic_params
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if generic_params.is_empty() {
+            return Ok(Some(return_type.clone()));
+        }
+        if generic_params.len() != type_args.len() {
+            return Err("checked generic call has incomplete return-type arguments");
+        }
+        let substitutions = generic_params
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Ok(Some(crate::Generics::substitute_type(
+            return_type,
+            &substitutions,
+        )))
+    }
+
+    pub(super) fn method_call_return_type_for(
+        &self,
+        id: MirFunctionId,
+        type_args: &[Type],
+        receiver_type: &Type,
+    ) -> Result<Option<Type>, &'static str> {
+        let Some(return_type) = self.return_types.get(&id) else {
+            return Err("checked method target has no return-type fact");
+        };
+        let Some(return_type) = return_type else {
+            return Ok(None);
+        };
+        let generic_params = self
+            .generic_params
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if generic_params.len() != type_args.len() {
+            return Err("checked generic method has incomplete return-type arguments");
+        }
+        let mut substitutions = generic_params
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let owner_type = self
+            .owner_types
+            .get(&id)
+            .ok_or("checked method target has no owner-type fact")?
+            .without_user_tags();
+        let receiver_type = receiver_type.without_user_tags();
+        let (owner_name, owner_params) = match &owner_type {
+            Type::Apply { name, args } => (name, args.as_slice()),
+            _ => return Ok(Some(crate::Generics::substitute_type(return_type, &substitutions))),
+        };
+        let (receiver_name, owner_args) = match &receiver_type {
+            Type::Apply { name, args } => (name, args.as_slice()),
+            Type::Named(name) => (name, &[][..]),
+            _ => return Err("checked method receiver is not a nominal type"),
+        };
+        if owner_name != receiver_name || owner_params.len() != owner_args.len() {
+            return Err("checked method receiver owner arguments disagree with its target");
+        }
+        for (parameter, argument) in owner_params.iter().zip(owner_args) {
+            let Type::Named(name) = parameter else {
+                return Err("checked generic method owner has a non-parameter type argument");
+            };
+            substitutions.insert(name.clone(), argument.clone());
+        }
+        Ok(Some(crate::Generics::substitute_type(
+            return_type,
+            &substitutions,
+        )))
     }
 
     fn candidates(&self, name: &str, current_module: &str) -> Vec<MirFunctionId> {
@@ -4206,6 +4312,11 @@ enum DeferredCleanup {
     Call(MirValueId),
     Guard(MirPlaceId),
     FileOwner { place: MirPlaceId, live: MirPlaceId },
+    DropPlace {
+        place: MirPlaceId,
+        live: MirPlaceId,
+        kind: MirDropKind,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -4286,6 +4397,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) local_places: HashMap<String, MirPlaceId>,
     pub(super) local_types: HashMap<String, Type>,
     pub(super) local_values: HashMap<String, MirValueId>,
+    drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
     send_fn_locals: HashSet<String>,
     capture_values: HashMap<String, MirValueId>,
     pub(super) prelude_calls: Vec<MirPreludeCall>,
@@ -4451,6 +4563,7 @@ impl<'a> LowerCtx<'a> {
             local_places: HashMap::new(),
             local_types: HashMap::new(),
             local_values: HashMap::new(),
+            drop_live_places: HashMap::new(),
             send_fn_locals: HashSet::new(),
             capture_values: HashMap::new(),
             prelude_calls: Vec::new(),
@@ -4502,6 +4615,36 @@ impl<'a> LowerCtx<'a> {
             method_id,
             method.self_access.map(super::tir_to_mir_types::mir_access),
         ))
+    }
+    pub(super) fn trait_method_return_type(
+        &self,
+        trait_name: &str,
+        method_name: &str,
+    ) -> Result<Type, LowerError> {
+        let trait_ref = lower_trait_ref(self, trait_name)?;
+        let row = self
+            .trait_defs
+            .iter()
+            .find(|row| row.key == trait_ref.name || row.name == trait_name)
+            .ok_or_else(|| {
+                self.error(
+                    self.span(),
+                    format!("missing checked trait row `{}`", trait_ref.name),
+                )
+            })?;
+        row.methods
+            .iter()
+            .find(|method| method.name == method_name)
+            .map(|method| method.return_type.clone())
+            .ok_or_else(|| {
+                self.error(
+                    self.span(),
+                    format!(
+                        "missing checked method `{method_name}` on trait `{}`",
+                        row.name
+                    ),
+                )
+            })
     }
     pub(super) fn is_trait_name(&self, name: &str) -> bool {
         self.trait_defs
@@ -5697,6 +5840,9 @@ impl<'a> LowerCtx<'a> {
                     DeferredCleanup::FileOwner { place, live } => {
                         self.emit_file_owner_cleanup(place, live)?;
                     }
+                    DeferredCleanup::DropPlace { place, live, kind } => {
+                        self.emit_owned_place_cleanup(place, live, kind)?;
+                    }
                 }
             }
         }
@@ -5955,6 +6101,85 @@ impl<'a> LowerCtx<'a> {
         self.switch_to(after);
         Ok(())
     }
+    fn emit_owned_place_cleanup(
+        &mut self,
+        place: MirPlaceId,
+        live: MirPlaceId,
+        kind: MirDropKind,
+    ) -> Result<(), LowerError> {
+        let condition = self.emit(
+            "owned.local.live",
+            Some(Type::Bool),
+            MirOperation::ReadPlace(live),
+        )?;
+        let drop_block = self.new_block(self.span(), "owned.local.drop")?;
+        let after = self.new_block(self.span(), "owned.local.after-drop")?;
+        self.terminate(MirTerminator::Branch {
+            condition,
+            then_target: drop_block,
+            else_target: after,
+        });
+        self.switch_to(drop_block);
+        let ty = self
+            .places
+            .iter()
+            .find(|row| row.id == place)
+            .map(|row| row.ty.clone())
+            .ok_or_else(|| self.error(self.span(), "owned local cleanup has no place"))?;
+        let value = self.emit_mir_type(
+            "owned.local.cleanup.move",
+            Some(ty),
+            MirOperation::MovePlace { place },
+        )?;
+        self.emit(
+            "owned.local.cleanup.drop",
+            None,
+            MirOperation::Drop { value, kind },
+        )?;
+        self.terminate(MirTerminator::Jump { target: after });
+        self.switch_to(after);
+        Ok(())
+    }
+
+    fn register_owned_drop(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        ownership: MirOwnership,
+        initialized: bool,
+    ) -> Result<(), LowerError> {
+        if ownership.drop == MirDropKind::None
+            || matches!(self.ownership_for(ty).mode, MirOwnershipMode::Copy)
+        {
+            return Ok(());
+        }
+        let live_local = TLocal::generated(format!("owned_live_{}", place.0)).as_mutable();
+        let live = self.bind_local(&live_local, Type::Bool, true, false, false)?;
+        let initial = self.emit(
+            "owned.local.live.initial",
+            Some(Type::Bool),
+            MirOperation::Constant(MirConstant::Bool(initialized)),
+        )?;
+        self.emit(
+            "owned.local.live.initialize",
+            None,
+            MirOperation::WritePlace {
+                place: live,
+                value: initial,
+            },
+        )?;
+        self.drop_live_places.insert(place, live);
+        self.defer_stack
+            .last_mut()
+            .expect("function always has a lexical cleanup frame")
+            .actions
+            .push(DeferredCleanup::DropPlace {
+                place,
+                live,
+                kind: ownership.drop,
+            });
+        Ok(())
+    }
 
     pub(super) fn emit_file_owner_replacement(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
         for (owner, live) in self.file_owner_leaves(place) {
@@ -5997,7 +6222,104 @@ impl<'a> LowerCtx<'a> {
         operation: MirOperation,
     ) -> Result<MirValueId, LowerError> {
         let value_type = ty.map(|source| self.mir_type(&source)).transpose()?;
-        self.emit_mir_type_with_ownership(role, value_type, operation, Some(MirOwnership::Owned))
+        let forced_ownership = match &operation {
+            MirOperation::MovePlace { .. } | MirOperation::Move { .. } => None,
+            _ => Some(MirOwnership::Owned),
+        };
+        self.emit_mir_type_with_ownership(role, value_type, operation, forced_ownership)
+    }
+    fn operation_ownership(
+        &self,
+        operation: &MirOperation,
+        value_type: &MirType,
+    ) -> Result<MirOwnership, LowerError> {
+        match operation {
+            MirOperation::MovePlace { .. } | MirOperation::Move { .. } => {
+                Ok(MirOwnership::from_access(MirAccess::Move))
+            }
+            MirOperation::AddressOf { access, .. } => {
+                Ok(MirOwnership::from_access(*access))
+            }
+            MirOperation::RawAddressOf { .. } => Ok(MirOwnership {
+                mode: MirOwnershipMode::ReadBorrow,
+                drop: MirDropKind::None,
+                moved: false,
+                last_use: false,
+                gc_root: false,
+            }),
+            MirOperation::Phi { incoming } => self.phi_ownership(incoming),
+            _ => Ok(self.ownership_for(&mir_type_as_ast(value_type))),
+        }
+    }
+
+    fn phi_ownership(
+        &self,
+        incoming: &[(MirBlockId, MirValueId)],
+    ) -> Result<MirOwnership, LowerError> {
+        let Some((_, first)) = incoming.first() else {
+            return Err(self.error(self.span(), "checked MIR Phi has no incoming values"));
+        };
+        let first_ownership = self
+            .values
+            .iter()
+            .find(|(value, _, _, _)| value == first)
+            .map(|(_, _, _, ownership)| *ownership)
+            .ok_or_else(|| self.error(self.span(), "checked MIR Phi input has no ownership fact"))?;
+        let mut all_copy = first_ownership.mode == MirOwnershipMode::Copy;
+        let mut all_read_borrow = first_ownership.mode == MirOwnershipMode::ReadBorrow;
+        let mut all_write_borrow = first_ownership.mode == MirOwnershipMode::WriteBorrow;
+        let mut all_shared = first_ownership.mode == MirOwnershipMode::Shared;
+        let mut all_move = first_ownership.mode == MirOwnershipMode::Move;
+        let mut all_owned = first_ownership.mode == MirOwnershipMode::Owned;
+        for (_, value) in incoming.iter().skip(1) {
+            let ownership = self
+                .values
+                .iter()
+                .find(|(candidate, _, _, _)| candidate == value)
+                .map(|(_, _, _, ownership)| *ownership)
+                .ok_or_else(|| {
+                    self.error(self.span(), "checked MIR Phi input has no ownership fact")
+                })?;
+            if ownership.drop != first_ownership.drop {
+                return Err(self.error(
+                    self.span(),
+                    "checked MIR Phi inputs disagree on their drop obligation",
+                ));
+            }
+            all_copy &= ownership.mode == MirOwnershipMode::Copy;
+            all_read_borrow &= ownership.mode == MirOwnershipMode::ReadBorrow;
+            all_write_borrow &= ownership.mode == MirOwnershipMode::WriteBorrow;
+            all_shared &= ownership.mode == MirOwnershipMode::Shared;
+            all_move &= ownership.mode == MirOwnershipMode::Move;
+            all_owned &= ownership.mode == MirOwnershipMode::Owned;
+        }
+        if all_copy || all_read_borrow || all_write_borrow || all_shared || all_move || all_owned {
+            return Ok(first_ownership);
+        }
+        let all_owned_values = incoming.iter().all(|(_, value)| {
+            self.values
+                .iter()
+                .find(|(candidate, _, _, _)| candidate == value)
+                .is_some_and(|(_, _, _, ownership)| {
+                    matches!(
+                        ownership.mode,
+                        MirOwnershipMode::Owned | MirOwnershipMode::Move | MirOwnershipMode::Shared
+                    )
+                })
+        });
+        if all_owned_values {
+            return Ok(MirOwnership {
+                mode: MirOwnershipMode::Owned,
+                drop: first_ownership.drop,
+                moved: false,
+                last_use: false,
+                gc_root: false,
+            });
+        }
+        Err(self.error(
+            self.span(),
+            "checked MIR Phi inputs disagree on ownership mode",
+        ))
     }
 
     fn emit_mir_type_with_ownership(
@@ -6008,11 +6330,22 @@ impl<'a> LowerCtx<'a> {
         forced_ownership: Option<MirOwnership>,
     ) -> Result<MirValueId, LowerError> {
         self.promote_spawn_closure_to_send(&operation)?;
-        let (live_places, live) = match &operation {
+        let (file_live_places, file_live) = match &operation {
             MirOperation::MovePlace { place } => (self.file_owner_leaves(*place), false),
             MirOperation::WritePlace { place, .. }
             | MirOperation::ReplacePlace { place, .. } => (self.file_owner_leaves(*place), true),
             _ => (Vec::new(), false),
+        };
+        let (drop_live_place, drop_live) = match &operation {
+            MirOperation::MovePlace { place } => (self.drop_live_places.get(place).copied(), false),
+            MirOperation::InitializeUninit { place } => {
+                (self.drop_live_places.get(place).copied(), true)
+            }
+            MirOperation::WritePlace { place, .. }
+            | MirOperation::ReplacePlace { place, .. } => {
+                (self.drop_live_places.get(place).copied(), true)
+            }
+            _ => (None, false),
         };
         let span = self.span();
         let source_line = self.current_line;
@@ -6021,13 +6354,11 @@ impl<'a> LowerCtx<'a> {
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
         if let Some(value_type) = &value_type {
-            self.values.push((
-                value,
-                value_type.clone(),
-                span,
-                forced_ownership
-                    .unwrap_or_else(|| self.ownership_for(&mir_type_as_ast(value_type))),
-            ));
+            let ownership = match forced_ownership {
+                Some(ownership) => ownership,
+                None => self.operation_ownership(&operation, value_type)?,
+            };
+            self.values.push((value, value_type.clone(), span, ownership));
         }
         if let Some(block) = self
             .blocks
@@ -6043,14 +6374,26 @@ impl<'a> LowerCtx<'a> {
                 operation,
             });
         }
-        for (_, flag) in live_places {
+        for (_, flag) in file_live_places {
             let next = self.emit(
                 "file.owner.live.state",
                 Some(Type::Bool),
-                MirOperation::Constant(MirConstant::Bool(live)),
+                MirOperation::Constant(MirConstant::Bool(file_live)),
             )?;
             self.emit(
                 "file.owner.live.update",
+                None,
+                MirOperation::WritePlace { place: flag, value: next },
+            )?;
+        }
+        if let Some(flag) = drop_live_place {
+            let next = self.emit(
+                "owned.local.live.state",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(drop_live)),
+            )?;
+            self.emit(
+                "owned.local.live.update",
                 None,
                 MirOperation::WritePlace { place: flag, value: next },
             )?;
@@ -6515,13 +6858,15 @@ impl<'a> LowerCtx<'a> {
         access: AccessConvention,
     ) -> Result<(), LowerError> {
         let access = lower_mir_convention(access);
-        let param_value = self.emit(
+        let parameter_type = self.mir_type(ty)?;
+        let param_value = self.emit_mir_type_with_ownership(
             &format!("parameter.{index}.{name}"),
-            Some(ty.clone()),
+            Some(parameter_type),
             MirOperation::Parameter {
                 index,
                 name: name.to_string(),
             },
+            Some(MirOwnership::from_access(access)),
         )?;
         self.local_types.insert(name.to_string(), ty.clone());
         self.local_values.insert(name.to_string(), param_value);
@@ -6563,6 +6908,7 @@ impl<'a> LowerCtx<'a> {
             mir_place.base = MirPlaceBase::Parameter(param_value);
         }
         if matches!(access, MirAccess::Move) {
+            self.register_owned_drop(place, ty, MirOwnership::from_access(access), true)?;
             self.register_file_owner(place)?;
         }
         Ok(())
@@ -6596,6 +6942,7 @@ impl<'a> LowerCtx<'a> {
             persist_key: None,
         });
         self.local_places.insert(local.name.clone(), place);
+        let ownership = self.ownership_for(&ty);
         self.locals.push(MirLocal {
             id: local_id,
             name: local.name.clone(),
@@ -6603,13 +6950,14 @@ impl<'a> LowerCtx<'a> {
             ty: mir_ty,
             place,
             mutable,
-            ownership: self.ownership_for(&ty),
+            ownership,
             comptime,
             uninit,
             arena_view: false,
             string_view: false,
             gc_root: false,
         });
+        self.register_owned_drop(place, &ty, ownership, false)?;
         Ok(place)
     }
     /// Bind a source-level place window to its checked owner place. A single
@@ -7543,24 +7891,27 @@ impl<'a> LowerCtx<'a> {
             } else {
                 MirAccess::Read
             };
-            let ownership = if moved || cloned {
+            let ownership = if moved {
+                MirOwnership::from_access(MirAccess::Move)
+            } else if cloned {
                 MirOwnership::Owned
             } else {
                 MirOwnership::from_access(access)
             };
-            let capture = self.emit(
-                &format!("capture.{slot}.{source}"),
-                Some(ty.clone()),
-                MirOperation::Capture { slot },
-            )?;
             let mir_ty = self.mir_type(ty)?;
+            let capture = self.emit_mir_type_with_ownership(
+                &format!("capture.{slot}.{source}"),
+                Some(mir_ty.clone()),
+                MirOperation::Capture { slot },
+                Some(ownership),
+            )?;
             self.capture_params.push(MirCaptureParam {
                 slot,
                 name: source.clone(),
                 span,
                 ty: mir_ty.clone(),
                 access,
-                ownership: ownership.clone(),
+                ownership,
             });
             let names: &[&str] = if runtime == source {
                 &[source.as_str()]
@@ -7593,6 +7944,11 @@ impl<'a> LowerCtx<'a> {
                     string_view: false,
                     gc_root: false,
                 });
+            }
+            if moved {
+                let source_local = TLocal::user(source.clone());
+                let source_place = self.place_for_local(&source_local, access)?;
+                self.register_owned_drop(source_place, ty, ownership, true)?;
             }
         }
         Ok(())
@@ -8028,7 +8384,8 @@ impl<'a> LowerCtx<'a> {
         if matches!(
             ty,
             Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::Char
-        ) {
+        ) || matches!(ty, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE || name == crate::Syntax::TYPE_NEVER)
+        {
             MirOwnership::copy()
         } else {
             MirOwnership::Owned

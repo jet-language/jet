@@ -231,7 +231,7 @@ fn env_runs_no_project_function() {
     let proj = Scratch::new("env-no-fn");
     let root = Scratch::new("env-no-fn-root");
     let home = Scratch::new("env-no-fn-home");
-    write_packageless_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    write_packageless_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
     let out = jetpack()
         .args(["env", "--no-color", "--", "echo", "entered"])
         .current_dir(&proj.path)
@@ -341,7 +341,7 @@ fn project_dev_runs_fn_dev_after_service_wait() {
     let proj = Scratch::new("dev-runs-fn-dev");
     let root = Scratch::new("dev-runs-fn-dev-root");
     let home = Scratch::new("dev-runs-fn-dev-home");
-    write_packageless_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_packageless_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     let out = jetpack()
         .args(["dev", "--no-color"])
         .current_dir(&proj.path)
@@ -365,7 +365,7 @@ fn dev_no_entry_is_e1254() {
     let proj = Scratch::new("dev-no-entry");
     let root = Scratch::new("dev-no-entry-root");
     let home = Scratch::new("dev-no-entry-home");
-    write_packageless_project(&proj.path, "fn other() { print(\"nope\"); }\n");
+    write_packageless_project(&proj.path, "fn other() { print(\"nope\") }\n");
     let out = jetpack()
         .args(["dev", "--no-color"])
         .current_dir(&proj.path)
@@ -387,7 +387,7 @@ fn dev_untrusted_non_interactive_is_e1255() {
     let proj = Scratch::new("dev-untrusted");
     let root = Scratch::new("dev-untrusted-root");
     let home = Scratch::new("dev-untrusted-home");
-    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     let out = jetpack()
         .args(["dev", "--no-color"])
         .current_dir(&proj.path)
@@ -409,7 +409,7 @@ fn dev_secret_env_untrusted_non_interactive_is_e1255() {
     let proj = Scratch::new("dev-secret-untrusted");
     let root = Scratch::new("dev-secret-untrusted-root");
     let home = Scratch::new("dev-secret-untrusted-home");
-    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     let out = jetpack()
         .args(["dev", "--no-color"])
         .current_dir(&proj.path)
@@ -431,7 +431,7 @@ fn dev_declared_missing_secret_is_e1263() {
     let proj = Scratch::new("dev-secret-missing");
     let root = Scratch::new("dev-secret-missing-root");
     let home = Scratch::new("dev-secret-missing-home");
-    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     let out = jetpack()
         .args(["dev", "--no-color", "--trust"])
         .current_dir(&proj.path)
@@ -455,7 +455,7 @@ fn env_declared_missing_secret_is_e1263() {
     let proj = Scratch::new("env-secret-missing");
     let root = Scratch::new("env-secret-missing-root");
     let home = Scratch::new("env-secret-missing-home");
-    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
     let out = jetpack()
         .args(["env", "--no-color", "--trust", "--", "echo", "entered"])
         .current_dir(&proj.path)
@@ -479,7 +479,7 @@ fn secret_env_beats_foreign_flake_autodetect() {
     let proj = Scratch::new("secret-env-beats-flake");
     let root = Scratch::new("secret-env-beats-flake-root");
     let home = Scratch::new("secret-env-beats-flake-home");
-    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
     fs::write(proj.path.join("flake.nix"), "{ outputs = _: {}; }\n").unwrap();
     let out = jetpack()
         .args(["env", "--no-color", "--", "echo", "entered"])
@@ -503,7 +503,7 @@ fn dev_trust_flag_bypasses() {
     let home = Scratch::new("dev-trust-flag-home");
     let fixtures = Scratch::new("dev-trust-flag-fixtures");
     let fastfetch_out = Scratch::new("dev-trust-flag-fastfetch-out");
-    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
     let out = jetpack()
         .args(["dev", "--no-color", "--offline", "--trust"])
@@ -534,7 +534,7 @@ fn dev_pattern_trust_preauthorizes() {
     let home = Scratch::new("dev-pattern-trust-home");
     let fixtures = Scratch::new("dev-pattern-trust-fixtures");
     let fastfetch_out = Scratch::new("dev-pattern-trust-fastfetch-out");
-    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
 
     let pattern = format!("{}*", proj.path.display());

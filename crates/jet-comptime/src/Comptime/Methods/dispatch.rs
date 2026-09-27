@@ -1191,7 +1191,7 @@ impl<'a> Interp<'a> {
 
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
     /// would in the compiled program. When `v`'s type has a user-written
-    /// `impl Type.Display { fn display(self) String -> { … } }`, run that exact Jet
+    /// `impl Type.Display { fn display(self) -> String { … } }`, run that exact Jet
     /// function body (byte-identical to what the real build does); otherwise
     /// fall back to the built-in `jet_show()` rendering (every primitive, and
     /// any struct/enum with no such impl — sema only accepts those in

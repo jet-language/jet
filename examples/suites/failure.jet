@@ -25,30 +25,30 @@ impl ConfigFailure -> AppFailure {
 }
 
 // The omitted contract is the beginner-facing implicit default `Err` route.
-fn lookup(name: String) Int -> {
+fn lookup(name: String) -> Int {
     if name == "" -> return Err("missing lookup key")
     return Ok(7)
 }
 
-fn read_config(path: String) String !ConfigFailure -> {
+fn read_config(path: String) -> String !ConfigFailure {
     if path == "" -> return Err(ConfigFailure.Missing)
     if path == "bad" -> return Ok("bad")
     return Ok("42")
 }
 
-fn parse_port(raw: String) Int !ConfigFailure -> {
+fn parse_port(raw: String) -> Int !ConfigFailure {
     if raw == "bad" -> return Err(ConfigFailure.Invalid)
     return Ok(42)
 }
 
 // Expert contract: callers can see the single application failure domain.
-fn load(path: String) Int !AppFailure -> {
+fn load(path: String) -> Int !AppFailure {
     raw :: read_config(path)
     port :: parse_port(raw)
     return Ok(port)
 }
 
-fn failure_label(error: AppFailure) String -> {
+fn failure_label(error: AppFailure) -> String {
     if error == {
         .Config(label) -> "config:{label}"
     }

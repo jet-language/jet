@@ -1,5 +1,7 @@
 #[path = "src/SHA256.rs"]
 mod source_sha256;
+#[path = "build/MirImageCodec.rs"]
+mod mir_image_codec;
 
 use std::env;
 use std::fs;
@@ -50,6 +52,11 @@ fn main() {
     let manifest_dir = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for a crate build script"),
     );
+    let out_dir = PathBuf::from(
+        env::var_os("OUT_DIR").expect("OUT_DIR is set for a crate build script"),
+    );
+    println!("cargo:rerun-if-changed=build/MirImageCodec.rs");
+    mir_image_codec::generate(&manifest_dir, &out_dir);
 
     const EFFECT_SOURCE: &str = "../jet-codegen/src/Prelude/Effects.jet";
     const CORE_SOURCE: &str = "../jet-codegen/src/Prelude/Core.jet";

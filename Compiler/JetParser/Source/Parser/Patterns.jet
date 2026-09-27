@@ -4,17 +4,24 @@ pub struct ParsedPattern {
     pub pattern: Pattern
     pub span: Span
 }
+
 fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool {
     token :: parser_current(&state)
-    if token.kind == TOKEN_DOT -> return parser_kind_at(&state, 1) == TOKEN_IDENT
-    if token.kind == TOKEN_NULL || token.kind == TOKEN_BANG || token.kind == TOKEN_QUESTION || token.kind == TOKEN_LBRACE -> return true
-    if token.kind == TOKEN_INT {
-        next_kind := parser_kind_at(&state, 1)
-        return next_kind == TOKEN_DOT_DOT || next_kind == TOKEN_DOT_DOT_LT
+    if token.kind == {
+        TOKEN_DOT -> parser_kind_at(&state, 1) == TOKEN_IDENT
+        TOKEN_NULL -> true
+        TOKEN_BANG -> true
+        TOKEN_QUESTION -> true
+        TOKEN_LBRACE -> true
+        TOKEN_INT -> {
+            next_kind :: parser_kind_at(&state, 1)
+            next_kind == TOKEN_DOT_DOT || next_kind == TOKEN_DOT_DOT_LT
+        }
+        TOKEN_STRING -> token.payload.interpolations > 0
+        TOKEN_RAW_STRING -> token.payload.interpolations > 0
+        else -> false
     }
-    (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING) && token.payload.interpolations > 0
 }
-
 
 fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
     if depth > 128 {
@@ -32,7 +39,7 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
         end = next.span
     }
     if alternatives.len() == 1 -> return first
-    span := parser_cover(first.span, end)
+    span :: parser_cover(first.span, end)
     ParsedPattern{pattern: Pattern.Or(alternatives: alternatives, span: span), span: span}
 }
 
@@ -41,7 +48,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
     if start.kind == TOKEN_QUESTION {
         parser_bump(&state)
         binding :: parser_expect_name(&state, "after `?` in a present-value pattern")
-        span := parser_cover(start.span, binding.span)
+        span :: parser_cover(start.span, binding.span)
         return ParsedPattern{pattern: Pattern.Present(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
     }
     if start.kind == TOKEN_BANG || start.kind == TOKEN_NULL {
@@ -52,40 +59,42 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
     if start.kind == TOKEN_STRING || start.kind == TOKEN_RAW_STRING -> return parser_parse_string_pattern(&state)
     if start.kind == TOKEN_INT {
         parser_bump(&state)
-        low := start.payload.integer ?? 0
-        range_kind := parser_current_kind(&state)
+        low :: start.payload.integer ?? 0
+        range_kind :: parser_current_kind(&state)
         if range_kind == TOKEN_DOT_DOT || range_kind == TOKEN_DOT_DOT_LT {
             parser_bump(&state)
             high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
-            value := high.payload.integer ?? low
-            span := parser_cover(start.span, high.span)
+            value :: high.payload.integer ?? low
+            span :: parser_cover(start.span, high.span)
             return ParsedPattern{pattern: Pattern.Range(lo: low, hi: value, span: span), span: span}
         }
         return ParsedPattern{pattern: Pattern.Range(lo: low, hi: low, span: start.span), span: start.span}
     }
-    if start.kind == TOKEN_LPAREN || start.kind == TOKEN_LBRACKET {
-        return parser_parse_pattern_sequence(&state, depth + 1)
-    }
+    if start.kind == TOKEN_LPAREN || start.kind == TOKEN_LBRACKET -> return parser_parse_pattern_sequence(&state, depth + 1)
     leading_dot := false
     path := ""
     path_span := start.span
-    if start.kind == TOKEN_DOT {
-        parser_bump(&state)
-        leading_dot = true
-        name :: parser_expect_name(&state, "after `.` in a variant pattern")
-        path = name.payload.decoded
-        path_span = name.span
-    } else if start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF {
-        parser_bump(&state)
-        path = start.payload.decoded
-        path_span = start.span
-    } else {
-        parser_add_error(&state, start.span, "expected a pattern, found `{start.payload.text}`", "patterns bind values, name variants, and express range or string cases", "write a binding name, variant, or pattern constructor")
-        if start.kind != TOKEN_EOF && start.kind != TOKEN_RBRACE && start.kind != TOKEN_COMMA -> parser_bump(&state)
-        return ParsedPattern{pattern: Pattern.Variant(variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: start.span), span: start.span}
+    if {
+        start.kind == TOKEN_DOT -> {
+            parser_bump(&state)
+            leading_dot = true
+            name :: parser_expect_name(&state, "after `.` in a variant pattern")
+            path = name.payload.decoded
+            path_span = name.span
+        }
+        start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF -> {
+            parser_bump(&state)
+            path = start.payload.decoded
+            path_span = start.span
+        }
+        else -> {
+            parser_add_error(&state, start.span, "expected a pattern, found `{start.payload.text}`", "patterns bind values, name variants, and express range or string cases", "write a binding name, variant, or pattern constructor")
+            if start.kind != TOKEN_EOF && start.kind != TOKEN_RBRACE && start.kind != TOKEN_COMMA -> parser_bump(&state)
+            return ParsedPattern{pattern: Pattern.Variant(variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: start.span), span: start.span}
+        }
     }
     loop {
-        separator_kind := parser_current_kind(&state)
+        separator_kind :: parser_current_kind(&state)
         if separator_kind != TOKEN_DOT && separator_kind != TOKEN_COLON_COLON -> break
         parser_bump(&state)
         member :: parser_expect_name(&state, "after a separator in a variant pattern")
@@ -96,7 +105,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         parser_expect(&state, TOKEN_LPAREN, "`(` after a result pattern")
         binding :: parser_expect_name(&state, "inside a result pattern")
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a result pattern")
-        span := parser_cover(start.span, close.span)
+        span :: parser_cover(start.span, close.span)
         if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
         return ParsedPattern{pattern: Pattern.Err(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
     }
@@ -117,7 +126,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after variant pattern bindings")
         end = close.span
     }
-    span := parser_cover(start.span, end)
+    span :: parser_cover(start.span, end)
     ParsedPattern{pattern: Pattern.Variant(variant: path, bindings: bindings, leading_dot: leading_dot, span: span), span: span}
 }
 
@@ -125,8 +134,8 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     start :: parser_current(&state)
     if start.kind == TOKEN_INT {
         parser_bump(&state)
-        low := start.payload.integer ?? 0
-        range_kind := parser_current_kind(&state)
+        low :: start.payload.integer ?? 0
+        range_kind :: parser_current_kind(&state)
         if range_kind == TOKEN_DOT_DOT || range_kind == TOKEN_DOT_DOT_LT {
             parser_bump(&state)
             high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
@@ -135,18 +144,13 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
         return PatSlot.Range(lo: low, hi: low)
     }
     name :: parser_expect_name(&state, "in a variant binding")
-    if name.payload.decoded == "_" -> return PatSlot.Wildcard
-    PatSlot.Bind(name: name.payload.decoded, span: name.span)
+    if name.payload.decoded == "_" -> PatSlot.Wildcard else -> PatSlot.Bind(name: name.payload.decoded, span: name.span)
 }
 
 fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPattern {
     open :: parser_bump(&state)
-    close_kind := TOKEN_RPAREN
-    variant := "tuple"
-    if open.kind == TOKEN_LBRACKET {
-        close_kind = TOKEN_RBRACKET
-        variant = "list"
-    }
+    close_kind :: if open.kind == TOKEN_LBRACKET -> TOKEN_RBRACKET else -> TOKEN_RPAREN
+    variant :: if open.kind == TOKEN_LBRACKET -> "list" else -> "tuple"
     bindings := [PatSlot]{}
     if parser_current_kind(&state) != close_kind {
         loop {
@@ -158,7 +162,7 @@ fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPa
         }
     }
     close :: parser_expect(&state, close_kind, "the matching delimiter after pattern bindings")
-    span := parser_cover(open.span, close.span)
+    span :: parser_cover(open.span, close.span)
     ParsedPattern{pattern: Pattern.Variant(variant: variant, bindings: bindings, leading_dot: false, span: span), span: span}
 }
 
@@ -187,7 +191,7 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct pattern fields")
-    span := parser_cover(type_span, close.span)
+    span :: parser_cover(type_span, close.span)
     ParsedPattern{pattern: Pattern.Struct(fields: fields, rest: rest, span: span), span: span}
 }
 
@@ -195,17 +199,15 @@ fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
     token :: parser_bump(&state)
     parts := [StrMatchPart]{}
     if token.payload.string_parts.len() > 0 {
-        index := 0
-        loop index < token.payload.string_parts.len() {
-            part :: token.payload.string_parts[index]
-            if part.kind == STRING_PART_TEXT {
-                parts.push(StrMatchPart.Lit(text: part.text))
-            } else if part.kind == STRING_PART_INTERPOLATION {
-                name := "_"
-                if part.tokens.len() > 1 && part.tokens[0].kind == TOKEN_IDENT -> name = part.tokens[0].payload.decoded
-                parts.push(StrMatchPart.Hole(name: name, ty: None, span: part.span))
+        loop part in token.payload.string_parts {
+            if part.kind == {
+                STRING_PART_TEXT -> parts.push(StrMatchPart.Lit(text: part.text))
+                STRING_PART_INTERPOLATION -> {
+                    name :: if part.tokens.len() > 1 && part.tokens[0].kind == TOKEN_IDENT -> part.tokens[0].payload.decoded else -> "_"
+                    parts.push(StrMatchPart.Hole(name: name, ty: None, span: part.span))
+                }
+                else -> {}
             }
-            index += 1
         }
     } else {
         parts.push(StrMatchPart.Lit(text: token.payload.decoded))

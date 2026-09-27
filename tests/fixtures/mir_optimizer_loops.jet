@@ -1,0 +1,32 @@
+// Source optimizer counted-loop, vector legality, reduction, and early-exit fixture.
+fn optimizer_loop_map(values: [Float#4]) -> [Float#4] {
+    output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    loop index in 0..<4 {
+        output[index] = values[index] * 2.0
+    }
+    return output
+}
+
+fn optimizer_loop_sum(values: [Float#4]) -> Float {
+    total := Float{0.0}
+    loop index in 0..<4 { total += values[index] }
+    return total
+}
+
+fn optimizer_loop_early_exit(values: [Float#4], sought: Float) -> Bool {
+    loop index in 0..<4 {
+        if values[index] == sought -> return true
+    }
+    return false
+}
+
+fn run() {
+    values := [Float#4]{1.0, 2.0, 3.0, 4.0}
+    mapped := optimizer_loop_map(values)
+    first_is_doubled := mapped[0] == 2.0
+    last_is_doubled := mapped[3] == 8.0
+    sum_is_exact := optimizer_loop_sum(values) == 10.0
+    found := optimizer_loop_early_exit(values, 3.0)
+    missed := optimizer_loop_early_exit(values, 9.0)
+    print("{first_is_doubled} {last_is_doubled} {sum_is_exact} {found} {missed}")
+}

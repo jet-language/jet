@@ -826,7 +826,7 @@ mod production_path {
         let right = Scratch::new("compiler-speed-c-link-right");
         let package =
             "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
-        let source = "use c.answer as answer\n#Import module c.answer { fn value() I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n";
+        let source = "use c.answer as answer\n#Import module c.answer { fn value() -> I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n";
         for scratch in [&left, &right] {
             fs::create_dir_all(scratch.join("native")).unwrap();
             fs::create_dir_all(scratch.join("src")).unwrap();

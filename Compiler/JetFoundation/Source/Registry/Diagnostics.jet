@@ -37,7 +37,6 @@ pub struct DiagnosticRegistryRow {
     pub no_fix_reason: ?DiagnosticNoFixReason
 }
 
-
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])
@@ -48,17 +47,19 @@ fn diagnostic_is_continuation(value: Int) -> Bool {
 }
 
 fn diagnostic_utf8_width(source: [U8], index: Int) -> Int {
-    first := diagnostic_byte_at(source, index)
-    if first < 0 -> return 0
-    if first < 128 -> return 1
-    if first >= 194 && first <= 223 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) -> return 2
-    if first >= 224 && first <= 239 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) -> return 3
-    if first >= 240 && first <= 244 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 3)) -> return 4
-    1
+    first :: diagnostic_byte_at(source, index)
+    if {
+        first < 0 -> 0
+        first < 128 -> 1
+        first >= 194 && first <= 223 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) -> 2
+        first >= 224 && first <= 239 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) -> 3
+        first >= 240 && first <= 244 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 3)) -> 4
+        else -> 1
+    }
 }
 
 fn diagnostic_scalar_at(source: [U8], index: Int) -> String {
-    width := diagnostic_utf8_width(source, index)
+    width :: diagnostic_utf8_width(source, index)
     if width <= 0 -> return ""
     out := [U8]{}
     loop offset in 0..<width {
@@ -69,10 +70,12 @@ fn diagnostic_scalar_at(source: [U8], index: Int) -> String {
 }
 
 fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool {
-    value := diagnostic_byte_at(source, index)
-    if value < 0 -> return false
-    if value < 128 -> return value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
-    diagnostic_unicode.is_whitespace(diagnostic_scalar_at(source, index))
+    value :: diagnostic_byte_at(source, index)
+    if {
+        value < 0 -> false
+        value < 128 -> value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
+        else -> diagnostic_unicode.is_whitespace(diagnostic_scalar_at(source, index))
+    }
 }
 
 fn diagnostic_is_sentence_digit(value: Int) -> Bool {
@@ -89,12 +92,12 @@ fn diagnostic_sentence_case_line(value: String) -> String {
     finished := false
     index := 0
     loop index < bytes.len() {
-        width := diagnostic_utf8_width(bytes, index)
+        width :: diagnostic_utf8_width(bytes, index)
         if finished {
             index += width
             next
         }
-        character := diagnostic_byte_at(bytes, index)
+        character :: diagnostic_byte_at(bytes, index)
         if first < 0 {
             if diagnostic_is_whitespace_at(bytes, index) || character == 42 || character == 126 || character == 95 {
                 index += width
@@ -147,8 +150,8 @@ pub fn diagnostic_registry_row(code: String) -> ?DiagnosticRegistryRow {
 fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> ?TextEdit {
     fix :: row.structured_fix ?? return None
     if fix == {
-        .Replace(_, replacement) -> return Val(TextEdit{span: span, new_text: replacement})
-        .Remove(_) -> return Val(TextEdit{span: span, new_text: ""})
+        .Replace(_, replacement) -> Val(TextEdit{span: span, new_text: replacement})
+        .Remove(_) -> Val(TextEdit{span: span, new_text: ""})
         else -> None
     }
 }
@@ -156,14 +159,16 @@ fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> ?T
 fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> ?DiagnosticFixApplicability {
     if !has_edit -> return None
     safety :: row.fix_safety ?? return None
-    if safety == DiagnosticFixSafety.Formatting || safety == DiagnosticFixSafety.BehaviorPreserving -> return Val(DiagnosticFixApplicability.Safe)
-    Val(DiagnosticFixApplicability.Suggested)
+    if safety == {
+        .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
+        else -> Val(DiagnosticFixApplicability.Suggested)
+    }
 }
 
 fn diagnostic_registry_project_row(diagnostic: Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic {
     if diagnostic.span != None {
         span :: diagnostic.span ?? return diagnostic
-        edit := diagnostic_registry_static_edit(row, span)
+        edit :: diagnostic_registry_static_edit(row, span)
         if edit != None {
             diagnostic.edit = edit
             diagnostic.applicability = diagnostic_registry_applicability(row, true)
@@ -178,7 +183,7 @@ fn diagnostic_registry_project_row(diagnostic: Diagnostic, row: DiagnosticRegist
 // span; the generated registry row owns protocol metadata and static edits.
 pub fn diagnostic_from_registry(code: String, span: ?Span, what: String, why: String, fix: String) -> Diagnostic {
     row :: diagnostic_registry_row(code) ?? return panic("diagnostic `{code}` has no generated Source registry row")
-    diagnostic := Diagnostic{
+    diagnostic :: Diagnostic{
         moment: row.moment,
         severity: row.severity,
         code: code,
@@ -220,7 +225,10 @@ fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool {
 }
 
 fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool {
-    safety == DiagnosticFixSafety.Formatting || safety == DiagnosticFixSafety.BehaviorPreserving
+    if safety == {
+        .Formatting | .BehaviorPreserving -> true
+        else -> false
+    }
 }
 
 pub fn diagnostic_registry_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
@@ -271,7 +279,7 @@ pub fn diagnostic_registry_with_alternative_edit(diagnostic: Diagnostic, edit: T
             diagnostic.structured = Val(DiagnosticStructured.SuggestedEdits(edits))
             diagnostic
         }
-        else -> return panic("diagnostic `{diagnostic.code}` cannot carry source edit alternatives with another structured payload")
+        else -> panic("diagnostic `{diagnostic.code}` cannot carry source edit alternatives with another structured payload")
     }
 }
 

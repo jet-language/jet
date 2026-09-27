@@ -195,7 +195,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 pub fn run_doctor() {
     println!("jet self lsp doctor");
     println!("--------------");
-    let src = "fn run() { print(\"hello\"); }\n";
+    let src = "fn run() { print(\"hello\") }\n";
     let (toks, lex_errs) = crate::Lexer::lex(src);
     if lex_errs.is_empty() {
         println!("  [ok] lexer");
@@ -322,12 +322,12 @@ pub fn measure_cone_bench() -> Vec<jet_driver::QueryService::ReverdictReceipt> {
     let mut receipts = Vec::new();
     for functions in [16, 128] {
         let mut source = (0..functions)
-            .map(|index| format!("fn helper_{index}() Int -> {{ return {index} }}\n"))
+            .map(|index| format!("fn helper_{index}() -> Int {{ return {index} }}\n"))
             .collect::<String>();
-        source.push_str("fn target() Int -> { return 1 }\nfn run() Int -> { return target() }\n");
+        source.push_str("fn target() -> Int { return 1 }\nfn run() -> Int { return target() }\n");
         let edited = source.replace(
-            "fn target() Int -> { return 1 }",
-            "fn target() Int -> { return 2 }",
+            "fn target() -> Int { return 1 }",
+            "fn target() -> Int { return 2 }",
         );
         let mut queries = jet_driver::QueryService::CompilerQueries::new();
         let _ = queries.check_text_with_receipt("cone-bench.jet", &source, true);

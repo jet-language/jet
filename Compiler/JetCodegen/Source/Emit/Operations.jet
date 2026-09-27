@@ -198,7 +198,10 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MirFun
     already_borrowed := false
     value := if borrowed && !has_coercion && arg.access == MirAccess.Read -> {
         already_borrowed = true
-        if arg.place != None -> jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Read) else -> jet_rust_emit_value_reference(arg.value, false)
+        if arg.place != None -> jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Read) else -> {
+            partial := if jet_rust_emit_partial_projection_only(ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(ctx, function, arg.value) else -> None
+            if partial != None -> partial ?? jet_rust_emit_value_reference(arg.value, false) else -> jet_rust_emit_value_reference(arg.value, false)
+        }
     } else if arg.access == MirAccess.Write -> {
         if arg.place != None -> jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Write) else -> jet_rust_emit_value_reference(arg.value, true)
     } else if arg.access == MirAccess.Move -> {
@@ -597,7 +600,7 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                 .Struct(fields, _) -> {
                     rendered := [String]{}
                     valid := true
-                    for field in fields {
+                    loop field in fields {
                         if field.computed -> next
                         field_name := jet_rust_emit_field_name(ctx, field.id)
                         value := jet_rust_emit_c_abi_encode(ctx, "({source}).{field_name}", field.ty, borrowed, visited)
@@ -621,7 +624,7 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                     abi_type := if jet_rust_emit_c_abi_unit_enum(variants) -> tag_type else -> jet_rust_emit_c_abi_nominal_name(row, "enum")
                     arms := [String]{}
                     variant_index := 0
-                    for variant in variants {
+                    loop variant in variants {
                         variant_name := jet_rust_emit_variant_name(ctx, row.id, variant.name)
                         discriminant :: jet_rust_emit_c_abi_discriminant(variants, variant_index) ?? {
                             visited.pop()
@@ -650,7 +653,7 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                                     pattern_fields := [String]{}
                                     payload_fields := [String]{}
                                     valid := true
-                                    for field in fields {
+                                    loop field in fields {
                                         if field.computed -> next
                                         field_name := jet_rust_emit_field_name(ctx, field.id)
                                         binding := "__jet_c_field_{field.id.value}"
@@ -732,7 +735,7 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                 .Struct(fields, _) -> {
                     rendered := [String]{}
                     valid := true
-                    for field in fields {
+                    loop field in fields {
                         if field.computed -> next
                         field_name := jet_rust_emit_field_name(ctx, field.id)
                         value := jet_rust_emit_c_abi_decode(ctx, "({source}).{field_name}", field.ty, visited)
@@ -754,7 +757,7 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                     tag_type := jet_rust_emit_c_abi_tag_type(tag)
                     arms := [String]{}
                     variant_index := 0
-                    for variant in variants {
+                    loop variant in variants {
                         variant_name := jet_rust_emit_variant_name(ctx, row.id, variant.name)
                         discriminant :: jet_rust_emit_c_abi_discriminant(variants, variant_index) ?? {
                             visited.pop()
@@ -779,7 +782,7 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                                     union_field := jet_rust_emit_c_abi_payload_field_name(variant)
                                     payload_values := [String]{}
                                     valid := true
-                                    for field in fields {
+                                    loop field in fields {
                                         if field.computed -> next
                                         field_name := jet_rust_emit_field_name(ctx, field.id)
                                         decoded := jet_rust_emit_c_abi_decode(ctx, "({payload_name}).{field_name}", field.ty, visited)
@@ -1536,7 +1539,7 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MirFunction,
     expression
 }
 
-fn jet_rust_emit_columnar_index_operand(ctx: &JetRustEmitContext, function: MirFunction, index: MirValueId, location: MirPanicLoc) -> String {
+fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MirFunction, index: MirValueId, location: MirPanicLoc) -> String {
     ty := jet_rust_emit_value_type(function, index)
     loop {
         if ty.kind == {
@@ -1568,7 +1571,7 @@ fn jet_rust_emit_columnar_read(ctx: &JetRustEmitContext, function: MirFunction, 
         return "unreachable!(\"invalid columnar accessor route\")"
     }
     base_text := jet_rust_emit_value_reference(base, false)
-    index_text := jet_rust_emit_columnar_index_operand(ctx, function, index, location)
+    index_text := jet_rust_emit_index_operand(ctx, function, index, location)
     field_name := jet_rust_emit_field_name(ctx, column)
     "({base_text}).cell({column_index}usize, {index_text}, {jet_rust_emit_source_path(ctx, location.file)}, {location.line}u32).jet_col_{field_name}()"
 }
@@ -1650,13 +1653,13 @@ fn jet_rust_emit_is_distinct_type(ctx: &JetRustEmitContext, source: MirType) -> 
     ty := source
     if ty.identity != None {
         identity :: ty.identity ?? MirTypeId{value: 0}
-        for instance in ctx.program.type_instances {
+        loop instance in ctx.program.type_instances {
             if instance.identity == Val(identity) { ty = instance; break }
         }
     }
     if ty.kind == {
         .Apply(name, _) -> {
-            for definition in ctx.program.types {
+            loop definition in ctx.program.types {
                 if definition.id == name.id {
                     if definition.kind == {
                         .Distinct(_, _) -> return true
@@ -1676,8 +1679,8 @@ fn jet_rust_emit_unit_wrap(ctx: &JetRustEmitContext, target: MirType, value: Str
 }
 
 fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction, call: MirPreludeCallId, value: MirValueId, parameters: [MirValueId], target: MirType, location: MirPanicLoc) -> String {
-    route :: None
-    for candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
+    route := None
+    loop candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
     route_row :: route ?? {
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "unit conversion route is missing", "each checked unit conversion must retain its exact StaticPrelude kernel", Val(function.span))
         return "unreachable!(\"missing unit conversion route\")"
@@ -1685,7 +1688,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
     rounded := route_row.member == "conversion_rounded" || route_row.member == "conversion_rounded_measurement"
     args := [String]{jet_rust_emit_value_read(value)}
     digits_index := if rounded -> 5 else -> -1
-    for index in 0..parameters.len() {
+    loop index in 0..parameters.len() {
         parameter := parameters[index]
         if index < 4 {
             instruction :: jet_rust_emit_find_value_instruction(function, parameter)
@@ -1766,8 +1769,8 @@ fn jet_rust_emit_conversion(ctx: &JetRustEmitContext, function: MirFunction, val
     if conversion == MirConversion.SendFn -> return "std::sync::Arc::new({rendered})"
     if conversion == {
         .Prelude(call, location, fallibility) -> {
-            route :: None
-            for candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
+            route := None
+            loop candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
             if route != None {
                 route_row :: route ?? panic("conversion route disappeared")
                 if route_row.member.starts_with("conversion_") -> return jet_rust_emit_unit_conversion(ctx, function, call, value, parameters, target, location)
@@ -1822,9 +1825,9 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MirTypeId, val
     message := None
     code := None
     cause := None
-    for declared_field in declared {
+    loop declared_field in declared {
         matched := None
-        for value in values {
+        loop value in values {
             if value.field == declared_field.id {
                 if matched != None {
                     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal repeats a field", "each canonical error field must appear once", Val(declared_field.span))
@@ -1855,7 +1858,7 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MirTypeId, val
 fn jet_rust_emit_global_symbol(ctx: &JetRustEmitContext, name: String) -> String {
     if name == "transaction" -> return "{ctx.config.root_prefix}jet_transaction()"
     if name == "stm" -> return "{ctx.config.root_prefix}jet_stm::begin()"
-    for constant in ctx.program.constants {
+    loop constant in ctx.program.constants {
         if constant.name == name || constant.key == name -> return jet_rust_emit_symbol("__jet_const_", constant.name, constant.id.value)
     }
     "{ctx.config.root_prefix}{jet_rust_emit_sanitize(name)}"
@@ -1985,6 +1988,10 @@ fn jet_rust_emit_scope_exit(ctx: &JetRustEmitContext, function: MirFunction, id:
     "()"
 }
 fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId, kind: MirDropKind) -> String {
+    partial := jet_rust_emit_partial_drop_value(ctx, function, value)
+    if partial != None -> return partial ?? "unreachable!(\"missing partial drop\")"
+    uninit := jet_rust_emit_uninit_fixed_drop_value(function, value)
+    if uninit != None -> return uninit ?? "unreachable!(\"missing uninitialized fixed-list drop\")"
     if kind == {
         .Value | .Shared -> return "{{ drop({jet_rust_emit_value_move(value)}); () }}"
         .View -> return "{{ drop({jet_rust_emit_value_move(value)}); () }}"
@@ -2345,7 +2352,14 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
         .Index(call, base, index, kind, access, panic_location, _) -> return jet_rust_emit_index(ctx, function, call, base, index, kind, access, panic_location)
         .Slice(call, base, start, end, range, panic_location) -> return jet_rust_emit_slice(ctx, call, base, start, end, range, panic_location)
         .Range(start, end, exclusive) -> return "{jet_rust_emit_value_read(start)}{if exclusive -> ".." else -> "..="}{jet_rust_emit_value_read(end)}"
-        .Field(base, field) -> return "({jet_rust_emit_value_read(base)}).{jet_rust_emit_field_name(ctx, field)}.clone()"
+        .Field(base, field) -> {
+            partial := jet_rust_emit_partial_projected_value(ctx, function, base, field)
+            if partial != None {
+                reference := partial ?? "__jet_missing_partial"
+                return "(*({reference})).clone()"
+            }
+            return "({jet_rust_emit_value_read(base)}).{jet_rust_emit_field_name(ctx, field)}.clone()"
+        }
         .Struct(type_id, fields) -> {
             rendered := [String]{}
             loop field in fields -> rendered.push("{jet_rust_emit_field_name(ctx, field.field)}: {jet_rust_emit_value_move(field.value)}")

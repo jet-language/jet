@@ -16,13 +16,7 @@ fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MirType, acce
 }
 
 fn jet_rust_emit_callable_return(ctx: &JetRustEmitContext, function: MirFunction) -> String {
-    success := jet_rust_emit_type(ctx, function.return_type)
-    if function.failure == {
-        .Infallible -> success
-        .Result(_, error) -> "{ctx.config.root_prefix}JetOutcome<{success}, {jet_rust_emit_type(ctx, error)}>"
-        .Optional(_) -> "{ctx.config.root_prefix}JetOutcome<{success}, {ctx.config.root_prefix}JetAbsent>"
-        .Diverges(_) -> "std::convert::Infallible"
-    }
+    jet_rust_emit_type(ctx, function.return_type)
 }
 
 fn jet_rust_emit_is_columnar_type(ctx: &JetRustEmitContext, source: MirType) -> Bool {
@@ -683,19 +677,35 @@ fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MirType) -> ?
     None
 }
 
+fn jet_rust_emit_native_rust_derive_name_for_id(id: MirTraitId) -> ?String {
+    if id == mir_trait_id("Clone") -> return Val("Clone")
+    if id == mir_trait_id("Copy") -> return Val("Copy")
+    if id == mir_trait_id("Debug") -> return Val("Debug")
+    if id == mir_trait_id("Default") -> return Val("Default")
+    if id == mir_trait_id("Eq") -> return Val("Eq")
+    if id == mir_trait_id("Hash") -> return Val("Hash")
+    if id == mir_trait_id("Ord") -> return Val("Ord")
+    if id == mir_trait_id("PartialEq") -> return Val("PartialEq")
+    if id == mir_trait_id("PartialOrd") -> return Val("PartialOrd")
+    None
+}
+
 fn jet_rust_emit_capability_trait_ref(ctx: &JetRustEmitContext, trait_name: String) -> ?MirTraitRef {
+    expected_id := mir_trait_id(trait_name)
+    native_name := jet_rust_emit_native_rust_derive_name_for_id(expected_id)
+    if native_name == None || (native_name ?? "") != trait_name -> return None
     found := None
     loop candidate in ctx.program.traits {
-        if candidate.name == trait_name {
-            if found != None {
-                existing :: found ?? MirTraitRef{id: MirTraitId{value: 0}, name: ""}
-                if existing.id != candidate.id {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name is ambiguous", "capability impl selection must resolve one declared trait identity before comparing impl rows", None)
-                    return None
-                }
-            }
-            found = Val(MirTraitRef{id: candidate.id, name: candidate.key})
+        if candidate.id != expected_id -> next
+        if candidate.name != trait_name || candidate.key == "" {
+            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
+            return None
         }
+        if found != None {
+            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait identity is duplicated", "capability impl selection requires one checked row for the canonical trait ID", None)
+            return None
+        }
+        found = Val(MirTraitRef{id: candidate.id, name: candidate.key})
     }
     if found != None -> return found
     Val(mir_trait_ref(trait_name))
@@ -1019,32 +1029,40 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MirType
     if clone_capable && !clone_user_impl -> derives.push("Clone")
     if debug_capable && !debug_user_impl -> derives.push("Debug")
     loop trait_id in definition.derives {
-        trait_name := None
-        loop trait_row in ctx.program.traits {
-            if trait_row.id == trait_id {
-                trait_name = Val(trait_row.name)
-                break
+        trait_row := None
+        duplicate_trait_row := false
+        loop candidate in ctx.program.traits {
+            if candidate.id == trait_id {
+                if trait_row != None {
+                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait identity is duplicated", "checked type derives require one row for each declared trait ID", Val(definition.span))
+                    duplicate_trait_row = true
+                    break
+                }
+                trait_row = Val(candidate)
             }
         }
-        if trait_name == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "checked type derives must resolve their canonical trait declaration", Val(definition.span))
+        if duplicate_trait_row -> next
+        if trait_row != None {
+            row :: trait_row ?? panic("selected derive trait row disappeared")
+            jet_rust_emit_validate_derived_trait(ctx, definition, trait_id, row.name)
             next
         }
-        name :: trait_name ?? ""
+        native_name := jet_rust_emit_native_rust_derive_name_for_id(trait_id)
+        if native_name == None {
+            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "only canonical native Rust derive IDs may omit a checked trait declaration", Val(definition.span))
+            next
+        }
+        name :: native_name ?? next
         if name == "Clone" && !clone_capable {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
         }
         if name == "Debug" && !debug_capable {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Debug without a checked Rust Debug capability", "all stored fields and recursive nominal payloads must support Debug", Val(definition.span))
         }
-        if name == "Clone" || name == "Copy" || name == "Debug" || name == "Default" || name == "Eq" || name == "Hash" || name == "Ord" || name == "PartialEq" || name == "PartialOrd" {
-            capability := derives_allowed
-            if name == "Clone" -> capability = clone_capable && !clone_user_impl
-            if name == "Debug" -> capability = debug_capable && !debug_user_impl
-            if capability && !derives.contains(name) -> derives.push(name)
-        } else {
-            jet_rust_emit_validate_derived_trait(ctx, definition, trait_id, name)
-        }
+        capability := derives_allowed
+        if name == "Clone" -> capability = clone_capable && !clone_user_impl
+        if name == "Debug" -> capability = debug_capable && !debug_user_impl
+        if capability && !derives.contains(name) -> derives.push(name)
     }
     derives
 }

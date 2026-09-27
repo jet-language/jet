@@ -405,15 +405,15 @@ use core.compute as compute
 use core.encoding.json as json
 
 #Import module c.{abi} {{
-    fn open() Int = "{abi}_open"
-    fn take_error() Int = "{abi}_take_error"
+    fn open() -> Int = "{abi}_open"
+    fn take_error() -> Int = "{abi}_take_error"
     fn cancel(handle: Int) = "{abi}_cancel"
     fn close(handle: Int) = "{abi}_close"
 "#
     );
     for function in functions {
         out.push_str(&format!(
-            "    fn {function}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{function}\"\n"
+            "    fn {function}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n"
         ));
     }
     out.push_str(&format!(
@@ -448,7 +448,7 @@ pub enum OctaveError {{
 
 pub fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
 
-pub fn open() Session !OctaveError -[FFI.Octave]> {
+pub fn open() -[FFI.Octave]> Session !OctaveError {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
     return Ok(Session{ value: handle })
@@ -460,7 +460,7 @@ pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
     );
     for function in functions {
         out.push_str(&format!(
-            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) Tensor !OctaveError -[FFI.Octave, GPU]> {{
+            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor !OctaveError {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [DataTree]{{}}
     loop dimension in compute.shape(input) {{
@@ -660,7 +660,7 @@ mod tests {
         assert!(source.contains(".Array(shape_values) {"));
         assert!(source.contains("compute.reshape(tensor, [rows, cols])"));
         assert!(source.contains("compute.rank(input) != 2 ->"));
-        assert!(source.contains("-[FFI.Octave, GPU]> {"));
+        assert!(source.contains("-[FFI.Octave, GPU]> Tensor !OctaveError {"));
         assert!(!source.contains("TensorWire"));
         assert!(!source.contains("=>") && !source.contains("Session.{"));
     }

@@ -29,13 +29,13 @@ const APP_HANDLERS: &str = r#"
 use core.web as web
 #Target(Web)
 
-fn home() WebPage -> web.page("Home", "hello")
+fn home() -> WebPage -> web.page("Home", "hello")
 
-fn detail(id: Int) WebPage -> web.page("Detail", "item {id}")
+fn detail(id: Int) -> WebPage -> web.page("Detail", "item {id}")
 
-fn save() String -> "saved"
+fn save() -> String -> "saved"
 
-fn run() App -> {
+fn run() -> App {
     return web.app()
         .route("/", home)
         .page("/about", home)

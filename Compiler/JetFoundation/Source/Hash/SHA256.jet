@@ -31,21 +31,12 @@ fn mir_sha256_rotr(value: Int, shift: Int) -> Int {
 
 fn mir_sha256_compress(state: &[Int], block: [U8]) {
     words := [Int]{}
-    index := 0
-    loop index < 64 {
-        words.push(0)
-        index += 1
-    }
-    index = 0
-    loop index < 16 {
-        words[index] = mir_sha256_word(block, index * 4)
-        index += 1
-    }
-    loop index < 64 {
-        s0 := mir_sha256_rotr(words[index - 15], 7) ~| mir_sha256_rotr(words[index - 15], 18) ~| (words[index - 15] >> 3)
-        s1 := mir_sha256_rotr(words[index - 2], 17) ~| mir_sha256_rotr(words[index - 2], 19) ~| (words[index - 2] >> 10)
+    loop _ in 0..<64 -> words.push(0)
+    loop index in 0..<16 -> words[index] = mir_sha256_word(block, index * 4)
+    loop index in 16..<64 {
+        s0 :: mir_sha256_rotr(words[index - 15], 7) ~| mir_sha256_rotr(words[index - 15], 18) ~| (words[index - 15] >> 3)
+        s1 :: mir_sha256_rotr(words[index - 2], 17) ~| mir_sha256_rotr(words[index - 2], 19) ~| (words[index - 2] >> 10)
         words[index] = (words[index - 16] + s0 + words[index - 7] + s1) & @MIR_SHA256_MASK
-        index += 1
     }
 
     a := state[0]
@@ -56,14 +47,13 @@ fn mir_sha256_compress(state: &[Int], block: [U8]) {
     f := state[5]
     g := state[6]
     h := state[7]
-    index = 0
-    loop index < 64 {
-        s1 := mir_sha256_rotr(e, 6) ~| mir_sha256_rotr(e, 11) ~| mir_sha256_rotr(e, 25)
-        ch := ((e & f) ~| ((@MIR_SHA256_MASK ~| e) & g)) & @MIR_SHA256_MASK
-        temp1 := (h + s1 + ch + @MIR_SHA256_K[index] + words[index]) & @MIR_SHA256_MASK
-        s0 := mir_sha256_rotr(a, 2) ~| mir_sha256_rotr(a, 13) ~| mir_sha256_rotr(a, 22)
-        maj := ((a & b) ~| (a & c) ~| (b & c)) & @MIR_SHA256_MASK
-        temp2 := (s0 + maj) & @MIR_SHA256_MASK
+    loop index in 0..<64 {
+        s1 :: mir_sha256_rotr(e, 6) ~| mir_sha256_rotr(e, 11) ~| mir_sha256_rotr(e, 25)
+        ch :: ((e & f) ~| ((@MIR_SHA256_MASK ~| e) & g)) & @MIR_SHA256_MASK
+        temp1 :: (h + s1 + ch + @MIR_SHA256_K[index] + words[index]) & @MIR_SHA256_MASK
+        s0 :: mir_sha256_rotr(a, 2) ~| mir_sha256_rotr(a, 13) ~| mir_sha256_rotr(a, 22)
+        maj :: ((a & b) ~| (a & c) ~| (b & c)) & @MIR_SHA256_MASK
+        temp2 :: (s0 + maj) & @MIR_SHA256_MASK
         h = g
         g = f
         f = e
@@ -72,7 +62,6 @@ fn mir_sha256_compress(state: &[Int], block: [U8]) {
         c = b
         b = a
         a = (temp1 + temp2) & @MIR_SHA256_MASK
-        index += 1
     }
     state[0] = (state[0] + a) & @MIR_SHA256_MASK
     state[1] = (state[1] + b) & @MIR_SHA256_MASK
@@ -90,30 +79,25 @@ fn mir_sha256_bytes(data: [U8]) -> [U8] {
     loop byte in data -> msg.push(byte)
     msg.push(U8{128})
     loop msg.len() % 64 != 56 -> msg.push(U8{0})
-    bit_length := (data.len() * 8) & @MIR_SHA256_LENGTH_MASK
+    bit_length :: (data.len() * 8) & @MIR_SHA256_LENGTH_MASK
     index := 7
     loop index >= 0 {
-        length_byte := (bit_length >> (8 * index)) & 255
+        length_byte :: (bit_length >> (8 * index)) & 255
         msg.push(U8{length_byte})
         index -= 1
     }
     offset := 0
     loop offset < msg.len() {
-        block := [U8]{}
-        index = 0
-        loop index < 64 {
-            block.push(msg[offset + index])
-            index += 1
-        }
+        block :: loop position in 0..<64 -> msg[offset + position]
         mir_sha256_compress(&state, block)
         offset += 64
     }
     output := [U8]{}
     loop word in state {
-        first := (word >> 24) & 255
-        second := (word >> 16) & 255
-        third := (word >> 8) & 255
-        fourth := word & 255
+        first :: (word >> 24) & 255
+        second :: (word >> 16) & 255
+        third :: (word >> 8) & 255
+        fourth :: word & 255
         output.push(U8{first})
         output.push(U8{second})
         output.push(U8{third})
@@ -130,7 +114,7 @@ fn mir_sha256_hex_digit(value: Int) -> String {
 pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String {
     output := ""
     loop byte in bytes {
-        value := Int.from_u8(byte)
+        value :: Int.from_u8(byte)
         output = "{output}{mir_sha256_hex_digit((value >> 4) & 15)}{mir_sha256_hex_digit(value & 15)}"
     }
     output

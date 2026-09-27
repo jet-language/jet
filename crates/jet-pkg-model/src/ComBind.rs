@@ -756,7 +756,7 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         .expect("COM binder descriptor is registered")
         .stamp();
     let mut o = format!(
-        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) String = \"{abi}_dynamic\"\n"
+        "// jet-ffi-descriptor={descriptor}\n#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) -> String = \"{abi}_dynamic\"\n"
     );
     for m in &s.methods {
         let name = method_name(m);
@@ -778,7 +778,7 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         "#Error\npub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n",
     );
     o.push_str(&format!(
-        "pub fn open() {} !ComError -[FFI.Com]> {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
+        "pub fn open() -[FFI.Com]> {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
         s.root_interface, s.root_interface
     ));
     o.push_str(&format!(
@@ -790,10 +790,10 @@ fn render_jet(lib: &str, s: &Schema) -> String {
             "impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
         ));
         o.push_str(&format!(
-            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) DataTree !ComError -[FFI.Com]> {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
+            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -[FFI.Com]> DataTree !ComError {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
         ));
     }
-    o.push_str("fn error(code: Int) ComError !Never -[]> {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
+    o.push_str("fn error(code: Int) -[]> ComError !Never {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
     for m in &s.methods {
         let name = method_name(m);
         o.push_str(&format!("pub fn {name}(object: {}", m.interface));
@@ -803,7 +803,7 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         if m.result == Kind::Unit {
             o.push_str(") !ComError -[FFI.Com]> {\n    ");
         } else {
-            o.push_str(&format!(") {} !ComError -[FFI.Com]> {{\n    ", m.result.jet()));
+            o.push_str(&format!(") -[FFI.Com]> {} !ComError {{\n    ", m.result.jet()));
         }
         if m.result != Kind::Unit {
             o.push_str("value :: ")
@@ -1007,18 +1007,18 @@ mod tests {
         let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n";
         let schema = super::parse_schema(metadata).unwrap();
         let jet = super::render_jet("office", &schema);
-        assert!(jet.contains("pub fn open() Application !ComError -[FFI.Com]>"));
+        assert!(jet.contains("pub fn open() -[FFI.Com]> Application !ComError"));
         assert!(jet.contains("impl Application.Close"));
         assert!(jet.contains("fn close(^self)"));
         assert!(!jet.contains("pub fn close_Application"));
         assert!(jet.contains(
-            "pub fn Application_Workbooks(object: Application) Workbooks !ComError -[FFI.Com]>"
+            "pub fn Application_Workbooks(object: Application) -[FFI.Com]> Workbooks !ComError"
         ));
         assert!(jet.contains(
-            "pub fn Workbooks_Open_Book(object: Workbooks, path: String) Workbook !ComError -[FFI.Com]>"
+            "pub fn Workbooks_Open_Book(object: Workbooks, path: String) -[FFI.Com]> Workbook !ComError"
         ));
         assert!(jet.contains(
-            "pub fn Range_Values(object: Range) DataTree !ComError -[FFI.Com]>"
+            "pub fn Range_Values(object: Range) -[FFI.Com]> DataTree !ComError"
         ));
         assert!(jet.contains(
             "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_Application"

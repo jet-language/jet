@@ -25,7 +25,7 @@ fn parser_parse_extern_rust(state: &JetParserState) -> Item {
     if rust.payload.decoded != "rust" {
         parser_add_error(&state, rust.span, "expected `rust` after `extern`", "this declaration imports Rust symbols", "write `extern rust \"crate\" {{ ... }}`")
     }
-    crate_value := parser_foreign_plain_string(&state, "after `extern rust`")
+    crate_value :: parser_foreign_plain_string(&state, "after `extern rust`")
     parser_expect(&state, TOKEN_LBRACE, "`{{` before foreign declarations")
     functions := [ExternFn]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
@@ -39,7 +39,7 @@ fn parser_parse_extern_rust(state: &JetParserState) -> Item {
 
 fn parser_parse_c_module(state: &JetParserState) -> Item {
     marker :: parser_parse_marker(&state)
-    kind := if marker.name == "Import" -> CModuleKind.Extern else -> CModuleKind.Bindgen
+    kind :: if marker.name == "Import" -> CModuleKind.Extern else -> CModuleKind.Bindgen
     parser_expect(&state, TOKEN_KW_MODULE, "after `#{marker.name}` in a C module declaration")
     root :: parser_expect_name(&state, "after `module` in a C module path")
     if root.payload.decoded != "c" {
@@ -61,7 +61,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
             parser_add_error(&state, segment.span, "a C module path may only end in `.__bindgen__` after its library name", "the generated-cache segment is reserved and C library overlays use the root `c.<lib>` path", "use `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`")
         }
     }
-    path_span := parser_cover(root.span, path_end)
+    path_span :: parser_cover(root.span, path_end)
     if kind == CModuleKind.Extern && has_bindgen_segment {
         parser_add_error_code(&state, "E3206", path_span, "module path `c.{lib.payload.decoded}.__bindgen__` uses the reserved segment `__bindgen__`", "generated bindings live under `c.<lib>.__bindgen__`; user overlays use `#Import module c.<lib>`", "remove `.__bindgen__` and declare the overlay as `#Import module c.<lib>`")
     }
@@ -74,8 +74,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE || parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
-        function := parser_parse_extern_fn(&state, true)
-        function = parser_c_module_callback_metadata(function, lib.payload.decoded)
+        function :: parser_c_module_callback_metadata(parser_parse_extern_fn(&state, true), lib.payload.decoded)
         functions.push(function)
         if state.position == before {
             token :: parser_current(&state)
@@ -95,23 +94,23 @@ fn parser_c_module_callback_metadata(function: ExternFn, lib: String) -> ExternF
             else -> {}
         }
     }
-    is_task_return := if function.return_type == {
+    is_task_return :: if function.return_type == {
         .Val(ty) -> ty == {
             .Apply(name, _) -> name == "Task"
             else -> false
         }
         else -> false
     }
-    callback_transport := None
-    if has_function_parameter {
-        callback_transport = if function.name.starts_with("__jet_native_") -> Val("native-start") else -> Val("managed")
-    } else if function.name == "unsubscribe" && is_task_return {
-        callback_transport = Val("managed-close")
-    } else if function.name == "emit_async" && is_task_return {
-        callback_transport = Val("emit-task")
+    callback_transport :: if {
+        has_function_parameter -> {
+            if function.name.starts_with("__jet_native_") -> Val("native-start") else -> Val("managed")
+        }
+        function.name == "unsubscribe" && is_task_return -> Val("managed-close")
+        function.name == "emit_async" && is_task_return -> Val("emit-task")
+        else -> None
     }
     if callback_transport == None -> return function
-    identity := "{lib}.{function.name}"
+    identity :: "{lib}.{function.name}"
     digest_bytes := "jet-ffi-callback-plan-v1".bytes()
     digest_bytes.push(U8{0})
     loop byte in identity.bytes() -> digest_bytes.push(byte)
@@ -122,7 +121,7 @@ fn parser_c_module_callback_metadata(function: ExternFn, lib: String) -> ExternF
 }
 
 fn parser_foreign_marker_name(marker: Marker, index: Int) -> ?NamedSpan {
-    value := parser_marker_expression(marker, index) ?? return None
+    value :: parser_marker_expression(marker, index) ?? return None
     if value == { .Ident(name, span) -> Val(NamedSpan{name: name, span: span}) else -> None }
 }
 
@@ -133,56 +132,67 @@ fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool)
     if parser_current_kind(&state) == TOKEN_HASH {
         loop parser_current_kind(&state) == TOKEN_HASH {
             marker :: parser_parse_marker(&state)
-            if marker.name == "ABI" {
-                if abi != None {
-                    parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#ABI` marker", "the calling convention is one property of one binding", "remove the repeated `#ABI(...)` marker")
+            if marker.name == {
+                "ABI" -> {
+                    if abi != None {
+                        parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#ABI` marker", "the calling convention is one property of one binding", "remove the repeated `#ABI(...)` marker")
+                    }
+                    abi = parser_foreign_marker_name(marker, 0)
+                    if abi == None -> parser_foreign_error(&state, marker.span, "`ABI` needs an identifier calling convention", "foreign ABI metadata is a fixed name", "write `#ABI(C)` or another identifier")
                 }
-                abi = parser_foreign_marker_name(marker, 0)
-                if abi == None -> parser_foreign_error(&state, marker.span, "`ABI` needs an identifier calling convention", "foreign ABI metadata is a fixed name", "write `#ABI(C)` or another identifier")
-            } else if marker.name == "Undo" {
-                if undo != None {
-                    parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#Undo` marker", "one binding has one compensating function", "remove the repeated `#Undo(...)` marker")
+                "Undo" -> {
+                    if undo != None {
+                        parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#Undo` marker", "one binding has one compensating function", "remove the repeated `#Undo(...)` marker")
+                    }
+                    undo = parser_foreign_marker_name(marker, 0)
+                    if undo == None -> parser_foreign_error(&state, marker.span, "`Undo` needs an identifier function name", "foreign cleanup metadata names one binding", "write `#Undo(inverse)`")
                 }
-                undo = parser_foreign_marker_name(marker, 0)
-                if undo == None -> parser_foreign_error(&state, marker.span, "`Undo` needs an identifier function name", "foreign cleanup metadata names one binding", "write `#Undo(inverse)`")
-            } else if marker.name == "Close" {
-                if close_name != None {
-                    parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#Close` marker", "one returned handle has one close function", "remove the repeated `#Close(...)` marker")
+                "Close" -> {
+                    if close_name != None {
+                        parser_foreign_error(&state, marker.span, "a foreign declaration may have only one `#Close` marker", "one returned handle has one close function", "remove the repeated `#Close(...)` marker")
+                    }
+                    close_name = parser_foreign_marker_name(marker, 0)
+                    if close_name == None -> parser_foreign_error(&state, marker.span, "`Close` needs an identifier function name", "foreign handle metadata names one binding", "write `#Close(close)`")
                 }
-                close_name = parser_foreign_marker_name(marker, 0)
-                if close_name == None -> parser_foreign_error(&state, marker.span, "`Close` needs an identifier function name", "foreign handle metadata names one binding", "write `#Close(close)`")
-            } else {
-                parser_foreign_error(&state, marker.span, "unknown foreign declaration marker", "foreign declarations accept ABI, Undo, and Close metadata", "remove the marker or use `#ABI`, `#Undo`, or `#Close`")
+                else -> parser_foreign_error(&state, marker.span, "unknown foreign declaration marker", "foreign declarations accept ABI, Undo, and Close metadata", "remove the marker or use `#ABI`, `#Undo`, or `#Close`")
             }
             parser_skip_semicolons(&state)
         }
     }
-    start := parser_current(&state).span
+    start :: parser_current(&state).span
     parser_expect(&state, TOKEN_KW_FN, "to declare a foreign function")
     name :: parser_expect_name(&state, "after `fn`")
-    params := parser_parse_param_list(&state)
+    params :: parser_parse_param_list(&state)
     return_type := None
     return_span := None
-    if parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
-        parser_bump(&state)
-        parsed :: parser_parse_type(&state, 0)
-        return_type = Val(parsed.ty)
-        return_span = Val(parsed.span)
-    } else if parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_QUESTION || parser_current_kind(&state) == TOKEN_LBRACKET || parser_current_kind(&state) == TOKEN_LPAREN {
-        parsed :: parser_parse_type(&state, 0)
-        return_type = Val(parsed.ty)
-        return_span = Val(parsed.span)
+    if {
+        parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW -> {
+            parser_bump(&state)
+            parsed :: parser_parse_type(&state, 0)
+            return_type = Val(parsed.ty)
+            return_span = Val(parsed.span)
+        }
+        parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_QUESTION || parser_current_kind(&state) == TOKEN_LBRACKET || parser_current_kind(&state) == TOKEN_LPAREN -> {
+            parsed :: parser_parse_type(&state, 0)
+            return_type = Val(parsed.ty)
+            return_span = Val(parsed.span)
+        }
+        else -> {}
     }
     parser_expect(&state, TOKEN_EQ, if allow_missing_semicolon -> "`=` before the C symbol" else -> "`=` before the Rust path")
-    path_context := if allow_missing_semicolon -> "after `=` in a C binding" else -> "after `=` in a foreign function"
+    path_context :: if allow_missing_semicolon -> "after `=` in a C binding" else -> "after `=` in a foreign function"
     path :: parser_foreign_plain_string(&state, path_context)
     end := path.span
-    if parser_current_kind(&state) == TOKEN_SEMI {
-        close :: parser_bump(&state)
-        end = close.span
-    } else if !allow_missing_semicolon {
-        close :: parser_expect(&state, TOKEN_SEMI, "after the foreign path")
-        end = close.span
+    if {
+        parser_current_kind(&state) == TOKEN_SEMI -> {
+            close :: parser_bump(&state)
+            end = close.span
+        }
+        !allow_missing_semicolon -> {
+            close :: parser_expect(&state, TOKEN_SEMI, "after the foreign path")
+            end = close.span
+        }
+        else -> {}
     }
     ExternFn{abi: abi, name: name.payload.decoded, name_span: name.span, params: params, return_type: return_type, return_type_span: return_span, rust_path: path.name, rust_path_span: path.span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: undo, close: close_name, span: parser_cover(start, end)}
 }

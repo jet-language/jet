@@ -110,7 +110,7 @@ fn curated_soundness_seeds() -> Vec<(String, String)> {
         (
             "curated/generic_identity".to_string(),
             r#"
-fn id<T>(x: T) T {
+fn id<T>(x: T) -> T {
     return x
 }
 
@@ -123,7 +123,7 @@ fn run() {
         (
             "curated/fixed_list_literal_index".to_string(),
             r#"
-fn second(xs: [Int#3]) Int {
+fn second(xs: [Int#3]) -> Int {
     return xs[1]
 }
 
@@ -139,7 +139,7 @@ fn run() {
             r#"
 Index3 :: distinct Int(0..2)
 
-fn pick(xs: [Int#3], i: Index3) Int {
+fn pick(xs: [Int#3], i: Index3) -> Int {
     return xs[i]
 }
 
@@ -153,7 +153,7 @@ fn run() {
         (
             "curated/fanout_fixed_list".to_string(),
             r#"
-fn inc(x: Int) Int {
+fn inc(x: Int) -> Int {
     return x + 1
 }
 
@@ -167,7 +167,7 @@ fn run() {
         (
             "curated/pure_boundary".to_string(),
             r#"
-fn add1(x: Int) Int -[]> {
+fn add1(x: Int) -[]> Int {
     return x + 1
 }
 

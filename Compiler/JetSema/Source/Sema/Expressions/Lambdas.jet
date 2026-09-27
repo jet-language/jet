@@ -759,13 +759,13 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
     loop parameter in lambda.params -> parameter_names.push(parameter.name)
     saw_capture := false
     loop candidate in scopes.bindings {
-        active_index :: sema_scope_resolve_index_at(scopes, candidate.symbol.name, lambda.span) ?? continue
-        if scopes.bindings[active_index].symbol.id.key != candidate.symbol.id.key -> continue
+        active_index :: sema_scope_resolve_index_at(scopes, candidate.symbol.name, lambda.span) ?? next
+        if scopes.bindings[active_index].symbol.id.key != candidate.symbol.id.key -> next
         skip_parameter := false
         loop parameter_name in parameter_names {
             if candidate.symbol.name == parameter_name -> skip_parameter = true
         }
-        if skip_parameter -> continue
+        if skip_parameter -> next
         used := false
         mutated := false
         if lambda.body == .Expr(value) {
@@ -776,7 +776,7 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
             used = sema_expression_lambda_bound_statements_use(body, candidate.symbol.name)
             mutated = sema_expression_lambda_bound_statements_mut_use(body, candidate.symbol.name)
         }
-        if !used -> continue
+        if !used -> next
         saw_capture = true
         if candidate.string_view -> return Val(false)
         if candidate.symbol.ty == None -> return None

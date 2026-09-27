@@ -838,7 +838,7 @@ fn value_dispatch_accepts_range_arm_heads() {
     // #1487 / D-IFDIST1: expression-position value dispatch must parse the same
     // `lo..hi ->` range arm heads statement dispatch already accepts.
     let source = r#"
-fn ordered(n: Int) Int -> {
+fn ordered(n: Int) -> Int {
     return if n == {
         0..9 -> 1
         10..99 -> 2

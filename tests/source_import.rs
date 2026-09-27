@@ -72,7 +72,7 @@ def risky(x: int) -> int:
 
     let generated = fs::read_to_string(root.join("jet/app/math.jet")).unwrap();
     assert!(
-        generated.contains("fn add(x: Int, y: Int) Int ->"),
+        generated.contains("fn add(x: Int, y: Int) -> Int {"),
         "{generated}"
     );
     assert!(generated.contains("total := x + y"), "{generated}");
@@ -417,35 +417,35 @@ fn enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged
             "java",
             "java",
             include_str!("fixtures/source_import/enterprise/java/Math.java"),
-            "fn add(left: Int, right: Int) Int ->",
+            "fn add(left: Int, right: Int) -> Int {",
             "5\n",
         ),
         (
             "csharp",
             "cs",
             include_str!("fixtures/source_import/enterprise/csharp/Math.cs"),
-            "fn add(left: Int, right: Int) Int ->",
+            "fn add(left: Int, right: Int) -> Int {",
             "5\n",
         ),
         (
             "ts",
             "ts",
             include_str!("fixtures/source_import/enterprise/ts/math.ts"),
-            "fn add(left: Float, right: Float) Float ->",
+            "fn add(left: Float, right: Float) -> Float {",
             "5.0\n",
         ),
         (
             "js",
             "js",
             include_str!("fixtures/source_import/enterprise/js/math.js"),
-            "fn add(left: Float, right: Float) Float ->",
+            "fn add(left: Float, right: Float) -> Float {",
             "5.0\n",
         ),
         (
             "go",
             "go",
             include_str!("fixtures/source_import/enterprise/go/math.go"),
-            "fn add(left: Int, right: Int) Int ->",
+            "fn add(left: Int, right: Int) -> Int {",
             "5\n",
         ),
     ];
@@ -533,7 +533,7 @@ fn enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer() {
     let generated_path = root.join("jet/app/Ambiguous.jet");
     let generated = fs::read_to_string(&generated_path).unwrap();
     assert!(
-        generated.contains("fn keep(value: Int) Int ->"),
+        generated.contains("fn keep(value: Int) -> Int {"),
         "{generated}"
     );
     assert!(
@@ -633,7 +633,7 @@ fn enterprise_import_preserves_source_for_partial_failure() {
     let generated_path = root.join("jet/app/partial.jet");
     let generated = fs::read_to_string(&generated_path).unwrap();
     assert!(
-        generated.contains("fn keep(value: Float) Float ->"),
+        generated.contains("fn keep(value: Float) -> Float {"),
         "{generated}"
     );
     assert!(

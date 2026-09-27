@@ -45,22 +45,26 @@ pub struct SemaCallSiteFact {
     pub callee: ?SymbolId
     pub facts: SemaCallFacts
 }
+
 pub struct SemaCallReturnViewFact {
     pub slot: [String]
     pub access: AccessConvention
     pub places: [SemaOwnershipPlace]
     pub sources: [ViewSourcePath]
 }
+
 pub struct SemaCallReturnView {
     pub span: Span
     pub facts: [SemaCallReturnViewFact]
 }
+
 pub struct SemaLocalViewProvenance {
     pub carrier_key: String
     pub output_path: [String]
     pub access: AccessConvention
     pub sources: [ViewSourcePath]
 }
+
 pub struct SemaNameReferenceFact {
     pub span: Span
     pub symbol: Symbol
@@ -70,6 +74,7 @@ pub struct SemaNameReferenceFact {
 pub struct SemaScopeLoopLabel {
     pub name: String
 }
+
 pub struct SemaStatementTailBody {
     pub statements: [Stmt]
 }
@@ -82,6 +87,7 @@ pub struct SemaStatementTailFrame {
     pub body_id: Int
     pub start_index: Int
 }
+
 pub fn sema_statement_tail_store_init() -> SemaStatementTailStore {
     SemaStatementTailStore{bodies: [SemaStatementTailBody]{}}
 }
@@ -90,6 +96,7 @@ pub fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statem
     body_id := store.bodies.len()
     store.bodies.push(SemaStatementTailBody{statements: statements})
     body_id
+}
 
 pub struct SemaComptimeRequest {
     pub callee_key: String
@@ -258,25 +265,21 @@ pub fn sema_scope_init(module_name: String) -> SemaScopeTable {
     }
 }
 
-
 pub fn sema_scope_function_owner_key(table: SemaScopeTable) -> String {
     if table.current <= 0 -> return ""
     frame := table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
     table.frames[frame].owner
 }
+
 // A local identity is rooted at its enclosing function/lambda and includes
 // every lexical frame owner; frame indices are traversal-order artifacts.
 pub fn sema_scope_local_owner_key(table: SemaScopeTable) -> String {
     owner := ""
     frame := table.current
     loop frame > 0 {
-        frame_owner := table.frames[frame].owner
-        if owner == "" {
-            owner = frame_owner
-        } else {
-            owner = "{frame_owner}/{owner}"
-        }
+        frame_owner :: table.frames[frame].owner
+        owner = if owner == "" -> frame_owner else -> "{frame_owner}/{owner}"
         frame = table.frames[frame].parent
     }
     owner
@@ -300,13 +303,11 @@ pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) {
 pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool {
     if table.frames[table.current].owner == owner -> return true
     parent :: table.current
-    index := 0
-    loop index < table.frames.len() {
-        if table.frames[index].parent == parent && table.frames[index].owner == owner {
+    loop (index, frame) in table.frames {
+        if frame.parent == parent && frame.owner == owner {
             table.current = index
             return true
         }
-        index += 1
     }
     false
 }
@@ -314,14 +315,13 @@ pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool 
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool {
-    index := 0
-    loop index < table.bindings.len() {
-        binding :: table.bindings[index]
+    loop binding in table.bindings {
         if binding.frame == 0 && !binding.compiler_builtin && binding.symbol.name == symbol.name -> return false
-        index += 1
+    }
     table.bindings.push(SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     true
 }
+
 pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool {
     nominal :: sema_registration_compiler_builtin_nominal(graph, "Err") ?? return true
     loop binding in table.bindings {
@@ -330,34 +330,56 @@ pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegist
     table.bindings.push(SemaScopeBinding{frame: 0, symbol: nominal.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
     true
 }
+
 fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String {
-    if plane == SemaKnowledgePlane.Range -> return "range"
-    if plane == SemaKnowledgePlane.Exactness -> return "exactness"
-    if plane == SemaKnowledgePlane.Unit -> return "unit"
-    if plane == SemaKnowledgePlane.State -> return "state"
-    "classification"
+    if plane == {
+        .Range -> "range"
+        .Exactness -> "exactness"
+        .Unit -> "unit"
+        .State -> "state"
+        else -> "classification"
+    }
 }
 
 fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String {
-    if gate == SemaKnowledgeGate.BoundedArithmetic -> return "wrapping"
-    if gate == SemaKnowledgeGate.Approximation -> return "approx"
-    if gate == SemaKnowledgeGate.RoundedConversion -> return "rounded"
-    if gate == SemaKnowledgeGate.RawProjection -> return "raw"
-    if gate == SemaKnowledgeGate.StateTransition -> return "transition"
-    "scrub"
+    if gate == {
+        .BoundedArithmetic -> "wrapping"
+        .Approximation -> "approx"
+        .RoundedConversion -> "rounded"
+        .RawProjection -> "raw"
+        .StateTransition -> "transition"
+        else -> "scrub"
+    }
 }
 
 fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool {
-    if plane == SemaKnowledgePlane.Range && (gate == SemaKnowledgeGate.BoundedArithmetic || gate == SemaKnowledgeGate.RawProjection) -> return true
-    if plane == SemaKnowledgePlane.Exactness && (gate == SemaKnowledgeGate.Approximation || gate == SemaKnowledgeGate.RoundedConversion || gate == SemaKnowledgeGate.RawProjection) -> return true
-    if plane == SemaKnowledgePlane.Unit && (gate == SemaKnowledgeGate.RoundedConversion || gate == SemaKnowledgeGate.RawProjection) -> return true
-    if plane == SemaKnowledgePlane.State && (gate == SemaKnowledgeGate.StateTransition || gate == SemaKnowledgeGate.RawProjection) -> return true
-    if plane == SemaKnowledgePlane.Classification && (gate == SemaKnowledgeGate.ClassificationScrub || gate == SemaKnowledgeGate.RawProjection) -> return true
-    false
+    if plane == {
+        .Range -> if gate == {
+            .BoundedArithmetic | .RawProjection -> true
+            else -> false
+        }
+        .Exactness -> if gate == {
+            .Approximation | .RoundedConversion | .RawProjection -> true
+            else -> false
+        }
+        .Unit -> if gate == {
+            .RoundedConversion | .RawProjection -> true
+            else -> false
+        }
+        .State -> if gate == {
+            .StateTransition | .RawProjection -> true
+            else -> false
+        }
+        .Classification -> if gate == {
+            .ClassificationScrub | .RawProjection -> true
+            else -> false
+        }
+        else -> false
+    }
 }
 
 pub fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> ?SemaKnowledgeGate {
-    previous := table.knowledge_gate
+    previous :: table.knowledge_gate
     table.knowledge_gate = Val(gate)
     previous
 }
@@ -373,8 +395,8 @@ pub fn sema_scope_knowledge_gate_allows(table: SemaScopeTable, plane: SemaKnowle
 
 pub fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_scope_knowledge_gate_allows(table, plane, gate) -> return true
-    plane_name := sema_knowledge_plane_name(plane)
-    gate_name := sema_knowledge_gate_spelling(gate)
+    plane_name :: sema_knowledge_plane_name(plane)
+    gate_name :: sema_knowledge_gate_spelling(gate)
     diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
     false
 }
@@ -382,7 +404,7 @@ pub fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnow
 pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) {
     table.unit_explicit_units = false
     module_index :: sema_registration_module_index(graph, module_identity) ?? return
-    package_identity := graph.modules[module_index].package_identity
+    package_identity :: graph.modules[module_index].package_identity
     loop declaration_module in graph.modules {
         if declaration_module.package_identity != package_identity -> next
         loop declaration in declaration_module.program.policy_declarations {
@@ -397,14 +419,14 @@ pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrati
 pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) {
     sema_scope_seed_unit_policy(&table, graph, module_identity)
     module_index :: sema_registration_module_index(graph, module_identity) ?? return
-    declaration_module := graph.modules[module_index]
+    declaration_module :: graph.modules[module_index]
     loop declaration in declaration_module.program.policy_declarations {
         if declaration.key == PolicyKey.ExplicitUnits && declaration.scope == PolicyScope.Function && declaration.target == Val(function_span) -> table.unit_explicit_units = true
     }
 }
 
 pub fn sema_scope_push_unit_policy(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool {
-    previous := table.unit_explicit_units
+    previous :: table.unit_explicit_units
     loop declaration in declarations {
         if declaration.key == PolicyKey.ExplicitUnits -> table.unit_explicit_units = true
     }
@@ -423,15 +445,11 @@ pub fn sema_scope_binding_is_compiler_builtin(binding: SemaScopeBinding, name: S
     binding.compiler_builtin && binding.symbol.name == name
 }
 
-
-
 // Locals, parameters, and constants share the function-local namespace.
 // Module functions remain resolvable and loop labels use a separate stack.
 fn sema_scope_name_blocks_binding(kind: SymbolKind) -> Bool {
     if kind == {
-        .Local -> true
-        .Parameter -> true
-        .Constant -> true
+        .Local | .Parameter | .Constant -> true
         else -> false
     }
 }
@@ -447,9 +465,8 @@ pub fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool {
 
 pub fn sema_scope_push_loop_label(table: &SemaScopeTable, name: String) -> Bool {
     duplicate := sema_scope_has_loop_label(table, name)
-    binding_index :: sema_scope_resolve_index(table, name)
-    if binding_index != None {
-        binding :: table.bindings[binding_index ?? 0]
+    if sema_scope_resolve_index(table, name) == .Val(binding_index) {
+        binding :: table.bindings[binding_index]
         if sema_scope_name_blocks_binding(binding.symbol.kind) -> duplicate = true
     }
     table.loop_labels.push(SemaScopeLoopLabel{name: name})
@@ -498,27 +515,23 @@ pub fn sema_scope_resolve(table: SemaScopeTable, name: String) -> ?Symbol {
 pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: ?TIntegerBounds, string_view: Bool) -> Bool {
     if symbol.name == "_" -> return true
     if sema_scope_has_loop_label(table, symbol.name) -> return false
-    index :: sema_scope_resolve_index(table, symbol.name)
-    if index != None {
-        previous :: table.bindings[index ?? 0].symbol
+    if sema_scope_resolve_index(table, symbol.name) == .Val(index) {
+        previous :: table.bindings[index].symbol
         if sema_scope_name_blocks_binding(previous.kind) -> return false
+    }
     table.bindings.push(SemaScopeBinding{frame: table.current, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
     true
 }
 
 pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolId) -> ?Symbol {
-    index := 0
-    loop index < table.bindings.len() {
-        binding :: table.bindings[index]
+    loop binding in table.bindings {
         if binding.symbol.id.key == id.key -> return Val(binding.symbol)
-        index += 1
     }
     None
 }
 
 pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolId) -> ?Item {
-    if environment.registration_graph != None {
-        graph :: environment.registration_graph ?? return None
+    if environment.registration_graph == .Val(graph) {
         loop module in graph.modules {
             loop function in module.functions {
                 if function.symbol.id.key == id.key -> return Val(Item.Func(function.declaration))

@@ -59,10 +59,10 @@ struct Pair {
     b: Int
 }
 
-fn align(left: D, right: D) Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
 
 impl D.Add {
-    fn add(self, rhs: D) D -> {
+    fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)
         return D{value: pair.a + pair.b}
     }
@@ -77,10 +77,10 @@ struct Shown {
 }
 
 impl Shown.Display {
-    fn display(self) String -> "shown={self.value}"
+    fn display(self) -> String -> "shown={self.value}"
 }
 
-fn mark(label: String, value: Int) D -[IO]> {
+fn mark(label: String, value: Int) -[IO]> D {
     print(label)
     return D{value: value}
 }
@@ -117,11 +117,11 @@ fn nested(outer: Bool, inner: Bool) {
     }
 }
 
-fn pick(flag: Bool) Int -> {
+fn pick(flag: Bool) -> Int {
     if flag -> 10 else -> 20
 }
 
-fn count_odd(limit: Int) Int -> {
+fn count_odd(limit: Int) -> Int {
     odd := 0
     loop i in 0..<limit {
         if i % 2 == 1 { odd += 1 }
@@ -129,7 +129,7 @@ fn count_odd(limit: Int) Int -> {
     odd
 }
 
-fn early(n: Int) String -> {
+fn early(n: Int) -> String {
     if n == 0 { return "zero" }
     "nonzero"
 }
@@ -186,7 +186,7 @@ const LOCAL_BINDINGS_STDOUT: &str = "3\n1.5\ntext\ntrue\n18\n21\n";
 const VALUE_IF: &str = r#"
 fn show(label: String) { print(label) }
 
-fn band(n: Int) Int -> {
+fn band(n: Int) -> Int {
     if n < 0 -> 1 else if n == 0 -> 2 else -> 3
 }
 

@@ -100,7 +100,7 @@ fn script_cache_identity_changes_for_source_dependency_toolchain_and_target() {
     let dependency_file = write_scratch_file(
         &root,
         ".jet/inline-deps/textkit/1.4.2/value.jet",
-        b"pub fn value() String {\n    return \"before\"\n}\n",
+        b"pub fn value() -> String {\n    return \"before\"\n}\n",
     );
     let dependency = inline_dep("textkit", "1.4.2");
     let resolved = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
@@ -128,7 +128,7 @@ fn script_cache_identity_changes_for_source_dependency_toolchain_and_target() {
     write_scratch_file(
         &root,
         ".jet/inline-deps/textkit/1.4.2/value.jet",
-        b"pub fn value() String {\n    return \"after\"\n}\n",
+        b"pub fn value() -> String {\n    return \"after\"\n}\n",
     );
     let changed_dependency = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
     assert_ne!(
@@ -182,7 +182,7 @@ fn script_cache_identity_changes_for_source_dependency_toolchain_and_target() {
 
     assert_eq!(
         fs::read(&dependency_file).unwrap(),
-        b"pub fn value() String {\n    return \"after\"\n}\n"
+        b"pub fn value() -> String {\n    return \"after\"\n}\n"
     );
     fs::remove_dir_all(root).unwrap();
 }

@@ -328,12 +328,12 @@ while (1) {{
 
 fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     let abi = format!("jet_perl_{lib}");
-    let mut out = format!("#Import module c.{abi} {{\n    fn open() Int = \"{abi}_open\"\n    fn take_error() Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out = format!("#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for function in functions {
         let name = &function.jet;
-        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() Session !PerlError -[FFI.Perl]> {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session !PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
     out.push_str(&crate::Bindgen::render_decode_response(
         "PerlError",
         crate::Bindgen::DecoderProtocol::StandardEnvelope,
@@ -341,7 +341,7 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     for function in functions {
         let name = &function.jet;
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PerlError -[FFI.Perl]> {{
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree !PerlError {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

@@ -180,7 +180,7 @@ impl Pattern.CheckedText {
         return
     }
 
-    fn encode_hole<T: Printable>(value: T) String -[]> {
+    fn encode_hole<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
@@ -408,9 +408,9 @@ struct Door {
     state { Closed, Open, Orphan }
 }
 impl Door {
-    #Transition(_, Closed) fn close() Door -> Door{}
-    #Transition(Closed, Open) fn open(self: ^Door) Door -> self
-    #Transition(Closed, Closed) fn hold(self: ^Door) Door -> self
+    #Transition(_, Closed) fn close() -> Door -> Door{}
+    #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self
+    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self
 }
 fn run() {}
 "#,
@@ -457,8 +457,8 @@ fn semindex_hover_projects_terminal_and_reachability_facts() {
     state { Closed, Open, Orphan }
 }
 impl Door {
-    #Transition(_, Closed) fn new() Door -[]> { return Door{} }
-    #Transition(Closed, Open) fn open(self: ^Door) Door -[]> { return self }
+    #Transition(_, Closed) fn new() -[]> Door { return Door{} }
+    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }
 }
 fn run() {}
 "#,
@@ -491,8 +491,8 @@ struct Door {
     state { Closed, Open }
 }
 impl Door {
-    #Transition(_, Door.State.Closed) fn new() Door -[]> { return Door{} }
-    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) Door -[]> { return self }
+    #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }
+    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door { return self }
 }
 fn run() {}
 "#,
@@ -592,7 +592,7 @@ fn jet_inspect_semindex_reports_checked_output() {
 fn jet_inspect_semindex_reports_explicit_failure_contract() {
     let path = temp_fixture(
         "inspect_explicit_failure.jet",
-        "#Error\nenum Problem { Bad }\nfn helper() Int !Problem -> { return Ok(1) }\nfn run() {}\n",
+        "#Error\nenum Problem { Bad }\nfn helper() -> Int !Problem { return Ok(1) }\nfn run() {}\n",
     );
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
@@ -613,7 +613,7 @@ fn semantic_symbols_carry_shared_docs_and_provenance() {
     let src = r#"
 /// Scores one name.
 /// Example: score("Ada")
-fn score(name: String) Int -> {
+fn score(name: String) -> Int {
     return 1
 }
 
@@ -631,7 +631,7 @@ fn run() {
         .expect("score identity");
     assert_eq!(
         score.signature,
-        "fn score(name: String) Int\nfailure: Int (implicit default !Err)"
+        "fn score(name: String) -> Int\nfailure: Int (implicit default !Err)"
     );
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
@@ -727,7 +727,7 @@ fn semantic_symbols_include_language_builtins() {
     let filter = symbols
         .lookup_qualified("List.filter")
         .expect("List.filter");
-    assert_eq!(filter.signature, "List.filter(f: fn(T) Bool) List<T>");
+    assert_eq!(filter.signature, "List.filter(f: fn(T) -> Bool) List<T>");
     assert_eq!(filter.summary, "Keeps items where f(item) is true.");
     assert!(matches!(
         filter.provenance,
@@ -744,7 +744,7 @@ fn semantic_symbols_index_value_tail_callable() {
     let path = temp_fixture(
         "value_tail_callable.jet",
         r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String {
     if value == {
         1 -> { "one" }
         else -> { "other" }
@@ -777,7 +777,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("library.jet"),
-        "pub fn score(name: String) Int -> { return 1 }\n",
+        "pub fn score(name: String) -> Int { return 1 }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -814,7 +814,7 @@ fn semindex_hello_json_shape() {
 fn semindex_identity_stable_across_reorder() {
     let a = r#"
 module math {
-    pub fn double(n: Int) Int -> {
+    pub fn double(n: Int) -> Int {
         return n * 2
     }
 }
@@ -823,13 +823,13 @@ struct Point {
     x: Int
     y: Int
 
-    fn sum(self) Int -> {
+    fn sum(self) -> Int {
         return self.x + self.y
     }
 }
 
 impl Point {
-    fn origin() Point -> {
+    fn origin() -> Point {
         return Point.{x: 0, y: 0}
     }
 }
@@ -839,7 +839,7 @@ enum Light {
     Green
 }
 
-fn helper(p: Point) Int -> {
+fn helper(p: Point) -> Int {
     return p.sum()
 }
 
@@ -854,7 +854,7 @@ enum Light {
     Green
 }
 
-fn helper(p: Point) Int -> {
+fn helper(p: Point) -> Int {
     return p.sum()
 }
 
@@ -862,19 +862,19 @@ struct Point {
     x: Int
     y: Int
 
-    fn sum(self) Int -> {
+    fn sum(self) -> Int {
         return self.x + self.y
     }
 }
 
 module math {
-    pub fn double(n: Int) Int -> {
+    pub fn double(n: Int) -> Int {
         return n * 2
     }
 }
 
 impl Point {
-    fn origin() Point -> {
+    fn origin() -> Point {
         return Point.{x: 0, y: 0}
     }
 }
@@ -923,7 +923,7 @@ fn run() {
 fn returned_view_provenance_is_structured_and_changes_signature_id() {
     let path = temp_fixture(
         "view_provenance.jet",
-        "fn pick(left: [Int], right: [Int], first: Bool) View<Int> -> {\n    if first { return left[0..1] }\n    return right[0..1]\n}\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {\n    if first { return left[0..1] }\n    return right[0..1]\n}\nfn run() {}\n",
     );
     let union = open(&path).expect("multi-source view provenance indexes");
     let pick = union.lookup("pick").expect("pick definition");
@@ -957,7 +957,7 @@ fn returned_view_provenance_is_structured_and_changes_signature_id() {
 
     fs::write(
         &path,
-        "fn pick(left: [Int], right: [Int], first: Bool) View<Int> -> { return right[0..1] }\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> { return right[0..1] }\nfn run() {}\n",
     )
     .unwrap();
     let right = open(&path).expect("parameter-1 view provenance indexes");
@@ -982,7 +982,7 @@ fn aggregate_view_provenance_preserves_slots_and_changes_signature_id() {
             r#"
 struct Pair {{ left: View<Int>, right: View<Int> }}
 
-fn pair(left: [Int], right: [Int]) Pair -> {{
+fn pair(left: [Int], right: [Int]) -> Pair {{
     left_view :: left[0..1]
     right_view :: {right_owner}[0..1]
     return Pair.{{ left: left_view, right: right_view }}
@@ -1062,14 +1062,14 @@ fn run() {}
 #[test]
 fn semindex_structural_audit_tracks_callable_signature_changes() {
     let a = r#"
-fn score(name: String) Int -> {
+fn score(name: String) -> Int {
     return 1
 }
 
 fn run() {}
 "#;
     let b = r#"
-fn score(name: String, bonus: Int) Float -> {
+fn score(name: String, bonus: Int) -> Float {
     return 1.0
 }
 
@@ -1164,12 +1164,12 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
 fn definition_ancestry_identity_ignores_signature_and_body_shape() {
     let path = temp_fixture(
         "ancestry_identity.jet",
-        "fn score(n: Int) Int -> { return n + 1 }\nfn run() { print(score(1)) }\n",
+        "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
     );
     let before = open(&path).expect("first fixture indexes");
     fs::write(
         &path,
-        "fn score(n: Float, bonus: Float) Float -> { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
+        "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
     )
     .unwrap();
     let after = open(&path).expect("changed fixture indexes");
@@ -1242,7 +1242,7 @@ fn semindex_projects_inline_module_inferred_effects() {
 fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let path = temp_fixture(
         "effect_provenance_origins.jet",
-        "trait Shape { fn area(self) Int -[IO]>; }\nfn dynamic(shape: Shape) Int -> { return shape.area(); }\nfn apply(f: fn() Int) Int -> { return f(); }\nfn stored(f: ^fn() Int) Int -> { g :: f; return g(); }\nfn run() {}\n",
+        "trait Shape { fn area(self) -[IO]> Int }\nfn dynamic(shape: Shape) -> Int { return shape.area() }\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn stored(f: ^fn() -> Int) -> Int { g :: f; return g() }\nfn run() {}\n",
     );
     let index = open(&path).expect("effect provenance index");
 
@@ -1316,7 +1316,7 @@ fn semindex_references() {
 fn semindex_rename_sites_keep_definition_identity_in_json() {
     let path = temp_fixture(
         "rename_anchor_identity.jet",
-        "fn helper() Int -> { return 1 }\nfn run() { print(helper()) }\n",
+        "fn helper() -> Int { return 1 }\nfn run() { print(helper()) }\n",
     );
     let index = open(&path).expect("rename anchor index");
     let definition = index
@@ -1378,25 +1378,25 @@ fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
 fn semindex_dossier_stitches_scattered_members() {
     let src = r#"
 trait DrawThing {
-    fn render(self) String ->
+    fn render(self) -> String ->
 }
 
 struct Widget {
     title: String
 
-    fn label(self) String -> {
+    fn label(self) -> String {
         return ~self.title
     }
 }
 
 impl Widget {
-    fn size(self) Int -> {
+    fn size(self) -> Int {
         return 1
     }
 }
 
 impl Widget.DrawThing {
-    fn render(self) String -> {
+    fn render(self) -> String {
         return self.label()
     }
 }
@@ -1418,13 +1418,13 @@ fn run() {
     assert!(
         signatures
             .iter()
-            .any(|s| s.contains("label:fn label() String")),
+            .any(|s| s.contains("label:fn label() -> String")),
         "{signatures:?}"
     );
-    assert!(signatures.iter().any(|s| s.contains("size:fn size() Int")));
+    assert!(signatures.iter().any(|s| s.contains("size:fn size() -> Int")));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("render:fn render() String")));
+        .any(|s| s.contains("render:fn render() -> String")));
     let json = dossier.to_json();
     assert!(json.contains("\"target\":\"Widget\""));
     assert!(json.contains("\"trait_impl\""));
@@ -1439,7 +1439,7 @@ struct Client {
 }
 
 impl Client {
-    fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) String -> {
+    fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {
         return host
     }
 }
@@ -1497,7 +1497,7 @@ fn run() {
     fetch_it().drop("telemetry only")
 }
 
-fn fetch_it() Int -> {
+fn fetch_it() -> Int {
     return 1
 }
 "#;

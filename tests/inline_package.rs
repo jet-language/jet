@@ -30,7 +30,7 @@ fn inline_package_keeps_pub_package_visibility() {
     name: "inline-visibility"
 }
 
-pub(package) fn secret() String -> {
+pub(package) fn secret() -> String {
     return "ok"
 }
 
@@ -155,7 +155,7 @@ fn run() {
         .unwrap();
         fs::write(
             root.join("deps/dep/dep.jet"),
-            "pub fn value() String -> \"dependency\"\n",
+            "pub fn value() -> String -> \"dependency\"\n",
         )
         .unwrap();
     }

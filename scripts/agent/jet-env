@@ -81,14 +81,15 @@ set_default_target_dir() {
 set_default_target_dir "$repo"
 check_target_dir "$repo"
 
-# Cache-mode selection (card #1785): a COLD tree (no target/debug yet — fresh
-# worktree) compiles fastest through sccache's input-keyed shared cache, which
-# is safe across diverged branches (unlike a shared CARGO_TARGET_DIR, banned
-# above and by papercut pc08xq6wo). A WARM tree keeps cargo's incremental
-# cache, which beats sccache on delta rebuilds. The sccache binary lives in
-# the nix shell, so the availability check must run AFTER the shell env is
-# materialized — hence the wrapper below. JET_NO_SCCACHE=1 opts out.
-ensure_test_stack() {
+# Select sccache for a cold tree after the shell has made it available.
+# Agent commands keep incremental compilation disabled in either cache mode.
+# JET_NO_SCCACHE=1 opts out.
+ensure_command_resources() {
+  # Apply after direnv/nix as well: shell imports may replace the caller's
+  # environment. A machine-wide Cargo/test fan-out can exhaust shared RAM.
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+  export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+  export CARGO_INCREMENTAL=0
   # Recursive formatter/parser walks overflow the 2 MiB test-thread default.
   if [ -z "${RUST_MIN_STACK:-}" ]; then
     export RUST_MIN_STACK=8388608
@@ -102,7 +103,6 @@ cache_mode_env() {
     tgt="${CARGO_TARGET_DIR:-$1/target}"
     if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
       export RUSTC_WRAPPER=sccache
-      export CARGO_INCREMENTAL=0
     fi
   fi
 }
@@ -116,7 +116,7 @@ if command -v direnv >/dev/null 2>&1; then
     set_default_target_dir "$repo"
     check_target_dir "$repo"
     cache_mode_env "$repo"
-    ensure_test_stack
+    ensure_command_resources
     exec "$@"
   fi
 fi
@@ -143,4 +143,4 @@ else
   mkdir -p "$cache_dir"
   shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
 fi
-exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_test_stack); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_test_stack; exec $joined"
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"

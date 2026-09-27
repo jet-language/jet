@@ -2444,7 +2444,7 @@ pub fn render_scalar_jet(
         })?;
         let _ = writeln!(out, ") {result} = \"{abi}_{}\"", function.name);
     }
-    let _ = writeln!(out, "    fn take_error() Int = \"{abi}_take_error\"\n}}");
+    let _ = writeln!(out, "    fn take_error() -> Int = \"{abi}_take_error\"\n}}");
     let _ = writeln!(out, "use c.{abi} as abi\n");
     for function in functions {
         let _ = write!(out, "pub fn {}(", function.name);
@@ -2463,7 +2463,7 @@ pub fn render_scalar_jet(
                 function.result
             )
         })?;
-        let _ = writeln!(out, ") {result} !String -[{effect}]> {{",);
+        let _ = writeln!(out, ") -[{effect}]> {result} !String {{",);
         let _ = write!(out, "    value :: abi.{}(", function.name);
         for index in 0..function.params.len() {
             if index > 0 {

@@ -50,23 +50,23 @@ use core.data as core_data
     }
 
     // Parse typed rows through the canonical core.data reader.
-    pub fn load_csv(text: String) [Observation] ![FieldError] -> {
+    pub fn load_csv(text: String) -> [Observation] ![FieldError] {
         return core_data.csv<Observation>(text)
     }
 
-    pub fn pivot_sum(rows: [Observation]) [DataPivotCell] !DataError -> {
+    pub fn pivot_sum(rows: [Observation]) -> [DataPivotCell] !DataError {
         return core_data.pivot_sum(rows, row -> row.team, row -> row.segment, row -> row.value)
     }
 
-    pub fn rolling_mean(values: [Float], width: Int) [Float] !DataError -> {
+    pub fn rolling_mean(values: [Float], width: Int) -> [Float] !DataError {
         return core_data.rolling_mean(values, width)
     }
 
-    pub fn describe(values: [Float]) DataSummary !DataError -> {
+    pub fn describe(values: [Float]) -> DataSummary !DataError {
         return core_data.describe(values)
     }
 
-    pub fn group_summaries(groups: [Group<String, Float>]) [Summary] -> {
+    pub fn group_summaries(groups: [Group<String, Float>]) -> [Summary] {
         out := [Summary]{}
         loop group in groups {
             out.push(Summary{team: group.key, mean: group.value})
@@ -77,7 +77,7 @@ use core.data as core_data
     // Consume the canonical typed join. The default evaluator still reports
     // E0956 for this core.data.inner_join path; keep that defect visible for
     // #2919 instead of hiding it behind a handwritten substitute.
-    pub fn join_summaries(rows: [Summary], owners: [Owner]) [Joined] -> {
+    pub fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
         pairs :: core_data.inner_join(rows, owners, row -> row.team, owner -> owner.team)
             ?? panic("typed inner join")
         out := [Joined]{}
@@ -91,7 +91,7 @@ use core.data as core_data
         return out
     }
 
-    pub fn fit(rows: [Observation]) Regression -> {
+    pub fn fit(rows: [Observation]) -> Regression {
         if rows.len() == 0 -> panic("OLS requires at least one row")
         n := 0
         sum_x := Float{0.0}
@@ -129,7 +129,7 @@ use core.data as core_data
 
     // Tensor-in-struct path retained as the honest API; it is expected to stay
     // unavailable until compiler defect #2769 is repaired.
-    pub fn cell(array: LabeledArray, row: String, column: String) Float -> {
+    pub fn cell(array: LabeledArray, row: String, column: String) -> Float {
         ri := 0
         ci := 0
         row_found := false
@@ -153,14 +153,14 @@ use core.data as core_data
         return compute.get(array.values, [ri, ci]) ?? panic("tensor cell")
     }
 
-    pub fn plot_svg(groups: [Group<String, Int>]) String !DataError -> {
+    pub fn plot_svg(groups: [Group<String, Int>]) -> String !DataError {
         return core_data.bar_svg(groups)
     }
 
     // The core surface intentionally has no bar_png operation.  This small
     // grayscale encoder writes a standards-valid PNG from the same grouped
     // data, so the battery does not report a fabricated provider result.
-    fn png_chunk(kind: [U8], payload: [U8]) [U8] -> {
+    fn png_chunk(kind: [U8], payload: [U8]) -> [U8] {
         chunk := Bytes.new()
         chunk.write_u32_be(U32{payload.len()})
         chunk.write_bytes(kind)
@@ -172,7 +172,7 @@ use core.data as core_data
         return chunk.to_bytes()
     }
 
-    fn png_rows(groups: [Group<String, Int>]) [U8] -> {
+    fn png_rows(groups: [Group<String, Int>]) -> [U8] {
         pixels := [U8]{}
         loop y in 0..<32 {
             // PNG filter byte: no prediction for this deterministic raster.
@@ -190,7 +190,7 @@ use core.data as core_data
         return pixels
     }
 
-    pub fn plot_png(groups: [Group<String, Int>]) [U8] -> {
+    pub fn plot_png(groups: [Group<String, Int>]) -> [U8] {
         ihdr := Bytes.new()
         ihdr.write_u32_be(U32{64})
         ihdr.write_u32_be(U32{32})
@@ -217,7 +217,7 @@ use core.data as core_data
 
     // Native and bridge facts remain authoritative; unavailable bridges are
     // represented by core_data.status and never replaced with made-up values.
-    pub fn bridge_status() [DataStatus] -> {
+    pub fn bridge_status() -> [DataStatus] {
         return core_data.status()
     }
 

@@ -141,7 +141,7 @@ fn realized_library_is_consumed_with_use() {
     );
     write(
         &producer.join("jsonutil.jet"),
-        "module jsonutil { }\npub fn parse(raw: String) Int -> 42\n",
+        "module jsonutil { }\npub fn parse(raw: String) -> Int -> 42\n",
     );
 
     let realized = realize_into_hangar(&roots, &producer, "jsonutil");
@@ -162,7 +162,7 @@ fn realized_library_is_consumed_with_use() {
     );
     write(
         &consumer.join("main.jet"),
-        "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
+        "use jsonutil\nfn run() {\n    print(jsonutil.parse(\"x\"))\n}\n",
     );
     fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 
@@ -215,7 +215,7 @@ fn executable_is_not_importable() {
     );
     write(
         &consumer.join("main.jet"),
-        "use deploy;\nfn run() {\n    print(\"hi\");\n}\n",
+        "use deploy\nfn run() {\n    print(\"hi\")\n}\n",
     );
     fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 
@@ -265,7 +265,7 @@ fn unrealized_library_points_at_build_when_preparation_is_refused() {
     );
     write(
         &consumer.join("main.jet"),
-        "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
+        "use jsonutil\nfn run() {\n    print(jsonutil.parse(\"x\"))\n}\n",
     );
     fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 

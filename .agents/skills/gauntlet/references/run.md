@@ -23,7 +23,7 @@ Use this playbook only for Run mode. Read
 ## Advisory rows
 
 Collect readability proxies, RLI5 rubric scores, and authoring cost as advisory
-rows. For RLI5, use one Luna max subagent per persona: true beginner by default,
+rows. For RLI5, use one Luna xhigh subagent per persona: true beginner by default,
 plus switcher, domain expert, and unattended agent. Apply the global `rli5`
 skill to Jet and port sources with the same modify/derive probes. Weight each
 stumble by path commonality, using `surface-frequency-audit` data when it exists

@@ -209,15 +209,15 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
 fn exact_widening_is_symmetric_at_operators_and_works_for_arguments() {
     let output = compile_ok(
         r#"
-fn take_i16(value: I16) I16 -[]> {
+fn take_i16(value: I16) -[]> I16 {
     return value
 }
 
-fn return_i16(value: I8) I16 -[]> {
+fn return_i16(value: I8) -[]> I16 {
     return value
 }
 
-fn increment(value: I32) I32 -[]> {
+fn increment(value: I32) -[]> I32 {
     return value + 1
 }
 
@@ -244,11 +244,11 @@ fn run() {
 #[test]
 fn checked_and_approximate_crossings_match_aot_jit_and_interpreter() {
     let success = r#"
-fn take_float(value: Float) Float -[]> {
+fn take_float(value: Float) -[]> Float {
     return value
 }
 
-fn return_float(value: Int) Float -[]> {
+fn return_float(value: Int) -[]> Float {
     return value
 }
 
@@ -293,11 +293,11 @@ fn run() {{
 #[test]
 fn parenthesized_approximate_crossings_match_aot_jit_and_interpreter() {
     let source = r#"
-fn take_float(value: Float) Float -[]> {
+fn take_float(value: Float) -[]> Float {
     return value
 }
 
-fn return_float(value: Int) Float -[]> {
+fn return_float(value: Int) -[]> Float {
     return ((approx(value)))
 }
 
@@ -328,7 +328,7 @@ fn run() {
 fn numeric_arguments_widen_at_every_user_call_seam() {
     let source = r#"
 trait NumericSink {
-    fn accept(self, value: Float) Float
+    fn accept(self, value: Float) -> Float
 }
 
 struct Holder {
@@ -336,28 +336,28 @@ struct Holder {
 }
 
 impl Holder.NumericSink {
-    fn accept(self, value: Float) Float -[]> {
+    fn accept(self, value: Float) -[]> Float {
         return value
     }
 }
 
 impl Holder {
-    fn instance(self, value: Float) Float -[]> {
+    fn instance(self, value: Float) -[]> Float {
         return value
     }
 
-    fn static(value: Float) Float -[]> {
+    fn static(value: Float) -[]> Float {
         return value
     }
 }
 
 module numeric_helpers {
-    pub fn accept(value: Float) Float -[]> {
+    pub fn accept(value: Float) -[]> Float {
         return value
     }
 }
 
-fn accept_float(value: Float) Float -[]> {
+fn accept_float(value: Float) -[]> Float {
     return value
 }
 
@@ -401,7 +401,7 @@ fn run() {
         (
             "helper.jet",
             r#"
-pub fn accept(value: Float) Float -[]> {
+pub fn accept(value: Float) -[]> Float {
     return value
 }
 "#,
@@ -565,7 +565,7 @@ fn run() {
 #[test]
 fn exact_and_approximate_widening_requires_approx_for_narrowing() {
     let success = r#"
-fn take_float(value: Float) Float {
+fn take_float(value: Float) -> Float {
     return value
 }
 
@@ -579,7 +579,7 @@ fn run() {
     assert_all_tiers("exact_approximate_widening", success, 0, "true\ntrue\n");
 
     let narrowing = r#"
-fn take_float(value: Float) Float {
+fn take_float(value: Float) -> Float {
     return value
 }
 

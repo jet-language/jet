@@ -19,7 +19,7 @@ fn run() {}
 "#;
 
 const FIXED_JOIN_SOURCE: &str = r#"
-fn join(left: [Int#2], right: [Int#3]) [Int#5] {
+fn join(left: [Int#2], right: [Int#3]) -> [Int#5] {
     return left.concat(right)
 }
 

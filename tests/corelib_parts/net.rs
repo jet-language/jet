@@ -757,11 +757,11 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {
     return stream.read(limit)
 }
 
-fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {
+fn send_four<T: Writer>(&stream: T) -[IO]> Int !IOError {
     stream.write_all([1, 2, 3, 4])
     return Ok(4)
 }
@@ -810,11 +810,11 @@ fn core_net_unix_stream_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {{
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {{
     return stream.read(limit)
 }}
 
-fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {{
+fn send_four<T: Writer>(&stream: T) -[IO]> Int !IOError {{
     first :: stream.write([1, 2])
     stream.write_all([3, 4])
     return Ok(first)
@@ -1229,7 +1229,7 @@ fn card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter() {
     for expected in [
         "Warning [L0520] (display_migration): `IOError` has no `Display` impl",
         "Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`",
-        "Fix: add `impl IOError.Display { fn display(self) String -> { … } }`",
+        "Fix: add `impl IOError.Display { fn display(self) -> String { … } }`",
     ] {
         assert!(
             snapshot.contains(expected),

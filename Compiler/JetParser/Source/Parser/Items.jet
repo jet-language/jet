@@ -70,114 +70,118 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
 
 fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
     modifiers :: parser_parse_item_modifiers(&state)
-    if parser_c_module_ahead_at(&state, 0) {
-        value := parser_parse_c_module(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_module_ahead(&state) {
-        value :: parser_parse_module(&state, modifiers)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_test_ahead(&state) {
-        value :: parser_parse_test(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_unit_family_ahead(&state) {
-        value :: parser_parse_unit_family(&state, modifiers)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_distinct_ahead(&state) {
-        value :: parser_parse_distinct(&state, modifiers)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_state_section_ahead(&state) {
-        section := parser_parse_state_section(&state, "", parser_current(&state).span)
-        parser_report_ineligible_state_section(&state, section, "module")
-        return ParsedItemOrImport{item: None, import: None, handled: true}
-    }
-    if parser_state_ahead(&state) {
-        declaration := parser_parse_state_decl(&state, modifiers)
-        parser_report_top_level_state_decl(&state, declaration)
-        return ParsedItemOrImport{item: None, import: None, handled: true}
-    }
-    if parser_protocol_ahead(&state) {
-        value :: parser_parse_protocol(&state, modifiers)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_marker_decl_ahead(&state) {
-        value :: parser_parse_marker_decl(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_fact_decl_ahead(&state) {
-        value :: parser_parse_fact_decl(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_tag_decl_ahead(&state) {
-        value :: parser_parse_tag_policy(&state, modifiers)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_item_declaration_ahead_at(&state, 0) && parser_extern_ahead(&state) {
-        value :: parser_parse_extern_rust(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
-    }
-    if parser_current_kind(&state) == TOKEN_KW_USE {
-        import :: parser_parse_import(&state)
-        import.is_pub = modifiers.is_pub
-        import.is_package_pub = modifiers.is_package_pub
-        return ParsedItemOrImport{item: None, import: Val(import), handled: true}
+    if {
+        parser_c_module_ahead_at(&state, 0) -> {
+            value := parser_parse_c_module(&state)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_module_ahead(&state) -> {
+            value :: parser_parse_module(&state, modifiers)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_test_ahead(&state) -> {
+            value :: parser_parse_test(&state)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_unit_family_ahead(&state) -> {
+            value :: parser_parse_unit_family(&state, modifiers)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_distinct_ahead(&state) -> {
+            value :: parser_parse_distinct(&state, modifiers)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_state_section_ahead(&state) -> {
+            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            parser_report_ineligible_state_section(&state, section, "module")
+            return ParsedItemOrImport{item: None, import: None, handled: true}
+        }
+        parser_state_ahead(&state) -> {
+            declaration := parser_parse_state_decl(&state, modifiers)
+            parser_report_top_level_state_decl(&state, declaration)
+            return ParsedItemOrImport{item: None, import: None, handled: true}
+        }
+        parser_protocol_ahead(&state) -> {
+            value :: parser_parse_protocol(&state, modifiers)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_marker_decl_ahead(&state) -> {
+            value :: parser_parse_marker_decl(&state)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_fact_decl_ahead(&state) -> {
+            value :: parser_parse_fact_decl(&state)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_tag_decl_ahead(&state) -> {
+            value :: parser_parse_tag_policy(&state, modifiers)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_item_declaration_ahead_at(&state, 0) && parser_extern_ahead(&state) -> {
+            value :: parser_parse_extern_rust(&state)
+            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        }
+        parser_current_kind(&state) == TOKEN_KW_USE -> {
+            import := parser_parse_import(&state)
+            import.is_pub = modifiers.is_pub
+            import.is_package_pub = modifiers.is_package_pub
+            return ParsedItemOrImport{item: None, import: Val(import), handled: true}
+        }
     }
     token :: parser_current(&state)
-    if parser_comptime_const_ahead(&state, 0) {
-        value :: parser_parse_const(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_FN {
-        parsed :: parser_parse_function(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Func(value: parsed.value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_STRUCT {
-        value :: parser_parse_struct(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Struct(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_ENUM {
-        value :: parser_parse_enum(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Enum(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_CONST || token.kind == TOKEN_KW_COMPTIME || (modifiers.is_comptime && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ) {
-        value :: parser_parse_const(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_TRAIT {
-        value :: parser_parse_trait(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Trait(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_IMPL {
-        value :: parser_parse_impl(&state)
-        return ParsedItemOrImport{item: Val(Item.Impl(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_MODULE {
-        value :: parser_parse_code_module(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.CodeModule(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_EFFECT {
-        value :: parser_parse_effect_decl(&state)
-        return ParsedItemOrImport{item: Val(Item.EffectDecl(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_TAG {
-        value :: parser_parse_tag_decl(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.Tag(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_EXTERN {
-        value :: parser_parse_extern_rust(&state)
-        return ParsedItemOrImport{item: Val(Item.ExternRust(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_KW_DERIVE {
-        value :: parser_parse_user_derive(&state)
-        return ParsedItemOrImport{item: Val(Item.UserDerive(value: value)), import: None, handled: true}
-    }
-    if token.kind == TOKEN_IDENT && token.payload.decoded == "alias" {
-        value :: parser_parse_type_alias(&state, modifiers)
-        return ParsedItemOrImport{item: Val(Item.TypeAlias(value: value)), import: None, handled: true}
+    if {
+        parser_comptime_const_ahead(&state, 0) -> {
+            value :: parser_parse_const(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_FN -> {
+            parsed :: parser_parse_function(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Func(value: parsed.value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_STRUCT -> {
+            value :: parser_parse_struct(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Struct(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_ENUM -> {
+            value :: parser_parse_enum(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Enum(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_CONST || token.kind == TOKEN_KW_COMPTIME || (modifiers.is_comptime && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ) -> {
+            value :: parser_parse_const(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Const(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_TRAIT -> {
+            value :: parser_parse_trait(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Trait(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_IMPL -> {
+            value :: parser_parse_impl(&state)
+            return ParsedItemOrImport{item: Val(Item.Impl(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_MODULE -> {
+            value :: parser_parse_code_module(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.CodeModule(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_EFFECT -> {
+            value :: parser_parse_effect_decl(&state)
+            return ParsedItemOrImport{item: Val(Item.EffectDecl(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_TAG -> {
+            value :: parser_parse_tag_decl(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Tag(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_EXTERN -> {
+            value :: parser_parse_extern_rust(&state)
+            return ParsedItemOrImport{item: Val(Item.ExternRust(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_KW_DERIVE -> {
+            value :: parser_parse_user_derive(&state)
+            return ParsedItemOrImport{item: Val(Item.UserDerive(value: value)), import: None, handled: true}
+        }
+        token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> {
+            value :: parser_parse_type_alias(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.TypeAlias(value: value)), import: None, handled: true}
+        }
     }
     ParsedItemOrImport{item: None, import: None, handled: false}
 }

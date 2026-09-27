@@ -1,7 +1,7 @@
 Error [E1102]: `parallel item` can't cross a parallel worker boundary because `fn(Int) Int` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:11:27
     |
- 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) Int) -> true)
+ 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
     |                           ^^^^^^^^^^^
  Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E1102
 Error [E1102]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) Int]` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:11:27
     |
- 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) Int) -> true)
+ 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
     |                           ^^^^^^^^^^^
  Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential
@@ -28,17 +28,17 @@ More: jet-lang.dev/e/E1102
 Error [E0108]: Argument 2 to `.para_fold()` should be fn(fn(Int) Int -[]>, Int) fn(Int) Int -[]>, not fn(fn(Int) Int, Int) fn(Int) Int -[]> -[]>
   --> tests/ui/parallel_function_worker_type.jet:13:51
     |
- 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) Int, n: Int) -> callback, (left: fn(Int) Int, right: fn(Int) Int) -> left)
-    |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
+    |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: Built-in methods need arguments of the right type
  Fix: Use fn(fn(Int) Int -[]>, Int) fn(Int) Int -[]> here
 More: jet-lang.dev/e/E0108
 
 Error [E0108]: Argument 3 to `.para_fold()` should be fn(fn(Int) Int -[]>, fn(Int) Int -[]>) fn(Int) Int -[]>, not fn(fn(Int) Int, fn(Int) Int) fn(Int) Int -[]> -[]>
-  --> tests/ui/parallel_function_worker_type.jet:13:96
+  --> tests/ui/parallel_function_worker_type.jet:13:99
     |
- 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) Int, n: Int) -> callback, (left: fn(Int) Int, right: fn(Int) Int) -> left)
-    |                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
+    |                                                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: Built-in methods need arguments of the right type
  Fix: Use fn(fn(Int) Int -[]>, fn(Int) Int -[]>) fn(Int) Int -[]> here
 More: jet-lang.dev/e/E0108
@@ -46,7 +46,7 @@ More: jet-lang.dev/e/E0108
 Error [E1102]: `parallel result` can't cross a parallel worker boundary because `fn(Int) Int -[]>` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:13:20
     |
- 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) Int, n: Int) -> callback, (left: fn(Int) Int, right: fn(Int) Int) -> left)
+ 13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
     |                    ^^^^^^^^^
  Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential

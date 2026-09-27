@@ -5260,7 +5260,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         ),
         (
             jet::Syntax::COMMAND_FILE_BUILD,
-            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) BuildPlan -> { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
+            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
         ),
         (
             jet::Syntax::COMMAND_FILE_DEV,
@@ -15309,7 +15309,7 @@ mod missing_c_lib_tests {
 
         project.write(
             "tools/build.jet",
-            "fn build(b: BuildContext) BuildPlan -> { return b.plan() }\n",
+            "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n",
         );
         let package_inputs = jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
         let package = jet::Driver::prepare_build_front_end(package_inputs)
@@ -15336,7 +15336,7 @@ mod missing_c_lib_tests {
     ) {
         let project = ScratchProject::new();
         let main = "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n";
-        let dependency = "pub module box<T>(n: Int) { pub fn value() Int -> { return n } }\n";
+        let dependency = "pub module box<T>(n: Int) { pub fn value() -> Int { return n } }\n";
         let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
@@ -15394,7 +15394,7 @@ mod missing_c_lib_tests {
         project.write("main.jet", main);
         project.write(
             "defs.jet",
-            "pub module box<T>(n: Int) { pub fn value() Int -> { return n + 1 } }\n",
+            "pub module box<T>(n: Int) { pub fn value() -> Int { return n + 1 } }\n",
         );
         let dependency_body = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("dependency cache key");

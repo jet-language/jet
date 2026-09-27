@@ -4,7 +4,7 @@ use jet_parser::{Lexer, Parser};
 #[test]
 fn result_handler_lookahead_keeps_neighboring_forms_unambiguous() {
     let source = r#"
-fn optional() ?Success -> None
+fn optional() -> ?Success -> None
 fn fallible() !Error -> Err("bad")
 
 fn run(value: Int !Error, optional: String) {

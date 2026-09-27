@@ -27,7 +27,7 @@ build: {
     let source = r#"
 module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
-    pub fn slots() Int -> capacity
+    pub fn slots() -> Int -> capacity
 }
 @PROFILE_SLOTS :: @build.settings.cache_slots
 module tuned :: cache<Int>(@build.settings.cache_slots)
@@ -252,13 +252,13 @@ fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
 module cache<K>(capacity: Int) {
     @COMPUTED_SIZE :: @BASE + capacity
     pub struct Entry { items: [K#capacity] }
-    pub fn size() Int -> @COMPUTED_SIZE
+    pub fn size() -> Int -> @COMPUTED_SIZE
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) K -> value
+    pub fn identity(value: K) -> K -> value
 }
 module plain :: plain_template<Int>
 
@@ -279,7 +279,7 @@ module box<T> {
     pub struct Entry { value: T }
 }
 module boxed :: box<Int>
-fn wrong(value: boxed.Entry) String -> { return value }
+fn wrong(value: boxed.Entry) -> String { return value }
 fn run() {}
 "#,
     )
@@ -311,7 +311,7 @@ fn generic_modules_complete_instantiation() {
     let nested = r#"
 module outer<T>(count: Int) {
     module inner<U>(extra: Int) {
-        pub fn total(first: T, second: U) Int -> { return count + extra }
+        pub fn total(first: T, second: U) -> Int { return count + extra }
     }
     module closed :: inner<T>(count)
 }
@@ -327,20 +327,20 @@ module complete<T>(count: Int, label: String) {
     @VALUE :: count
     @COMPTIME_VALUE :: count + 1
     tag Marked { deny: [Net] }
-    trait Reveal { fn reveal(self) T }
+    trait Reveal { fn reveal(self) -> T }
     struct Wrapped { value: T }
     enum Maybe { Empty Value(T) }
-    impl Wrapped.Reveal { fn reveal(self) T -> { return self.value } }
+    impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     #Target(OS.Linux)
-    impl Wrapped { fn linux_value(self) T -> { return self.value } }
-    module plain { pub fn value() Int -> { return count } }
-    module nested<U> { pub fn keep(value: U) U -> { return ~value } }
+    impl Wrapped { fn linux_value(self) -> T { return self.value } }
+    module plain { pub fn value() -> Int { return count } }
+    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
     module nested_use :: nested<T>
     #Meta(category: label)
-    pub fn marked(value: ^#Marked T) #Marked T -> {
+    pub fn marked(value: ^#Marked T) -> #Marked T {
         #Meta(category: label)
         local := T{ value }
         return local
@@ -381,12 +381,12 @@ fn run() {
     .expect("write generic-module package");
     std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() Int -> { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() Int -> { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -451,11 +451,11 @@ fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
     @BASE :: capacity
-    pub fn shadowed() Int -> {
+    pub fn shadowed() -> Int {
         @base :: 5
         return @base
     }
-    pub fn plain_shadowed() Int -> {
+    pub fn plain_shadowed() -> Int {
         capacity := 5
         return capacity
     }
@@ -509,15 +509,15 @@ fn assert_nested_generic_module_execution() {
 module outer<T>(count: Int) {
     module plain {
         module inner<U> {
-            pub fn total(value: U) Int -> { return count }
+            pub fn total(value: U) -> Int { return count }
         }
         module closed :: inner<T>
         module forwarded :: closed
-        pub fn result(value: T) Int -> {
+        pub fn result(value: T) -> Int {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) Int -> {
+    pub fn result(value: T) -> Int {
         return plain.result(value)
     }
 }
@@ -582,7 +582,7 @@ fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
 module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
-    pub fn value() Int -> { return count }
+    pub fn value() -> Int { return count }
 }
 module same :: keyed(true, 3, 'a', "x", Mode.Fast)
 module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
@@ -660,7 +660,7 @@ fn generic_scalar_matrix() {
     for lit in types {
         let src = format!(
             r#"
-fn twice<T>(x: ^T, y: ^T) Pair<T> -> {{
+fn twice<T>(x: ^T, y: ^T) -> Pair<T> {{
     return Pair<T>{{ first: x, second: y }}
 }}
 
@@ -683,7 +683,7 @@ fn run() {{
 #[test]
 fn generic_fn_with_scalar_types() {
     let src = r#"
-fn twice<T>(x: ^T, y: ^T) Pair<T> -> {
+fn twice<T>(x: ^T, y: ^T) -> Pair<T> {
     return Pair<T>{ first: x, second: y }
 }
 
@@ -713,7 +713,7 @@ struct Wrap<Kind> {
     val: Kind
 }
 
-fn wrap<Kind>(x: ^Kind) Wrap<Kind> -> {
+fn wrap<Kind>(x: ^Kind) -> Wrap<Kind> {
     return Wrap<Kind>{ val: x }
 }
 
@@ -734,7 +734,7 @@ fn run() {
 #[test]
 fn multi_char_type_param_fn_only() {
     let src = r#"
-fn identity<Elem>(x: ^Elem) Elem -> {
+fn identity<Elem>(x: ^Elem) -> Elem {
     return x
 }
 
@@ -758,7 +758,7 @@ fn run() {
 fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
-fn twice<Elem>(x: ^Elem, y: ^Elem) Pair<Elem> -> {
+fn twice<Elem>(x: ^Elem, y: ^Elem) -> Pair<Elem> {
     return Pair<Elem>{ first: x, second: y }
 }
 
@@ -785,11 +785,11 @@ fn run() {
 #[test]
 fn explicit_generic_calls_cover_value_and_result_only_arguments() {
     let src = r#"
-fn identity<T>(value: ^T) T -> {
+fn identity<T>(value: ^T) -> T {
     return value
 }
 
-fn empty<T>() [T] -> {
+fn empty<T>() -> [T] {
     ignored :: input()
     return []
 }
@@ -852,7 +852,7 @@ fn generic_call_formatter_keeps_adjacent_angles() {
 fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
     let source = r#"
 module helpers {
-    pub fn identity<T>(value: ^T) T -> {
+    pub fn identity<T>(value: ^T) -> T {
         return value
     }
 }
@@ -894,7 +894,7 @@ fn run() {
 #[test]
 fn generic_call_diagnostics_cover_arity_and_bound_failures() {
     let wrong_arity = r#"
-fn identity<T>(value: ^T) T -> { return value }
+fn identity<T>(value: ^T) -> T { return value }
 fn run() { value :: identity<Int, String>(1) }
 "#;
     let arity_diags = jet::compile(wrong_arity).expect_err("wrong generic arity must fail");
@@ -907,7 +907,7 @@ fn run() { value :: identity<Int, String>(1) }
     let wrong_bound = r#"
 #!Comparable
 struct NotComparable { value: Int }
-fn choose<T: Comparable>(value: ^T) T -> { return value }
+fn choose<T: Comparable>(value: ^T) -> T { return value }
 fn run() {
     value :: choose<NotComparable>(NotComparable{ value: 1 })
 }
@@ -920,7 +920,7 @@ fn run() {
     assert!(!bound.what.is_empty() && !bound.why.is_empty() && !bound.fix.is_empty());
 
     let non_generic = r#"
-fn plain(value: Int) Int -> { return value }
+fn plain(value: Int) -> Int { return value }
 fn run() { value :: plain<Int>(1) }
 "#;
     let non_generic_diags = jet::compile(non_generic)
@@ -933,7 +933,7 @@ fn run() { value :: plain<Int>(1) }
     );
 
     let spaced = r#"
-fn identity<T>(value: ^T) T -> { return value }
+fn identity<T>(value: ^T) -> T { return value }
 fn run() { value :: identity < Int > (1) }
 "#;
     assert!(
@@ -958,8 +958,8 @@ fn run() { value :: json.decode<Int, String>("1") }
 #[test]
 fn free_generic_calls_execute_in_the_resident_jit() {
     let source = r#"
-fn identity<T>(value: ^T) T -> { return value }
-fn empty<T>() [T] -> { return [] }
+fn identity<T>(value: ^T) -> T { return value }
+fn empty<T>() -> [T] { return [] }
 fn run() {
     text :: identity<String>("ok")
     values :: empty<Int>()
@@ -1016,15 +1016,15 @@ struct Box<T> {
 }
 
 impl Box {
-    fn new(value: ^T) Box<T> -> {
+    fn new(value: ^T) -> Box<T> {
         return Box<T>{ value: value }
     }
 
-    fn convert<U>(self, value: ^U, *, note: String{"unused"}) U -> {
+    fn convert<U>(self, value: ^U, *, note: String{"unused"}) -> U {
         return value
     }
 
-    fn make<U>(value: ^U) U -> {
+    fn make<U>(value: ^U) -> U {
         return value
         }
     }

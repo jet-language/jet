@@ -4095,7 +4095,7 @@ fn run_with_project_env_file_resolves_declared_packages() {
     // Declare one package, then run with no ref → it resolves from env.jet.
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"fastfetch\"]);\n    ];\n}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\"),\n        pkg.packages([\"fastfetch\"])\n    ]\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -5733,7 +5733,7 @@ fn named_source_env_resolves_with_pin() {
     let root = Scratch::new("root");
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\");\n        pkg.packages([\"ripgrep@stable\"]);\n    ];\n}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"ripgrep@stable\"])\n    ]\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -5759,7 +5759,7 @@ fn unknown_named_source_in_env_is_friendly() {
     // References `neovim@beta` but only declares `stable`.
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\");\n        pkg.packages([\"neovim@beta\"]);\n    ];\n}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"neovim@beta\"])\n    ]\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -7597,7 +7597,7 @@ fn core_provider_runs_first_party_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
+            "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -7704,7 +7704,7 @@ fn core_provider_builds_library_package_without_nix() {
     // with no `bin/` — it is imported for its code, not installed on PATH.
     fs::write(
         lib_pkg.join("mathlib.jet"),
-        "module mathlib {\n    pub fn add(a: Int, b: Int) Int { return a + b }\n}\n",
+        "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
     )
     .unwrap();
     // A typed env references the library package; the source kind is inferred
@@ -7776,7 +7776,7 @@ fn core_cargo_build_requires_exact_trust_before_running_build_script() {
     fs::write(
         project.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"escape@mine\"]);\n    ];\n}}\n",
+            "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\"),\n        pkg.packages([\"escape@mine\"])\n    ]\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -8010,7 +8010,7 @@ fn core_provider_fetches_remote_git_package_from_env() {
     fs::write(
         proj.join("env.jet"),
         format!(
-        "use jetpack as pkg;\npub fn shell() [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -8078,7 +8078,7 @@ fn jetpack_toml_retirement_fires_e1225_from_cli() {
     fs::write(proj.join("jetpack.toml"), "[repo]\nname = \"old\"\n").unwrap();
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])]\n}\n",
     )
     .unwrap();
     let out = jetpack()
@@ -8140,7 +8140,7 @@ fn env_jet_sources_resolve_without_toml() {
     // env.jet declares `mine` as a path source and references `hello@mine`.
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"mine\", \"PLACEHOLDER\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}\n".replace(
+        "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"mine\", \"PLACEHOLDER\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}\n".replace(
             "PLACEHOLDER",
             &repo.to_string_lossy(),
         ),
@@ -9024,7 +9024,7 @@ fn two_process_reverse_package_order_does_not_deadlock() {
         fs::write(
             project.join("env.jet"),
             format!(
-        "use jetpack as pkg;\npub fn shell() [JSON] {{\n return [pkg.source(\"mine\", \"{}\", \"core\"); pkg.packages([{}]);];\n}}\n",
+        "use jetpack as pkg\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"{}\", \"core\"), pkg.packages([{}])]\n}}\n",
                 repo.display(),
                 packages
                     .iter()

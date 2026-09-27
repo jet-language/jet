@@ -743,12 +743,10 @@ impl JetObserveControl for JetTaskControl {
 thread_local! {
     static TASK_CONTROL: std::cell::RefCell<Option<Arc<JetTaskControl>>> =
         const { std::cell::RefCell::new(None) };
-    // A task's lexical groups must drain before this scheduler publishes its
-    // completion. Engines register only their representation-specific close
-    // callback; this Prelude owns the completion ordering.
-    static TASK_COMPLETION_CLEANUPS: std::cell::RefCell<Vec<Box<dyn FnOnce()>>> =
+    // Each task/helper completion boundary owns a nested frame. Child scopes
+    // drain only their own callbacks and leave the parent frame untouched.
+    static TASK_COMPLETION_FRAMES: std::cell::RefCell<Vec<Vec<Box<dyn FnOnce()>>>> =
         const { std::cell::RefCell::new(Vec::new()) };
-    static TASK_COMPLETION_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
@@ -1256,53 +1254,90 @@ where
 }
 
 
-pub fn jet_scheduler_task_completion_begin() {
-    TASK_COMPLETION_ACTIVE.with(|active| {
-        debug_assert!(!active.replace(true), "task completion scope nested");
+#[must_use = "dropping the scope closes and drains its task-completion frame"]
+pub struct JetSchedulerTaskCompletionScope {
+    frame_index: usize,
+}
+
+impl JetSchedulerTaskCompletionScope {
+    /// Run only this frame's registered callbacks in reverse registration order.
+    /// Callbacks registered by a callback join this frame and drain before it ends.
+    pub fn drain(&mut self) {
+        let mut first_panic = None;
+        loop {
+            let cleanups = TASK_COMPLETION_FRAMES.with(|frames| {
+                let mut frames = frames.borrow_mut();
+                assert_eq!(
+                    frames.len(),
+                    self.frame_index + 1,
+                    "task completion scopes must drain in nested order"
+                );
+                std::mem::take(
+                    frames
+                        .last_mut()
+                        .expect("task completion frame is present"),
+                )
+            });
+            if cleanups.is_empty() {
+                break;
+            }
+            for cleanup in cleanups.into_iter().rev() {
+                if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup))
+                {
+                    if first_panic.is_none() {
+                        first_panic = Some(panic);
+                    }
+                }
+            }
+        }
+        if let Some(panic) = first_panic {
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+impl Drop for JetSchedulerTaskCompletionScope {
+    fn drop(&mut self) {
+        let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.drain()));
+        TASK_COMPLETION_FRAMES.with(|frames| {
+            let mut frames = frames.borrow_mut();
+            assert_eq!(
+                frames.len(),
+                self.frame_index + 1,
+                "task completion scopes must end in nested order"
+            );
+            frames.pop();
+        });
+        if let Err(panic) = cleanup {
+            // Cleanup panics were already reported by the panic hook. Preserve
+            // an active body unwind rather than triggering a double panic.
+            if !std::thread::panicking() {
+                std::panic::resume_unwind(panic);
+            }
+        }
+    }
+}
+
+/// Begin a nested task-completion cleanup frame. The returned scope drains and
+/// removes exactly this frame on drop, including early returns and unwinding.
+pub fn jet_scheduler_task_completion_begin() -> JetSchedulerTaskCompletionScope {
+    let frame_index = TASK_COMPLETION_FRAMES.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        let frame_index = frames.len();
+        frames.push(Vec::new());
+        frame_index
     });
-    TASK_COMPLETION_CLEANUPS.with(|cleanups| {
-        debug_assert!(
-            cleanups.borrow().is_empty(),
-            "task completion cleanup leaked"
-        );
-    });
+    JetSchedulerTaskCompletionScope { frame_index }
 }
 
 pub fn jet_scheduler_task_completion_register<F>(cleanup: F)
 where
     F: FnOnce() + 'static,
 {
-    TASK_COMPLETION_ACTIVE.with(|active| {
-        if active.get() {
-            TASK_COMPLETION_CLEANUPS.with(|cleanups| {
-                cleanups.borrow_mut().push(Box::new(cleanup));
-            });
+    TASK_COMPLETION_FRAMES.with(|frames| {
+        if let Some(frame) = frames.borrow_mut().last_mut() {
+            frame.push(Box::new(cleanup));
         }
-    });
-}
-
-pub fn jet_scheduler_task_completion_drain() {
-    loop {
-        let cleanups = TASK_COMPLETION_CLEANUPS.with(|pending| {
-            std::mem::take(&mut *pending.borrow_mut())
-        });
-        if cleanups.is_empty() {
-            return;
-        }
-        for cleanup in cleanups.into_iter().rev() {
-            cleanup();
-        }
-    }
-}
-
-pub fn jet_scheduler_task_completion_end() {
-    TASK_COMPLETION_ACTIVE.with(|active| active.set(false));
-    TASK_COMPLETION_CLEANUPS.with(|cleanups| {
-        debug_assert!(
-            cleanups.borrow().is_empty(),
-            "task completion cleanup leaked"
-        );
-        cleanups.borrow_mut().clear();
     });
 }
 
@@ -2863,6 +2898,7 @@ struct ChannelState<T> {
     queue: VecDeque<T>,
     recv_waiters: Vec<Arc<ParkSlot>>,
     send_waiters: Vec<Arc<ParkSlot>>,
+    reserved_sends: usize,
     closed: bool,
     cancelled: bool,
     capacity: Option<usize>,
@@ -2872,11 +2908,53 @@ struct ChannelState<T> {
     receiver_count: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetSchedulerSendReserveError {
+    Closed,
+    Cancelled,
+    ReservationCountExhausted,
+    QueueAllocationFailed,
+}
+
+#[derive(Debug)]
+pub enum JetSchedulerSendPrepareError<E> {
+    Closed,
+    Preparation(E),
+}
+
+pub struct JetSchedulerSendReservation<T> {
+    inner: Arc<ChannelInner<T>>,
+    active: bool,
+}
+
 pub(crate) struct ChannelInner<T> {
     state: Mutex<ChannelState<T>>,
     observe_id: usize,
 }
 
+
+impl<T> Drop for JetSchedulerSendReservation<T> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let waiter = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.reserved_sends -= 1;
+            let waiter = state.send_waiters.pop();
+            jet_observe_channel_update(self.inner.observe_id, &state);
+            waiter
+        };
+        self.active = false;
+        if let Some(waiter) = waiter {
+            jet_scheduler_wake(&waiter);
+        }
+    }
+}
 fn jet_observe_channel_update<T>(id: usize, state: &ChannelState<T>) {
     let Some(registry) = jet_observe_registry() else { return };
     registry.channels.lock().unwrap().insert(
@@ -2966,6 +3044,7 @@ impl<T: Send> JetSchedulerChannel<T> {
                     queue: VecDeque::new(),
                     recv_waiters: Vec::new(),
                     send_waiters: Vec::new(),
+                    reserved_sends: 0,
                     closed: false,
                     cancelled: false,
                     capacity,
@@ -3149,47 +3228,182 @@ impl<T: Send> JetSchedulerSender<T> {
         }
     }
 
-    pub fn send(&self, value: T) -> bool {
-        let mut value = Some(value);
+    /// Reserve bounded capacity before preparing or extracting an owned
+    /// payload. A returned reservation is honored against all later senders.
+    pub fn reserve_send(
+        &self,
+    ) -> Result<JetSchedulerSendReservation<T>, JetSchedulerSendReserveError> {
         loop {
-            // D-CANCELMODEL1=C: a cancelled send unwinds at this wait point instead
-            // of returning the cooperative `false` sentinel. Shield defers.
             if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
                 jet_task_deliver_cancel();
-                return false;
+                return Err(JetSchedulerSendReserveError::Cancelled);
             }
             if let Some(ctrl) = current_task_control() {
                 ctrl.wait_while_paused();
             }
             let slot = ParkSlot::new();
-            let wake = {
-                let mut st = self.inner.state.lock().unwrap();
-                if st.closed || st.receiver_count == 0 {
-                    jet_observe_channel_update(self.inner.observe_id, &st);
-                    return false;
+            let reserved = {
+                let mut state = self.inner.state.lock().unwrap();
+                if state.closed || state.receiver_count == 0 {
+                    jet_observe_channel_update(self.inner.observe_id, &state);
+                    return Err(JetSchedulerSendReserveError::Closed);
                 }
-                let full = st.capacity.is_some_and(|cap| st.queue.len() >= cap);
-                let wake = if full {
-                    st.send_waiters.push(slot.clone());
-                    None
+                let occupied = state
+                    .queue
+                    .len()
+                    .checked_add(state.reserved_sends)
+                    .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
+                if state.capacity.is_some_and(|capacity| occupied >= capacity) {
+                    state.send_waiters.push(slot.clone());
+                    jet_observe_channel_update(self.inner.observe_id, &state);
+                    false
                 } else {
-                    st.queue.push_back(value.take().expect("channel send value missing"));
-                    st.recv_waiters.pop()
-                };
-                jet_observe_channel_update(self.inner.observe_id, &st);
-                wake
+                    let reserved_sends = state
+                        .reserved_sends
+                        .checked_add(1)
+                        .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
+                    if state.queue.try_reserve(reserved_sends).is_err() {
+                        jet_observe_channel_update(self.inner.observe_id, &state);
+                        return Err(JetSchedulerSendReserveError::QueueAllocationFailed);
+                    }
+                    state.reserved_sends = reserved_sends;
+                    jet_observe_channel_update(self.inner.observe_id, &state);
+                    true
+                }
             };
-            if let Some(slot) = wake {
-                jet_scheduler_wake(&slot);
+            if reserved {
+                return Ok(JetSchedulerSendReservation {
+                    inner: self.inner.clone(),
+                    active: true,
+                });
             }
-            if value.is_none() {
-                return true;
-            }
-            jet_scheduler_yield("channel send", &slot, None);
-            let mut st = self.inner.state.lock().unwrap();
-            st.send_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
-            jet_observe_channel_update(self.inner.observe_id, &st);
+            jet_scheduler_yield("channel send capacity", &slot, None);
+            let mut state = self.inner.state.lock().unwrap();
+            state.send_waiters.retain(|waiter| !Arc::ptr_eq(waiter, &slot));
+            jet_observe_channel_update(self.inner.observe_id, &state);
         }
+    }
+
+    /// Send an already-owned value while returning it exactly when acceptance
+    /// fails. Transferable Source owners should reserve before extraction and
+    /// use `commit_prepared` instead.
+    pub fn send_owned(&self, value: T) -> Result<(), T> {
+        match self.reserve_send() {
+            Ok(reservation) => reservation.commit(value),
+            Err(_) => Err(value),
+        }
+    }
+
+    pub fn send(&self, value: T) -> bool {
+        self.send_owned(value).is_ok()
+    }
+}
+
+impl<T: Send> JetSchedulerSendReservation<T> {
+    /// Commit a value already owned by the caller. A rejected acceptance
+    /// returns the exact value and releases this reservation.
+    pub fn commit(mut self, value: T) -> Result<(), T> {
+        let (result, waiter) = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let (result, waiter) = if state.closed || state.receiver_count == 0 {
+                state.reserved_sends -= 1;
+                self.active = false;
+                (Err(value), state.send_waiters.pop())
+            } else {
+                state.queue.push_back(value);
+                state.reserved_sends -= 1;
+                self.active = false;
+                (Ok(()), state.recv_waiters.pop())
+            };
+            jet_observe_channel_update(self.inner.observe_id, &state);
+            (result, waiter)
+        };
+        if let Some(waiter) = waiter {
+            jet_scheduler_wake(&waiter);
+        }
+        result
+    }
+
+    /// Atomically prepare an owned payload and publish it into capacity
+    /// reserved by `reserve_send`. The closure runs only after the channel is
+    /// accepted and while its queue lock excludes close/other senders. Queue
+    /// storage is preallocated by the reservation, so after `Ok((value,
+    /// receipt))` returns publication has no cancellation, allocation, or
+    /// fallible step.
+    pub fn commit_prepared<R, E>(
+        mut self,
+        prepare: impl FnOnce() -> Result<(T, R), E>,
+    ) -> Result<R, JetSchedulerSendPrepareError<E>> {
+        let mut prepare = Some(prepare);
+        let (result, waiter) = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let (result, waiter) = if state.closed || state.receiver_count == 0 {
+                state.reserved_sends -= 1;
+                self.active = false;
+                (
+                    Err(JetSchedulerSendPrepareError::Closed),
+                    state.send_waiters.pop(),
+                )
+            } else {
+                match prepare.take().expect("prepared send closure missing")() {
+                    Ok((value, receipt)) => {
+                        state.queue.push_back(value);
+                        state.reserved_sends -= 1;
+                        self.active = false;
+                        (Ok(receipt), state.recv_waiters.pop())
+                    }
+                    Err(error) => {
+                        state.reserved_sends -= 1;
+                        self.active = false;
+                        (
+                            Err(JetSchedulerSendPrepareError::Preparation(error)),
+                            state.send_waiters.pop(),
+                        )
+                    }
+                }
+            };
+            jet_observe_channel_update(self.inner.observe_id, &state);
+            (result, waiter)
+        };
+        drop(prepare);
+        if let Some(waiter) = waiter {
+            jet_scheduler_wake(&waiter);
+        }
+        result
+    }
+}
+
+impl<T: Send> JetSchedulerChannel<T> {
+    /// Close exactly this receiver endpoint and recover queued values only
+    /// when it is the final physical receiver. Surviving receiver aliases
+    /// retain the queue; concurrent senders observe the terminal receiver count
+    /// under the same state lock and cannot enqueue after the drain.
+    pub fn close_receiver_and_drain(&self) -> Vec<T> {
+        let (queue, recv_waiters, send_waiters) = {
+            let mut st = self.inner.state.lock().unwrap();
+            if st.receiver_count > 1 {
+                return Vec::new();
+            }
+            st.receiver_count = 0;
+            st.closed = true;
+            let queue = std::mem::take(&mut st.queue);
+            let recv_waiters = std::mem::take(&mut st.recv_waiters);
+            let send_waiters = std::mem::take(&mut st.send_waiters);
+            jet_observe_channel_update(self.inner.observe_id, &st);
+            (queue, recv_waiters, send_waiters)
+        };
+        for waiter in recv_waiters.into_iter().chain(send_waiters) {
+            waiter.wake();
+        }
+        queue.into_iter().collect()
     }
 }
 
@@ -3199,6 +3413,30 @@ impl<T> JetSchedulerChannel<T> {
         self.inner.clone()
     }
 }
+/// A non-owning view used to keep a channel's physical queue state alive
+/// during selection without retaining a logical receiver endpoint.
+pub struct JetSchedulerChannelSelectView<T> {
+    inner: Arc<ChannelInner<T>>,
+}
+
+impl<T> Clone for JetSchedulerChannelSelectView<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T> JetSchedulerChannel<T> {
+    /// Retain only the queue state for a blocking select. Dropping this view
+    /// never changes receiver ownership or closes the channel.
+    pub fn select_view(&self) -> JetSchedulerChannelSelectView<T> {
+        JetSchedulerChannelSelectView {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 
 // ── D-CONCSELECT1=A: scoped select multiplex ─────────────────────────────────
 
@@ -3911,14 +4149,17 @@ pub fn jet_scheduler_select_int_channels<T: Send>(
     )
 }
 
-/// D-CONC-CHAN1: the tagged arm result used by subjectless readiness tables.
-/// Channel/timer registration, arm choice, close, and cancellation stay in
-/// this Prelude door; AOT and JIT only marshal their endpoint handles here.
-pub fn jet_scheduler_select_int_channels_tagged(
-    channels: &[JetSchedulerChannel<i64>],
+/// Generic tagged select door for Source-owned channel payloads. Readiness,
+/// timer conversion, arm ordering, close, and cancellation stay in the
+/// canonical scheduler kernel.
+pub fn jet_scheduler_select_channels_tagged<T: Send>(
+    channels: &[JetSchedulerChannel<T>],
     after_ns: Vec<i64>,
-) -> (i64, Option<i64>) {
-    let recvs: Vec<_> = channels.iter().map(|channel| channel.select_inner()).collect();
+) -> (i64, Option<T>) {
+    let recvs: Vec<_> = channels
+        .iter()
+        .map(|channel| channel.select_inner())
+        .collect();
     let after_ms = after_ns
         .into_iter()
         .map(|ns| jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(ns)))
@@ -3929,15 +4170,47 @@ pub fn jet_scheduler_select_int_channels_tagged(
         JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
     }
 }
+/// Tagged selection over non-owning queue views. Consuming the views keeps
+/// queue state alive without delaying logical receiver close/release.
+pub fn jet_scheduler_select_channel_views_tagged<T: Send>(
+    views: Vec<JetSchedulerChannelSelectView<T>>,
+    after_ns: Vec<i64>,
+) -> (i64, Option<T>) {
+    let receiver_arms = views.len();
+    let recvs = views
+        .into_iter()
+        .map(|view| view.inner)
+        .collect();
+    let after_ms = after_ns
+        .into_iter()
+        .map(|ns| jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(ns)))
+        .collect();
+    match jet_scheduler_select(recvs, after_ms) {
+        JetSelectOutcome::Recv { arm, value } => (arm as i64, Some(value)),
+        JetSelectOutcome::After { arm } => ((receiver_arms + arm) as i64, None),
+        JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
+    }
+}
 
-/// D-CONC-CHAN2=D: nonblocking readiness for a table with `else`. The
-/// sentinel arm `-1` is an ABI detail consumed by TIR; the Prelude owns the
-/// same immediate receive/timer/closed policy as the interpreter and AOT.
-pub fn jet_scheduler_try_select_int_channels_tagged(
+/// D-CONC-CHAN1: the tagged arm result used by subjectless readiness tables.
+/// Channel/timer registration, arm choice, close, and cancellation stay in
+/// this Prelude door; AOT and JIT only marshal their endpoint handles here.
+pub fn jet_scheduler_select_int_channels_tagged(
     channels: &[JetSchedulerChannel<i64>],
     after_ns: Vec<i64>,
 ) -> (i64, Option<i64>) {
-    let recvs: Vec<_> = channels.iter().map(|channel| channel.select_inner()).collect();
+    jet_scheduler_select_channels_tagged(channels, after_ns)
+}
+
+/// Generic nonblocking tagged selection for Source-owned channel payloads.
+pub fn jet_scheduler_try_select_channels_tagged<T: Send>(
+    channels: &[JetSchedulerChannel<T>],
+    after_ns: Vec<i64>,
+) -> (i64, Option<T>) {
+    let recvs: Vec<_> = channels
+        .iter()
+        .map(|channel| channel.select_inner())
+        .collect();
     let after_ms = after_ns
         .into_iter()
         .map(|ns| jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(ns)))
@@ -3947,6 +4220,16 @@ pub fn jet_scheduler_try_select_int_channels_tagged(
         Some(JetSelectOutcome::After { arm }) => ((channels.len() + arm) as i64, None),
         Some(JetSelectOutcome::Closed) | None => (-1, None),
     }
+}
+
+/// D-CONC-CHAN2=D: nonblocking readiness for a table with `else`. The
+/// sentinel arm `-1` is an ABI detail consumed by TIR; the Prelude owns the
+/// same immediate receive/timer/closed policy as the interpreter and AOT.
+pub fn jet_scheduler_try_select_int_channels_tagged(
+    channels: &[JetSchedulerChannel<i64>],
+    after_ns: Vec<i64>,
+) -> (i64, Option<i64>) {
+    jet_scheduler_try_select_channels_tagged(channels, after_ns)
 }
 
 /// Run an internal timer producer on a detached host thread. A producer
@@ -4097,13 +4380,13 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
             task_completion_wait.wake();
             return;
         }
-        jet_scheduler_task_completion_begin();
+        let mut completion_scope = jet_scheduler_task_completion_begin();
         let out = jet_scheduler_catch_task_unwind(f);
         // D-CANCELMODEL1=C: a cancellation unwind skips the generated task
         // frame's fall-through epilogue. Drain owned groups before publishing
         // this task's completion, so its caller cannot observe it first.
-        jet_scheduler_task_completion_drain();
-        jet_scheduler_task_completion_end();
+        completion_scope.drain();
+        drop(completion_scope);
         jet_scheduler_task_panic_leave();
         jet_scheduler_set_task_control(None);
         let result = match out {
@@ -4185,6 +4468,177 @@ pub fn jet_scheduler_drain_after_exit() {
             }
         }
         thread::yield_now();
+    }
+}
+
+#[cfg(test)]
+mod task_completion_scope_tests {
+    use super::*;
+
+    fn register_record(
+        trace: Arc<Mutex<Vec<&'static str>>>,
+        event: &'static str,
+    ) {
+        jet_scheduler_task_completion_register(move || {
+            trace.lock().unwrap().push(event);
+        });
+    }
+
+    #[test]
+    fn nested_task_completion_drains_only_its_frame_in_lifo_order() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut outer = jet_scheduler_task_completion_begin();
+        register_record(trace.clone(), "outer-first");
+        register_record(trace.clone(), "outer-second");
+        {
+            let mut inner = jet_scheduler_task_completion_begin();
+            let inner_trace = trace.clone();
+            let late_trace = trace.clone();
+            jet_scheduler_task_completion_register(move || {
+                inner_trace.lock().unwrap().push("inner-first");
+                register_record(late_trace.clone(), "inner-late");
+            });
+            register_record(trace.clone(), "inner-second");
+
+            inner.drain();
+            assert_eq!(
+                *trace.lock().unwrap(),
+                vec!["inner-second", "inner-first", "inner-late"]
+            );
+        }
+        assert_eq!(
+            *trace.lock().unwrap(),
+            vec!["inner-second", "inner-first", "inner-late"]
+        );
+
+        outer.drain();
+        assert_eq!(
+            *trace.lock().unwrap(),
+            vec![
+                "inner-second",
+                "inner-first",
+                "inner-late",
+                "outer-second",
+                "outer-first"
+            ]
+        );
+    }
+
+    fn nested_task_completion_failure(
+        trace: Arc<Mutex<Vec<&'static str>>>,
+    ) -> Result<(), &'static str> {
+        let _inner = jet_scheduler_task_completion_begin();
+        register_record(trace, "failed-child");
+        let result: Result<(), &'static str> = Err("child failed");
+        result?;
+        Ok(())
+    }
+
+    #[test]
+    fn nested_task_completion_restores_parent_on_failure_and_unwind() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut outer = jet_scheduler_task_completion_begin();
+        register_record(trace.clone(), "outer-first");
+        assert_eq!(
+            nested_task_completion_failure(trace.clone()),
+            Err("child failed")
+        );
+        assert_eq!(*trace.lock().unwrap(), vec!["failed-child"]);
+
+        let panic_trace = trace.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _inner = jet_scheduler_task_completion_begin();
+            register_record(panic_trace, "panicked-child");
+            panic!("nested task failed");
+        }));
+        assert!(result.is_err());
+        assert_eq!(
+            *trace.lock().unwrap(),
+            vec!["failed-child", "panicked-child"]
+        );
+
+        register_record(trace.clone(), "outer-late");
+        outer.drain();
+        assert_eq!(
+            *trace.lock().unwrap(),
+            vec!["failed-child", "panicked-child", "outer-late", "outer-first"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod send_reservation_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_reservations_serialize_capacity_until_commit_or_drop() {
+        let channel = JetSchedulerChannel::<i64>::bounded(1);
+        let sender = channel.sender();
+        let reservation = sender.reserve_send().expect("reserve bounded capacity");
+        assert_eq!(channel.inner.state.lock().unwrap().reserved_sends, 1);
+
+        let worker_sender = sender.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let reservation = worker_sender
+                .reserve_send()
+                .expect("reserve after capacity is released");
+            tx.send(reservation.commit(22).is_ok())
+                .expect("report committed send");
+        });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if channel.inner.state.lock().unwrap().send_waiters.len() == 1 {
+                break;
+            }
+            assert!(Instant::now() < deadline, "second sender did not wait for capacity");
+            thread::yield_now();
+        }
+        assert_eq!(channel.inner.state.lock().unwrap().reserved_sends, 1);
+
+        drop(reservation);
+        assert!(rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("released reservation wakes waiting sender"));
+        worker.join().expect("sender worker completed");
+        assert_eq!(channel.try_receive(), Some(22));
+    }
+
+    #[test]
+    fn prepared_send_publishes_receipt_and_skips_prepare_after_close() {
+        let channel = JetSchedulerChannel::<i64>::bounded(1);
+        let sender = channel.sender();
+        let reservation = sender.reserve_send().expect("reserve bounded capacity");
+        let receipt = reservation
+            .commit_prepared(|| Ok::<_, ()>((17, "receipt")))
+            .expect("prepare and publish");
+        assert_eq!(receipt, "receipt");
+        assert_eq!(channel.try_receive(), Some(17));
+
+        let reservation = sender.reserve_send().expect("reserve second capacity");
+        channel.close();
+        let prepared = std::sync::atomic::AtomicUsize::new(0);
+        let result = reservation.commit_prepared(|| {
+            prepared.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, ()>((19, ()))
+        });
+        assert!(matches!(
+            result,
+            Err(JetSchedulerSendPrepareError::Closed)
+        ));
+        assert_eq!(prepared.load(Ordering::SeqCst), 0);
+        assert_eq!(channel.try_receive(), None);
+    }
+    #[test]
+    fn non_owning_select_view_does_not_delay_receiver_close() {
+        let channel = JetSchedulerChannel::<i64>::new();
+        let view = channel.select_view();
+
+        drop(channel);
+
+        let state = view.inner.state.lock().unwrap();
+        assert_eq!(state.receiver_count, 0);
+        assert!(state.closed);
     }
 }
 

@@ -376,7 +376,7 @@ fn panic_context_uses_only_lexically_live_locals() {
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(
             r#"
-fn missing() (?Int) -> None
+fn missing() -> (?Int) -> None
 fn capture(live: Int) {{
     {scoped_stmt}
     _value :: missing() ?? panic("missing value")
@@ -484,17 +484,17 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) Int !ParseError -[]> {
+fn parse_age(raw: String) -[]> Int !ParseError {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) Int !ParseError -[]> {
+fn load(raw: String) -[]> Int !ParseError {
     n :: parse_age(raw)?("loading age")
     return Ok((n * 2))
 }
-fn double(raw: String) Int !ParseError -[]> {
+fn double(raw: String) -[]> Int !ParseError {
     n :: load(raw)?("doubling age")
     return Ok((n * 2))
 }
@@ -546,12 +546,12 @@ fn try_note_interpolation_is_lazy_on_success() {
     }
 
     let src = r#"
-fn present() String -> Ok("ok")
-fn note_value() String -[IO]> {
+fn present() -> String -> Ok("ok")
+fn note_value() -[IO]> String {
     print("evaluated")
     return "unexpected"
 }
-fn wrapped() String -[IO]> {
+fn wrapped() -[IO]> String {
     value :: present()?("never {note_value()}")
     return Ok(value)
 }
@@ -578,7 +578,7 @@ fn fallback_handles_locally_and_context_preserves_the_structured_cause() {
     // second crossing uses the canonical `?(text)` form; it adds one hop and
     // leaves both the typed code and nested cause on the same carrier.
     let src = r#"
-fn fail() String -> Err("outer", code: "E_OUTER", cause: Err("root"))
+fn fail() -> String -> Err("outer", code: "E_OUTER", cause: Err("root"))
 fn pass_through() -[]> {
     _ :: fail()?("loading")
 }
@@ -624,7 +624,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() Int !IOError -> {
+fn read_store() -> Int !IOError {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -633,7 +633,7 @@ fn read_store() Int !IOError -> {
     }))
 }
 
-fn get_user() Int -> {
+fn get_user() -> Int {
     value :: read_store()?("loading store")
     return Ok(value)
 }
@@ -683,7 +683,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() String !IOError -> {
+fn read_store() -> String !IOError {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -692,12 +692,12 @@ fn read_store() String !IOError -> {
     }))
 }
 
-fn load_store() String -> {
+fn load_store() -> String {
     value :: read_store()?("loading store")
     return value
 }
 
-fn open_store() String -> {
+fn open_store() -> String {
     value :: load_store()?("opening store")
     return value
 }
@@ -744,12 +744,12 @@ fn uncaught_err_prints_propagation_chain() {
     // D-FAIL-CTX1=A: uncaught Err at `fn run()` prints the journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
-fn read_raw() String -> Err("file not found")
-fn parse_config() String -[]> {
+fn read_raw() -> String -> Err("file not found")
+fn parse_config() -[]> String {
     raw :: read_raw()?("reading raw config")
     return Ok(raw)
 }
-fn load_config() String -[]> {
+fn load_config() -[]> String {
     cfg :: parse_config()?("loading config")
     return Ok(cfg)
 }
@@ -792,7 +792,7 @@ fn propagation_trace_collapses_repeated_frames() {
     // The journey only reaches stderr when the failure escapes the entry, so
     // `run` propagates instead of recovering.
     let src = r#"
-fn dive(n: Int) Int -[]> {
+fn dive(n: Int) -[]> Int {
     if n <= 0 {
         return Err("bottom")
     }

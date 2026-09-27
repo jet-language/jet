@@ -23,7 +23,7 @@ fn range_interval_proves_fixed_array_index() {
 tag Checked { deny: [Net] }
 Die :: distinct Int(1..6)
 
-fn pick(faces: [String#6], roll: Die) String -[]> {
+fn pick(faces: [String#6], roll: Die) -[]> String {
     return faces[roll.raw() - 1]
 }
 
@@ -84,7 +84,7 @@ tag Checked { deny: [Net] }
 Die :: distinct Int(1..6)
 
 #Target(JS)
-fn pick(faces: [String#6], roll: Die) String -[]> {
+fn pick(faces: [String#6], roll: Die) -[]> String {
     return faces[roll.raw() - 1]
 }
 
@@ -136,7 +136,7 @@ fn parenthesized_view_place_return_keeps_parameter_provenance() {
         return;
     }
     let src = r#"
-fn first(values: [Int]) View<Int> -[]> {
+fn first(values: [Int]) -[]> View<Int> {
     return (values[0..1])
 }
 

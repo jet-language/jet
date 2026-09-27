@@ -1,0 +1,60 @@
+// Source optimizer regressions for inline MIR contracts and loop-fact reuse.
+#Inline(Always) fn optimizer_source_unit() {
+    print("unit:body")
+}
+
+#Inline(Always) fn optimizer_source_generic<T>(values: List<T>) -> List<T> {
+    values
+}
+
+#Inline(Always) fn optimizer_source_widen(values: List<Int>) -> Int {
+    values[1]
+}
+
+#Inline(Always) fn optimizer_source_recursive(value: Int) -> Int {
+    if value <= 1 -> return 1
+    return value * optimizer_source_recursive(value - 1)
+}
+
+#Inline(Always) fn optimizer_source_math(value: Float) -> Float {
+    math.sqrt(value)
+}
+
+fn optimizer_source_range_sum(values: [Float#4]) -> Float {
+    total := Float{0.0}
+    loop index in 0..<4 { total += values[index] }
+    return total
+}
+
+fn optimizer_source_dynamic_sum(values: [Float#4], limit: Int) -> Float {
+    total := Float{0.0}
+    loop index in 0..<limit { total += values[index] }
+    return total
+}
+
+fn optimizer_source_stale_alias_sum(values: [Float#4]) -> Float {
+    stale_index := 0
+    total := Float{0.0}
+    loop iteration in 0..<2 {
+        total += values[stale_index]
+        stale_index = iteration
+    }
+    return total
+}
+
+fn run() {
+    optimizer_source_unit()
+    values := [Int]{7, 8}
+    returned := optimizer_source_generic(values)
+    fixed := [Int#2]{7, 8}
+    widened := optimizer_source_widen(fixed)
+    generic_ok := returned[0] == 7 && returned[1] == 8
+    widening_ok := widened == 8
+    recursion_ok := optimizer_source_recursive(5) == 120
+    math_ok := optimizer_source_math(Float{16.0}) == 4.0
+    reduction_values := [Float#4]{1.0, 2.0, 3.0, 4.0}
+    dynamic_values := [Float#4]{1.0, 2.0, 3.0, 4.0}
+    range_reduction_ok := optimizer_source_range_sum(reduction_values) == 10.0
+    dynamic_bound_ok := optimizer_source_dynamic_sum(dynamic_values, 2) == 3.0
+    stale_alias_ok := optimizer_source_stale_alias_sum(reduction_values) == 2.0
+    print("{generic_ok} {widening_ok} {recursion_ok} {math_ok} {range_reduction_ok} {dynamic_bound_ok} {stale_alias_ok}")

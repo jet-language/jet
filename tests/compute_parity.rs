@@ -136,7 +136,7 @@ fn compute_result_tensor_payload_survives_resident_return_cleanup() {
     let source = r#"
 use core.compute as compute
 
-fn make_tensor() Tensor !ComputeError -> {
+fn make_tensor() -> Tensor !ComputeError {
     tensor :: compute.full([2], 3.0) ?? panic("tensor")
     return tensor
 }
@@ -182,7 +182,7 @@ fn named_gradient_composes_into_second_derivative() {
     let source = r#"
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) Tensor -> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
@@ -208,11 +208,11 @@ fn compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate
     let source = r#"
 use core.compute as compute
 
-fn vec_rank(value: Vec<3>) Int -[GPU]> {
+fn vec_rank(value: Vec<3>) -[GPU]> Int {
     return compute.rank(value)
 }
 
-fn matrix_rank(value: Matrix<2, 3>) Int -[GPU]> {
+fn matrix_rank(value: Matrix<2, 3>) -[GPU]> Int {
     return compute.rank(value)
 }
 

@@ -158,7 +158,7 @@ fn refusal_for(src: &str, fn_name: &str) -> String {
 #[test]
 fn gate_refusal_names_an_uncovered_parameter_type() {
     let detail = refusal_for(
-        "fn build(b: BuildContext) Int -> {\n    return 1\n}\n",
+        "fn build(b: BuildContext) -> Int {\n    return 1\n}\n",
         "build",
     );
     assert!(
@@ -807,7 +807,7 @@ fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
 #[test]
 fn covers_simple_arithmetic_fn() {
     assert!(covers(
-        "fn add(a: Int, b: Int) Int -> {\n return (a + b)\n}\n",
+        "fn add(a: Int, b: Int) -> Int {\n return (a + b)\n}\n",
         "add"
     ));
 }
@@ -822,7 +822,7 @@ fn covers_print_and_string_param() {
 
 #[test]
 fn covers_if_else_chain() {
-    let src = "fn f(n: Int) Int -> {\n if (n > 0) {\n return 1\n } else {\n return 0\n }\n}\n";
+    let src = "fn f(n: Int) -> Int {\n if (n > 0) {\n return 1\n } else {\n return 0\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -847,7 +847,7 @@ fn covers_struct_lit_with_string_field_value() {
 struct Person {
     name: String
 }
-fn make(n: String) Person -> {
+fn make(n: String) -> Person {
     return Person{ name: n }
 }
 ";
@@ -870,7 +870,7 @@ fn covers_generic_fn() {
     // type-var value by-value. (The `covers` helper is build_cx-only, so it sees
     // `x: T` as a Read param; sema would require `take x: T`, but the gate shape is
     // identical either way — a type-var param/return is in-subset.)
-    assert!(covers("fn id<T>(x: T) T -> {\n return x\n}\n", "id"));
+    assert!(covers("fn id<T>(x: T) -> T {\n return x\n}\n", "id"));
 }
 
 #[test]
@@ -879,7 +879,7 @@ fn covers_generic_struct_fn() {
     // param/return type and the turbofish construction (`__jet_Pair::<T> { … }`) are now
     // covered. The struct's type-var fields are admitted by `field_ty_covered`; the
     // turbofish head is resolved at lowering.
-    let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) Pair<T> -> {\n return Pair<T>{first: a, second: b}\n}\n";
+    let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T>{first: a, second: b}\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -929,7 +929,7 @@ fn covers_core_math_pi_field() {
     // `use core.math as math` then `math.pi` is a module field, not a call.
     // Coverage used to refuse the alias and ICE as "expression `pi`".
     assert!(covers_with_core_import(
-        "fn angle(x: Float) Float -> {\n return -math.pi / x\n}\n",
+        "fn angle(x: Float) -> Float {\n return -math.pi / x\n}\n",
         "angle",
         "math",
         "core.math",
@@ -938,7 +938,7 @@ fn covers_core_math_pi_field() {
 
 #[test]
 fn covers_core_math_pi_field_after_sema() {
-    let src = "use core.math as math\nfn angle(x: Float) Float -> {\n return -math.pi / x\n}\nfn run() { print(angle(2.0)) }\n";
+    let src = "use core.math as math\nfn angle(x: Float) -> Float {\n return -math.pi / x\n}\nfn run() { print(angle(2.0)) }\n";
     if !covers_after_sema(src, "angle") {
         panic!(
             "angle was uncovered after sema: {}",
@@ -949,7 +949,7 @@ fn covers_core_math_pi_field_after_sema() {
 
 #[test]
 fn covers_float_is_finite_after_sema() {
-    let src = "fn checked(x: Float) Bool -> {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
+    let src = "fn checked(x: Float) -> Bool {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
     assert!(covers_after_sema(src, "checked"));
 }
 
@@ -1004,7 +1004,7 @@ fn mk() {
 fn covers_unsafe_fn_with_ptr_ops() {
     // c109 Phase 18: a `#Unsafe("reason") fn` (S58) is covered — it lowers to `unsafe fn`, and
     // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-    let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) Int -> {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+    let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) -> Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
     assert!(covers_with_mem(src, "read_reg"));
 }
 
@@ -1020,7 +1020,7 @@ fn covers_unsafe_block_and_address_of() {
 fn covers_list_param() {
     // c109 Phase 5: a list parameter is now inside the subset (was excluded
     // through Phase 4).
-    assert!(covers("fn sum(xs: [Int]) Int -> {\n return 0\n}\n", "sum"));
+    assert!(covers("fn sum(xs: [Int]) -> Int {\n return 0\n}\n", "sum"));
 }
 
 #[test]
@@ -1089,7 +1089,7 @@ fn rejects_list_of_tuple_with_unsupported_nested_option() {
 fn covers_option_param() {
     // c109 Phase 8: an optional-typed param (`?Int`) is now inside the subset
     // (was excluded through Phase 7). The payload is a covered value type.
-    assert!(covers("fn f(p: ?Int) Int -> {\n return 0\n}\n", "f"));
+    assert!(covers("fn f(p: ?Int) -> Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
@@ -1097,13 +1097,13 @@ fn rejects_list_of_option_param_still() {
     // A list whose element is itself optional (`[?Int]`) is still excluded — the
     // collection element-coverage does not admit optionals (clone/coercion for an
     // option-element collection is deferred), even though a bare `?Int` is covered.
-    assert!(!covers("fn f(xs: [?Int]) Int -> {\n return 0\n}\n", "f"));
+    assert!(!covers("fn f(xs: [?Int]) -> Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
 fn rejects_method_call_in_body() {
     // A method call (`.bumped()`) is not a covered construct.
-    let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) Int -> {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) Int -> {\n return c\n}\nfn caller() Int -> {\n x :: C{ n: 1 }\n return x.bumped()\n}\n";
+    let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x :: C{ n: 1 }\n return x.bumped()\n}\n";
     assert!(!covers(src, "caller"));
 }
 
@@ -1113,7 +1113,7 @@ fn rejects_method_call_in_body() {
 fn covers_struct_param_and_scalar_field_read() {
     // A plain struct param with a scalar field read (borrow position) and a
     // struct literal + struct return are all in the subset.
-    let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) Int -> {\n return (p.x + p.y)\n}\nfn origin() Point -> {\n return Point{ x: 0, y: 0 }\n}\n";
+    let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) -> Int {\n return (p.x + p.y)\n}\nfn origin() -> Point {\n return Point{ x: 0, y: 0 }\n}\n";
     assert!(covers(src, "sum_pt"));
     assert!(covers(src, "origin"));
 }
@@ -1122,7 +1122,7 @@ fn covers_struct_param_and_scalar_field_read() {
 fn covers_nested_struct() {
     // A struct field whose type is itself a covered struct, with a chained
     // field read and a nested literal.
-    let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n label: Int }\nfn deep(o: Outer) Int -> {\n return (o.inner.v + o.label)\n}\n";
+    let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n label: Int }\nfn deep(o: Outer) -> Int {\n return (o.inner.v + o.label)\n}\n";
     assert!(covers(src, "deep"));
 }
 
@@ -1132,7 +1132,7 @@ fn covers_recursive_boxed_struct() {
     // — a boxed field read derefs the `Box` (total `boxed` fact). A fn reading a plain
     // scalar field of a recursive struct routes through the TIR.
     let src =
-        "struct Node { value: Int\n next: Node }\nfn val(n: Node) Int -> {\n return n.value\n}\n";
+        "struct Node { value: Int\n next: Node }\nfn val(n: Node) -> Int {\n return n.value\n}\n";
     assert!(covers(src, "val"));
 }
 
@@ -1141,7 +1141,7 @@ fn covers_struct_with_list_field() {
     // c109 Phase 16: a struct with a covered collection field (`[Int]`). The
     // struct-literal emit is plain (`items: vec![…]`), byte-identical to the AST
     // path, so the owning struct is covered as a param/return.
-    let src = "struct Tally { items: [Int] }\nfn first_tag(b: Tally) Int -> {\n return 0\n}\n";
+    let src = "struct Tally { items: [Int] }\nfn first_tag(b: Tally) -> Int {\n return 0\n}\n";
     assert!(covers(src, "first_tag"));
 }
 
@@ -1150,7 +1150,7 @@ fn covers_generic_struct_literal() {
     // c109 Phase 19: a generic struct literal (`Pair<Int> { … }`) carries non-empty
     // `type_args` (the turbofish `__jet_Pair::<i64> { … }`) and its field types reference
     // type vars — both now covered. The owning fn routes through the TIR.
-    let src = "struct Pair<T> { first: T\n second: T }\nfn mk() Pair<Int> -> {\n return Pair<Int>{ first: 1, second: 2 }\n}\n";
+    let src = "struct Pair<T> { first: T\n second: T }\nfn mk() -> Pair<Int> {\n return Pair<Int>{ first: 1, second: 2 }\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -1200,28 +1200,28 @@ fn covers_collection_loop_over_literal() {
 #[test]
 fn covers_enum_unit_match() {
     // A unit-variant enum, an enum literal, and an exhaustive variant match.
-    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) Light -> {\n if light == {\n .Red -> { return Light.Yellow }\n .Yellow -> { return Light.Green }\n .Green -> { return Light.Red }\n }\n}\n";
+    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) -> Light {\n if light == {\n .Red -> { return Light.Yellow }\n .Yellow -> { return Light.Green }\n .Green -> { return Light.Red }\n }\n}\n";
     assert!(covers(src, "next"));
 }
 
 #[test]
 fn covers_enum_payload_or_and_wildcard() {
     // Scalar-payload enum, or-pattern with a shared binding, and a wildcard slot.
-    let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) String -> {\n if c == {\n .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }\n .Idle(_) -> { return \"idle\" }\n .Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
+    let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) -> String {\n if c == {\n .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }\n .Idle(_) -> { return \"idle\" }\n .Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
     assert!(covers(src, "d"));
 }
 
 #[test]
 fn covers_enum_payload_range_pattern() {
     // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
-    let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) String -> {\n if r == {\n .Good(200..299) -> { return \"ok\" }\n .Good(_) -> { return \"other\" }\n .Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+    let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) -> String {\n if r == {\n .Good(200..299) -> { return \"ok\" }\n .Good(_) -> { return \"other\" }\n .Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
     assert!(covers(src, "classify"));
 }
 
 #[test]
 fn covers_arm_head_range_switch() {
     // An all-range arm-head scalar switch with an `else` (mixed-switch path).
-    let src = "fn grade(score: Int) String -> {\n if score == {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
+    let src = "fn grade(score: Int) -> String {\n if score == {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
     assert!(covers(src, "grade"));
 }
 
@@ -1230,17 +1230,17 @@ fn covers_mixed_switch_non_ident_subject() {
     // c109 (B1): a pattern switch over a NON-IDENT subject routes through the
     // exhaustive-match / fallible-match path (the subject is matched by source-text
     // equality, not just an ident name). A call subject with unit-variant arms:
-    let variant = "enum Light { Red Green Yellow }\nfn pick() Light -> { return Light.Red }\nfn classify() Int -> {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
+    let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(variant, "classify"));
     // A field-access subject with a payload-binding (optional) arm:
-    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) Int -> {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) -> Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(payload, "f"));
 }
 
 #[test]
 fn covers_enum_local_and_literal_in_main() {
     // An enum-typed local bound from a literal, passed to a covered helper.
-    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) String -> {\n if l == {\n .Red -> { return \"r\" }\n .Yellow -> { return \"y\" }\n .Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
+    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n .Red -> { return \"r\" }\n .Yellow -> { return \"y\" }\n .Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
     assert!(covers(src, "run"));
 }
 
@@ -1249,7 +1249,7 @@ fn covers_string_payload_enum() {
     // c109 Phase 16: a String-payload enum. The literal's borrowed-payload
     // `.clone()` and pattern bindings are reproduced as total facts
     // (`emit_boxed_enum_arg`), so the match + getter route through the TIR.
-    let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) String -> {\n if m == {\n .Text(s) -> { return s }\n .Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
+    let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) -> String {\n if m == {\n .Text(s) -> { return s }\n .Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
     assert!(covers(src, "show"));
 }
 
@@ -1258,7 +1258,7 @@ fn covers_recursive_enum() {
     // c109 Phase 16: a self-referential (boxed) enum. The `Box::new(…)` at
     // construction and the auto-deref at pattern/field sites are total facts
     // (`TEnumArg.boxed`), so a covered traversal routes through the TIR.
-    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) Int -> {\n if t == {\n .Leaf(n) -> { return n }\n .Node(inner) -> { return 1 }\n }\n return 0\n}\n";
+    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) -> Int {\n if t == {\n .Leaf(n) -> { return n }\n .Node(inner) -> { return 1 }\n }\n return 0\n}\n";
     assert!(covers(src, "depth"));
 }
 
@@ -1270,7 +1270,7 @@ fn covers_recursive_enum_construction_with_clone_box() {
     // `.clone()`, then the recursive boxed edge → `Box::new`), reproducing
     // `emit_boxed_enum_arg` exactly. The construction reaches codegen as a
     // `MethodCall` (sema never emits an `Expr::EnumLit` for a payload variant).
-    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn wrap(inner: Tree) Tree -> {\n return Tree.Node(inner)\n}\n";
+    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn wrap(inner: Tree) -> Tree {\n return Tree.Node(inner)\n}\n";
     assert!(covers(src, "wrap"));
 }
 
@@ -1280,7 +1280,7 @@ fn covers_struct_payload_enum() {
     // struct value flows through the variant construction + pattern binding
     // without a clone/box decision the subset can't make (the value's own move/
     // clone facts live in its sub-expression).
-    let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) Int -> {\n if s == {\n .Dot(p) -> { return p.x }\n .Line(n) -> { return n }\n }\n return 0\n}\n";
+    let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) -> Int {\n if s == {\n .Dot(p) -> { return p.x }\n .Line(n) -> { return n }\n }\n return 0\n}\n";
     assert!(covers(src, "area"));
 }
 
@@ -1289,7 +1289,7 @@ fn covers_collection_payload_enum() {
     // c109 Phase 16: an enum variant carrying a covered collection payload
     // (`[Int]`). Construction (`Holder.Nums(xs)`) routes through the variant
     // MethodCall shape; the borrowed-list `.clone()` is total.
-    let src = "enum Holder {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) Holder -> {\n return Holder.Nums(xs)\n}\n";
+    let src = "enum Holder {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) -> Holder {\n return Holder.Nums(xs)\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -1312,7 +1312,7 @@ fn rejects_range_switch_over_non_ident_subject() {
     //
     // A non-ident subject stays covered without a range arm — see
     // `covers_mixed_switch_non_ident_subject`.
-    let src = "fn pick() Int -> { return 5 }\nfn f() String -> {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
+    let src = "fn pick() -> Int { return 5 }\nfn f() -> String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1325,7 +1325,7 @@ fn rejects_range_switch_over_non_ident_subject() {
 #[test]
 fn covers_list_literal_and_param() {
     // A list literal returned from a covered fn, and a list-typed param.
-    let src = "fn build() [Int] -> {\n return [1, 2, 3]\n}\nfn accept(xs: [Int]) Int -> {\n return 0\n}\n";
+    let src = "fn build() -> [Int] {\n return [1, 2, 3]\n}\nfn accept(xs: [Int]) -> Int {\n return 0\n}\n";
     assert!(covers(src, "build"));
     assert!(covers(src, "accept"));
 }
@@ -1333,7 +1333,7 @@ fn covers_list_literal_and_param() {
 #[test]
 fn covers_map_literal_and_param() {
     // An empty and a non-empty map literal, plus a map-typed param.
-    let src = "fn empty() [String:Int] -> {\n return []\n}\nfn one() [String:Int] -> {\n return [\"a\": 1]\n}\nfn accept(m: [String:Int]) Int -> {\n return 0\n}\n";
+    let src = "fn empty() -> [String:Int] {\n return []\n}\nfn one() -> [String:Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String:Int]) -> Int {\n return 0\n}\n";
     assert!(covers(src, "empty"));
     assert!(covers(src, "one"));
     assert!(covers(src, "accept"));
@@ -1378,7 +1378,7 @@ fn covers_optional_binding_if_condition() {
 fn covers_user_enum_variant_if_let_condition() {
     // c109 (B4): `if m == .Ping(n) { … } else { … }` over a covered user enum lowers
     // to `if let __jet_Msg::__jet_Ping(user_n) = m`. Single-payload variant (one bind).
-    let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) Int -> {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
+    let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) -> Int {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1386,7 +1386,7 @@ fn covers_user_enum_variant_if_let_condition() {
 fn rejects_list_of_option_param() {
     // A list whose element is an option (`[?Int]`) is not a covered value type
     // (optionals are Phase 8); the owning collection is excluded.
-    let src = "fn f(xs: [?Int]) Int -> {\n return 0\n}\n";
+    let src = "fn f(xs: [?Int]) -> Int {\n return 0\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1402,7 +1402,7 @@ fn covers_struct_param_with_method_caller() {
     // A struct with a user method: the method body (has `self`) is excluded,
     // but a free function taking the struct and reading a scalar field is still
     // covered (Phase 3 baseline — methods don't disturb the existing coverage).
-    let src = "struct Calc {\n base: Int\n fn add(self, x: Int) Int -> {\n return (self.base + x)\n }\n}\nfn peek(c: Calc) Int -> {\n return c.base\n}\n";
+    let src = "struct Calc {\n base: Int\n fn add(self, x: Int) -> Int {\n return (self.base + x)\n }\n}\nfn peek(c: Calc) -> Int {\n return c.base\n}\n";
     assert!(covers(src, "peek"));
 }
 
@@ -1459,7 +1459,7 @@ fn covers_user_method_shadowing_builtin_name() {
     // the node sema produces. (The end-to-end build+run + byte-parity in the TIR
     // feature integration targets is
     // the authoritative proof; this exercises the gate's user-vs-builtin decision.)
-    let src = "struct Tally {\n items: [Int]\n fn get(self) Int -> {\n return 1\n }\n fn len(self) Int -> {\n return 2\n }\n}\n";
+    let src = "struct Tally {\n items: [Int]\n fn get(self) -> Int {\n return 1\n }\n fn len(self) -> Int {\n return 2\n }\n}\n";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse failed");
     let cx = build_cx(&prog, src, "test.jet");
@@ -1517,28 +1517,28 @@ fn covers_user_method_shadowing_builtin_name() {
 fn covers_instance_method_body() {
     // A `self` getter on a covered struct, body reading `self.field` — covered.
     // (Multi-letter type name; a single uppercase letter reads as a type var.)
-    let src = "struct Cell {\n n: Int\n fn value(self) Int -> {\n return self.n\n }\n}\n";
+    let src = "struct Cell {\n n: Int\n fn value(self) -> Int {\n return self.n\n }\n}\n";
     assert!(covers_method(src, "Cell", "value"));
 }
 
 #[test]
 fn covers_mut_self_method_body() {
     // A `mut self` receiver (→ `&mut self`) whose body only reads is covered.
-    let src = "struct Acc {\n total: Int\n fn doubled(&self) Int -> {\n return (self.total + self.total)\n }\n}\n";
+    let src = "struct Acc {\n total: Int\n fn doubled(&self) -> Int {\n return (self.total + self.total)\n }\n}\n";
     assert!(covers_method(src, "Acc", "doubled"));
 }
 
 #[test]
 fn covers_static_constructor() {
     // A static (no-`self`) associated function returning the owning type.
-    let src = "struct Cell {\n n: Int\n fn make(v: Int) Cell -> {\n return Cell{ n: v }\n }\n}\n";
+    let src = "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell{ n: v }\n }\n}\n";
     assert!(covers_method(src, "Cell", "make"));
 }
 
 #[test]
 fn covers_enum_instance_method() {
     // A `when self` match in an enum method body is covered.
-    let src = "enum Dir {\n North\n South\n fn code(self) Int -> {\n if self == {\n .North -> { return 0 }\n .South -> { return 1 }\n }\n }\n}\n";
+    let src = "enum Dir {\n North\n South\n fn code(self) -> Int {\n if self == {\n .North -> { return 0 }\n .South -> { return 1 }\n }\n }\n}\n";
     assert!(covers_method(src, "Dir", "code"));
 }
 
@@ -1565,7 +1565,7 @@ fn covers_self_field_assign_method() {
 fn covers_generic_method() {
     // Card #129: generic owner identity survives through the enclosing
     // `impl<T> __jet_Box<T>`; the method body lowers through ordinary TIR.
-    let src = "struct Box<T> {\n v: T\n fn get(self) T -> {\n return self.v\n }\n}\n";
+    let src = "struct Box<T> {\n v: T\n fn get(self) -> T {\n return self.v\n }\n}\n";
     assert!(covers_method(src, "Box", "get"));
 }
 
@@ -1593,7 +1593,7 @@ fn covers_fallible_return_and_try() {
     // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
     // proven end-to-end by
     // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-    let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int !Err -> {\n n :: f(x)\n return Ok((n + 1))\n}\nfn run() {}\n";
+    let src = "fn f(x: Int) -> Int !Err {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int !Err {\n n :: f(x)\n return Ok((n + 1))\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
     assert!(covers_after_sema(src, "g"));
 }
@@ -1744,7 +1744,7 @@ fn mir_lowers_default_err_return() {
     // lookup needs that type row; without it, lowering ICEs as
     // "missing checked MIR owner type".
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
+        let src = "fn f(x: Int) -> Int !Err {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
         let bundle = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
@@ -1755,6 +1755,223 @@ fn mir_lowers_default_err_return() {
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
     });
 }
+#[test]
+fn mir_keeps_full_call_carriers_and_drops_partial_move_remainders() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "\
+struct Pair {
+    shared: Shared<String>
+    remaining: String
+}
+fn child() -> Int !String { return Ok(7) }
+fn caller() -> Int !String { return child() }
+fn generic_child<T>(value: ^T) -> T !String { return Ok(value) }
+fn generic_caller() -> Int !String { return generic_child<Int>(7) }
+fn take_shared(pair: ^Pair) -> Shared<String> { return ^pair.shared }
+struct Box<T> {
+    value: T
+    fn get(self) -> T !String { return Ok(self.value) }
+}
+fn boxed(item: Box<Int>) -> Int !String { return item.get() }
+fn run() {}
+";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed to lower: {err:?}"));
+        mir.validate()
+            .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed validation: {err}"));
+
+        let child = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "child")
+            .expect("child function");
+        let caller = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "caller")
+            .expect("caller function");
+        let call = caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::Call {
+                        callee: jet_foundation::MIR::MirCallee::User(target),
+                        ..
+                    } if *target == child.id
+                )
+            })
+            .expect("caller invokes child");
+        assert_eq!(call.ty.as_ref(), Some(&child.return_type));
+        let call_result = call.result.expect("typed call result");
+        let returned = caller
+            .blocks
+            .iter()
+            .find_map(|block| match &block.terminator {
+                jet_foundation::MIR::MirTerminator::Return { value: Some(value) } => Some(*value),
+                _ => None,
+            })
+            .expect("caller returns the child result");
+        assert_eq!(returned, call_result);
+        let returned_type = caller
+            .values
+            .iter()
+            .find(|(value, _, _, _)| *value == returned)
+            .map(|(_, ty, _, _)| ty)
+            .expect("returned call value has a type fact");
+        assert_eq!(returned_type, &caller.return_type);
+        let generic_child = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "generic_child")
+            .expect("generic child function");
+        let generic_caller = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "generic_caller")
+            .expect("generic caller function");
+        let generic_call = generic_caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::Call {
+                        callee: jet_foundation::MIR::MirCallee::User(target),
+                        ..
+                    } if *target == generic_child.id
+                )
+            })
+            .expect("generic caller invokes generic child");
+        assert_eq!(
+            generic_call.ty.as_ref(),
+            Some(&generic_caller.return_type),
+            "generic call preserves its instantiated full carrier"
+        );
+        assert_ne!(
+            generic_call.ty.as_ref(),
+            Some(&generic_child.return_type),
+            "generic call does not retain the uninstantiated callee carrier"
+        );
+        let boxed = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "boxed")
+            .expect("generic-owner method caller");
+        let (method_call, get_id) = boxed
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find_map(|instruction| match &instruction.operation {
+                jet_foundation::MIR::MirOperation::Call {
+                    callee: jet_foundation::MIR::MirCallee::Method { function, .. },
+                    ..
+                } => Some((instruction, *function)),
+                _ => None,
+            })
+            .expect("generic-owner method call");
+        let get = mir
+            .functions
+            .iter()
+            .find(|function| function.id == get_id)
+            .expect("generic-owner method target");
+        assert_eq!(
+            method_call.ty.as_ref(),
+            Some(&boxed.return_type),
+            "method call uses its owner-instantiated full carrier"
+        );
+        assert_ne!(
+            method_call.ty.as_ref(),
+            Some(&get.return_type),
+            "method call does not retain the generic owner carrier"
+        );
+
+        let take_shared = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "take_shared")
+            .expect("take_shared function");
+        let pair = take_shared
+            .locals
+            .iter()
+            .find(|local| local.name == "pair")
+            .expect("owned Pair parameter");
+        let projected_move = take_shared
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::MovePlace { place }
+                        if take_shared.places.iter().any(|candidate| {
+                            candidate.id == *place && !candidate.projections.is_empty()
+                        })
+                )
+            })
+            .expect("projected Shared field is moved");
+        assert!(projected_move.result.is_some());
+
+        let live_local = take_shared
+            .locals
+            .iter()
+            .find(|local| local.name.starts_with("owned_live_"))
+            .expect("owner liveness local");
+        let instructions = take_shared
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            instructions
+                .iter()
+                .filter(|instruction| matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::WritePlace { place, .. }
+                        if *place == live_local.place
+                ))
+                .count(),
+            1,
+            "a projected move must not clear whole-owner liveness"
+        );
+        let live_test = instructions
+            .iter()
+            .find(|instruction| matches!(
+                &instruction.operation,
+                jet_foundation::MIR::MirOperation::ReadPlace { place }
+                    if *place == live_local.place
+            ))
+            .and_then(|instruction| instruction.result)
+            .expect("owner cleanup tests its live flag");
+        assert!(take_shared.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            jet_foundation::MIR::MirTerminator::Branch { condition, .. } if *condition == live_test
+        )));
+        let root_move = instructions
+            .iter()
+            .find(|instruction| matches!(
+                &instruction.operation,
+                jet_foundation::MIR::MirOperation::MovePlace { place }
+                    if *place == pair.place
+            ))
+            .expect("remaining Pair fields are moved for cleanup");
+        let root_value = root_move.result.expect("root cleanup move result");
+        assert!(instructions.iter().any(|instruction| matches!(
+            &instruction.operation,
+            jet_foundation::MIR::MirOperation::Drop { value, .. } if *value == root_value
+        )));
+    });
+}
+
 
 #[test]
 fn mir_types_absent_match_arm_from_its_checked_option_peer() {
@@ -1980,7 +2197,7 @@ fn mir_is_finite_selects_math_runtime_part() {
     // Artifact rows used to drop those Core-use labels because they are not
     // `MirRuntimePartId` spellings, so AOT never emitted MathLibPure.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "fn checked(x: Float) Bool -> {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
+        let src = "fn checked(x: Float) -> Bool {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
         let bundle = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
@@ -2170,7 +2387,7 @@ fn covers_optional_return_and_chaining() {
     // right to reject the unresolved node; the covered shape is the resolved
     // one. `ch` needs no sema fact — `Expr::OptField` is in-subset iff its base
     // is — so it stays on the structural helper.
-    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) ?Int -> {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) ?String -> {\n return a?.city\n}\n";
+    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> ?Int {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) -> ?String {\n return a?.city\n}\n";
     assert!(covers_after_sema(src, "opt"));
     assert!(covers(src, "ch"));
 }
@@ -2178,7 +2395,7 @@ fn covers_optional_return_and_chaining() {
 #[test]
 fn covers_or_fallback_value_and_return() {
     // `??` with a value fallback and with an early-`return` fallback.
-    let src = "fn v(x: ?Int) Int -> {\n return x ?? 0\n}\nfn r(x: ?Int) Int -> {\n return x ?? return -1\n}\n";
+    let src = "fn v(x: ?Int) -> Int {\n return x ?? 0\n}\nfn r(x: ?Int) -> Int {\n return x ?? return -1\n}\n";
     assert!(covers(src, "v"));
     assert!(covers(src, "r"));
 }
@@ -2187,7 +2404,7 @@ fn covers_or_fallback_value_and_return() {
 fn covers_or_fallback_panic_form() {
     // c109 Phase 15: the `panic(…)` fallback form is now covered — the
     // `safe_locals_expr` snapshot is rendered from the lexical lowering env.
-    let src = "fn p(x: ?Int) Int -> {\n return x ?? panic(\"missing\")\n}\n";
+    let src = "fn p(x: ?Int) -> Int {\n return x ?? panic(\"missing\")\n}\n";
     assert!(covers(src, "p"));
 }
 
@@ -2197,7 +2414,7 @@ fn covers_comptime_if() {
     // selected branch's statements are emitted inline. (`build_cx`-only gate test:
     // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
     // lowering reads `selected_then`, but the gate does not need sema for routing.)
-    let src = "fn f(x: Int) Int -> {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
+    let src = "fn f(x: Int) -> Int {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2207,7 +2424,7 @@ fn covers_mixed_bool_switch() {
     // TIR's `MixedSwitch` (the general `emit_mixed_switch` if/else chain) — a
     // bare-value arm (`0 ->` ≡ `x == 0`) beside range arms (`1..10 ->`), each
     // range lowered to `x >= lo && x <= hi`. (Q4 retired free-predicate arms.)
-    let src = "fn f(x: Int) Int -> {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
+    let src = "fn f(x: Int) -> Int {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2219,7 +2436,7 @@ fn covers_mixed_bool_switch() {
 fn covers_list_builtin_methods() {
     // push/len/get/sort/reverse/contains on a list-typed param — all covered,
     // so the whole function routes through the TIR.
-    let src = "fn f(xs: [Int]) Int -> {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n";
+    let src = "fn f(xs: [Int]) -> Int {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2228,7 +2445,7 @@ fn covers_map_builtin_methods() {
     // add/len/keys/values/has_key/clear on a map-typed param. Run the full
     // front end so this coverage proof cannot drift onto a list-only or
     // otherwise invalid method spelling that sema would reject before TIR.
-    let src = "fn f(m: [String:Int]) Int -> {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
+    let src = "fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -2236,14 +2453,14 @@ fn covers_map_builtin_methods() {
 fn rejects_unsupported_map_builtin_handoff() {
     // `contains_key` is not Jet's Map surface. The TIR gate must hand the
     // unsupported shape back instead of guessing from its Rust spelling.
-    let src = "fn f(m: [String:Int]) Bool -> {\n return m.contains_key(\"a\")\n}\n";
+    let src = "fn f(m: [String:Int]) -> Bool {\n return m.contains_key(\"a\")\n}\n";
     assert!(!covers(src, "f"));
 }
 
 #[test]
 fn covers_string_builtin_methods() {
     // to_upper/to_lower/trim/split/starts_with/replace/repeat/slice/chars/bytes.
-    let src = "fn f(s: String) String -> {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n";
+    let src = "fn f(s: String) -> String {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2268,7 +2485,7 @@ fn covers_is_empty_builtin() {
     // a function using it routes through the TIR.
     assert!(is_covered_builtin_name("is_empty", 0));
     let src =
-        "fn f(xs: [Int]) Int -> {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
+        "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2326,7 +2543,7 @@ fn covers_string_payload_error_enum() {
     // covered — the error enum is a covered (String-payload) enum, and its
     // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
     // (a String literal arg, no borrowed clone) byte-for-byte.
-    let src = "#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) Int !Oops -> {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
+    let src = "#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int !Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -2335,7 +2552,7 @@ fn covers_fn_typed_param() {
     // c109 Phase 13: a fn-typed parameter is now inside the subset (was excluded
     // through Phase 12, when any callee/param with a `Type::Fn` stayed on the AST
     // path). The body `f(f(x))` is a fn-value call through the local param.
-    let src = "fn apply_twice(f: fn(Int) Int, x: Int) Int -> {\n return f(f(x))\n}\n";
+    let src = "fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {\n return f(f(x))\n}\n";
     assert!(covers(src, "apply_twice"));
 }
 
@@ -2344,7 +2561,7 @@ fn covers_fn_name_value_arg() {
     // c109 Phase 13: a bare top-level fn name used as a VALUE (passed to a
     // fn-typed param) is in subset; typed function-value facts carry the
     // declaration identity into the canonical lowering.
-    let src = "fn callit(f: fn(Int) Int) Int -> {\n return f(1)\n}\nfn dbl(x: Int) Int -> {\n return (x * 2)\n}\nfn use_it() Int -> {\n return callit(dbl)\n}\n";
+    let src = "fn callit(f: fn(Int) -> Int) -> Int {\n return f(1)\n}\nfn dbl(x: Int) -> Int {\n return (x * 2)\n}\nfn use_it() -> Int {\n return callit(dbl)\n}\n";
     assert!(covers(src, "use_it"));
 }
 
@@ -2439,9 +2656,9 @@ fn covers_static_new_constructor() {
     let src = "\
 struct Rect { width: Int height: Int }
 impl Rect {
-    fn new(width: Int, height: Int) Rect -> { return Rect{width: width, height: height} }
+    fn new(width: Int, height: Int) -> Rect { return Rect{width: width, height: height} }
 }
-fn build() Rect -> { return Rect.new(4, 3) }
+fn build() -> Rect { return Rect.new(4, 3) }
 ";
     assert!(covers(src, "build"));
     // The instance-method intercept stays whole: a user INSTANCE method named `new`
@@ -2454,7 +2671,7 @@ fn covers_ambient_input() {
     // c109 Phase 25: the ambient prelude `input(...)` routes (bare call, no user
     // `input` fn). It composes with the `??` value fallback (Phase 8).
     let src = "\
-fn greet() String -> {
+fn greet() -> String {
     name :: input() ?? \"world\"
     return \"hi {name}\"
 }
@@ -2463,8 +2680,8 @@ fn greet() String -> {
     // A user-defined `input` fn shadows the prelude — the gate then treats `input(...)`
     // as a plain fn call (still covered, but via the plain-fn shape, not ambient).
     let shadowed = "\
-fn input() String -> { return \"x\" }
-fn greet() String -> { return input() }
+fn input() -> String { return \"x\" }
+fn greet() -> String { return input() }
 ";
     assert!(covers(shadowed, "greet"));
 }
@@ -2481,7 +2698,7 @@ fn covers_assert_builtins() {
     // A user fn / local named `assert` shadows the builtin — it then routes via the
     // plain-fn shape, NOT the builtin (still covered, different path).
     assert!(covers(
-        "fn assert(x: Int) Int -> { return x }\nfn f() Int -> { return assert(3) }",
+        "fn assert(x: Int) -> Int { return x }\nfn f() -> Int { return assert(3) }",
         "f"
     ));
 }
@@ -2511,7 +2728,7 @@ fn covers_free_call_arg_conventions() {
         "f"
     ));
     assert!(covers(
-        "fn keep(s: ^String) String -> { return s }\nfn f() String -> { return keep(^\"v\") }",
+        "fn keep(s: ^String) -> String { return s }\nfn f() -> String { return keep(^\"v\") }",
         "f"
     ));
 }
@@ -2545,7 +2762,7 @@ fn covers_named_fn_value_binding() {
     // is wired in lowering; the live-suite `24_callbacks` never routed only
     // because the struct fn-field / fn-field-call were uncovered.
     assert!(covers(
-        "fn dbl(x: Int) Int -> { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }",
+        "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }",
         "f"
     ));
 }
@@ -2558,7 +2775,7 @@ fn covers_fn_field_struct_value_type() {
     // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
     // Some("Worker")` is a sema fact — so it is proven by the TIR feature
     // integration targets + byte-parity.)
-    let src = "struct Worker { step: fn(Int) Int }\nfn f() {}";
+    let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse");
     let cx = build_cx(&prog, src, "test.jet");
@@ -2737,7 +2954,7 @@ use core.tasks as tasks
 fn produce(s: Sender<Int>) {
     s.send(7)
 }
-fn consume(ch: Receiver<Int>) Int -> {
+fn consume(ch: Receiver<Int>) -> Int {
     return ch.receive() ?? panic(\"closed\")
 }
 ";
@@ -2752,7 +2969,7 @@ fn consume(ch: Receiver<Int>) Int -> {
 fn covers_pure_fn() {
     // c109 Phase 23: a `#Pure fn` is covered (purity is sema-only, erased at codegen).
     assert!(covers(
-        "fn double(n: Int) Int -[]> {\n return (n * 2)\n}\n",
+        "fn double(n: Int) -[]> Int {\n return (n * 2)\n}\n",
         "double"
     ));
 }
@@ -2767,7 +2984,7 @@ fn covers_todo_hole() {
     // surrounding fn is covered — the end-to-end `todo_hole` test proves the emit.
     // (A bare `#Todo` body with no sema annotation has `expected_type: None`, which the
     // gate EXCLUDES — so we assert exclusion here, matching the conservative rule.)
-    assert!(!covers("fn f(n: Int) Int -> {\n return #Todo\n}\n", "f"));
+    assert!(!covers("fn f(n: Int) -> Int {\n return #Todo\n}\n", "f"));
 }
 
 #[test]
@@ -2775,7 +2992,7 @@ fn covers_default_params() {
     // c109 Phase 23: a fn with default param values is covered (defaults are filled at
     // call sites by sema; codegen never reads `p.default`).
     assert!(covers(
-        "fn box_dims(w: Int, h: Int{w}, d: Int{h}) String -> {\n return \"{w}{h}{d}\"\n}\n",
+        "fn box_dims(w: Int, h: Int{w}, d: Int{h}) -> String {\n return \"{w}{h}{d}\"\n}\n",
         "box_dims"
     ));
 }
@@ -2784,9 +3001,9 @@ fn covers_default_params() {
 fn covers_distinct_value_type_and_ctor() {
     // c109 Phase 23: a distinct param type + `.raw()` + the destination-owned conversion are
     // covered. The build_cx-only helper registers the distinct in `distinct_types`.
-    let src = "UserId :: distinct Int\nfn greet(id: UserId) Int -> {\n return (id.raw())\n}\n";
+    let src = "UserId :: distinct Int\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
     assert!(covers(src, "greet"));
-    let src2 = "UserId :: distinct Int\nfn mk() UserId -> {\n return UserId.from_int(42)\n}\n";
+    let src2 = "UserId :: distinct Int\nfn mk() -> UserId {\n return UserId.from_int(42)\n}\n";
     assert!(covers(src2, "mk"));
 }
 
@@ -2797,7 +3014,7 @@ fn covers_tuple_value_type() {
     // `Expr::TupleLit.ty` to resolve the canonical field order/struct name, which the
     // build_cx-only helper does not fill — so the literal + destructure are proven by
     // the end-to-end `named_tuples` test, not here.)
-    let src = "fn first(p: (x: Int, y: Int)) Int -> {\n return p.x\n}\n";
+    let src = "fn first(p: (x: Int, y: Int)) -> Int {\n return p.x\n}\n";
     assert!(covers(src, "first"));
 }
 
@@ -2806,7 +3023,7 @@ fn covers_named_args_at_call_site() {
     // D-APILABEL1=A: sema binds the label by name and lowering preserves any
     // observable source-order change before the declaration-order call. The
     // callee `area` is a plain fn; the labeled call is in-subset.
-    let src = "fn area(width: Int, height: Int) Int -> {\n return (width * height)\n}\nfn use_it() Int -> {\n return area(width: 4, height: 3)\n}\n";
+    let src = "fn area(width: Int, height: Int) -> Int {\n return (width * height)\n}\nfn use_it() -> Int {\n return area(width: 4, height: 3)\n}\n";
     assert!(covers(src, "use_it"));
 }
 
@@ -2815,7 +3032,7 @@ fn covers_default_param_method() {
     // c109 Phase 23: a struct-body method with a default param value (`clamp: Bool{false}`)
     // is covered (same call-site-fill rule as a free fn; codegen never reads
     // `p.default`).
-    let src = "struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool{false}) Int -> {\n return (self.w * factor)\n }\n}\n";
+    let src = "struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool{false}) -> Int {\n return (self.w * factor)\n }\n}\n";
     assert!(covers_method(src, "Rect", "scale"));
 }
 
@@ -2882,7 +3099,7 @@ fn covers_json_construction_and_collection() {
     // integration targets + the whole-suite byte-parity diff; here we gate the
     // sema-independent construction.
     let src = "\
-fn build() DataTree -> {
+fn build() -> DataTree {
     items := []
     items.push(DataTree.Text(\"jet\"))
     items.push(DataTree.Bool(true))
@@ -2897,7 +3114,7 @@ fn build() DataTree -> {
 fn covers_json_value_param_and_array() {
     // A `DataTree` param + list value type + `DataTree.Array` construction.
     let src = "\
-fn wrap(x: DataTree) DataTree -> {
+fn wrap(x: DataTree) -> DataTree {
     items := []
     items.push(x)
     return DataTree.Array(items)
@@ -2917,7 +3134,7 @@ struct Note {
     name: String
     note_type: NoteType
 }
-fn name_of(n: Note) String -> {
+fn name_of(n: Note) -> String {
     return n.name
 }
 ";
@@ -2937,7 +3154,7 @@ enum Query {
     Tag(String)
     OfKind(Kind)
 }
-fn mk(k: Kind) Query -> {
+fn mk(k: Kind) -> Query {
     return Query.OfKind(k)
 }
 ";
@@ -2951,7 +3168,7 @@ fn covers_comptime_const_in_interpolation() {
     // value into the interpolation operand, so this needs the full sema pass.
     let src = "\
 @HEADER :: \"<html>\"
-fn wrap(s: String) String -> {
+fn wrap(s: String) -> String {
     return \"{@HEADER}: {s}\"
 }
 fn run() {
@@ -2969,7 +3186,7 @@ fn covers_comptime_local_binding() {
     // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
     // full sema pass, hence `covers_after_sema`.
     let src = "\
-fn build() [Int] -> {
+fn build() -> [Int] {
     xs := [Int]{}
     loop i in 1..3 {
         xs.push(i * 10)
@@ -3020,7 +3237,7 @@ struct PR {
     file_path: String
     note: ?String
 }
-fn mk(p: String) PR -> {
+fn mk(p: String) -> PR {
     return PR{file_path: ~p, note: None}
 }
 fn run() {}
@@ -3099,7 +3316,7 @@ fn covers_generic_optional_return() {
     // `Expr::EnumLit` arm rejects unresolved nodes, while the covered shape is
     // the sema-resolved `return Val(best)` used by the trait example.
     let src = "\
-fn opt_id<T>(x: ^T) ?T -> {
+fn opt_id<T>(x: ^T) -> ?T {
     return Val(x)
 }
 fn run() {
@@ -3114,9 +3331,9 @@ fn rejects_optional_return_uncovered_payload() {
     // fallible payload) stays excluded — the type-var admission is narrow.
     let src = "\
 trait Shape {
-    fn area(self) Float
+    fn area(self) -> Float
 }
-fn maybe_shape(s: Shape) ?Shape -> {
+fn maybe_shape(s: Shape) -> ?Shape {
     return Val(s)
 }
 ";
@@ -3132,8 +3349,8 @@ fn covers_trait_object_param() {
     // empty body covers.
     let src = "\
 trait Shape {
-    fn area(self) Float
-    fn name(self) String
+    fn area(self) -> Float
+    fn name(self) -> String
 }
 fn takes_shape(s: Shape) {
 }
@@ -3148,7 +3365,7 @@ fn covers_trait_object_list_param() {
     // with no body construct beyond the param, routes.
     let src = "\
 trait Shape {
-    fn area(self) Float
+    fn area(self) -> Float
 }
 fn takes_shapes(xs: [Shape]) {
 }
@@ -3205,7 +3422,7 @@ struct Tree {
     value: Int
     child: ?Tree
 }
-fn first_child(t: Tree) Int -> {
+fn first_child(t: Tree) -> Int {
     kid :: t.child
     if kid == {
         .Val(c) -> {
@@ -3385,11 +3602,11 @@ fn auto_facts_after_sema(src: &str, fn_name: &str) -> Option<crate::AST::AutoVec
 #[test]
 fn named_task_all_preserves_authored_spawn_order() {
     let source = r#"
-fn first() Int -> {
+fn first() -> Int {
     print("z")
     return 1
 }
-fn second() Int -> {
+fn second() -> Int {
     print("a")
     return 2
 }
@@ -3431,7 +3648,7 @@ fn run() {
 #[test]
 fn d_simd3_default_fact_reaches_native_emission() {
     let source = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i] * 2.0 + 1.0
@@ -3456,7 +3673,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
 #[test]
 fn d_simd3_wide_float_loop_selects_wide_native_kernel() {
     let source = r#"
-fn auto(values: [Float#8]) [Float#8] -> {
+fn auto(values: [Float#8]) -> [Float#8] {
     output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     loop i in 0..<8 {
         output[i] = values[i] * 2.0
@@ -3477,7 +3694,7 @@ fn auto(values: [Float#8]) [Float#8] -> {
 #[test]
 fn d_simd3_accepts_loop_invariant_scalar_captures() {
     let scalar_capture = r#"
-fn auto(values: [Float#4], scale: Float) [Float#4] -> {
+fn auto(values: [Float#4], scale: Float) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     mirror := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
@@ -3496,7 +3713,7 @@ fn auto(values: [Float#4], scale: Float) [Float#4] -> {
 #[test]
 fn d_simd3_rejects_output_alias_and_cross_iteration_reads() {
     let output_alias = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = output[i] + values[i]
@@ -3510,7 +3727,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
     );
 
     let cross_iteration = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i - 1]
@@ -3527,11 +3744,11 @@ fn auto(values: [Float#4]) [Float#4] -> {
 #[test]
 fn d_simd3_rejects_impure_and_early_exit_bodies() {
     let impure = r#"
-fn noisy(value: Float) Float -> {
+fn noisy(value: Float) -> Float {
     print(value)
     return value
 }
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = noisy(values[i])
@@ -3545,7 +3762,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
     );
 
     let early_exit = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         if values[i] > 0.0 {
@@ -3565,7 +3782,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
 #[test]
 fn d_simd3_scalar_marker_suppresses_native_hint() {
     let source = r#"
-#Scalar fn scalar(values: [Float#4]) [Float#4] -> {
+#Scalar fn scalar(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i] * 2.0 + 1.0

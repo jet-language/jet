@@ -2453,7 +2453,7 @@ mod tests {
     y: Int
 }
 
-fn make() Point -> {x: 1, y: 2}
+fn make() -> Point -> {x: 1, y: 2}
 
 fn accepts(values: [String]) {}
 
@@ -2534,19 +2534,19 @@ fn run() {
 
     #[test]
     fn failure_formatter_keeps_prefix_and_contextual_roles() {
-        let source = r#"fn load() ?Int !IOError -> read()?(
+        let source = r#"fn load() -> ?Int !IOError -> read()?(
     "loading"
 )
 "#;
         let once = format_source(source).expect("failure syntax should format");
-        assert!(once.contains("fn load() ?Int !IOError"), "{once}");
+        assert!(once.contains("fn load() -> ?Int !IOError"), "{once}");
         assert!(once.contains("read()?(\"loading\")"), "{once}");
         assert_eq!(
             once,
             format_source(&once).expect("failure fmt should be stable")
         );
 
-        let source = "fn load() Int !IOError -> read()\n";
+        let source = "fn load() -> Int !IOError -> read()\n";
         let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let mut program = crate::Parser::parse_for_fmt(&tokens).expect("source should parse");

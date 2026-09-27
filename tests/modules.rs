@@ -51,14 +51,14 @@ fn run_forced_interpreter(
 }
 
 fn assert_bodyless_module_runs(name: &str, declaration: &str) {
-    let main_src = "module lib;\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
+    let main_src = "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
     let lib_src = format!("{} module helper;\n", declaration);
     let files = [
         ("main.jet", main_src),
         ("lib.jet", lib_src.as_str()),
         (
             "helper.jet",
-            "pub fn value() String { return \"visible\" }\n",
+            "pub fn value() -> String { return \"visible\" }\n",
         ),
     ];
 
@@ -595,12 +595,12 @@ fn bodyless_private_module_stays_hidden_outside_owner_file() {
         &[
             (
                 "main.jet",
-                "module lib;\nuse lib.[helper]\nfn run() { print(helper.value()) }\n",
+                "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n",
             ),
             ("lib.jet", "module helper;\n"),
             (
                 "helper.jet",
-                "pub fn value() String { return \"private\" }\n",
+                "pub fn value() -> String { return \"private\" }\n",
             ),
         ],
     );
@@ -633,7 +633,7 @@ fn bodyless_package_module_stays_hidden_across_packages() {
             ("dep/dep.jet", "pub(package) module helper;\n"),
             (
                 "dep/helper.jet",
-                "pub fn value() String { return \"hidden\" }\n",
+                "pub fn value() -> String { return \"hidden\" }\n",
             ),
         ],
     );

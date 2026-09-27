@@ -95,7 +95,7 @@ fn curried_autodiff_shapes_share_the_prelude_handle() {
         r#"
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) Tensor -> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
@@ -130,7 +130,7 @@ fn autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss() {
     let pure = r#"
 use core.compute as compute
 
-fn loss(value: Tensor) Tensor -> {
+fn loss(value: Tensor) -> Tensor {
     return compute.mul(value, value) ?? panic("loss")
 }
 
@@ -144,7 +144,7 @@ fn run() {
     let impure = r#"
 use core.compute as compute
 
-fn loss(value: Tensor) Tensor -> {
+fn loss(value: Tensor) -> Tensor {
     print("side effect")
     return compute.mul(value, value) ?? panic("loss")
 }
@@ -171,7 +171,7 @@ fn f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle() {
         r#"
 use core.compute as compute
 
-fn tiled_loss(left: Tensor, right: Tensor) Tensor -> {
+fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
     return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
 }
 
@@ -320,7 +320,7 @@ fn run() {
 #[test]
 fn safe_kernel_rejects_effectful_bodies_before_codegen() {
     let diagnostics = jet::compile(
-        "#Kernel(.parallel) fn noisy(value: Int) Int -[IO]> { print(value)\n    return value }\n",
+        "#Kernel(.parallel) fn noisy(value: Int) -[IO]> Int { print(value)\n    return value }\n",
     )
     .expect_err("a safe kernel must not lower an effectful body");
     assert!(
@@ -411,7 +411,7 @@ fn portable_accelerator_vulkan_operations_match_cpu_across_tiers() {
     let source = r#"
 use core.compute as compute
 
-fn loss(left: Tensor, right: Tensor) Tensor -> compute.mse_loss(left, right) ?? panic("loss")
+fn loss(left: Tensor, right: Tensor) -> Tensor -> compute.mse_loss(left, right) ?? panic("loss")
 
 fn run() {
     left_cpu :: compute.full([2, 2], 2.0) ?? panic("left")

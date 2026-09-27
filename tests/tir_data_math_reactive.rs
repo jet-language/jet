@@ -34,14 +34,14 @@ struct P {
     x: Float
     mass: Float
 }
-fn total(ps: [P]) Float -> {
+fn total(ps: [P]) -> Float {
     s := Float{0.0}
     loop p in ps {
         s = s + p.mass
     }
     return s
 }
-fn particle_energy(ps: [P]) Float -> {
+fn particle_energy(ps: [P]) -> Float {
     total := Float{0.0}
     loop i in 0..<ps.len() {
         total += ps[i].x * ps[i].mass

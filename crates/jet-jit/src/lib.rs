@@ -241,6 +241,9 @@ mod enc_stream;
 /// the typed capability boundary without reaching the JIT's legacy integer
 /// handle tables.
 pub mod SourceResources;
+/// Private physical transport for compiler-implementation `Shared<T>` roots.
+/// This is distinct from the Source evaluator's logical `Shared(index)` values.
+pub mod SourceSharedInterop;
 /// Session-local generic transport for retained Source callback payloads.
 /// Semantic evaluation and logical Source/Eval state remain owned by the
 /// generated compiler callback pump.
@@ -248,10 +251,13 @@ pub mod SourceCallbacks;
 /// Invocation-scoped native implementations of private MIR traits.
 pub mod SourceInterfaces;
 pub use SourceCallbacks::{
-    SourceCallbackCleanup, SourceCallbackDrainStatus, SourceCallbackEnqueueError,
-    SourceCallbackError, SourceCallbackEvent, SourceCallbackId, SourceCallbackInvocation,
-    SourceCallbackLease, SourceCallbackRegisterError, SourceCallbackRelease,
-    SourceCallbackReply, SourceCallbackReplyError, SourceCallbackRequestId,
+    SourceCallbackJob, SourceCallbackJobDrainOutcome, SourceCallbackJobOwner,
+    SourceCallbackJobSessionRegistration,
+    SourceCallbackAbandonedEvent, SourceCallbackAbandonment, SourceCallbackCleanup,
+    SourceCallbackDrainStatus, SourceCallbackEnqueueError, SourceCallbackError,
+    SourceCallbackEvent, SourceCallbackId, SourceCallbackInvocation, SourceCallbackLease,
+    SourceCallbackRegisterError, SourceCallbackRelease, SourceCallbackReply,
+    SourceCallbackReplyCleanup, SourceCallbackReplyError, SourceCallbackRequestId,
     SourceCallbackResponder, SourceCallbackRetireError, SourceCallbackSession,
 };
 mod host_seam;
@@ -529,9 +535,18 @@ pub use api_debug::{
     try_compile_debug_aot, try_compile_program, DebugAotObject, ResidentJitSafety,
 };
 pub use backend::{
-    execute_source_entry, retire_source_entry, CraneliftBackend, SourceDeoptError,
-    SourceDeoptRun, SourceEntryExecution, SourceExecutionRetirementError, SourceExecutionTier,
+    execute_source_entry, execute_source_helper_entry, retire_source_entry,
+    source_execution_completion_into_box, source_execution_completion_take_from_box,
+    CraneliftBackend, SourceDeoptError, SourceDeoptRun, SourceEntryExecution,
+    SourceExecutionCompletion, SourceExecutionCompletionBox,
+    SourceExecutionCompletionDisposition, SourceExecutionCompletionRetirement,
+    SourceExecutionCompletionScope, SourceExecutionCompletionScopeWeak,
+    SourceExecutionCompletionWriteback, SourceExecutionPolicy, SourceExecutionRetirementError,
+    SourceExecutionRetirementFailureKind, SourceExecutionTier, SourceHelperArgument,
+    SourceHelperArgumentWriteback, SourceHelperExecution, SourceHelperInvocationError,
+    SourceHelperInvocationFailure,
 };
+pub use jet_codegen::scheduler::{jet_scheduler_spawn, JetSchedulerJoin, JetTaskFailure};
 pub use Ffi::set_bridge_cdylib;
 /// Bind the prepared native bridge before interpreter MIR execution.
 ///

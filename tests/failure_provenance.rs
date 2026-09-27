@@ -8,11 +8,11 @@ enum WrongDomain { One }
 #Error
 enum CallerDomain { One }
 
-fn wrong_helper() Int !WrongDomain -> {
+fn wrong_helper() -> Int !WrongDomain {
     return Err(WrongDomain.One)
 }
 
-fn caller() Int !CallerDomain -> {
+fn caller() -> Int !CallerDomain {
     wrong_helper()
     wrong_helper()
     wrong_helper()

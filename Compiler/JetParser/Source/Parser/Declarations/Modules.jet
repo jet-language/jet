@@ -2,7 +2,6 @@
 // Module names and role payloads use a contextual head contract; nested
 // expressions and types still use the canonical parser.
 
-
 fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSpan {
     first :: parser_expect_name(&state, context)
     name := first.payload.decoded
@@ -17,31 +16,29 @@ fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSp
 }
 
 fn parser_module_namespace(name: String) -> ?Namespace {
-    normalized := name
-    if name.starts_with("_") && name.len() > 1 -> normalized = name.slice(1, name.len())
-    if normalized == "env" -> return Val(Namespace.Env)
-    if normalized == "system" -> return Val(Namespace.System)
-    if normalized == "image" -> return Val(Namespace.Image)
-    if normalized == "fleet" -> return Val(Namespace.Fleet)
-    if normalized == "vmtest" -> return Val(Namespace.VmTest)
-    if normalized == "profile" -> return Val(Namespace.Profile)
-    if normalized == "perf" -> return Val(Namespace.Perf)
-    None
+    normalized :: if name.starts_with("_") && name.len() > 1 -> name.slice(1, name.len()) else -> name
+    if normalized == {
+        "env" -> Val(Namespace.Env)
+        "system" -> Val(Namespace.System)
+        "image" -> Val(Namespace.Image)
+        "fleet" -> Val(Namespace.Fleet)
+        "vmtest" -> Val(Namespace.VmTest)
+        "profile" -> Val(Namespace.Profile)
+        "perf" -> Val(Namespace.Perf)
+        else -> None
+    }
 }
 
 fn parser_module_is_dashed(name: String) -> Bool {
-    bytes := name.bytes()
-    index := 0
-    loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 45 -> return true
-        index += 1
+    loop byte in name.bytes() {
+        if Int.from_u8(byte) == 45 -> return true
     }
     false
 }
 
 fn parser_module_config_body_ahead(state: &JetParserState) -> Bool {
     if parser_current_kind(&state) != TOKEN_LBRACE -> return false
-    first := parser_lookahead(&state, 1)
+    first :: parser_lookahead(&state, 1)
     if first.kind != TOKEN_IDENT -> return false
     if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
     if parser_kind_at(&state, 2) != TOKEN_COLON -> return false
@@ -59,27 +56,20 @@ fn parser_module_ahead(state: &JetParserState) -> Bool {
     parser_kind_at(&state, 2) == TOKEN_MINUS || parser_kind_at(&state, 2) == TOKEN_LBRACE || parser_kind_at(&state, 2) == TOKEN_SEMI || parser_kind_at(&state, 2) == TOKEN_LT || parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_COLON_COLON
 }
 
-
-
 // One entry point for the dispatcher.  `modifiers` has already consumed
 // visibility/comptime markers; this function consumes `module` itself.
 fn parser_parse_module(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start :: parser_bump(&state)
     name_head :: parser_module_dashed_name(&state, "for the module name")
-    if parser_current_kind(&state) == TOKEN_DOT {
-        return parser_parse_role_module(&state, modifiers, start.span, name_head)
+    if {
+        parser_current_kind(&state) == TOKEN_DOT -> parser_parse_role_module(&state, modifiers, start.span, name_head)
+        parser_current_kind(&state) == TOKEN_COLON_COLON -> parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
+        parser_current_kind(&state) == TOKEN_LT || parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_generic_module_after_name(&state, modifiers, start.span, name_head)
+        parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) -> parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
+        else -> parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
     }
-    if parser_current_kind(&state) == TOKEN_COLON_COLON {
-        return parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
-    }
-    if parser_current_kind(&state) == TOKEN_LT || parser_current_kind(&state) == TOKEN_LPAREN {
-        return parser_parse_generic_module_after_name(&state, modifiers, start.span, name_head)
-    }
-    if parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) {
-        return parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
-    }
-    parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
 }
+
 fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a module body")
     sources := [SourceDecl]{}
@@ -90,17 +80,13 @@ fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: Parsed
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         if parser_state_section_ahead(&state) {
-            section := parser_parse_state_section(&state, "", parser_current(&state).span)
+            section :: parser_parse_state_section(&state, "", parser_current(&state).span)
             parser_report_ineligible_state_section(&state, section, "module")
             next
         }
         if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
-            parsed_sources := parser_module_sources(&state)
-            source_index := 0
-            loop source_index < parsed_sources.len() {
-                sources.push(parsed_sources[source_index])
-                source_index += 1
-            }
+            parsed_sources :: parser_module_sources(&state)
+            loop source in parsed_sources -> sources.push(source)
             next
         }
         if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
@@ -140,18 +126,18 @@ fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
     parser_expect(&state, TOKEN_DOT, "after the namespace name")
     path :: parser_module_dashed_name(&state, "for a contribution name")
     parser_expect(&state, TOKEN_COLON, "after a contribution name")
-    value := if {
-        namespace_value == Namespace.System -> ContribValue.System(value: parser_parse_module_system_lit(&state))
-        namespace_value == Namespace.Image -> ContribValue.Image(value: parser_parse_module_image_lit(&state))
-        namespace_value == Namespace.Fleet -> ContribValue.Fleet(value: parser_parse_module_fleet_lit(&state))
-        namespace_value == Namespace.VmTest -> ContribValue.VmTest(value: parser_parse_module_vmtest_lit(&state))
-        namespace_value == Namespace.Perf -> {
+    value :: if namespace_value == {
+        .System -> ContribValue.System(value: parser_parse_module_system_lit(&state))
+        .Image -> ContribValue.Image(value: parser_parse_module_image_lit(&state))
+        .Fleet -> ContribValue.Fleet(value: parser_parse_module_fleet_lit(&state))
+        .VmTest -> ContribValue.VmTest(value: parser_parse_module_vmtest_lit(&state))
+        .Perf -> {
             parser_module_error(&state, "E2903", namespace_token.span, "performance contributions use a role module", "performance budgets need one typed budgets list and are not ordinary namespace values", "write `module perf.name {{ budgets: [...] }}`")
             ContribValue.Expr(value: parser_parse_expression(&state, 1, 0).expr)
         }
         else -> ContribValue.Expr(value: parser_parse_expression(&state, 1, 0).expr)
     }
-    end := parser_module_contribution_end(value)
+    end :: parser_module_contribution_end(value)
     Contribution{namespace: namespace ?? Namespace.Env, path: path.name, path_span: path.span, value: value, span: parser_cover(namespace_token.span, end)}
 }
 
@@ -167,7 +153,6 @@ fn parser_module_contribution_end(value: ContribValue) -> Span {
         .Perf(lit) -> lit.span
     }
 }
- 
 
 fn parser_parse_module_system_lit(state: &JetParserState) -> SystemLit {
     explicit_type := None
@@ -248,7 +233,6 @@ fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VmTestLit {
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a VM-test record")
     VmTestLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
 }
-
 
 fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
     if parser_current_kind(&state) == TOKEN_SEMI {
@@ -358,7 +342,7 @@ fn parser_parse_module_alias_after_name(state: &JetParserState, modifiers: Parse
                 parser_bump(&state)
                 next
             }
-            begin := parser_current(&state).span
+            begin :: parser_current(&state).span
             value :: parser_parse_type(&state, 0)
             args.push(ModuleArg.Type(ty: value.ty, span: parser_cover(begin, value.span)))
             if parser_type_close_here(&state) -> break
@@ -377,7 +361,7 @@ fn parser_parse_module_alias_after_name(state: &JetParserState, modifiers: Parse
                 parser_bump(&state)
                 next
             }
-            begin := parser_current(&state).span
+            begin :: parser_current(&state).span
             value :: parser_parse_expression(&state, 1, 0)
             args.push(ModuleArg.Value(expr: value.expr, span: parser_cover(begin, value.span)))
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
@@ -422,12 +406,8 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
-            parsed_sources := parser_module_sources(&state)
-            source_index := 0
-            loop source_index < parsed_sources.len() {
-                sources.push(parsed_sources[source_index])
-                source_index += 1
-            }
+            parsed_sources :: parser_module_sources(&state)
+            loop source in parsed_sources -> sources.push(source)
             next
         }
         if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
@@ -437,27 +417,23 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
             next
         }
-        if {
-            namespace_value == Namespace.Env -> {
+        if namespace_value == {
+            .Env -> {
                 field :: parser_expect_name(&state, "for an environment field")
                 parser_expect(&state, TOKEN_COLON, "after an environment field")
                 if field.payload.decoded == {
                     "services" -> {
-                        parsed_services := parser_module_services_map(&state)
-                        service_index := 0
-                        loop service_index < parsed_services.len() {
-                            env_services.push(parsed_services[service_index])
-                            service_index += 1
-                        }
+                        parsed_services :: parser_module_services_map(&state)
+                        loop service in parsed_services -> env_services.push(service)
                     }
                     else -> env_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
                 }
             }
-            namespace_value == Namespace.System -> system_fields.push(parser_module_system_field(&state))
-            namespace_value == Namespace.Image -> image_fields.push(parser_module_image_field(&state))
-            namespace_value == Namespace.Fleet -> fleet_fields.push(parser_module_fleet_field(&state))
-            namespace_value == Namespace.VmTest -> vmtest_fields.push(parser_module_vmtest_field(&state))
-            namespace_value == Namespace.Profile -> {
+            .System -> system_fields.push(parser_module_system_field(&state))
+            .Image -> image_fields.push(parser_module_image_field(&state))
+            .Fleet -> fleet_fields.push(parser_module_fleet_field(&state))
+            .VmTest -> vmtest_fields.push(parser_module_vmtest_field(&state))
+            .Profile -> {
                 field :: parser_expect_name(&state, "for a profile field")
                 parser_expect(&state, TOKEN_COLON, "after a profile field")
                 profile_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
@@ -467,13 +443,13 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
                 parser_expect(&state, TOKEN_COLON, "after a performance field")
                 if field.payload.decoded == {
                     "budgets" -> {
-                        parsed := parser_module_perf_budgets(&state)
+                        parsed :: parser_module_perf_budgets(&state)
                         perf_budgets = parsed.budgets
                         perf_budgets_span = parsed.span
                         perf_list_span = parsed.span
                     }
                     "compile_workloads" -> {
-                        parsed := parser_module_perf_workloads(&state)
+                        parsed :: parser_module_perf_workloads(&state)
                         perf_compile_workloads = parsed.workloads
                         perf_compile_workloads_span = Val(field.span)
                     }
@@ -487,24 +463,25 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a role-module body")
-    body_span := parser_cover(namespace_head.span, close.span)
+    body_span :: parser_cover(namespace_head.span, close.span)
     if namespace_value == Namespace.Perf && perf_budgets.len() == 0 {
         parser_module_error(&state, "E2903", namespace_head.span, "a performance role needs a budgets list", "performance policy is typed budget metadata", "write `budgets: [Budget{{ ... }}]`")
         perf_budgets_span = body_span
         perf_list_span = body_span
     }
-    value := if {
-        namespace_value == Namespace.Env -> ContribValue.Env(value: EnvLit{fields: env_fields, services: env_services, span: body_span})
-        namespace_value == Namespace.System -> ContribValue.System(value: SystemLit{explicit_type: None, fields: system_fields, span: body_span})
-        namespace_value == Namespace.Image -> ContribValue.Image(value: ImageLit{explicit_type: None, fields: image_fields, span: body_span})
-        namespace_value == Namespace.Fleet -> ContribValue.Fleet(value: FleetLit{explicit_type: None, fields: fleet_fields, span: body_span})
-        namespace_value == Namespace.VmTest -> ContribValue.VmTest(value: VmTestLit{explicit_type: None, fields: vmtest_fields, span: body_span})
-        namespace_value == Namespace.Profile -> ContribValue.Profile(value: ProfileLit{fields: profile_fields, span: body_span})
+    value :: if namespace_value == {
+        .Env -> ContribValue.Env(value: EnvLit{fields: env_fields, services: env_services, span: body_span})
+        .System -> ContribValue.System(value: SystemLit{explicit_type: None, fields: system_fields, span: body_span})
+        .Image -> ContribValue.Image(value: ImageLit{explicit_type: None, fields: image_fields, span: body_span})
+        .Fleet -> ContribValue.Fleet(value: FleetLit{explicit_type: None, fields: fleet_fields, span: body_span})
+        .VmTest -> ContribValue.VmTest(value: VmTestLit{explicit_type: None, fields: vmtest_fields, span: body_span})
+        .Profile -> ContribValue.Profile(value: ProfileLit{fields: profile_fields, span: body_span})
         else -> ContribValue.Perf(value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span})
     }
-    contribution := Contribution{namespace: namespace ?? Namespace.Env, path: role.name, path_span: role.span, value: value, span: parser_cover(namespace_head.span, close.span)}
+    contribution :: Contribution{namespace: namespace ?? Namespace.Env, path: role.name, path_span: role.span, value: value, span: parser_cover(namespace_head.span, close.span)}
     Item.Module(value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span)})
 }
+
 pub struct ModulePerfBudgets {
     pub budgets: [BudgetDecl]
     pub span: Span
@@ -555,7 +532,7 @@ fn parser_module_perf_budget_entry(state: &JetParserState, require_head: Bool) -
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         field :: parser_expect_name(&state, "for a budget field")
         parser_expect(&state, TOKEN_COLON, "after a budget field")
-        value := parser_parse_expression(&state, 1, 0)
+        value :: parser_parse_expression(&state, 1, 0)
         fields.push(BudgetField{name: field.payload.decoded, name_span: field.span, value: value.expr, span: parser_cover(field.span, value.span)})
         if {
             parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
@@ -601,7 +578,7 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         field :: parser_expect_name(&state, "for a compiler workload field")
         parser_expect(&state, TOKEN_COLON, "after a compiler workload field")
-        value := parser_parse_expression(&state, 1, 0)
+        value :: parser_parse_expression(&state, 1, 0)
         if field.payload.decoded == {
             "target" -> {
                 if target != None -> parser_module_error(&state, "E2903", field.span, "a compile workload repeats `target`", "each edit workload has one target", "keep one `target:` field")
@@ -619,16 +596,15 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
     if head.payload.decoded != "CompilerWorkload" || variant.payload.decoded != "Edit" {
         parser_module_error(&state, parser_cover(head.span, variant.span), "unknown compiler workload variant", "performance probes currently use CompilerWorkload.Edit", "write `CompilerWorkload.Edit{{ target: ..., patch: ... }}`")
     }
-    target_value := target ?? Expr.Unit(span: name.span)
-    patch_value := patch ?? Expr.Unit(span: name.span)
+    target_value :: target ?? Expr.Unit(span: name.span)
+    patch_value :: patch ?? Expr.Unit(span: name.span)
     if target == None -> parser_module_error(&state, name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
     if patch == None -> parser_module_error(&state, name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
     CompileWorkloadDecl{name: name.payload.decoded, name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
 }
 
-
 fn parser_module_name_starts_with_underscore(name: String) -> Bool {
-    bytes := name.bytes()
+    bytes :: name.bytes()
     bytes.len() > 0 && Int.from_u8(bytes[0]) == 95
 }
 
@@ -642,7 +618,7 @@ fn parser_module_sources(state: &JetParserState) -> [SourceDecl] {
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         name :: parser_expect_name(&state, "for a source name")
         parser_expect(&state, TOKEN_COLON, "after a source name")
-        begin := parser_current(&state).span
+        begin :: parser_current(&state).span
         end := begin
         loop parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
             end = parser_bump(&state).span
@@ -668,17 +644,17 @@ fn parser_module_platform_value(state: &JetParserState) -> (os: String, arch: St
 fn parser_module_system_field(state: &JetParserState) -> SystemField {
     name :: parser_expect_name(&state, "for a system field")
     parser_expect(&state, TOKEN_COLON, "after a system field")
-    value := if {
-        name.payload.decoded == "target" -> {
-            platform := parser_module_platform_value(&state)
+    value :: if name.payload.decoded == {
+        "target" -> {
+            platform :: parser_module_platform_value(&state)
             SystemFieldValue.Platform(os: platform.os, arch: platform.arch, span: platform.span)
         }
-        name.payload.decoded == "packages" -> SystemFieldValue.Packages(value: parser_parse_expression(&state, 1, 0).expr)
-        name.payload.decoded == "services" -> SystemFieldValue.Services(entries: parser_module_services_map(&state))
-        name.payload.decoded == "options" -> SystemFieldValue.Options(entries: parser_module_options_list(&state))
+        "packages" -> SystemFieldValue.Packages(value: parser_parse_expression(&state, 1, 0).expr)
+        "services" -> SystemFieldValue.Services(entries: parser_module_services_map(&state))
+        "options" -> SystemFieldValue.Options(entries: parser_module_options_list(&state))
         else -> SystemFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
     }
-    end := parser_module_system_value_end(value, name.span)
+    end :: parser_module_system_value_end(value, name.span)
     SystemField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
@@ -739,8 +715,8 @@ fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
             end = part.span
         }
         parser_expect(&state, TOKEN_COLON, "after an option key")
-        value := parser_parse_expression(&state, 1, 0)
-        value_end := value.span
+        value :: parser_parse_expression(&state, 1, 0)
+        value_end :: value.span
         entries.push(OptionEntry{key: name, key_span: parser_cover(key.span, end), value: value.expr, value_span: value_end, span: parser_cover(key.span, value_end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
     }
@@ -751,15 +727,15 @@ fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
 fn parser_module_image_field(state: &JetParserState) -> ImageField {
     name :: parser_expect_name(&state, "for an image field")
     parser_expect(&state, TOKEN_COLON, "after an image field")
-    value := if {
-        name.payload.decoded == "from" -> {
+    value :: if name.payload.decoded == {
+        "from" -> {
             source :: parser_expect_name(&state, "for an image source namespace")
             parser_expect(&state, TOKEN_DOT, "after an image source namespace")
             target :: parser_module_dashed_name(&state, "for an image source name")
-            from := if {
-                source.payload.decoded == "system" -> ImageFromRef.System(name: target.name)
-                source.payload.decoded == "packages" -> ImageFromRef.Package(name: target.name)
-                source.payload.decoded == "env" -> ImageFromRef.Environment(name: target.name)
+            from :: if source.payload.decoded == {
+                "system" -> ImageFromRef.System(name: target.name)
+                "packages" -> ImageFromRef.Package(name: target.name)
+                "env" -> ImageFromRef.Environment(name: target.name)
                 else -> {
                     parser_module_error(&state, "E0960", source.span, "an image source must use system, packages, or env", "image origins name one of the three provider namespaces", "write `from: system.name`, `from: packages.name`, or `from: env.name`")
                     ImageFromRef.Environment(name: target.name)
@@ -767,17 +743,17 @@ fn parser_module_image_field(state: &JetParserState) -> ImageField {
             }
             ImageFieldValue.From(source: from, span: parser_cover(source.span, target.span))
         }
-        name.payload.decoded == "format" -> {
+        "format" -> {
             word :: parser_expect_name(&state, "for an image format")
             ImageFieldValue.Format(word: word.payload.decoded, span: word.span)
         }
-        name.payload.decoded == "target" -> {
-            platform := parser_module_platform_value(&state)
+        "target" -> {
+            platform :: parser_module_platform_value(&state)
             ImageFieldValue.Platform(os: platform.os, arch: platform.arch, span: platform.span)
         }
         else -> ImageFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
     }
-    end := if value == {
+    end :: if value == {
         .From(_, span) -> span
         .Format(_, span) -> span
         .Platform(_, _, span) -> span
@@ -789,20 +765,20 @@ fn parser_module_image_field(state: &JetParserState) -> ImageField {
 fn parser_module_fleet_field(state: &JetParserState) -> FleetField {
     name :: parser_expect_name(&state, "for a fleet field")
     parser_expect(&state, TOKEN_COLON, "after a fleet field")
-    value := if {
-        name.payload.decoded == "hosts" -> FleetFieldValue.Hosts(entries: parser_module_hosts_map(&state))
+    value :: if name.payload.decoded == {
+        "hosts" -> FleetFieldValue.Hosts(entries: parser_module_hosts_map(&state))
         else -> FleetFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
     }
-    end := if value == { .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span } .Other(expr) -> expr_span(expr) }
+    end :: if value == { .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span } .Other(expr) -> expr_span(expr) }
     FleetField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_vmtest_field(state: &JetParserState) -> VmTestField {
     name :: parser_expect_name(&state, "for a VM-test field")
     parser_expect(&state, TOKEN_COLON, "after a VM-test field")
-    value := if {
-        name.payload.decoded == "hosts" -> VmTestFieldValue.Hosts(entries: parser_module_hosts_map(&state))
-        name.payload.decoded == "run" -> {
+    value :: if name.payload.decoded == {
+        "hosts" -> VmTestFieldValue.Hosts(entries: parser_module_hosts_map(&state))
+        "run" -> {
             start :: parser_expect_name(&state, "for `test` before a VM-test body")
             if start.payload.decoded != "test" {
                 parser_module_error(&state, "E0960", start.span, "VM-test run body starts with `test`", "the run field is a checked VM test body", "write `run: test {{ ... }}")
@@ -812,17 +788,20 @@ fn parser_module_vmtest_field(state: &JetParserState) -> VmTestField {
             end := open.span
             loop depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
                 token :: parser_bump(&state)
-                if token.kind == TOKEN_LBRACE -> depth += 1
-                if token.kind == TOKEN_RBRACE {
-                    depth -= 1
-                    end = token.span
+                if token.kind == {
+                    TOKEN_LBRACE -> depth += 1
+                    TOKEN_RBRACE -> {
+                        depth -= 1
+                        end = token.span
+                    }
+                    else -> {}
                 }
             }
             VmTestFieldValue.Run(span: parser_cover(start.span, end))
         }
         else -> VmTestFieldValue.Other(value: parser_parse_expression(&state, 1, 0).expr)
     }
-    end := if value == {
+    end :: if value == {
         .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span }
         .Run(span) -> span
         .Other(expr) -> expr_span(expr)
@@ -851,10 +830,13 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
             close := open.span
             loop depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
                 token :: parser_bump(&state)
-                if token.kind == TOKEN_LBRACE -> depth += 1
-                if token.kind == TOKEN_RBRACE {
-                    depth -= 1
-                    close = token.span
+                if token.kind == {
+                    TOKEN_LBRACE -> depth += 1
+                    TOKEN_RBRACE -> {
+                        depth -= 1
+                        close = token.span
+                    }
+                    else -> {}
                 }
             }
             overrides = Val(parser_cover(open.span, close))

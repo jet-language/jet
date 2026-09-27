@@ -89,9 +89,9 @@ fn jet_test_inline_c_comparison_preserves_checked_int_declaration() {
     let wrong = cwd.path.join("wrong_inline_c.jet");
     fs::write(
         &wrong,
-        r#"fn jet_add(n: Int) Int -> (n * 2)
+        r#"fn jet_add(n: Int) -> Int -> (n * 2)
 
-#[Unsafe("deliberately wrong scalar C result"), FFI(c)] fn c_wrong(n: Int) Int -> {
+#[Unsafe("deliberately wrong scalar C result"), FFI(c)] fn c_wrong(n: Int) -> Int {
     """int64_t c_wrong(int64_t n) { return n * 2 + 1; }"""
 }
 
@@ -1439,7 +1439,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     let dir = bare_package_project("bare_package", &jet);
     fs::write(
         dir.join("math.jet"),
-        "fn double(n: Int) Int -> (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
+        "fn double(n: Int) -> Int -> (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet)
@@ -1469,7 +1469,7 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
         return;
     }
     let dir = bare_package_project("package_directory", &jet);
-    fs::write(dir.join("helper.jet"), "fn helper() Int -> 1\n").unwrap();
+    fs::write(dir.join("helper.jet"), "fn helper() -> Int -> 1\n").unwrap();
     fs::write(
         dir.join("math.jet"),
         "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
@@ -1512,7 +1512,7 @@ fn jet_test_package_directory_reports_no_tests_once() {
         return;
     }
     let dir = bare_package_project("bare_testless", &jet);
-    fs::write(dir.join("math.jet"), "fn double(n: Int) Int -> (n * 2)\n").unwrap();
+    fs::write(dir.join("math.jet"), "fn double(n: Int) -> Int -> (n * 2)\n").unwrap();
     let out = Command::new(&jet)
         .args(["test", dir.to_str().unwrap()])
         .current_dir(&dir)
@@ -1938,17 +1938,17 @@ struct HelperError {
     message: String
 }
 
-fn first(values: [Int]) Int -> {
+fn first(values: [Int]) -> Int {
     return values.get(0) ?? panic("empty list")
 }
 
-fn checked(flag: Bool) Bool -> {
+fn checked(flag: Bool) -> Bool {
     assert(flag, "flag must hold")
     assert_eq(flag, true)
     return true
 }
 
-fn port(text: String) Int !HelperError -> {
+fn port(text: String) -> Int !HelperError {
     number :: text.trim().to_int() ?? panic("not a port number")
     if number < 0 -> return Err(HelperError{message: "negative port"})
     return Ok(number)
@@ -1961,7 +1961,7 @@ struct Recorded {
 // #2350 part 2: both operands are read windows into borrowed non-scalar
 // parameters. Binding them by value moved out of a shared reference (E0507),
 // so the generated Rust never compiled.
-fn same_argv(expected: Recorded, oracle_argv: [String]) Bool -> {
+fn same_argv(expected: Recorded, oracle_argv: [String]) -> Bool {
     assert_eq(expected.argv, oracle_argv)
     return true
 }

@@ -1548,7 +1548,7 @@ mod tests {
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "fn job() Int {\n    return 1\n}\nfn run() {\n    h :: task job()\n    print(h.join() ?? 0)\n}\n";
+        let src = "fn job() -> Int {\n    return 1\n}\nfn run() {\n    h :: task job()\n    print(h.join() ?? 0)\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }
@@ -1622,10 +1622,10 @@ mod tests {
     #[test]
     fn direct_and_cli_bundle_paths_have_identical_lowering_coverage() {
         let src = r#"
-fn flatten_words(contents: String) [String] -> {
+fn flatten_words(contents: String) -> [String] {
     return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
 }
-fn first(values: [Float]) Float -> values.first() ?? 0.0
+fn first(values: [Float]) -> Float -> values.first() ?? 0.0
 fn run() {
     words :: flatten_words("one two\nthree four")
     values :: [Float]{1.0, 2.0}

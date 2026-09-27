@@ -2970,3 +2970,414 @@ fn jit_reader_fixed_width_take_pattern_preserves_fields_and_position() {
         "4\n5\n0\n40\n4\n",
     );
 }
+
+#[test]
+fn native_source_helper_reenters_from_interface_and_catches_inner_error() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+
+    let scratch = common::Scratch::new("jit_nested_source_helper_interface");
+    let file = scratch.join("run.jet");
+    fs::write(
+        &file,
+        r#"trait Bridge {
+    fn invoke(&self, value: Int) Int -[]>;
+}
+
+fn nested(value: Int) Int -[]> {
+    return value + 10
+}
+
+fn outer(service: Bridge, value: Int) Int -[]> {
+    before :: value * 2
+    answer :: service.invoke(value)
+    return before + answer
+}
+
+fn run() {}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("nested helper fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "nested helper fixture must type-check: {diagnostics:#?}"
+    );
+    let (program, artifact) = common::lower_cranelift_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("nested helper fixture must lower to canonical MIR: {error}"));
+    let trait_row = program
+        .traits
+        .iter()
+        .find(|row| row.name == "Bridge")
+        .expect("checked Bridge trait");
+    let method_row = trait_row
+        .methods
+        .iter()
+        .find(|row| row.name == "invoke")
+        .expect("checked Bridge.invoke method");
+    let outer = program
+        .functions
+        .iter()
+        .find(|row| row.name == "outer")
+        .expect("checked outer helper");
+    let nested = program
+        .functions
+        .iter()
+        .find(|row| row.name == "nested")
+        .expect("checked nested helper");
+    let outer_id = outer.id;
+    let nested_id = nested.id;
+    let receiver_type = outer.params[0].ty.clone();
+    let method = jet_jit::SourceInterfaces::NativeInterfaceMethod::checked(
+        &program,
+        artifact,
+        trait_row.id,
+        method_row.id,
+        receiver_type,
+    )
+    .expect("checked native Bridge.invoke descriptor");
+
+    let bindings = std::sync::Arc::new(jet_jit::SourceInterfaces::NativeInterfaceBindings::new());
+    let object = bindings.create_object(()).expect("native bridge object");
+    let source_resources =
+        std::sync::Arc::new(jet_jit::SourceResources::SourceResourceSession::new());
+    let callback_errors = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let nested_error_caught = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let unexpected_source_fallback =
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let nested_program = std::sync::Arc::new(program);
+    let nested_policy = common::development_policy();
+    let handler_resources = source_resources.clone();
+    let handler_program = nested_program.clone();
+    let handler_policy = nested_policy.clone();
+    let handler_callback_errors = callback_errors.clone();
+    let handler_error_caught = nested_error_caught.clone();
+    let handler_calls_count = handler_calls.clone();
+    let handler_unexpected_fallback = unexpected_source_fallback.clone();
+    bindings
+        .bind(
+            object.clone(),
+            method.identity.clone(),
+            method.signature.clone(),
+            std::sync::Arc::new(move |_object, call| {
+                handler_calls_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let value = match call.argument(0).map(|argument| &argument.value) {
+                    Some(jet_foundation::MIR::MirRuntimeValue::Int(value)) => *value,
+                    _ => return Err("Bridge.invoke received no checked Int value".to_string()),
+                };
+                let lease = handler_resources
+                    .retain_root()
+                    .map_err(|error| error.to_string())?;
+                if value == -1 {
+                    let source_callback_errors = handler_callback_errors.clone();
+                    let error = jet_jit::execute_source_helper_entry(
+                        handler_program.as_ref(),
+                        artifact,
+                        &[nested_id],
+                        nested_id,
+                        &lease,
+                        vec![jet_jit::SourceHelperArgument::Owned(
+                            jet_foundation::MIR::MirRuntimeValue::Int(7),
+                        )],
+                        jet_jit::SourceExecutionPolicy::SourceOnly,
+                        &handler_policy,
+                        move |_request| {
+                            source_callback_errors
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            Err("inner Source callback failure".to_string())
+                        },
+                    );
+                    return match error {
+                        Err(error) => {
+                            let invoked = matches!(
+                                error.failure(),
+                                jet_jit::SourceHelperInvocationFailure::Invoked { .. }
+                            );
+                            let cause = error.to_string();
+                            error.record_completion().map_err(|completion| {
+                                format!("inner completion has no parent owner: {completion:?}")
+                            })?;
+                            if invoked {
+                                handler_error_caught
+                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                Ok(jet_foundation::MIR::MirRuntimeValue::Int(90))
+                            } else {
+                                Err(format!("inner failure was pre-invocation: {cause}"))
+                            }
+                        }
+                        Ok(_) => Err(
+                            "inner Source callback failure was not returned".to_string(),
+                        ),
+                    };
+                }
+
+                let fallback_calls = handler_unexpected_fallback.clone();
+                let execution = jet_jit::execute_source_helper_entry(
+                    handler_program.as_ref(),
+                    artifact,
+                    &[nested_id],
+                    nested_id,
+                    &lease,
+                    vec![jet_jit::SourceHelperArgument::Owned(
+                        jet_foundation::MIR::MirRuntimeValue::Int(value),
+                    )],
+                    jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+                    &handler_policy,
+                    move |_request| {
+                        fallback_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Err("native nested helper unexpectedly requested Source".to_string())
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                if execution.tier != jet_jit::SourceExecutionTier::Native {
+                    return Err("nested helper did not execute in the native tier".to_string());
+                }
+                let (execution, projected) = execution.with_completion_scope(|execution| {
+                    execution
+                        .take_result()
+                        .expect("nested helper returns one projection")
+                });
+                let completion = execution.retire();
+                jet_jit::SourceExecutionCompletionScope::record_current(completion).map_err(
+                    |completion| format!("nested completion has no parent owner: {completion:?}"),
+                )?;
+                match projected.value {
+                    Some(jet_foundation::MIR::MirRuntimeValue::Int(value)) => {
+                        Ok(jet_foundation::MIR::MirRuntimeValue::Int(value))
+                    }
+                    _ => Err("nested helper returned no checked Int value".to_string()),
+                }
+            }),
+        )
+        .expect("bind exact native Bridge.invoke implementation");
+    let outer_lease = source_resources
+        .retain_root()
+        .expect("retain outer helper source root");
+    let pure_helper = jet_jit::execute_source_helper_entry(
+        nested_program.as_ref(),
+        artifact,
+        &[nested_id],
+        nested_id,
+        &outer_lease,
+        vec![jet_jit::SourceHelperArgument::Owned(
+            jet_foundation::MIR::MirRuntimeValue::Int(30),
+        )],
+        jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        &nested_policy,
+        |_request| Err("pure helper unexpectedly requested Source".to_string()),
+    )
+    .expect("a private pure helper needs no interface scope");
+    assert_eq!(pure_helper.tier, jet_jit::SourceExecutionTier::Native);
+    let pure_value = match pure_helper.retire().disposition {
+        jet_jit::SourceExecutionCompletionDisposition::Invoked {
+            retirement:
+                Some(jet_jit::SourceExecutionCompletionRetirement::Completed(retirement)),
+            ..
+        } => retirement.value,
+        other => panic!("private pure helper did not retain its result: {other:?}"),
+    };
+    assert_eq!(
+        pure_value,
+        Some(jet_foundation::MIR::MirRuntimeValue::Int(40))
+    );
+
+    let no_scope_values = vec![
+        object.as_runtime_value(),
+        jet_foundation::MIR::MirRuntimeValue::Int(10),
+    ];
+    let no_scope_error = match jet_jit::execute_source_helper_entry(
+        nested_program.as_ref(),
+        artifact,
+        &[outer_id],
+        outer_id,
+        &outer_lease,
+        vec![
+            jet_jit::SourceHelperArgument::Owned(object.as_runtime_value()),
+            jet_jit::SourceHelperArgument::Owned(
+                jet_foundation::MIR::MirRuntimeValue::Int(10),
+            ),
+        ],
+        jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        &nested_policy,
+        |_request| Err("scope preflight must not enter Source".to_string()),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a reachable native interface call needs its checked scope"),
+    };
+    assert!(matches!(
+        no_scope_error.failure(),
+        jet_jit::SourceHelperInvocationFailure::NotInvoked {
+            cause:
+                jet_jit::SourceDeoptError::NativeInterface(
+                    jet_jit::SourceInterfaces::NativeInterfaceError::MissingBinding,
+                ),
+            entry_values,
+            ..
+        } if entry_values == &no_scope_values
+    ));
+    assert_eq!(no_scope_error.entry_values(), Some(no_scope_values.as_slice()));
+    assert_eq!(
+        handler_calls.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        unexpected_source_fallback.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    drop(no_scope_error);
+
+    let _activation = bindings
+        .activate(nested_program.as_ref(), artifact)
+        .expect("activate checked native bridge");
+    let missing_helper_id = (0..)
+        .map(jet_foundation::MIR::MirFunctionId)
+        .find(|candidate| {
+            nested_program
+                .functions
+                .iter()
+                .all(|function| function.id != *candidate)
+        })
+        .expect("the checked MIR has an unused function identity");
+    let preflight_values = vec![
+        object.as_runtime_value(),
+        jet_foundation::MIR::MirRuntimeValue::Int(77),
+    ];
+    let preflight_arguments = vec![
+        jet_jit::SourceHelperArgument::Owned(object.as_runtime_value()),
+        jet_jit::SourceHelperArgument::Owned(
+            jet_foundation::MIR::MirRuntimeValue::Int(77),
+        ),
+    ];
+    let preflight_error = match jet_jit::execute_source_helper_entry(
+        nested_program.as_ref(),
+        artifact,
+        &[],
+        missing_helper_id,
+        &outer_lease,
+        preflight_arguments,
+        jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        &common::development_policy(),
+        {
+            let calls = unexpected_source_fallback.clone();
+            move |_request| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err("preflight failure must not enter Source".to_string())
+            }
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("missing helper must fail before native or Source invocation"),
+    };
+    assert!(matches!(
+        preflight_error.failure(),
+        jet_jit::SourceHelperInvocationFailure::NotInvoked { entry_values, .. }
+            if entry_values == &preflight_values
+    ));
+    assert_eq!(
+        preflight_error.entry_values(),
+        Some(preflight_values.as_slice())
+    );
+    drop(preflight_error);
+    let policy = common::development_policy();
+
+    let success = jet_jit::execute_source_helper_entry(
+        nested_program.as_ref(),
+        artifact,
+        &[outer_id],
+        outer_id,
+        &outer_lease,
+        vec![
+            jet_jit::SourceHelperArgument::Owned(object.as_runtime_value()),
+            jet_jit::SourceHelperArgument::Owned(
+                jet_foundation::MIR::MirRuntimeValue::Int(10),
+            ),
+        ],
+        jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        &policy,
+        |_request| Err("outer helper unexpectedly requested Source".to_string()),
+    )
+    .expect("outer native helper returns after nested native execution");
+    assert_eq!(success.tier, jet_jit::SourceExecutionTier::Native);
+    assert!(matches!(
+        &success.outcome,
+        Some(RunOutcome::Ran { exit_code: 0, .. })
+    ));
+    let success_retirement = match success.retire().disposition {
+        jet_jit::SourceExecutionCompletionDisposition::Invoked {
+            cause: None,
+            retirement: Some(
+                jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+            ),
+            ..
+        } => retirement,
+        _ => panic!("successful helper completion must retain its retirement"),
+    };
+    assert_eq!(
+        success_retirement.value,
+        Some(jet_foundation::MIR::MirRuntimeValue::Int(40))
+    );
+
+    let recovered = jet_jit::execute_source_helper_entry(
+        nested_program.as_ref(),
+        artifact,
+        &[outer_id],
+        outer_id,
+        &outer_lease,
+        vec![
+            jet_jit::SourceHelperArgument::Owned(object.as_runtime_value()),
+            jet_jit::SourceHelperArgument::Owned(
+                jet_foundation::MIR::MirRuntimeValue::Int(-1),
+            ),
+        ],
+        jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
+        &policy,
+        |_request| Err("outer helper unexpectedly requested Source".to_string()),
+    )
+    .expect("outer native helper resumes after catching the nested Source error");
+    assert_eq!(recovered.tier, jet_jit::SourceExecutionTier::Native);
+    assert!(matches!(
+        &recovered.outcome,
+        Some(RunOutcome::Ran { exit_code: 0, .. })
+    ));
+    let recovered_retirement = match recovered.retire().disposition {
+        jet_jit::SourceExecutionCompletionDisposition::Invoked {
+            cause: None,
+            retirement: Some(
+                jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+            ),
+            ..
+        } => retirement,
+        _ => panic!("recovered helper completion must retain its retirement"),
+    };
+    assert_eq!(
+        recovered_retirement.value,
+        Some(jet_foundation::MIR::MirRuntimeValue::Int(88))
+    );
+    assert_eq!(
+        handler_calls.load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+    assert_eq!(
+        callback_errors.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        nested_error_caught.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        unexpected_source_fallback.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+
+    drop(outer_lease);
+    source_resources
+        .retire()
+        .expect("retire shared parent Source resources");
+}

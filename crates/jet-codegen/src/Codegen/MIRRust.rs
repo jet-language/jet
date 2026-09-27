@@ -15795,6 +15795,46 @@ impl<'a> RustEmitter<'a> {
         dropped.then_some(node)
     }
 
+    fn uninit_fixed_drop_local(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<MirLocalId> {
+        let MirOperation::MovePlace { place: place_id } = self.value_definition(function, value)?
+        else {
+            return None;
+        };
+        let place = function.places.iter().find(|place| place.id == *place_id)?;
+        if !place.projections.is_empty() {
+            return None;
+        }
+        let MirPlaceBase::Local(local) = &place.base else {
+            return None;
+        };
+        self.local_uninit_fixed_type(function, *local)?;
+        if function
+            .blocks
+            .iter()
+            .any(|block| block.terminator.value_uses().contains(&value))
+        {
+            return None;
+        }
+        let mut dropped = false;
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if !instruction.operation.value_uses().contains(&value) {
+                continue;
+            }
+            if !matches!(
+                &instruction.operation,
+                MirOperation::Drop { value: operand, .. } if *operand == value
+            ) {
+                return None;
+            }
+            dropped = true;
+        }
+        dropped.then_some(*local)
+    }
+
     fn prepare_partial_read(&self, node: &PartialMoveNode, fields: &[MirFieldId]) -> String {
         let Some(field) = fields.first() else {
             return self.restore_partial_node(node);
@@ -15816,9 +15856,12 @@ impl<'a> RustEmitter<'a> {
         indent: usize,
         debug_active: bool,
     ) {
-        if instruction.result.is_some_and(|value| self.partial_drop_node(function, value).is_some()) {
-            // Its sole consumer drops the initialized whole or remaining field
-            // slots, without trying to reconstruct a partially moved aggregate.
+        if instruction.result.is_some_and(|value| {
+            self.partial_drop_node(function, value).is_some()
+                || self.uninit_fixed_drop_local(function, value).is_some()
+        }) {
+            // The sole consumer drops the backing storage without reconstructing
+            // a complete fixed-list value.
             return;
         }
         if self.partial_moves.contains_key(&function.id)
@@ -22724,6 +22767,12 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         kind: MirDropKind,
     ) -> String {
+        if let Some(local) = self.uninit_fixed_drop_local(function, value) {
+            return format!(
+                "{{ drop({}.take()); () }}",
+                self.local_storage(function, local)
+            );
+        }
         if let Some(node) = self.partial_drop_node(function, value) {
             return format!("{{ drop({}.take()); {} () }}", node.slot, Self::clear_partial_fields(node));
         }

@@ -55,8 +55,8 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 /// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
 /// them, and so the op expressions are type-checked and lowered through the
 /// normal pipeline:
-///   - `change … via { (old) -> body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) New -> body`
-///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() T -> body`
+///   - `change … via { (old) -> body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) -> New -> body`
+///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() -> T -> body`
 /// The op's `conv_fn`/`default_fn` is set to the synthetic name. Types that
 /// never decode at runtime (no `Decode` derive, or generic) get nothing — the
 /// migration stays a compile-time intent check only, and codegen emits nothing

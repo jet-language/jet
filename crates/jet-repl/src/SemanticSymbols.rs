@@ -109,19 +109,19 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "map",
-        "List.map(f: fn(T) R) -> [R]",
+        "List.map(f: fn(T) -> R) -> [R]",
         "Transforms each item with f."
     ),
     member!(
         "List",
         "filter",
-        "List.filter(f: fn(T) Bool) -> List<T>",
+        "List.filter(f: fn(T) -> Bool) -> List<T>",
         "Keeps items where f(item) is true."
     ),
     member!(
         "List",
         "filter_map",
-        "List.filter_map(f: fn(T) ?V) -> [V]",
+        "List.filter_map(f: fn(T) -> ?V) -> [V]",
         "Maps then drops failures — keeps only successes."
     ),
     member!(
@@ -133,37 +133,37 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "find",
-        "List.find(f: fn(T) Bool) -> ?T",
+        "List.find(f: fn(T) -> Bool) -> ?T",
         "The first item where f(item) is true, if any."
     ),
     member!(
         "List",
         "any",
-        "List.any(f: fn(T) Bool) -> Bool",
+        "List.any(f: fn(T) -> Bool) -> Bool",
         "True if f is true for at least one item."
     ),
     member!(
         "List",
         "all",
-        "List.all(f: fn(T) Bool) -> Bool",
+        "List.all(f: fn(T) -> Bool) -> Bool",
         "True if f is true for every item."
     ),
     member!(
         "List",
         "sort_by",
-        "List.sort_by(key: fn(T) K)",
+        "List.sort_by(key: fn(T) -> K)",
         "Sorts in place by the key f extracts."
     ),
     member!(
         "List",
         "reduce",
-        "List.reduce(init: R, f: fn(R, T) R) -> R",
+        "List.reduce(init: R, f: fn(R, T) -> R) -> R",
         "Folds items into one value, starting from init."
     ),
     member!(
         "List",
         "fold",
-        "List.fold(init: R, f: fn(R, T) R) -> R",
+        "List.fold(init: R, f: fn(R, T) -> R) -> R",
         "Folds items into one value, starting from init."
     ),
     member!(

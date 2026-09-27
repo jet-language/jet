@@ -680,7 +680,7 @@ fn sema_checked_foreign_enum_c_layout_tag(definition: EnumDef) -> ?TCEnumTag {
     }
 }
 fn sema_checked_foreign_handle_source_matches(handles: [SemaCheckedForeignHandle], facts: SemaRegistrationForeignHandleFacts) -> Bool {
-    for handle in handles {
+    loop handle in handles {
         if handle.library == facts.library && handle.typedef_name == facts.typedef_name && handle.jet_name == facts.jet_name && handle.ownership == facts.ownership && handle.close == facts.close && handle.close_source == facts.close_source && handle.thread_safety == facts.thread_safety && handle.send == facts.send && handle.sync == facts.sync -> return true
     }
     false
@@ -699,7 +699,7 @@ fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: Sema
         .SourceAst(item) -> if item == {
             .Struct(definition) -> {
                 if c_abi && !sema_checked_foreign_struct_c_layout(definition.layout) -> return false
-                for field in definition.fields {
+                loop field in definition.fields {
                     if !sema_checked_foreign_type(graph, field.ty, nominal.symbol.module_name, c_abi, generated, handles, next_seen) -> return false
                 }
                 return true
@@ -712,11 +712,11 @@ fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: Sema
                     payload_handles = [SemaCheckedForeignHandle]{}
                     payload_generated = false
                 }
-                for variant in definition.variants {
+                loop variant in definition.variants {
                     if variant.payload == {
                         .Single(ty, _) -> if !sema_checked_foreign_type(graph, ty, nominal.symbol.module_name, c_abi, payload_generated, payload_handles, next_seen) -> return false
                         .Named(fields) -> {
-                            for field in fields {
+                            loop field in fields {
                                 if !sema_checked_foreign_type(graph, field.ty, nominal.symbol.module_name, c_abi, payload_generated, payload_handles, next_seen) -> return false
                             }
                         }
@@ -855,7 +855,7 @@ fn sema_checked_foreign_bridge_companion_count(params: [SemaCheckedForeignParam]
 }
 
 fn sema_checked_foreign_bridge_return_count(params: [SemaCheckedForeignParam]) -> Bool {
-    for parameter in params {
+    loop parameter in params {
         if parameter.convention == AccessConvention.Write && sema_checked_foreign_array_length_name(parameter.name) && sema_checked_foreign_integer_type(parameter.ty) -> return true
     }
     false
@@ -892,7 +892,7 @@ fn sema_checked_foreign_bridge_generated_shape(graph: SemaRegistrationGraph, mod
 }
 
 fn sema_checked_foreign_bridge_resident_shape(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], return_type: ?Type, handles: [SemaCheckedForeignHandle]) -> Bool {
-    for parameter in params {
+    loop parameter in params {
         if parameter.convention == AccessConvention.Read || parameter.convention == AccessConvention.Write {
             if !sema_checked_foreign_bridge_resident_value(graph, module_identity, parameter.ty, handles) -> return false
         } else if parameter.convention == AccessConvention.Move {
@@ -914,7 +914,7 @@ fn sema_checked_foreign_bridge_types_equal(params: [SemaCheckedForeignParam], ex
 }
 
 fn sema_checked_foreign_bridge_all_read(params: [SemaCheckedForeignParam]) -> Bool {
-    for parameter in params {
+    loop parameter in params {
         if parameter.convention != AccessConvention.Read -> return false
     }
     true
@@ -935,7 +935,7 @@ fn sema_checked_foreign_bridge_legacy_shape(graph: SemaRegistrationGraph, module
     if return_type == Val(Type.Float) {
         six_floats := params.len() == 6
         if six_floats {
-            for parameter in params {
+            loop parameter in params {
                 if parameter.ty != Type.Float -> six_floats = false
             }
         }
@@ -1026,7 +1026,7 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
         return false
     }
     function_candidate := None
-    for function in module_row.functions {
+    loop function in module_row.functions {
         if function.declaration.name == close.name {
             function_candidate = Val(function)
             break
@@ -1273,14 +1273,14 @@ fn sema_checked_foreign_handle_key_for_type(graph: SemaRegistrationGraph, module
 }
 
 fn sema_checked_foreign_handle_key(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationForeignFunction, providers: [SemaCheckedForeignProvider]) -> ?String {
-    for provider in providers {
+    loop provider in providers {
         if provider.module_identity != module_identity -> next
         if registered.declaration.return_type != None {
             return_type :: registered.declaration.return_type ?? Type.Named("Unit")
             key := sema_checked_foreign_handle_key_for_type(graph, module_identity, return_type, provider)
             if key != None -> return key
         }
-        for parameter in registered.parameters {
+        loop parameter in registered.parameters {
             key := sema_checked_foreign_handle_key_for_type(graph, module_identity, parameter.ty, provider)
             if key != None -> return key
         }
@@ -1290,16 +1290,16 @@ fn sema_checked_foreign_handle_key(graph: SemaRegistrationGraph, module_identity
 fn sema_checked_foreign_close_foreign_key(module_row: SemaRegistrationModule, registered: SemaRegistrationForeignFunction, providers: [SemaCheckedForeignProvider]) -> ?String {
     close :: registered.declaration.close ?? return None
     if sema_checked_foreign_registered_close_key(module_row, Val(close)) != None -> return None
-    for provider in providers {
+    loop provider in providers {
         if provider.module_identity != module_row.module_identity -> next
-        for adapter in provider.close_adapters {
+        loop adapter in provider.close_adapters {
             if adapter.adapter_function != close.name -> next
-            for function in module_row.foreign_functions {
+            loop function in module_row.foreign_functions {
                 if function.declaration.name == adapter.raw_function -> return Val(function.symbol.id.key)
             }
         }
     }
-    for function in module_row.foreign_functions {
+    loop function in module_row.foreign_functions {
         if function.declaration.name == close.name -> return Val(function.symbol.id.key)
     }
     None
@@ -1308,7 +1308,7 @@ fn sema_checked_foreign_close_foreign_key(module_row: SemaRegistrationModule, re
 fn sema_checked_foreign_registered_close_key(module_row: SemaRegistrationModule, close: ?NamedSpan) -> ?String {
     if close == None -> return None
     named :: close ?? return None
-    for function in module_row.functions {
+    loop function in module_row.functions {
         if function.declaration.name == named.name -> return Val(function.symbol.id.key)
     }
     None
@@ -1339,10 +1339,10 @@ fn sema_checked_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegist
     handles := [SemaCheckedForeignHandle]{}
     scoped_providers := [SemaCheckedForeignProvider]{}
     if c_abi {
-        for provider in providers {
+        loop provider in providers {
             if provider.module_identity != module_row.module_identity -> next
             scoped_providers.push(provider)
-            for handle in provider.handles -> handles.push(handle)
+            loop handle in provider.handles -> handles.push(handle)
         }
     } else {
         scoped_providers = providers

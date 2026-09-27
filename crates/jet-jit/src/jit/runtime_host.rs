@@ -642,6 +642,15 @@ pub(crate) struct JitCallableSlot {
     pub raw_many: Option<unsafe extern "C" fn(i64, *const i64) -> i64>,
 }
 
+#[derive(Clone)]
+struct JitCallablePortableEnvironment {
+    function: MirFunctionId,
+    execution: MirExecutionIdentity,
+    capture_type_ids: Vec<u64>,
+    capture_owned: Vec<bool>,
+    captures: std::sync::Arc<std::sync::Mutex<Vec<MirRuntimeValue>>>,
+}
+
 /// Executable target metadata for a checked MIR closure. The function pointer
 /// is installed only after the resident module is finalized; captures retain
 /// their canonical descriptor identities so invocation marshalling can rebuild
@@ -649,13 +658,15 @@ pub(crate) struct JitCallableSlot {
 #[derive(Clone)]
 pub(crate) struct JitClosureTarget {
     pub(crate) function: MirFunctionId,
+    pub(crate) execution: MirExecutionIdentity,
     pub(crate) fn_ptr: i64,
     pub(crate) capture_type_ids: Vec<u64>,
+    pub(crate) capture_owned: Vec<bool>,
 }
 
-/// Invocation-only native carrier metadata. The record is a physical sentinel
-/// owned by the current run heap; its token and epoch make stale/reused integer
-/// handles fail closed before the retained native root is exposed.
+/// Invocation-only native carrier metadata. The record is owned by the current
+/// run heap; its token and epoch make stale/reused integer handles fail closed
+/// before the retained native root is exposed.
 #[derive(Clone)]
 pub(crate) struct JitInvocationNativeCarrier {
     pub(crate) epoch: u64,
@@ -1524,6 +1535,18 @@ fn runtime_type_descriptor(ty: &MirType) -> Option<RuntimeTypeDescriptor> {
                     RuntimeValueKind::List | RuntimeValueKind::View | RuntimeValueKind::Iterator,
                     [inner],
                 ) => (runtime_type_id(inner), None, None, None, None),
+                _ if name.name == "JetSharedWeak" && args.len() == 1 => {
+                    let mut owner = ty.clone();
+                    owner.identity = None;
+                    owner.kind = MirTypeKind::Shared(Box::new(args[0].clone()));
+                    (runtime_type_id(&owner), None, None, None, None)
+                }
+                _ if name.name == "JetSharedSnapshot" && args.len() == 2 => {
+                    let mut owner = ty.clone();
+                    owner.identity = None;
+                    owner.kind = MirTypeKind::Shared(Box::new(args[0].clone()));
+                    (runtime_type_id(&owner), None, None, None, None)
+                }
                 _ if name.name == "Result" && args.len() == 2 => {
                     (None, None, None, runtime_type_id(&args[0]), runtime_type_id(&args[1]))
                 }
@@ -1781,6 +1804,24 @@ pub(crate) fn install_native_interface_methods(
 ) -> Result<(), String> {
     runtime.native_interface_methods.clear();
     runtime.clear_invocation_carriers();
+    register_native_interface_methods(runtime, program, artifact, functions)
+}
+
+pub(crate) fn extend_native_interface_methods(
+    runtime: &mut JitRuntime,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    functions: &[&MirFunction],
+) -> Result<(), String> {
+    register_native_interface_methods(runtime, program, artifact, functions)
+}
+
+fn register_native_interface_methods(
+    runtime: &mut JitRuntime,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    functions: &[&MirFunction],
+) -> Result<(), String> {
     let registered_descriptors =
         match crate::SourceInterfaces::active_binding_descriptors(program, artifact) {
             Ok(descriptors) => descriptors,
@@ -3024,6 +3065,10 @@ impl JetHardwareErasedHost for JitHardwareReplayHost {
     }
 }
 
+pub(crate) struct NativeSharedGuardEntry {
+    pub(crate) permit: Arc<Memory::shared_protocol::JetSharedCanonicalPermit>,
+    pub(crate) view: crate::SourceSharedInterop::SourceSharedInteropGuardState,
+}
 pub(crate) struct JitRuntime {
     /// The canonical policy for this invocation/resident image. It is carried
     /// by the runtime instead of caller-thread TLS so game and web Prelude
@@ -3082,11 +3127,17 @@ pub(crate) struct JitRuntime {
     /// Invocation-only native binding records. The key is a resident heap
     /// record handle; the retained root never enters persistent serialization.
     pub(crate) native_interface_carriers: HashMap<i64, JitInvocationNativeCarrier>,
-    /// Canonical Shared handles for native-owned roots. Each value points to
-    /// the physical sentinel record stored inside the Shared state, preserving
-    /// both Shared aliasing and the root's Arc identity across recursive
-    /// codec passes.
-    pub(crate) native_shared_carriers: HashMap<i64, JitInvocationNativeCarrier>,
+    /// Physical compiler Shared roots. Values are real typed payload bridges,
+    /// never sentinel records; the reverse table preserves alias identity when
+    /// a root returns to a newly materialized JIT heap.
+    pub(crate) native_shared_interops:
+        HashMap<i64, crate::SourceSharedInterop::SourceSharedInterop>,
+    pub(crate) native_shared_roots:
+        HashMap<usize, crate::SourceSharedInterop::SourceSharedInterop>,
+    pub(crate) native_shared_handles: HashMap<(usize, Option<i64>), i64>,
+    /// their map/split aliases.
+    pub(crate) native_shared_guards: HashMap<i64, NativeSharedGuardEntry>,
+    pub(crate) next_native_shared_guard_token: i64,
     /// Current run generation for invocation-only carrier records.
     pub(crate) invocation_carrier_epoch: u64,
     pub(crate) next_invocation_carrier_token: i64,
@@ -3094,6 +3145,7 @@ pub(crate) struct JitRuntime {
     /// ABI for ordinary Source closures crossing an invocation boundary.
     pub(crate) jit_closure_targets: HashMap<u64, JitClosureTarget>,
     pub(crate) jit_closure_targets_by_ptr: HashMap<i64, JitClosureTarget>,
+    pub(crate) jit_closure_execution_identity: Option<MirExecutionIdentity>,
     pub(crate) native_interface_methods:
         HashMap<(u64, u64, u64), crate::SourceInterfaces::NativeInterfaceMethod>,
     /// Checked native function-value signatures keyed by callable MIR type
@@ -3269,8 +3321,13 @@ pub(crate) struct JitRuntime {
     pub(crate) gc_roots: Vec<jet_rt::__gc::AutomaticRoot<i64>>,
     pub(crate) gc_edges: Vec<Vec<jet_rt::__gc::ObjectId>>,
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
-    pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
-    pub(crate) conditions: Vec<std::sync::Arc<Memory::ConditionState>>,
+    pub(crate) shareds: Vec<Option<std::sync::Arc<Memory::SharedState>>>,
+    pub(crate) shared_weak_owners: std::collections::HashMap<i64, Memory::SharedWeakOwner>,
+    pub(crate) shared_snapshots:
+        std::collections::HashMap<i64, std::sync::Arc<Memory::SharedSnapshot>>,
+    pub(crate) jit_callable_env_lifetimes:
+        Vec<Option<Memory::JitCallableEnvLifetime>>,
+    pub(crate) jit_callable_env_by_handle: std::collections::HashMap<i64, usize>,
     pub(crate) shared_guard_states: std::collections::HashMap<
         i64,
         std::sync::Arc<Memory::shared_protocol::JetSharedGuardState>,
@@ -3453,21 +3510,51 @@ fn hardware_ownership_tag(
     }
 }
 impl JitRuntime {
-    /// Install the finalized function target used by ordinary closure
-    /// marshalling. Replacements retire the old pointer mapping so a stale
-    /// executable handle cannot be reconstructed after hot reload.
+    /// Select the checked image authority for callable targets. A cutover
+    /// retires the previous image's code-pointer mappings.
+    pub(crate) fn set_jit_closure_execution_identity(
+        &mut self,
+        execution: MirExecutionIdentity,
+    ) {
+        if self.jit_closure_execution_identity.as_ref() != Some(&execution) {
+            self.jit_closure_targets.clear();
+            self.jit_closure_targets_by_ptr.clear();
+            self.jit_closure_execution_identity = Some(execution);
+        }
+    }
+    /// Install one finalized target within the active checked image.
+    ///
+    /// Replacements retire the old pointer mapping so a stale executable
+    /// handle cannot be reconstructed after hot reload.
     pub(crate) fn install_jit_closure_target(
+
         &mut self,
         function: MirFunctionId,
+        execution: MirExecutionIdentity,
         fn_ptr: i64,
         capture_type_ids: Vec<u64>,
+        capture_owned: Vec<bool>,
     ) {
+        match self.jit_closure_execution_identity.as_ref() {
+            Some(current) if current != &execution => {
+                self.set_host_fault("closure target execution authority changed without an image cutover");
+                return;
+            }
+            None => self.jit_closure_execution_identity = Some(execution.clone()),
+            Some(_) => {}
+        }
+        if capture_type_ids.len() != capture_owned.len() {
+            self.set_host_fault("closure target capture ownership layout is inconsistent");
+            return;
+        }
         if let Some(previous) = self.jit_closure_targets.insert(
             function.0,
             JitClosureTarget {
+                execution: execution.clone(),
                 function,
                 fn_ptr,
                 capture_type_ids: capture_type_ids.clone(),
+                capture_owned: capture_owned.clone(),
             },
         ) {
             self.jit_closure_targets_by_ptr.remove(&previous.fn_ptr);
@@ -3477,14 +3564,82 @@ impl JitRuntime {
             JitClosureTarget {
                 function,
                 fn_ptr,
+                execution,
                 capture_type_ids,
+                capture_owned,
             },
         );
     }
-
     pub(crate) fn clear_invocation_carriers(&mut self) {
         self.native_interface_carriers.clear();
-        self.native_shared_carriers.clear();
+        let mut resident_aliases = HashSet::new();
+        let mut lifecycle_error = None;
+        for (handle, interop) in &self.native_shared_interops {
+            if !interop.is_resident_root() || Memory::shared_state(self, *handle).is_none() {
+                continue;
+            }
+            match interop.owner_strong_count() {
+                Ok(Some(count)) if count > 0 => {
+                    resident_aliases.insert(*handle);
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    lifecycle_error.get_or_insert_with(|| {
+                        "resident Shared root has no logical alias-count hook".to_string()
+                    });
+                }
+                Err(error) => {
+                    lifecycle_error.get_or_insert(error);
+                }
+            }
+        }
+        if let Some(error) = lifecycle_error {
+            self.set_host_fault(&error);
+        }
+
+        for index in 0..self.shareds.len() {
+            let Ok(handle) = i64::try_from(index + 1) else {
+                self.set_host_fault("JIT Shared handle table exhausted during invocation cleanup");
+                break;
+            };
+            if resident_aliases.contains(&handle) || Memory::shared_state(self, handle).is_none() {
+                continue;
+            }
+            let state = Memory::shared_state(self, handle).expect("checked live Shared slot");
+            let Some(type_id) = Memory::shared_state_type_id(&state) else {
+                self.set_host_fault("JIT Shared alias has no checked owner descriptor");
+                continue;
+            };
+            let Some(descriptor) = self.runtime_type_descriptor(type_id).cloned() else {
+                self.set_host_fault(&format!(
+                    "JIT Shared descriptor {type_id} is unavailable during invocation cleanup"
+                ));
+                continue;
+            };
+            if let Err(error) = runtime_shared_alias_release(self, handle, &descriptor) {
+                self.set_host_fault(&error);
+            }
+        }
+
+        self.native_shared_interops
+            .retain(|handle, _| resident_aliases.contains(handle));
+        self.native_shared_handles.retain(|key, handle| {
+            resident_aliases.contains(handle)
+                && self.native_shared_interops.get(handle).is_some_and(|interop| {
+                    let owner_token = interop.owner_alias_token_id();
+                    (interop.identity(), owner_token) == *key
+                        || (owner_token.is_some()
+                            && key.0 == interop.identity()
+                            && key.1.is_none())
+                })
+        });
+        self.native_shared_roots.retain(|identity, _| {
+            self.native_shared_handles
+                .keys()
+                .any(|(root, _)| root == identity)
+        });
+        self.native_shared_guards.clear();
+        self.next_native_shared_guard_token = i64::MIN;
         self.trait_object_types.clear();
         self.invocation_carrier_epoch = self.invocation_carrier_epoch.wrapping_add(1).max(1);
         self.next_invocation_carrier_token = 1;
@@ -3509,9 +3664,7 @@ impl JitRuntime {
         type_id: u64,
     ) -> bool {
         carrier.epoch == self.invocation_carrier_epoch
-            && carrier.type_id == type_id
             && carrier.record == raw
-            && self.trait_object_types.get(&raw) == Some(&MirTypeId(type_id))
             && self.heap.record_len(raw) == Some(1)
             && self.heap.record_get_int(raw, 0) == Some(carrier.token)
     }
@@ -4294,6 +4447,9 @@ pub(crate) struct ResidentModule {
     pub(crate) module: JITModule,
     pub(crate) host: HostFns,
     pub(crate) main_id: FuncId,
+    pub(crate) program: Option<std::sync::Arc<MirProgram>>,
+    pub(crate) artifact: Option<MirArtifactId>,
+    pub(crate) execution: Option<MirExecutionIdentity>,
     pub(crate) typed_entry_id: Option<FuncId>,
     pub(crate) main_returns_result: bool,
     pub(crate) main_returns_app: bool,
@@ -5119,23 +5275,610 @@ fn persist_decode_slot(
     }
 }
 
-fn native_binding_type_allowed(rt: &JitRuntime, type_id: u64) -> bool {
-    rt.native_interface_methods.values().any(|method| {
-        runtime_type_id(&method.identity.receiver_type) == Some(type_id)
-            || method
-                .signature
-                .parameters
-                .iter()
-                .any(|parameter| runtime_type_id(&parameter.ty) == Some(type_id))
-            || runtime_type_id(&method.signature.return_type) == Some(type_id)
-    }) || rt.native_callable_methods.contains_key(&type_id)
-}
-
 fn native_carrier_descriptor(descriptor: &RuntimeTypeDescriptor) -> bool {
     matches!(
         descriptor.kind,
-        RuntimeValueKind::Handle | RuntimeValueKind::Shared | RuntimeValueKind::Closure
+        RuntimeValueKind::Handle | RuntimeValueKind::Closure
     )
+}
+
+fn shared_interop_element_descriptor_for_type(
+    rt: &JitRuntime,
+    type_id: u64,
+) -> Result<RuntimeTypeDescriptor, String> {
+    let descriptor = rt
+        .runtime_type_descriptor(type_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Source Shared type {type_id} has no checked runtime descriptor"
+            )
+        })?;
+    if descriptor.kind != RuntimeValueKind::Shared {
+        return Err(format!(
+            "Source Shared interop root type `{}` is not a Shared descriptor",
+            descriptor.name
+        ));
+    }
+    let element = descriptor
+        .element
+        .ok_or_else(|| "Source Shared descriptor has no element type".to_string())?;
+    rt.runtime_type_descriptor(element)
+        .cloned()
+        .ok_or_else(|| format!("Source Shared element type {element} has no descriptor"))
+}
+
+
+fn shared_interop_element_descriptor(
+    rt: &JitRuntime,
+    interop: &crate::SourceSharedInterop::SourceSharedInterop,
+) -> Result<RuntimeTypeDescriptor, String> {
+    shared_interop_element_descriptor_for_type(rt, interop.type_id())
+}
+
+fn register_native_shared_interop(
+    rt: &mut JitRuntime,
+    handle: i64,
+    interop: crate::SourceSharedInterop::SourceSharedInterop,
+) -> Result<(), String> {
+    if Memory::shared_state(rt, handle).is_none() {
+        return Err("Source Shared interop handle is not a live JIT Shared".to_string());
+    }
+    let identity = interop.identity();
+    let alias_key = (identity, interop.owner_alias_token_id());
+    if let Some(existing) = rt.native_shared_interops.get(&handle) {
+        if existing.identity() != identity
+            || existing.type_id() != interop.type_id()
+            || existing.owner_alias_token_id() != interop.owner_alias_token_id()
+        {
+            return Err("JIT Shared handle is already bound to another physical alias".to_string());
+        }
+        return Ok(());
+    }
+    if rt
+        .native_shared_handles
+        .get(&alias_key)
+        .is_some_and(|existing_handle| {
+            *existing_handle != handle
+                && rt.native_shared_interops.contains_key(existing_handle)
+                && Memory::shared_state(rt, *existing_handle).is_some()
+        })
+    {
+        return Err("one physical Shared owner alias was bound to multiple JIT handles".to_string());
+    }
+    if let Some(root) = rt.native_shared_roots.get(&identity) {
+        if root.type_id() != interop.type_id() {
+            return Err("physical Shared identity was reused for another checked type".to_string());
+        }
+    } else {
+        rt.native_shared_roots
+            .insert(identity, interop.without_owner_alias_lease());
+    }
+    rt.native_shared_handles.insert(alias_key, handle);
+    rt.native_shared_interops.insert(handle, interop);
+    Ok(())
+}
+
+fn decode_jit_shared_payload(
+    state: &Memory::SharedState,
+    type_id: u64,
+) -> Result<MirRuntimeValue, String> {
+    if Memory::shared_state_type_id(state) != Some(type_id) {
+        return Err("JIT Shared portable payload has a different checked root type".to_string());
+    }
+    Memory::shared_state_portable_value(state)
+}
+
+pub(crate) fn decode_jit_shared_payload_raw(
+    rt: &mut JitRuntime,
+    raw: i64,
+    type_id: u64,
+) -> Result<MirRuntimeValue, String> {
+    let descriptor = shared_interop_element_descriptor_for_type(rt, type_id)?;
+    let mut decode_state = PersistDecodeState::for_invocation();
+    persist_decode_raw(rt, raw, &descriptor, &mut decode_state, 1)
+}
+
+
+fn finish_jit_shared_operation<T>(
+    permit: std::sync::Arc<Memory::SharedStatePermit>,
+    result: Result<T, String>,
+) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T> {
+    let released = permit.release();
+    let Memory::shared_protocol::JetSharedPhysicalOperationOutcome {
+        result: release_result,
+        completion,
+    } = released;
+    Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+        result.and(release_result),
+        completion,
+    )
+}
+
+fn canonical_jit_shared_read(
+    state: &std::sync::Arc<Memory::SharedState>,
+    type_id: u64,
+    callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+    let Some(permit) = state.acquire_state_permit(false) else {
+        return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            Err("JIT Shared read permit acquisition was cancelled".to_string()),
+            None,
+        );
+    };
+    let result = decode_jit_shared_payload(state, type_id)
+        .and_then(|value| callback(&value));
+    finish_jit_shared_operation(permit, result)
+}
+
+fn canonical_jit_shared_edit(
+    state: &std::sync::Arc<Memory::SharedState>,
+    type_id: u64,
+    callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+    let Some(permit) = state.acquire_state_permit(true) else {
+        return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            Err("JIT Shared edit permit acquisition was cancelled".to_string()),
+            None,
+        );
+    };
+    let result = decode_jit_shared_payload(state, type_id).and_then(|mut value| {
+        callback(&mut value)?;
+        Memory::shared_state_commit_portable(state, value)
+    });
+    finish_jit_shared_operation(permit, result)
+}
+
+fn canonical_jit_shared_capture(
+    state: &std::sync::Arc<Memory::SharedState>,
+    type_id: u64,
+    callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+    let Some(permit) = state.acquire_state_permit(false) else {
+        return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            Err("JIT Shared read permit acquisition was cancelled".to_string()),
+            None,
+        );
+    };
+    let result = Memory::shared_state_revision(state)
+        .ok_or_else(|| "JIT Shared root has no physical revision".to_string())
+        .and_then(|revision| {
+            decode_jit_shared_payload(state, type_id)
+                .and_then(|value| callback(&value, revision))
+        });
+    finish_jit_shared_operation(permit, result)
+}
+
+fn canonical_jit_shared_replace_if_revision(
+    state: &std::sync::Arc<Memory::SharedState>,
+    _type_id: u64,
+    expected_revision: u64,
+    replacement: MirRuntimeValue,
+) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)> {
+    let Some(permit) = state.acquire_state_permit(true) else {
+        return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            Err("JIT Shared edit permit acquisition was cancelled".to_string()),
+            None,
+        );
+    };
+    let result = Memory::shared_state_revision(state)
+        .ok_or_else(|| "JIT Shared root has no physical revision".to_string())
+        .and_then(|current| {
+            if current != expected_revision {
+                Ok((false, current))
+            } else {
+                Memory::shared_state_commit_portable(state, replacement).and_then(|()| {
+                    Memory::shared_state_revision(state)
+                        .ok_or_else(|| "JIT Shared root has no physical revision".to_string())
+                        .map(|revision| (true, revision))
+                })
+            }
+        });
+    finish_jit_shared_operation(permit, result)
+}
+
+
+struct JitSharedInteropGuard {
+    state: std::sync::Arc<Memory::SharedState>,
+    type_id: u64,
+    permit: std::sync::Arc<Memory::SharedStatePermit>,
+    value: MirRuntimeValue,
+    editable: bool,
+    held: bool,
+    suspended: bool,
+    dirty: bool,
+}
+
+impl JitSharedInteropGuard {
+    fn acquire(
+        state: std::sync::Arc<Memory::SharedState>,
+        type_id: u64,
+        editable: bool,
+    ) -> Result<Self, String> {
+        let permit = state
+            .acquire_state_permit(editable)
+            .ok_or_else(|| "JIT Shared guard permit acquisition was cancelled".to_string())?;
+        let value = decode_jit_shared_payload(&state, type_id)?;
+        Ok(Self {
+            state,
+            type_id,
+            permit,
+            value,
+            editable,
+            held: true,
+            suspended: false,
+            dirty: false,
+        })
+    }
+
+    fn commit_if_dirty(&mut self) -> Result<(), String> {
+        if !self.dirty {
+            return Ok(());
+        }
+        Memory::shared_state_commit_portable(&self.state, self.value.clone())?;
+        Ok(())
+    }
+
+    fn refresh(&mut self) -> Result<(), String> {
+        self.value = decode_jit_shared_payload(&self.state, self.type_id)?;
+        self.dirty = false;
+        Ok(())
+    }
+}
+
+impl crate::SourceSharedInterop::SourceSharedInteropGuard for JitSharedInteropGuard {
+    fn read_value(&mut self) -> Result<MirRuntimeValue, String> {
+        if !self.held {
+            return Err("JIT Shared guard permit is not held".to_string());
+        }
+        Ok(self.value.clone())
+    }
+
+    fn stage_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+        if !self.editable {
+            return Err("read-only JIT Shared guard cannot stage a value".to_string());
+        }
+        if !self.held {
+            return Err("JIT Shared guard permit is not held".to_string());
+        }
+        self.value = value;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn wait_suspend(
+        &mut self,
+        value: MirRuntimeValue,
+    ) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        if !self.editable {
+            return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("read-only JIT Shared guard cannot wait".to_string()),
+                None,
+            );
+        }
+        if !self.held || self.suspended {
+            return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("JIT Shared guard permit is not active".to_string()),
+                None,
+            );
+        }
+        if self.value != value {
+            self.value = value;
+            self.dirty = true;
+        }
+        if let Err(error) = self.commit_if_dirty() {
+            return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err(error),
+                None,
+            );
+        }
+        let released = self.permit.release();
+        self.held = false;
+        self.suspended = true;
+        released
+    }
+
+    fn wait_resume(
+        &mut self,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+        Option<MirRuntimeValue>,
+    > {
+        if !self.suspended || self.held {
+            return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("JIT Shared guard wait lease is not suspended".to_string()),
+                None,
+            );
+        }
+        if !self.permit.reacquire(cancelled) {
+            return Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(None), None);
+        }
+        self.held = true;
+        self.suspended = false;
+        match self.refresh() {
+            Ok(()) => Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Ok(Some(self.value.clone())),
+                None,
+            ),
+            Err(error) => {
+                Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Err(error), None)
+            }
+        }
+    }
+
+    fn wait_abort(
+        &mut self,
+    ) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let released = if self.held {
+            self.permit.release()
+        } else {
+            Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+        };
+        self.held = false;
+        self.suspended = false;
+        self.dirty = false;
+        released
+    }
+
+    fn release(
+        &mut self,
+    ) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let commit_result = if self.held && self.editable {
+            self.commit_if_dirty()
+        } else {
+            Ok(())
+        };
+        let released = if self.held {
+            self.permit.release()
+        } else {
+            Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+        };
+        self.held = false;
+        self.suspended = false;
+        self.dirty = false;
+        let Memory::shared_protocol::JetSharedPhysicalOperationOutcome {
+            result: release_result,
+            completion,
+        } = released;
+        Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            commit_result.and(release_result),
+            completion,
+        )
+    }
+
+    fn release_during_drop(&mut self) {
+        if self.held {
+            if self.editable {
+                let _ = self.commit_if_dirty();
+            }
+            self.permit.release_during_drop();
+        }
+        self.held = false;
+        self.suspended = false;
+        self.dirty = false;
+    }
+
+    fn discard_staged(&mut self) -> Result<(), String> {
+        if !self.held {
+            return Err("JIT Shared guard permit is not held".to_string());
+        }
+        self.refresh()
+    }
+    fn finish_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+        if !self.held {
+            self.suspended = false;
+            self.dirty = false;
+            return Ok(());
+        }
+        if self.value != value {
+            self.value = value;
+            self.dirty = self.editable;
+        }
+        self.commit_if_dirty()
+    }
+    fn revision(&self) -> Result<u64, String> {
+        if !self.held {
+            return Err("JIT Shared guard permit is not held".to_string());
+        }
+        Memory::shared_state_revision(&self.state)
+            .ok_or_else(|| "JIT Shared root has no physical revision".to_string())
+    }
+
+    fn held(&self) -> bool {
+        self.held
+    }
+}
+
+impl Drop for JitSharedInteropGuard {
+    fn drop(&mut self) {
+        crate::SourceSharedInterop::SourceSharedInteropGuard::release_during_drop(self);
+    }
+}
+
+struct JitSharedWeakOwner {
+    state: std::sync::Weak<Memory::SharedState>,
+    type_id: u64,
+}
+
+impl crate::SourceSharedInterop::SourceSharedInteropWeakOwner for JitSharedWeakOwner {
+    fn upgrade(
+        &self,
+    ) -> Result<
+        Option<(
+            crate::SourceSharedInterop::SourceSharedInterop,
+            Box<dyn crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
+        )>,
+        String,
+    > {
+        let Some(state) = self.state.upgrade() else {
+            return Ok(None);
+        };
+        let Some(alias) = state.try_retain_owner_alias()? else {
+            return Ok(None);
+        };
+        Ok(Some((jit_shared_interop_for_state(state, self.type_id), alias)))
+    }
+}
+
+fn jit_shared_interop_for_state(
+    state: std::sync::Arc<Memory::SharedState>,
+    type_id: u64,
+) -> crate::SourceSharedInterop::SourceSharedInterop {
+    let read_state = std::sync::Arc::clone(&state);
+    let edit_state = std::sync::Arc::clone(&state);
+    let guard_state = std::sync::Arc::clone(&state);
+    let capture_state = std::sync::Arc::clone(&state);
+    let replace_state = std::sync::Arc::clone(&state);
+    let weak_state = std::sync::Arc::downgrade(&state);
+    let weak_count_state = weak_state.clone();
+    let finalizer_state = std::sync::Arc::clone(&state);
+    let weak_retain_state = weak_state.clone();
+    let mut interop = crate::SourceSharedInterop::SourceSharedInterop::from_callbacks_with_guard(
+        type_id,
+        move |callback| canonical_jit_shared_read(&read_state, type_id, callback),
+        move |callback| canonical_jit_shared_edit(&edit_state, type_id, callback),
+        move |editable| {
+            let result = JitSharedInteropGuard::acquire(
+                std::sync::Arc::clone(&guard_state),
+                type_id,
+                editable,
+            )
+            .map(|guard| {
+                Box::new(guard)
+                    as Box<dyn crate::SourceSharedInterop::SourceSharedInteropGuard>
+            });
+            Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+        },
+        move |callback| canonical_jit_shared_capture(&capture_state, type_id, callback),
+        move |expected_revision, replacement| {
+            canonical_jit_shared_replace_if_revision(
+                &replace_state,
+                type_id,
+                expected_revision,
+                replacement,
+            )
+        },
+    )
+    .with_owner_identity(std::sync::Arc::as_ptr(&state) as usize)
+    .with_protocol_order_key(std::sync::Arc::as_ptr(&state.protocol) as usize)
+    .with_owner_lifecycle(move || {
+        Box::new(JitSharedWeakOwner {
+            state: weak_state.clone(),
+            type_id,
+        }) as Box<dyn crate::SourceSharedInterop::SourceSharedInteropWeakOwner>
+    })
+    .with_owner_alias_lifecycle(
+        move || {
+            weak_count_state
+                .upgrade()
+                .ok_or_else(|| "JIT Shared root has no live strong aliases".to_string())?
+                .owner_strong_count()
+        },
+        move || {
+            weak_retain_state
+                .upgrade()
+                .ok_or_else(|| "JIT Shared root has no live strong aliases".to_string())?
+                .retain_owner_alias()
+        },
+    );
+    interop = interop.with_payload_finalizer_installer(move |finalizer| {
+        finalizer_state.install_payload_finalizer(finalizer)
+    });
+    interop.mark_resident_root();
+    interop
+}
+
+fn ensure_jit_shared_interop(
+    rt: &mut JitRuntime,
+    raw: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<Option<crate::SourceSharedInterop::SourceSharedInterop>, String> {
+    if descriptor.kind != RuntimeValueKind::Shared {
+        return Ok(None);
+    }
+    if let Some(interop) = rt.native_shared_interops.get(&raw).cloned() {
+        if interop.type_id() != descriptor.id {
+            return Err("JIT Shared root type disagrees with its checked descriptor".to_string());
+        }
+        return Ok(Some(interop));
+    }
+    let state =
+        Memory::shared_state(rt, raw).ok_or_else(|| "JIT Shared handle is invalid".to_string())?;
+    if Memory::shared_state_type_id(&state) != Some(descriptor.id) {
+        return Err("JIT Shared root type disagrees with its checked descriptor".to_string());
+    }
+    if !Memory::shared_state_has_live_portable_value(&state) {
+        return Err("external Shared shell has no registered physical owner alias".to_string());
+    }
+    shared_interop_element_descriptor_for_type(rt, descriptor.id)?;
+    let interop = jit_shared_interop_for_state(state, descriptor.id);
+    register_native_shared_interop(rt, raw, interop.clone())?;
+    Ok(Some(interop))
+}
+
+fn encode_native_shared_interop(
+    rt: &mut JitRuntime,
+    interop: &crate::SourceSharedInterop::SourceSharedInterop,
+    type_id: u64,
+) -> Result<i64, String> {
+    if interop.type_id() != type_id {
+        return Err("Source Shared interop root type disagrees with checked carrier".to_string());
+    }
+    if interop.physical_identity().is_none() {
+        return Err("Source Shared root has no physical owner identity".to_string());
+    }
+    if interop.protocol_order_key().is_none() {
+        return Err("Source Shared root has no physical protocol-order key".to_string());
+    }
+    if !interop.has_owner_lifecycle() {
+        return Err("Source Shared root has no physical owner lifecycle hooks".to_string());
+    }
+    shared_interop_element_descriptor(rt, interop)?;
+    let alias_key = (interop.identity(), interop.owner_alias_token_id());
+    if let Some(handle) = rt.native_shared_handles.get(&alias_key).copied() {
+        if rt.native_shared_interops.contains_key(&handle)
+            && Memory::shared_state(rt, handle).is_some()
+        {
+            return Ok(handle);
+        }
+        rt.native_shared_handles.remove(&alias_key);
+    }
+    let outer = rt
+        .runtime_type_descriptor(type_id)
+        .cloned()
+        .ok_or_else(|| "Source Shared outer descriptor disappeared".to_string())?;
+    if outer.element.is_none() {
+        return Err("Source Shared descriptor has no element type".to_string());
+    }
+
+    let local_state = rt.shareds.iter().flatten().find_map(|state| {
+        (std::sync::Arc::as_ptr(state) as usize == interop.identity()
+            && Memory::shared_state_type_id(state) == Some(type_id)
+            && Memory::shared_state_portable_value(state).is_ok())
+        .then(|| std::sync::Arc::clone(state))
+    });
+    let alias_interop = if interop.owner_alias_token_id().is_some() {
+        interop.clone()
+    } else {
+        interop
+            .clone()
+            .with_owner_alias_lease(interop.retain_owner_alias()?)?
+    };
+    let handle = if let Some(state) = local_state {
+        Memory::shared_alloc_alias_state(rt, state)?
+    } else {
+        Memory::shared_alloc_external_for_persist(rt, type_id)?
+    };
+    if let Err(error) = register_native_shared_interop(rt, handle, alias_interop.clone()) {
+        let _ = Memory::shared_take_slot(rt, handle);
+        drop(alias_interop);
+        return Err(error);
+    }
+    if interop.owner_alias_token_id().is_none() {
+        rt.native_shared_handles
+            .insert((interop.identity(), None), handle);
+    }
+    Ok(handle)
 }
 
 fn encode_native_interface_carrier(
@@ -5159,90 +5902,73 @@ fn encode_native_interface_carrier(
     Ok(record)
 }
 
-fn encode_native_shared_carrier(
-    rt: &mut JitRuntime,
-    root: &MirNativeOwned,
-    type_id: u64,
-) -> Result<i64, String> {
-    if let Some((handle, carrier)) = rt.native_shared_carriers.iter().find(|(_, carrier)| {
-        carrier.type_id == type_id
-            && carrier.root.identity() == root.identity()
-            && rt.carrier_record_is_live(carrier.record, carrier, type_id)
-            && Memory::shared_value(rt, *handle) == Some(carrier.record)
-    }) {
-        return Ok(*handle);
-    }
-    let (record, epoch, token) = rt.alloc_invocation_carrier_record()?;
-    rt.trait_object_types
-        .insert(record, MirTypeId(type_id));
-    let handle = Memory::shared_alloc_for_persist(rt, record);
-    rt.native_shared_carriers.insert(
-        handle,
-        JitInvocationNativeCarrier {
-            epoch,
-            type_id,
-            token,
-            record,
-            root: root.clone(),
-        },
-    );
-    Ok(handle)
-}
 
 fn decode_native_invocation_value(
-    rt: &JitRuntime,
+    rt: &mut JitRuntime,
     raw: i64,
     descriptor: &RuntimeTypeDescriptor,
     type_id: u64,
 ) -> Result<Option<MirRuntimeValue>, String> {
+    if descriptor.kind == RuntimeValueKind::Shared {
+        return ensure_jit_shared_interop(rt, raw, descriptor)
+            .map(|interop| interop.map(|value| value.as_native_owned()));
+    }
     if !native_carrier_descriptor(descriptor) {
         return Ok(None);
     }
-    if descriptor.kind == RuntimeValueKind::Shared {
-        let Some(carrier) = rt.native_shared_carriers.get(&raw).cloned() else {
-            return Ok(None);
-        };
-        if !rt.carrier_record_is_live(carrier.record, &carrier, type_id)
-            || Memory::shared_value(rt, raw) != Some(carrier.record)
-        {
-            return Err("native Shared carrier is no longer live".to_string());
+    if let Some(carrier) = rt.native_interface_carriers.get(&raw).cloned() {
+        if !rt.carrier_record_is_live(raw, &carrier, type_id) {
+            return Err("native binding carrier is no longer live".to_string());
         }
         return Ok(Some(MirRuntimeValue::NativeOwned(carrier.root)));
     }
-    let Some(carrier) = rt.native_interface_carriers.get(&raw).cloned() else {
-        return Ok(None);
-    };
-    if !rt.carrier_record_is_live(raw, &carrier, type_id) {
-        return Err("native binding carrier is no longer live".to_string());
-    }
-    Ok(Some(MirRuntimeValue::NativeOwned(carrier.root)))
+    Ok(None)
 }
 
-fn encode_executable_closure(
+fn attach_jit_callable_portable_captures(
+    runtime: &mut JitRuntime,
+    handle: i64,
+    captures: std::sync::Arc<std::sync::Mutex<Vec<MirRuntimeValue>>>,
+) -> Result<(), String> {
+    let index = jit_callable_index(handle)
+        .ok_or_else(|| "portable closure has an invalid callable handle".to_string())?;
+    let env = {
+        let lifetime = runtime
+            .jit_callable_env_lifetimes
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| "portable closure has no owned environment lifetime".to_string())?;
+        lifetime.portable_captures = Some(captures);
+        lifetime.env
+    };
+    runtime.jit_callable_env_by_handle.insert(env, index);
+    Ok(())
+}
+
+fn encode_jit_callable_environment(
     rt: &mut JitRuntime,
-    closure: &MirRuntimeClosure,
+    target: &JitClosureTarget,
+    captures: &[MirRuntimeValue],
+    portable_captures: Option<std::sync::Arc<std::sync::Mutex<Vec<MirRuntimeValue>>>>,
     state: &mut PersistEncodeState,
     depth: usize,
 ) -> Result<i64, String> {
-    let target = rt
-        .jit_closure_targets
-        .get(&closure.function.0)
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "ordinary closure target {:?} has no finalized executable ABI",
-                closure.function
-            )
-        })?;
-    if target.capture_type_ids.len() != closure.captures.len() {
+    if target.capture_type_ids.len() != captures.len()
+        || target.capture_owned.len() != captures.len()
+    {
         return Err(format!(
-            "ordinary closure {:?} capture arity changed",
-            closure.function
+            "ordinary closure {:?} capture layout changed",
+            target.function
         ));
     }
-    let mut slots = Vec::with_capacity(closure.captures.len());
-    for (capture, type_id) in closure
-        .captures
+    if target.capture_owned.iter().any(|owned| !owned) {
+        return Err(format!(
+            "ordinary closure {:?} has borrowed captures and cannot cross an invocation boundary",
+            target.function
+        ));
+    }
+    let mut slots = Vec::with_capacity(captures.len());
+    for (capture, type_id) in captures
         .iter()
         .zip(target.capture_type_ids.iter().copied())
     {
@@ -5261,14 +5987,97 @@ fn encode_executable_closure(
     let (env, has_env) = if slots.is_empty() {
         (0, false)
     } else {
-        (rt.heap.alloc_record_cells(slots), true)
+        (rt.heap.alloc_record_values(slots), true)
     };
-    Ok(bind_jit_callable(
+    let handle = bind_jit_callable(rt, target.fn_ptr, env, has_env);
+    if has_env {
+        let portable_captures = portable_captures
+            .ok_or_else(|| "owned closure environment has no portable capture root".to_string())?;
+        attach_jit_callable_portable_captures(rt, handle, portable_captures)?;
+    }
+    Ok(handle)
+}
+
+fn encode_executable_closure(
+    rt: &mut JitRuntime,
+    closure: &MirRuntimeClosure,
+    state: &mut PersistEncodeState,
+    depth: usize,
+) -> Result<i64, String> {
+    let target = rt
+        .jit_closure_targets
+        .get(&closure.function.0)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "ordinary closure target {:?} has no finalized executable ABI",
+                closure.function
+            )
+        })?;
+    let portable_captures = (!closure.captures.is_empty()).then(|| {
+        std::sync::Arc::new(std::sync::Mutex::new(closure.captures.clone()))
+    });
+    encode_jit_callable_environment(
         rt,
-        target.fn_ptr,
-        env,
-        has_env,
-    ))
+        &target,
+        &closure.captures,
+        portable_captures,
+        state,
+        depth,
+    )
+}
+
+fn encode_portable_executable_closure(
+    rt: &mut JitRuntime,
+    portable: &JitCallablePortableEnvironment,
+    state: &mut PersistEncodeState,
+    depth: usize,
+) -> Result<i64, String> {
+    if rt.jit_closure_execution_identity.as_ref() != Some(&portable.execution) {
+        return Err(format!(
+            "portable closure {:?} execution authority does not match the active JIT image",
+            portable.function
+        ));
+    }
+    if !rt.jit_closure_targets.contains_key(&portable.function.0) {
+        super::resident::resident_resolve_jit_closure_target(
+            rt,
+            portable.function,
+            &portable.execution,
+        )?;
+    }
+    let target = rt
+        .jit_closure_targets
+        .get(&portable.function.0)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "ordinary closure target {:?} has no finalized executable ABI",
+                portable.function
+            )
+        })?;
+    if target.execution != portable.execution
+        || target.capture_type_ids != portable.capture_type_ids
+        || target.capture_owned != portable.capture_owned
+    {
+        return Err(format!(
+            "ordinary closure {:?} portable execution authority or capture layout disagrees with its checked target",
+            portable.function
+        ));
+    }
+    let captures = portable
+        .captures
+        .lock()
+        .map_err(|_| "portable closure capture environment lock was poisoned".to_string())?
+        .clone();
+    encode_jit_callable_environment(
+        rt,
+        &target,
+        &captures,
+        Some(std::sync::Arc::clone(&portable.captures)),
+        state,
+        depth,
+    )
 }
 
 fn decode_executable_closure(
@@ -5278,6 +6087,8 @@ fn decode_executable_closure(
     state: &mut PersistDecodeState,
     depth: usize,
 ) -> Result<MirRuntimeValue, String> {
+    let callable_index = jit_callable_index(raw)
+        .ok_or_else(|| "ordinary closure handle is invalid".to_string())?;
     let slot = jit_callable_slot(rt, raw)
         .ok_or_else(|| "ordinary closure handle is invalid".to_string())?;
     let target = rt
@@ -5289,43 +6100,79 @@ fn decode_executable_closure(
         if slot.has_env {
             return Err("ordinary closure has an unexpected capture environment".to_string());
         }
-        return Ok(MirRuntimeValue::Closure(MirRuntimeClosure {
-            function: target.function,
-            captures: Vec::new(),
-        }));
+        return Ok(MirRuntimeValue::NativeOwned(MirNativeOwned::new(
+            JitCallablePortableEnvironment {
+                function: target.function,
+                execution: target.execution,
+                capture_type_ids: target.capture_type_ids,
+                capture_owned: target.capture_owned,
+                captures: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            },
+        )));
     }
     if !slot.has_env {
         return Err("ordinary closure lost its capture environment".to_string());
     }
-    let slots = rt
-        .heap
-        .clone_record_values(slot.env)
-        .ok_or_else(|| "ordinary closure environment is not a live record".to_string())?;
-    if slots.len() != target.capture_type_ids.len() {
-        return Err("ordinary closure environment layout changed".to_string());
+    if target.capture_owned.iter().any(|owned| !owned) {
+        return Err(format!(
+            "ordinary closure {:?} has borrowed captures and cannot cross an invocation boundary",
+            target.function
+        ));
     }
-    let mut captures = Vec::with_capacity(slots.len());
-    for (slot, type_id) in slots
-        .iter()
-        .zip(target.capture_type_ids.iter().copied())
-    {
-        let capture_descriptor = rt
-            .runtime_type_descriptor(type_id)
-            .cloned()
-            .ok_or_else(|| format!("closure capture type {type_id} is unavailable"))?;
-        captures.push(persist_decode_slot(
-            rt,
-            slot,
-            &capture_descriptor,
-            state,
-            depth + 1,
-        )?);
-    }
+    let portable_captures = rt
+        .jit_callable_env_lifetimes
+        .get(callable_index)
+        .and_then(Option::as_ref)
+        .and_then(|lifetime| lifetime.portable_captures.clone());
+    let captures = if let Some(captures) = portable_captures {
+        captures
+    } else {
+        let length = rt
+            .heap
+            .record_len(slot.env)
+            .ok_or_else(|| "ordinary closure environment is not a live record".to_string())?;
+        if usize::try_from(length).ok() != Some(target.capture_type_ids.len()) {
+            return Err("ordinary closure environment layout changed".to_string());
+        }
+        let mut values = Vec::with_capacity(target.capture_type_ids.len());
+        for (index, type_id) in target.capture_type_ids.iter().copied().enumerate() {
+            let capture_descriptor = rt
+                .runtime_type_descriptor(type_id)
+                .cloned()
+                .ok_or_else(|| format!("closure capture type {type_id} is unavailable"))?;
+            let capture_slot = rt
+                .heap
+                .record_get(slot.env, index as i64)
+                .cloned()
+                .ok_or_else(|| "ordinary closure environment slot is unavailable".to_string())?;
+            values.push(persist_decode_slot(
+                rt,
+                &capture_slot,
+                &capture_descriptor,
+                state,
+                depth + 1,
+            )?);
+        }
+        let captures = std::sync::Arc::new(std::sync::Mutex::new(values));
+        if rt
+            .jit_callable_env_lifetimes
+            .get(callable_index)
+            .is_some_and(Option::is_some)
+        {
+            attach_jit_callable_portable_captures(rt, raw, std::sync::Arc::clone(&captures))?;
+        }
+        captures
+    };
     let _ = descriptor;
-    Ok(MirRuntimeValue::Closure(MirRuntimeClosure {
-        function: target.function,
-        captures,
-    }))
+    Ok(MirRuntimeValue::NativeOwned(MirNativeOwned::new(
+        JitCallablePortableEnvironment {
+            function: target.function,
+            execution: target.execution,
+            capture_type_ids: target.capture_type_ids,
+            capture_owned: target.capture_owned,
+            captures,
+        },
+    )))
 }
 
 fn persist_decode_raw(
@@ -5336,7 +6183,7 @@ fn persist_decode_raw(
     depth: usize,
 ) -> Result<MirRuntimeValue, String> {
     let native_carrier_raw = if descriptor.kind == RuntimeValueKind::Shared {
-        rt.native_shared_carriers.contains_key(&raw)
+        rt.native_shared_interops.contains_key(&raw)
     } else {
         native_carrier_descriptor(descriptor)
             && rt.native_interface_carriers.contains_key(&raw)
@@ -5392,10 +6239,16 @@ fn persist_decode_raw(
         }
         RuntimeValueKind::Map => persist_decode_map(rt, raw, descriptor, state, depth + 1),
         RuntimeValueKind::Shared => {
-            let child = persist_child_descriptor(rt, descriptor.element, descriptor, "element")?;
-            let value = Memory::shared_value(rt, raw)
-                .ok_or_else(|| "persistent Shared handle was invalid".to_string())?;
-            persist_decode_raw(rt, value, &child, state, depth + 1)
+            let _ = persist_child_descriptor(rt, descriptor.element, descriptor, "element")?;
+            if !state.invocation {
+                return Err(format!(
+                    "persistent Shared `{}` has no physical owner transport",
+                    descriptor.name
+                ));
+            }
+            let interop = ensure_jit_shared_interop(rt, raw, descriptor)?
+                .ok_or_else(|| "persistent Shared root has no physical owner".to_string())?;
+            Ok(interop.as_native_owned())
         }
         RuntimeValueKind::Option => {
             let child = persist_child_descriptor(rt, descriptor.ok, descriptor, "option")?;
@@ -5426,6 +6279,7 @@ fn persist_decode_raw(
                     value as i64,
                     &ok,
                     state,
+
                     depth + 1,
                 )?)))
             } else if runtime_report_is_clean(rt, Some(err.id)) {
@@ -5462,6 +6316,89 @@ fn persist_decode_raw(
     };
     state.leave(descriptor, raw, tracked);
     value
+}
+fn jet_jit_closure_capture_publish(env: i64, slot: i64, type_id: i64) {
+    with_runtime_mut(|runtime| {
+        let Ok(slot) = usize::try_from(slot) else {
+            runtime.set_host_fault("closure capture publication received an invalid slot");
+            return;
+        };
+        let Some(index) = runtime.jit_callable_env_by_handle.get(&env).copied() else {
+            return;
+        };
+        let Some(lifetime) = runtime
+            .jit_callable_env_lifetimes
+            .get(index)
+            .and_then(Option::as_ref)
+        else {
+            runtime.set_host_fault("closure capture publication lost its environment lifetime");
+            return;
+        };
+        let Some(capture_type_id) = lifetime.capture_type_ids.get(slot).copied() else {
+            runtime.set_host_fault("closure capture publication slot is out of range");
+            return;
+        };
+        if capture_type_id != type_id as u64
+            || !lifetime.capture_owned.get(slot).copied().unwrap_or(false)
+        {
+            runtime.set_host_fault("closure capture publication disagrees with checked ownership");
+            return;
+        }
+        let Some(captures) = lifetime.portable_captures.clone() else {
+            return;
+        };
+        let Some(descriptor) = runtime.runtime_type_descriptor(capture_type_id).cloned() else {
+            runtime.set_host_fault("closure capture publication type descriptor is unavailable");
+            return;
+        };
+        let capture_slot = match runtime.heap.record_get(env, slot as i64).cloned() {
+            Some(capture_slot) => capture_slot,
+            None => {
+                runtime.set_host_fault("closure capture publication environment slot is unavailable");
+                return;
+            }
+        };
+        let moved_marker = matches!(
+            &capture_slot,
+            jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value)
+                if *value == JIT_MOVED_OWNER_VALUE
+        );
+        let moved = if moved_marker {
+            match runtime_type_needs_owned_drop(runtime, descriptor.id, 0) {
+                Ok(owns_value) => owns_value,
+                Err(error) => {
+                    runtime.set_host_fault(&error);
+                    return;
+                }
+            }
+        } else {
+            false
+        };
+        let value = if moved {
+            MirRuntimeValue::Moved
+        } else {
+            let mut state = PersistDecodeState::for_invocation();
+            match persist_decode_slot(runtime, &capture_slot, &descriptor, &mut state, 0) {
+                Ok(value) => value,
+                Err(error) => {
+                    runtime.set_host_fault(&error);
+                    return;
+                }
+            }
+        };
+        let mut captures = match captures.lock() {
+            Ok(captures) => captures,
+            Err(_) => {
+                runtime.set_host_fault("portable closure capture environment lock was poisoned");
+                return;
+            }
+        };
+        let Some(capture) = captures.get_mut(slot) else {
+            runtime.set_host_fault("portable closure capture environment layout changed");
+            return;
+        };
+        *capture = value;
+    });
 }
 
 fn persist_name_matches(descriptor: &RuntimeTypeDescriptor, name: &str) -> bool {
@@ -5660,10 +6597,24 @@ fn persist_encode_raw(
     if state.invocation {
         match value {
             MirRuntimeValue::NativeOwned(root) => {
-                if !native_binding_type_allowed(rt, descriptor.id) {
-                    return Err(
-                        "native-owned value has no checked native binding carrier type".to_string(),
-                    );
+                // Invocation carriers are reached only through checked
+                // native argument/result descriptors. Recursive aggregates
+                // must permit their nested Handle/Closure/Shared leaves;
+                // the descriptor-kind checks below still reject scalars or
+                // unrelated language values.
+                if descriptor.kind == RuntimeValueKind::Closure {
+                    if let Some(portable) =
+                        root.downcast_ref::<JitCallablePortableEnvironment>()
+                    {
+                        return encode_portable_executable_closure(rt, portable, state, depth);
+                    }
+                }
+                if descriptor.kind == RuntimeValueKind::Shared {
+                    let interop =
+                        crate::SourceSharedInterop::SourceSharedInterop::from_native_owned(
+                            &MirRuntimeValue::NativeOwned(root.clone()),
+                        )?;
+                    return encode_native_shared_interop(rt, &interop, descriptor.id);
                 }
                 if !native_carrier_descriptor(descriptor) {
                     return Err(format!(
@@ -5671,11 +6622,7 @@ fn persist_encode_raw(
                         descriptor.name
                     ));
                 }
-                return if descriptor.kind == RuntimeValueKind::Shared {
-                    encode_native_shared_carrier(rt, root, descriptor.id)
-                } else {
-                    encode_native_interface_carrier(rt, root, descriptor.id)
-                };
+                encode_native_interface_carrier(rt, root, descriptor.id)
             }
             MirRuntimeValue::Closure(closure)
                 if descriptor.kind == RuntimeValueKind::Closure =>
@@ -5741,11 +6688,10 @@ fn persist_encode_raw(
             }
             _ => Err(format!("persistent `{}` expects a map", descriptor.name)),
         },
-        RuntimeValueKind::Shared => {
-            let child = persist_child_descriptor(rt, descriptor.element, descriptor, "element")?;
-            let value = persist_encode_raw(rt, value, &child, state, depth + 1)?;
-            Ok(Memory::shared_alloc_for_persist(rt, value))
-        }
+        RuntimeValueKind::Shared => Err(format!(
+            "Shared `{}` lost its physical owner carrier",
+            descriptor.name
+        )),
         RuntimeValueKind::Option => match value {
             MirRuntimeValue::Present(value) => {
                 let child =
@@ -6772,6 +7718,486 @@ fn jet_jit_str_push_str(buf_id: i64, str_id: i64) {
     });
 }
 
+const JIT_MOVED_OWNER_VALUE: i64 = i64::MIN;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SharedOwnerHandleKind {
+    Weak,
+    Snapshot,
+}
+
+fn shared_owner_handle_kind(descriptor: &RuntimeTypeDescriptor) -> Option<SharedOwnerHandleKind> {
+    if descriptor.kind != RuntimeValueKind::Handle {
+        return None;
+    }
+    let name = descriptor.name.split('<').next().unwrap_or(&descriptor.name);
+    let name = name.rsplit("::").next().unwrap_or(name);
+    match name {
+        "JetSharedWeak" => Some(SharedOwnerHandleKind::Weak),
+        "JetSharedSnapshot" => Some(SharedOwnerHandleKind::Snapshot),
+        _ => None,
+    }
+}
+
+fn checked_shared_owner_type(
+    runtime: &JitRuntime,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<u64, String> {
+    let owner_type_id = descriptor
+        .element
+        .ok_or_else(|| format!("`{}` has no checked Shared owner descriptor", descriptor.name))?;
+    if runtime
+        .runtime_type_descriptor(owner_type_id)
+        .is_none_or(|owner| owner.kind != RuntimeValueKind::Shared)
+    {
+        return Err(format!(
+            "`{}` does not name a checked Shared owner type",
+            descriptor.name
+        ));
+    }
+    Ok(owner_type_id)
+}
+
+fn runtime_shared_alias_retain(
+    runtime: &mut JitRuntime,
+    handle: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<i64, String> {
+    let interop = ensure_jit_shared_interop(runtime, handle, descriptor)?
+        .ok_or_else(|| "checked descriptor is not a Shared owner".to_string())?;
+    let state = Memory::shared_state(runtime, handle)
+        .ok_or_else(|| "JIT Shared alias is no longer live".to_string())?;
+    let alias = interop
+        .without_owner_alias_lease()
+        .with_owner_alias_lease(interop.retain_owner_alias()?)?;
+    let new_handle = Memory::shared_alloc_alias_state(runtime, state)?;
+    if let Err(error) = register_native_shared_interop(runtime, new_handle, alias.clone()) {
+        let _ = Memory::shared_take_slot(runtime, new_handle);
+        drop(alias);
+        return Err(error);
+    }
+    Ok(new_handle)
+}
+
+fn runtime_shared_alias_release(
+    runtime: &mut JitRuntime,
+    handle: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<(), String> {
+    let state = Memory::shared_state(runtime, handle)
+        .ok_or_else(|| "JIT Shared alias is invalid or already released".to_string())?;
+    if Memory::shared_state_type_id(&state) != Some(descriptor.id) {
+        return Err("JIT Shared alias type disagrees with its checked descriptor".to_string());
+    }
+    if !runtime.native_shared_interops.contains_key(&handle) {
+        ensure_jit_shared_interop(runtime, handle, descriptor)?
+            .ok_or_else(|| "checked descriptor is not a Shared owner".to_string())?;
+    }
+    let interop = runtime.native_shared_interops.remove(&handle);
+    let identity = interop.as_ref().map(|interop| interop.identity());
+    runtime
+        .native_shared_handles
+        .retain(|_, registered_handle| *registered_handle != handle);
+    let state = Memory::shared_take_slot(runtime, handle)?;
+    let release_result = match interop {
+        Some(interop) => {
+            let result = if interop.owner_alias_token_id().is_none() {
+                interop.finish_physical_operation(state.release_owner_alias())
+            } else {
+                Ok(())
+            };
+            drop(interop);
+            result
+        }
+        None => {
+            state.release_owner_alias_during_drop();
+            Ok(())
+        }
+    };
+    if let Some(identity) = identity {
+        if !runtime
+            .native_shared_handles
+            .keys()
+            .any(|(root, _)| *root == identity)
+        {
+            runtime.native_shared_roots.remove(&identity);
+        }
+    }
+    release_result
+}
+
+fn jit_callable_index(handle: i64) -> Option<usize> {
+    usize::try_from(handle.checked_neg()?.checked_sub(1)?).ok()
+}
+
+fn runtime_clone_closure(runtime: &mut JitRuntime, handle: i64) -> Result<i64, String> {
+    let index = jit_callable_index(handle)
+        .ok_or_else(|| "typed closure copy received an invalid callable handle".to_string())?;
+    let slot = runtime
+        .jit_callables
+        .get(index)
+        .ok_or_else(|| "typed closure copy received an expired callable handle".to_string())?;
+    if !slot.has_env {
+        return Ok(handle);
+    }
+    let Some(lifetime) = runtime
+        .jit_callable_env_lifetimes
+        .get_mut(index)
+        .and_then(Option::as_mut)
+    else {
+        return Ok(handle);
+    };
+    lifetime.references = lifetime
+        .references
+        .checked_add(1)
+        .ok_or_else(|| "JIT closure environment reference count exhausted".to_string())?;
+    Ok(handle)
+}
+
+fn runtime_drop_closure(runtime: &mut JitRuntime, handle: i64, depth: usize) -> Result<(), String> {
+    let index = jit_callable_index(handle)
+        .ok_or_else(|| "typed closure drop received an invalid callable handle".to_string())?;
+    let slot = runtime
+        .jit_callables
+        .get(index)
+        .ok_or_else(|| "typed closure drop received an expired callable handle".to_string())?;
+    if !slot.has_env {
+        return Ok(());
+    }
+    let Some(lifetime_slot) = runtime.jit_callable_env_lifetimes.get_mut(index) else {
+        return Ok(());
+    };
+    let Some(lifetime) = lifetime_slot.as_mut() else {
+        return Ok(());
+    };
+    lifetime.references = lifetime
+        .references
+        .checked_sub(1)
+        .ok_or_else(|| "JIT closure environment was released more than once".to_string())?;
+    if lifetime.references != 0 {
+        return Ok(());
+    }
+    let lifetime = lifetime_slot
+        .take()
+        .ok_or_else(|| "JIT closure environment disappeared during release".to_string())?;
+    runtime.jit_callable_env_by_handle.remove(&lifetime.env);
+    if lifetime.capture_type_ids.len() != lifetime.capture_owned.len() {
+        return Err("JIT closure capture ownership layout is inconsistent".to_string());
+    }
+    for (index, (type_id, owned)) in lifetime
+        .capture_type_ids
+        .iter()
+        .copied()
+        .zip(lifetime.capture_owned.iter().copied())
+        .enumerate()
+    {
+        if !owned {
+            continue;
+        }
+        let descriptor = runtime
+            .runtime_type_descriptor(type_id)
+            .cloned()
+            .ok_or_else(|| format!("closure capture type {type_id} is unavailable"))?;
+        let raw = runtime_owned_record_slot(runtime, lifetime.env, index, &descriptor)?;
+        if let Some(raw) = raw {
+            runtime_drop_value(runtime, raw, type_id, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+fn runtime_type_needs_owned_drop(
+    runtime: &JitRuntime,
+    type_id: u64,
+    depth: usize,
+) -> Result<bool, String> {
+    if depth > 64 {
+        return Err("typed drop descriptor recursion limit exceeded".to_string());
+    }
+    let descriptor = runtime
+        .runtime_type_descriptor(type_id)
+        .ok_or_else(|| format!("JIT drop type descriptor {type_id} is unavailable"))?;
+    if descriptor.kind == RuntimeValueKind::Shared
+        || descriptor.kind == RuntimeValueKind::Closure
+        || shared_owner_handle_kind(descriptor).is_some()
+    {
+        return Ok(true);
+    }
+    let child_needs_drop = |child| runtime_type_needs_owned_drop(runtime, child, depth + 1);
+    match descriptor.kind {
+        RuntimeValueKind::List => descriptor.element.map(child_needs_drop).transpose().map(
+            |needs_drop| needs_drop.unwrap_or(false),
+        ),
+        RuntimeValueKind::Map => descriptor.value.map(child_needs_drop).transpose().map(
+            |needs_drop| needs_drop.unwrap_or(false),
+        ),
+        RuntimeValueKind::Option => descriptor.ok.map(child_needs_drop).transpose().map(
+            |needs_drop| needs_drop.unwrap_or(false),
+        ),
+        RuntimeValueKind::Result => {
+            for child in [descriptor.ok, descriptor.err].into_iter().flatten() {
+                if child_needs_drop(child)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        RuntimeValueKind::Record | RuntimeValueKind::Named | RuntimeValueKind::Handle => {
+            for field in &descriptor.fields {
+                if child_needs_drop(field.type_id)? {
+                    return Ok(true);
+                }
+            }
+            for variant in &descriptor.variants {
+                for field in &variant.fields {
+                    if child_needs_drop(field.type_id)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        }
+        RuntimeValueKind::Enum => {
+            for variant in &descriptor.variants {
+                for field in &variant.fields {
+                    if child_needs_drop(field.type_id)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn runtime_owned_record_slot(
+    runtime: &JitRuntime,
+    record: i64,
+    index: usize,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<Option<i64>, String> {
+    let slot = runtime
+        .heap
+        .record_get(record, index as i64)
+        .ok_or_else(|| format!("typed drop `{}` field {index} is unavailable", descriptor.name))?;
+    match slot {
+        jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value) => Ok(Some(*value)),
+        _ if runtime_type_needs_owned_drop(runtime, descriptor.id, 0)? => Err(format!(
+            "typed drop `{}` field {index} has no runtime handle",
+            descriptor.name
+        )),
+        _ => Ok(None),
+    }
+}
+
+fn runtime_owned_list_slot(
+    runtime: &JitRuntime,
+    list: i64,
+    index: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<Option<i64>, String> {
+    let slot = match runtime.heap.list_value(list) {
+        Some(jet_rt::JetVal::IntList(values)) => values.get(index as usize).copied(),
+        Some(jet_rt::JetVal::List(values)) => match values.get(index as usize) {
+            Some(jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value)) => Some(*value),
+            _ => None,
+        },
+        Some(jet_rt::JetVal::UninitList {
+            values,
+            initialized,
+        }) => {
+            let Ok(index) = usize::try_from(index) else {
+                return Err(format!(
+                    "typed drop `{}` list element index is invalid",
+                    descriptor.name
+                ));
+            };
+            let initialized = initialized.get(index).copied().ok_or_else(|| {
+                format!(
+                    "typed drop `{}` list initialization bitmap is unavailable",
+                    descriptor.name
+                )
+            })?;
+            if !initialized {
+                return Ok(None);
+            }
+            match values.get(index) {
+                Some(jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value)) => {
+                    Some(*value)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    if slot.is_none() && runtime_type_needs_owned_drop(runtime, descriptor.id, 0)? {
+        return Err(format!("typed drop `{}` list element has no runtime handle", descriptor.name));
+    }
+    Ok(slot)
+}
+
+pub(crate) fn runtime_drop_value(
+    runtime: &mut JitRuntime,
+    value: i64,
+    type_id: u64,
+    depth: usize,
+) -> Result<(), String> {
+    if value == JIT_MOVED_OWNER_VALUE {
+        return Ok(());
+    }
+    if depth > 64 {
+        return Err("typed drop value recursion limit exceeded".to_string());
+    }
+    let descriptor = runtime
+        .runtime_type_descriptor(type_id)
+        .cloned()
+        .ok_or_else(|| format!("JIT drop type descriptor {type_id} is unavailable"))?;
+    match descriptor.kind {
+        RuntimeValueKind::Shared => runtime_shared_alias_release(runtime, value, &descriptor),
+        RuntimeValueKind::Closure => runtime_drop_closure(runtime, value, depth),
+        RuntimeValueKind::Handle => match shared_owner_handle_kind(&descriptor) {
+            Some(SharedOwnerHandleKind::Weak) => {
+                let owner_type = checked_shared_owner_type(runtime, &descriptor)?;
+                Memory::shared_weak_release_in_runtime(runtime, value, owner_type)
+            }
+            Some(SharedOwnerHandleKind::Snapshot) => {
+                let owner_type = checked_shared_owner_type(runtime, &descriptor)?;
+                Memory::shared_snapshot_release_in_runtime(runtime, value, owner_type)
+            }
+            None if !descriptor.fields.is_empty() => {
+                runtime_drop_record(runtime, value, &descriptor, depth + 1)
+            }
+            None if !descriptor.variants.is_empty() => {
+                runtime_drop_enum(runtime, value, &descriptor, depth + 1)
+            }
+            None => Ok(()),
+        },
+        RuntimeValueKind::Record => runtime_drop_record(runtime, value, &descriptor, depth + 1),
+        RuntimeValueKind::Named if !descriptor.fields.is_empty() => {
+            runtime_drop_record(runtime, value, &descriptor, depth + 1)
+        }
+        RuntimeValueKind::Named if !descriptor.variants.is_empty() => {
+            runtime_drop_enum(runtime, value, &descriptor, depth + 1)
+        }
+        RuntimeValueKind::Named => Ok(()),
+        RuntimeValueKind::Enum => runtime_drop_enum(runtime, value, &descriptor, depth + 1),
+        RuntimeValueKind::List => {
+            let element = descriptor.element.ok_or_else(|| {
+                format!("JIT drop `{}` has no element descriptor", descriptor.name)
+            })?;
+            let element_descriptor = runtime
+                .runtime_type_descriptor(element)
+                .cloned()
+                .ok_or_else(|| format!("JIT drop type descriptor {element} is unavailable"))?;
+            let length = runtime
+                .heap
+                .list_len(value)
+                .ok_or_else(|| format!("JIT drop `{}` value is not a list", descriptor.name))?;
+            for index in 0..length {
+                if let Some(raw) =
+                    runtime_owned_list_slot(runtime, value, index, &element_descriptor)?
+                {
+                    runtime_drop_value(runtime, raw, element, depth + 1)?;
+                }
+            }
+            Ok(())
+        }
+        RuntimeValueKind::Map => {
+            let value_type = descriptor
+                .value
+                .ok_or_else(|| format!("JIT drop `{}` has no value descriptor", descriptor.name))?;
+            let length = runtime
+                .heap
+                .map_len(value)
+                .ok_or_else(|| format!("JIT drop `{}` value is not a map", descriptor.name))?;
+            for index in 0..length {
+                let raw = runtime
+                    .heap
+                    .map_value_at(value, index)
+                    .ok_or_else(|| format!("JIT drop `{}` map value is unavailable", descriptor.name))?;
+                runtime_drop_value(runtime, raw, value_type, depth + 1)?;
+            }
+            Ok(())
+        }
+        RuntimeValueKind::Option | RuntimeValueKind::Result => {
+            let result = jit_result(runtime, value)
+                .ok_or_else(|| format!("JIT drop `{}` value is not a result", descriptor.name))?;
+            if !result.ok && descriptor.kind == RuntimeValueKind::Option {
+                return Ok(());
+            }
+            let payload_type = if result.ok {
+                descriptor.ok
+            } else {
+                descriptor.err
+            }
+            .ok_or_else(|| format!("JIT drop `{}` has no payload descriptor", descriptor.name))?;
+            runtime_drop_value(runtime, result.bits as i64, payload_type, depth + 1)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn runtime_drop_record(
+    runtime: &mut JitRuntime,
+    value: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    depth: usize,
+) -> Result<(), String> {
+    for field in &descriptor.fields {
+        let child = runtime
+            .runtime_type_descriptor(field.type_id)
+            .cloned()
+            .ok_or_else(|| format!("JIT drop type descriptor {} is unavailable", field.type_id))?;
+        let raw = runtime_owned_record_slot(runtime, value, field.index, &child)?;
+        if let Some(raw) = raw {
+            runtime_drop_value(runtime, raw, field.type_id, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+fn runtime_drop_enum(
+    runtime: &mut JitRuntime,
+    value: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    depth: usize,
+) -> Result<(), String> {
+    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+        let discriminant = value & 0xff;
+        let variant = descriptor
+            .variants
+            .iter()
+            .find(|variant| variant.discriminant == discriminant)
+            .ok_or_else(|| format!("JIT drop `{}` value is not an enum", descriptor.name))?;
+        if let Some(field) = variant.fields.first() {
+            let raw = value >> 8;
+            return runtime_drop_value(runtime, raw, field.type_id, depth + 1);
+        }
+        return Ok(());
+    }
+    let discriminant = runtime
+        .heap
+        .record_get_int(value, 0)
+        .ok_or_else(|| format!("JIT drop `{}` enum discriminant is invalid", descriptor.name))?;
+    let variant = descriptor
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == discriminant)
+        .ok_or_else(|| format!("JIT drop `{}` enum discriminant is unknown", descriptor.name))?;
+    for field in &variant.fields {
+        let child = runtime
+            .runtime_type_descriptor(field.type_id)
+            .cloned()
+            .ok_or_else(|| format!("JIT drop type descriptor {} is unavailable", field.type_id))?;
+        let raw = runtime_owned_record_slot(runtime, value, field.index + 1, &child)?;
+        if let Some(raw) = raw {
+            runtime_drop_value(runtime, raw, field.type_id, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn runtime_clone_value(
     runtime: &mut JitRuntime,
     value: i64,
@@ -6789,12 +8215,16 @@ pub(crate) fn runtime_clone_with_descriptor(
     value: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<i64, String> {
-    // D-TERM1: the resident terminal host packs `Key` into one scalar word,
-    // while enum literals may still use the ordinary immutable record carrier.
-    // Neither representation contains mutable state, so copying a Key never
-    // needs to interpret the word as a heap enum.
     if descriptor.name == "Key" {
         return Ok(value);
+    }
+    if value == JIT_MOVED_OWNER_VALUE
+        && runtime_type_needs_owned_drop(runtime, descriptor.id, 0)?
+    {
+        return Err(format!(
+            "cannot copy moved or uninitialized `{}` value",
+            descriptor.name
+        ));
     }
     match descriptor.kind {
         RuntimeValueKind::Named | RuntimeValueKind::Handle
@@ -6802,22 +8232,37 @@ pub(crate) fn runtime_clone_with_descriptor(
         {
             Ok(runtime.clock_clone(value))
         }
-        RuntimeValueKind::List => runtime_clone_list(runtime, value, &descriptor),
-        RuntimeValueKind::Map => runtime_clone_map(runtime, value, &descriptor),
-        RuntimeValueKind::Record => runtime_clone_record(runtime, value, &descriptor),
-        RuntimeValueKind::Enum => runtime_clone_enum(runtime, value, &descriptor),
+        RuntimeValueKind::Shared => runtime_shared_alias_retain(runtime, value, descriptor),
+        RuntimeValueKind::Closure => runtime_clone_closure(runtime, value),
+        RuntimeValueKind::Handle => match shared_owner_handle_kind(descriptor) {
+            Some(SharedOwnerHandleKind::Weak) => {
+                let owner_type = checked_shared_owner_type(runtime, descriptor)?;
+                Memory::shared_weak_clone_in_runtime(runtime, value, owner_type)
+            }
+            Some(SharedOwnerHandleKind::Snapshot) => {
+                let owner_type = checked_shared_owner_type(runtime, descriptor)?;
+                Memory::shared_snapshot_clone_in_runtime(runtime, value, owner_type)
+            }
+            None if !descriptor.fields.is_empty() => {
+                runtime_clone_record(runtime, value, descriptor)
+            }
+            None if !descriptor.variants.is_empty() => {
+                runtime_clone_enum(runtime, value, descriptor)
+            }
+            None => Ok(value),
+        },
+        RuntimeValueKind::List => runtime_clone_list(runtime, value, descriptor),
+        RuntimeValueKind::Map => runtime_clone_map(runtime, value, descriptor),
+        RuntimeValueKind::Record => runtime_clone_record(runtime, value, descriptor),
+        RuntimeValueKind::Enum => runtime_clone_enum(runtime, value, descriptor),
         RuntimeValueKind::Option | RuntimeValueKind::Result => {
-            runtime_clone_result(runtime, value, &descriptor)
+            runtime_clone_result(runtime, value, descriptor)
         }
-        RuntimeValueKind::Named | RuntimeValueKind::Handle
-            if !descriptor.fields.is_empty() =>
-        {
-            runtime_clone_record(runtime, value, &descriptor)
+        RuntimeValueKind::Named if !descriptor.fields.is_empty() => {
+            runtime_clone_record(runtime, value, descriptor)
         }
-        RuntimeValueKind::Named | RuntimeValueKind::Handle
-            if !descriptor.variants.is_empty() =>
-        {
-            runtime_clone_enum(runtime, value, &descriptor)
+        RuntimeValueKind::Named if !descriptor.variants.is_empty() => {
+            runtime_clone_enum(runtime, value, descriptor)
         }
         RuntimeValueKind::Unit
         | RuntimeValueKind::Int
@@ -6825,8 +8270,6 @@ pub(crate) fn runtime_clone_with_descriptor(
         | RuntimeValueKind::Bool
         | RuntimeValueKind::Char
         | RuntimeValueKind::String
-        | RuntimeValueKind::Shared
-        | RuntimeValueKind::Closure
         | RuntimeValueKind::View
         | RuntimeValueKind::Iterator
         | RuntimeValueKind::Named
@@ -7118,6 +8561,28 @@ fn jet_jit_typed_clone(value: i64, type_id: i64) -> i64 {
         }
     })
 }
+fn jet_jit_typed_drop(value: i64, type_id: i64) {
+    with_runtime_mut(|runtime| {
+        if let Err(error) = runtime_drop_value(runtime, value, type_id as u64, 0) {
+            runtime.set_host_fault(&error);
+        }
+    });
+}
+
+fn jet_jit_typed_moved_marker(_value: i64, type_id: i64) -> i64 {
+    with_runtime_result(JIT_MOVED_OWNER_VALUE, |runtime| {
+        let type_id = type_id as u64;
+        match runtime_type_needs_owned_drop(runtime, type_id, 0) {
+            Ok(true) => {}
+            Ok(false) => runtime.set_host_fault(
+                "typed move marker requested for a type without an owner lifecycle",
+            ),
+            Err(error) => runtime.set_host_fault(&error),
+        }
+        JIT_MOVED_OWNER_VALUE
+    })
+}
+
 
 #[derive(Clone, Copy)]
 enum RuntimeEqSlot<'a> {
@@ -8627,22 +10092,535 @@ fn jet_jit_trait_object_type(record: i64) -> i64 {
     })
 }
 fn native_binding_carrier_is_live(rt: &JitRuntime, raw: i64, type_id: u64) -> bool {
-    let shared = rt
+    if rt
         .runtime_type_descriptor(type_id)
-        .is_some_and(|descriptor| descriptor.kind == RuntimeValueKind::Shared);
-    if shared {
+        .is_some_and(|descriptor| descriptor.kind == RuntimeValueKind::Shared)
+    {
         return rt
-            .native_shared_carriers
+            .native_shared_interops
             .get(&raw)
-            .is_some_and(|carrier| {
-                rt.carrier_record_is_live(carrier.record, carrier, type_id)
-                    && Memory::shared_value(rt, raw) == Some(carrier.record)
+            .is_some_and(|interop| {
+                interop.type_id() == type_id && Memory::shared_state(rt, raw).is_some()
             });
     }
     rt.native_interface_carriers
         .get(&raw)
         .is_some_and(|carrier| rt.carrier_record_is_live(raw, carrier, type_id))
 }
+fn native_shared_entry(
+    handle: i64,
+) -> Option<Result<(
+    crate::SourceSharedInterop::SourceSharedInterop,
+    RuntimeTypeDescriptor,
+), String>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(interop) = rt.native_shared_interops.get(&handle).cloned() else {
+            return None;
+        };
+        if Memory::shared_state(rt, handle).is_none() {
+            return Some(Err("Source Shared interop handle is no longer live".to_string()));
+        }
+        Some(
+            shared_interop_element_descriptor(rt, &interop)
+                .map(|descriptor| (interop, descriptor)),
+        )
+    })
+}
+
+pub(crate) fn native_shared_interop(
+    handle: i64,
+) -> Option<crate::SourceSharedInterop::SourceSharedInterop> {
+    Concurrency::with_runtime_mut(|rt| rt.native_shared_interops.get(&handle).cloned())
+}
+
+pub(crate) fn native_shared_interop_for_type(
+    handle: i64,
+    type_id: u64,
+) -> Result<crate::SourceSharedInterop::SourceSharedInterop, String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let descriptor = rt
+            .runtime_type_descriptor(type_id)
+            .cloned()
+            .ok_or_else(|| format!("Shared descriptor {type_id} is unavailable"))?;
+        ensure_jit_shared_interop(rt, handle, &descriptor)?
+            .ok_or_else(|| "checked descriptor is not a Shared owner".to_string())
+    })
+}
+
+pub(crate) fn native_shared_alias_retain(handle: i64, type_id: u64) -> Result<i64, String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let descriptor = rt
+            .runtime_type_descriptor(type_id)
+            .cloned()
+            .ok_or_else(|| format!("Shared descriptor {type_id} is unavailable"))?;
+        let interop = ensure_jit_shared_interop(rt, handle, &descriptor)?
+            .ok_or_else(|| "checked descriptor is not a Shared owner".to_string())?;
+        let state = Memory::shared_state(rt, handle)
+            .ok_or_else(|| "JIT Shared alias is no longer live".to_string())?;
+        let alias = interop
+            .without_owner_alias_lease()
+            .with_owner_alias_lease(interop.retain_owner_alias()?)?;
+        let new_handle = Memory::shared_alloc_alias_state(rt, state)?;
+        if let Err(error) = register_native_shared_interop(rt, new_handle, alias.clone()) {
+            let _ = Memory::shared_take_slot(rt, new_handle);
+            drop(alias);
+            return Err(error);
+        }
+        Ok(new_handle)
+    })
+}
+
+pub(crate) fn native_shared_alias_release(handle: i64, type_id: u64) -> Result<(), String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let state = Memory::shared_state(rt, handle)
+            .ok_or_else(|| "JIT Shared alias is invalid or already released".to_string())?;
+        if Memory::shared_state_type_id(&state) != Some(type_id) {
+            return Err("JIT Shared alias type disagrees with its checked descriptor".to_string());
+        }
+        let interop = rt.native_shared_interops.remove(&handle);
+        let identity = interop.as_ref().map(|interop| interop.identity());
+        rt.native_shared_handles
+            .retain(|_, registered_handle| *registered_handle != handle);
+        let state = Memory::shared_take_slot(rt, handle)?;
+        let release_result = match interop {
+            Some(interop) => {
+                let result = if interop.owner_alias_token_id().is_none() {
+                    interop.finish_physical_operation(state.release_owner_alias())
+                } else {
+                    Ok(())
+                };
+                drop(interop);
+                result
+            }
+            None => {
+                state.release_owner_alias_during_drop();
+                Ok(())
+            }
+        };
+        if let Some(identity) = identity {
+            if !rt
+                .native_shared_handles
+                .keys()
+                .any(|(root, _)| *root == identity)
+            {
+                rt.native_shared_roots.remove(&identity);
+            }
+        }
+        release_result
+    })
+}
+
+pub(crate) fn native_shared_owner_strong_count(
+    handle: i64,
+    type_id: u64,
+) -> Result<usize, String> {
+    native_shared_interop_for_type(handle, type_id)?
+        .owner_strong_count()?
+        .ok_or_else(|| "Source Shared owner has no physical strong-count hook".to_string())
+}
+
+pub(crate) fn native_shared_owner_downgrade(
+    handle: i64,
+    type_id: u64,
+) -> Result<crate::SourceSharedInterop::SourceSharedInteropWeak, String> {
+    native_shared_interop_for_type(handle, type_id)?
+        .downgrade_owner()
+        .ok_or_else(|| "Source Shared owner has no physical weak-owner hook".to_string())
+}
+
+pub(crate) fn native_shared_export_owner(
+    interop: crate::SourceSharedInterop::SourceSharedInterop,
+) -> Result<i64, String> {
+    Concurrency::with_runtime_mut(|rt| {
+        encode_native_shared_interop(rt, &interop, interop.type_id())
+    })
+}
+
+fn native_shared_payload_raw(
+    rt: &mut JitRuntime,
+    value: &MirRuntimeValue,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<i64, String> {
+    let mut state = PersistEncodeState::for_invocation();
+    persist_encode_raw(rt, value, descriptor, &mut state, 0)
+}
+pub(crate) fn native_shared_value_from_raw(
+    interop: &crate::SourceSharedInterop::SourceSharedInterop,
+    raw: i64,
+) -> Result<MirRuntimeValue, String> {
+    Concurrency::with_runtime_string(|rt| {
+        let descriptor = shared_interop_element_descriptor(rt, interop)?;
+        decode_jit_cell_value(rt, raw, descriptor.id)
+    })
+}
+
+
+pub(crate) fn native_shared_capture(
+    handle: i64,
+) -> Option<Result<(i64, u64), String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let result = interop.capture_with_revision().and_then(|(value, revision)| {
+        Concurrency::with_runtime_string(|rt| {
+            native_shared_payload_raw(rt, &value, &descriptor)
+        })
+        .map(|raw| (raw, revision))
+    });
+    if let Ok((raw, revision)) = result.as_ref() {
+        Memory::shared_cache_capture(handle, *raw, *revision);
+    }
+    Some(result)
+}
+
+pub(crate) fn native_shared_get_value(handle: i64) -> Option<Result<i64, String>> {
+    native_shared_capture(handle).map(|result| result.map(|(raw, _)| raw))
+}
+
+pub(crate) fn native_shared_replace_if_revision(
+    handle: i64,
+    expected_revision: u64,
+    raw: i64,
+) -> Option<Result<(bool, u64), String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = Concurrency::with_runtime_string(|rt| {
+        decode_jit_cell_value(rt, raw, descriptor.id)
+    });
+    let result = decoded.and_then(|replacement| {
+        interop.replace_if_revision(expected_revision, replacement)
+    });
+    if let Ok((committed, revision)) = result.as_ref() {
+        if *committed {
+            Memory::shared_cache_capture(handle, raw, *revision);
+        } else {
+            Memory::shared_cache_revision(handle, *revision);
+        }
+    }
+    Some(result)
+}
+
+pub(crate) fn native_shared_set_value(handle: i64, raw: i64) -> Option<Result<(), String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = Concurrency::with_runtime_string(|rt| {
+        decode_jit_cell_value(rt, raw, descriptor.id)
+    });
+    let mut guard = match interop.acquire_guard(true) {
+        Ok(guard) => guard,
+        Err(error) => return Some(Err(error)),
+    };
+    let result = decoded.and_then(|decoded| {
+        let mut decoded = Some(decoded);
+        guard.with_edit(&mut |value| {
+            *value = decoded
+                .take()
+                .ok_or_else(|| "Shared edit guard was invoked more than once".to_string())?;
+            Ok(())
+        })
+    });
+    if result.is_ok() {
+        Memory::shared_cache_value(handle, raw);
+    }
+    Some(result)
+}
+
+pub(crate) fn native_shared_replace_value(
+    handle: i64,
+    raw: i64,
+) -> Option<Result<i64, String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = Concurrency::with_runtime_string(|rt| {
+        decode_jit_cell_value(rt, raw, descriptor.id)
+    });
+    let mut guard = match interop.acquire_guard(true) {
+        Ok(guard) => guard,
+        Err(error) => return Some(Err(error)),
+    };
+    let result = decoded.and_then(|decoded| {
+        let mut decoded = Some(decoded);
+        let mut previous = None;
+        guard.with_edit(&mut |value| {
+            previous = Some(Concurrency::with_runtime_string(|rt| {
+                native_shared_payload_raw(rt, value, &descriptor)
+            })?);
+            *value = decoded
+                .take()
+                .ok_or_else(|| "Shared replace guard was invoked more than once".to_string())?;
+            Ok(())
+        })?;
+        previous.ok_or_else(|| "Shared replace guard did not run".to_string())
+    });
+    if result.is_ok() {
+        Memory::shared_cache_value(handle, raw);
+    }
+    Some(result)
+}
+
+pub(crate) fn native_shared_read_call(
+    handle: i64,
+    callback: i64,
+) -> Option<Result<i64, String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let slot = Concurrency::with_runtime_mut(|rt| jit_callable_parts(rt, callback));
+    let Some(slot) = slot else {
+        return Some(Err("Shared.read callback handle is invalid".to_string()));
+    };
+    let mut guard = match interop.acquire_guard(false) {
+        Ok(guard) => guard,
+        Err(error) => return Some(Err(error)),
+    };
+    let mut callback_result = None;
+    let result = guard.with_read(&mut |value| {
+        let raw = Concurrency::with_runtime_string(|rt| {
+            native_shared_payload_raw(rt, value, &descriptor)
+        })?;
+        Memory::shared_cache_value(handle, raw);
+        callback_result = invoke_universal_unary(slot, raw);
+        callback_result
+            .ok_or_else(|| "Shared.read callback is invalid".to_string())
+    });
+    match result {
+        Ok(()) => Some(
+            callback_result.ok_or_else(|| "Shared.read callback did not run".to_string()),
+        ),
+        Err(error) => Some(Err(error)),
+    }
+}
+
+pub(crate) fn native_shared_edit_call(
+    handle: i64,
+    callback: i64,
+) -> Option<Result<i64, String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let slot = Concurrency::with_runtime_mut(|rt| jit_callable_parts(rt, callback));
+    let Some(slot) = slot else {
+        return Some(Err("Shared.edit callback handle is invalid".to_string()));
+    };
+    let mut guard = match interop.acquire_guard(true) {
+        Ok(guard) => guard,
+        Err(error) => return Some(Err(error)),
+    };
+    let mut callback_result = None;
+    let mut updated_raw = None;
+    let result = guard.with_edit(&mut |value| {
+        let mut raw = Concurrency::with_runtime_string(|rt| {
+            native_shared_payload_raw(rt, value, &descriptor)
+        })?;
+        let result = invoke_universal_unary(slot, (&mut raw as *mut i64) as i64)
+            .ok_or_else(|| "Shared.edit callback is invalid".to_string())?;
+        let stopped = Concurrency::with_runtime_mut(|rt| runtime_stop_pending(rt));
+        if stopped {
+            return Err("Shared.edit stopped before its physical writeback".to_string());
+        }
+        let decoded = Concurrency::with_runtime_string(|rt| {
+            decode_jit_cell_value(rt, raw, descriptor.id)
+        })?;
+        *value = decoded;
+        callback_result = Some(result);
+        updated_raw = Some(raw);
+        Ok(())
+    });
+    match result {
+        Ok(()) => {
+            let result = callback_result
+                .ok_or_else(|| "Shared.edit callback did not run".to_string());
+            if let Some(raw) = updated_raw {
+                Memory::shared_cache_value(handle, raw);
+            }
+            Some(result)
+        }
+        Err(error) => Some(Err(error)),
+    }
+}
+pub(crate) fn native_shared_guard_begin(
+    handle: i64,
+    editable: bool,
+) -> Option<Result<(i64, i64), String>> {
+    let entry = native_shared_entry(handle)?;
+    let (interop, descriptor) = match entry {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let (permit, view) =
+        match Memory::source_shared_canonical_permit_with_entry_view(interop.clone(), editable) {
+            Ok(pair) => pair,
+            Err(error) => return Some(Err(error)),
+        };
+    let (value, revision) = match Memory::source_shared_canonical_read(&permit) {
+        Ok(value) => value,
+        Err(error) => return Some(Err(error)),
+    };
+    let raw = match Concurrency::with_runtime_string(|rt| {
+        native_shared_payload_raw(rt, &value, &descriptor)
+    }) {
+        Ok(raw) => raw,
+        Err(error) => return Some(Err(error)),
+    };
+    Memory::shared_cache_revision(handle, revision);
+    let token = match Concurrency::with_runtime_mut(|rt| {
+        let token = rt.next_native_shared_guard_token;
+        rt.next_native_shared_guard_token = token
+            .checked_add(1)
+            .ok_or_else(|| "too many Source Shared guard permits".to_string())?;
+        rt.native_shared_guards
+            .insert(token, NativeSharedGuardEntry { permit, view });
+        Ok::<_, String>(token)
+    }) {
+        Ok(token) => token,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(Ok((token, raw)))
+}
+
+
+pub(crate) fn native_shared_guard_entry_view(
+    token: i64,
+) -> Option<Result<crate::SourceSharedInterop::SourceSharedInteropGuardState, String>> {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards
+            .get(&token)
+            .map(|entry| entry.view.entry_view())
+    })
+}
+
+pub(crate) fn native_shared_guard_bind(
+    guard_handle: i64,
+    token: i64,
+) -> Result<(), String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let lease = rt
+            .native_shared_guards
+            .remove(&token)
+            .ok_or_else(|| "Source Shared guard token is no longer live".to_string())?;
+        if rt.native_shared_guards.contains_key(&guard_handle) {
+            return Err("JIT Shared guard handle is already bound".to_string());
+        }
+        rt.native_shared_guards.insert(guard_handle, lease);
+        Ok(())
+    })
+}
+
+pub(crate) fn native_shared_guard_abort(guard_handle: i64) -> bool {
+    Concurrency::with_runtime_mut(|rt| rt.native_shared_guards.remove(&guard_handle).is_some())
+}
+
+pub(crate) fn native_shared_guard_is_bound(guard_handle: i64) -> Option<bool> {
+    Some(Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards.contains_key(&guard_handle)
+    }))
+}
+
+pub(crate) fn native_shared_guard_wait_suspend(
+    guard_handle: i64,
+    shared_handle: i64,
+    raw: i64,
+) -> Option<Result<(), String>> {
+    let (_, descriptor) = match native_shared_entry(shared_handle)? {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let permit = Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards
+            .get(&guard_handle)
+            .map(|entry| Arc::clone(&entry.permit))
+    })?;
+    let value = match Concurrency::with_runtime_string(|rt| {
+        decode_jit_cell_value(rt, raw, descriptor.id)
+    }) {
+        Ok(value) => value,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(Memory::source_shared_canonical_wait_suspend(&permit, value))
+}
+
+pub(crate) fn native_shared_guard_wait_resume(
+    guard_handle: i64,
+    shared_handle: i64,
+    cancelled: bool,
+) -> Option<Result<Option<i64>, String>> {
+    let (_, descriptor) = match native_shared_entry(shared_handle)? {
+        Ok(entry) => entry,
+        Err(error) => return Some(Err(error)),
+    };
+    let permit = Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards
+            .get(&guard_handle)
+            .map(|entry| Arc::clone(&entry.permit))
+    })?;
+    let cancel_requested = cancelled;
+    let mut should_cancel = || {
+        cancel_requested || Concurrency::with_runtime_mut(|rt| runtime_stop_pending(rt))
+    };
+    let value = match Memory::source_shared_canonical_wait_resume(&permit, &mut should_cancel) {
+        Ok(Some(value)) => value,
+        Ok(None) => return Some(Ok(None)),
+        Err(error) => return Some(Err(error)),
+    };
+    let raw = match Concurrency::with_runtime_string(|rt| {
+        native_shared_payload_raw(rt, &value, &descriptor)
+    }) {
+        Ok(raw) => raw,
+        Err(error) => return Some(Err(error)),
+    };
+    Memory::shared_cache_value(shared_handle, raw);
+    Some(Ok(Some(raw)))
+}
+
+pub(crate) fn native_shared_guard_wait_abort(
+    guard_handle: i64,
+) -> Option<Result<(), String>> {
+    let permit = Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards
+            .get(&guard_handle)
+            .map(|entry| Arc::clone(&entry.permit))
+    })?;
+    Some(Memory::source_shared_canonical_wait_abort(&permit))
+}
+
+pub(crate) fn native_shared_guard_end(
+    guard_handle: i64,
+    shared_handle: i64,
+    raw: i64,
+    editable: bool,
+) -> Option<Result<(), String>> {
+    let entry = Concurrency::with_runtime_mut(|rt| {
+        rt.native_shared_guards.remove(&guard_handle)
+    })?;
+    let NativeSharedGuardEntry { permit, view } = entry;
+    let result = if editable {
+        match native_shared_entry(shared_handle) {
+            Some(Ok(_)) => Memory::source_shared_canonical_finish(&permit, raw),
+            Some(Err(error)) => Err(error),
+            None => Err("Source Shared guard root is no longer live".to_string()),
+        }
+    } else {
+        Ok(())
+    };
+    drop(permit);
+    Some(result.and(view.release_and_deliver()))
+}
+
 
 fn jet_jit_native_interface_is_carrier(
     trait_id: i64,
@@ -11100,9 +13078,16 @@ mod service_adapter {
                 Ok(map)
             }
             RuntimeValueKind::Shared => {
-                let child = job_child_descriptor(rt, descriptor, descriptor.element, "element")?;
-                let raw = job_marshal_value(rt, value, &child, depth + 1)?;
-                Ok(super::Memory::shared_alloc_for_persist(rt, raw))
+                if matches!(value, MirRuntimeValue::NativeOwned(_)) {
+                    let interop =
+                        crate::SourceSharedInterop::SourceSharedInterop::from_native_owned(value)?;
+                    encode_native_shared_interop(rt, &interop, descriptor.id)
+                } else {
+                    let child =
+                        job_child_descriptor(rt, descriptor, descriptor.element, "element")?;
+                    let raw = job_marshal_value(rt, value, &child, depth + 1)?;
+                    super::Memory::shared_alloc_for_persist(rt, raw, descriptor.id)
+                }
             }
             RuntimeValueKind::Option => {
                 let child = job_child_descriptor(rt, descriptor, descriptor.ok, "option")?;
@@ -12153,6 +14138,32 @@ fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) 
         callable_defect(rt, "resident callable value has no function address");
         return 0;
     }
+    let lifetime = if has_env {
+        rt.jit_closure_targets_by_ptr
+            .get(&fn_ptr)
+            .map(|target| {
+                if target.capture_type_ids.len() != target.capture_owned.len() {
+                    return Err("closure target capture ownership layout is inconsistent".to_string());
+                }
+                Ok(Memory::JitCallableEnvLifetime {
+                    env,
+                    capture_type_ids: target.capture_type_ids.clone(),
+                    capture_owned: target.capture_owned.clone(),
+                    references: 1,
+                    portable_captures: None,
+                })
+            })
+            .transpose()
+    } else {
+        Ok(None)
+    };
+    let lifetime = match lifetime {
+        Ok(lifetime) => lifetime,
+        Err(error) => {
+            rt.set_host_fault(&error);
+            return 0;
+        }
+    };
     let index = rt.jit_callables.len();
     if index >= i64::MAX as usize - 1 {
         rt.set_trap("too many resident callable values");
@@ -12170,6 +14181,7 @@ fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) 
         raw_pair: None,
         raw_many: None,
     });
+    rt.jit_callable_env_lifetimes.push(lifetime);
     handle
 }
 
@@ -15690,6 +17702,13 @@ host_fns! {
         sig_clock_clone.returns.push(AbiParam::new(types::I64));
         let mut sig_typed_clone = sig_clock_clone.clone();
         sig_typed_clone.params.push(AbiParam::new(types::I64));
+        let mut sig_typed_drop = sig_typed_clone.clone();
+        sig_typed_drop.returns.clear();
+        let mut sig_closure_capture_publish = Signature::new(cc);
+        sig_closure_capture_publish
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+
 
         let mut sig_model_open = Signature::new(cc);
         sig_model_open.params.extend([AbiParam::new(types::I64); 2]);
@@ -16311,6 +18330,10 @@ host_fns! {
     eq: "jet_eq" => jet_jit_str_eq: sig_str_eq;
     clock_clone: "jet_jit_clock_clone" => jet_jit_clock_clone: sig_clock_clone;
     typed_clone: "jet_jit_typed_clone" => jet_jit_typed_clone: sig_typed_clone;
+    typed_drop: "jet_jit_typed_drop" => jet_jit_typed_drop: sig_typed_drop;
+    typed_moved_marker: "jet_jit_typed_moved_marker" => jet_jit_typed_moved_marker: sig_typed_clone;
+    closure_capture_publish: "jet_jit_closure_capture_publish" => jet_jit_closure_capture_publish: sig_closure_capture_publish;
+
     typed_eq: "jet_jit_typed_eq" => jet_jit_typed_eq: sig_typed_eq;
     str_order: "jet_jit_str_order" => jet_jit_str_order: sig_str_binary_i64;
     pattern_text_match: "jet_text_pattern_match" => jet_jit_pattern_text_match: sig_i64_i64_i64;
@@ -16794,5 +18817,1031 @@ mod host_fns_tests {
         assert_eq!(runtime.take_trap().as_deref(), Some("ordered payload"));
         assert!(!runtime.trap_pending());
         assert!(runtime.trapped.is_none());
+    }
+}
+
+#[cfg(test)]
+mod native_shared_interop_tests {
+    use super::{
+        encode_native_shared_interop, ensure_jit_shared_interop, native_shared_capture,
+        native_shared_get_value, native_shared_set_value, persist_decode_raw, persist_encode_raw,
+        runtime_shared_alias_release, runtime_shared_alias_retain, Concurrency, JitRuntime,
+        PersistDecodeState, PersistEncodeState, ReleaseDevtoolsPolicy, RuntimeTypeDescriptor,
+        RuntimeValueAbi, RuntimeValueKind,
+    };
+    use crate::resident::fresh_runtime;
+    use crate::{Memory, SourceSharedInterop};
+
+    fn int_descriptor(id: u64) -> RuntimeTypeDescriptor {
+        RuntimeTypeDescriptor {
+            id,
+            name: "Int".to_string(),
+            canonical: "Int".to_string(),
+            kind: RuntimeValueKind::Int,
+            abi: RuntimeValueAbi::Int,
+            integer_width: None,
+            integer_range: None,
+            element: None,
+            key: None,
+            value: None,
+            ok: None,
+            err: None,
+            serde_tag: None,
+            serde_untagged: false,
+            serde_deny_unknown: false,
+            cli: None,
+            fields: Vec::new(),
+            migration: None,
+            variants: Vec::new(),
+        }
+    }
+
+    fn shared_int_descriptor(id: u64, element: u64) -> RuntimeTypeDescriptor {
+        RuntimeTypeDescriptor {
+            id,
+            name: "Shared<Int>".to_string(),
+            canonical: "Shared<Int>".to_string(),
+            kind: RuntimeValueKind::Shared,
+            abi: RuntimeValueAbi::Handle,
+            integer_width: None,
+            integer_range: None,
+            element: Some(element),
+            key: None,
+            value: None,
+            ok: None,
+            err: None,
+            serde_tag: None,
+            serde_untagged: false,
+            serde_deny_unknown: false,
+            cli: None,
+            fields: Vec::new(),
+            migration: None,
+            variants: Vec::new(),
+        }
+    }
+    fn shared_list_descriptor(id: u64, element: u64) -> RuntimeTypeDescriptor {
+        RuntimeTypeDescriptor {
+            id,
+            name: "[Shared<Int>]".to_string(),
+            canonical: "[Shared<Int>]".to_string(),
+            kind: RuntimeValueKind::List,
+            abi: RuntimeValueAbi::Handle,
+            integer_width: None,
+            integer_range: None,
+            element: Some(element),
+            key: None,
+            value: None,
+            ok: None,
+            err: None,
+            serde_tag: None,
+            serde_untagged: false,
+            serde_deny_unknown: false,
+            cli: None,
+            fields: Vec::new(),
+            migration: None,
+            variants: Vec::new(),
+        }
+    }
+
+
+    fn closure_descriptor(id: u64) -> RuntimeTypeDescriptor {
+        RuntimeTypeDescriptor {
+            id,
+            name: "Fn() -> Int".to_string(),
+            canonical: "Fn() -> Int".to_string(),
+            kind: RuntimeValueKind::Closure,
+            abi: RuntimeValueAbi::Handle,
+            integer_width: None,
+            integer_range: None,
+            element: None,
+            key: None,
+            value: None,
+            ok: None,
+            err: None,
+            serde_tag: None,
+            serde_untagged: false,
+            serde_deny_unknown: false,
+            cli: None,
+            fields: Vec::new(),
+            migration: None,
+            variants: Vec::new(),
+        }
+    }
+
+    fn test_execution_identity(image: &str) -> jet_foundation::MIR::MirExecutionIdentity {
+        use jet_foundation::MIR::{
+            MirArtifactBuildMode, MirArtifactId, MirArtifactIdentity, MirArtifactKind,
+            MirArtifactTarget, MirProgramIdentity, MIR_IDENTITY_SCHEMA_VERSION,
+            MIR_SCHEMA_VERSION,
+        };
+        jet_foundation::MIR::MirExecutionIdentity {
+            schema_version: MIR_IDENTITY_SCHEMA_VERSION,
+            artifact: MirArtifactIdentity {
+                schema_version: MIR_IDENTITY_SCHEMA_VERSION,
+                mir_schema_version: MIR_SCHEMA_VERSION,
+                program_digest: [image.as_bytes()[0]; 32],
+                package_identity: image.to_string(),
+                artifact: MirArtifactId(1),
+                name: "portable-closure-test".to_string(),
+                kind: MirArtifactKind::NativeExecutable,
+                target: MirArtifactTarget::Cranelift,
+                mode: MirArtifactBuildMode::Test,
+                provider_identity: String::new(),
+                closure_identity: String::new(),
+                artifact_identity: image.to_string(),
+                program_identity: MirProgramIdentity {
+                    semantic_hash: image.to_string(),
+                    optimized_hash: format!("{image}-optimized"),
+                    function_ids: Vec::new(),
+                    core_ids: Vec::new(),
+                    target_facts: Vec::new(),
+                    source_map: Vec::new(),
+                },
+            },
+        }
+    }
+    #[test]
+    fn typed_drop_skips_uninitialized_shared_list_suffix() {
+        let element_id = 0x4101;
+        let shared_id = 0x4102;
+        let list_id = 0x4103;
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let shared_descriptor = shared_int_descriptor(shared_id, element_id);
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_descriptor.clone(),
+            shared_list_descriptor(list_id, shared_id),
+        ]);
+        let payload = runtime.heap.int_from_i64(7);
+        let root_handle =
+            Memory::shared_alloc_for_persist(&mut runtime, payload, shared_id)
+                .expect("Shared root should allocate");
+        let alias_handle =
+            runtime_shared_alias_retain(&mut runtime, root_handle, &shared_descriptor)
+                .expect("Shared alias should retain its root");
+        let state = Memory::shared_state(&runtime, root_handle)
+            .expect("root should retain its physical owner state");
+        assert_eq!(
+            state.owner_strong_count().expect("owner count should be available"),
+            2
+        );
+
+        let list = runtime.heap.alloc_uninit_list(2);
+        runtime
+            .heap
+            .list_set_int(list, 0, alias_handle)
+            .expect("first Shared slot should initialize");
+        super::runtime_drop_value(&mut runtime, list, list_id, 0)
+            .expect("typed drop should skip the uninitialized list suffix");
+        assert_eq!(
+            state.owner_strong_count().expect("owner count should be available"),
+            1,
+            "typed drop should release the initialized Shared owner exactly once"
+        );
+    }
+
+    #[test]
+    fn typed_drop_rejects_initialized_shared_list_slot_without_handle() {
+        let element_id = 0x4111;
+        let shared_id = 0x4112;
+        let list_id = 0x4113;
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+            shared_list_descriptor(list_id, shared_id),
+        ]);
+        let list = runtime.heap.alloc_value(jet_rt::JetVal::UninitList {
+            values: vec![jet_rt::JetVal::Float(1.0)],
+            initialized: vec![true],
+        });
+        let error = super::runtime_drop_value(&mut runtime, list, list_id, 0)
+            .expect_err("an initialized Shared slot without a runtime handle must be rejected");
+        assert!(error.contains("list element has no runtime handle"));
+    }
+
+    struct TestOwnerAliasLease(i64);
+
+    impl SourceSharedInterop::SourceSharedInteropOwnerAliasLease for TestOwnerAliasLease {
+        fn token_id(&self) -> i64 {
+            self.0
+        }
+    }
+
+    static NEXT_TEST_OWNER_ALIAS_TOKEN: std::sync::atomic::AtomicI64 =
+        std::sync::atomic::AtomicI64::new(1);
+
+    fn test_owner_alias_lease(
+    ) -> Box<dyn SourceSharedInterop::SourceSharedInteropOwnerAliasLease> {
+        let token = NEXT_TEST_OWNER_ALIAS_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Box::new(TestOwnerAliasLease(token))
+    }
+
+    #[test]
+    fn portable_shared_closure_rebinds_exact_image_and_root_after_runtime_teardown() {
+        use jet_foundation::MIR::{MirFunctionId, MirRuntimeClosure, MirRuntimeValue};
+
+        let element_id = 0x401;
+        let shared_id = 0x402;
+        let closure_id = 0x403;
+        let function = MirFunctionId(0x404);
+        let execution = test_execution_identity("origin-image");
+        let mut origin: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        origin.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+            closure_descriptor(closure_id),
+        ]);
+        origin.install_jit_closure_target(
+            function,
+            execution.clone(),
+            0x1110,
+            vec![shared_id],
+            vec![true],
+        );
+
+        let initial = origin.heap.int_from_i64(7);
+        let root_handle = Memory::shared_alloc_for_persist(&mut origin, initial, shared_id)
+            .expect("origin Shared root should allocate");
+        let shared_descriptor = origin
+            .runtime_type_descriptor(shared_id)
+            .cloned()
+            .expect("Shared descriptor should be installed");
+        let root = ensure_jit_shared_interop(&mut origin, root_handle, &shared_descriptor)
+            .expect("origin root should resolve")
+            .expect("Shared descriptor should produce its physical owner");
+        let capture_handle = runtime_shared_alias_retain(&mut origin, root_handle, &shared_descriptor)
+            .expect("capturing Shared by value should retain one logical alias");
+        let capture_interop = ensure_jit_shared_interop(&mut origin, capture_handle, &shared_descriptor)
+            .expect("captured root should resolve")
+            .expect("captured Shared should have a physical owner");
+        let owner_count = capture_interop
+            .owner_strong_count()
+            .expect("Shared owner should report its strong count")
+            .expect("JIT Shared owner should expose its strong count");
+        assert_eq!(owner_count, 2);
+
+        let closure_type_descriptor = origin
+            .runtime_type_descriptor(closure_id)
+            .cloned()
+            .expect("closure descriptor should be installed");
+        let closure_value = MirRuntimeValue::Closure(MirRuntimeClosure {
+            function,
+            captures: vec![capture_interop.as_native_owned()],
+        });
+        let mut encode_state = PersistEncodeState::for_invocation();
+        let origin_callable = persist_encode_raw(
+            &mut origin,
+            &closure_value,
+            &closure_type_descriptor,
+            &mut encode_state,
+            0,
+        )
+        .expect("checked closure should encode in its origin image");
+        let mut decode_state = PersistDecodeState::for_invocation();
+        let portable_value = persist_decode_raw(
+            &mut origin,
+            origin_callable,
+            &closure_type_descriptor,
+            &mut decode_state,
+            0,
+        )
+        .expect("origin closure should decode to a portable environment");
+        let portable = match &portable_value {
+            MirRuntimeValue::NativeOwned(root) => root
+                .downcast_ref::<super::JitCallablePortableEnvironment>()
+                .expect("closure should carry checked portable environment"),
+            _ => panic!("captured closure should be a native-owned portable root"),
+        };
+        assert_eq!(portable.execution, execution);
+        let captured_value = portable
+            .captures
+            .lock()
+            .expect("portable capture lock should be available")[0]
+            .clone();
+        let captured_owner = SourceSharedInterop::SourceSharedInterop::from_native_owned(
+            &captured_value,
+        )
+        .expect("portable closure should retain its captured physical Shared owner");
+        assert_eq!(
+            captured_owner
+                .owner_strong_count()
+                .expect("Shared owner should report its strong count"),
+            Some(owner_count)
+        );
+        drop(origin);
+        drop(closure_value);
+
+        let mut receiver: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        receiver.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+            closure_descriptor(closure_id),
+        ]);
+        receiver.install_jit_closure_target(
+            function,
+            execution.clone(),
+            0x2220,
+            vec![shared_id],
+            vec![true],
+        );
+        let mut encode_state = PersistEncodeState::for_invocation();
+        let receiver_callable = persist_encode_raw(
+            &mut receiver,
+            &portable_value,
+            &closure_type_descriptor,
+            &mut encode_state,
+            0,
+        )
+        .expect("same checked image should rebind the portable closure");
+        assert_eq!(
+            super::jit_callable_slot(&receiver, receiver_callable)
+                .expect("receiver should bind a callable slot")
+                .fn_ptr,
+            0x2220,
+            "rebinding must use the receiver image, not the retired code pointer"
+        );
+        assert_eq!(
+            captured_owner
+                .owner_strong_count()
+                .expect("Shared owner should report its strong count"),
+            Some(owner_count),
+            "portable rebind must borrow the captured Shared alias"
+        );
+        let capture_key = (
+            captured_owner.identity(),
+            captured_owner.owner_alias_token_id(),
+        );
+        let receiver_shared = receiver
+            .native_shared_handles
+            .get(&capture_key)
+            .copied()
+            .expect("receiver should map the exact captured owner alias");
+        assert_eq!(
+            receiver
+                .native_shared_interops
+                .get(&receiver_shared)
+                .expect("receiver should retain the captured root")
+                .identity(),
+            captured_owner.identity(),
+            "rebound environment must preserve the original physical Shared root"
+        );
+
+        let mut wrong_image: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        wrong_image.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+            closure_descriptor(closure_id),
+        ]);
+        wrong_image.install_jit_closure_target(
+            function,
+            test_execution_identity("different-image"),
+            0x3330,
+            vec![shared_id],
+            vec![true],
+        );
+        let mut encode_state = PersistEncodeState::for_invocation();
+        let error = persist_encode_raw(
+            &mut wrong_image,
+            &portable_value,
+            &closure_type_descriptor,
+            &mut encode_state,
+            0,
+        )
+        .expect_err("same function ID from a different image must not be rebound");
+        assert!(error.contains("execution authority"));
+        assert!(wrong_image.jit_callables.is_empty());
+        assert!(wrong_image.shareds.is_empty());
+        assert_eq!(
+            captured_owner
+                .owner_strong_count()
+                .expect("Shared owner should report its strong count"),
+            Some(owner_count),
+            "rejecting another image must not retain the captured alias"
+        );
+
+        captured_owner
+            .with_edit(|value| {
+                *value = MirRuntimeValue::Int(9);
+                Ok(())
+            })
+            .expect("captured root should remain writable after origin teardown");
+        assert_eq!(
+            receiver
+                .native_shared_interops
+                .get(&receiver_shared)
+                .expect("receiver root should remain registered")
+                .with_read(|value| match value {
+                    MirRuntimeValue::Int(value) => Ok(*value),
+                    _ => Err("captured Shared payload changed type".to_string()),
+                })
+                .expect("receiver alias should read the canonical payload"),
+            9
+        );
+        assert_eq!(
+            captured_owner
+                .owner_strong_count()
+                .expect("Shared owner should report its strong count"),
+            Some(owner_count),
+            "reading the mutable capture must not retain another Shared alias"
+        );
+        let replacement = receiver.heap.int_from_i64(17);
+        let replacement_root_handle =
+            Memory::shared_alloc_for_persist(&mut receiver, replacement, shared_id)
+                .expect("replacement Shared root should allocate");
+        let replacement_capture_handle =
+            runtime_shared_alias_retain(&mut receiver, replacement_root_handle, &shared_descriptor)
+                .expect("capturing replacement Shared should retain one alias");
+        let replacement_capture =
+            ensure_jit_shared_interop(&mut receiver, replacement_capture_handle, &shared_descriptor)
+                .expect("replacement capture should resolve")
+                .expect("replacement capture should retain its physical root");
+        let replacement_root =
+            ensure_jit_shared_interop(&mut receiver, replacement_root_handle, &shared_descriptor)
+                .expect("replacement root should resolve")
+                .expect("replacement Shared should have a physical owner");
+        let receiver_env = super::jit_callable_slot(&receiver, receiver_callable)
+            .expect("receiver callable should retain its environment")
+            .env;
+        receiver
+            .heap
+            .record_set_int(receiver_env, 0, replacement_capture_handle)
+            .expect("replacement capture should write into the callable environment");
+        runtime_shared_alias_release(&mut receiver, receiver_shared, &shared_descriptor)
+            .expect("replacing capture should release its previous runtime alias");
+        Concurrency::set_active_runtime(Some(&mut receiver as *mut JitRuntime));
+        super::jet_jit_closure_capture_publish(receiver_env, 0, shared_id as i64);
+        Concurrency::set_active_runtime(None);
+        assert!(!receiver.host_fault, "capture writeback should decode successfully");
+        let published_capture = portable
+            .captures
+            .lock()
+            .expect("portable capture lock should remain available")[0]
+            .clone();
+        let published_owner = SourceSharedInterop::SourceSharedInterop::from_native_owned(
+            &published_capture,
+        )
+        .expect("published capture should retain its physical Shared owner");
+        assert_eq!(
+            published_owner.identity(),
+            replacement_capture.identity(),
+            "capture publication must update the canonical mutable environment"
+        );
+        let moved_capture_handle = receiver
+            .heap
+            .record_get_int(receiver_env, 0)
+            .expect("owned capture should be present before FnOnce move");
+        assert_eq!(moved_capture_handle, replacement_capture_handle);
+        receiver
+            .heap
+            .record_set_int(receiver_env, 0, i64::MIN)
+            .expect("FnOnce move should mark the capture slot uninitialized");
+        Concurrency::set_active_runtime(Some(&mut receiver as *mut JitRuntime));
+        super::jet_jit_closure_capture_publish(receiver_env, 0, shared_id as i64);
+        Concurrency::set_active_runtime(None);
+        assert!(matches!(
+            &portable.captures.lock().expect("portable capture lock should remain available")[0],
+            MirRuntimeValue::Moved
+        ));
+        super::runtime_drop_value(&mut receiver, receiver_callable, closure_id, 0)
+            .expect("FnOnce closure should release its remaining environment");
+        assert_eq!(
+            replacement_root
+                .owner_strong_count()
+                .expect("replacement root should report its strong count"),
+            Some(2),
+            "final closure drop must not release a capture transferred by FnOnce"
+        );
+        runtime_shared_alias_release(&mut receiver, moved_capture_handle, &shared_descriptor)
+            .expect("the moved capture's new owner should release it exactly once");
+        drop(receiver);
+        drop(portable_value);
+        drop(captured_value);
+        drop(captured_owner);
+        drop(capture_interop);
+        drop(published_capture);
+        drop(published_owner);
+        drop(replacement_capture);
+        assert_eq!(
+            root.owner_strong_count()
+                .expect("origin root should report its strong count"),
+            Some(1),
+            "dropping the portable closure should release its captured alias"
+        );
+        assert_eq!(
+            replacement_root
+                .owner_strong_count()
+                .expect("replacement root should report its strong count"),
+            Some(1),
+            "dropping the published capture should release its transferred alias"
+        );
+    }
+    #[test]
+    fn captureless_portable_closure_keeps_its_origin_image_authority() {
+        use jet_foundation::MIR::{MirFunctionId, MirRuntimeClosure, MirRuntimeValue};
+
+        let function = MirFunctionId(0x501);
+        let closure_id = 0x502;
+        let execution = test_execution_identity("captureless-origin");
+        let mut origin: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        origin.install_type_descriptors([closure_descriptor(closure_id)]);
+        origin.install_jit_closure_target(
+            function,
+            execution.clone(),
+            0x5110,
+            Vec::new(),
+            Vec::new(),
+        );
+        let closure_type_descriptor = origin
+            .runtime_type_descriptor(closure_id)
+            .cloned()
+            .expect("closure descriptor should be installed");
+        let closure = MirRuntimeValue::Closure(MirRuntimeClosure {
+            function,
+            captures: Vec::new(),
+        });
+        let mut encode_state = PersistEncodeState::for_invocation();
+        let raw = persist_encode_raw(
+            &mut origin,
+            &closure,
+            &closure_type_descriptor,
+            &mut encode_state,
+            0,
+        )
+        .expect("captureless closure should encode");
+        let mut decode_state = PersistDecodeState::for_invocation();
+        let portable = persist_decode_raw(
+            &mut origin,
+            raw,
+            &closure_type_descriptor,
+            &mut decode_state,
+            0,
+        )
+        .expect("captureless closure should retain portable image authority");
+        let MirRuntimeValue::NativeOwned(root) = &portable else {
+            panic!("captureless closure should be represented by a portable owner");
+        };
+        assert_eq!(
+            root.downcast_ref::<super::JitCallablePortableEnvironment>()
+                .expect("portable closure carrier should be typed")
+                .execution,
+            execution
+        );
+        drop(origin);
+
+        let mut receiver: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        receiver.install_type_descriptors([closure_descriptor(closure_id)]);
+        receiver.install_jit_closure_target(
+            function,
+            test_execution_identity("captureless-other-image"),
+            0x5220,
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut encode_state = PersistEncodeState::for_invocation();
+        let error = persist_encode_raw(
+            &mut receiver,
+            &portable,
+            &closure_type_descriptor,
+            &mut encode_state,
+            0,
+        )
+        .expect_err("different image must not adopt a captureless closure");
+        assert!(error.contains("execution authority"));
+        assert!(receiver.jit_callables.is_empty());
+    }
+    #[test]
+    fn jit_image_cutover_retires_old_closure_code_pointers() {
+        use jet_foundation::MIR::MirFunctionId;
+
+        let function = MirFunctionId(0x601);
+        let first_image = test_execution_identity("first-target-image");
+        let second_image = test_execution_identity("second-target-image");
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        runtime.install_jit_closure_target(
+            function,
+            first_image,
+            0x6110,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert!(runtime.jit_closure_targets.contains_key(&function.0));
+        assert!(runtime.jit_closure_targets_by_ptr.contains_key(&0x6110));
+
+        runtime.set_jit_closure_execution_identity(second_image.clone());
+        assert!(
+            !runtime.jit_closure_targets.contains_key(&function.0),
+            "an image cutover must retire targets compiled from the prior image"
+        );
+        assert!(
+            !runtime.jit_closure_targets_by_ptr.contains_key(&0x6110),
+            "an image cutover must retire reverse pointer mappings too"
+        );
+
+        runtime.install_jit_closure_target(
+            function,
+            second_image.clone(),
+            0x6220,
+            Vec::new(),
+            Vec::new(),
+        );
+        let target = runtime
+            .jit_closure_targets
+            .get(&function.0)
+            .expect("new image target should be installed");
+        assert_eq!(target.execution, second_image);
+        assert_eq!(target.fn_ptr, 0x6220);
+        assert!(!runtime.jit_closure_targets_by_ptr.contains_key(&0x6110));
+    }
+
+    #[test]
+    fn native_shared_interop_import_export_preserves_root_and_commits_set() {
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x101;
+        let shared_id = 0x102;
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+
+        let initial = runtime.heap.int_from_i64(7);
+        let handle = Memory::shared_alloc_for_persist(&mut runtime, initial, shared_id)
+            .expect("typed Shared allocation should retain its checked descriptor");
+        let descriptor = runtime
+            .runtime_type_descriptor(shared_id)
+            .cloned()
+            .expect("test Shared descriptor must be installed");
+        let imported = ensure_jit_shared_interop(&mut runtime, handle, &descriptor)
+            .expect("JIT Shared import should resolve")
+            .expect("Shared descriptor should produce a physical root");
+        let native = imported.as_native_owned();
+        let restored = SourceSharedInterop::from_native_owned(&native)
+            .expect("native-owned Shared root should round-trip");
+        assert_eq!(restored.identity(), imported.identity());
+
+        let exported = encode_native_shared_interop(&mut runtime, &imported, shared_id)
+            .expect("same physical root should export");
+        assert_eq!(
+            exported, handle,
+            "round-tripping a root must reuse the original JIT Shared handle"
+        );
+
+        let runtime_ptr = &mut runtime as *mut JitRuntime;
+        Concurrency::set_active_runtime(Some(runtime_ptr));
+        let fetched_raw = native_shared_get_value(handle)
+            .expect("native Shared route should recognize the live handle")
+            .expect("native Shared read should succeed");
+        let fetched = Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(fetched_raw))
+            .expect("native Shared read should return an Int carrier");
+        let replacement = Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(9));
+        let set_result = native_shared_set_value(handle, replacement)
+            .expect("native Shared route should recognize the live handle");
+        set_result.expect("native Shared write should commit");
+        let cached = Concurrency::with_runtime_mut(|rt| {
+            Memory::shared_value(rt, handle)
+                .and_then(|value| rt.heap.int_to_i64(value))
+        });
+        Concurrency::set_active_runtime(None);
+        Concurrency::clear_http_shared_runtime();
+
+        assert_eq!(fetched, 7);
+        assert_eq!(cached, Some(9));
+        assert_eq!(
+            imported
+                .with_read(|value| match value {
+                    jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(*value),
+                    _ => Err("physical Shared payload changed type".to_string()),
+                })
+                .expect("sidecar should observe the committed write"),
+            9
+        );
+    }
+
+    #[test]
+    fn resident_shared_physical_root_survives_runtime_teardown() {
+        let mut owner_runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x111;
+        let shared_id = 0x112;
+        owner_runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+        let initial = owner_runtime.heap.int_from_i64(7);
+        let owner_handle =
+            Memory::shared_alloc_for_persist(&mut owner_runtime, initial, shared_id)
+                .expect("typed Shared allocation should retain its checked payload");
+        let descriptor = owner_runtime
+            .runtime_type_descriptor(shared_id)
+            .cloned()
+            .expect("test Shared descriptor must be installed");
+        let interop = ensure_jit_shared_interop(&mut owner_runtime, owner_handle, &descriptor)
+            .expect("JIT Shared export should resolve")
+            .expect("typed Shared root should expose its physical owner");
+        let root_identity = interop.identity();
+        owner_runtime.clear_invocation_carriers();
+        assert_eq!(
+            owner_runtime
+                .native_shared_interops
+                .get(&owner_handle)
+                .map(|root| root.identity()),
+            Some(root_identity),
+            "invocation cleanup must retain resident physical roots"
+        );
+
+        let mut receiver_runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        receiver_runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+        let receiver_handle =
+            encode_native_shared_interop(&mut receiver_runtime, &interop, shared_id)
+                .expect("a second runtime should register the same physical root");
+        drop(interop);
+        drop(owner_runtime);
+
+        Concurrency::set_active_runtime(Some(&mut receiver_runtime as *mut JitRuntime));
+        let (initial_raw, initial_revision) = native_shared_capture(receiver_handle)
+            .expect("receiver should recognize the physical root")
+            .expect("resident payload should remain readable after runtime teardown");
+        assert_eq!(
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(initial_raw)),
+            Some(7)
+        );
+        assert_eq!(initial_revision, 0);
+
+        let replacement = Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(9));
+        native_shared_set_value(receiver_handle, replacement)
+            .expect("receiver should recognize the physical root")
+            .expect("write should commit through the retained physical owner");
+        let (latest_raw, latest_revision) = native_shared_capture(receiver_handle)
+            .expect("receiver should still recognize the physical root")
+            .expect("updated payload should remain readable");
+        assert_eq!(
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(latest_raw)),
+            Some(9)
+        );
+        assert_eq!(latest_revision, 1);
+        Concurrency::set_active_runtime(None);
+        Concurrency::clear_http_shared_runtime();
+        assert_eq!(
+            receiver_runtime
+                .native_shared_interops
+                .get(&receiver_handle)
+                .expect("receiver should retain the physical root carrier")
+                .capture_with_revision()
+                .expect("physical owner should retain its authoritative payload"),
+            (
+                jet_foundation::MIR::MirRuntimeValue::Int(9),
+                latest_revision,
+            )
+        );
+    }
+
+    #[test]
+    fn nested_shared_transport_preserves_the_inner_physical_root() {
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x121;
+        let inner_shared_id = 0x122;
+        let outer_shared_id = 0x123;
+        let inner_descriptor = shared_int_descriptor(inner_shared_id, element_id);
+        let mut outer_descriptor = shared_int_descriptor(outer_shared_id, inner_shared_id);
+        outer_descriptor.name = "Shared<Shared<Int>>".to_string();
+        outer_descriptor.canonical = outer_descriptor.name.clone();
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            inner_descriptor,
+            outer_descriptor,
+        ]);
+
+        let initial = runtime.heap.int_from_i64(7);
+        let inner_handle = Memory::shared_alloc_for_persist(&mut runtime, initial, inner_shared_id)
+            .expect("inner Shared should retain its checked payload");
+        let outer_handle =
+            Memory::shared_alloc_for_persist(&mut runtime, inner_handle, outer_shared_id)
+                .expect("outer Shared should transport its nested physical root");
+        let outer_state =
+            Memory::shared_state(&runtime, outer_handle).expect("outer Shared should resolve");
+        let nested_root = Memory::shared_state_portable_value(&outer_state)
+            .expect("outer payload should have a portable Shared carrier");
+        let inner_interop = SourceSharedInterop::from_native_owned(&nested_root)
+            .expect("nested payload should retain its physical Shared root");
+        let original_inner = runtime
+            .native_shared_interops
+            .get(&inner_handle)
+            .expect("inner physical root should be registered during decode");
+        assert_eq!(inner_interop.identity(), original_inner.identity());
+
+        let shared_count = runtime.shareds.len();
+        let reencoded =
+            encode_native_shared_interop(&mut runtime, &inner_interop, inner_shared_id)
+                .expect("nested Shared should re-encode as its original physical root");
+        assert_eq!(reencoded, inner_handle);
+        assert_eq!(runtime.shareds.len(), shared_count);
+    }
+
+    #[test]
+    fn native_shared_first_export_keeps_payload_and_revision_with_locked_owner() {
+        struct ExpiredSourceSharedWeak;
+
+        impl SourceSharedInterop::SourceSharedInteropWeakOwner for ExpiredSourceSharedWeak {
+            fn upgrade(
+                &self,
+            ) -> Result<
+                Option<(
+                    SourceSharedInterop::SourceSharedInterop,
+                    Box<dyn SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
+                )>,
+                String,
+            > {
+                Ok(None)
+            }
+        }
+
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x301;
+        let shared_id = 0x302;
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+        let owner_marker = std::sync::Arc::new(0_u8);
+        let owner_identity = std::sync::Arc::as_ptr(&owner_marker) as usize;
+        let interop = SourceSharedInterop::SourceSharedInterop::from_value(
+            shared_id,
+            jet_foundation::MIR::MirRuntimeValue::Int(7),
+        )
+        .with_owner_identity(owner_identity)
+        .with_protocol_order_key(owner_identity)
+        .with_owner_lifecycle(|| Box::new(ExpiredSourceSharedWeak))
+        .with_owner_alias_lifecycle(|| Ok(1), || Ok(test_owner_alias_lease()));
+        let mut owner_guard = interop
+            .acquire_guard(true)
+            .expect("physical Source Shared guard should acquire");
+        owner_guard
+            .stage_value(jet_foundation::MIR::MirRuntimeValue::Int(9))
+            .expect("physical Source Shared guard should stage");
+
+        let handle = encode_native_shared_interop(&mut runtime, &interop, shared_id)
+            .expect("first export should allocate only an external root shell");
+        let repeated = encode_native_shared_interop(&mut runtime, &interop, shared_id)
+            .expect("re-export should reuse the same physical root");
+        assert_eq!(repeated, handle);
+        let shell = Memory::shared_state(&runtime, handle)
+            .expect("external Shared shell should be registered");
+        assert_eq!(Memory::shared_state_raw(&shell), None);
+        assert_eq!(Memory::shared_state_revision(&shell), None);
+
+        drop(owner_guard);
+        let (value, revision) = interop
+            .capture_with_revision()
+            .expect("the original owner should remain the source of truth");
+        assert_eq!(value, jet_foundation::MIR::MirRuntimeValue::Int(9));
+        assert_eq!(revision, 1);
+    }
+
+    #[test]
+    fn native_shared_external_reads_writes_and_guards_use_physical_owner() {
+        struct ExpiredSourceSharedWeak;
+
+        impl SourceSharedInterop::SourceSharedInteropWeakOwner for ExpiredSourceSharedWeak {
+            fn upgrade(
+                &self,
+            ) -> Result<
+                Option<(
+                    SourceSharedInterop::SourceSharedInterop,
+                    Box<dyn SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
+                )>,
+                String,
+            > {
+                Ok(None)
+            }
+        }
+
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x303;
+        let shared_id = 0x304;
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+        let owner_marker = std::sync::Arc::new(0_u8);
+        let owner_identity = std::sync::Arc::as_ptr(&owner_marker) as usize;
+        let interop = SourceSharedInterop::SourceSharedInterop::from_value(
+            shared_id,
+            jet_foundation::MIR::MirRuntimeValue::Int(7),
+        )
+        .with_owner_identity(owner_identity)
+        .with_protocol_order_key(owner_identity)
+        .with_owner_lifecycle(|| Box::new(ExpiredSourceSharedWeak))
+        .with_owner_alias_lifecycle(|| Ok(1), || Ok(test_owner_alias_lease()));
+        let handle = encode_native_shared_interop(&mut runtime, &interop, shared_id)
+            .expect("external root shell should register without cloning its value");
+
+        let runtime_ptr = &mut runtime as *mut JitRuntime;
+        Concurrency::set_active_runtime(Some(runtime_ptr));
+        let (initial_raw, initial_revision) = native_shared_capture(handle)
+            .expect("native Source Shared handle should be recognized")
+            .expect("physical owner capture should succeed");
+        assert_eq!(
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(initial_raw)),
+            Some(7)
+        );
+        assert_eq!(initial_revision, 0);
+
+        let replacement = Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(9));
+        native_shared_set_value(handle, replacement)
+            .expect("native Source Shared handle should be recognized")
+            .expect("write should commit through the physical owner");
+        let (guard_token, guarded_raw) = native_shared_guard_begin(handle, true)
+            .expect("native Source Shared handle should be recognized")
+            .expect("guard should lease the physical owner");
+        assert_eq!(
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(guarded_raw)),
+            Some(9)
+        );
+        let guarded_replacement =
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(11));
+        native_shared_guard_end(guard_token, handle, guarded_replacement, true)
+            .expect("native Source Shared guard should remain registered")
+            .expect("guarded write should commit through the physical owner");
+        let (final_raw, final_revision) = native_shared_capture(handle)
+            .expect("native Source Shared handle should still be recognized")
+            .expect("physical owner should publish the guarded write");
+        assert_eq!(
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(final_raw)),
+            Some(11)
+        );
+        Concurrency::set_active_runtime(None);
+        Concurrency::clear_http_shared_runtime();
+
+        let shell = Memory::shared_state(&runtime, handle)
+            .expect("external root shell should remain registered");
+        assert_eq!(Memory::shared_state_raw(&shell), None);
+        assert_eq!(Memory::shared_state_revision(&shell), None);
+        assert_eq!(final_revision, 2);
+        assert_eq!(
+            interop
+                .capture_with_revision()
+                .expect("physical owner should retain its authoritative value"),
+            (
+                jet_foundation::MIR::MirRuntimeValue::Int(11),
+                final_revision,
+            )
+        );
+    }
+
+    #[test]
+    fn native_shared_export_while_existing_guard_holds_reuses_live_root() {
+        let mut runtime: JitRuntime = fresh_runtime(ReleaseDevtoolsPolicy::default());
+        let element_id = 0x201;
+        let shared_id = 0x202;
+        runtime.install_type_descriptors([
+            int_descriptor(element_id),
+            shared_int_descriptor(shared_id, element_id),
+        ]);
+
+        let initial = runtime.heap.int_from_i64(7);
+        let handle = Memory::shared_alloc_for_persist(&mut runtime, initial, shared_id)
+            .expect("typed Shared allocation should retain its checked descriptor");
+        let descriptor = runtime
+            .runtime_type_descriptor(shared_id)
+            .cloned()
+            .expect("test Shared descriptor must be installed");
+        let shared = Memory::shared_state(&runtime, handle)
+            .expect("test Shared handle must resolve");
+        let permit = shared
+            .acquire_state_permit(true)
+            .expect("the first JIT owner should hold the canonical exclusive permit");
+
+        let interop = ensure_jit_shared_interop(&mut runtime, handle, &descriptor)
+            .expect("JIT Shared export should attach without reading the locked root")
+            .expect("Shared descriptor should produce a physical root");
+        let exported = encode_native_shared_interop(&mut runtime, &interop, shared_id)
+            .expect("the attached root should export while its owner guard is held");
+        assert_eq!(exported, handle);
+
+        let replacement = runtime.heap.int_from_i64(9);
+        Memory::shared_state_commit(&shared, replacement)
+            .expect("the original owner should commit under its permit");
+        let committed_revision = Memory::shared_state_revision(&shared)
+            .expect("resident Shared root should retain its physical revision");
+        drop(permit);
+
+        let runtime_ptr = &mut runtime as *mut JitRuntime;
+        Concurrency::set_active_runtime(Some(runtime_ptr));
+        let (captured_raw, captured_revision) = native_shared_capture(handle)
+            .expect("native Shared route should recognize the live handle")
+            .expect("native Shared capture should read the committed owner value");
+        let captured_value = Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(captured_raw));
+        Concurrency::set_active_runtime(None);
+        Concurrency::clear_http_shared_runtime();
+
+        assert_eq!(captured_value, Some(9));
+        assert_eq!(captured_revision, committed_revision);
+        assert_eq!(captured_revision, 1);
+        assert_eq!(
+            Memory::shared_state_revision(&shared),
+            Some(captured_revision),
+        );
     }
 }

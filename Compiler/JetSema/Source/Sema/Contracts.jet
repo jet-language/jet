@@ -52,7 +52,7 @@ fn sema_contract_line(environment: SemaScopeEnvironment, span: Span) -> Int {
 fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvironment) -> Bool {
     if fact.facts.effect_bound != None {
         row :: fact.facts.effect_bound ?? [EffectRowEntry]{}
-        for entry in row {
+        loop entry in row {
             if entry.name.starts_with("!") -> next
             return false
         }
@@ -111,7 +111,7 @@ fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, 
 }
 
 fn sema_contract_result_ident_in_call_args(args: [CallArg]) -> ?Span {
-    for argument in args {
+    loop argument in args {
         found :: sema_contract_result_ident_in_expr(argument.expr)
         if found != None -> return found
     }
@@ -138,14 +138,14 @@ fn sema_contract_result_ident_in_lvalue(value: LValue) -> ?Span {
 fn sema_contract_result_ident_in_pattern(value: Pattern) -> ?Span {
     if value == {
         .Or(alternatives, _) -> {
-            for alternative in alternatives {
+            loop alternative in alternatives {
                 found :: sema_contract_result_ident_in_pattern(alternative)
                 if found != None -> return found
             }
             return None
         }
         .Struct(fields, _, _) -> {
-            for field in fields {
+            loop field in fields {
                 if field == {.Value(_, _, expression) -> {
                     found :: sema_contract_result_ident_in_expr(expression)
                     if found != None -> return found
@@ -189,8 +189,8 @@ fn sema_contract_result_ident_in_binding(binding: Binding) -> ?Span {
     if found != None -> return found
     found = sema_contract_result_ident_in_bind_pattern(binding.pattern)
     if found != None -> return found
-    for marker in binding.markers {
-        for argument in marker.args {
+    loop marker in binding.markers {
+        loop argument in marker.args {
             if argument == {
                 .Expr(expression) -> {
                     found = sema_contract_result_ident_in_expr(expression)
@@ -202,7 +202,7 @@ fn sema_contract_result_ident_in_binding(binding: Binding) -> ?Span {
     }
     if binding.meta != None {
         meta :: binding.meta ?? MetaAttr{fields: [MetaField]{}, span: binding.name_span}
-        for field in meta.fields {
+        loop field in meta.fields {
             if field == {
                 .Category(expression, _) | .Maturity(expression, _) -> {
                     found = sema_contract_result_ident_in_expr(expression)
@@ -256,7 +256,7 @@ fn sema_contract_result_ident_in_stmt(value: Stmt) -> ?Span {
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
             found := sema_contract_result_ident_in_expr(subject)
             if found != None -> return found
-            for arm in arms {
+            loop arm in arms {
                 found = sema_contract_result_ident_in_expr(arm.cond)
                 if found != None -> return found
                 found = sema_contract_result_ident_in_statements(arm.body)
@@ -298,7 +298,7 @@ fn sema_contract_result_ident_in_stmt(value: Stmt) -> ?Span {
             return None
         }
         .ContextBlock(fields, body, _) -> {
-            for field in fields {
+            loop field in fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
@@ -310,7 +310,7 @@ fn sema_contract_result_ident_in_stmt(value: Stmt) -> ?Span {
             return sema_contract_result_ident_in_statements(body)
         }
         .ScopeMember(_, _, args, _, body, _, _, _) -> {
-            for argument in args {
+            loop argument in args {
                 found :: sema_contract_result_ident_in_expr(argument)
                 if found != None -> return found
             }
@@ -322,7 +322,7 @@ fn sema_contract_result_ident_in_stmt(value: Stmt) -> ?Span {
 }
 
 fn sema_contract_result_ident_in_statements(values: [Stmt]) -> ?Span {
-    for value in values {
+    loop value in values {
         found :: sema_contract_result_ident_in_stmt(value)
         if found != None -> return found
     }
@@ -333,7 +333,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
     if expr == {
         .Ident(name, span) -> if name == "result" -> Val(span) else -> None
         .Str(parts, _) -> {
-            for part in parts {
+            loop part in parts {
                 if part == {.Interp(value, _) -> {
                     found :: sema_contract_result_ident_in_expr(value)
                     if found != None -> return found
@@ -342,7 +342,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
             return None
         }
         .ListLit(elements, _) -> {
-            for value in elements {
+            loop value in elements {
                 found :: sema_contract_result_ident_in_expr(value)
                 if found != None -> return found
             }
@@ -350,7 +350,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
         }
         .MemberSpread(base, _, _) | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Place(base, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Paren(base, _) -> return sema_contract_result_ident_in_expr(base)
         .MapLit(entries, _) -> {
-            for entry in entries {
+            loop entry in entries {
                 found := sema_contract_result_ident_in_expr(entry.key)
                 if found != None -> return found
                 found = sema_contract_result_ident_in_expr(entry.value)
@@ -391,7 +391,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
             return sema_contract_result_ident_in_expr(right)
         }
         .CompareChain(operands, _, _, _) -> {
-            for operand in operands {
+            loop operand in operands {
                 found :: sema_contract_result_ident_in_expr(operand)
                 if found != None -> return found
             }
@@ -404,25 +404,25 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
             return sema_contract_result_ident_in_call_args(args)
         }
         .StructLit(_, _, _, _, fields, _, _) -> {
-            for field in fields {
+            loop field in fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
             return None
         }
         .TypedLit(_, body, _) -> {
-            for field in body.fields {
+            loop field in body.fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
-            for value in body.elements {
+            loop value in body.elements {
                 found :: sema_contract_result_ident_in_expr(value)
                 if found != None -> return found
             }
             return None
         }
         .EnumLit(_, _, _, args, _, _) -> {
-            for argument in args {
+            loop argument in args {
                 if argument == {
                     .Positional(value) -> {
                         found :: sema_contract_result_ident_in_expr(value)
@@ -464,7 +464,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> ?Span {
             return sema_contract_result_ident_in_expr(else_value)
         }
         .TupleLit(fields, _, _) -> {
-            for field in fields {
+            loop field in fields {
                 found :: sema_contract_result_ident_in_expr(field.value)
                 if found != None -> return found
             }
@@ -529,7 +529,7 @@ fn sema_contract_type_name(ty: Type) -> ?String {
 
 fn sema_contract_distinct_range(ty: Type, environment: SemaScopeEnvironment) -> ?TIntegerRange {
     name :: sema_contract_type_name(ty) ?? return None
-    for definition in environment.checked_types {
+    loop definition in environment.checked_types {
         qualified := "{definition.module_identity}::{definition.name}"
         if name == definition.name {
             if definition.module_identity != environment.module_identity -> next
@@ -618,7 +618,7 @@ pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironmen
     result := sema_contract_result_for_function(declared_return, func.name_span)
     complete := true
     post := [TContract]{}
-    for clause in func.pre {
+    loop clause in func.pre {
         condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", true, true, environment, scopes, state, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
         message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, scopes, state, &tail_store, &context, &diagnostics)
@@ -635,7 +635,7 @@ pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironmen
             complete = false
         } else {
             sema_ownership_declare_binding(&post_state, result_symbol, false)
-            for clause in func.post {
+            loop clause in func.post {
                 condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, post_scopes, post_state, &tail_store, &context, &diagnostics)
                 if condition == None -> complete = false
                 message :: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, post_scopes, post_state, &tail_store, &context, &diagnostics)
@@ -653,17 +653,17 @@ pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironmen
 fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_identity: String) -> ?Func {
     if item == {
         .Struct(value) -> {
-            for method in value.methods {
+            loop method in value.methods {
                 if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
             }
         }
         .Enum(value) -> {
-            for method in value.methods {
+            loop method in value.methods {
                 if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
             }
         }
         .Impl(value) -> {
-            for method in value.methods {
+            loop method in value.methods {
                 if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(method)
             }
         }
@@ -675,23 +675,23 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_i
 pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolId) -> ?Func {
     if environment.registration_graph != None {
         graph :: environment.registration_graph ?? return None
-        for module in graph.modules {
-            for function in module.functions {
+        loop module in graph.modules {
+            loop function in module.functions {
                 if function.symbol.id.key == target.key -> return Val(function.declaration)
             }
-            for nominal in module.nominals {
-                for method in nominal.methods {
+            loop nominal in module.nominals {
+                loop method in nominal.methods {
                     if method.symbol.id.key == target.key -> return Val(method.declaration)
                 }
             }
-            for implementation in module.impls {
-                for method in implementation.methods {
+            loop implementation in module.impls {
+                loop method in implementation.methods {
                     if method.symbol.id.key == target.key -> return Val(method.declaration)
                 }
             }
         }
     }
-    for declaration in environment.declarations {
+    loop declaration in environment.declarations {
         if declaration.symbol_id.key == target.key {
             if declaration.item == {.Func(value) -> return Val(value) else -> {}}
         }

@@ -22,12 +22,12 @@ fn cuda_f32_backend_runs_or_fails_closed_across_all_tiers() {
     let source = r#"
 use core.compute as compute
 
-fn cuda_loss(value: Tensor) Tensor -> {
+fn cuda_loss(value: Tensor) -> Tensor {
     rooted :: compute.sqrt(value) ?? panic("sqrt")
     return compute.sum_axis(rooted, 1) ?? panic("sum")
 }
 
-fn cuda_mse(value: Tensor, target: Tensor) Tensor -> compute.mse_loss(value, target) ?? panic("mse")
+fn cuda_mse(value: Tensor, target: Tensor) -> Tensor -> compute.mse_loss(value, target) ?? panic("mse")
 
 fn run() {
     seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")

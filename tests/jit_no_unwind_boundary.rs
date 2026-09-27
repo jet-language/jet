@@ -896,7 +896,7 @@ fn cancelled_interpreter_wait_inside_deopt_is_a_diagnostic_not_a_signal() {
         r#"use core.text as text
 use core.time as time
 
-fn slow_deopt() String {
+fn slow_deopt() -> String {
     time.sleep(200ms)
     return "{text.casefold("Straße")}"
 }

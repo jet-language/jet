@@ -9,9 +9,10 @@ fn parser_marker_expression(marker: Marker, index: Int) -> ?Expr {
 
 fn parser_marker_label(marker: Marker, index: Int) -> String {
     if index < 0 || index >= marker.arg_labels.len() -> return ""
-    label := marker.arg_labels[index]
+    label :: marker.arg_labels[index]
     if label == { .Val(value) -> value.name else -> "" }
 }
+
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool {
     parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT
 }
@@ -20,11 +21,10 @@ fn parser_fact_decl_ahead(state: &JetParserState) -> Bool {
     parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT
 }
 
-
 fn parser_parse_marker_decl(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "for a marker declaration name")
-    params := parser_marker_decl_params(&state)
+    params :: parser_marker_decl_params(&state)
     body := None
     end := parser_lookahead(&state, -1).span
     if parser_current_kind(&state) == TOKEN_LBRACE {
@@ -38,7 +38,7 @@ fn parser_parse_marker_decl(state: &JetParserState) -> Item {
 fn parser_parse_fact_decl(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "for a fact declaration name")
-    params := parser_marker_decl_params(&state)
+    params :: parser_marker_decl_params(&state)
     end := parser_lookahead(&state, -1).span
     if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
     Item.FactDecl(value: FactDecl{name: name.payload.decoded, name_span: name.span, params: params, span: parser_cover(start.span, end)})
@@ -64,7 +64,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
         }
         parser_expect(&state, TOKEN_COLON, "between a marker parameter name and its type or value")
         if marked {
-            value := parser_parse_expression(&state, 1, 0)
+            value :: parser_parse_expression(&state, 1, 0)
             params.push(MarkerDeclParam{name: name, name_span: name_span, ty: None, value: Val(value.expr), variadic: false})
         } else {
             variadic := false
@@ -72,7 +72,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
                 parser_bump(&state)
                 variadic = true
             }
-            parsed := parser_parse_type(&state, 0)
+            parsed :: parser_parse_type(&state, 0)
             default := None
             if parser_current_kind(&state) == TOKEN_LBRACE {
                 parser_bump(&state)
@@ -103,17 +103,17 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
             next
         }
         if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV {
-            modifiers := parser_parse_item_modifiers(&state)
+            modifiers :: parser_parse_item_modifiers(&state)
             body.push(DeriveBodyItem.Item(value: parser_marker_body_item(&state, modifiers)))
             next
         }
-        if parser_current_kind(&state) == TOKEN_KW_FN || parser_current_kind(&state) == TOKEN_KW_STRUCT || parser_current_kind(&state) == TOKEN_KW_ENUM || parser_current_kind(&state) == TOKEN_KW_IMPL || parser_current_kind(&state) == TOKEN_KW_TAG {
-            modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
-            body.push(DeriveBodyItem.Item(value: parser_marker_body_item(&state, modifiers)))
-        } else if parser_test_ahead(&state) {
-            body.push(DeriveBodyItem.Item(value: parser_parse_test(&state)))
-        } else {
-            body.push(DeriveBodyItem.Stmt(value: parser_parse_statement(&state)))
+        if {
+            parser_current_kind(&state) == TOKEN_KW_FN || parser_current_kind(&state) == TOKEN_KW_STRUCT || parser_current_kind(&state) == TOKEN_KW_ENUM || parser_current_kind(&state) == TOKEN_KW_IMPL || parser_current_kind(&state) == TOKEN_KW_TAG -> {
+                modifiers :: ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
+                body.push(DeriveBodyItem.Item(value: parser_marker_body_item(&state, modifiers)))
+            }
+            parser_test_ahead(&state) -> body.push(DeriveBodyItem.Item(value: parser_parse_test(&state)))
+            else -> body.push(DeriveBodyItem.Stmt(value: parser_parse_statement(&state)))
         }
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker body")
@@ -121,16 +121,20 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
 }
 
 fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
-    if parser_current_kind(&state) == TOKEN_KW_FN {
-        parsed :: parser_parse_function(&state, modifiers)
-        return Item.Func(value: parsed.value)
+    if parser_current_kind(&state) == {
+        TOKEN_KW_FN -> {
+            parsed :: parser_parse_function(&state, modifiers)
+            Item.Func(value: parsed.value)
+        }
+        TOKEN_KW_STRUCT -> Item.Struct(value: parser_parse_struct(&state, modifiers))
+        TOKEN_KW_ENUM -> Item.Enum(value: parser_parse_enum(&state, modifiers))
+        TOKEN_KW_IMPL -> Item.Impl(value: parser_parse_impl(&state))
+        TOKEN_KW_TAG -> Item.Tag(value: parser_parse_tag_decl(&state, modifiers))
+        else -> {
+            parser_add_error(&state, parser_current(&state).span, "expected an item in a marker body", "marker templates contain declarations or statements", "write a function, struct, enum, impl, or statement")
+            Item.Const(value: parser_parse_const(&state, modifiers))
+        }
     }
-    if parser_current_kind(&state) == TOKEN_KW_STRUCT -> return Item.Struct(value: parser_parse_struct(&state, modifiers))
-    if parser_current_kind(&state) == TOKEN_KW_ENUM -> return Item.Enum(value: parser_parse_enum(&state, modifiers))
-    if parser_current_kind(&state) == TOKEN_KW_IMPL -> return Item.Impl(value: parser_parse_impl(&state))
-    if parser_current_kind(&state) == TOKEN_KW_TAG -> return Item.Tag(value: parser_parse_tag_decl(&state, modifiers))
-    parser_add_error(&state, parser_current(&state).span, "expected an item in a marker body", "marker templates contain declarations or statements", "write a function, struct, enum, impl, or statement")
-    Item.Const(value: parser_parse_const(&state, modifiers))
 }
 
 fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
@@ -138,12 +142,11 @@ fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
     parser_expect(&state, TOKEN_KW_LOOP, "after `@` in a marker template loop")
     variable :: parser_expect_name(&state, "for a marker template loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a marker template loop binding and source")
-    source := parser_parse_expression(&state, 1, 0)
-    body := parser_marker_body(&state)
-    end := parser_lookahead(&state, -1).span
+    source :: parser_parse_expression(&state, 1, 0)
+    body :: parser_marker_body(&state)
+    end :: parser_lookahead(&state, -1).span
     DeriveBodyItem.Loop(var: variable.payload.decoded, var_span: variable.span, source: source.expr, body: body, span: parser_cover(start.span, end))
 }
-
 
 fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
     hash :: parser_expect(&state, TOKEN_HASH, "before a marker group")
@@ -151,7 +154,7 @@ fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
     markers := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
         negated := false
-        start := parser_current(&state).span
+        start :: parser_current(&state).span
         if parser_current_kind(&state) == TOKEN_BANG {
             parser_bump(&state)
             negated = true
@@ -161,12 +164,10 @@ fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
         labels := [?CallLabel]{}
         end := name.span
         if parser_current_kind(&state) == TOKEN_LPAREN {
-            parsed := parser_parse_call_args(&state, 1, true)
-            index := 0
-            loop index < parsed.len() {
-                args.push(MarkerCallArg.Expr(value: parsed[index].expr))
-                labels.push(parsed[index].label)
-                index += 1
+            parsed :: parser_parse_call_args(&state, 1, true)
+            loop arg in parsed {
+                args.push(MarkerCallArg.Expr(value: arg.expr))
+                labels.push(arg.label)
             }
             if state.position > 0 -> end = parser_lookahead(&state, -1).span
         }

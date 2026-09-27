@@ -1,4 +1,4 @@
-pub fn read(req: HTTPRequest) String -> {
+pub fn read(req: HTTPRequest) -> String {
     body :: req.body().text(1048576) ?? "fallback"
     smaller :: req.body().text(1024) ?? "fallback"
     exact :: 1024 * 1024
@@ -10,15 +10,15 @@ pub fn read(req: HTTPRequest) String -> {
     body
 }
 
-pub fn read_response(response: HTTPResponse) String -> {
+pub fn read_response(response: HTTPResponse) -> String {
     response.body().text(1048576) ?? "fallback"
 }
 
-pub fn read_binary(req: HTTPRequest) [U8] -> {
+pub fn read_binary(req: HTTPRequest) -> [U8] {
     req.body().bytes(1048576) ?? []
 }
 
-pub fn read_stream(req: HTTPRequest) HTTPBodyChunks -> {
+pub fn read_stream(req: HTTPRequest) -> HTTPBodyChunks {
     req.body().chunks(1024)
 }
 

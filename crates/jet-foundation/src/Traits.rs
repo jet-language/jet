@@ -552,7 +552,7 @@ impl TraitRegistry {
             .find(|(name, _, _)| name == "Error")
             .map_or_else(|| "Error".to_string(), |(_, _, ty)| ty.name());
         let check_expected = format!("`fn check(text: String) !{error_name} -[]>`");
-        let hole_expected = "`fn encode_hole<T: Printable>(value: T) String -[]>`";
+        let hole_expected = "`fn encode_hole<T: Printable>(value: T) -[]> String`";
         let Some(Type::String) = self.distinct_bases.get(type_name) else {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,

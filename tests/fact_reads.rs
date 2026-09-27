@@ -233,7 +233,7 @@ fn retired_origin_method_is_rejected_for_every_tracked_value_type() {
 #[test]
 fn retired_origin_method_preempts_root_dispatch() {
     let diags = diagnostics(
-        "fn origin(#Root value: Int) Int -> value\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n",
+        "fn origin(#Root value: Int) -> Int -> value\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n",
     );
     assert_eq!(
         diags.iter().filter(|diagnostic| diagnostic.code == "E0311").count(),
@@ -328,7 +328,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() -> String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));

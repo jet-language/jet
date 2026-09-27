@@ -16,21 +16,21 @@ use core.encoding.xml as xml
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn keep_error(v: ^encoding.EncodingError) encoding.EncodingError {{ return v }}
-fn keep_cause(v: ^encoding.EncodingCause) encoding.EncodingCause {{ return v }}
-fn keep_event(v: ^encoding.DataEvent) encoding.DataEvent {{ return v }}
-fn keep_format(v: ^encoding.EncodingFormat) encoding.EncodingFormat {{ return v }}
-fn keep_kind(v: ^encoding.EncodingErrorKind) encoding.EncodingErrorKind {{ return v }}
-fn keep_json_reader(v: ^json.JSONReader) json.JSONReader {{ return v }}
-fn keep_json_writer(v: ^json.JSONWriter) json.JSONWriter {{ return v }}
-fn keep_jsonl_reader(v: ^jsonl.JSONLReader) jsonl.JSONLReader {{ return v }}
-fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) jsonl.JSONLWriter {{ return v }}
-fn keep_csv_reader(v: ^csv.CSVReader) csv.CSVReader {{ return v }}
-fn keep_csv_writer(v: ^csv.CSVWriter) csv.CSVWriter {{ return v }}
-fn keep_xml_reader(v: ^xml.XMLReader) xml.XMLReader {{ return v }}
-fn keep_xml_writer(v: ^xml.XMLWriter) xml.XMLWriter {{ return v }}
-fn keep_cbor_reader(v: ^cbor.CBORReader) cbor.CBORReader {{ return v }}
-fn keep_cbor_writer(v: ^cbor.CBORWriter) cbor.CBORWriter {{ return v }}
+fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError {{ return v }}
+fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause {{ return v }}
+fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent {{ return v }}
+fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat {{ return v }}
+fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind {{ return v }}
+fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader {{ return v }}
+fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter {{ return v }}
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader {{ return v }}
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter {{ return v }}
+fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader {{ return v }}
+fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter {{ return v }}
+fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader {{ return v }}
+fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter {{ return v }}
+fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
+fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
 
 fn run() {{
     limits := encoding.EncodingLimits.safe()
@@ -1316,7 +1316,7 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) DataTree {{
+fn xml_name(local: String) -> DataTree {{
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -1325,7 +1325,7 @@ fn xml_name(local: String) DataTree {{
     ])
 }}
 
-fn document_start() DataTree {{
+fn document_start() -> DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("document_start"),
         "encoding": DataTree.Null,
@@ -1333,11 +1333,11 @@ fn document_start() DataTree {{
     ])
 }}
 
-fn document_end() DataTree {{
+fn document_end() -> DataTree {{
     return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
 }}
 
-fn element_start(empty_style: String) DataTree {{
+fn element_start(empty_style: String) -> DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("element_start"),
         "name": xml_name("r"),
@@ -1545,7 +1545,7 @@ use core.encoding.csv as csv
 #Codable
 struct Note { name: String, note: String }
 
-fn csv_error_contains(input: String, needle: String) Bool -> {
+fn csv_error_contains(input: String, needle: String) -> Bool {
     _rows :: csv.parse(input) ?? {
         return err.contains(needle)
     }
@@ -1939,7 +1939,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     repeated :: reader.next()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -1948,7 +1948,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2169,7 +2169,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
+fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.finish()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2230,7 +2230,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     repeated :: reader.next()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2239,7 +2239,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2530,7 +2530,7 @@ fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
     let source = r#"
 use core.encoding.cbor as cbor
 
-fn wire(values: [Int]) [U8] {
+fn wire(values: [Int]) -> [U8] {
     bytes := [U8]{}
     loop value in values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
@@ -2538,7 +2538,7 @@ fn wire(values: [Int]) [U8] {
     return bytes
 }
 
-fn accepted(values: [Int]) Bool {
+fn accepted(values: [Int]) -> Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return true
         .Err(_) -> return false
@@ -2546,7 +2546,7 @@ fn accepted(values: [Int]) Bool {
     return false
 }
 
-fn rejected(values: [Int], offset: Int, path: String, reason: String) Bool {
+fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return false
         .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
@@ -2554,7 +2554,7 @@ fn rejected(values: [Int], offset: Int, path: String, reason: String) Bool {
     return false
 }
 
-fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) Bool {
+fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     strict := cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,

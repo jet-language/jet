@@ -3352,7 +3352,7 @@ impl BuildError -> BuildRightError { return BuildRightError.One }
 impl BuildLeftError -> BuildTargetError { return BuildTargetError.One }
 impl BuildRightError -> BuildTargetError { return BuildTargetError.One }
 
-fn build(b: BuildContext) BuildPlan !BuildTargetError -> {
+fn build(b: BuildContext) -> BuildPlan !BuildTargetError {
     first :: b.add_library("app", ["main.jet"], [])
     return b.plan(first)
 }

@@ -340,8 +340,8 @@ pub fn sema_call_resolve_method(receiver_type: Type, method: String, args: [Call
     None
 }
 fn sema_call_trait_nominal_for_bound(graph: SemaRegistrationGraph, bound: String) -> ?SemaRegistrationNominal {
-    for graph_module in graph.modules {
-        for nominal in graph_module.nominals {
+    loop graph_module in graph.modules {
+        loop nominal in graph_module.nominals {
             if nominal.kind != SemaRegistrationNominalKind.Trait -> next
             canonical := "{nominal.symbol.module_name}::{nominal.symbol.name}"
             if bound == canonical -> return Val(nominal)
@@ -350,8 +350,8 @@ fn sema_call_trait_nominal_for_bound(graph: SemaRegistrationGraph, bound: String
     None
 }
 fn sema_call_trait_nominal_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolId) -> ?SemaRegistrationNominal {
-    for graph_module in graph.modules {
-        for nominal in graph_module.nominals {
+    loop graph_module in graph.modules {
+        loop nominal in graph_module.nominals {
             if nominal.kind == SemaRegistrationNominalKind.Trait && nominal.symbol.id.key == symbol.key -> return Val(nominal)
         }
     }
@@ -369,7 +369,7 @@ fn sema_call_generic_receiver_name(ty: Type) -> ?String {
 fn sema_call_trait_visible(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: String, caller_package: String) -> Bool {
     if nominal.symbol.module_name == caller_module -> return true
     owner_package := ""
-    for graph_module in graph.modules {
+    loop graph_module in graph.modules {
         if graph_module.module_identity == nominal.symbol.module_name {
             owner_package = graph_module.package_identity
             break
@@ -418,10 +418,10 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
     trait_nominals := [SemaRegistrationNominal]{}
     if resolved_receiver == {
         .TraitObject(bounds) -> {
-            for bound in bounds {
+            loop bound in bounds {
                 nominal :: sema_call_trait_nominal_for_bound(graph, bound) ?? next
                 duplicate := false
-                for existing in trait_nominals {
+                loop existing in trait_nominals {
                     if existing.symbol.id.key == nominal.symbol.id.key -> duplicate = true
                 }
                 if !duplicate -> trait_nominals.push(nominal)
@@ -440,10 +440,10 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
                 }
             }
             current :: parameter ?? return [SemaCallMethodCandidate]{}
-            for bound in current.bounds {
+            loop bound in current.bounds {
                 nominal :: sema_call_trait_nominal_for_symbol(graph, bound) ?? next
                 duplicate := false
-                for existing in trait_nominals {
+                loop existing in trait_nominals {
                     if existing.symbol.id.key == nominal.symbol.id.key -> duplicate = true
                 }
                 if !duplicate -> trait_nominals.push(nominal)
@@ -451,13 +451,13 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
         }
     }
     candidates := [SemaCallMethodCandidate]{}
-    for nominal in trait_nominals {
+    loop nominal in trait_nominals {
         if !sema_call_trait_visible(graph, nominal, caller_module, caller_package) -> next
-        for trait_method in nominal.trait_methods {
+        loop trait_method in nominal.trait_methods {
             if trait_method.declaration.name != method -> next
             candidate :: sema_call_trait_method_candidate_from_registration(graph, nominal, trait_method, resolved_receiver, type_args, caller_module, generic_params, span, &diagnostics) ?? next
             duplicate := false
-            for existing in candidates {
+            loop existing in candidates {
                 if existing.method.symbol.key == candidate.method.symbol.key -> duplicate = true
             }
             if !duplicate -> candidates.push(candidate)

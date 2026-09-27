@@ -1,8 +1,8 @@
 Error [E2417]: Explicit failure domain ``ExpectedLambdaError`` is not an Error type
   --> tests/ui/lambda_interface_error_mismatch.jet:9:13
     |
-  9 | fn apply(f: fn(Int) Int !ExpectedLambdaError) Int -> f(1) ?? 0
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  9 | fn apply(f: fn(Int) -> Int !ExpectedLambdaError) -> Int { f(1) ?? 0 }
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417

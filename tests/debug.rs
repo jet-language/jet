@@ -96,7 +96,7 @@ fn run() {
 ";
 
 const CALLS: &str = "\
-fn double(x: Int) Int {
+fn double(x: Int) -> Int {
     y := x * 2
     return y
 }

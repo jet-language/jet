@@ -4,7 +4,7 @@ pub struct ParseError {
     pub message: String
 }
 
-pub fn parse_error_message(error: ParseError) String !Never -> error.message
+pub fn parse_error_message(error: ParseError) -> String !Never { error.message }
 
 
 pub struct Dependency {
@@ -25,7 +25,7 @@ pub struct Manifest {
     pub packages: [PackageTarget]
 }
 
-fn safe_name(name: String) Bool !ParseError -> {
+fn safe_name(name: String) -> Bool !ParseError {
     if name == "" || !name.is_ascii() {
         return Ok(false)
     }
@@ -44,7 +44,7 @@ fn safe_name(name: String) Bool !ParseError -> {
     return Ok(true)
 }
 
-fn scalar(raw: String, field: String) String !ParseError -> {
+fn scalar(raw: String, field: String) -> String !ParseError {
     value := ~raw.trim()
     if value.ends_with(",") {
         value = ~value.remove_suffix(",").trim()
@@ -69,7 +69,7 @@ fn scalar(raw: String, field: String) String !ParseError -> {
     return Ok(value)
 }
 
-fn field_value(line: String, field: String) String !ParseError -> {
+fn field_value(line: String, field: String) -> String !ParseError {
     pair :: line.split_once(":") ?? return Err(ParseError{message: "manifest field {field}: expected ':'"})
     before :: ~pair.before.trim()
     if before != field {
@@ -78,7 +78,7 @@ fn field_value(line: String, field: String) String !ParseError -> {
     return scalar(~pair.after, field)
 }
 
-fn parse_dependency(line: String) Dependency !ParseError -> {
+fn parse_dependency(line: String) -> Dependency !ParseError {
     entry := ~line.trim()
     if entry.ends_with(",") {
         entry = ~entry.remove_suffix(",").trim()
@@ -93,11 +93,11 @@ fn parse_dependency(line: String) Dependency !ParseError -> {
     return Ok(Dependency{name: name, reference: parsed.raw})
 }
 
-fn valid_kind(kind: String) Bool !ParseError -> {
+fn valid_kind(kind: String) -> Bool !ParseError {
     return Ok(kind == "library" || kind == "executable" || kind == "test" || kind == "example" || kind == "benchmark")
 }
 
-fn kind_prefix(raw: String) String !ParseError -> {
+fn kind_prefix(raw: String) -> String !ParseError {
     value :: ~raw.trim()
     if value == "executable{{" || value == "executable {{" || value == "Executable{{" || value == "Executable {{" {
         return Ok("executable")
@@ -118,7 +118,7 @@ fn kind_prefix(raw: String) String !ParseError -> {
 }
 
 
-fn duplicate_dependency(deps: [Dependency], name: String) Bool !ParseError -> {
+fn duplicate_dependency(deps: [Dependency], name: String) -> Bool !ParseError {
     loop dep in deps {
         if dep.name == name {
             return Ok(true)
@@ -127,7 +127,7 @@ fn duplicate_dependency(deps: [Dependency], name: String) Bool !ParseError -> {
     return Ok(false)
 }
 
-fn duplicate_package(packages: [PackageTarget], name: String) Bool !ParseError -> {
+fn duplicate_package(packages: [PackageTarget], name: String) -> Bool !ParseError {
     loop item in packages {
         if item.name == name {
             return Ok(true)
@@ -136,7 +136,7 @@ fn duplicate_package(packages: [PackageTarget], name: String) Bool !ParseError -
     return Ok(false)
 }
 
-pub fn parse_manifest(text: String) Manifest !ParseError -> {
+pub fn parse_manifest(text: String) -> Manifest !ParseError {
     name := ""
     version := ""
     deps := [Dependency]{}

@@ -81,7 +81,7 @@ fn init_project(project: &Path) {
     .unwrap();
     fs::write(
         project.join("run.jet"),
-        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hello\"); }\n",
+        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hello\") }\n",
     )
     .unwrap();
     git(project, &["init", "-b", "main"]);

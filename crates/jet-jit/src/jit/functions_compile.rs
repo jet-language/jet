@@ -6,20 +6,22 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, FuncOrDataId, Linkage, Module};
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirArtifactId, MirArtifactPlan, MirArtifactTarget, MirBasicBlock,
+    MirAbi, MirAccess, MirArtifactId, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirModuleId,
     MirBinaryOp, MirCallArg, MirCallee, MirCaptureOperand, MirConstKey, MirConstReport,
     MirConstant, MirCoreClosureKind, MirDropKind, MirFailureCarrier, MirFieldId, MirFieldRow,
-    MirFunction, MirFunctionForm, MirFunctionId, MirGcEditKind, MirInstruction, MirOperation,
-    MirInternalTag, MirOwnershipMode, MirPanicContext, MirPanicLoc, MirPlace, MirPlaceBase,
-    MirPlaceId, MirPreludeTypeArg, MirProgram, MirRequireKind, MirScalarKind, MirSemanticOp,
-    MirStringPart, MirTagMarker, MirTerminator, MirType, MirTypeDefKind, MirTypeId, MirTypeKind,
-    MirUnaryOp, MirUnionCoercion, MirValueId,
+    MirForeignId, MirFunction, MirFunctionForm, MirFunctionId, MirGcEditKind, MirInstruction,
+    MirInternalTag, MirLinkUnitId, MirOperation, MirOwnershipMode, MirPanicContext, MirPanicLoc,
+    MirPlace, MirPlaceBase, MirPlaceId, MirPreludeTypeArg, MirProgram, MirRequireKind,
+    MirScalarKind, MirSemanticOp, MirStringPart, MirTagMarker, MirTerminator,
+    MirTraitMethodId, MirTraitRef, MirType, MirTypeDefKind, MirTypeId, MirTypeKind, MirUnaryOp,
+    MirUnionCoercion, MirValueId,
 };
 use jet_rt::{
     RECORD_FIELD_ADDRESS_BOOL, RECORD_FIELD_ADDRESS_CHAR, RECORD_FIELD_ADDRESS_F64,
     RECORD_FIELD_ADDRESS_I64,
 };
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::borrow::Cow;
 
 use super::runtime_host::{HostFns, JitRuntime};
 use super::types_meta::{clif_ty_from_mir, mir_fn_name, prelude_enum_variant_index, JitMeta};
@@ -427,7 +429,7 @@ fn copy_needs_typed_clone(ty: &MirType) -> bool {
             !matches!(name.name.as_str(), "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
                 && !jet_foundation::Syntax::is_simd_lane_type(&name.name)
         }
-        MirTypeKind::Shared(_) => false,
+        MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => true,
         MirTypeKind::List(inner)
         | MirTypeKind::FixedList { elem: inner, .. }
         | MirTypeKind::Tagged { inner, .. }
@@ -445,8 +447,37 @@ fn copy_needs_typed_clone(ty: &MirType) -> bool {
             .any(|(_, field)| copy_needs_typed_clone(field)),
         MirTypeKind::Union(variants) => variants.iter().any(copy_needs_typed_clone),
         _ => false,
+}
+
+#[derive(Clone, Copy)]
+enum SharedOwnerValueKind {
+    Strong,
+    Weak,
+    Snapshot,
+}
+
+fn shared_owner_value_kind(ty: &MirType) -> Option<(SharedOwnerValueKind, &MirType)> {
+    match ty.kind() {
+        MirTypeKind::Shared(inner) => Some((SharedOwnerValueKind::Strong, inner)),
+        MirTypeKind::Apply { name, args }
+            if name.name == jet_foundation::Syntax::TYPE_SHARED_WEAK && args.len() == 1 =>
+        {
+            Some((SharedOwnerValueKind::Weak, &args[0]))
+        }
+        MirTypeKind::Apply { name, args }
+            if name.name == jet_foundation::Syntax::TYPE_SHARED_SNAPSHOT && args.len() == 2 =>
+        {
+            Some((SharedOwnerValueKind::Snapshot, &args[0]))
+        }
+        MirTypeKind::Tagged { inner, .. } => shared_owner_value_kind(inner),
+        _ => None,
     }
 }
+
+fn is_shared_owner_value(ty: &MirType) -> bool {
+    shared_owner_value_kind(ty).is_some()
+}
+
 
 fn comparison_map_parts(ty: &MirType) -> Option<(&MirType, &MirType)> {
     match ty.kind() {
@@ -845,6 +876,8 @@ struct FunctionLower<'a, 'm> {
     block_phis: HashMap<jet_foundation::MIR::MirBlockId, Vec<(MirValueId, types::Type)>>,
     values: HashMap<MirValueId, Value>,
     places: HashMap<SlotKey, ir::StackSlot>,
+    pending_argument_drops: Vec<(MirType, Value, MirDropKind)>,
+    pending_capture_writebacks: Vec<(usize, u64)>,
     write_parameters: Vec<(MirValueId, Value, types::Type)>,
     capture_env: Option<Value>,
     function_ids: &'a HashMap<MirFunctionId, FuncId>,
@@ -956,24 +989,16 @@ enum PatternCaptureKind {
     Bytes,
 }
 
-fn cranelift_artifact<'a>(
+fn validated_artifact<'a>(
     program: &'a MirProgram,
     artifact_id: MirArtifactId,
+    require_cranelift_links: bool,
 ) -> Result<&'a MirArtifactPlan, String> {
     let artifact = program
         .artifacts
         .iter()
         .find(|artifact| artifact.id == artifact_id)
         .ok_or_else(|| format!("MIR artifact {:?} is missing", artifact_id))?;
-    match artifact.target {
-        MirArtifactTarget::Cranelift => {}
-        MirArtifactTarget::RustAot | MirArtifactTarget::Interpreter | MirArtifactTarget::Web => {
-            return Err(format!(
-                "MIR artifact {:?} targets {:?}, not Cranelift",
-                artifact.id, artifact.target
-            ));
-        }
-    }
     for module_id in &artifact.modules {
         if !program.modules.iter().any(|module| module.id == *module_id) {
             return Err(format!(
@@ -993,7 +1018,7 @@ fn cranelift_artifact<'a>(
                     artifact.id, link_id
                 )
             })?;
-        if !link.target_applicability.cranelift {
+        if require_cranelift_links && !link.target_applicability.cranelift {
             return Err(format!(
                 "MIR artifact {:?} references link {:?} unavailable to Cranelift",
                 artifact.id, link_id
@@ -1019,6 +1044,38 @@ fn cranelift_artifact<'a>(
                 artifact.id, harness_id
             ));
         }
+    }
+    Ok(artifact)
+}
+
+fn cranelift_artifact<'a>(
+    program: &'a MirProgram,
+    artifact_id: MirArtifactId,
+) -> Result<&'a MirArtifactPlan, String> {
+    let artifact = validated_artifact(program, artifact_id, true)?;
+    if artifact.target != MirArtifactTarget::Cranelift {
+        return Err(format!(
+            "MIR artifact {:?} targets {:?}, not Cranelift",
+            artifact.id, artifact.target
+        ));
+    }
+    Ok(artifact)
+}
+
+/// Private Source helper execution uses the checked artifact image as-is. A
+/// canonical compiler image is commonly labelled RustAot even though its
+/// per-function target facts include Cranelift-compatible helpers; selecting a
+/// helper must not retarget or mutate that artifact.
+fn source_helper_artifact<'a>(
+    program: &'a MirProgram,
+    artifact_id: MirArtifactId,
+) -> Result<&'a MirArtifactPlan, String> {
+    let artifact = validated_artifact(program, artifact_id, false)?;
+    if !source_helper_target_supported(artifact.target) {
+        return Err(format!(
+            "MIR artifact {:?} targets {:?}, which is not executable by the Source helper native tier",
+            artifact.id, artifact.target
+        ));
     }
     Ok(artifact)
 }
@@ -1104,6 +1161,164 @@ fn direct_function_call(operation: &MirOperation) -> Option<MirFunctionId> {
     }
 }
 
+fn closure_is_managed_callback(
+    program: &MirProgram,
+    caller: &MirFunction,
+    result: Option<MirValueId>,
+) -> bool {
+    result.is_some_and(|result| {
+        caller
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .any(|candidate| {
+                let MirOperation::Semantic(MirSemanticOp::CCallback {
+                    callback,
+                    lambda,
+                    ..
+                }) = &candidate.operation
+                else {
+                    return false;
+                };
+                *lambda == result
+                    && program
+                        .callbacks
+                        .iter()
+                        .any(|row| row.id == *callback && row.managed)
+            })
+    })
+}
+
+pub(crate) fn closure_capture_ownership(
+    program: &MirProgram,
+) -> Result<HashMap<MirFunctionId, Vec<bool>>, String> {
+    let mut ownership_by_target = HashMap::new();
+    for caller in &program.functions {
+        for instruction in caller
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let MirOperation::Closure {
+                function,
+                captures,
+                ..
+            } = &instruction.operation
+            else {
+                continue;
+            };
+            let target = program
+                .functions
+                .iter()
+                .find(|candidate| candidate.id == *function)
+                .ok_or_else(|| format!("MIR closure function {:?} is missing", function))?;
+            if target.capture_params.len() != captures.len() {
+                return Err(format!(
+                    "MIR closure {:?} has {} captures but its target declares {} capture slots",
+                    function,
+                    captures.len(),
+                    target.capture_params.len()
+                ));
+            }
+            let owned_callback =
+                closure_is_managed_callback(program, caller, instruction.result);
+            let capture_owned = captures
+                .iter()
+                .map(|capture| match capture {
+                    MirCaptureOperand::Value(_) => true,
+                    MirCaptureOperand::Place(_) => owned_callback,
+                })
+                .collect::<Vec<_>>();
+            if let Some(existing) = ownership_by_target.get(function) {
+                if existing != &capture_owned {
+                    return Err(format!(
+                        "MIR closure {:?} has conflicting capture ownership layouts",
+                        function
+                    ));
+                }
+            } else {
+                ownership_by_target.insert(*function, capture_owned);
+            }
+        }
+    }
+    Ok(ownership_by_target)
+}
+/// Register only functions whose code has been finalized in `module`. The
+/// caller chooses the selected function set; MIR capture ownership and
+/// execution identity are always derived from the checked source artifact.
+pub(crate) fn register_finalized_jit_closure_targets(
+    module: &JITModule,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    functions: impl IntoIterator<Item = MirFunctionId>,
+    runtime: &mut JitRuntime,
+) -> Result<(), String> {
+    let execution = program
+        .execution_identity(Some(artifact))
+        .map_err(|error| error.to_string())?;
+    runtime.set_jit_closure_execution_identity(execution.clone());
+    let capture_ownership = closure_capture_ownership(program)?;
+    for function in functions {
+        let Some(function_row) = program.functions.iter().find(|row| row.id == function) else {
+            return Err(format!("MIR closure function {:?} is missing", function));
+        };
+        let Some(FuncOrDataId::Func(function_id)) =
+            module.get_name(&mir_fn_name(function))
+        else {
+            return Err(format!(
+                "MIR closure function {:?} has no finalized definition",
+                function
+            ));
+        };
+        let pointer = module.get_finalized_function(function_id);
+        if pointer.is_null() {
+            return Err(format!(
+                "MIR closure function {:?} has no finalized function address",
+                function
+            ));
+        }
+        let capture_type_ids = function_row
+            .capture_params
+            .iter()
+            .map(|parameter| {
+                super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
+                    format!(
+                        "MIR closure {:?} capture has no runtime type identity",
+                        function
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let capture_owned = capture_ownership
+            .get(&function)
+            .cloned()
+            .or_else(|| function_row.capture_params.is_empty().then(Vec::new))
+            .ok_or_else(|| {
+                format!(
+                    "MIR closure {:?} has captures but no checked ownership layout",
+                    function
+                )
+            })?;
+        if capture_owned.len() != capture_type_ids.len() {
+            return Err(format!(
+                "MIR closure {:?} capture ownership layout has {} slots but its target has {}",
+                function,
+                capture_owned.len(),
+                capture_type_ids.len()
+            ));
+        }
+        runtime.install_jit_closure_target(
+            function,
+            execution.clone(),
+            pointer as i64,
+            capture_type_ids,
+            capture_owned,
+        );
+    }
+    Ok(())
+}
+
+
 fn artifact_function_ids(
     program: &MirProgram,
     artifact: &MirArtifactPlan,
@@ -1180,6 +1395,311 @@ fn artifact_function_ids(
     iterable_hook_function_ids(program, &mut ids)?;
     Ok(ids)
 }
+
+/// Select the native closure rooted at private Source helper functions.
+///
+/// Private helper execution must not force compilation of the public artifact
+/// entry: the entry may be Source-only while the selected helper is a valid
+/// native function. Non-native siblings remain in the checked root list for
+/// Source dispatch, but are intentionally absent from this Cranelift set.
+fn private_helper_function_ids(
+    program: &MirProgram,
+    helper_roots: &[MirFunctionId],
+) -> Result<BTreeSet<MirFunctionId>, String> {
+    let mut selected_ids = helper_roots
+        .iter()
+        .copied()
+        .filter(|function_id| {
+            program
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .is_some_and(|function| function.target_applicability.cranelift)
+        })
+        .collect::<BTreeSet<_>>();
+    let mut pending = selected_ids.iter().copied().collect::<VecDeque<_>>();
+    while let Some(function_id) = pending.pop() {
+        let function = program
+            .functions
+            .iter()
+            .find(|candidate| candidate.id == function_id)
+            .ok_or_else(|| format!("MIR function {:?} is missing", function_id))?;
+        for instruction in function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let Some(callee) = direct_function_call(&instruction.operation) else {
+                continue;
+            };
+            let callee_function = program
+                .functions
+                .iter()
+                .find(|candidate| candidate.id == callee)
+                .ok_or_else(|| format!("MIR function {:?} is missing", callee))?;
+            if !callee_function.target_applicability.cranelift {
+                return Err(format!(
+                    "native Source helper {:?} directly calls non-Cranelift function {:?}",
+                    function_id, callee
+                ));
+            }
+            if selected_ids.insert(callee) {
+                pending.push(callee);
+            }
+        }
+    }
+    hardware_handler_function_ids(program, &mut selected_ids)?;
+    protocol_render_function_ids(program, &mut selected_ids);
+    json_decode_function_ids(program, &mut selected_ids)?;
+    iterable_hook_function_ids(program, &mut selected_ids)?;
+    Ok(selected_ids)
+}
+
+pub(crate) struct SourceHelperCompileClosure {
+    pub(crate) functions: BTreeSet<MirFunctionId>,
+    pub(crate) foreigns: BTreeSet<MirForeignId>,
+    pub(crate) links: BTreeSet<MirLinkUnitId>,
+    pub(crate) needs_data_provider: bool,
+}
+
+fn module_requires_data_provider(module_name: &str) -> bool {
+    matches!(
+        module_name,
+        "core.data"
+            | "core.data.sketch.hll"
+            | "core.data.sketch.tdigest"
+            | "core.data.sketch.cms"
+            | "core.data.sketch.reservoir"
+            | "core.db"
+            | "core.encoding.csv"
+    )
+}
+
+fn source_helper_data_provider_required<'a>(
+    reachable_modules: &BTreeSet<MirModuleId>,
+    modules: impl IntoIterator<Item = (MirModuleId, &'a str)>,
+) -> Result<bool, String> {
+    let mut resolved = BTreeSet::new();
+    let mut needs_provider = false;
+    for (module_id, module_name) in modules {
+        if !reachable_modules.contains(&module_id) {
+            continue;
+        }
+        if !resolved.insert(module_id) {
+            return Err(format!(
+                "native Source helper module {:?} resolves to multiple module rows",
+                module_id
+            ));
+        }
+        needs_provider |= module_requires_data_provider(module_name.as_ref());
+    }
+    if let Some(missing) = reachable_modules.difference(&resolved).next() {
+        return Err(format!(
+            "native Source helper module {:?} is missing",
+            missing
+        ));
+    }
+    Ok(needs_provider)
+}
+
+fn validate_source_helper_links<'a>(
+    artifact_id: MirArtifactId,
+    artifact_links: &[MirLinkUnitId],
+    roots: impl IntoIterator<Item = MirLinkUnitId>,
+    mut resolve_link: impl FnMut(
+        MirLinkUnitId,
+    ) -> Result<Option<(bool, &'a [MirLinkUnitId])>, String>,
+) -> Result<BTreeSet<MirLinkUnitId>, String> {
+    let mut selected = BTreeSet::new();
+    let mut pending = roots.into_iter().collect::<VecDeque<_>>();
+    while let Some(link_id) = pending.pop_front() {
+        if !selected.insert(link_id) {
+            continue;
+        }
+        if !artifact_links.contains(&link_id) {
+            return Err(format!(
+                "native Source helper reaches link {:?} outside artifact {:?}",
+                link_id, artifact_id
+            ));
+        }
+        let (cranelift, link_closure) = resolve_link(link_id)?
+            .ok_or_else(|| format!("native Source helper link {:?} is missing", link_id))?;
+        if !cranelift {
+            return Err(format!(
+                "native Source helper reaches link {:?} unavailable to Cranelift",
+                link_id
+            ));
+        }
+        pending.extend(link_closure.iter().copied());
+    }
+    Ok(selected)
+}
+
+fn source_helper_foreign_link_authority(
+    function: MirFunctionId,
+    foreign: MirForeignId,
+    cranelift: bool,
+    in_artifact_module: bool,
+    foreign_link: Option<MirLinkUnitId>,
+    artifact_id: MirArtifactId,
+    artifact_links: &[MirLinkUnitId],
+) -> Result<Option<MirLinkUnitId>, String> {
+    if !cranelift {
+        return Err(format!(
+            "native Source helper {:?} reaches foreign function {:?} unavailable to Cranelift",
+            function, foreign
+        ));
+    }
+    if !in_artifact_module
+        && foreign_link.is_none_or(|link| !artifact_links.contains(&link))
+    {
+        return Err(format!(
+            "native Source helper {:?} reaches foreign function {:?} outside artifact {:?}",
+            function, foreign, artifact_id
+        ));
+    }
+    Ok(foreign_link)
+}
+
+fn direct_foreign_call(operation: &MirOperation) -> Option<MirForeignId> {
+    match operation {
+        MirOperation::Call {
+            callee: MirCallee::Foreign(foreign),
+            ..
+        } => Some(*foreign),
+        _ => None,
+    }
+}
+pub(crate) fn source_helper_compile_closure(
+    program: &MirProgram,
+    artifact_id: MirArtifactId,
+    helper_roots: &[MirFunctionId],
+) -> Result<SourceHelperCompileClosure, String> {
+    let artifact = source_helper_artifact(program, artifact_id)?;
+    let functions = private_helper_function_ids(program, helper_roots)?;
+    for function_id in &functions {
+        let mut matches = program
+            .functions
+            .iter()
+            .filter(|function| function.id == *function_id);
+        let function = matches
+            .next()
+            .ok_or_else(|| format!("MIR function {:?} is missing", function_id))?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "MIR function {:?} resolves to multiple function rows",
+                function_id
+            ));
+        }
+        if !artifact.modules.contains(&function.module_id) {
+            return Err(format!(
+                "native Source helper function {:?} is outside artifact {:?}",
+                function_id, artifact_id
+            ));
+        }
+        if !function.target_applicability.cranelift {
+            return Err(format!(
+                "native Source helper function {:?} is not applicable to Cranelift",
+                function_id
+            ));
+        }
+    }
+
+    let mut foreigns = BTreeSet::new();
+    let mut link_roots = BTreeSet::new();
+    for function in program
+        .functions
+        .iter()
+        .filter(|function| functions.contains(&function.id))
+    {
+        for instruction in function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let Some(foreign_id) = direct_foreign_call(&instruction.operation) else {
+                continue;
+            };
+            let mut matches = program
+                .foreign
+                .iter()
+                .filter(|foreign| foreign.id == foreign_id);
+            let foreign = matches
+                .next()
+                .ok_or_else(|| format!("MIR foreign function {:?} is missing", foreign_id))?;
+            if matches.next().is_some() {
+                return Err(format!(
+                    "MIR foreign function {:?} resolves to multiple rows",
+                    foreign_id
+                ));
+            }
+            if let Some(link_id) = source_helper_foreign_link_authority(
+                function.id,
+                foreign_id,
+                foreign.target_applicability.cranelift,
+                artifact.modules.contains(&foreign.module_id),
+                foreign.link,
+                artifact_id,
+                &artifact.links,
+            )? {
+                link_roots.insert(link_id);
+            }
+            foreigns.insert(foreign_id);
+        }
+    }
+    let links = validate_source_helper_links(
+        artifact.id,
+        &artifact.links,
+        link_roots,
+        |link_id| {
+            let mut matches = program.links.iter().filter(|link| link.id == link_id);
+            let Some(link) = matches.next() else {
+                return Ok(None);
+            };
+            if matches.next().is_some() {
+                return Err(format!(
+                    "native Source helper link {:?} resolves to multiple link rows",
+                    link_id
+                ));
+            }
+            Ok(Some((
+                link.target_applicability.cranelift,
+                link.link_closure.as_slice(),
+            )))
+        },
+    )?;
+    let mut reachable_modules = functions
+        .iter()
+        .filter_map(|function_id| {
+            program
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .map(|function| function.module_id)
+        })
+        .collect::<BTreeSet<_>>();
+    for foreign_id in &foreigns {
+        let foreign = program
+            .foreign
+            .iter()
+            .find(|foreign| foreign.id == *foreign_id)
+            .ok_or_else(|| format!("MIR foreign function {:?} is missing", foreign_id))?;
+        reachable_modules.insert(foreign.module_id);
+    }
+    let needs_data_provider = source_helper_data_provider_required(
+        &reachable_modules,
+        program
+            .modules
+            .iter()
+            .map(|module| (module.id, module.name.as_str())),
+    )?;
+    Ok(SourceHelperCompileClosure {
+        functions,
+        foreigns,
+        links,
+        needs_data_provider,
+    })
+}
 fn protocol_render_function_ids(
     program: &MirProgram,
     selected_ids: &mut BTreeSet<MirFunctionId>,
@@ -1198,6 +1718,70 @@ fn protocol_render_function_ids(
             selected_ids.insert(function.id);
         }
     }
+}
+
+fn trait_method_function_ids(
+    program: &MirProgram,
+    trait_ref: &MirTraitRef,
+    method_id: MirTraitMethodId,
+) -> Result<Vec<MirFunctionId>, String> {
+    let mut traits = program.traits.iter().filter(|trait_def| trait_def.id == trait_ref.id);
+    let trait_def = traits
+        .next()
+        .ok_or_else(|| format!("MIR trait {:?} is missing", trait_ref.id))?;
+    if traits.next().is_some() {
+        return Err(format!(
+            "MIR trait {:?} resolves to multiple trait rows",
+            trait_ref.id
+        ));
+    }
+    let method = trait_def
+        .methods
+        .iter()
+        .find(|method| method.id == method_id)
+        .ok_or_else(|| {
+            format!(
+                "MIR trait {:?} is missing method {:?}",
+                trait_ref.id, method_id
+            )
+        })?;
+    let mut targets = Vec::new();
+    if let Some(default) = method.default {
+        targets.push(default);
+    }
+    for implementation in &program.impls {
+        let Some(implementation_trait) = implementation.trait_ref.as_ref() else {
+            continue;
+        };
+        if implementation_trait.id != trait_ref.id {
+            continue;
+        }
+        for function_id in &implementation.methods {
+            let function = program
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .ok_or_else(|| {
+                    format!(
+                        "MIR impl {:?} references missing function {:?}",
+                        implementation.id, function_id
+                    )
+                })?;
+            if function.name != method.name
+                || !matches!(
+                    &function.form,
+                    MirFunctionForm::TraitMethod { trait_ref: function_trait, .. }
+                        if function_trait.id == trait_ref.id
+                )
+            {
+                continue;
+            }
+            targets.push(function.id);
+        }
+    }
+    targets.sort();
+    targets.dedup();
+    Ok(targets)
 }
 
 fn iterable_hook_function_ids(
@@ -1243,6 +1827,25 @@ fn iterable_hook_function_ids(
                             ));
                         }
                         changed |= selected_ids.insert(callee);
+                    }
+                    if let MirOperation::Call {
+                        callee:
+                            MirCallee::TraitMethod {
+                                method, trait_ref, ..
+                            },
+                        ..
+                    } = &instruction.operation
+                    {
+                        for target in trait_method_function_ids(program, trait_ref, *method)? {
+                            let target_function = resolve_function(target)?;
+                            if !target_function.target_applicability.cranelift {
+                                return Err(format!(
+                                    "MIR function {:?} trait call {:?} resolves to {:?}, unavailable to Cranelift",
+                                    selected, method, target
+                                ));
+                            }
+                            changed |= selected_ids.insert(target);
+                        }
                     }
                     if let MirOperation::LoopIterInit {
                         source_kind:
@@ -1397,39 +2000,40 @@ pub(crate) fn compile_program(
     artifact: MirArtifactId,
     runtime: &mut JitRuntime,
 ) -> Result<CompiledMirProgram, String> {
-    let compiled = compile_program_inner(module, host, program, artifact, runtime)?;
+    compile_program_with_roots(module, host, program, artifact, runtime, &[], None)
+}
+
+/// Compile an artifact together with checked private helper roots. The roots
+/// are invocation authorities supplied by the compiler image; they never
+/// mutate the artifact's public entry or export rows.
+pub(crate) fn compile_program_with_roots(
+    module: &mut JITModule,
+    host: &HostFns,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    runtime: &mut JitRuntime,
+    helper_roots: &[MirFunctionId],
+    source_helper_closure: Option<&SourceHelperCompileClosure>,
+) -> Result<CompiledMirProgram, String> {
+    let compiled = compile_program_inner(
+        module,
+        host,
+        program,
+        artifact,
+        runtime,
+        helper_roots,
+        source_helper_closure,
+    )?;
     module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
-    for (function, function_id) in &compiled.function_ids {
-        let Some(function_row) = program.functions.iter().find(|row| row.id == *function) else {
-            return Err(format!("MIR closure function {:?} is missing", function));
-        };
-        let pointer = module.get_finalized_function(*function_id);
-        if pointer.is_null() {
-            return Err(format!(
-                "MIR closure function {:?} has no finalized function address",
-                function
-            ));
-        }
-        let capture_type_ids = function_row
-            .capture_params
-            .iter()
-            .map(|parameter| {
-                super::runtime_host::runtime_type_id(&parameter.ty).ok_or_else(|| {
-                    format!(
-                        "MIR closure {:?} capture has no runtime type identity",
-                        function
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        runtime.install_jit_closure_target(
-            *function,
-            pointer as i64,
-            capture_type_ids,
-        );
-    }
+    register_finalized_jit_closure_targets(
+        module,
+        program,
+        artifact,
+        compiled.function_ids.keys().copied(),
+        runtime,
+    )?;
     Ok(compiled)
 }
 
@@ -1440,7 +2044,7 @@ pub(crate) fn compile_program_object(
     artifact: MirArtifactId,
     runtime: &mut JitRuntime,
 ) -> Result<FuncId, String> {
-    let compiled = compile_program_inner(module, host, program, artifact, runtime)?;
+    let compiled = compile_program_inner(module, host, program, artifact, runtime, &[], None)?;
     Ok(compiled.entry_id)
 }
 
@@ -1470,6 +2074,95 @@ pub(crate) fn redefine_mir_functions(
         false,
     )
 }
+/// Materialize a checked portable closure target in the active resident
+/// module without resetting its runtime. Existing callees are reused; only
+/// newly reachable functions are lowered before their finalized metadata is
+/// published.
+pub(crate) fn compile_register_jit_closure_target(
+    module: &mut JITModule,
+    host: &HostFns,
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    target: MirFunctionId,
+    closure: &SourceHelperCompileClosure,
+    runtime: &mut JitRuntime,
+) -> Result<i64, String> {
+    program
+        .validate()
+        .map_err(|error| format!("invalid MIR: {error}"))?;
+    jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
+        .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
+    if !closure.functions.contains(&target) {
+        return Err(format!(
+            "MIR closure target {:?} is absent from its checked source-helper closure",
+            target
+        ));
+    }
+    let execution = program
+        .execution_identity(Some(artifact))
+        .map_err(|error| error.to_string())?;
+    if runtime.jit_closure_execution_identity.as_ref() != Some(&execution) {
+        return Err(format!(
+            "MIR closure target {:?} does not belong to the active JIT execution image",
+            target
+        ));
+    }
+    let selected_functions = selected_function_rows(program, &closure.functions)?;
+    super::runtime_host::extend_native_interface_methods(
+        runtime,
+        program,
+        artifact,
+        &selected_functions,
+    )?;
+    let (function_ids, iterable_hooks) = compile_selected_functions_reusing_existing(
+        module,
+        host,
+        program,
+        &closure.functions,
+        runtime,
+    )?;
+    module
+        .finalize_definitions()
+        .map_err(|error| error.to_string())?;
+    for hook in iterable_hooks {
+        let iter_pointer = module.get_finalized_function(hook.iter);
+        let next_pointer = module.get_finalized_function(hook.next);
+        if iter_pointer.is_null() || next_pointer.is_null() {
+            return Err(format!(
+                "MIR closure target {:?} has an unfinalized iterable hook",
+                target
+            ));
+        }
+        runtime.register_iterable_hook(
+            &hook.source_wire,
+            iter_pointer as usize as i64,
+            next_pointer as usize as i64,
+            &hook.coll_type,
+            &hook.iter_type,
+        )?;
+    }
+    runtime.snapshot_compile_strings();
+    register_finalized_jit_closure_targets(
+        module,
+        program,
+        artifact,
+        closure.functions.iter().copied(),
+        runtime,
+    )?;
+    let function_id = function_ids
+        .get(&target)
+        .copied()
+        .ok_or_else(|| format!("MIR closure target {:?} was not compiled", target))?;
+    let pointer = module.get_finalized_function(function_id);
+    if pointer.is_null() {
+        return Err(format!(
+            "MIR closure target {:?} has no finalized function address",
+            target
+        ));
+    }
+    Ok(pointer as i64)
+}
+
 
 fn selected_function_rows<'a>(
     program: &'a MirProgram,
@@ -1534,48 +2227,110 @@ fn compile_selected_functions(
     runtime: &mut JitRuntime,
     reset_runtime_state: bool,
 ) -> Result<HashMap<MirFunctionId, FuncId>, String> {
+    compile_selected_functions_inner(
+        module,
+        host,
+        program,
+        selected_ids,
+        runtime,
+        reset_runtime_state,
+        false,
+    )
+    .map(|(function_ids, _)| function_ids)
+}
+
+fn compile_selected_functions_reusing_existing(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &MirProgram,
+    selected_ids: &BTreeSet<MirFunctionId>,
+    runtime: &mut JitRuntime,
+) -> Result<(HashMap<MirFunctionId, FuncId>, Vec<CompiledIterableHook>), String> {
+    compile_selected_functions_inner(module, host, program, selected_ids, runtime, false, true)
+}
+
+fn compile_selected_functions_inner(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &MirProgram,
+    selected_ids: &BTreeSet<MirFunctionId>,
+    runtime: &mut JitRuntime,
+    reset_runtime_state: bool,
+    reuse_existing: bool,
+) -> Result<(HashMap<MirFunctionId, FuncId>, Vec<CompiledIterableHook>), String> {
     if reset_runtime_state {
         runtime.clear_iterable_hooks();
         runtime.model_sessions.clear();
     }
-    runtime.model_outputs = program.facts.model_outputs.clone();
+    if !reuse_existing {
+        runtime.model_outputs = program.facts.model_outputs.clone();
+    }
     let selected_functions = selected_function_rows(program, selected_ids)?;
     super::runtime_host::install_program_type_descriptors(runtime, program, &selected_functions);
     let mut function_ids = HashMap::new();
     let mut generator_body_ids = HashMap::new();
+    let mut newly_compiled = Vec::new();
     for function in &selected_functions {
-        let signature = function_signature(module, function)?;
-        let id = module
-            .declare_function(&mir_fn_name(function.id), Linkage::Local, &signature)
-            .map_err(|error| error.to_string())?;
+        let existing_id = if reuse_existing {
+            match module.get_name(&mir_fn_name(function.id)) {
+                Some(FuncOrDataId::Func(id)) => Some(id),
+                Some(FuncOrDataId::Data(_)) => {
+                    return Err(format!(
+                        "resident MIR function {:?} resolves to data, not code",
+                        function.id
+                    ));
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        let id = if let Some(id) = existing_id {
+            id
+        } else {
+            newly_compiled.push(*function);
+            let signature = function_signature(module, function)?;
+            module
+                .declare_function(&mir_fn_name(function.id), Linkage::Local, &signature)
+                .map_err(|error| error.to_string())?
+        };
         function_ids.insert(function.id, id);
         if function.generator.is_some() {
-            let body_signature = generator_body_signature(module, function)?;
-            let body_id = module
-                .declare_function(
-                    &format!("{}__generator", mir_fn_name(function.id)),
-                    Linkage::Local,
-                    &body_signature,
-                )
-                .map_err(|error| error.to_string())?;
+            let body_name = format!("{}__generator", mir_fn_name(function.id));
+            let body_id = if existing_id.is_some() {
+                match module.get_name(&body_name) {
+                    Some(FuncOrDataId::Func(id)) => id,
+                    _ => {
+                        return Err(format!(
+                            "resident MIR generator {:?} has no declared body definition",
+                            function.id
+                        ));
+                    }
+                }
+            } else {
+                let body_signature = generator_body_signature(module, function)?;
+                module
+                    .declare_function(&body_name, Linkage::Local, &body_signature)
+                    .map_err(|error| error.to_string())?
+            };
             generator_body_ids.insert(function.id, body_id);
         }
     }
-    let view_thunks = install_view_callback_thunks(module, host, program, &selected_functions)?;
+    let view_thunks = install_view_callback_thunks(module, host, program, &newly_compiled)?;
     let app_thunks =
-        install_app_callback_thunks(module, host, program, &selected_functions, runtime)?;
+        install_app_callback_thunks(module, host, program, &newly_compiled, runtime)?;
     let csv_thunks =
-        install_csv_decode_thunks(module, program, &selected_functions, &function_ids)?;
+        install_csv_decode_thunks(module, program, &newly_compiled, &function_ids)?;
     let json_thunks =
-        install_json_decode_thunks(module, program, &selected_functions, &function_ids)?;
-    let _ = install_iterable_hook_thunks(
+        install_json_decode_thunks(module, program, &newly_compiled, &function_ids)?;
+    let (_, iterable_hooks) = install_iterable_hook_thunks(
         module,
         host,
         program,
-        &selected_functions,
+        &newly_compiled,
         &function_ids,
     )?;
-    for function in &selected_functions {
+    for function in &newly_compiled {
         let wrapper_id = *function_ids
             .get(&function.id)
             .ok_or_else(|| format!("MIR function {:?} was not declared", function.id))?;
@@ -1612,7 +2367,7 @@ fn compile_selected_functions(
             )?;
         }
     }
-    Ok(function_ids)
+    Ok((function_ids, iterable_hooks))
 }
 
 /// Compile one explicitly requested MIR function without selecting an artifact.
@@ -1707,12 +2462,46 @@ pub(crate) fn compile_mir_function(
         .ok_or_else(|| format!("MIR function {:?} was not declared", function_id))
 }
 
+fn select_compile_entry(
+    artifact_id: MirArtifactId,
+    public_entry: Option<MirFunctionId>,
+    helper_roots: &[MirFunctionId],
+    compiled_ids: &BTreeSet<MirFunctionId>,
+) -> Result<MirFunctionId, String> {
+    if helper_roots.is_empty() {
+        return public_entry
+            .ok_or_else(|| format!("MIR artifact {:?} has no entry function", artifact_id));
+    }
+    helper_roots
+        .iter()
+        .find(|function_id| compiled_ids.contains(function_id))
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "native Source helper roots for artifact {:?} contain no Cranelift function",
+                artifact_id
+            )
+        })
+}
+
+fn source_helper_target_supported(target: MirArtifactTarget) -> bool {
+    matches!(
+        target,
+        MirArtifactTarget::RustAot | MirArtifactTarget::Cranelift
+    )
+}
+
+/// Select an artifact's public entry for ordinary runs or an explicitly
+/// compiled private helper for Source compiler-image runs. Helper selection
+/// intentionally does not require a public artifact entry.
 fn compile_program_inner(
     module: &mut dyn Module,
     host: &HostFns,
     program: &MirProgram,
     artifact_id: MirArtifactId,
     runtime: &mut JitRuntime,
+    helper_roots: &[MirFunctionId],
+    source_helper_closure: Option<&SourceHelperCompileClosure>,
 ) -> Result<CompiledMirProgram, String> {
     program
         .validate()
@@ -1721,11 +2510,22 @@ fn compile_program_inner(
         .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
     runtime.model_outputs = program.facts.model_outputs.clone();
     runtime.model_sessions.clear();
-    let artifact = cranelift_artifact(program, artifact_id)?;
-    let mut selected_ids = artifact_function_ids(program, artifact)?;
-    protocol_render_function_ids(program, &mut selected_ids);
-    json_decode_function_ids(program, &mut selected_ids)?;
-    iterable_hook_function_ids(program, &mut selected_ids)?;
+    let artifact = if helper_roots.is_empty() {
+        cranelift_artifact(program, artifact_id)?
+    } else {
+        source_helper_artifact(program, artifact_id)?
+    };
+    let selected_ids: Cow<'_, BTreeSet<MirFunctionId>> = if helper_roots.is_empty() {
+        let mut selected_ids = artifact_function_ids(program, artifact)?;
+        protocol_render_function_ids(program, &mut selected_ids);
+        json_decode_function_ids(program, &mut selected_ids)?;
+        iterable_hook_function_ids(program, &mut selected_ids)?;
+        Cow::Owned(selected_ids)
+    } else if let Some(closure) = source_helper_closure {
+        Cow::Borrowed(&closure.functions)
+    } else {
+        Cow::Owned(source_helper_compile_closure(program, artifact_id, helper_roots)?.functions)
+    };
     let selected_functions = program
         .functions
         .iter()
@@ -1806,11 +2606,16 @@ fn compile_program_inner(
             )?;
         }
     }
-    let entry = artifact
-        .entry
-        .as_ref()
-        .and_then(|entry| entry.function)
-        .ok_or_else(|| format!("MIR artifact {:?} has no entry function", artifact.id))?;
+    let compiled_ids = function_ids.keys().copied().collect::<BTreeSet<_>>();
+    let entry = select_compile_entry(
+        artifact.id,
+        artifact
+            .entry
+            .as_ref()
+            .and_then(|entry| entry.function),
+        helper_roots,
+        &compiled_ids,
+    )?;
     let entry_id = *function_ids
         .get(&entry)
         .ok_or_else(|| format!("MIR entry {:?} was not declared", entry))?;
@@ -3179,38 +3984,46 @@ fn install_iterable_hook_thunks(
                 signature.returns.push(AbiParam::new(types::I64));
                 signature
             };
+            let iter_thunk_name = format!(
+                "__jet_iterable_{}_{}_iter",
+                iter_function.0, next_function.0
+            );
+            let next_thunk_name = format!(
+                "__jet_iterable_{}_{}_next",
+                iter_function.0, next_function.0
+            );
+            let preexisting = match (
+                module.get_name(&iter_thunk_name),
+                module.get_name(&next_thunk_name),
+            ) {
+                (None, None) => false,
+                (Some(FuncOrDataId::Func(_)), Some(FuncOrDataId::Func(_))) => true,
+                _ => {
+                    return Err(format!(
+                        "MIR iterable hook pair ({iter_function:?}, {next_function:?}) has an incomplete resident thunk pair"
+                    ));
+                }
+            };
             let iter_thunk = module
-                .declare_function(
-                    &format!(
-                        "__jet_iterable_{}_{}_iter",
-                        iter_function.0, next_function.0
-                    ),
-                    Linkage::Local,
-                    &signature,
-                )
+                .declare_function(&iter_thunk_name, Linkage::Local, &signature)
                 .map_err(|error| error.to_string())?;
             let next_thunk = module
-                .declare_function(
-                    &format!(
-                        "__jet_iterable_{}_{}_next",
-                        iter_function.0, next_function.0
-                    ),
-                    Linkage::Local,
-                    &signature,
-                )
+                .declare_function(&next_thunk_name, Linkage::Local, &signature)
                 .map_err(|error| error.to_string())?;
-            let iter = program
-                .functions
-                .iter()
-                .find(|function| function.id == iter_function)
-                .ok_or_else(|| format!("MIR iterable function {:?} is missing", iter_function))?;
-            let next = program
-                .functions
-                .iter()
-                .find(|function| function.id == next_function)
-                .ok_or_else(|| format!("MIR iterable function {:?} is missing", next_function))?;
-            lower_iterable_hook_thunk(module, host, iter, iter_id, iter_thunk)?;
-            lower_iterable_hook_thunk(module, host, next, next_id, next_thunk)?;
+            if !preexisting {
+                let iter = program
+                    .functions
+                    .iter()
+                    .find(|function| function.id == iter_function)
+                    .ok_or_else(|| format!("MIR iterable function {:?} is missing", iter_function))?;
+                let next = program
+                    .functions
+                    .iter()
+                    .find(|function| function.id == next_function)
+                    .ok_or_else(|| format!("MIR iterable function {:?} is missing", next_function))?;
+                lower_iterable_hook_thunk(module, host, iter, iter_id, iter_thunk)?;
+                lower_iterable_hook_thunk(module, host, next, next_id, next_thunk)?;
+            }
             let ids = IterableThunkIds {
                 iter: iter_thunk,
                 next: next_thunk,
@@ -3866,6 +4679,8 @@ fn lower_function(
         block_phis: HashMap::new(),
         values: HashMap::new(),
         places: HashMap::new(),
+        pending_argument_drops: Vec::new(),
+        pending_capture_writebacks: Vec::new(),
         write_parameters: Vec::new(),
         capture_env: None,
         function_ids,
@@ -4231,17 +5046,34 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     ));
                 }
                 let value = self.read_place(builder, *place)?;
+                let result_ownership = instruction.result.and_then(|value_id| {
+                    self.function
+                        .values
+                        .iter()
+                        .find(|(value, _, _, _)| *value == value_id)
+                        .map(|(_, _, _, ownership)| *ownership)
+                });
                 if is_core_files_type(self.program, &place_row.ty, "FileReader")
                     || is_core_files_type(self.program, &place_row.ty, "FileWriter")
                     || core_files_resource_kind(self.program, &place_row.ty).is_some()
                 {
-                    // A move empties the provider slot. Reinitializing that slot
-                    // must not release the ownership now held by the moved value.
+                    // Filesystem owners use their established empty-slot ABI.
                     let zero = builder.ins().iconst(types::I64, 0);
                     let value_id = instruction.result.ok_or_else(|| {
                         "MIR owned place move has no result".to_string()
                     })?;
-                    self.write_place(builder, *place, value_id, zero)?;
+                    self.write_place(builder, *place, value_id, zero, true)?;
+                    self.flush_pending_capture_writebacks(builder)?;
+                } else if result_ownership.is_some_and(|ownership| {
+                    self.call_drop_is_relevant(&place_row.ty, ownership.drop)
+                        && copy_needs_typed_clone(&place_row.ty)
+                }) {
+                    let marker = self.typed_moved_marker(builder, &place_row.ty, value)?;
+                    let value_id = instruction.result.ok_or_else(|| {
+                        "MIR owned place move has no result".to_string()
+                    })?;
+                    self.write_place(builder, *place, value_id, marker, true)?;
+                    self.flush_pending_capture_writebacks(builder)?;
                 }
                 Some(value)
             }
@@ -4283,16 +5115,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .copied()
                         .ok_or_else(|| "MIR fixed-list initializer returned no carrier".to_string())?;
                     builder.ins().stack_store(carrier, slot, 0);
-                }
-                else if is_core_files_type(self.program, &place_row.ty, "FileReader")
+                } else if is_core_files_type(self.program, &place_row.ty, "FileReader")
                     || is_core_files_type(self.program, &place_row.ty, "FileWriter")
                     || core_files_resource_kind(self.program, &place_row.ty).is_some()
                 {
                     let empty = builder.ins().iconst(types::I64, 0);
                     builder.ins().stack_store(empty, slot, 0);
+                } else if copy_needs_typed_clone(&place_row.ty) {
+                    // The typed-drop host recognizes the reserved moved marker
+                    // and skips this checked owner until it is initialized.
+                    let moved = builder.ins().iconst(types::I64, i64::MIN);
+                    builder.ins().stack_store(moved, slot, 0);
                 }
-                None
-            }
+                }
             MirOperation::ReplacePlace { place, value } => {
                 let ty = self
                     .function
@@ -4304,25 +5139,31 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .clone();
                 let old_value = self.read_place(builder, *place)?;
                 let old = self.cast(builder, old_value, types::I64)?;
-                let live = builder.ins().icmp_imm(IntCC::NotEqual, old, 0);
-                let release = builder.create_block();
-                let assign = builder.create_block();
-                builder.ins().brif(live, release, &[], assign, &[]);
-                builder.switch_to_block(release);
-                if !self.drop_core_file_owner(builder, &ty, old)? {
-                    return Err("MIR replacement requires a checked Core file owner".to_string());
+                if copy_needs_typed_clone(&ty) {
+                    if !self.drop_mir_value(builder, &ty, old, MirDropKind::Value)? {
+                        return Err("MIR replacement requires a checked owner lifecycle".to_string());
+                    }
+                } else {
+                    let live = builder.ins().icmp_imm(IntCC::NotEqual, old, 0);
+                    let release = builder.create_block();
+                    let assign = builder.create_block();
+                    builder.ins().brif(live, release, &[], assign, &[]);
+                    builder.switch_to_block(release);
+                    if !self.drop_mir_value(builder, &ty, old, MirDropKind::Value)? {
+                        return Err("MIR replacement requires a checked owner lifecycle".to_string());
+                    }
+                    builder.ins().jump(assign, &[]);
+                    builder.switch_to_block(assign);
                 }
-                builder.ins().jump(assign, &[]);
-                builder.switch_to_block(assign);
                 let next = self.value(*value)?;
-                self.write_place(builder, *place, *value, next)?;
+                self.write_place(builder, *place, *value, next, false)?;
                 self.observe_live_place(builder, *place)?;
                 None
             }
             MirOperation::WritePlace { place, value } => {
                 let value_id = *value;
                 let value = self.value(value_id)?;
-                self.write_place(builder, *place, value_id, value)?;
+                self.write_place(builder, *place, value_id, value, false)?;
                 self.observe_live_place(builder, *place)?;
                 None
             }
@@ -4644,28 +5485,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             } => {
                 let callback_value = instruction.result;
                 let callback_ty = instruction.ty.as_ref();
-                let owned_callback_captures = instruction.result.is_some_and(|result| {
-                    self.function
-                        .blocks
-                        .iter()
-                        .flat_map(|block| block.instructions.iter())
-                        .any(|candidate| {
-                            let MirOperation::Semantic(MirSemanticOp::CCallback {
-                                callback,
-                                lambda,
-                                ..
-                            }) = &candidate.operation
-                            else {
-                                return false;
-                            };
-                            *lambda == result
-                                && self
-                                    .program
-                                    .callbacks
-                                    .iter()
-                                    .any(|row| row.id == *callback && row.managed)
-                        })
-                });
+                let owned_callback_captures =
+                    closure_is_managed_callback(self.program, self.function, instruction.result);
                 Some(self.closure(
                     builder,
                     *function,
@@ -5072,56 +5893,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirOperation::Drop { value, kind } => {
                 let value_ty = self.mir_value_type(*value)?;
                 let owner_value = self.value(*value)?;
-                if !self.drop_core_file_owner(builder, &value_ty, owner_value)?
-                    && matches!(kind, MirDropKind::ForeignHandle)
-                {
-                    if !self.program.handles.iter().any(|handle| {
-                        handle.ty.same_checked_type(&value_ty)
-                            || (handle.ty.nominal_name().is_some()
-                                && handle.ty.nominal_name() == value_ty.nominal_name())
-                    }) {
-                        return Err("MIR foreign-handle drop has no lifecycle row".to_string());
-                    }
-                    let token = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(builder, self.host.ffi.drop_handle, &[token])?;
-                } else if is_shared_guard_type(&value_ty) {
-                    let guard = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ =
-                        self.call_host(builder, self.host.memory.shared_guard_end, &[guard])?;
-                } else if value_ty.nominal_name() == Some("ScopeGuard") {
-                    let guard = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(builder, self.host.io.scope_guard_drop, &[guard])?;
-                } else if value_ty.nominal_name() == Some("EventScope") {
-                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(
-                        builder,
-                        self.host.reactive.event_scope_cancel,
-                        &[handle],
-                    )?;
-                } else if value_ty.nominal_name() == Some("DbLease") {
-                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(builder, self.host.db.pool_lease_close, &[handle])?;
-                } else if matches!(
-                    value_ty.nominal_name(),
-                    Some("Arena" | "Bump" | "Pool" | "Fixed")
-                ) {
-                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(
-                        builder,
-                        self.host.memory.allocator_close,
-                        &[handle],
-                    )?;
-                } else if matches!(
-                    value_ty.nominal_name(),
-                    Some("ByteIterCursor" | "IterCursor" | "RangeCursor")
-                ) {
-                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
-                    let _ = self.call_host(
-                        builder,
-                        self.host.coll.loop_iter_drop,
-                        &[handle],
-                    )?;
-                }
+                let _ = self.drop_mir_value(builder, &value_ty, owner_value, *kind)?;
                 instruction
                     .result
                     .map(|_| builder.ins().iconst(types::I64, 0))
@@ -8327,6 +9099,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         span: &jet_foundation::Diagnostics::Span,
         value_ty: &MirType,
         value: Value,
+        writeback: Option<(usize, u64)>,
     ) -> Result<(), String> {
         let metadata_call = write_call.unwrap_or(call);
         let metadata =
@@ -8359,6 +9132,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     })?,
                     types::I32,
                 )?;
+                self.pending_capture_writebacks.extend(writeback);
                 let _ = self.call_host(builder, host, &[base, index_value, value, line])?;
                 Ok(())
             }
@@ -8374,6 +9148,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 };
                 let mut args = vec![base, index_value, value];
                 args.extend(metadata);
+                self.pending_capture_writebacks.extend(writeback);
                 let _ = self.call_host(builder, host, &args)?;
                 Ok(())
             }
@@ -8384,6 +9159,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let value = self.cast(builder, value, types::I64)?;
                 let mut args = vec![base, index_value, value];
                 args.extend(metadata);
+                self.pending_capture_writebacks.extend(writeback);
                 let _ = self.call_host(builder, self.host.memory.index_pool_set, &args)?;
                 Ok(())
             }
@@ -8411,6 +9187,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let line = *metadata
                     .get(1)
                     .ok_or_else(|| "MIR lane setter has no source line metadata".to_string())?;
+                self.pending_capture_writebacks.extend(writeback);
                 let _ = self.call_host(
                     builder,
                     host,
@@ -8514,6 +9291,103 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             return Ok(true);
         }
         Ok(false)
+    }
+    fn drop_mir_value(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ty: &MirType,
+        value: Value,
+        kind: MirDropKind,
+    ) -> Result<bool, String> {
+        if self.drop_core_file_owner(builder, ty, value)? {
+            return Ok(true);
+        }
+        if matches!(kind, MirDropKind::ForeignHandle) {
+            if !self.program.handles.iter().any(|handle| {
+                handle.ty.same_checked_type(ty)
+                    || (handle.ty.nominal_name().is_some()
+                        && handle.ty.nominal_name() == ty.nominal_name())
+            }) {
+                return Err("MIR foreign-handle drop has no lifecycle row".to_string());
+            }
+            let token = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.ffi.drop_handle, &[token])?;
+            return Ok(true);
+        }
+        if is_shared_guard_type(ty) {
+            let guard = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.memory.shared_guard_end, &[guard])?;
+            return Ok(true);
+        }
+        if ty.nominal_name() == Some("ScopeGuard") {
+            let guard = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.io.scope_guard_drop, &[guard])?;
+            return Ok(true);
+        }
+        if ty.nominal_name() == Some("EventScope") {
+            let handle = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.reactive.event_scope_cancel, &[handle])?;
+            return Ok(true);
+        }
+        if ty.nominal_name() == Some("DbLease") {
+            let handle = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.db.pool_lease_close, &[handle])?;
+            return Ok(true);
+        }
+        if matches!(ty.nominal_name(), Some("Arena" | "Bump" | "Pool" | "Fixed")) {
+            let handle = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.memory.allocator_close, &[handle])?;
+            return Ok(true);
+        }
+        if matches!(
+            ty.nominal_name(),
+            Some("ByteIterCursor" | "IterCursor" | "RangeCursor")
+        ) {
+            let handle = self.cast(builder, value, types::I64)?;
+            let _ = self.call_host(builder, self.host.coll.loop_iter_drop, &[handle])?;
+            return Ok(true);
+        }
+        self.drop_typed_owner_value(builder, ty, value)
+    }
+
+    fn flush_pending_argument_drops(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<(), String> {
+        let pending = std::mem::take(&mut self.pending_argument_drops);
+        for (ty, value, kind) in pending.into_iter().rev() {
+            let _ = self.drop_mir_value(builder, &ty, value, kind)?;
+        }
+        Ok(())
+    }
+
+    fn flush_pending_capture_writebacks(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<(), String> {
+        let pending = std::mem::take(&mut self.pending_capture_writebacks);
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let env = self.capture_env.ok_or_else(|| {
+            "MIR capture writeback has no callable environment".to_string()
+        })?;
+        let env = self.cast(builder, env, types::I64)?;
+        let mut published = HashSet::new();
+        for (slot, type_id) in pending {
+            if !published.insert(slot) {
+                continue;
+            }
+            let slot = builder.ins().iconst(types::I64, slot as i64);
+            let type_id = builder.ins().iconst(types::I64, type_id as i64);
+            let _ = self.call_owner_lifecycle_host(
+                builder,
+                "jet_jit_closure_capture_publish",
+                &[env, slot, type_id],
+                false,
+            )?;
+        }
+        Ok(())
     }
 
     fn read_place(
@@ -8635,6 +9509,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         id: jet_foundation::MIR::MirPlaceId,
         value_id: MirValueId,
         value: Value,
+        consuming_move: bool,
     ) -> Result<(), String> {
         let place = self
             .function
@@ -8643,6 +9518,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .find(|place| place.id == id)
             .cloned()
             .ok_or_else(|| format!("MIR place {:?} is missing", id))?;
+        self.ensure_capture_place_writable(&place, consuming_move)?;
         if place.projections.is_empty() {
             let base_type = self.place_base_type(&place)?;
             let value_type = self.mir_value_type(value_id)?;
@@ -8674,6 +9550,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     jet_foundation::MIR::MirProjection::Field { field, .. } => {
                         let (field_index, field_ty) =
                             self.field_info_for_base(*field, &current_type)?;
+                        self.queue_capture_place_writeback(&place)?;
                         self.set_field(builder, current, field_index, &field_ty, value)?;
                     }
                     jet_foundation::MIR::MirProjection::Index {
@@ -8686,6 +9563,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         span,
                         ..
                     } => {
+                        let writeback = self.writeback_for_capture_place(&place)?;
                         self.index_write(
                             builder,
                             current,
@@ -8699,12 +9577,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             span,
                             &place.ty,
                             value,
+                            writeback,
                         )?;
                     }
                     jet_foundation::MIR::MirProjection::Deref { .. } => {
                         let address = self.cast(builder, current, types::I64)?;
                         if is_allocator_view_type(&current_type) {
                             let value = self.cast(builder, value, types::I64)?;
+                            self.queue_capture_place_writeback(&place)?;
                             let _ = self.call_host(
                                 builder,
                                 self.host.memory.allocator_view_write,
@@ -8712,6 +9592,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             )?;
                         } else if is_shared_guard_type(&current_type) {
                             let value = self.cast(builder, value, result_ty)?;
+                            self.queue_capture_place_writeback(&place)?;
                             let _ = self.call_host(
                                 builder,
                                 shared_guard_set_value_host(self.host, result_ty),
@@ -8725,10 +9606,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                                 .or_else(|| sentry_pointee_type(&current_type))
                                 .unwrap_or(&current_type);
                             self.emit_sentry_check(builder, address, pointee, "write")?;
+                            self.queue_capture_place_writeback(&place)?;
                             builder.ins().store(MemFlags::new(), value, address, 0);
                         }
                     }
                 }
+                self.flush_pending_capture_writebacks(builder)?;
                 if let Some(root) = persistent_root.as_ref() {
                     self.write_static_place(builder, root, persistent_root_value)?;
                 }
@@ -8935,6 +9818,84 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .map(|(_, address, _)| *address)
     }
 
+    fn publish_capture_slot(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        slot: usize,
+        ty: &MirType,
+        owned: bool,
+    ) -> Result<(), String> {
+        if !owned {
+            return Ok(());
+        }
+        let env = self.capture_env.ok_or_else(|| {
+            format!("invalid MIR: owned capture slot {slot} has no environment")
+        })?;
+        let env = self.cast(builder, env, types::I64)?;
+        let slot = builder.ins().iconst(types::I64, slot as i64);
+        let type_id = runtime_descriptor_id(ty).ok_or_else(|| {
+            format!(
+                "MIR owned closure capture `{}` has no runtime type identity",
+                ty.display_name()
+            )
+        })?;
+        let type_id = builder.ins().iconst(types::I64, type_id as i64);
+        let _ = self.call_owner_lifecycle_host(
+            builder,
+            "jet_jit_closure_capture_publish",
+            &[env, slot, type_id],
+            false,
+        )?;
+        Ok(())
+    }
+
+    fn writeback_for_capture_place(
+        &self,
+        place: &MirPlace,
+    ) -> Result<Option<(usize, u64)>, String> {
+        let MirPlaceBase::Capture(base_value) = &place.base else {
+            return Ok(None);
+        };
+        let slot = self.capture_slot_for_value(*base_value)?;
+        let (_, ty, owned) = self.capture_parameter(slot)?;
+        if !owned {
+            return Ok(None);
+        }
+        let type_id = runtime_descriptor_id(&ty).ok_or_else(|| {
+            format!(
+                "MIR owned closure capture `{}` has no runtime type identity",
+                ty.display_name()
+            )
+        })?;
+        Ok(Some((slot, type_id)))
+    }
+
+    fn queue_capture_place_writeback(
+        &mut self,
+        place: &MirPlace,
+    ) -> Result<(), String> {
+        if let Some(writeback) = self.writeback_for_capture_place(place)? {
+            self.pending_capture_writebacks.push(writeback);
+        }
+        Ok(())
+    }
+    fn queue_capture_place_writeback_id(
+        &mut self,
+        place_id: Option<MirPlaceId>,
+    ) -> Result<(), String> {
+        let Some(place_id) = place_id else {
+            return Ok(());
+        };
+        let place = self
+            .function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)
+            .cloned()
+            .ok_or_else(|| format!("MIR capture writeback place {:?} is missing", place_id))?;
+        self.queue_capture_place_writeback(&place)
+    }
+
     fn write_place_base(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -8953,13 +9914,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
         if let MirPlaceBase::Capture(base_value) = place.base {
             let slot = self.capture_slot_for_value(base_value)?;
-            let (access, ty, owned) = self.capture_parameter(slot)?;
-            if access != jet_foundation::MIR::MirAccess::Write {
-                return Err(format!(
-                    "MIR captured place {:?} is not writable ({access:?})",
-                    place.id
-                ));
-            }
+            let (_, ty, owned) = self.capture_parameter(slot)?;
             let env = self.capture_env.ok_or_else(|| {
                 format!(
                     "invalid MIR: captured place {:?} has no environment",
@@ -8968,7 +9923,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             })?;
             let index = builder.ins().iconst(types::I64, slot as i64);
             if owned {
-                return self.set_field(builder, env, slot, &ty, value);
+                self.queue_capture_place_writeback(place)?;
+                self.set_field(builder, env, slot, &ty, value)?;
+                return Ok(());
             }
             let address = self
                 .call_host(builder, self.host.struct_get_i64, &[env, index])?
@@ -9109,8 +10066,51 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok((
             parameter.access,
             parameter.ty.clone(),
-            parameter.ownership.mode == MirOwnershipMode::Owned,
+            matches!(
+                parameter.ownership.mode,
+                MirOwnershipMode::Owned | MirOwnershipMode::Move
+            ),
         ))
+    }
+    fn capture_slot_is_mutable(&self, slot: usize) -> Result<bool, String> {
+        let parameter = self
+            .function
+            .capture_params
+            .iter()
+            .find(|parameter| parameter.slot == slot)
+            .ok_or_else(|| format!("invalid MIR: capture slot {slot} is not declared"))?;
+        Ok(self
+            .function
+            .captures
+            .as_ref()
+            .is_some_and(|facts| facts.mutable.contains(&parameter.name)))
+    }
+
+    fn ensure_capture_place_writable(
+        &self,
+        place: &MirPlace,
+        consuming_move: bool,
+    ) -> Result<(), String> {
+        let MirPlaceBase::Capture(value) = &place.base else {
+            return Ok(());
+        };
+        let slot = self.capture_slot_for_value(*value)?;
+        let (access, _, owned) = self.capture_parameter(slot)?;
+        let writable = match access {
+            MirAccess::Write => true,
+            MirAccess::Move => {
+                owned && (consuming_move || self.capture_slot_is_mutable(slot)?)
+            }
+            MirAccess::Read => false,
+        };
+        if writable {
+            Ok(())
+        } else {
+            Err(format!(
+                "MIR captured place {:?} is not writable ({access:?})",
+                place.id
+            ))
+        }
     }
 
     fn capture_slot_value(
@@ -9125,11 +10125,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let index = builder.ins().iconst(types::I64, slot as i64);
         if access == jet_foundation::MIR::MirAccess::Move || owned {
             let getter = self.field_getter(&ty)?;
-            return self
+            let value = self
                 .call_host(builder, getter, &[env, index])?
                 .first()
                 .copied()
-                .ok_or_else(|| format!("MIR capture slot {slot} getter returned no value"));
+                .ok_or_else(|| format!("MIR capture slot {slot} getter returned no value"))?;
+            return Ok(value);
         }
         let address = self
             .call_host(builder, self.host.struct_get_i64, &[env, index])?
@@ -11069,6 +12070,312 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .ok_or_else(|| format!("MIR `{}` view materialization host returned no value", ty.display_name()))
     }
 
+    fn shared_owner_type_id(&self, ty: &MirType) -> Result<u64, String> {
+        match ty.kind() {
+            MirTypeKind::Shared(_) => runtime_descriptor_id(ty).ok_or_else(|| {
+                format!(
+                    "MIR Shared owner `{}` has no checked runtime descriptor",
+                    ty.display_name()
+                )
+            }),
+            MirTypeKind::Apply { name, args }
+                if (name.name == jet_foundation::Syntax::TYPE_SHARED_WEAK && args.len() == 1)
+                    || (name.name == jet_foundation::Syntax::TYPE_SHARED_SNAPSHOT
+                        && args.len() == 2) =>
+            {
+                let inner = &args[0];
+                let mut owners = self.program.type_instances.iter().filter(|candidate| {
+                    matches!(
+                        candidate.kind(),
+                        MirTypeKind::Shared(owner_inner)
+                            if owner_inner.same_checked_type(inner)
+                    )
+                });
+                let owner = owners.next().ok_or_else(|| {
+                    format!(
+                        "MIR `{}` has no checked Shared<{}> owner descriptor",
+                        ty.display_name(),
+                        inner.display_name()
+                    )
+                })?;
+                if owners.next().is_some() {
+                    return Err(format!(
+                        "MIR `{}` resolves to multiple checked Shared<{}> owner descriptors",
+                        ty.display_name(),
+                        inner.display_name()
+                    ));
+                }
+                runtime_descriptor_id(owner).ok_or_else(|| {
+                    format!(
+
+                        "MIR Shared<{}> owner has no checked runtime descriptor",
+                        inner.display_name()
+                    )
+                })
+            }
+            MirTypeKind::Tagged { inner, .. } => self.shared_owner_type_id(inner),
+            _ => Err(format!(
+                "MIR `{}` is not a Shared owner carrier",
+                ty.display_name()
+            )),
+        }
+    }
+
+    fn typed_moved_marker(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ty: &MirType,
+        value: Value,
+    ) -> Result<Value, String> {
+        let type_id = runtime_descriptor_id(ty).ok_or_else(|| {
+            format!(
+                "MIR moved owner `{}` has no checked runtime descriptor",
+                ty.display_name()
+            )
+        })?;
+        let value = self.cast(builder, value, types::I64)?;
+        let type_id = builder.ins().iconst(types::I64, type_id as i64);
+        self.call_owner_lifecycle_host(
+            builder,
+            "jet_jit_typed_moved_marker",
+            &[value, type_id],
+            true,
+        )?
+        .ok_or_else(|| "JIT typed moved-marker host returned no value".to_string())
+    }
+
+    fn shared_owner_handle_method(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        member: &str,
+        borrow_mask: &[bool],
+        receiver: MirValueId,
+        args: &[MirValueId],
+        expected: Option<types::Type>,
+    ) -> Result<Option<Value>, String> {
+        let receiver_type = self.mir_value_type(receiver)?;
+        let Some((kind, _)) = shared_owner_value_kind(&receiver_type) else {
+            return Ok(None);
+        };
+        let method = member.rsplit('.').next().unwrap_or(member);
+        let symbol = match (kind, method, args.len()) {
+            (SharedOwnerValueKind::Strong, "try_replace", 2) => {
+                Some("jet_shared_try_replace")
+            }
+            (SharedOwnerValueKind::Strong, "downgrade", 0) => {
+                Some("jet_jit_shared_downgrade")
+            }
+            (SharedOwnerValueKind::Strong, "strong_count", 0) => {
+                Some("jet_jit_shared_strong_count")
+            }
+            (SharedOwnerValueKind::Strong, "capture", 0) => {
+                Some("jet_shared_capture")
+            }
+            (SharedOwnerValueKind::Strong, "capture", 1) => {
+                Some("jet_shared_capture_with")
+            }
+            (SharedOwnerValueKind::Weak, "upgrade", 0) => {
+                Some("jet_jit_shared_weak_upgrade")
+            }
+            (SharedOwnerValueKind::Snapshot, "value", 0) => {
+                Some("jet_shared_snapshot_value")
+            }
+            _ => None,
+        };
+        let Some(symbol) = symbol else {
+            return Ok(None);
+        };
+        if borrow_mask.len() < args.len() + 1 {
+            return Err(format!(
+                "MIR Shared HandleMethod `{member}` has {} operands but only {} borrow flags",
+                args.len() + 1,
+                borrow_mask.len()
+            ));
+        }
+        let owner_type = self.shared_owner_type_id(&receiver_type)?;
+        let owner_type = builder.ins().iconst(types::I64, owner_type as i64);
+        let handle = self.handle_method_value(builder, receiver, borrow_mask[0])?;
+        let handle = self.cast(builder, handle, types::I64)?;
+        let mut values = vec![handle];
+        if symbol == "jet_shared_capture_with" {
+            let callback = self.handle_method_value(builder, args[0], borrow_mask[1])?;
+            values.push(self.cast(builder, callback, types::I64)?);
+        }
+        else if symbol == "jet_shared_try_replace" {
+            for (index, argument) in args.iter().enumerate() {
+                let value =
+                    self.handle_method_value(builder, *argument, borrow_mask[index + 1])?;
+                values.push(self.cast(builder, value, types::I64)?);
+            }
+        }
+        values.push(owner_type);
+        let result = self
+            .call_owner_lifecycle_host(builder, symbol, &values, true)?
+            .ok_or_else(|| format!("JIT Shared host `{symbol}` returned no value"))?;
+        expected
+            .map_or(Ok(result), |ty| self.cast(builder, result, ty))
+            .map(Some)
+    }
+
+    fn call_owner_lifecycle_host(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        symbol: &str,
+        args: &[Value],
+        returns_value: bool,
+    ) -> Result<Option<Value>, String> {
+        let host = self
+            .host
+            .lookup(symbol)
+            .ok_or_else(|| format!("JIT owner lifecycle host `{symbol}` is not registered"))?;
+        let signature = self
+            .module
+            .declarations()
+            .get_function_decl(host)
+            .signature
+            .clone();
+        if signature.params.len() != args.len() {
+            return Err(format!(
+                "JIT owner lifecycle host `{symbol}` expects {} arguments, got {}",
+                signature.params.len(),
+                args.len()
+            ));
+        }
+        let results = self.call_declared_values(builder, host, &signature, args.to_vec())?;
+        if returns_value {
+            if results.len() != 1 {
+                return Err(format!(
+                    "JIT owner lifecycle host `{symbol}` returned {} values, expected one",
+                    results.len()
+                ));
+            }
+            Ok(results.first().copied())
+        } else if results.is_empty() {
+            Ok(None)
+        } else {
+            Err(format!(
+                "JIT owner lifecycle host `{symbol}` unexpectedly returned a value"
+            ))
+        }
+    }
+
+    fn clone_runtime_value(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ty: &MirType,
+        value: Value,
+    ) -> Result<Value, String> {
+        if copy_is_clock_type(ty) {
+            let value = self.cast(builder, value, types::I64)?;
+            return self
+                .call_host(builder, self.host.clock_clone, &[value])?
+                .first()
+                .copied()
+                .ok_or_else(|| {
+                    format!("MIR `{}` clock copy host returned no value", ty.display_name())
+                });
+        }
+        if jet_foundation::MIR::mir_view_element_type(ty).is_some() {
+            return Ok(value);
+        }
+        if let Some(kind) = core_files_resource_kind(self.program, ty) {
+            let value = self.cast(builder, value, types::I64)?;
+            let kind = builder.ins().iconst(types::I64, kind);
+            return self
+                .call_host(builder, self.host.core.fs_resource_clone, &[value, kind])?
+                .first()
+                .copied()
+                .ok_or_else(|| "filesystem owner clone host returned no value".to_string());
+        }
+        if let Some((kind, _)) = shared_owner_value_kind(ty) {
+            let symbol = match kind {
+                SharedOwnerValueKind::Strong => "jet_jit_shared_retain",
+                SharedOwnerValueKind::Weak => "jet_jit_shared_weak_clone",
+                SharedOwnerValueKind::Snapshot => "jet_jit_shared_snapshot_clone",
+            };
+            let value = self.cast(builder, value, types::I64)?;
+            let owner_type = self.shared_owner_type_id(ty)?;
+            let owner_type = builder.ins().iconst(types::I64, owner_type as i64);
+            return self
+                .call_owner_lifecycle_host(builder, symbol, &[value, owner_type], true)?
+                .ok_or_else(|| format!("JIT owner lifecycle host `{symbol}` returned no value"));
+        }
+        if copy_needs_typed_clone(ty) {
+            let value = self.cast(builder, value, types::I64)?;
+            let type_id = runtime_descriptor_id(ty).ok_or_else(|| {
+                format!(
+                    "MIR `{}` copy has no runtime type identity",
+                    ty.display_name()
+                )
+            })?;
+            let type_id = builder.ins().iconst(types::I64, type_id as i64);
+            return self
+                .call_host(builder, self.host.typed_clone, &[value, type_id])?
+                .first()
+                .copied()
+                .ok_or_else(|| {
+                    format!(
+                        "MIR `{}` typed copy host returned no value",
+                        ty.display_name()
+                    )
+                });
+        }
+        let Some(host) = self.collection_copy_host(ty) else {
+            return Ok(value);
+        };
+        let value = self.cast(builder, value, types::I64)?;
+        self.call_host(builder, host, &[value])?
+            .first()
+            .copied()
+            .ok_or_else(|| format!("MIR `{}` copy host returned no value", ty.display_name()))
+    }
+
+    fn drop_typed_owner_value(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ty: &MirType,
+        value: Value,
+    ) -> Result<bool, String> {
+        if let Some((kind, _)) = shared_owner_value_kind(ty) {
+            let value = self.cast(builder, value, types::I64)?;
+            let symbol = match kind {
+                SharedOwnerValueKind::Strong => "jet_jit_shared_release",
+                SharedOwnerValueKind::Weak => "jet_jit_shared_weak_release",
+                SharedOwnerValueKind::Snapshot => "jet_jit_shared_snapshot_release",
+            };
+            let owner_type = self.shared_owner_type_id(ty)?;
+            let owner_type = builder.ins().iconst(types::I64, owner_type as i64);
+            let moved_marker = builder.ins().iconst(types::I64, i64::MIN);
+            let moved = builder.ins().icmp(IntCC::Equal, value, moved_marker);
+            let release = builder.create_block();
+            let done = builder.create_block();
+            builder.ins().brif(moved, done, &[], release, &[]);
+            builder.switch_to_block(release);
+            self.call_owner_lifecycle_host(builder, symbol, &[value, owner_type], false)?;
+            builder.ins().jump(done, &[]);
+            builder.switch_to_block(done);
+            return Ok(true);
+        }
+        if !copy_needs_typed_clone(ty) {
+            return Ok(false);
+        }
+        let value = self.cast(builder, value, types::I64)?;
+        let owner_type = runtime_descriptor_id(ty).ok_or_else(|| {
+            format!(
+                "MIR `{}` drop has no checked runtime descriptor",
+                ty.display_name()
+            )
+        })?;
+        let owner_type = builder.ins().iconst(types::I64, owner_type as i64);
+        self.call_owner_lifecycle_host(
+            builder,
+            "jet_jit_typed_drop",
+            &[value, owner_type],
+            false,
+        )?;
+        Ok(true)
+    }
+
     fn copy_value(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -11091,34 +12398,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         if jet_foundation::MIR::mir_view_element_type(&ty).is_some() {
             return self.value(value_id);
         }
-        if copy_needs_typed_clone(&ty) {
-            let value = self.cast(builder, self.value(value_id)?, types::I64)?;
-            let type_id = runtime_descriptor_id(&ty).ok_or_else(|| {
-                format!(
-                    "MIR `{}` copy has no runtime type identity",
-                    ty.display_name()
-                )
-            })?;
-            let type_id = builder.ins().iconst(types::I64, type_id as i64);
-            return self
-                .call_host(builder, self.host.typed_clone, &[value, type_id])?
-                .first()
-                .copied()
-                .ok_or_else(|| {
-                    format!(
-                        "MIR `{}` typed copy host returned no value",
-                        ty.display_name()
-                    )
-                });
-        }
-        let Some(host) = self.collection_copy_host(&ty) else {
-            return self.value(value_id);
-        };
-        let value = self.cast(builder, self.value(value_id)?, types::I64)?;
-        self.call_host(builder, host, &[value])?
-            .first()
-            .copied()
-            .ok_or_else(|| format!("MIR `{}` copy host returned no value", ty.display_name()))
+        let value = self.value(value_id)?;
+        self.clone_runtime_value(builder, &ty, value)
     }
     fn build_string(
         &mut self,
@@ -11955,7 +13236,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             return Err("native callable signature disagrees with checked MIR type".to_string());
         }
         match (signature.return_type.as_ref(), result_type) {
-            (Some(checked), Some(actual)) if checked != actual => {
+            (Some(checked), Some(actual)) if !checked.same_checked_type(actual) => {
                 return Err("native callable result type disagrees with checked signature".to_string());
             }
             (None, None) | (Some(_), Some(_)) => {}
@@ -12020,22 +13301,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .as_ref()
             .and_then(clif_ty_from_mir)
             .map_or(Ok(result), |ty| thunk_decode_raw(builder, result, ty))?;
-        if let Some(failure) = signature.return_type.as_ref().and_then(|ret| match ret.kind() {
-            MirTypeKind::Result { ok, err } => Some(MirFailureCarrier::Result {
-                success: (**ok).clone(),
-                error: (**err).clone(),
-            }),
-            MirTypeKind::Option(value) => Some(MirFailureCarrier::Optional {
-                value: (**value).clone(),
-            }),
-            _ => None,
-        }) {
-            if result_type.is_some_and(|return_type| {
-                Self::call_result_matches_return_type(result_type, return_type)
-            }) {
-                return self.unwrap_call_result(builder, result, expected, &failure);
-            }
-        }
         expected.map_or(Ok(result), |target| thunk_cast(builder, result, target))
     }
 
@@ -12151,6 +13416,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         // Function-value parameter and result carriers are fixed by checked
         // MIR. The function type is only projected into Cranelift ABI types;
         // no source-level callable semantics are rediscovered here.
+        if ret.is_some_and(|return_type| {
+            matches!(
+                return_type.kind(),
+                MirTypeKind::Result { .. } | MirTypeKind::Option(_)
+            )
+        }) && !ret.is_some_and(|return_type| {
+            result_type.is_some_and(|actual| actual.same_checked_type(return_type))
+        }) {
+            return Err(
+                "MIR indirect call does not preserve its checked Result/Option return carrier"
+                    .to_string(),
+            );
+        }
         let parameter_types = params
             .iter()
             .zip(args)
@@ -12176,23 +13454,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let values = self.lower_call_args(builder, args, &signature)?;
         let handle = self.cast(builder, self.value(callee)?, types::I64)?;
         let result = self.call_callable_values(builder, handle, signature, values, return_type)?;
-        let failure = ret.and_then(|ret| match ret.kind() {
-            MirTypeKind::Result { ok, err } => Some(MirFailureCarrier::Result {
-                success: (**ok).clone(),
-                error: (**err).clone(),
-            }),
-            MirTypeKind::Option(value) => Some(MirFailureCarrier::Optional {
-                value: (**value).clone(),
-            }),
-            _ => None,
-        });
-        if let Some(failure) = failure.as_ref() {
-            if ret.is_some_and(|return_type| {
-                Self::call_result_matches_return_type(result_type, return_type)
-            }) {
-                return self.unwrap_call_result(builder, result, expected, failure);
-            }
-        }
         expected.map_or(Ok(result), |target| self.cast(builder, result, target))
     }
 
@@ -12273,8 +13534,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         } else {
             builder.ins().jump(merge_block, &[]);
         }
-
         builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+
+        self.flush_pending_capture_writebacks(builder)?;
+        self.flush_pending_argument_drops(builder)?;
         self.emit_pending_exit_check(builder);
         if return_type.is_some() {
             builder
@@ -13366,7 +14630,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             ));
                         }
                         if owned_callback_captures {
-                            self.read_place(builder, *place)?
+                            let value = self.read_place(builder, *place)?;
+                            self.clone_runtime_value(builder, &parameter.ty, value)?
                         } else {
                             self.address_of(builder, *place)?
                         }
@@ -13464,13 +14729,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .function_ids
             .get(&id)
             .ok_or_else(|| format!("MIR user function {:?} is missing", id))?;
-        let (return_type, failure) = self
+        let return_type = self
             .program
             .functions
             .iter()
             .find(|function| function.id == id)
-            .map(|function| (function.return_type.clone(), function.failure.clone()))
+            .map(|function| function.return_type.clone())
             .ok_or_else(|| format!("MIR user function {:?} has no metadata", id))?;
+        if matches!(return_type.kind(), MirTypeKind::Result { .. } | MirTypeKind::Option(_))
+            && !result_type.is_some_and(|actual| actual.same_checked_type(&return_type))
+        {
+            return Err(format!(
+                "MIR user call to {:?} does not preserve its checked Result/Option return carrier",
+                id
+            ));
+        }
         let signature = self
             .module
             .declarations()
@@ -13478,97 +14751,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .signature
             .clone();
         let values = self.lower_call_args(builder, args, &signature)?;
-        self.call_declared_values(builder, target, &signature, values)
-            .and_then(|results| {
-                let results = Self::prelude_results(builder, &signature, results);
-                let value = results
-                    .first()
-                    .copied()
-                    .ok_or_else(|| "MIR user call returned no value".to_string())?;
-                if Self::call_result_matches_return_type(result_type, &return_type) {
-                    self.unwrap_call_result(builder, value, expected, &failure)
-                } else {
-                    expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
-                }
-            })
-    }
-
-    fn call_result_matches_return_type(
-        result_type: Option<&MirType>,
-        return_type: &MirType,
-    ) -> bool {
-        match return_type.kind() {
-            MirTypeKind::Result { ok, .. } => {
-                result_type.is_some_and(|ty| ty.same_checked_type(ok))
-            }
-            MirTypeKind::Option(value) => {
-                result_type.is_some_and(|ty| ty.same_checked_type(value))
-            }
-            _ => false,
-        }
-    }
-
-    fn unwrap_call_result(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        raw: Value,
-        expected: Option<types::Type>,
-        failure: &MirFailureCarrier,
-    ) -> Result<Value, String> {
-        let raw_result = self.cast(builder, raw, types::I64)?;
-        let ok = self
-            .call_host(builder, self.host.result_is_ok, &[raw_result])?
+        let results = self.call_declared_values(builder, target, &signature, values)?;
+        let results = Self::prelude_results(builder, &signature, results);
+        let value = results
             .first()
             .copied()
-            .ok_or_else(|| "MIR user call result discriminator returned no value".to_string())?;
-        let payload_type = expected.unwrap_or(types::I64);
-        let success_block = builder.create_block();
-        let failure_block = builder.create_block();
-        let merge_block = builder.create_block();
-        builder.append_block_param(merge_block, payload_type);
-        builder
-            .ins()
-            .brif(ok, success_block, &[], failure_block, &[]);
+            .ok_or_else(|| "MIR user call returned no value".to_string())?;
+        expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
 
-        builder.switch_to_block(failure_block);
-        let compatible = match (failure, &self.function.failure) {
-            (
-                MirFailureCarrier::Result { error: source, .. },
-                MirFailureCarrier::Result { error: target, .. },
-            ) => source.same_checked_type(target),
-            (MirFailureCarrier::Optional { .. }, MirFailureCarrier::Optional { .. }) => true,
-            _ => false,
-        };
-        if !compatible {
-            return Err(format!(
-                "MIR call failure cannot propagate through `{}`",
-                self.function.key
-            ));
-        }
-        let return_type = clif_ty_from_mir(&self.function.return_type).ok_or_else(|| {
-            format!(
-                "MIR call failure target `{}` has no Cranelift return carrier",
-                self.function.key
-            )
-        })?;
-        let return_value = self.cast(builder, raw_result, return_type)?;
-        self.emit_cell_frame_leave(builder, Some(return_value))?;
-        self.emit_sentry_function_exit(builder)?;
-        self.emit_stack_leave(builder)?;
-        builder.ins().return_(&[return_value]);
-
-        builder.switch_to_block(success_block);
-        let payload = self.result_value_get_raw(builder, raw_result, Some(payload_type))?;
-        builder.ins().jump(merge_block, &[payload]);
-        builder.switch_to_block(merge_block);
-        builder.seal_block(merge_block);
-        builder
-            .block_params(merge_block)
-            .first()
-            .copied()
-            .ok_or_else(|| "MIR user call result merge has no payload".to_string())
     }
-
     fn call_foreign(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -15642,6 +16833,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             };
             let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
             let other = self.cast(builder, self.value(*other)?, types::I64)?;
+            self.queue_capture_place_writeback_id(receiver_place)?;
             self.call_host(builder, host, &[receiver, other])?;
             return Ok(Some(builder.ins().iconst(types::I64, 0)));
         }
@@ -15665,6 +16857,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             };
             let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
             let other = self.cast(builder, self.value(*other)?, types::I64)?;
+            self.queue_capture_place_writeback_id(receiver_place)?;
             self.call_host(builder, host, &[receiver, other])?;
             return Ok(Some(builder.ins().iconst(types::I64, 0)));
         }
@@ -16299,6 +17492,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .get_function_decl(host)
             .signature
             .clone();
+        if matches!(
+            member,
+            "list_push"
+                | "list_try_push"
+                | "list_try_reserve"
+                | "list_insert"
+                | "list_remove_value"
+                | "list_remove_slot"
+                | "list_pop"
+                | "list_extend"
+                | "list_reverse"
+                | "list_sort"
+                | "list_sort_desc"
+                | "list_clear"
+                | "map_insert"
+                | "map_setdefault"
+                | "map_add_new"
+                | "map_try_insert"
+                | "map_remove"
+                | "map_pop_first"
+                | "map_merge"
+        ) {
+            self.queue_capture_place_writeback_id(receiver_place)?;
+        }
         let results = self.call_declared_values(builder, host, &signature, values)?;
         let value = Self::prelude_results(builder, &signature, results)
             .first()
@@ -17033,6 +18250,104 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
     }
 
+    fn call_argument_value_type(
+        &self,
+        arg: &MirCallArg,
+        source_type: &MirType,
+    ) -> Result<MirType, String> {
+        if let Some(coercion) = &arg.fn_coercion {
+            return Ok(coercion.ty.clone());
+        }
+        let type_id = arg
+            .box_as_trait
+            .or_else(|| arg.widen_to_union.as_ref().map(|coercion| coercion.union));
+        if let Some(type_id) = type_id {
+            return self
+                .program
+                .type_instances
+                .iter()
+                .find(|instance| instance.identity == Some(type_id))
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "MIR call argument target type {:?} has no checked instance",
+                        type_id
+                    )
+                });
+        }
+        if arg.widen_fixed_to_list {
+            let element = match source_type.kind() {
+                MirTypeKind::FixedList { elem, .. } => elem,
+                _ => {
+                    return Err(format!(
+                        "MIR call argument widens non-fixed-list type `{}`",
+                        source_type.display_name()
+                    ));
+                }
+            };
+            let mut targets = self.program.type_instances.iter().filter(|instance| {
+                matches!(
+                    instance.kind(),
+                    MirTypeKind::List(target_element)
+                        if target_element.same_checked_type(element)
+                )
+            });
+            let target = targets.next().ok_or_else(|| {
+                format!(
+                    "MIR fixed-list argument `{}` has no checked List target",
+                    source_type.display_name()
+                )
+            })?;
+            if targets.next().is_some() {
+                return Err(format!(
+                    "MIR fixed-list argument `{}` resolves to multiple checked List targets",
+                    source_type.display_name()
+                ));
+            }
+            return Ok(target.clone());
+        }
+        Ok(source_type.clone())
+    }
+
+    fn call_drop_is_relevant(&self, ty: &MirType, kind: MirDropKind) -> bool {
+        !matches!(kind, MirDropKind::None)
+            && (copy_needs_typed_clone(ty)
+                || core_files_resource_kind(self.program, ty).is_some()
+                || is_core_files_type(self.program, ty, "FileReader")
+                || is_core_files_type(self.program, ty, "FileWriter"))
+    }
+
+    fn call_argument_capture_writeback(
+        &self,
+        arg: &MirCallArg,
+    ) -> Result<Option<(usize, u64)>, String> {
+        if arg.access != MirAccess::Write {
+            return Ok(None);
+        }
+        let Some(place_id) = arg.place else {
+            return Ok(None);
+        };
+        let place = self
+            .function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)
+            .ok_or_else(|| format!("MIR write call place {:?} is missing", place_id))?;
+        self.writeback_for_capture_place(place)
+    }
+
+    fn queue_call_argument_drop(
+        &self,
+        pending: &mut Vec<(MirType, Value, MirDropKind)>,
+        ty: &MirType,
+        value: Value,
+        kind: MirDropKind,
+    ) {
+        if self.call_drop_is_relevant(ty, kind) {
+            pending.push((ty.clone(), value, kind));
+        }
+    }
+
     fn lower_call_args_with_mode(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -17047,85 +18362,145 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 args.len()
             ));
         }
-        args.iter()
-            .zip(signature.params.iter())
-            .map(|(arg, parameter)| {
-                if arg.access == MirAccess::Write && arg.place.is_none() {
-                    return Err("MIR write call argument has no checked place".to_string());
+        let mut lowered = Vec::with_capacity(args.len());
+        let mut pending_drops = Vec::new();
+        let mut pending_capture_writebacks = Vec::new();
+        for (arg, parameter) in args.iter().zip(&signature.params) {
+            if arg.access == MirAccess::Write && arg.place.is_none() {
+                return Err("MIR write call argument has no checked place".to_string());
+            }
+            if let Some(writeback) = self.call_argument_capture_writeback(arg)? {
+                pending_capture_writebacks.push(writeback);
+            }
+            if let Some(coercion) = &arg.fn_coercion {
+                let carrier = clif_ty_from_mir(&coercion.ty)
+                    .ok_or_else(|| "MIR function coercion has no ABI".to_string())?;
+                if carrier != types::I64 {
+                    return Err(format!(
+                        "MIR function coercion carrier {carrier} is not a function handle"
+                    ));
                 }
-                if let Some(coercion) = &arg.fn_coercion {
-                    let carrier = clif_ty_from_mir(&coercion.ty)
-                        .ok_or_else(|| "MIR function coercion has no ABI".to_string())?;
-                    if carrier != types::I64 {
-                        return Err(format!(
-                            "MIR function coercion carrier {carrier} is not a function handle"
-                        ));
-                    }
-                }
-                if let Some(coercion) = &arg.widen_to_union {
-                    self.validate_union_coercion(coercion)?;
-                }
-                let source_is_trait_object =
-                    matches!(self.mir_value_type(arg.value)?.kind(), MirTypeKind::TraitObject(_));
-                let trait_target = if let Some(type_id) = arg.box_as_trait {
-                    let target = self
-                        .program
-                        .type_instances
-                        .iter()
-                        .find(|instance| instance.identity == Some(type_id))
-                        .ok_or_else(|| {
-                            format!(
-                                "MIR trait coercion target {:?} has no instance row",
-                                type_id
-                            )
-                        })?;
-                    if !matches!(target.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
-                        return Err(format!(
-                            "MIR trait coercion target {:?} is not a single-trait object",
+            }
+            if let Some(coercion) = &arg.widen_to_union {
+                self.validate_union_coercion(coercion)?;
+            }
+            let source_type = self.mir_value_type(arg.value)?;
+            let source_ownership = self
+                .function
+                .values
+                .iter()
+                .find(|(value, _, _, _)| *value == arg.value)
+                .map(|(_, _, _, ownership)| *ownership)
+                .ok_or_else(|| format!("MIR call argument value {:?} has no ownership fact", arg.value))?;
+            let source_is_trait_object =
+                matches!(source_type.kind(), MirTypeKind::TraitObject(_));
+            let trait_target = if let Some(type_id) = arg.box_as_trait {
+                let target = self
+                    .program
+                    .type_instances
+                    .iter()
+                    .find(|instance| instance.identity == Some(type_id))
+                    .ok_or_else(|| {
+                        format!(
+                            "MIR trait coercion target {:?} has no instance row",
                             type_id
-                        ));
-                    }
-                    Some(type_id)
-                } else {
-                    None
-                };
-                let needs_trait_box = trait_target.is_some() && !source_is_trait_object;
-                let value = if arg.access == MirAccess::Write {
-                    let place = arg.place.expect("checked MIR write argument place");
-                    if write_as_value {
-                        self.read_place(builder, place)?
-                    } else {
-                        self.address_of(builder, place)?
-                    }
-                } else {
-                    self.value(arg.value)?
-                };
-                let mut value = if let Some(coercion) = &arg.widen_to_union {
-                    self.wrap_union(builder, coercion, arg.value, value)?
-                } else {
-                    value
-                };
-                if needs_trait_box {
-                    let source_type = self.mir_value_type(arg.value)?;
-                    let source_id = source_type.identity.ok_or_else(|| {
-                        "MIR trait coercion source has no type identity".to_string()
+                        )
                     })?;
-                    let source_id_value = builder.ins().iconst(types::I64, source_id.0 as i64);
-                    let record = self.cast(builder, value, types::I64)?;
-                    value = self
-                        .call_host(
-                            builder,
-                            self.host.trait_object_tag,
-                            &[record, source_id_value],
-                        )?
-                        .first()
-                        .copied()
-                        .ok_or_else(|| "MIR trait coercion host returned no record".to_string())?;
+                if !matches!(target.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
+                    return Err(format!(
+                        "MIR trait coercion target {:?} is not a single-trait object",
+                        type_id
+                    ));
                 }
-                self.cast(builder, value, parameter.value_type)
-            })
-            .collect()
+                Some(type_id)
+            } else {
+                None
+            };
+            let needs_trait_box = trait_target.is_some() && !source_is_trait_object;
+            let source_value = if arg.access == MirAccess::Write {
+                let place = arg.place.expect("checked MIR write argument place");
+                if write_as_value {
+                    self.read_place(builder, place)?
+                } else {
+                    self.address_of(builder, place)?
+                }
+            } else {
+                self.value(arg.value)?
+            };
+            let clone_requested = arg.implicit_clone || arg.shared_auto_clone;
+            let mut value = if clone_requested && arg.access != MirAccess::Write {
+                self.clone_runtime_value(builder, &source_type, source_value)?
+            } else {
+                source_value
+            };
+            if clone_requested
+                && arg.owned_last_use
+                && self.call_drop_is_relevant(&source_type, source_ownership.drop)
+            {
+                self.queue_call_argument_drop(
+                    &mut pending_drops,
+                    &source_type,
+                    source_value,
+                    source_ownership.drop,
+                );
+            } else if !clone_requested
+                && arg.access == MirAccess::Read
+                && arg.owned_last_use
+                && self.call_drop_is_relevant(&source_type, source_ownership.drop)
+            {
+                self.queue_call_argument_drop(
+                    &mut pending_drops,
+                    &source_type,
+                    source_value,
+                    source_ownership.drop,
+                );
+            }
+            if let Some(coercion) = &arg.widen_to_union {
+                value = self.wrap_union(builder, coercion, arg.value, value)?;
+            }
+            if needs_trait_box {
+                let source_id = source_type.identity.ok_or_else(|| {
+                    "MIR trait coercion source has no type identity".to_string()
+                })?;
+                let source_id_value = builder.ins().iconst(types::I64, source_id.0 as i64);
+                let record = self.cast(builder, value, types::I64)?;
+                value = self
+                    .call_host(
+                        builder,
+                        self.host.trait_object_tag,
+                        &[record, source_id_value],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR trait coercion host returned no record".to_string())?;
+            }
+            let argument_value_owned = clone_requested
+                || arg.widen_fixed_to_list
+                || arg.widen_to_union.is_some()
+                || needs_trait_box
+                || arg.fn_coercion.as_ref().is_some_and(|coercion| !coercion.already_boxed);
+            if arg.access == MirAccess::Read && argument_value_owned {
+                let owned_type = self.call_argument_value_type(arg, &source_type)?;
+                let drop_kind = if source_ownership.drop == MirDropKind::None {
+                    MirDropKind::Value
+                } else {
+                    source_ownership.drop
+                };
+                self.queue_call_argument_drop(
+                    &mut pending_drops,
+                    &owned_type,
+                    value,
+                    drop_kind,
+                );
+            }
+            lowered.push(self.cast(builder, value, parameter.value_type)?);
+        }
+        self.pending_argument_drops.extend(pending_drops);
+        self.pending_capture_writebacks
+            .extend(pending_capture_writebacks);
+        Ok(lowered)
     }
+
     fn validate_union_coercion(&self, coercion: &MirUnionCoercion) -> Result<(), String> {
         let definition = self
             .program
@@ -17268,6 +18643,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .collect::<Result<Vec<_>, _>>()?;
         let local = self.module.declare_func_in_func(id, builder.func);
         let call = builder.ins().call(local, &args);
+        self.flush_pending_capture_writebacks(builder)?;
+        self.flush_pending_argument_drops(builder)?;
         self.emit_pending_exit_check(builder);
         Ok(builder.inst_results(call).to_vec())
     }
@@ -17309,6 +18686,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         values: &[Value],
     ) -> Result<Vec<Value>, String> {
         let result = self.call_host_unchecked(builder, id, values)?;
+        self.flush_pending_capture_writebacks(builder)?;
         self.emit_pending_exit_check(builder);
         Ok(result)
     }
@@ -18620,6 +19998,78 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .map_or(Ok(result), |ty| self.cast(builder, result, ty))
                         .map(Some);
                 }
+                let is_shared_constructor = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == *call)
+                    .is_some_and(|row| {
+                        row.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                            && row.module == "::jet_std::JetShared"
+                            && row.member == "new"
+                    });
+                if is_shared_constructor {
+                    let row = self
+                        .program
+                        .prelude_calls
+                        .iter()
+                        .find(|row| row.id == *call)
+                        .ok_or_else(|| format!("MIR Prelude call {:?} is missing", call))?;
+                    if row.symbol.name() != "jet_std::JetShared::new" {
+                        return Err(format!(
+                            "MIR Shared constructor has a non-canonical symbol `{}`",
+                            row.symbol.name()
+                        ));
+                    }
+                    if args.len() != 1 || owner_type_args.len() != 1 || !type_args.is_empty() {
+                        return Err(
+                            "MIR Shared.new expects one value argument and one owner type argument"
+                                .to_string(),
+                        );
+                    }
+                    if !matches!(owner_type_args[0], MirPreludeTypeArg::Type(_)) {
+                        return Err(
+                            "MIR Shared.new owner argument must be an element type".to_string()
+                        );
+                    }
+                    let shared_ty = instruction.ty.as_ref().ok_or_else(|| {
+                        "MIR Shared.new result has no checked Shared type".to_string()
+                    })?;
+                    let shared_type_id = runtime_descriptor_id(shared_ty).ok_or_else(|| {
+                        format!(
+                            "MIR Shared.new result type `{}` has no runtime identity",
+                            shared_ty.display_name()
+                        )
+                    })?;
+                    let host = self.lookup_prelude_host(row)?;
+                    let signature = self
+                        .module
+                        .declarations()
+                        .get_function_decl(host)
+                        .signature
+                        .clone();
+                    if signature.params.len() != 2 {
+                        return Err(format!(
+                            "MIR Shared constructor ABI expects raw value and Shared type metadata, got {} parameters",
+                            signature.params.len()
+                        ));
+                    }
+                    let mut source_signature = signature.clone();
+                    source_signature.params.pop();
+                    let mut values = self.lower_call_args(builder, args, &source_signature)?;
+                    values.push(builder.ins().iconst(types::I64, shared_type_id as i64));
+                    let result = self
+                        .call_declared_values(builder, host, &signature, values)?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| {
+                            "MIR Shared constructor host returned no value".to_string()
+                        })?;
+                    return expected
+                        .map_or(Ok(result), |ty| self.cast(builder, result, ty))
+                        .map(Some);
+                }
+
 
 
                 let is_set_constructor = self
@@ -19025,6 +20475,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .find(|row| row.id == *call)
                     .cloned()
                     .ok_or_else(|| format!("MIR Prelude call {:?} is missing", call))?;
+                if row.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod {
+                    if let Some(value) = self.shared_owner_handle_method(
+                        builder,
+                        &row.member,
+                        &row.signature.borrow_mask,
+                        *receiver,
+                        args,
+                        expected,
+                    )? {
+                        return Ok(Some(value));
+                    }
+                }
                 if row.member == "path.home" {
                     if !args.is_empty() {
                         return Err(
@@ -19928,5 +21390,117 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         } else {
             Ok(builder.ins().icmp_imm(IntCC::NotEqual, value, 0))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_aot_private_helper_does_not_require_public_entry() {
+        let helper = MirFunctionId(41);
+        let compiled = BTreeSet::from([helper]);
+        assert!(source_helper_target_supported(MirArtifactTarget::RustAot));
+        assert!(!source_helper_target_supported(MirArtifactTarget::Interpreter));
+        assert_eq!(
+            select_compile_entry(MirArtifactId(7), None, &[helper], &compiled),
+            Ok(helper)
+        );
+    }
+
+    #[test]
+    fn helper_closure_rejects_inapplicable_foreign_and_only_reachable_links() {
+        let function = MirFunctionId(40);
+        let foreign = MirForeignId(41);
+        let operation = MirOperation::Call {
+            callee: MirCallee::Foreign(foreign),
+            args: Vec::new(),
+            type_args: Vec::new(),
+        };
+        assert_eq!(direct_foreign_call(&operation), Some(foreign));
+        let artifact = MirArtifactId(7);
+        let native_link = MirLinkUnitId(1);
+        let unrelated_aot_link = MirLinkUnitId(2);
+        let artifact_links = [native_link, unrelated_aot_link];
+
+        let inapplicable_foreign = source_helper_foreign_link_authority(
+            function,
+            foreign,
+            false,
+            true,
+            Some(native_link),
+            artifact,
+            &artifact_links,
+        )
+        .expect_err("a reachable foreign without Cranelift applicability is rejected");
+        assert!(inapplicable_foreign.contains("unavailable to Cranelift"));
+
+        let links = [
+            (native_link, true, &[][..]),
+            (unrelated_aot_link, false, &[][..]),
+        ];
+        let selected = validate_source_helper_links(
+            artifact,
+            &artifact_links,
+            [native_link],
+            |id| {
+                Ok(links
+                    .iter()
+                    .find(|(link, _, _)| *link == id)
+                    .map(|(_, cranelift, closure)| (*cranelift, *closure)))
+            },
+        )
+        .expect("an unrelated RustAot-only artifact link is not in the helper closure");
+        assert_eq!(selected, BTreeSet::from([native_link]));
+
+        let reachable_aot_link = validate_source_helper_links(
+            artifact,
+            &artifact_links,
+            [unrelated_aot_link],
+            |id| {
+                Ok(links
+                    .iter()
+                    .find(|(link, _, _)| *link == id)
+                    .map(|(_, cranelift, closure)| (*cranelift, *closure)))
+            },
+        )
+        .expect_err("a reachable RustAot-only link is not executable by Cranelift");
+        assert!(reachable_aot_link.contains("unavailable to Cranelift"));
+    }
+
+    #[test]
+    fn ordinary_compile_still_requires_public_entry() {
+        let compiled = BTreeSet::new();
+        let error = select_compile_entry(MirArtifactId(7), None, &[], &compiled)
+            .expect_err("ordinary artifact compilation must require its entry");
+        assert!(error.contains("has no entry function"));
+    }
+    #[test]
+    fn source_helper_data_provider_uses_only_reachable_modules() {
+        let reachable_data = MirModuleId(71);
+        let unrelated_data = MirModuleId(72);
+        let modules = [
+            (reachable_data, "core.data"),
+            (unrelated_data, "core.data.sketch.hll"),
+        ];
+        assert!(
+            source_helper_data_provider_required(&BTreeSet::from([reachable_data]), modules)
+                .expect("the reachable helper module resolves")
+        );
+
+        let reachable_helper = MirModuleId(73);
+        let unrelated_data = MirModuleId(74);
+        let modules = [
+            (reachable_helper, "app.source_helper"),
+            (unrelated_data, "core.data"),
+        ];
+        assert!(
+            !source_helper_data_provider_required(
+                &BTreeSet::from([reachable_helper]),
+                modules
+            )
+            .expect("the foreign-free helper module resolves")
+        );
     }
 }

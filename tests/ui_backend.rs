@@ -82,7 +82,7 @@ fn tui_backend_reactive_conditional_capture() {
 use core.ui as ui
 use core.reactive as reactive
 
-fn view(title: String) UiNode -> ui.box([
+fn view(title: String) -> UiNode -> ui.box([
     ui.text(title),
     ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
 ])

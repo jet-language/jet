@@ -13,7 +13,7 @@ struct WorkloadArgs {
     #Doc("write the report to this file") output: ?String
 }
 
-fn field_text(bytes: [U8], start: Int, width: Int) String -> {
+fn field_text(bytes: [U8], start: Int, width: Int) -> String {
     value := [U8]{}
     loop i in 0..<width {
         byte :: bytes.get(start + i) ?? 0
@@ -23,7 +23,7 @@ fn field_text(bytes: [U8], start: Int, width: Int) String -> {
     return String.from_bytes_lossy(value)
 }
 
-fn valid_field(bytes: [U8], start: Int, width: Int) Bool -> {
+fn valid_field(bytes: [U8], start: Int, width: Int) -> Bool {
     i := 0
     loop i < width {
         first :: bytes.get(start + i) ?? return false
@@ -57,7 +57,7 @@ fn valid_field(bytes: [U8], start: Int, width: Int) Bool -> {
     return true
 }
 
-fn number_field(bytes: [U8], start: Int, width: Int) Int -> {
+fn number_field(bytes: [U8], start: Int, width: Int) -> Int {
     first :: bytes.get(start) ?? return -1
     if first >= 128 {
         value := Int.from_u8(first) - 128
@@ -82,7 +82,7 @@ fn number_field(bytes: [U8], start: Int, width: Int) Int -> {
     return value
 }
 
-fn checksum_ok(bytes: [U8], offset: Int) Bool -> {
+fn checksum_ok(bytes: [U8], offset: Int) -> Bool {
     stored :: number_field(bytes, offset + 148, 8)
     if stored < 0 -> return false
     sum := 0
@@ -93,7 +93,7 @@ fn checksum_ok(bytes: [U8], offset: Int) Bool -> {
     return stored == sum
 }
 
-fn zero_block(bytes: [U8], offset: Int) Bool -> {
+fn zero_block(bytes: [U8], offset: Int) -> Bool {
     loop i in 0..<512 {
         byte :: bytes.get(offset + i) ?? return false
         if byte != 0 -> return false
@@ -101,7 +101,7 @@ fn zero_block(bytes: [U8], offset: Int) Bool -> {
     return true
 }
 
-fn zero_tail(bytes: [U8], offset: Int) Bool -> {
+fn zero_tail(bytes: [U8], offset: Int) -> Bool {
     loop i in offset..<bytes.len() {
         byte :: bytes.get(i) ?? return false
         if byte != 0 -> return false
@@ -109,7 +109,7 @@ fn zero_tail(bytes: [U8], offset: Int) Bool -> {
     return true
 }
 
-fn safe_path(path: String) Bool -> {
+fn safe_path(path: String) -> Bool {
     if path == "" || path.starts_with("/") || path.starts_with("\\") -> return false
     path_bytes :: path.bytes()
     if path_bytes.len() > 1 && path_bytes[1] == 58 -> return false
@@ -120,7 +120,7 @@ fn safe_path(path: String) Bool -> {
     return true
 }
 
-fn glob_match(pattern: String, path: String) Bool -> {
+fn glob_match(pattern: String, path: String) -> Bool {
     p :: pattern.bytes()
     s :: path.bytes()
     pattern_index := 0
@@ -154,7 +154,7 @@ fn glob_match(pattern: String, path: String) Bool -> {
     return pattern_index == p.len()
 }
 
-fn entry_kind(tag_byte: U8) String -> {
+fn entry_kind(tag_byte: U8) -> String {
     if tag_byte == 0 || tag_byte == 48 -> return "file"
     if tag_byte == 49 -> return "hardlink"
     if tag_byte == 50 -> return "symlink"

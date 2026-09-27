@@ -70,7 +70,7 @@ struct InspectReport {
     seal_reseal_needed: Int
 }
 
-fn safe_entry_name(name: String) Bool !ReadError -> {
+fn safe_entry_name(name: String) -> Bool !ReadError {
     if name == "" || !name.is_ascii() {
         return false
     }
@@ -89,7 +89,7 @@ fn safe_entry_name(name: String) Bool !ReadError -> {
     return true
 }
 
-fn internal_directory(name: String) Bool !ReadError -> {
+fn internal_directory(name: String) -> Bool !ReadError {
     return name == "build-scratch"
         || name == "failed-scratch"
         || name == "objects"
@@ -107,7 +107,7 @@ fn internal_directory(name: String) Bool !ReadError -> {
         || name == "unreproducible"
 }
 
-fn object_ids(store_root: String) [String] !ReadError -> {
+fn object_ids(store_root: String) -> [String] !ReadError {
     hangar :: Path.from(store_root).join("hangar")
     if !fs.exists(~hangar) {
         return Ok([String]{})
@@ -139,7 +139,7 @@ fn object_ids(store_root: String) [String] !ReadError -> {
     return Ok(ids)
 }
 
-fn read_record(hangar_root: String, id: String) ObjectRecord !ReadError -> {
+fn read_record(hangar_root: String, id: String) -> ObjectRecord !ReadError {
     object :: Path.from(hangar_root).join(~id)
     metadata_path :: object.join("meta.json")
     metadata_stat :: fs.stat(~metadata_path) ?? return Err(ReadError{message: "Hangar object {id} metadata cannot be inspected"})
@@ -163,7 +163,7 @@ fn read_record(hangar_root: String, id: String) ObjectRecord !ReadError -> {
     })
 }
 
-fn records(store_root: String) [ObjectRecord] !ReadError -> {
+fn records(store_root: String) -> [ObjectRecord] !ReadError {
     ids :: object_ids(~store_root)
     hangar_root :: Path.from(store_root).join("hangar").to_string()
     result := [ObjectRecord]{}
@@ -174,7 +174,7 @@ fn records(store_root: String) [ObjectRecord] !ReadError -> {
     return Ok(result)
 }
 
-fn list_report(entries: [ObjectRecord]) String !ReadError -> {
+fn list_report(entries: [ObjectRecord]) -> String !ReadError {
     packages := [PackageRow]{}
     loop entry in entries {
         packages.push(PackageRow{
@@ -196,13 +196,13 @@ fn list_report(entries: [ObjectRecord]) String !ReadError -> {
     })
 }
 
-pub fn list_json(store_root: String) String !ReadError -> {
+pub fn list_json(store_root: String) -> String !ReadError {
     entries :: records(store_root)
     wire :: list_report(entries)
     return Ok(wire)
 }
 
-pub fn inspect_json(store_root: String) String !ReadError -> {
+pub fn inspect_json(store_root: String) -> String !ReadError {
     entries :: records(store_root)
     return Ok(json.to_string(InspectReport{
         schema: "jet.report/v1",

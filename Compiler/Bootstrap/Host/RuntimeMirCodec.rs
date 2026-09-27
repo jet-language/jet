@@ -1,4 +1,4 @@
-//! Generated, typed Source-MIR -> native MIR conversion for the private bootstrap.
+//! Generated, typed Source-MIR <-> native MIR conversion for the private bootstrap.
 //!
 //! This module is deliberately a generator, rather than a handwritten carrier
 //! projection.  The source MIR declarations and the binding manifest are the
@@ -75,7 +75,7 @@ enum TypeExpr {
     Map(Box<TypeExpr>, Box<TypeExpr>),
 }
 
-/// Append the complete typed Source-MIR decoder to generated host glue.
+/// Append the typed Source-MIR and native-MIR converters to generated host glue.
 pub(crate) fn append_runtime_mir_codec(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
@@ -124,7 +124,7 @@ pub(crate) fn append_runtime_mir_codec(
     emit_special_structural_converters(out, symbols)?;
     writeln!(
         out,
-        "\n// Source-MIR codec: generated from Compiler/JetFoundation/Source/MIR/MIR.jet.\n"
+        "\n// Typed Source-MIR/native-MIR projection generated from Compiler/JetFoundation/Source/MIR/MIR.jet.\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -146,7 +146,25 @@ pub(crate) fn append_runtime_mir_codec(
             Body::Tuple => emit_tuple_converter(out, symbols, definition)?,
         }
     }
-    emit_image_payload_codec(out, symbols, &source)?;
+    emit_special_host_to_source_converters(out, symbols)?;
+    for definition in &source {
+        if definition.name.ends_with("Id") && definition.name != "MirTypeId" {
+            emit_id_from_host_converter(out, symbols, &definition.name)?;
+            continue;
+        }
+        if custom_source_converter(&definition.name) {
+            continue;
+        }
+        match &definition.body {
+            Body::Struct(fields) => {
+                emit_struct_from_host_converter(out, symbols, &host_by_name, definition, fields)?
+            }
+            Body::Enum(variants) => {
+                emit_enum_from_host_converter(out, symbols, &host_by_name, definition, variants)?
+            }
+            Body::Tuple => emit_tuple_from_host_converter(definition)?,
+        }
+    }
 
 
     // The top-level entry is named and stable so Runner/Native wiring never
@@ -166,6 +184,11 @@ pub(crate) fn append_runtime_mir_codec(
             "Source MirProgram must remain a struct".to_string(),
         ));
     }
+    writeln!(
+        out,
+        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_from_host(\n    value: &::jet_foundation::MIR::MirProgram,\n) -> Result<{program_source}, String> {{\n    __jet_bootstrap_mir_MirProgram_from_host(value)\n}}\n"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     Ok(())
 }
 
@@ -418,6 +441,232 @@ fn emit_special_structural_converters(
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
 
+fn emit_special_host_to_source_converters(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+) -> Result<(), BootstrapHostCodecError> {
+    let value_fact_source = symbols.type_symbol("MirValueFact")?;
+    let value_fact_id = symbols.field_symbol("MirValueFact", "id")?;
+    let value_fact_ty = symbols.field_symbol("MirValueFact", "ty")?;
+    let value_fact_span = symbols.field_symbol("MirValueFact", "span")?;
+    let value_fact_ownership = symbols.field_symbol("MirValueFact", "ownership")?;
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_value_fact_from_host(value: &(::jet_foundation::MIR::MirValueId, ::jet_foundation::MIR::MirType, ::jet_foundation::Diagnostics::Span, ::jet_foundation::MIR::MirOwnership)) -> Result<{value_fact_source}, String> {{\n    Ok({value_fact_source} {{\n        {value_fact_id}: __jet_bootstrap_mir_MirValueId_from_host(&value.0)?,\n        {value_fact_ty}: __jet_bootstrap_type_from_host(&value.1)?,\n        {value_fact_span}: __jet_bootstrap_span_from_host(&value.2)?,\n        {value_fact_ownership}: __jet_bootstrap_mir_MirOwnership_from_host(&value.3)?,\n    }})\n}}\n"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+
+    let provenance_source = symbols.type_symbol("MirViewProvenanceEntry")?;
+    let provenance_slot = symbols.field_symbol("MirViewProvenanceEntry", "slot")?;
+    let provenance_value = symbols.field_symbol("MirViewProvenanceEntry", "provenance")?;
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_view_provenance_from_host(values: &::std::collections::BTreeMap<Vec<String>, ::jet_foundation::MIR::MirViewProvenance>) -> Result<Vec<{provenance_source}>, String> {{\n    let mut output = Vec::with_capacity(values.len());\n    for (slot, provenance) in values {{\n        output.push({provenance_source} {{\n            {provenance_slot}: slot.iter().cloned().collect(),\n            {provenance_value}: __jet_bootstrap_mir_MirViewProvenance_from_host(provenance)?,\n        }});\n    }}\n    Ok(output)\n}}\n"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+
+    let job_limit_source = symbols.type_symbol("MirJobLimit")?;
+    let job_limit_name = symbols.field_symbol("MirJobLimit", "name")?;
+    let job_limit_value = symbols.field_symbol("MirJobLimit", "value")?;
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_job_limits_from_host(values: &::std::collections::BTreeMap<String, String>) -> Result<Vec<{job_limit_source}>, String> {{\n    Ok(values.iter().map(|(name, value)| {job_limit_source} {{ {job_limit_name}: name.clone(), {job_limit_value}: value.clone() }}).collect())\n}}\n"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+fn emit_id_from_host_converter(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+    name: &str,
+) -> Result<(), BootstrapHostCodecError> {
+    let source = symbols.type_symbol(name)?;
+    let value_field = symbols.field_symbol(name, "value")?;
+    let host_path = host_type_path(name);
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_{name}_from_host(value: &{host_path}) -> Result<{source}, String> {{\n    let raw = value.0;\n    if raw == 0 {{ return Err(\"MIR identity must be non-zero\".to_string()); }}\n    Ok({source} {{ {value_field}: jet_foundation::Numeric::JetInt::from_str(&raw.to_string())? }})\n}}\n"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+fn emit_tuple_from_host_converter(
+    definition: &Definition,
+) -> Result<(), BootstrapHostCodecError> {
+    Err(BootstrapHostCodecError::InvalidMetadata(format!(
+        "Source MIR tuple carrier `{}` has no checked native representation",
+        definition.name
+    )))
+}
+
+fn emit_struct_from_host_converter(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+    host_by_name: &BTreeMap<String, Definition>,
+    definition: &Definition,
+    source_fields: &[Field],
+) -> Result<(), BootstrapHostCodecError> {
+    let source = symbols.type_symbol(&definition.name)?;
+    let host_path = host_type_path(&definition.name);
+    let host_fields = match host_by_name.get(&definition.name) {
+        Some(Definition {
+            body: Body::Struct(fields),
+            ..
+        }) => fields.clone(),
+        Some(Definition {
+            body: Body::Tuple, ..
+        }) => {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "native MIR type `{}` is a tuple carrier but Source MIR declares a struct",
+                definition.name
+            )))
+        }
+        Some(Definition {
+            body: Body::Enum(_), ..
+        }) => {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "native MIR type `{}` is an enum but Source MIR declares a struct",
+                definition.name
+            )))
+        }
+        None => source_fields.to_vec(),
+    };
+    let mut initializers = Vec::new();
+    for source_field in source_fields {
+        let host_field = host_fields
+            .iter()
+            .find(|field| source_field_name(&definition.name, &field.name) == source_field.name)
+            .ok_or_else(|| {
+                BootstrapHostCodecError::InvalidMetadata(format!(
+                    "Source MIR field `{}.{}` has no native MIR source",
+                    definition.name, source_field.name
+                ))
+            })?;
+        let expression = convert_from_host_expression(
+            &source_field.ty,
+            &host_field.ty,
+            &format!("&value.{}", host_field.name),
+        )?;
+        let source_field_symbol = symbols.field_symbol(&definition.name, &source_field.name)?;
+        initializers.push(format!(
+            "        {source_field_symbol}: {expression},"
+        ));
+    }
+
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n    Ok({} {{\n{}\n    }})\n}}\n",
+        definition.name,
+        host_path,
+        source,
+        source,
+        initializers.join("\n"),
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+fn emit_enum_from_host_converter(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+    host_by_name: &BTreeMap<String, Definition>,
+    definition: &Definition,
+    source_variants: &[Variant],
+) -> Result<(), BootstrapHostCodecError> {
+    let source = symbols.type_symbol(&definition.name)?;
+    let host_path = host_type_path(&definition.name);
+    let host_variants = match host_by_name.get(&definition.name) {
+        Some(Definition {
+            body: Body::Enum(variants),
+            ..
+        }) => variants.clone(),
+        Some(_) => {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "native MIR type `{}` is not an enum",
+                definition.name
+            )))
+        }
+        None => source_variants.to_vec(),
+    };
+    let mut arms = Vec::new();
+    for source_variant in source_variants {
+        let source_path = symbols.variant_path(&definition.name, &source_variant.name)?;
+        let host_name = host_variant_name(&definition.name, &source_variant.name);
+        let host_variant = host_variants
+            .iter()
+            .find(|variant| variant.name == host_name)
+            .ok_or_else(|| {
+                BootstrapHostCodecError::InvalidMetadata(format!(
+                    "native MIR enum `{}` has no variant `{}`",
+                    definition.name, host_name
+                ))
+            })?;
+        if source_variant.fields.len() != host_variant.fields.len() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "MIR enum variant `{}::{}` changes payload arity",
+                definition.name, source_variant.name
+            )));
+        }
+        let bindings = (0..host_variant.fields.len())
+            .map(|index| format!("__field_{index}"))
+            .collect::<Vec<_>>();
+        let pattern = if host_variant.fields.is_empty() {
+            format!("{host_path}::{}", host_variant.name)
+        } else if host_variant.fields.iter().all(|field| field.name.is_some()) {
+            let fields = host_variant
+                .fields
+                .iter()
+                .zip(bindings.iter())
+                .map(|(field, binding)| {
+                    format!(
+                        "{}: {binding}",
+                        field.name.as_deref().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "{host_path}::{} {{ {} }}",
+                host_variant.name,
+                fields.join(", ")
+            )
+        } else if host_variant.fields.iter().all(|field| field.name.is_none()) {
+            format!(
+                "{host_path}::{}({})",
+                host_variant.name,
+                bindings.join(", ")
+            )
+        } else {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "native MIR enum variant `{}::{}` mixes named and positional fields",
+                definition.name, host_variant.name
+            )));
+        };
+        let values = source_variant
+            .fields
+            .iter()
+            .zip(host_variant.fields.iter())
+            .zip(bindings.iter())
+            .map(|((source_field, host_field), binding)| {
+                convert_from_host_expression(&source_field.ty, &host_field.ty, binding)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let constructor = if values.is_empty() {
+            source_path
+        } else {
+            format!("{}({})", source_path, values.join(", "))
+        };
+        arms.push(format!("        {pattern} => Ok({constructor}),"));
+    }
+    writeln!(
+        out,
+        "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n    match value {{\n{}\n        _ => Err(\"native MIR enum variant is not representable in Source MIR\".to_string()),\n    }}\n}}\n",
+        definition.name,
+        host_path,
+        source,
+        arms.join("\n"),
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
 fn emit_id_converter(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
@@ -641,6 +890,193 @@ fn convert_expression(
     let source_type = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     let host_type = parse_type(host_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     convert_type_expression(&source_type, &host_type, expression)
+}
+
+fn convert_from_host_expression(
+    source_type: &str,
+    host_type: &str,
+    expression: &str,
+) -> Result<String, BootstrapHostCodecError> {
+    let source_type = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+    let host_type = parse_type(host_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+    convert_from_host_type_expression(&source_type, &host_type, expression)
+}
+
+fn convert_from_host_type_expression(
+    source_type: &TypeExpr,
+    host_type: &TypeExpr,
+    expression: &str,
+) -> Result<String, BootstrapHostCodecError> {
+    match source_type {
+        TypeExpr::Optional(inner) => {
+            let host_inner = match host_type {
+                TypeExpr::Optional(host_inner) => host_inner.as_ref(),
+                _ => host_type,
+            };
+            let inner = convert_from_host_type_expression(inner, host_inner, "__inner")?;
+            Ok(format!(
+                "match ({expression}).as_ref() {{ Some(__inner) => Ok({inner}), None => Err(::jet_foundation::Outcome::JetAbsent), }}"
+            ))
+        }
+        TypeExpr::List(inner) => {
+            if let TypeExpr::Map(_, _) = host_type {
+                if let TypeExpr::Named(name) = inner.as_ref() {
+                    let helper = match name.as_str() {
+                        "MirViewProvenanceEntry" => {
+                            "__jet_bootstrap_mir_view_provenance_from_host"
+                        }
+                        "MirJobLimit" => "__jet_bootstrap_mir_job_limits_from_host",
+                        _ => "",
+                    };
+                    if !helper.is_empty() {
+                        return Ok(format!("{helper}({expression})?"));
+                    }
+                }
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "native MIR map has no checked Source-MIR list converter".to_string(),
+                ));
+            }
+            let host_inner = match host_type {
+                TypeExpr::List(host_inner) => host_inner.as_ref(),
+                TypeExpr::Named(name) => {
+                    if let Some(inner) =
+                        generic_inner(name, "BTreeSet").or_else(|| generic_inner(name, "HashSet"))
+                    {
+                        return convert_host_set_to_source(inner, source_type, expression);
+                    }
+                    source_type
+                }
+                _ => source_type,
+            };
+            let inner = convert_from_host_type_expression(inner, host_inner, "__item")?;
+            Ok(format!(
+                "({expression}).iter().map(|__item| Ok({inner})).collect::<Result<Vec<_>, String>>()?"
+            ))
+        }
+        TypeExpr::Map(key, value) => {
+            let (host_key, host_value) = match host_type {
+                TypeExpr::Map(host_key, host_value) => (host_key.as_ref(), host_value.as_ref()),
+                _ => (key.as_ref(), value.as_ref()),
+            };
+            let key = convert_from_host_type_expression(key, host_key, "__key")?;
+            let value = convert_from_host_type_expression(value, host_value, "__value")?;
+            Ok(format!(
+                "{{ let __items = ({expression}).iter().map(|(__key, __value)| Ok(({key}, {value}))).collect::<Result<Vec<_>, String>>()?; let __count = __items.len(); let __output = __items.into_iter().collect::<_>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}"
+            ))
+        }
+        TypeExpr::Named(name) => convert_named_from_host(name, host_type, expression),
+    }
+}
+
+fn convert_host_set_to_source(
+    host_element: &str,
+    source_type: &TypeExpr,
+    expression: &str,
+) -> Result<String, BootstrapHostCodecError> {
+    let source_element = match source_type {
+        TypeExpr::List(inner) => inner.as_ref(),
+        _ => {
+            return Err(BootstrapHostCodecError::InvalidMetadata(
+                "native MIR set has no Source-MIR list element type".to_string(),
+            ))
+        }
+    };
+    let host_element =
+        parse_type(host_element).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+    let converted =
+        convert_from_host_type_expression(source_element, &host_element, "__item")?;
+    Ok(format!(
+        "({expression}).iter().map(|__item| Ok({converted})).collect::<Result<Vec<_>, String>>()?"
+    ))
+}
+
+fn convert_named_from_host(
+    source_name: &str,
+    host_type: &TypeExpr,
+    expression: &str,
+) -> Result<String, BootstrapHostCodecError> {
+    if let TypeExpr::Named(name) = host_type {
+        if let Some(inner) = generic_inner(name, "Box") {
+            let host_inner =
+                parse_type(inner).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+            let source = TypeExpr::Named(source_name.to_string());
+            return convert_from_host_type_expression(
+                &source,
+                &host_inner,
+                &format!("&**({expression})"),
+            );
+        }
+    }
+    if source_name == "MirValueFact"
+        && matches!(host_type, TypeExpr::Named(name) if name.starts_with('('))
+    {
+        return Ok(format!(
+            "__jet_bootstrap_mir_value_fact_from_host({expression})?"
+        ));
+    }
+    if source_name == "String"
+        && matches!(
+            host_type,
+            TypeExpr::Named(name) if name == "std::path::PathBuf" || name.ends_with("::PathBuf")
+        )
+    {
+        return Ok(format!(
+            "({expression}).to_str().ok_or_else(|| \"native MIR path is not valid UTF-8\".to_string())?.to_string()"
+        ));
+    }
+    if source_name == "Int" {
+        return Ok(format!(
+            "jet_foundation::Numeric::JetInt::from_str(&({expression}).to_string())?"
+        ));
+    }
+    if source_name == "String" {
+        return Ok(format!("({expression}).clone()"));
+    }
+    if source_name == "Bool"
+        || source_name == "Float"
+        || source_name == "Float32"
+        || source_name == "Char"
+        || source_name.starts_with('U')
+        || source_name.starts_with('I')
+    {
+        return Ok(format!("*({expression})"));
+    }
+    if source_name == "Span" {
+        return Ok(format!("__jet_bootstrap_span_from_host({expression})?"));
+    }
+    match source_name {
+        "MirTypeId" => {
+            return Ok(format!(
+                "__jet_bootstrap_type_id_from_host(*({expression}))?"
+            ))
+        }
+        "MirMeasure" => {
+            return Ok(format!(
+                "__jet_bootstrap_measure_from_host({expression})?"
+            ))
+        }
+        "MirDimension" => {
+            return Ok(format!(
+                "__jet_bootstrap_dimension_from_host({expression})?"
+            ))
+        }
+        "MirTagMarker" => {
+            return Ok(format!("__jet_bootstrap_tag_from_host({expression})?"))
+        }
+        "MirAbi" => {
+            return Ok(format!("__jet_bootstrap_abi_from_host({expression})"))
+        }
+        "MirSize" => {
+            return Ok(format!("__jet_bootstrap_size_from_host({expression})?"))
+        }
+        "MirType" => {
+            return Ok(format!("__jet_bootstrap_type_from_host({expression})?"))
+        }
+        _ => {}
+    }
+    Ok(format!(
+        "__jet_bootstrap_mir_{source_name}_from_host({expression})?"
+    ))
 }
 
 
@@ -1007,428 +1443,13 @@ fn validate_unique_definitions(definitions: &[Definition]) -> Result<(), String>
     Ok(())
 }
 
-fn emit_image_payload_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-    definitions: &[Definition],
-) -> Result<(), BootstrapHostCodecError> {
-    let by_name = definitions
-        .iter()
-        .map(|definition| (definition.name.as_str(), definition))
-        .collect::<BTreeMap<_, _>>();
-    for definition in definitions {
-        match &definition.body {
-            Body::Struct(fields) => {
-                emit_image_struct_codec(out, symbols, &by_name, definition, fields)?;
-            }
-            Body::Enum(variants) => {
-                emit_image_enum_codec(out, symbols, &by_name, definition, variants)?;
-            }
-            Body::Tuple => {
-                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                    "Source MIR image type `{}` is an unsupported tuple",
-                    definition.name
-                )));
-            }
-        }
-    }
-    emit_image_span_codec(out, symbols)?;
-    let program = symbols.type_symbol("MirProgram")?;
-    writeln!(
-        out,
-        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_to_image_payload(value: &{program}) -> Result<Vec<u8>, String> {{\n    let mut writer = crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter::new();\n    __jet_bootstrap_image_encode_MirProgram(value, &mut writer)?;\n    Ok(writer.finish())\n}}\n#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_from_image_payload(bytes: &[u8]) -> Result<{program}, String> {{\n    let mut reader = crate::compiler_bootstrap_compiler_image::CompilerImagePayloadReader::new(bytes);\n    let value = __jet_bootstrap_image_decode_MirProgram(&mut reader)?;\n    reader.finish()?;\n    Ok(value)\n}}\n"
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-}
 
-fn emit_image_struct_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-    definitions: &BTreeMap<&str, &Definition>,
-    definition: &Definition,
-    fields: &[Field],
-) -> Result<(), BootstrapHostCodecError> {
-    let source = symbols.type_symbol(&definition.name)?;
-    let mut encoder = String::new();
-    let mut decoder_fields = Vec::new();
-    for field in fields {
-        let field_symbol = symbols.field_symbol(&definition.name, &field.name)?;
-        encoder.push_str(&image_encode_expression(
-            &field.ty,
-            &format!("&value.{field_symbol}"),
-            "writer",
-            definitions,
-            symbols,
-        )?);
-        let decoded = image_decode_expression(&field.ty, "reader", definitions, symbols)?;
-        decoder_fields.push(format!("        {field_symbol}: {decoded},"));
-    }
-    writeln!(
-        out,
-        "fn __jet_bootstrap_image_encode_{}(value: &{}, writer: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter) -> Result<(), String> {{\n{}    Ok(())\n}}\nfn __jet_bootstrap_image_decode_{}(reader: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadReader<'_>) -> Result<{}, String> {{\n    Ok({} {{\n{}\n    }})\n}}\n",
-        definition.name,
-        source,
-        encoder,
-        definition.name,
-        source,
-        source,
-        decoder_fields.join("\n"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-}
 
-fn emit_image_enum_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-    definitions: &BTreeMap<&str, &Definition>,
-    definition: &Definition,
-    variants: &[Variant],
-) -> Result<(), BootstrapHostCodecError> {
-    let source = symbols.type_symbol(&definition.name)?;
-    let mut encode_arms = Vec::new();
-    let mut decode_arms = Vec::new();
-    for (index, variant) in variants.iter().enumerate() {
-        let discriminant = u32::try_from(index).map_err(|_| {
-            BootstrapHostCodecError::InvalidMetadata(format!(
-                "MIR enum `{}` exceeds the compiler-image tag range",
-                definition.name
-            ))
-        })?;
-        let path = symbols.variant_path(&definition.name, &variant.name)?;
-        let bindings = (0..variant.fields.len())
-            .map(|field| format!("__field_{field}"))
-            .collect::<Vec<_>>();
-        let pattern = if bindings.is_empty() {
-            path.clone()
-        } else {
-            format!("{}({})", path, bindings.join(", "))
-        };
-        let mut encode_body = format!("            writer.write_u32({discriminant});\n");
-        for (field, binding) in variant.fields.iter().zip(bindings.iter()) {
-            encode_body.push_str(&image_encode_expression(
-                &field.ty,
-                binding,
-                "writer",
-                definitions,
-                symbols,
-            )?);
-        }
-        encode_arms.push(format!("        {pattern} => {{\n{encode_body}            Ok(())\n        }},"));
-        let decoded = variant
-            .fields
-            .iter()
-            .map(|field| image_decode_expression(&field.ty, "reader", definitions, symbols))
-            .collect::<Result<Vec<_>, _>>()?;
-        let constructor = if decoded.is_empty() {
-            path
-        } else {
-            format!("{}({})", path, decoded.join(", "))
-        };
-        decode_arms.push(format!(
-            "        {discriminant} => Ok({constructor}),"
-        ));
-    }
-    writeln!(
-        out,
-        "fn __jet_bootstrap_image_encode_{}(value: &{}, writer: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter) -> Result<(), String> {{\n    match value {{\n{}\n    }}\n}}\nfn __jet_bootstrap_image_decode_{}(reader: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadReader<'_>) -> Result<{}, String> {{\n    match reader.read_u32()? {{\n{}\n        _ => Err(\"unknown compiler-image MIR enum tag\".to_string()),\n    }}\n}}\n",
-        definition.name,
-        source,
-        encode_arms.join("\n"),
-        definition.name,
-        source,
-        decode_arms.join("\n"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-}
 
-fn emit_image_span_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let source = symbols.type_symbol("Span")?;
-    let start = symbols.field_symbol("Span", "start")?;
-    let end = symbols.field_symbol("Span", "end")?;
-    let start_encode = image_encode_expression(
-        "Int",
-        &format!("&value.{start}"),
-        "writer",
-        &BTreeMap::new(),
-        symbols,
-    )?;
-    let end_encode = image_encode_expression(
-        "Int",
-        &format!("&value.{end}"),
-        "writer",
-        &BTreeMap::new(),
-        symbols,
-    )?;
-    let start_decode = image_decode_expression("Int", "reader", &BTreeMap::new(), symbols)?;
-    let end_decode = image_decode_expression("Int", "reader", &BTreeMap::new(), symbols)?;
-    writeln!(
-        out,
-        "fn __jet_bootstrap_image_encode_Span(value: &{source}, writer: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter) -> Result<(), String> {{\n{start_encode}{end_encode}    Ok(())\n}}\nfn __jet_bootstrap_image_decode_Span(reader: &mut crate::compiler_bootstrap_compiler_image::CompilerImagePayloadReader<'_>) -> Result<{source}, String> {{\n    Ok({source} {{ {start}: {start_decode}, {end}: {end_decode} }})\n}}\n"
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-}
 
-fn image_encode_expression(
-    source_type: &str,
-    expression: &str,
-    writer: &str,
-    definitions: &BTreeMap<&str, &Definition>,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<String, BootstrapHostCodecError> {
-    let ty = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-    image_encode_type_expression(&ty, expression, writer, definitions, symbols)
-}
 
-fn image_encode_type_expression(
-    ty: &TypeExpr,
-    expression: &str,
-    writer: &str,
-    definitions: &BTreeMap<&str, &Definition>,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<String, BootstrapHostCodecError> {
-    match ty {
-        TypeExpr::Optional(inner) => {
-            let inner = image_encode_type_expression(inner, "__value", writer, definitions, symbols)?;
-            Ok(format!(
-                "    match ({expression}).as_ref().ok() {{ Some(__value) => {{ {writer}.write_u8(1);\n{inner}    }}, None => {writer}.write_u8(0), }}\n"
-            ))
-        }
-        TypeExpr::List(inner) => {
-            let inner = image_encode_type_expression(inner, "__item", writer, definitions, symbols)?;
-            Ok(format!(
-                "    {writer}.write_len(({expression}).len())?;\n    for __item in ({expression}).iter() {{\n{inner}    }}\n"
-            ))
-        }
-        TypeExpr::Map(key, value) => {
-            let key_encode = image_encode_type_expression(
-                key,
-                "__key",
-                "__key_writer",
-                definitions,
-                symbols,
-            )?;
-            let value_encode = image_encode_type_expression(
-                value,
-                "__value",
-                "__value_writer",
-                definitions,
-                symbols,
-            )?;
-            Ok(format!(
-                "    {{\n        let mut __entries = Vec::with_capacity(({expression}).len());\n        for (__key, __value) in ({expression}).iter() {{\n            let mut __key_writer = crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter::new();\n{key_encode}            let mut __value_writer = crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter::new();\n{value_encode}            __entries.push((__key_writer.finish(), __value_writer.finish()));\n        }}\n        __entries.sort_by(|left, right| left.0.cmp(&right.0));\n        if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate Source MIR map key\".to_string()); }}\n        {writer}.write_len(__entries.len())?;\n        for (__key_bytes, __value_bytes) in __entries {{ {writer}.write_raw(&__key_bytes); {writer}.write_raw(&__value_bytes); }}\n    }}\n"
-            ))
-        }
-        TypeExpr::Named(name) if name == "Span" => Ok(format!(
-            "    __jet_bootstrap_image_encode_Span({expression}, {writer})?;\n"
-        )),
-        TypeExpr::Named(name) if name == "String" => Ok(format!(
-            "    {writer}.write_string(({expression}).as_str())?;\n"
-        )),
-        TypeExpr::Named(name) if name == "Int" => Ok(format!(
-            "    {{ let __integer = ({expression}).to_string_rep(); {writer}.write_string(&__integer)?; }}\n"
-        )),
-        TypeExpr::Named(name) if name == "Bool" => Ok(format!(
-            "    {writer}.write_u8(u8::from(*({expression})));\n"
-        )),
-        TypeExpr::Named(name) if name == "Float" || name == "Float64" => Ok(format!(
-            "    {writer}.write_u64(({expression}).to_bits());\n"
-        )),
-        TypeExpr::Named(name) if name == "Float32" => Ok(format!(
-            "    {writer}.write_u32(({expression}).to_bits());\n"
-        )),
-        TypeExpr::Named(name) if name == "Char" => Ok(format!(
-            "    {writer}.write_u32(*({expression}) as u32);\n"
-        )),
-        TypeExpr::Named(name) if name == "U8" => Ok(format!(
-            "    {writer}.write_u8(*({expression}));\n"
-        )),
-        TypeExpr::Named(name) if name == "U16" => Ok(format!(
-            "    {writer}.write_u16(*({expression}));\n"
-        )),
-        TypeExpr::Named(name) if name == "U32" => Ok(format!(
-            "    {writer}.write_u32(*({expression}));\n"
-        )),
-        TypeExpr::Named(name) if name == "U64" => Ok(format!(
-            "    {writer}.write_u64(*({expression}));\n"
-        )),
-        TypeExpr::Named(name) if name == "I8" => Ok(format!(
-            "    {writer}.write_u8(*({expression}) as u8);\n"
-        )),
-        TypeExpr::Named(name) if name == "I16" => Ok(format!(
-            "    {writer}.write_u16(*({expression}) as u16);\n"
-        )),
-        TypeExpr::Named(name) if name == "I32" => Ok(format!(
-            "    {writer}.write_u32(*({expression}) as u32);\n"
-        )),
-        TypeExpr::Named(name) if name == "I64" => Ok(format!(
-            "    {writer}.write_u64(*({expression}) as u64);\n"
-        )),
-        TypeExpr::Named(name) if name == "Usize" || name == "usize" => Ok(format!(
-            "    {writer}.write_u64(u64::try_from(*({expression})).map_err(|_| \"MIR usize exceeds u64\".to_string())?);\n"
-        )),
-        TypeExpr::Named(name) if name == "Isize" || name == "isize" => Ok(format!(
-            "    {writer}.write_u64((*({expression}) as i64) as u64);\n"
-        )),
-        TypeExpr::Named(name) if name.starts_with("Box<") => {
-            let inner = generic_inner(name, "Box").ok_or_else(|| {
-                BootstrapHostCodecError::InvalidMetadata(format!(
-                    "invalid boxed MIR type `{name}`"
-                ))
-            })?;
-            let inner_ty = parse_type(inner).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-            image_encode_type_expression(
-                &inner_ty,
-                &format!("&**({expression})"),
-                writer,
-                definitions,
-                symbols,
-            )
-        }
-        TypeExpr::Named(name) => {
-            if !definitions.contains_key(name.as_str()) {
-                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                    "Source MIR image has no schema for type `{name}`"
-                )));
-            }
-            let _ = symbols.type_symbol(name)?;
-            Ok(format!(
-                "    __jet_bootstrap_image_encode_{name}({expression}, {writer})?;\n"
-            ))
-        }
-    }
-}
 
-fn image_decode_expression(
-    source_type: &str,
-    reader: &str,
-    definitions: &BTreeMap<&str, &Definition>,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<String, BootstrapHostCodecError> {
-    let ty = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-    image_decode_type_expression(&ty, reader, definitions, symbols)
-}
 
-fn image_decode_type_expression(
-    ty: &TypeExpr,
-    reader: &str,
-    definitions: &BTreeMap<&str, &Definition>,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<String, BootstrapHostCodecError> {
-    let decode = match ty {
-        TypeExpr::Optional(inner) => {
-            let inner = image_decode_type_expression(inner, reader, definitions, symbols)?;
-            return Ok(format!(
-                "{{ match {reader}.read_u8()? {{ 0 => Err(::jet_foundation::Outcome::JetAbsent), 1 => Ok({inner}), _ => return Err(\"invalid compiler-image MIR option tag\".to_string()), }} }}"
-            ));
-        }
-        TypeExpr::List(inner) => {
-            let inner = image_decode_type_expression(inner, reader, definitions, symbols)?;
-            return Ok(format!(
-                "{{ let __count = {reader}.read_len()?; let mut __values = Vec::new(); __values.try_reserve_exact(__count).map_err(|_| \"compiler-image MIR list is too large\".to_string())?; for _ in 0..__count {{ __values.push({inner}); }} __values }}"
-            ));
-        }
-        TypeExpr::Map(key, value) => {
-            let key_decode = image_decode_type_expression(key, reader, definitions, symbols)?;
-            let value_decode = image_decode_type_expression(value, reader, definitions, symbols)?;
-            let key_encode = image_encode_type_expression(
-                key,
-                "&__key",
-                "__key_writer",
-                definitions,
-                symbols,
-            )?;
-            return Ok(format!(
-                "{{ let __count = {reader}.read_len()?; let mut __seen = ::std::collections::BTreeSet::new(); let mut __entries = Vec::new(); __entries.try_reserve_exact(__count).map_err(|_| \"compiler-image MIR map is too large\".to_string())?; for _ in 0..__count {{ let __key = {key_decode}; let mut __key_writer = crate::compiler_bootstrap_compiler_image::CompilerImagePayloadWriter::new(); {key_encode} let __key_bytes = __key_writer.finish(); if !__seen.insert(__key_bytes) {{ return Err(\"duplicate compiler-image MIR map key\".to_string()); }} let __value = {value_decode}; __entries.push((__key, __value)); }} let __output = __entries.into_iter().collect::<_>(); if __output.len() != __count {{ return Err(\"duplicate compiler-image MIR map key\".to_string()); }} __output }}"
-            ));
-        }
-        TypeExpr::Named(name) if name == "Span" => {
-            return Ok(format!("__jet_bootstrap_image_decode_Span({reader})?"));
-        }
-        TypeExpr::Named(name) if name == "String" => {
-            return Ok(format!("{reader}.read_string()?"));
-        }
-        TypeExpr::Named(name) if name == "Int" => {
-            return Ok(format!(
-                "{{ let __text = {reader}.read_string()?; let __value = jet_foundation::Numeric::JetInt::from_str(&__text)?; if __value.to_string_rep() != __text {{ return Err(\"non-canonical compiler-image MIR integer\".to_string()); }} __value }}"
-            ));
-        }
-        TypeExpr::Named(name) if name == "Bool" => {
-            return Ok(format!(
-                "match {reader}.read_u8()? {{ 0 => false, 1 => true, _ => return Err(\"invalid compiler-image MIR boolean\".to_string()), }}"
-            ));
-        }
-        TypeExpr::Named(name) if name == "Float" || name == "Float64" => {
-            return Ok(format!("f64::from_bits({reader}.read_u64()?)"));
-        }
-        TypeExpr::Named(name) if name == "Float32" => {
-            return Ok(format!("f32::from_bits({reader}.read_u32()?)"));
-        }
-        TypeExpr::Named(name) if name == "Char" => {
-            return Ok(format!(
-                "char::from_u32({reader}.read_u32()?).ok_or_else(|| \"invalid compiler-image MIR character\".to_string())?"
-            ));
-        }
-        TypeExpr::Named(name) if name == "U8" => {
-            return Ok(format!("{reader}.read_u8()?"));
-        }
-        TypeExpr::Named(name) if name == "U16" => {
-            return Ok(format!("{reader}.read_u16()?"));
-        }
-        TypeExpr::Named(name) if name == "U32" => {
-            return Ok(format!("{reader}.read_u32()?"));
-        }
-        TypeExpr::Named(name) if name == "U64" => {
-            return Ok(format!("{reader}.read_u64()?"));
-        }
-        TypeExpr::Named(name) if name == "I8" => {
-            return Ok(format!("{reader}.read_u8()? as i8"));
-        }
-        TypeExpr::Named(name) if name == "I16" => {
-            return Ok(format!("{reader}.read_u16()? as i16"));
-        }
-        TypeExpr::Named(name) if name == "I32" => {
-            return Ok(format!("{reader}.read_u32()? as i32"));
-        }
-        TypeExpr::Named(name) if name == "I64" => {
-            return Ok(format!("{reader}.read_u64()? as i64"));
-        }
-        TypeExpr::Named(name) if name == "Usize" || name == "usize" => {
-            return Ok(format!(
-                "usize::try_from({reader}.read_u64()?).map_err(|_| \"compiler-image MIR usize exceeds host range\".to_string())?"
-            ));
-        }
-        TypeExpr::Named(name) if name == "Isize" || name == "isize" => {
-            return Ok(format!(
-                "isize::try_from({reader}.read_u64()? as i64).map_err(|_| \"compiler-image MIR isize exceeds host range\".to_string())?"
-            ));
-        }
-        TypeExpr::Named(name) if name.starts_with("Box<") => {
-            let inner = generic_inner(name, "Box").ok_or_else(|| {
-                BootstrapHostCodecError::InvalidMetadata(format!(
-                    "invalid boxed MIR type `{name}`"
-                ))
-            })?;
-            let inner_ty = parse_type(inner).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-            return Ok(format!(
-                "Box::new({})",
-                image_decode_type_expression(&inner_ty, reader, definitions, symbols)?
-            ));
-        }
-        TypeExpr::Named(name) => {
-            if !definitions.contains_key(name.as_str()) {
-                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                    "Source MIR image has no schema for type `{name}`"
-                )));
-            }
-            let _ = symbols.type_symbol(name)?;
-            return Ok(format!("__jet_bootstrap_image_decode_{name}({reader})?"));
-        }
-    };
-    Ok(decode)
-}
 
 fn parse_type(input: &str) -> Result<TypeExpr, String> {
     let input = input.trim().trim_end_matches(',').trim();

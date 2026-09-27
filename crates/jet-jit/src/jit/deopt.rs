@@ -54,6 +54,9 @@ pub struct SourceDeoptRequest {
     /// handoff and preserves recursive aggregates, closures, and typed
     /// resource-owned values without flattening them into ABI words.
     pub entry_values: Vec<MirRuntimeValue>,
+    /// `true` only after the Source adapter installed the exact checked entry frame.
+    /// False keeps the original borrowed write arguments untouched.
+    pub entry_frame_installed: bool,
     /// `true` means this is an entry handoff: Source must allocate the
     /// checked function frame from these exact parameters. `false` means the
     /// snapshot belongs to an existing Source frame and resume must preserve
@@ -64,15 +67,19 @@ pub struct SourceDeoptRequest {
 /// Final Source/Eval state after its owner has decoded/adopted the terminal
 /// value and explicitly retired the retained machine, callback roots, and
 /// resource-transfer ledger.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SourceExecutionRetirement {
     pub outcome: Option<RunOutcome>,
     pub value: Option<MirRuntimeValue>,
     pub soft_stop: bool,
-    /// Cumulative output snapshots captured even when `RunOutcome::Problems`
-    /// has no output fields; final cleanup replaces this snapshot.
+    /// Cumulative Source output snapshots, kept separate because Problems
+    /// outcomes have no output fields. Native output remains in `outcome`.
     pub stdout: String,
+    /// Matching cumulative stderr snapshot.
     pub stderr: String,
+    /// Owned nested Source/shared-payload completions discharged while this
+    /// invocation, projection, and retirement scope remained active.
+    pub completions: Vec<super::backend::SourceExecutionCompletion>,
 }
 
 /// Owned, transport-neutral logical Source/Eval session guard.
@@ -80,9 +87,10 @@ pub struct SourceExecutionRetirement {
 /// The generated compiler implements this trait around its retained
 /// `JetEvalResult.session`, callback queue/root lease, and physical arena
 /// owner. `retire` is explicit: cleanup may update output/error state and its
-/// final result must be returned to the Runner rather than dropped.
 pub trait SourceExecutionGuard {
-    fn retire(self: Box<Self>) -> Result<SourceExecutionRetirement, String>;
+    fn retire(
+        self: Box<Self>,
+    ) -> Result<SourceExecutionRetirement, super::backend::SourceExecutionRetirementError>;
 }
 
 /// ABI result supplied by the Source evaluator after it resumes a deopted
@@ -115,7 +123,7 @@ pub struct SourceDeoptReply {
 /// diagnostics and control outcomes belong in `SourceDeoptReply::outcome`.
 
 type SourceDeoptCallback =
-    Rc<dyn Fn(SourceDeoptRequest) -> Result<SourceDeoptReply, String>>;
+    Rc<dyn Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String>>;
 
 /// Owns one nested Source-deopt callback activation.  Activations are
 /// thread-local and strictly stack-scoped; there is no process-wide session
@@ -137,7 +145,7 @@ thread_local! {
 /// own invocation-scoped owner (normally an `Arc<Mutex<_>>` or equivalent
 /// Source session handle), never in a global registry.
 pub fn with_source_deopt_scope<R>(
-    callback: impl Fn(SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
+    callback: impl Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
     body: impl FnOnce() -> R,
 ) -> R {
     let _scope = push_source_deopt_scope(callback);
@@ -149,7 +157,7 @@ pub fn with_source_deopt_scope<R>(
 /// This lower-level form is used by generated private Runner glue when the
 /// Cranelift call and Source evaluator session have separate lexical scopes.
 pub fn push_source_deopt_scope(
-    callback: impl Fn(SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
+    callback: impl Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
 ) -> SourceDeoptScope {
     let callback: SourceDeoptCallback = Rc::new(callback);
     SOURCE_DEOPT_CALLBACKS.with(|stack| stack.borrow_mut().push(callback.clone()));
@@ -394,22 +402,29 @@ fn record_abi_frame(function: i64, argc: i64, args: &[i64; 8]) -> Option<MirFram
 /// helper below remains a strict boundary for any producer that emits it; the
 /// current Cranelift lowering does not synthesize a mid-function deopt call.
 pub fn dispatch_source_deopt(
-    request: SourceDeoptRequest,
+    request: &mut SourceDeoptRequest,
 ) -> Result<SourceDeoptReply, String> {
     current_source_deopt_callback()
         .ok_or_else(|| "Source MIR deopt requested without an active resume callback".to_string())?
         (request)
 }
 
+pub(crate) fn source_deopt_callback_available() -> bool {
+    current_source_deopt_callback().is_some()
+}
+
 /// Construct the exact entry request from the canonical recursive MIR value
-/// carrier. Entry values are moved into the request so native-owned payloads
-/// retain their unique lease; no scalar ABI narrowing is performed.
+/// carrier. Entry values remain in the caller's slot until every preflight
+/// check succeeds, then move into the request without cloning.
 pub fn source_entry_deopt_request(
     program: &MirProgram,
     artifact: MirArtifactId,
     function: MirFunctionId,
-    entry_values: Vec<MirRuntimeValue>,
+    entry_values: &mut Option<Vec<MirRuntimeValue>>,
 ) -> Result<SourceDeoptRequest, String> {
+    let values = entry_values
+        .as_ref()
+        .ok_or_else(|| "Source entry values were already consumed".to_string())?;
     let execution = program
         .execution_identity(Some(artifact))
         .map_err(|error| format!("Source entry deopt identity unavailable: {error}"))?;
@@ -418,13 +433,14 @@ pub fn source_entry_deopt_request(
         .iter()
         .find(|row| row.id == function)
         .ok_or_else(|| format!("Source entry deopt function {function:?} is missing"))?;
-    if function_row.params.len() != entry_values.len() {
+    if function_row.params.len() != values.len() {
         return Err(format!(
             "Source entry deopt expected {} checked parameters, got {} typed values",
             function_row.params.len(),
-            entry_values.len()
+            values.len()
         ));
     }
+    let argc = values.len();
     let identity = MirFrameIdentity {
         schema_version: execution.schema_version,
         execution,
@@ -432,6 +448,9 @@ pub fn source_entry_deopt_request(
         block: None,
         sequence: 0,
     };
+    let entry_values = entry_values
+        .take()
+        .expect("checked Source entry values remain owned by their caller");
     Ok(SourceDeoptRequest {
         snapshot: MirFrameSnapshot {
             identity,
@@ -443,9 +462,10 @@ pub fn source_entry_deopt_request(
         },
         function,
         entry_params: function_row.params.clone(),
-        argc: entry_values.len(),
+        argc,
         args: [0_u64; 8],
         entry_values,
+        entry_frame_installed: false,
         entry: true,
     })
 }
@@ -539,16 +559,17 @@ pub(crate) fn jet_deopt_call(
         record_source_deopt_failure("MIR deopt argument count is outside usize");
         return 0;
     };
-    let request = SourceDeoptRequest {
+    let mut request = SourceDeoptRequest {
         function: snapshot.identity.function,
         snapshot,
         entry_params: Vec::new(),
         argc,
         args: abi_args.map(|bits| bits as u64),
         entry_values: Vec::new(),
+        entry_frame_installed: false,
         entry: false,
     };
-    match dispatch_source_deopt(request) {
+    match dispatch_source_deopt(&mut request) {
         Ok(reply) => {
             publish_source_deopt_reply(&reply, true);
             reply.bits

@@ -12,6 +12,13 @@ fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MirCapturePara
 fn jet_rust_emit_function_visibility(function: MirFunction) -> String { jet_rust_emit_visibility(function.visibility) }
 
 fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MirLocal) -> String {
+    if local.uninit {
+        storage := jet_rust_emit_uninit_fixed_storage_type(ctx, local.ty)
+        if storage != None {
+            rust_type := storage ?? jet_rust_emit_type(ctx, local.ty)
+            return "let mut {jet_rust_emit_local_slot(local.id)}: Option<{rust_type}> = None;"
+        }
+    }
     "let mut {jet_rust_emit_local_slot(local.id)}: Option<{jet_rust_emit_type(ctx, local.ty)}> = None;"
 }
 
@@ -54,24 +61,47 @@ fn jet_rust_emit_function_has_deadline_scope(function: MirFunction) -> Bool {
     false
 }
 
+fn jet_rust_emit_partial_declare_node(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, seen: &[String], lines: &[String]) {
+    fields := jet_rust_emit_partial_fields(ctx, owner)
+    index := fields.len()
+    loop index > 0 {
+        index -= 1
+        field := fields[index]
+        child_prefix := jet_rust_emit_partial_path_append(prefix, field.id)
+        slot := jet_rust_emit_partial_field_slot(base, child_prefix)
+        already := false
+        loop prior in seen { if prior == slot -> already = true }
+        if !already {
+            seen.push(slot)
+            ty := jet_rust_emit_partial_field_type(ctx, function, base, prefix, owner, field)
+            if jet_rust_emit_partial_field_boxed(ctx, owner, field.id) -> ty = "Box<{ty}>"
+            lines.push("let mut {slot}: Option<{ty}> = None;")
+        }
+        nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
+        if nested_owner != None {
+            jet_rust_emit_partial_declare_node(ctx, function, base, child_prefix, nested_owner ?? MirTypeId{value: 0}, seen, lines)
+        }
+    }
+}
+
 fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MirFunction) -> [String] {
     lines := [String]{}
-    seen := [String]{}
+    seen_roots := [String]{}
+    seen_slots := [String]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             place_id := None
             if instruction.operation == {
                 .MovePlace(place) -> place_id = Val(place)
-                .AddressOf(place, access) -> {
-                    if access == MirAccess.Move -> place_id = Val(place)
-                }
+                .AddressOf(place, access) -> if access == MirAccess.Move -> place_id = Val(place)
                 else -> {}
             }
             if place_id == None -> next
-            path := jet_rust_emit_partial_place_path(function, place_id ?? MirPlaceId{value: 0})
+            id := place_id ?? MirPlaceId{value: 0}
+            path := jet_rust_emit_partial_place_path(function, id)
             if path.len() == 0 -> next
             base := MirPlaceBase.Static("")
-            loop place in function.places { if place.id == (place_id ?? MirPlaceId{value: 0}) -> base = place.base }
+            loop place in function.places { if place.id == id -> base = place.base }
             if base == {
                 .Static(_) -> {
                     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR partial move targets static storage", "static places do not expose a checked split-storage ownership protocol", Val(function.span))
@@ -79,30 +109,18 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MirFun
                 }
                 else -> {}
             }
+            root := jet_rust_emit_partial_root_slot(base)
+            already := false
+            loop prior in seen_roots { if prior == root -> already = true }
+            if already -> next
+            seen_roots.push(root)
             owner := jet_rust_emit_partial_owner(ctx, path[0]) ?? MirTypeId{value: 0}
-            loop field in jet_rust_emit_partial_fields(ctx, owner) {
-                slot := jet_rust_emit_partial_field_slot(base, field.id)
-                already := false
-                loop prior in seen { if prior == slot -> already = true }
-                if already -> next
-                seen.push(slot)
-                ty := jet_rust_emit_type(ctx, field.ty)
-                if jet_rust_emit_partial_field_boxed(ctx, owner, field.id) -> ty = "Box<{ty}>"
-                lines.push("let mut {slot}: Option<{ty}> = None;")
-            }
+            jet_rust_emit_partial_declare_node(ctx, function, base, [MirFieldId]{}, owner, seen_slots, lines)
         }
     }
     lines
 }
 
-fn jet_rust_emit_failure_return_type(ctx: &JetRustEmitContext, success: MirType, failure: MirFailureCarrier) -> String {
-    if failure == {
-        .Infallible -> return jet_rust_emit_type(ctx, success)
-        .Result(_, error) -> return "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(ctx, success)}, {jet_rust_emit_type(ctx, error)}>"
-        .Optional(_) -> return "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(ctx, success)}, {ctx.config.root_prefix}JetAbsent>"
-        .Diverges(_) -> return "std::convert::Infallible"
-    }
-}
 
 fn jet_rust_emit_trait_param_name(parameter: MirParam, index: Int) -> String {
     if parameter.name.len() > 0 -> return jet_rust_emit_sanitize(parameter.name)
@@ -124,7 +142,7 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, method: MirTraitMet
         params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access)}")
         index += 1
     }
-    "fn {jet_rust_emit_trait_method_symbol(method)}({params.join(", ")}) -> {jet_rust_emit_failure_return_type(ctx, method.return_type, method.failure)}"
+    "fn {jet_rust_emit_trait_method_symbol(method)}({params.join(", ")}) -> {jet_rust_emit_type(ctx, method.return_type)}"
 }
 
 fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, method: MirTraitMethod) -> String {
@@ -321,7 +339,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
     generics := if implementation.trait_ref == None -> jet_rust_emit_generic_params(ctx, local_generic_params) else -> ""
     call_expression := "{jet_rust_emit_function_name(ctx, function.id)}({call_args.join(", ")})"
     if function.is_unsafe -> call_expression = "unsafe {{ {call_expression} }}"
-    lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {jet_rust_emit_failure_return_type(ctx, function.return_type, function.failure)} {{")
+    lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {jet_rust_emit_type(ctx, function.return_type)} {{")
     lines.push("        {call_expression}")
     lines.push("    }}")
 }
@@ -394,10 +412,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MirFunction) -> [S
     function_scope := jet_rust_emit_merge_generic_params(ctx.current_generic_params, owner_generic_params)
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(function_scope, function.generic_params)
     lines := [String]{jet_rust_emit_function_signature(ctx, function)}
-    loop local in function.locals -> lines.push("    {jet_rust_emit_local_declaration(ctx, local)}")
-    loop value in function.values -> lines.push("    {jet_rust_emit_value_declaration(ctx, value)}")
     partial_lines := jet_rust_emit_partial_declarations(ctx, function)
     loop line in partial_lines -> lines.push("    {line}")
+    loop local in function.locals -> lines.push("    {jet_rust_emit_local_declaration(ctx, local)}")
+    loop value in function.values -> lines.push("    {jet_rust_emit_value_declaration(ctx, value)}")
     if function.capture_params.len() > 0 {
         capture_lines := jet_rust_emit_capture_declaration(ctx, function)
         loop line in capture_lines -> lines.push("    {line}")

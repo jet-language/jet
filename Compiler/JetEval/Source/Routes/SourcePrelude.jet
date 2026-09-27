@@ -1,0 +1,199 @@
+// Canonical source-backed Prelude routes for the Jet evaluator.
+//
+// This file only resolves an already-registered MIR route to the matching
+// Core source function. It does not reimplement formatting, numeric, or unit
+// policy and it never reconstructs a route from a free-form symbol.
+
+pub struct JetEvalSourceTarget {
+    pub function: MirFunctionId
+    pub route: MirPreludeCallId
+    pub signature: MirCallSignature
+    pub fallibility: MirCallFallibility
+    pub abi: MirPreludeAbi
+    pub module_name: String
+    pub member: String
+}
+
+pub enum JetEvalSourceLookup {
+    Unavailable
+    Invalid(reason: String)
+    Target(value: JetEvalSourceTarget)
+}
+
+// The optional helper is intentionally side-effect free. Callers that need to
+// distinguish an absent source module from a malformed/unsupported canonical
+// row should use jet_eval_source_lookup instead.
+pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> ?JetEvalSourceTarget {
+    lookup := jet_eval_source_lookup(program, row)
+    if lookup == {
+        .Target(value) -> return Val(value)
+        else -> {}
+    }
+    None
+}
+// Return the registered source-compatible formatting row for a source member.
+// The source-member matcher above remains the single owner of symbol, arity,
+// and borrow-mask classification; callers retain their own value marshalling.
+pub fn jet_eval_source_row(program: MirProgram, member: String) -> ?MirPreludeCall {
+    loop row in program.prelude_calls {
+        if !jet_eval_source_route_shape_valid(row) {
+            next
+        }
+        source_member :: jet_eval_source_member(row) ?? next
+        if source_member == member {
+            return Val(row)
+        }
+    }
+    None
+}
+
+
+// Resolve a registered Prelude row to a loaded Core source function. A route
+// in the known Core formatting family which has no source equivalent is
+// Invalid rather than silently falling through to a second evaluator policy.
+pub fn jet_eval_source_lookup(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceLookup {
+    source_member :: jet_eval_source_member(row) ?? {
+        if row.module_name == "core.text.fmt" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
+        return JetEvalSourceLookup.Unavailable
+        }
+    function :: jet_eval_source_find_function(program, source_member) ?? {
+        return JetEvalSourceLookup.Unavailable
+    }
+    if !jet_eval_source_route_shape_valid(row) {
+        return JetEvalSourceLookup.Invalid{reason: "MIR Prelude route has an invalid source evaluator ABI"}
+    }
+    if function.arity != row.signature.arity || row.signature.max_arity != row.signature.arity {
+        return JetEvalSourceLookup.Invalid{reason: "Core source target arity does not match the registered Prelude ABI"}
+    }
+    if !function.interpreter {
+        return JetEvalSourceLookup.Invalid{reason: "Core source target is disabled for the interpreter"}
+    }
+    JetEvalSourceLookup.Target{value: JetEvalSourceTarget{
+        function: function.id,
+        route: row.id,
+        signature: row.signature,
+        fallibility: row.fallibility,
+        abi: row.abi,
+        module_name: function.module_name,
+        member: source_member,
+    }}
+}
+
+struct JetEvalSourceFunction {
+    id: MirFunctionId
+    module_name: String
+    arity: Int
+    interpreter: Bool
+}
+
+fn jet_eval_source_find_function(program: MirProgram, member: String) -> ?JetEvalSourceFunction {
+    loop function in program.functions {
+        if function.name != member -> next
+        loop candidate_module in program.modules {
+            if candidate_module.id == function.module_id && candidate_module.name == "core_text_fmt" && candidate_module.path == "Core/text/fmt.jet" && function.module_name == candidate_module.key {
+                return Val(JetEvalSourceFunction{
+                    id: function.id,
+                    module_name: function.module_name,
+                    arity: function.params.len(),
+                    interpreter: function.target_applicability.interpreter,
+                })
+            }
+        }
+    }
+    None
+}
+
+fn jet_eval_source_route_shape_valid(row: MirPreludeCall) -> Bool {
+    if row.signature.arity < 0 || row.signature.max_arity != row.signature.arity -> return false
+    row.signature.borrow_mask.len() == row.signature.arity
+}
+
+// This table mirrors only the checked Core route rows. The native symbol is
+// part of the match so interpolation adapters (for example decimal_int) can
+// never be mistaken for the Float source implementation.
+fn jet_eval_source_mask_1(mask: [Bool], first: Bool) -> Bool {
+    mask.len() == 1 && mask[0] == first
+}
+
+fn jet_eval_source_mask_2(mask: [Bool], first: Bool, second: Bool) -> Bool {
+    mask.len() == 2 && mask[0] == first && mask[1] == second
+}
+
+fn jet_eval_source_mask_3(mask: [Bool], first: Bool, second: Bool, third: Bool) -> Bool {
+    mask.len() == 3 && mask[0] == first && mask[1] == second && mask[2] == third
+}
+
+fn jet_eval_source_member(row: MirPreludeCall) -> ?String {
+    if row.module_name != "core.text.fmt" -> return None
+    symbol := mir_symbol_name(row.symbol)
+    if row.member == "number" && symbol == "jet_fmt_number" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("number")
+    if row.member == "pretty" && symbol == "jet_fmt_pretty" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, true) -> return Val("pretty")
+    if (row.member == "decimal" || row.member == "fixed") && symbol == "jet_fmt_decimal" && row.signature.arity == 2 && jet_eval_source_mask_2(row.signature.borrow_mask, false, false) -> return Val("decimal")
+    if row.member == "grouped" && symbol == "jet_fmt_grouped" && row.signature.arity == 2 && jet_eval_source_mask_2(row.signature.borrow_mask, false, false) -> return Val("grouped")
+    if row.member == "hex" && symbol == "jet_fmt_hex" && row.signature.arity == 2 && jet_eval_source_mask_2(row.signature.borrow_mask, false, false) -> return Val("hex")
+    if row.member == "sci" && symbol == "jet_fmt_sci" && row.signature.arity == 2 && jet_eval_source_mask_2(row.signature.borrow_mask, false, false) -> return Val("sci")
+    if row.member == "percent" && symbol == "jet_fmt_percent" && row.signature.arity == 2 && jet_eval_source_mask_2(row.signature.borrow_mask, false, false) -> return Val("percent")
+    if row.member == "bin" && symbol == "jet_fmt_bin" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("bin")
+    if row.member == "oct" && symbol == "jet_fmt_oct" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("oct")
+    if row.member == "bytes" && symbol == "jet_fmt_bytes" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("bytes")
+    if row.member == "duration" && symbol == "jet_fmt_duration" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("duration")
+    if row.member == "ordinal" && symbol == "jet_fmt_ordinal" && row.signature.arity == 1 && jet_eval_source_mask_1(row.signature.borrow_mask, false) -> return Val("ordinal")
+    if row.member == "plural" && symbol == "jet_fmt_plural" && row.signature.arity == 3 && jet_eval_source_mask_3(row.signature.borrow_mask, false, true, true) -> return Val("plural")
+    if row.member == "pad" && symbol == "jet_fmt_pad" && row.signature.arity == 3 && jet_eval_source_mask_3(row.signature.borrow_mask, true, false, true) -> return Val("pad")
+    if row.member == "pad_left" && symbol == "jet_fmt_pad_left" && row.signature.arity == 3 && jet_eval_source_mask_3(row.signature.borrow_mask, true, false, true) -> return Val("pad_left")
+    if row.member == "pad_right" && symbol == "jet_fmt_pad_right" && row.signature.arity == 3 && jet_eval_source_mask_3(row.signature.borrow_mask, true, false, true) -> return Val("pad_right")
+    if row.member == "pad_center" && symbol == "jet_fmt_pad_center" && row.signature.arity == 3 && jet_eval_source_mask_3(row.signature.borrow_mask, true, false, true) -> return Val("pad_center")
+    None
+}
+// Return the canonical descriptor used when checked MIR keeps an exact integer
+// operation primitive instead of carrying an explicit Prelude call ID. The
+// symbol, family, ABI, and stable identity are the same registry facts used by
+// jet_codegen_add_binary_prelude; the caller supplies the operation's checked
+// arity rather than inventing a route.
+pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> ?MirPreludeCall {
+    if member != "add" && member != "sub" && member != "mul" && member != "div" && member != "rem" && member != "floor_div" && member != "mod" && member != "pow" && member != "shl" && member != "shr" && member != "bit_and" && member != "bit_or" && member != "bit_xor" && member != "div_euclid" && member != "rem_euclid" -> return None
+    if arity != 2 && arity != 4 -> return None
+    symbol := "jet_std::jet_int_{member}"
+    mask := [Bool]{}
+    loop index in 0..<arity -> mask.push(false)
+    mask_names := [String]{}
+    loop item in mask {
+        if item -> mask_names.push("true") else -> mask_names.push("false")
+    }
+    effect := if arity == 4 -> Val(Effect.Panic) else -> None
+    effect_identity := if arity == 4 -> "Some(Panic)" else -> "None"
+    identity := "Overflow:core.numeric:{member}:{symbol}:{arity}:{arity}:[{mask_names.join(", ")}]:{effect_identity}:Infallible:Value"
+    MirPreludeCall{
+        id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
+        family: MirPreludeFamily.Overflow,
+        module_name: "core.numeric",
+        member: member,
+        symbol: MirSymbol.Prelude(symbol),
+        signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
+        effect: effect,
+        fallibility: MirCallFallibility.Infallible,
+        abi: MirPreludeAbi.Value,
+        authority: None,
+        db_metadata: None,
+    }
+}
+// Comparison primitives use the checked core.compare BuiltinMethod row even
+// when MIR keeps the operation structural. This descriptor mirrors the
+// registered route exactly; it does not define a second comparison policy.
+pub fn jet_eval_exact_compare_row(member: String) -> ?MirPreludeCall {
+    if member != "eq" && member != "ne" && member != "lt" && member != "gt" && member != "le" && member != "ge" && member != "compare" -> return None
+    identity := "BuiltinMethod:core.compare:{member}:jet_int_compare:2:2:[true, true]:None:Infallible:Value"
+    MirPreludeCall{
+        id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
+        family: MirPreludeFamily.BuiltinMethod,
+        module_name: "core.compare",
+        member: member,
+        symbol: MirSymbol.Prelude("jet_int_compare"),
+        signature: MirCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, true}},
+        effect: None,
+        fallibility: MirCallFallibility.Infallible,
+        abi: MirPreludeAbi.Value,
+        authority: None,
+        db_metadata: None,
+    }
+}

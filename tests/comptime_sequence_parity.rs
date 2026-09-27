@@ -295,7 +295,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "empty-float-sum",
-            "fn empty_sum() Float {\n\
+            "fn empty_sum() -> Float {\n\
                  empty :: [Float]{}\n\
                  return empty.sum()\n\
              }",
@@ -303,7 +303,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "empty-float-product",
-            "fn empty_product() Float {\n\
+            "fn empty_product() -> Float {\n\
                  empty :: [Float]{}\n\
                  return empty.product()\n\
              }",
@@ -311,39 +311,39 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "f32-nonempty-sum",
-            "fn f32_values() [F32] { return [16777217.0, 1.0, 1.0] }",
+            "fn f32_values() -> [F32] { return [16777217.0, 1.0, 1.0] }",
             "f32_values().sum()",
         ),
         (
             "f32-nonempty-product",
-            "fn f32_values() [F32] { return [16777217.0, 2.0] }",
+            "fn f32_values() -> [F32] { return [16777217.0, 2.0] }",
             "f32_values().product()",
         ),
         (
             "f32-fold",
-            "fn f32_values() [F32] { return [16777217.0, 1.0] }\n\
-             fn f32_zero() F32 { return 0.0 }",
+            "fn f32_values() -> [F32] { return [16777217.0, 1.0] }\n\
+             fn f32_zero() -> F32 { return 0.0 }",
             "f32_values().fold(f32_zero(), (a: F32, n: F32) -> a + n)",
         ),
         (
             "f32-map",
-            "fn f32_values() [F32] { return [16777217.0, 1.0] }\n\
-             fn f32_one() F32 { return 1.0 }",
+            "fn f32_values() -> [F32] { return [16777217.0, 1.0] }\n\
+             fn f32_one() -> F32 { return 1.0 }",
             "f32_values().map((n: F32) -> n + f32_one())",
         ),
         (
             "f32-min",
-            "fn f32_values() [F32] { return [16777217.0, 1.0] }",
+            "fn f32_values() -> [F32] { return [16777217.0, 1.0] }",
             "f32_values().min()",
         ),
         (
             "f32-max",
-            "fn f32_values() [F32] { return [16777217.0, 1.0] }",
+            "fn f32_values() -> [F32] { return [16777217.0, 1.0] }",
             "f32_values().max()",
         ),
         (
             "empty-f32-sum",
-            "fn empty_f32_sum() F32 {\n\
+            "fn empty_f32_sum() -> F32 {\n\
                  empty :: [F32]{}\n\
                  return empty.sum()\n\
              }",
@@ -351,7 +351,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "empty-f32-product",
-            "fn empty_f32_product() F32 {\n\
+            "fn empty_f32_product() -> F32 {\n\
                  empty :: [F32]{}\n\
                  return empty.product()\n\
              }",
@@ -369,7 +369,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "view",
-            "fn view_sum(xs: [Int]) Int {\n\
+            "fn view_sum(xs: [Int]) -> Int {\n\
                  view :: xs[0..1]\n\
                  return view.fold(0, (a: Int, n: Int) -> a + n)\n\
              }",
@@ -378,7 +378,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         (
             "range-fixed-index",
             "Die :: distinct Int(1..6)\n\
-             fn pick(faces: [Int#6], roll: Die) Int {\n\
+             fn pick(faces: [Int#6], roll: Die) -> Int {\n\
                  return faces[roll.raw() - 1]\n\
              }",
             "pick([0, 1, 2, 3, 4, 5], Die.from_int(3))",

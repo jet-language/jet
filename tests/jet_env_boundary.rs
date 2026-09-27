@@ -21,7 +21,7 @@ fn toolchain_only_run_and_dev_skip_environment_realization() {
     .unwrap();
     fs::write(
         project.join("run.jet"),
-        "use core.text as text\npub fn count() Int -> text.scalar_count(\"toolchain\")\nfn run() {}\n",
+        "use core.text as text\npub fn count() -> Int -> text.scalar_count(\"toolchain\")\nfn run() {}\n",
     )
     .unwrap();
 
