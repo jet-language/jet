@@ -2,8 +2,8 @@
 // `NixDrvError` text of the Rust reference (crates/jetpack/src/NixDrv.rs); the
 // import variants are the project-root import authority's refusals
 // (NixEval/Authority.rs); the fallback variants are the one-shot local-Nix
-// import document's field errors (NixFallback.rs). Evaluator failures stay in
-// the NixEval area's `NixEvalError`.
+// import record's errors (NixFallback.rs, including `DataTree::as_object`).
+// Evaluator failures stay in the NixEval area's `NixEvalError`.
 
 #Error
 pub enum NixError {
@@ -17,6 +17,8 @@ pub enum NixError {
     ImportTooLarge
     FallbackFieldConflict(String)
     FallbackFieldMissing(String)
+    FallbackNotObject
+    FallbackNonFinite
 
     fn message(self) -> String !Never {
         if self == {
@@ -30,6 +32,8 @@ pub enum NixError {
             .ImportTooLarge -> "project import exceeds the 1 MiB evaluator limit"
             .FallbackFieldConflict(label) -> "fallback document has more than one {label} field"
             .FallbackFieldMissing(label) -> "fallback document has no {label} field"
+            .FallbackNotObject -> "expected a DataTree object"
+            .FallbackNonFinite -> "fallback document contains a non-finite number"
         }
     }
 }

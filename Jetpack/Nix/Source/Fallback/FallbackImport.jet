@@ -4,9 +4,8 @@
 // document and each required projection are retained as canonical JSON, so
 // later phases never need the Nix process or its output formatting.
 //
-// This file owns the field policy and the retained facts. Reading the record
-// and rendering each value as compact, insertion-ordered JSON is
-// core.encoding.json (`parse`, `to_string`) at the Provider boundary.
+// Values are rendered as compact JSON by core.encoding.json (`to_string`),
+// which keeps object insertion order like the reference renderer.
 
 @NIX_FALLBACK_IMPORT_SCHEMA :: "jetpack.nix-fallback.v1"
 
@@ -143,4 +142,87 @@ pub struct NixFallbackCanonical {
 // Jetpack-owned state imported from one fallback record.
 pub struct NixImportedState {
     pub facts: [String: String]
+}
+
+// Import a rich fallback record. None means the record is the old pinned
+// `nix build --json` shape with no fallback projections to retain.
+pub fn nix_fallback_import_record(record: DataTree) -> ?NixImportedState !NixError {
+    root :: nix_fallback_object(record)
+    import :: nix_fallback_import_object(root)
+    if !nix_fallback_detect(root.keys().to_list(), import.keys().to_list()) -> return Ok(None)
+    graph :: nix_fallback_render(import, .Graph)
+    selected_outputs :: nix_fallback_render(import, .SelectedOutputs)
+    dependencies :: nix_fallback_render(import, .Dependencies)
+    sources :: nix_fallback_render(import, .Sources)
+    hashes :: nix_fallback_render(import, .Hashes)
+    losses :: nix_fallback_render(import, .Losses)
+    proof :: nix_fallback_render(import, .Proof)
+    // Every projection is a subtree of the record, so one check covers all.
+    if !nix_fallback_is_finite(record) -> return Err(NixError.FallbackNonFinite)
+    canonical :: NixFallbackCanonical{
+        document: nix_fallback_json(record),
+        graph,
+        selected_outputs,
+        dependencies,
+        sources,
+        hashes,
+        losses,
+        proof,
+        recipe: nix_fallback_optional(import, "recipe"),
+        lock: nix_fallback_optional(import, "lock"),
+    }
+    Ok(Val(canonical.imported()))
+}
+
+fn nix_fallback_object(value: DataTree) -> [String: DataTree] !NixError {
+    if value == {
+        .Object(entries) -> return Ok(entries)
+        else -> return Err(NixError.FallbackNotObject)
+    }
+}
+
+// The import object: the `jetpackImport` or `jetpack` field of the root, or
+// the root itself.
+fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] !NixError {
+    if nix_fallback_import_field(root.keys().to_list()) == {
+        .Val(field) -> return nix_fallback_object(root[field])
+        else -> {}
+    }
+    Ok(~root)
+}
+
+// The compact JSON of `projection`'s one field of `object`.
+fn nix_fallback_render(object: [String: DataTree], projection: NixFallbackProjection) -> String !NixError {
+    field :: projection.select(object.keys().to_list())
+    Ok(nix_fallback_json(object[field]))
+}
+
+fn nix_fallback_optional(object: [String: DataTree], field: String) -> ?String !Never {
+    value :: object.get(field) ?? return None
+    Val(nix_fallback_json(value))
+}
+
+// Compact, insertion-ordered JSON. `json.to_string` declares no failure
+// contract, so it carries an implicit one; rendering a tree cannot fail.
+fn nix_fallback_json(value: DataTree) -> String !Never {
+    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+}
+
+// Whether every number in `value` is finite (JSON has no NaN or infinity).
+fn nix_fallback_is_finite(value: DataTree) -> Bool !Never {
+    children := [DataTree]{}
+    if value == {
+        .Float(number) -> return number - number == 0.0
+        .Array(items) -> {
+            loop item in items -> children.push(item)
+        }
+        .Object(entries) -> {
+            loop entry in entries -> children.push(entry.value)
+        }
+        else -> {}
+    }
+    loop child in children {
+        if !nix_fallback_is_finite(child) -> return false
+    }
+    true
 }
