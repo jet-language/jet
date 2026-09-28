@@ -16,9 +16,9 @@ mod SymbolDB;
 
 // Public entry points (preserve `jet::LSP::<item>` paths).
 pub use Check::{
-    apply_all, apply_edit, build_graph_json, check_document, check_document_with_bundle,
-    collect_fixes, fixes_from_diagnostics, measure_bench, run_bench, run_doctor, safe_fixes,
-    BenchReport, Fix,
+    apply_all, apply_edit, apply_non_overlapping, build_graph_json, check_document,
+    check_document_with_bundle, collect_fixes, fixes_from_diagnostics, measure_bench, run_bench,
+    run_doctor, safe_fixes, BenchReport, Fix,
 };
 pub use Position::{byte_offset_to_lsp, lsp_pos_to_offset, LspPos};
 pub use Server::run_stdio;
@@ -149,6 +149,26 @@ mod tests {
             apply_all(source, &print_fixes.into_iter().cloned().collect::<Vec<_>>()),
             "use core.term as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
         );
+    }
+
+    #[test]
+    fn overlapping_fixes_apply_the_wider_edit_and_defer_the_rest() {
+        let fix = |start: usize, end: usize, text: &str| Fix {
+            title: String::new(),
+            edit: crate::Diagnostics::TextEdit {
+                span: crate::Diagnostics::Span::new(start, end),
+                new_text: text.to_string(),
+            },
+            applicability: crate::Diagnostics::FixApplicability::Safe,
+            safety: crate::Diagnostics::FixSafety::Formatting,
+        };
+        let source = "abcdefghij";
+        // The inner edit was computed against the original text; applying it
+        // together with the wider one would corrupt the file.
+        let (text, applied, deferred) =
+            apply_non_overlapping(source, &[fix(2, 4, "X"), fix(0, 6, "OUTER"), fix(8, 9, "Y")]);
+        assert_eq!(text, "OUTERghYj");
+        assert_eq!((applied, deferred), (2, 1));
     }
 
     #[test]

@@ -151,16 +151,40 @@ pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
         .collect()
 }
 
-/// Apply every fix to `src`, returning the rewritten text. Edits are applied
-/// from the highest offset down so earlier spans stay valid.
+/// Apply every fix to `src`, returning the rewritten text.
 pub fn apply_all(src: &str, fixes: &[Fix]) -> String {
-    let mut edits: Vec<&TextEdit> = fixes.iter().map(|f| &f.edit).collect();
-    edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
-    let mut out = src.to_string();
+    apply_non_overlapping(src, fixes).0
+}
+
+/// Apply the largest set of non-overlapping fixes through the one shared fix
+/// engine. Returns the new text, the number of edits applied, and the number
+/// deferred because they overlapped a wider edit. The earlier, wider edit wins
+/// (a rewritten branch that contains its own fix): both were computed against
+/// the original text, so applying both would corrupt it.
+pub fn apply_non_overlapping(src: &str, fixes: &[Fix]) -> (String, usize, usize) {
+    let mut edits: Vec<TextEdit> = fixes.iter().map(|fix| fix.edit.clone()).collect();
+    edits.sort_by(|a, b| {
+        a.span
+            .start
+            .cmp(&b.span.start)
+            .then(b.span.end.cmp(&a.span.end))
+    });
+    edits.dedup();
+    let mut kept: Vec<TextEdit> = Vec::with_capacity(edits.len());
+    let mut deferred = 0;
     for edit in edits {
-        out = apply_edit(&out, edit);
+        if kept
+            .last()
+            .is_some_and(|last| edit.span.start < last.span.end)
+        {
+            deferred += 1;
+            continue;
+        }
+        kept.push(edit);
     }
-    out
+    let applied = kept.len();
+    let text = crate::FixEngine::apply_edits(src, &kept).unwrap_or_else(|_| src.to_string());
+    (text, applied, deferred)
 }
 
 // ── URI / path utilities ──────────────────────────────────────────────────────

@@ -167,6 +167,74 @@ fn block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers() {
     );
 }
 
+/// L0507's automatic fix respells a classic chain as one arm table. When the
+/// chain is a function's last statement, the table becomes the function's
+/// final expression (D-BODY-LAST1=B), for both a declared result and a unit
+/// function. The fix is graded safe because the meaning is the same on every
+/// hosted tier. The fixed text comes from the compiler's own edits.
+#[test]
+fn l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier() {
+    let source = r#"fn grade(score: Int) -> String {
+    if score >= 90 {
+        return "a"
+    } else if score >= 80 {
+        return "b"
+    } else {
+        return "c"
+    }
+}
+
+fn show(score: Int) {
+    if score >= 90 {
+        print("A")
+    } else if score >= 80 {
+        print("B")
+    } else {
+        print("C")
+    }
+}
+
+fn run() {
+    print(grade(95))
+    print(grade(85))
+    print(grade(10))
+    show(95)
+    show(85)
+    show(10)
+}
+"#;
+    // Compile from a real file: the driver resolves the entry path on disk.
+    let scratch = common::unique_tmp("jet_l0507_fix");
+    fs::create_dir_all(&scratch).unwrap();
+    let compile = |text: &str| {
+        let path = scratch.join("run.jet");
+        fs::write(&path, text).unwrap();
+        jet::compile_with_path(text, path.to_str().unwrap())
+    };
+    let compiled = compile(source)
+        .unwrap_or_else(|diagnostics| panic!("classic chains must compile: {diagnostics:?}"));
+    let edits: Vec<_> = compiled
+        .lints
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "L0507")
+        .filter_map(|diagnostic| diagnostic.edit.clone())
+        .collect();
+    assert_eq!(edits.len(), 2, "both chains must carry the arm-table fix");
+    let fixed = jet::FixEngine::apply_edits(source, &edits).expect("the L0507 edits must apply");
+    assert!(fixed.contains("    if {\n        score >= 90 -> {"), "{fixed}");
+    let recompiled = compile(&fixed).unwrap_or_else(|diagnostics| {
+        panic!("fixed source must compile:\n{fixed}\n{diagnostics:?}")
+    });
+    assert!(
+        !recompiled.lints.iter().any(|d| d.code == "L0507"),
+        "fixed source still warns:\n{fixed}"
+    );
+    let _ = fs::remove_dir_all(&scratch);
+    let expected = "a\nb\nc\nA\nB\nC\n";
+    assert_packaged_cli_tiers_agree(source, expected);
+    assert_packaged_cli_tiers_agree(&fixed, expected);
+}
+
 #[test]
 fn block_values_arm_tables_and_early_returns_match_web_runtime() {
     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {

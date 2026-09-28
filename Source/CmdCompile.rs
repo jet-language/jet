@@ -4781,21 +4781,37 @@ pub(crate) fn run_fix(
     let retired_print_count = jet::Formatter::retired_print_family_edits(&migrated).len();
     let retired_type_count = jet::Formatter::retired_type_edits(&migrated).len();
     let fixes = jet::LSP::collect_fixes(file, &migrated);
-    let selected_fixes = if all {
-        fixes.clone()
-    } else {
-        jet::LSP::safe_fixes(&fixes)
+    let select = |fixes: &[jet::LSP::Fix]| {
+        if all {
+            fixes.to_vec()
+        } else {
+            jet::LSP::safe_fixes(fixes)
+        }
     };
+    let selected_fixes = select(&fixes);
     let skipped_suggestions = fixes.len().saturating_sub(selected_fixes.len());
-    let fixed = if selected_fixes.is_empty() {
-        migrated
-    } else {
-        jet::LSP::apply_all(&migrated, &selected_fixes)
-    };
+    // Overlapping fixes (a rewritten branch containing its own fix) cannot
+    // apply in one pass. Re-check and continue only while a round deferred
+    // an edit, so a fix is never re-applied without a new reason.
+    const FIX_ROUNDS: usize = 16;
+    let (mut fixed, mut applied, mut deferred) =
+        jet::LSP::apply_non_overlapping(&migrated, &selected_fixes);
+    let mut round = 1;
+    while deferred > 0 && round < FIX_ROUNDS {
+        let next_fixes = select(&jet::LSP::collect_fixes(file, &fixed));
+        let (next, count, next_deferred) = jet::LSP::apply_non_overlapping(&fixed, &next_fixes);
+        if next == fixed {
+            break;
+        }
+        fixed = next;
+        applied += count;
+        deferred = next_deferred;
+        round += 1;
+    }
     let plan = FixPlan {
         before: src.clone(),
         staged: fixed,
-        edits: selected_fixes.len(),
+        edits: applied,
         skipped_suggestions,
     };
     if plan.staged == plan.before {

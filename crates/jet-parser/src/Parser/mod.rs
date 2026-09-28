@@ -578,6 +578,56 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
     Ok(())
 }
 
+/// One authored piece of a classic `if` chain, in source order. The L0507
+/// fix rebuilds the chain as an arm table from exactly these byte ranges.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum BranchPart {
+    Arm { cond: Span, body: Span },
+    Else { body: Span },
+}
+
+/// True when the text between two recorded pieces holds only the chain's own
+/// connectors. Anything else — a comment, a retired arrow — means the rebuilt
+/// table would drop authored text, so no automatic fix is offered.
+fn branch_gap_is_connector(gap: &str) -> bool {
+    gap.split_whitespace().all(|word| {
+        matches!(word, "if" | "else") || word == Syntax::OP_UNIFIED_ARROW
+    })
+}
+
+/// Re-indent every line after the first by one level, so a body moved from
+/// statement level into a table arm keeps its relative layout.
+fn indent_following_lines(text: &str, unit: &str) -> String {
+    let mut lines = text.split('\n');
+    let mut out = lines.next().unwrap_or_default().to_string();
+    for line in lines {
+        out.push('\n');
+        if !line.trim().is_empty() {
+            out.push_str(unit);
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// Take the next authored piece of a chain: the text before it must be only
+/// connectors, and pieces must advance in source order within `end`.
+fn take_branch_piece<'s>(
+    source: &'s str,
+    piece: Span,
+    cursor: &mut usize,
+    end: usize,
+) -> Option<&'s str> {
+    if piece.start < *cursor || piece.end < piece.start || piece.end > end {
+        return None;
+    }
+    if !branch_gap_is_connector(source.get(*cursor..piece.start)?) {
+        return None;
+    }
+    *cursor = piece.end;
+    source.get(piece.start..piece.end).map(str::trim)
+}
+
 impl<'a> Parser<'a> {
     pub(super) fn environment_read_outside_config(&self, span: Span) -> Diagnostic {
         Diagnostic::error(
@@ -605,15 +655,106 @@ impl<'a> Parser<'a> {
             .any(|token| matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end)
     }
 
-    fn prefer_arm_table_lint(&mut self, span: Span) {
-        self.diags.push(Diagnostic::lint(
+    /// L0507: a multi-line or chained classic branch. When the recorded parts
+    /// cover the whole construct, attach the arm-table rewrite as a safe fix.
+    fn prefer_arm_table_lint(&mut self, span: Span, parts: &[BranchPart], diag_mark: usize) {
+        let diagnostic = Diagnostic::lint(
             "L0507",
             "prefer an ordered arm table for this branch".to_string(),
             "one ordered arm table is Jet's normal form for multi-line and chained choices"
                 .to_string(),
             "write `if { condition -> body else -> body }`".to_string(),
             Some(span),
-        ));
+        );
+        let diagnostic = match self.arm_table_edit(span, parts, diag_mark) {
+            Some(edit) => diagnostic.with_edit(edit),
+            None => diagnostic,
+        };
+        self.diags.push(diagnostic);
+    }
+
+    /// Rebuild a classic chain as `if { cond -> body … else -> body }` from its
+    /// authored text. Returns `None` whenever the rewrite could lose or change
+    /// anything: parse errors inside the chain, text between parts other than
+    /// `if`/`else`/`->`, or a condition the guard table would read differently.
+    fn arm_table_edit(
+        &self,
+        if_span: Span,
+        parts: &[BranchPart],
+        diag_mark: usize,
+    ) -> Option<crate::Diagnostics::TextEdit> {
+        let source = self.source.as_deref()?;
+        let start = if_span.start;
+        let end = self.prev_end();
+        if start >= end || end > source.len() || !source[start..].starts_with("if") {
+            return None;
+        }
+        if self.diags[diag_mark.min(self.diags.len())..]
+            .iter()
+            .any(|d| d.severity == crate::Diagnostics::Severity::Error)
+        {
+            return None;
+        }
+        let mut arms: Vec<(&str, &str)> = Vec::new();
+        let mut else_body: Option<&str> = None;
+        let mut cursor = start + "if".len();
+        let take = |piece: Span, cursor: &mut usize| take_branch_piece(source, piece, cursor, end);
+        for part in parts {
+            if else_body.is_some() {
+                return None;
+            }
+            match *part {
+                BranchPart::Arm { cond, body } => {
+                    let cond = take(cond, &mut cursor)?;
+                    let body = take(body, &mut cursor)?;
+                    // A guard head that starts with `after` is a readiness
+                    // timeout, not a Boolean test.
+                    if cond.is_empty()
+                        || body.is_empty()
+                        || cond.split(|c: char| !c.is_alphanumeric() && c != '_').next()
+                            == Some(Syntax::READINESS_AFTER)
+                    {
+                        return None;
+                    }
+                    arms.push((cond, body));
+                }
+                BranchPart::Else { body } => {
+                    let body = take(body, &mut cursor)?;
+                    if body.is_empty() {
+                        return None;
+                    }
+                    else_body = Some(body);
+                }
+            }
+        }
+        if arms.is_empty() || !source.get(cursor..end)?.trim().is_empty() {
+            return None;
+        }
+        let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+        let indent: String = source[line_start..start]
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        let unit = "    ";
+        let mut table = String::from("if {\n");
+        for (cond, body) in arms {
+            table.push_str(&format!(
+                "{indent}{unit}{} -> {}\n",
+                indent_following_lines(cond, unit),
+                indent_following_lines(body, unit)
+            ));
+        }
+        if let Some(body) = else_body {
+            table.push_str(&format!(
+                "{indent}{unit}else -> {}\n",
+                indent_following_lines(body, unit)
+            ));
+        }
+        table.push_str(&format!("{indent}}}"));
+        Some(crate::Diagnostics::TextEdit {
+            span: Span::new(start, end),
+            new_text: table,
+        })
     }
 
     fn peek(&self) -> &Token {

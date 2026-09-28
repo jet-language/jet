@@ -402,7 +402,10 @@ impl<'a> Parser<'a> {
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
+        let cond_start = self.peek().span.start;
         let cond = self.expr_no_struct_lit()?;
+        let cond_span = Span::new(cond_start, self.prev_end());
+        let mut parts = Vec::new();
         // D-ASSIGNCOND1 / E0322: `if x = 5` — bare `=` is assignment, not equality.
         if matches!(self.peek().kind, TokKind::Eq) {
             let eq_span = self.peek().span;
@@ -419,10 +422,15 @@ impl<'a> Parser<'a> {
         // its one statement. Braces remain the multi-statement/scoped form.
         if self.at_unified_arrow() {
             self.expect_unified_arrow("after an `if` condition")?;
+            let body_start = self.peek().span.start;
             let then_body = self.adjacent_effect_body()?;
-            let else_branch = self.adjacent_effect_else()?;
+            parts.push(BranchPart::Arm {
+                cond: cond_span,
+                body: Span::new(body_start, self.prev_end()),
+            });
+            let else_branch = self.adjacent_effect_else(&mut parts)?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
-                self.prefer_arm_table_lint(span);
+                self.prefer_arm_table_lint(span, &parts, probe_diags);
             }
             return Ok(Self::classic_if_switch(IfStmt {
                 cond,
@@ -433,10 +441,15 @@ impl<'a> Parser<'a> {
         }
         if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
             self.teach_control_braces("if", self.peek().span);
+            let body_start = self.peek().span.start;
             let then_body = self.adjacent_effect_body()?;
-            let else_branch = self.adjacent_effect_else()?;
+            parts.push(BranchPart::Arm {
+                cond: cond_span,
+                body: Span::new(body_start, self.prev_end()),
+            });
+            let else_branch = self.adjacent_effect_else(&mut parts)?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
-                self.prefer_arm_table_lint(span);
+                self.prefer_arm_table_lint(span, &parts, probe_diags);
             }
             return Ok(Self::classic_if_switch(IfStmt {
                 cond,
@@ -445,6 +458,7 @@ impl<'a> Parser<'a> {
                 span,
             }));
         }
+        let body_start = self.peek().span.start;
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
         // D-IF3 / E0992: an old implicit-dispatch body (first item is `head ->`)
@@ -474,22 +488,30 @@ impl<'a> Parser<'a> {
 
         // Conventional `if`: the condition gates a statement body.
         let then_body = self.block_stmts();
+        parts.push(BranchPart::Arm {
+            cond: cond_span,
+            body: Span::new(body_start, self.prev_end()),
+        });
         let mut else_branch = None;
         let mut chained = false;
         if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
             if matches!(self.peek().kind, TokKind::KwIf) {
                 chained = true;
-                else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?)));
+                else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt(&mut parts)?)));
             } else {
+                let else_start = self.peek().span.start;
                 self.expect(TokKind::LBrace, "to open the `else` body")?;
                 else_branch = Some(ElseBranch::Else(self.block_stmts()));
+                parts.push(BranchPart::Else {
+                    body: Span::new(else_start, self.prev_end()),
+                });
             }
         }
         if else_branch.is_some()
             && (chained || self.span_has_authored_line_break(branch_start, self.pos))
         {
-            self.prefer_arm_table_lint(span);
+            self.prefer_arm_table_lint(span, &parts, probe_diags);
         }
         Ok(Self::classic_if_switch(IfStmt {
             cond,
@@ -562,24 +584,39 @@ impl<'a> Parser<'a> {
         Ok(vec![statement?])
     }
 
-    fn adjacent_effect_else(&mut self) -> Result<Option<ElseBranch>, Diagnostic> {
+    /// Parse an optional `else` tail. Each body it consumes is appended to
+    /// `parts` so the L0507 fix can rebuild the chain from authored text.
+    fn adjacent_effect_else(
+        &mut self,
+        parts: &mut Vec<BranchPart>,
+    ) -> Result<Option<ElseBranch>, Diagnostic> {
         if !matches!(self.peek().kind, TokKind::KwElse) {
             return Ok(None);
         }
         self.bump();
         if matches!(self.peek().kind, TokKind::KwIf) {
-            return Ok(Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?))));
+            return Ok(Some(ElseBranch::ElseIf(Box::new(self.if_stmt(parts)?))));
         }
         if matches!(self.peek().kind, TokKind::LBrace) {
+            let body_start = self.peek().span.start;
             self.bump();
-            return Ok(Some(ElseBranch::Else(self.block_stmts())));
+            let body = self.block_stmts();
+            parts.push(BranchPart::Else {
+                body: Span::new(body_start, self.prev_end()),
+            });
+            return Ok(Some(ElseBranch::Else(body)));
         }
         if self.at_unified_arrow() {
             self.expect_unified_arrow("after `else`")?;
-            return Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)));
+        } else {
+            self.teach_control_braces("else", self.peek().span);
         }
-        self.teach_control_braces("else", self.peek().span);
-        Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)))
+        let body_start = self.peek().span.start;
+        let body = self.adjacent_effect_body()?;
+        parts.push(BranchPart::Else {
+            body: Span::new(body_start, self.prev_end()),
+        });
+        Ok(Some(ElseBranch::Else(body)))
     }
 
     pub(super) fn teach_control_braces(&mut self, body: &str, span: Span) {
@@ -1342,39 +1379,46 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn if_stmt(&mut self) -> Result<IfStmt, Diagnostic> {
+    /// Parse one `else if` link of a classic chain, appending its condition
+    /// and body to `parts` for the L0507 fix.
+    pub(super) fn if_stmt(&mut self, parts: &mut Vec<BranchPart>) -> Result<IfStmt, Diagnostic> {
         let span = self.bump().span; // `if`
+        let cond_start = self.peek().span.start;
         let cond = self.expr_no_struct_lit()?;
+        let cond_span = Span::new(cond_start, self.prev_end());
         // D-ONELINE-BODY1=B: every arm of a chain takes the same body shapes as
         // the leading `if` — one `->` statement, a braced block, or the
         // braces-teaching recovery. `fmt` prints `->` for each arm that fits, so
         // each arm must read it back; a chain that only the first arm could
         // spell made the formatter write source the parser rejected.
-        if self.at_unified_arrow() {
+        let body_start = self.peek().span.start;
+        let then_body = if self.at_unified_arrow() {
             self.expect_unified_arrow("after an `if` condition")?;
-            let then_body = self.adjacent_effect_body()?;
-            let else_branch = self.adjacent_effect_else()?;
-            return Ok(IfStmt {
-                cond,
-                then_body,
-                else_branch,
-                span,
+            let body_start = self.peek().span.start;
+            let body = self.adjacent_effect_body()?;
+            parts.push(BranchPart::Arm {
+                cond: cond_span,
+                body: Span::new(body_start, self.prev_end()),
             });
-        }
-        if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
+            body
+        } else if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
             self.teach_control_braces("if", self.peek().span);
-            let then_body = self.adjacent_effect_body()?;
-            let else_branch = self.adjacent_effect_else()?;
-            return Ok(IfStmt {
-                cond,
-                then_body,
-                else_branch,
-                span,
+            let body = self.adjacent_effect_body()?;
+            parts.push(BranchPart::Arm {
+                cond: cond_span,
+                body: Span::new(body_start, self.prev_end()),
             });
-        }
-        self.expect(TokKind::LBrace, "to open the `if` body")?;
-        let then_body = self.block_stmts();
-        let else_branch = self.adjacent_effect_else()?;
+            body
+        } else {
+            self.expect(TokKind::LBrace, "to open the `if` body")?;
+            let body = self.block_stmts();
+            parts.push(BranchPart::Arm {
+                cond: cond_span,
+                body: Span::new(body_start, self.prev_end()),
+            });
+            body
+        };
+        let else_branch = self.adjacent_effect_else(parts)?;
         Ok(IfStmt {
             cond,
             then_body,
@@ -1390,10 +1434,16 @@ impl<'a> Parser<'a> {
     /// Each branch is a value block; `else` is required (an `if` with no value
     /// is a statement, parsed elsewhere).
     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
-        self.parse_if_expr_inner(true)
+        self.parse_if_expr_inner(true, &mut Vec::new())
     }
 
-    fn parse_if_expr_inner(&mut self, lint_style: bool) -> Result<Expr, Diagnostic> {
+    /// `parts` collects each condition and branch value so a linted root can
+    /// rebuild the whole chain as one L0507 arm table.
+    fn parse_if_expr_inner(
+        &mut self,
+        lint_style: bool,
+        parts: &mut Vec<BranchPart>,
+    ) -> Result<Expr, Diagnostic> {
         let branch_start = self.pos;
         let start = self.bump().span; // `if`
         if matches!(self.peek().kind, TokKind::LBrace) {
@@ -1413,9 +1463,16 @@ impl<'a> Parser<'a> {
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
+        let cond_start = self.peek().span.start;
         let cond = self.expr_no_struct_lit()?;
+        let cond_span = Span::new(cond_start, self.prev_end());
         self.expect_unified_arrow("after the condition of a value-producing `if`")?;
+        let body_start = self.peek().span.start;
         let (then_body, then_value) = self.parse_selected_value()?;
+        parts.push(BranchPart::Arm {
+            cond: cond_span,
+            body: Span::new(body_start, self.prev_end()),
+        });
         if !matches!(self.peek().kind, TokKind::KwElse) {
             return Err(Diagnostic::error(
                 "E0003",
@@ -1429,14 +1486,19 @@ impl<'a> Parser<'a> {
                      // `else if …` nests directly; a final selected value uses `else ->`.
         let chained = matches!(self.peek().kind, TokKind::KwIf);
         let (else_body, else_value) = if chained {
-            (Vec::new(), self.parse_if_expr_inner(false)?)
+            (Vec::new(), self.parse_if_expr_inner(false, parts)?)
         } else {
             self.expect_unified_arrow("after `else` in a value-producing `if`")?;
-            self.parse_selected_value()?
+            let body_start = self.peek().span.start;
+            let selected = self.parse_selected_value()?;
+            parts.push(BranchPart::Else {
+                body: Span::new(body_start, self.prev_end()),
+            });
+            selected
         };
         let span = Span::new(start.start, else_value.span().end);
         if lint_style && (chained || self.span_has_authored_line_break(branch_start, self.pos)) {
-            self.prefer_arm_table_lint(start);
+            self.prefer_arm_table_lint(start, parts, probe_diags);
         }
         Ok(Expr::If {
             cond: Box::new(cond),
@@ -2191,3 +2253,123 @@ fn run() {
         ));
     }
 }
+
+#[cfg(test)]
+mod arm_table_fix_tests {
+    use crate::Diagnostics::{Diagnostic, FixApplicability, TextEdit};
+    use crate::Lexer::lex;
+    use crate::Parser::parse_for_check_with_source;
+    use crate::AST::Program;
+
+    fn checked(source: &str) -> (Program, Vec<Diagnostic>) {
+        let (tokens, lex_diagnostics) = lex(source);
+        assert!(lex_diagnostics.is_empty(), "lex: {lex_diagnostics:?}");
+        parse_for_check_with_source(&tokens, source)
+            .unwrap_or_else(|diagnostics| panic!("parse: {diagnostics:?}"))
+    }
+
+    fn arm_table_edits(diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
+        diagnostics
+            .iter()
+            .filter(|d| d.code == "L0507")
+            .filter_map(|d| {
+                let edit = d.edit.clone()?;
+                assert_eq!(d.applicability, Some(FixApplicability::Safe), "{d:?}");
+                Some(edit)
+            })
+            .collect()
+    }
+
+    fn applied(source: &str, edit: &TextEdit) -> String {
+        let mut out = source.to_string();
+        out.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+        out
+    }
+
+    /// Apply the first L0507 fix until none remain, as `jet fix` rounds do.
+    /// With `same_tree`, prove the result parses to exactly the original
+    /// program. A table that is a function's last statement becomes the
+    /// function's final expression (D-BODY-LAST1=B), so that case changes node
+    /// shape while keeping its meaning; `tests/tail_return_parity.rs` proves it
+    /// on every hosted tier.
+    fn fix_all(source: &str, same_tree: bool) -> String {
+        let (original, _) = checked(source);
+        let mut text = source.to_string();
+        for _ in 0..8 {
+            let (_, diagnostics) = checked(&text);
+            let Some(edit) = arm_table_edits(&diagnostics).into_iter().next() else {
+                break;
+            };
+            text = applied(&text, &edit);
+        }
+        let (fixed, diagnostics) = checked(&text);
+        assert!(
+            !diagnostics.iter().any(|d| d.code == "L0507"
+                || d.severity == crate::Diagnostics::Severity::Error),
+            "fixed source still warns or fails:\n{text}\n{diagnostics:?}"
+        );
+        if same_tree {
+            assert_eq!(
+                String::from_utf8_lossy(&crate::Formatter::canonical_program(&original)),
+                String::from_utf8_lossy(&crate::Formatter::canonical_program(&fixed)),
+                "the arm-table rewrite changed program meaning:\n{text}"
+            );
+        }
+        text
+    }
+
+    #[test]
+    fn braced_else_if_chain_becomes_one_arm_table() {
+        let source = "fn show(score: Int) {\n    if score >= 90 {\n        print(\"a\")\n    } else if score >= 80 {\n        print(\"b\")\n    } else {\n        print(\"c\")\n    }\n    print(\"done\")\n}\n";
+        assert_eq!(
+            fix_all(source, true),
+            "fn show(score: Int) {\n    if {\n        score >= 90 -> {\n            print(\"a\")\n        }\n        score >= 80 -> {\n            print(\"b\")\n        }\n        else -> {\n            print(\"c\")\n        }\n    }\n    print(\"done\")\n}\n"
+        );
+    }
+
+    #[test]
+    fn value_tail_chain_becomes_the_function_value_table() {
+        let source = "fn grade(score: Int) -> String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
+        assert_eq!(
+            fix_all(source, false),
+            "fn grade(score: Int) -> String {\n    if {\n        score >= 90 -> {\n            return \"a\"\n        }\n        score >= 80 -> {\n            return \"b\"\n        }\n        else -> {\n            return \"c\"\n        }\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn arrow_else_if_chain_becomes_one_arm_table() {
+        let source = "fn run() {\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}\n";
+        assert_eq!(
+            fix_all(source, true),
+            "fn run() {\n    if {\n        false -> print(\"a\")\n        true -> print(\"b\")\n        else -> print(\"c\")\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn multi_line_value_branch_becomes_a_value_table() {
+        let source = "fn run() {\n    answer :: if true -> {\n        value :: 40 + 2\n        value\n    } else -> 0\n    print(answer)\n}\n";
+        assert_eq!(
+            fix_all(source, true),
+            "fn run() {\n    answer :: if {\n        true -> {\n            value :: 40 + 2\n            value\n        }\n        else -> 0\n    }\n    print(answer)\n}\n"
+        );
+    }
+
+    #[test]
+    fn nested_chains_converge_across_fix_rounds() {
+        let source = "fn run(a: Bool, b: Bool) {\n    if a {\n        if b {\n            print(\"1\")\n        } else if a {\n            print(\"2\")\n        }\n    } else if b {\n        print(\"3\")\n    }\n}\n";
+        let (_, diagnostics) = checked(source);
+        assert_eq!(arm_table_edits(&diagnostics).len(), 2, "{diagnostics:?}");
+        let fixed = fix_all(source, true);
+        assert!(fixed.contains("            b -> {"), "{fixed}");
+    }
+
+    #[test]
+    fn comment_between_branches_keeps_the_warning_without_an_edit() {
+        let source = "fn run(a: Bool) {\n    if a {\n        print(\"x\")\n    } /* keep */ else if !a {\n        print(\"y\")\n    }\n}\n";
+        let (_, diagnostics) = checked(source);
+        let lint = diagnostics
+            .iter()
+            .find(|d| d.code == "L0507")
+            .expect("the chain still warns");
+        assert!(lint.edit.is_none(), "a comment would be lost: {lint:?}");
+    }
