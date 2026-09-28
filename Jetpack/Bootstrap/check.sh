@@ -37,16 +37,18 @@ areas=""
 own_area=""
 each=0
 deps_from_head=0
+syntax_only=0
 while (( $# > 0 )); do
   case "$1" in
     --tests) with_tests=1 ;;
+    --syntax) syntax_only=1 ;;
     --areas) areas="${2:?--areas needs a comma-separated list}"; shift ;;
     --areas=*) areas="${1#--areas=}" ;;
     --area) own_area="${2:?--area needs an area name}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")"; shift ;;
     --area=*) own_area="${1#--area=}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")" ;;
     --each) each=1 ;;
     --deps-from-head) deps_from_head=1 ;;
-    *) echo "usage: check.sh [--tests] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
+    *) echo "usage: check.sh [--syntax | --tests] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
   shift
 done
@@ -182,7 +184,19 @@ unit_record() {
 overall=0
 node "$bootstrap/assemble.mjs" check
 unit_record check
+if (( ${syntax_only:-0} == 1 )); then
+  # Grammar only (lexer + parser, well under a second): the fast build-out loop.
+  probe="$(dirname "$jet_source")/jet-bootstrap-syntax-probe"
+  "$probe" "$scratch/check/project/src/jetpack.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
+  grep -q '^total errors: 0$' "$scratch/syntax.log" || overall=1
+  printf 'syntax-log: %s\nexit: %d\n' "$scratch/syntax.log" "$overall" >> "$receipt"
+  (( overall == 0 )) && echo "JETPACK SYNTAX OK"
+  exit "$overall"
+fi
 bounded check "$check_mem" 1200 "$scratch/check/project" "$jet" check src/jetpack.jet || overall=1
+# Per-file error summary mapped back to source paths (advisory type check).
+node "$bootstrap/locate.mjs" check "$scratch/check/jetpack.map.json" "$scratch/check.log" > "$scratch/check-errors.txt" || true
+if (( overall != 0 )); then echo "--- errors by source file ($scratch/check-errors.txt)"; grep -A200 '^errors per file:' "$scratch/check-errors.txt" || true; fi
 
 if (( with_tests == 1 && overall == 0 )); then
   node "$bootstrap/assemble.mjs" run
