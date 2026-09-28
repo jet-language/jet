@@ -1,0 +1,605 @@
+// `.jet/lock` schema v1 (M12.1, D-PM1/3): the typed lock graph. The lock
+// lives at `@UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
+// (U2) and is the single lockfile. Canonical text lives in Write.jet, the
+// strict reader in Parse.jet, and the on-disk recorders in Record.jet.
+
+@PKG_LOCK_VERSION :: 1
+// `provenance.build` prefix that marks a package record as projected from a
+// Rust FFI bridge build; `pkg_lock_record_rust_bridge` replaces every such
+// record.
+@PKG_RUST_BRIDGE_PROVENANCE_PREFIX :: "jet-ffi-bridge:"
+// Hard upper bound for one committed lockfile. A lock is a human-reviewed
+// artifact; exceeding this limit indicates a serializer invariant failure.
+@PKG_MAX_LOCK_BYTES :: 1048576
+@PKG_MAX_LOCK_VALUE_BYTES :: 1048576
+// The largest accepted `nix-size`: 16 GiB.
+@PKG_MAX_NIX_NAR_SIZE :: 17179869184
+
+// The Lock model's one error carrier. Parse and validation failures keep the
+// exact Rust message text; an unsupported format version stays typed so
+// `pkg_lock_parse_with_path` maps it to E1214 without re-reading a message.
+#Error
+pub enum LockError {
+    // Schema, record, or recorder failure with its complete message.
+    Invalid(String)
+    // The top-level `version` names a schema this reader does not support.
+    UnsupportedVersion(String)
+    // Reading or opening lock bytes failed at the file system.
+    Io(IOError)
+    // A generated record is missing one concrete fact.
+    Incomplete(LockCompletenessError)
+    // A registered host diagnostic (E1202, E1205, E1214, E3502, E3512).
+    Reported(Diagnostic)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Invalid(text) -> text
+            .UnsupportedVersion(version) -> "unsupported lock version {version}; expected {@PKG_LOCK_VERSION}"
+            .Io(error) -> "{error}"
+            .Incomplete(error) -> error.message()
+            .Reported(diagnostic) -> diagnostic.what
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound`.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .Io(.NotFound(_)) -> true
+            else -> false
+        }
+    }
+}
+
+impl IOError -> LockError { LockError.Io(self) }
+
+impl LockCompletenessError -> LockError { LockError.Incomplete(self) }
+
+// D-CTEFFECT1 Tier-1: one `embed_file`/`embed_bytes` (or generated-module)
+// input hashed at compile time: the relative path and the digest of its bytes.
+pub struct ComptimeInput {
+    pub path: String
+    pub hash: String
+}
+
+// One node in the resolved package graph.
+pub struct LockedPackage {
+    pub name: String
+    pub version: String
+    pub source: LockSource
+    // Portable Nix closure identity. Present exactly when `source` is
+    // `LockSource.Nix`.
+    pub nix_closure: ?NixClosureRecord{None}
+    // Exact resolved identity (only for git + registry deps).
+    pub locked: ?LockedRevision{None}
+    // Plan fingerprint = sha256 of (source tree hash + sorted dep fingerprints).
+    pub fingerprint: String{""}
+    // D-CASTORE1=A: SHA-256 of the installed source tree; None for old locks.
+    pub content_hash: ?String{None}
+    // Direct dependency names.
+    pub dependencies: [String]{[String]{}}
+    // D-RINGLAYER1=A: optional `runtime:` ceiling from the package payload.
+    pub layer: ?MirRuntimeLayer{None}
+    // D-RINGLAYER1=A M2: minimum runtime profile inferred at last build.
+    pub inferred_layer: ?MirRuntimeLayer{None}
+    // D-EFFBUDGET1: the effect names this dependency's code used at the last
+    // build, and the effects granted to it through `grants: { … }`.
+    pub effects: [String]{[String]{}}
+    pub effect_grants: [String]{[String]{}}
+    // Canonical role projection for inspect/provenance consumers.
+    pub required_effects: [String]{[String]{}}
+    pub granted_effects: [String]{[String]{}}
+    pub denied_effects: [String]{[String]{}}
+    pub effect_authority: ?String{None}
+    // D-JPK-CACHE1=A (U24/A4): the realized-output envelope; None until the
+    // package is realized (and for older locks, which round-trip unchanged).
+    pub envelope: ?LockEnvelope{None}
+    // D-ECO-RECEIPT2: digest of the immutable Hangar receipt of this package.
+    pub receipt: ?String{None}
+    // D-BOUND-PROV1: the transparency, publisher, and build evidence above
+    // the integrity floor.
+    pub provenance: ?DependencyProvenance{None}
+
+    // The realized output digest recorded on the source, when it has one.
+    fn output(self) -> ?String !Never {
+        output :: if self.source == {
+            .Nix(_, output) -> output
+            .Cran(_, output, _, _, _) -> output
+            .LuaRocks(_, output, _, _, _) -> output
+            .Registry(_, _, output, _, _, _, _, _) -> output
+            .Foreign(_, _, output) -> output
+            .Root | .Path(_) | .Git(_, _) -> return None
+        }
+        if output == "" -> return None
+        Val(output)
+    }
+
+    // The source's pinned source hash for CRAN, LuaRocks, and registry
+    // records.
+    fn source_hash(self) -> ?String !Never {
+        if self.source == {
+            .Cran(_, _, source_hash, _, _) -> Val(source_hash)
+            .LuaRocks(_, _, source_hash, _, _) -> Val(source_hash)
+            .Registry(_, _, _, source_hash, _, _, _, _) -> Val(source_hash)
+            else -> None
+        }
+    }
+
+    fn is_root(self) -> Bool !Never {
+        if self.source == {
+            .Root -> true
+            else -> false
+        }
+    }
+
+    fn is_nix(self) -> Bool !Never {
+        if self.source == {
+            .Nix(_, _) -> true
+            else -> false
+        }
+    }
+
+    fn is_foreign(self) -> Bool !Never {
+        if self.source == {
+            .Foreign(_, _, _) -> true
+            else -> false
+        }
+    }
+
+    fn is_cran(self) -> Bool !Never {
+        if self.source == {
+            .Cran(_, _, _, _, _) -> true
+            else -> false
+        }
+    }
+
+    fn is_luarocks(self) -> Bool !Never {
+        if self.source == {
+            .LuaRocks(_, _, _, _, _) -> true
+            else -> false
+        }
+    }
+
+    // A registry record from `registry` (RubyGems, CPAN, Packagist, …).
+    fn is_registry(self, registry: String) -> Bool !Never {
+        if self.source == {
+            .Registry(value, _, _, _, _, _, _, _) -> value == registry
+            else -> false
+        }
+    }
+
+    // The `provenance.build` evidence, when recorded.
+    fn provenance_build(self) -> ?String !Never {
+        provenance :: self.provenance ?? return None
+        provenance.build
+    }
+
+    // The `effects` role projection: the stored provenance when no explicit
+    // required set was recorded.
+    fn required_effect_roles(self) -> [String] !Never {
+        if self.required_effects.len() == 0 -> return self.effects
+        self.required_effects
+    }
+
+    fn granted_effect_roles(self) -> [String] !Never {
+        if self.granted_effects.len() == 0 -> return self.effect_grants
+        self.granted_effects
+    }
+
+    // Project one lock record into the single user-facing provenance view.
+    // The projection never verifies a second way: integrity is the E1204
+    // floor, registry metadata is the verified source path, and attestation
+    // stays recorded until its live verifier lands.
+    fn provenance_report(self) -> DependencyProvenanceReport !Never {
+        locked_hash := self.content_hash
+        if locked_hash == None {
+            if self.locked == {
+                .Val(revision) -> locked_hash = Val(revision.tree_hash)
+                .None -> {}
+            }
+        }
+        if locked_hash == None {
+            locked_hash = if self.source == {
+                .Cran(_, _, source_hash, _, _) -> Val(source_hash)
+                .LuaRocks(_, _, source_hash, _, _) -> Val(source_hash)
+                .Registry(_, _, _, source_hash, _, _, _, _) -> Val(source_hash)
+                .Nix(_, _) -> if self.envelope == {
+                    .Val(envelope) -> Val(envelope.output_hash)
+                    .None -> None
+                }
+                .Root | .Path(_) | .Git(_, _) | .Foreign(_, _, _) -> None
+            }
+        }
+        integrity_value :: pkg_lock_recorded_or(locked_hash, "not recorded")
+        integrity_status :: if integrity_value == "not recorded" -> ProvenanceStatus.Recorded else -> ProvenanceStatus.Enforced
+
+        provenance :: self.provenance ?? DependencyProvenance.empty()
+        transparency :: if pkg_lock_nonblank(provenance.transparency) == {
+            .Val(value) -> ProvenanceField{value: value, status: ProvenanceStatus.Verified}
+            .None -> ProvenanceField.not_recorded()
+        }
+        publisher :: if pkg_lock_nonblank(provenance.publisher) == {
+            .Val(value) -> ProvenanceField{value: value, status: ProvenanceStatus.Verified}
+            .None -> ProvenanceField.not_recorded()
+        }
+        build_value := pkg_lock_nonblank(provenance.build)
+        if build_value == None {
+            if self.envelope == {
+                .Val(envelope) -> build_value = pkg_lock_nonblank(Val(envelope.provenance))
+                .None -> {}
+            }
+        }
+        build :: if build_value == {
+            .Val(value) -> ProvenanceField{value: value, status: ProvenanceStatus.Recorded}
+            .None -> ProvenanceField.not_recorded()
+        }
+
+        DependencyProvenanceReport{
+            name: self.name,
+            version: self.version,
+            integrity: ProvenanceField{value: integrity_value, status: integrity_status},
+            transparency: transparency,
+            publisher: publisher,
+            build: build,
+            required_effects: self.required_effect_roles(),
+            granted_effects: self.granted_effect_roles(),
+            denied_effects: self.denied_effects,
+            authority: self.effect_authority ?? "not recorded"
+        }
+    }
+
+    // The compact trust grade used by lock-change presentation: a projection
+    // of facts already stored in the lock, never a new verification step.
+    fn trust_grade(self) -> String !Never {
+        envelope :: self.envelope ?? return "unverified-mapping"
+        if envelope.catalog_tier == {
+            "local-unofficial" | "local-import" -> return "unverified-mapping"
+            else -> {}
+        }
+        if envelope.catalog_trust.contains("unverified") -> return "unverified-mapping"
+        if envelope.signature != "" || (envelope.catalog_tier == "official-signed" && envelope.catalog_trust == "verified") -> return "signed"
+        if pkg_lock_is_reproduced_evidence(envelope.provenance) -> return "reproduced"
+        if self.provenance_build() == {
+            .Val(build) -> if pkg_lock_is_reproduced_evidence(build) -> return "reproduced"
+            .None -> {}
+        }
+        "unverified-mapping"
+    }
+
+    // Validate the facts a locked/offline dependency realization consumes.
+    // Registry and foreign records have their own provider-specific floors;
+    // this boundary covers the path and Git identities used directly by the
+    // package loader.
+    fn validate_completeness(self) !LockCompletenessError {
+        name :: if self.name.trim() == "" -> "<unnamed>" else -> self.name
+        if self.version.trim() == "" -> return Err(LockCompletenessError.dependency(name, "version"))
+        if self.source == {
+            .Path(path) -> {
+                if path.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.path"))
+                if pkg_lock_nonblank(self.content_hash) == None -> return Err(LockCompletenessError.dependency(name, "content-hash"))
+            }
+            .Git(url, selector) -> {
+                if url.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.url"))
+                if selector.trim() == "" -> return Err(LockCompletenessError.dependency(name, "source.selector"))
+                revision :: self.locked ?? return Err(LockCompletenessError.dependency(name, "locked"))
+                if revision.rev.trim() == "" -> return Err(LockCompletenessError.dependency(name, "locked.rev"))
+                if revision.tree_hash.trim() == "" && pkg_lock_nonblank(self.content_hash) == None -> return Err(LockCompletenessError.dependency(name, "locked.tree-hash"))
+            }
+            .Root | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {}
+        }
+    }
+}
+
+pub enum LockSource {
+    Root
+    Path(String)
+    Git(url: String, selector: String)
+    // D-JPK-OFFLINE2=B: a package realized through the Nix compatibility
+    // provider. `reference` is the source ref (`openssl@nixpkgs`); `output`
+    // is the portable Hangar content digest. The complete replay identity is
+    // the mandatory `LockedPackage.nix_closure`.
+    Nix(reference: String, output: String)
+    // D-FFI-R1: exact CRAN closure pinned by SHA-256 and realized output.
+    Cran(reference: String, output: String, source_hash: String, repository: String, authority: String)
+    // D-FFI-LUA1 / D-JPK-PROVIDERS2: exact LuaRocks closure and output.
+    LuaRocks(reference: String, output: String, source_hash: String, repository: String, authority: String)
+    // D-FFI-RUBY1/PERL1/PHP1: exact foreign scripting-registry closure.
+    // `tier` is `core`/`community` for Jet's registry and `not-applicable`
+    // elsewhere; `gate_status` is the registry's canonical gate summary.
+    Registry(registry: String, reference: String, output: String, source_hash: String, repository: String, authority: String, tier: String, gate_status: String)
+    // D-FFI-UNIFY1: the exact foreign package provider ref and the verified
+    // Hangar projection that materialized its binding.
+    Foreign(language: ForeignLanguage, reference: String, output: String)
+}
+
+pub struct LockedRevision {
+    pub rev: String
+    pub tree_hash: String
+    pub last_modified: Int
+}
+
+// D-JPK-OFFLINE2: the portable, content-addressed evidence needed to replay
+// one Nix output without a host Nix store or a package catalog. Every field
+// is an identity or a digest; host paths are not representable.
+pub struct NixClosureRecord {
+    pub channel: String
+    pub revision: String
+    pub system: String
+    // Signed manifest digest for official catalogs; canonical index digest
+    // for explicit local catalogs.
+    pub index_authority: String
+    pub derivation: String
+    pub output: String
+    pub nar_hash: String
+    pub size: Int
+    pub compression: String
+    pub references: [String]
+    pub upstream_proof: String
+    pub cache_key: String
+    pub project_cas_bundle: String
+
+    // Reject incomplete or path-bearing records before they become a replay
+    // authority: no field that claims to be content addressed may smuggle a
+    // machine-local path.
+    fn validate(self) !LockError {
+        fields :: [(name: String, value: String)]{
+            (name: "channel", value: self.channel),
+            (name: "revision", value: self.revision),
+            (name: "system", value: self.system),
+            (name: "index-authority", value: self.index_authority),
+            (name: "derivation", value: self.derivation),
+            (name: "output", value: self.output),
+            (name: "nar-hash", value: self.nar_hash),
+            (name: "compression", value: self.compression),
+            (name: "upstream-proof", value: self.upstream_proof),
+            (name: "cache-key", value: self.cache_key),
+            (name: "project-cas-bundle", value: self.project_cas_bundle)
+        }
+        loop field in fields {
+            if field.value.trim() == "" -> return Err(LockError.Invalid("Nix closure record is missing `{field.name}`"))
+            if pkg_lock_has_unsafe_path_byte(field.value) -> return Err(LockError.Invalid("Nix closure record `{field.name}` contains a host path or unsafe control byte"))
+        }
+        if self.channel == {
+            "nixpkgs-unstable" | "nixos-unstable" -> {}
+            else -> return Err(LockError.Invalid("Nix closure record has an unsupported channel"))
+        }
+        if !pkg_lock_is_lower_hex(self.revision, 40) -> return Err(LockError.Invalid("Nix closure record revision must be exactly 40 lowercase hexadecimal characters"))
+        if self.system == {
+            "x86_64-linux" | "aarch64-linux" | "x86_64-darwin" | "aarch64-darwin" -> {}
+            else -> return Err(LockError.Invalid("Nix closure record has an unsupported system"))
+        }
+        if !pkg_lock_is_lower_hex(self.index_authority, 64) -> return Err(LockError.Invalid("Nix closure record index authority must be a 64-character lowercase SHA-256"))
+        if !pkg_lock_is_lower_hex(self.derivation, 64) -> return Err(LockError.Invalid("Nix closure record derivation must be a 64-character lowercase SHA-256"))
+        if !pkg_lock_is_cas_digest(self.output) -> return Err(LockError.Invalid("Nix closure record output is not a canonical CAS digest"))
+        if !pkg_lock_is_nar_hash(self.nar_hash) -> return Err(LockError.Invalid("Nix closure record NarHash is not canonical"))
+        if self.compression == {
+            "none" | "zstd" -> {}
+            else -> return Err(LockError.Invalid("Nix closure record uses unsupported compression"))
+        }
+        if !pkg_lock_is_cas_digest(self.upstream_proof) -> return Err(LockError.Invalid("Nix closure record upstream proof is not a canonical digest"))
+        if !pkg_lock_is_lower_hex(self.cache_key, 64) -> return Err(LockError.Invalid("Nix closure record cache key must be a 64-character lowercase SHA-256"))
+        if !pkg_lock_is_cas_digest(self.project_cas_bundle) -> return Err(LockError.Invalid("Nix closure record CAS bundle is not a canonical digest"))
+        seen := [String]{}
+        loop reference in self.references {
+            if !pkg_lock_is_cas_digest(reference) -> return Err(LockError.Invalid("Nix closure record contains an invalid reference identity"))
+            if seen.contains(reference) -> return Err(LockError.Invalid("Nix closure record repeats an ordered reference"))
+            seen.push(reference)
+        }
+        if self.size == 0 || self.size > @PKG_MAX_NIX_NAR_SIZE -> return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
+    }
+}
+
+// D-JPK-CACHE1=A (U24/A4): the lock-serialized form of a realized object's
+// envelope: not a second envelope model, just its on-disk shape. `signature`
+// stays empty until package signing fills it.
+pub struct LockEnvelope {
+    pub output_hash: String{""}
+    pub platform: String{""}
+    pub signature: String{""}
+    pub provenance: String{""}
+    // Nix package catalog provenance; empty for non-Nix envelopes.
+    pub catalog_tier: String{""}
+    pub catalog_trust: String{""}
+
+    fn empty() -> LockEnvelope !Never {
+        LockEnvelope{output_hash: "", platform: "", signature: "", provenance: "", catalog_tier: "", catalog_trust: ""}
+    }
+
+    // An authority digest identifies bytes; only this explicit provenance
+    // pair distinguishes a verified signed manifest from an unsigned local
+    // index.
+    fn validate_nix_catalog(self) !LockError {
+        if self.catalog_tier == "official-signed" && self.catalog_trust == "verified" -> return
+        if self.catalog_tier == "local-unofficial" && self.catalog_trust == "unverified" -> return
+        Err(LockError.Invalid("Nix lock requires a recognized, consistent catalog tier and trust"))
+    }
+}
+
+// D-JPK-TOOLCHAIN1=A (A4): a pinned toolchain is an ordinary hangar object,
+// recorded in its own `[[toolchain]]` block so a build's toolchain identity
+// enters output provenance. `channel` is the `jet:` channel ref the pin was
+// resolved from (`0.4`, `main`, …); every run except `jet update jet` reads
+// `version`.
+pub struct LockedToolchain {
+    pub id: String
+    pub channel: String
+    pub version: String
+    pub envelope: LockEnvelope
+
+    fn validate_completeness(self) !LockCompletenessError {
+        name :: if self.channel.trim() == "" -> "jet" else -> self.channel
+        fields :: [(field: String, value: String)]{(field: "id", value: self.id), (field: "channel", value: self.channel), (field: "version", value: self.version)}
+        loop entry in fields {
+            if entry.value.trim() == "" -> return Err(LockCompletenessError.missing(LockRecordKind.Toolchain, name, entry.field, LockRegeneration.toolchain()))
+        }
+    }
+}
+
+// D-JPK-CHANNEL1=A: exact lock for a named source declared with a channel
+// selector (`owner/repo@github#latest`, `#main`, `#v0.x`). Realize-class
+// commands read `exact`; only update-class commands move it.
+pub struct LockedSourceChannel {
+    pub name: String
+    pub channel: String
+    pub exact: String
+
+    fn validate_completeness(self) !LockCompletenessError {
+        name :: if self.name.trim() == "" -> "<unnamed>" else -> self.name
+        fields :: [(field: String, value: String)]{(field: "name", value: self.name), (field: "channel", value: self.channel), (field: "exact", value: self.exact)}
+        loop entry in fields {
+            if entry.value.trim() == "" -> return Err(LockCompletenessError.missing(LockRecordKind.SourceChannel, name, entry.field, LockRegeneration.source_channel(self.name)))
+        }
+    }
+}
+
+// D-BROWSER-AUTO1=A (#1187): a project-locked browser binary for automation,
+// so `Browser.launch` resolves a deterministic install rather than a host
+// PATH scrape. `protocol` is the WebDriver BiDi client profile name.
+pub struct LockedBrowser {
+    pub engine: String
+    pub version: String
+    pub binary: String
+    pub protocol: String
+    pub size: Int
+    pub envelope: LockEnvelope
+}
+
+pub struct LockedWorkspaceMember {
+    pub name: String
+    pub path: String
+    pub source_digest: String
+    pub canonical_path: String
+    // Digest of the fully composed typed Package facts for this member.
+    pub package_digest: String
+}
+
+// D-CONF-SPLIT1=A: one locked writer record for every computed build fact:
+// the stable on-disk provenance projection of the semantic resolver.
+pub struct LockedBuildContribution {
+    pub package: String
+    pub key: String
+    pub value: String
+    pub scope: String
+    pub layer: String
+    pub source: String
+    pub reason: String
+}
+
+// The full lock graph.
+pub struct LockFile {
+    pub version: Int
+    pub packages: [LockedPackage]
+    // Root dependency names (direct deps of the workspace root).
+    pub root_dependencies: [String]
+    // D-AUTHORITY-MANIFEST1=A: the root package's one authority block.
+    pub authority: ?PackageAuthority
+    // D-WORKSPACELOCK1=A: monorepo workspace members live in this lockfile.
+    pub workspace_members: [LockedWorkspaceMember]
+    // D-WORKSPACELOCK1=A: the workspace source identity, retained even when a
+    // valid workspace has no members.
+    pub workspace_source_digest: ?String
+    // D-JPK-OVERLAY1=A: the checked workspace overlay policy.
+    pub workspace_overlay_policy: OverlayPolicy
+    // D-CTEFFECT1 Tier-1: embed/generated inputs hashed at compile time.
+    pub comptime_inputs: [ComptimeInput]
+    // D-JPK-TOOLCHAIN1=A (A4): pinned toolchain objects.
+    pub toolchains: [LockedToolchain]
+    // D-BROWSER-AUTO1=A (#1187): locked browser binaries.
+    pub browsers: [LockedBrowser]
+    // D-JPK-CHANNEL1=A: named source channels resolved to exact source refs.
+    pub source_channels: [LockedSourceChannel]
+    // D-CONF-STAMP1=B: provenance for the build fact plane, replayed verbatim
+    // by later locked builds.
+    pub build_stamp: ?BuildStamp
+    // D-CONF-SPLIT1=A: computed build-fact writers, keyed by package.
+    pub build_contributions: [LockedBuildContribution]
+
+    // A version-1 lock with no records.
+    fn empty() -> LockFile !Never {
+        LockFile{
+            version: @PKG_LOCK_VERSION,
+            packages: [LockedPackage]{},
+            root_dependencies: [String]{},
+            authority: None,
+            workspace_members: [LockedWorkspaceMember]{},
+            workspace_source_digest: None,
+            workspace_overlay_policy: OverlayPolicy.empty(),
+            comptime_inputs: [ComptimeInput]{},
+            toolchains: [LockedToolchain]{},
+            browsers: [LockedBrowser]{},
+            source_channels: [LockedSourceChannel]{},
+            build_stamp: None,
+            build_contributions: [LockedBuildContribution]{}
+        }
+    }
+
+    // Validate every generated identity before a locked or offline
+    // operation consumes it.
+    fn validate_completeness(self) !LockCompletenessError {
+        loop package in self.packages -> package.validate_completeness()
+        loop source in self.source_channels -> source.validate_completeness()
+        loop toolchain in self.toolchains -> toolchain.validate_completeness()
+    }
+
+    fn find_package(self, name: String) -> ?LockedPackage !Never {
+        loop package in self.packages {
+            if package.name == name -> return Val(package)
+        }
+        None
+    }
+
+    fn find_source_channel(self, name: String) -> ?LockedSourceChannel !Never {
+        loop channel in self.source_channels {
+            if channel.name == name -> return Val(channel)
+        }
+        None
+    }
+}
+
+// Whether `value` holds a byte a content-addressed field may not carry: a
+// non-ASCII byte, NUL, an ASCII control, or a path separator.
+fn pkg_lock_has_unsafe_path_byte(value: String) -> Bool !Never {
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code >= 128 || code < 32 || code == 127 || code == 47 || code == 92 -> return true
+    }
+    false
+}
+
+// Exactly `digits` lowercase hexadecimal characters.
+fn pkg_lock_is_lower_hex(value: String, digits: Int) -> Bool !Never {
+    raw :: value.bytes()
+    if raw.len() != digits -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// `sha256-<64 lowercase hex>`
+fn pkg_lock_is_cas_digest(value: String) -> Bool !Never {
+    if !value.starts_with("sha256-") -> return false
+    pkg_lock_is_lower_hex(value.removeprefix("sha256-"), 64)
+}
+
+// `sha256:<64 lowercase hex>`
+fn pkg_lock_is_nar_hash(value: String) -> Bool !Never {
+    if !value.starts_with("sha256:") -> return false
+    pkg_lock_is_lower_hex(value.removeprefix("sha256:"), 64)
+}
+
+// The value when it is present and not blank.
+fn pkg_lock_nonblank(value: ?String) -> ?String !Never {
+    text :: value ?? return None
+    if text.trim() == "" -> return None
+    Val(text)
+}
+
+fn pkg_lock_recorded_or(value: ?String, fallback: String) -> String !Never {
+    pkg_lock_nonblank(value) ?? fallback
+}
+
+// Attested or independently reproduced build evidence.
+fn pkg_lock_is_reproduced_evidence(value: String) -> Bool !Never {
+    value == "attested-v1" || value.starts_with("independent-agreeing-v1:")
+}

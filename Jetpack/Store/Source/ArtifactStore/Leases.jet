@@ -1,0 +1,259 @@
+// Ownership and liveness of the artifact store: the process identity written
+// into lock and lease files, the store lock and build leases that release
+// themselves only while their ownership record is unchanged, lease and owner
+// line parsing, and the checksummed access journal that orders pruning (Rust
+// `jet_store` Lease, StoreLock, LeaseRecord, JournalState, owner liveness).
+
+// Ownership identity recorded in lock and lease files. PID alone is not
+// sufficient because a later process may reuse it.
+pub struct ArtifactProcessIdentity {
+    pid: Int
+    start: String
+
+    fn new(pid: Int, start: String) -> ArtifactProcessIdentity !Never {
+        ArtifactProcessIdentity{pid, start}
+    }
+
+    // This process: its PID and kernel start token, or a per-store fallback
+    // token where the platform exposes none.
+    fn current() -[FS, Env, Rand]> ArtifactProcessIdentity !ArtifactStoreError {
+        pid :: sys.pid()
+        if store_artifact_lookup_process_start(pid) == {
+            .Found(start) -> Ok(ArtifactProcessIdentity.new(pid, start))
+            else -> Ok(ArtifactProcessIdentity.new(pid, "fallback-{pid}-{store_artifact_unique_token()}"))
+        }
+    }
+
+    fn pid(self) -> Int !Never { self.pid }
+
+    fn start(self) -> String !Never { self.start }
+
+    // `jet.store.v1|<role>|<pid>|<start>\n`, the first line of a lock or
+    // lease file.
+    fn owner_line(self, role: String) -> String !Never {
+        "{@STORE_ARTIFACT_VERSION}|{role}|{self.pid}|{self.start}\n"
+    }
+}
+
+// What the platform reports about a process start token.
+enum ArtifactIdentityLookup {
+    Found(String)
+    Missing
+    Unknown
+}
+
+// The kernel start time of `pid` (Linux `/proc/<pid>/stat` field 22); other
+// platforms cannot tell.
+fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLookup !Never {
+    if !sys.is_linux() -> return ArtifactIdentityLookup.Unknown
+    content :: if files.read("/proc/{pid}/stat") == {
+        .Ok(text) -> text
+        .Err(error) -> {
+            if store_artifact_io_missing(error) -> return ArtifactIdentityLookup.Missing
+            return ArtifactIdentityLookup.Unknown
+        }
+    }
+    raw :: content.bytes()
+    paren :: store_artifact_rfind(raw, ") ".bytes())
+    if paren < 0 -> return ArtifactIdentityLookup.Unknown
+    fields :: store_artifact_split_whitespace(pkg_bytes_text(raw, paren + 2, raw.len()))
+    if fields.len() <= 19 -> return ArtifactIdentityLookup.Unknown
+    ArtifactIdentityLookup.Found(fields[19])
+}
+
+// Whether `owner` is still running: the same process as `current`, or a
+// process whose start token still matches. None when the platform cannot
+// tell, which callers treat as live.
+fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: ArtifactProcessIdentity) -[FS, Env]> ?Bool !Never {
+    if owner.pid() == current.pid() -> return Val(owner.start() == current.start())
+    if store_artifact_lookup_process_start(owner.pid()) == {
+        .Found(start) -> Val(start == owner.start())
+        .Missing -> Val(false)
+        .Unknown -> None
+    }
+}
+
+// The last byte offset where `needle` occurs, or -1.
+fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int !Never {
+    at := haystack.len() - needle.len()
+    loop at >= 0 {
+        if pkg_bytes_starts_with(haystack, at, needle) -> return at
+        at -= 1
+    }
+    -1
+}
+
+// A live lease. Closing it releases the file only if its ownership record is
+// unchanged; a later process can therefore never remove a live lease by PID
+// coincidence.
+pub struct ArtifactLease {
+    path: String
+    owner: ArtifactProcessIdentity
+
+    fn path(self) -> String !Never { self.path }
+
+    fn owner(self) -> ArtifactProcessIdentity !Never { self.owner }
+
+    fn is_live(self) -[FS, Env]> Bool !Never {
+        store_artifact_owner_liveness(self.owner, self.owner) ?? true
+    }
+}
+
+impl ArtifactLease.Close {
+    fn close(^self) -[FS]> {
+        expected :: self.owner.owner_line("lease").bytes()
+        bytes :: files.read_bytes(self.path) ?? return
+        if !pkg_bytes_starts_with(bytes, 0, expected) -> return
+        files.remove(self.path) ?? return
+        store_artifact_sync_dir(files.dirname(self.path)).drop("lease release is best-effort once the file is gone")
+    }
+}
+
+// The held machine-wide store lock. Closing it removes the lock file only
+// while it still holds this owner's line.
+struct ArtifactStoreLock {
+    path: String
+    owner_line: [U8]
+}
+
+impl ArtifactStoreLock.Close {
+    fn close(^self) -[FS]> {
+        bytes :: files.read_bytes(self.path) ?? return
+        if bytes != self.owner_line -> return
+        files.remove(self.path) ?? return
+        store_artifact_sync_dir(files.dirname(self.path)).drop("lock release is best-effort once the file is gone")
+    }
+}
+
+// One parsed lease file: its owner and the entries it pins.
+struct ArtifactLeaseRecord {
+    owner: ArtifactProcessIdentity
+    targets: [ArtifactEntryKey]
+}
+
+// A lease file: the owner line, then one `kind|value` line per pinned entry.
+// Any malformed line refuses the whole file.
+fn store_artifact_parse_lease(bytes: [U8]) -> ?ArtifactLeaseRecord !Never {
+    text :: String.from_bytes(bytes) ?? return None
+    lines :: store_artifact_lines(text)
+    if lines.len() == 0 -> return None
+    header :: lines[0].split("|").to_list()
+    if header.len() != 4 || header[0] != @STORE_ARTIFACT_VERSION || header[1] != "lease" -> return None
+    pid :: store_artifact_parse_pid(header[2]) ?? return None
+    if header[3] == "" -> return None
+    owner :: ArtifactProcessIdentity.new(pid, header[3])
+    targets := [ArtifactEntryKey]{}
+    loop index in 1..<lines.len() {
+        fields :: lines[index].split("|").to_list()
+        if fields.len() != 2 -> return None
+        targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
+    }
+    Val(ArtifactLeaseRecord{owner, targets: store_artifact_unique_keys(targets)})
+}
+
+// The owner of a lock file (`jet.store.v1|lock|<pid>|<start>`).
+fn store_artifact_parse_owner_line(bytes: [U8]) -> ?ArtifactProcessIdentity !Never {
+    text := String.from_bytes(bytes) ?? return None
+    loop text.ends_with("\n") {
+        raw :: text.bytes()
+        text = pkg_bytes_text(raw, 0, raw.len() - 1)
+    }
+    fields :: text.split("|").to_list()
+    if fields.len() != 4 || fields[0] != @STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" -> return None
+    pid :: store_artifact_parse_pid(fields[2]) ?? return None
+    Val(ArtifactProcessIdentity.new(pid, fields[3]))
+}
+
+// A `u32` process id.
+fn store_artifact_parse_pid(text: String) -> ?Int !Never {
+    pid :: store_artifact_parse_count(text) ?? return None
+    if pid > 4294967295 -> return None
+    Val(pid)
+}
+
+// `str::lines`: split on LF, drop one CR before each LF, and yield no final
+// empty line after a trailing LF.
+fn store_artifact_lines(text: String) -> [String] !Never {
+    lines := [String]{}
+    raw :: text.bytes()
+    start := 0
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) != 10 -> next
+        end :: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
+        lines.push(pkg_bytes_text(raw, start, end))
+        start = index + 1
+    }
+    if start < raw.len() {
+        end :: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        lines.push(pkg_bytes_text(raw, start, end))
+    }
+    lines
+}
+
+// The replayed access journal: the last-use sequence of every live key
+// (by `ArtifactEntryKey.identity`), the highest sequence, the file size, and
+// whether every record was valid. Replay stops at the first invalid record.
+struct ArtifactJournalState {
+    last_use: [String: Int]
+    last_sequence: Int
+    bytes: Int
+    valid: Bool
+
+    fn last_use_of(self, key: ArtifactEntryKey) -> Int !Never {
+        self.last_use.get(key.identity()) ?? 0
+    }
+}
+
+// One checksummed journal line:
+// `jet.store.v1|<op>|<kind>|<value>|<length>|<sequence>|<sha256 of prefix>`.
+fn store_artifact_journal_line(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String !Never {
+    prefix :: "{@STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
+    "{prefix}{pkg_sha256_hex(prefix.bytes())}\n"
+}
+
+fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState !ArtifactStoreError {
+    bytes :: if files.read_bytes(path) == {
+        .Ok(read) -> read
+        .Err(error) -> {
+            if store_artifact_io_missing(error) -> return Ok(ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: 0, valid: true})
+            return Err(ArtifactStoreError.Io(error))
+        }
+    }
+    state := ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
+    start := 0
+    loop index in 0..<(bytes.len() + 1) {
+        if index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> next
+        line_start :: start
+        start = index + 1
+        if index == line_start -> next
+        end :: if Int.from_u8(bytes[index - 1]) == 13 -> index - 1 else -> index
+        if !store_artifact_replay_journal_line(&state, store_artifact_slice(bytes, line_start, end)) {
+            state.valid = false
+            break
+        }
+    }
+    Ok(state)
+}
+
+// Apply one journal record; false when it is invalid.
+fn store_artifact_replay_journal_line(state: &ArtifactJournalState, line: [U8]) -> Bool !Never {
+    text :: String.from_bytes(line) ?? return false
+    fields :: text.split("|").to_list()
+    if fields.len() != 7 || fields[0] != @STORE_ARTIFACT_VERSION -> return false
+    prefix :: "{fields[0]}|{fields[1]}|{fields[2]}|{fields[3]}|{fields[4]}|{fields[5]}|"
+    if pkg_sha256_hex(prefix.bytes()) != fields[6] -> return false
+    store_artifact_parse_count(fields[4]) ?? return false
+    sequence :: store_artifact_parse_count(fields[5]) ?? return false
+    key :: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return false
+    if sequence > state.last_sequence -> state.last_sequence = sequence
+    if fields[1] == {
+        "put" | "touch" -> {
+            state.last_use[key.identity()] = sequence
+        }
+        "remove" -> {
+            state.last_use.remove(key.identity()).drop("a remove of an unknown key is a no-op")
+        }
+        else -> return false
+    }
+    true
+}

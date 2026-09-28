@@ -1,0 +1,216 @@
+// Typed environment facts shared by the evaluator and the Jetpack runtime.
+//
+// These are deliberately small closed records. The evaluator turns Jet values
+// into these facts; Jetpack consumes them without reparsing source or
+// inventing a second policy language. This file holds the first-party
+// integration vocabulary (D-ENV-INTEGRATIONS1=A).
+
+// The fully-qualified name of a first-party integration call. The parser
+// represents `env.platform.android(...)` as a method call on the field path
+// `env.platform`, while bare calls are `Expr.Call`. Both spellings are the same
+// integration surface and share one lowering path.
+pub fn envmodel_qualified_call_name(expr: Expr) -> ?String !Never {
+    if expr == {
+        .Call(call) -> Val(call.name)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            path :: envmodel_expression_path(receiver) ?? return None
+            Val("{path}.{method}")
+        }
+        else -> None
+    }
+}
+
+fn envmodel_expression_path(expr: Expr) -> ?String !Never {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Field(base, member, _) -> {
+            path :: envmodel_expression_path(base) ?? return None
+            Val("{path}.{member}")
+        }
+        else -> None
+    }
+}
+
+// D-ENV-INTEGRATIONS1=A: the closed first-party integration vocabulary. An
+// integration is a typed projection into ordinary environment facts, not a
+// second package resolver, lock, effect system, or activation engine.
+#[Comparable]
+pub enum IntegrationKind {
+    Android
+    Apple
+    Certificates
+    Hosts
+    CodexAgent
+    Editor
+    CloudCredentials
+    Vault
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Android -> "android"
+            .Apple -> "apple"
+            .Certificates -> "certificates"
+            .Hosts -> "hosts"
+            .CodexAgent -> "codex-agent"
+            .Editor -> "editor"
+            .CloudCredentials -> "cloud-credentials"
+            .Vault -> "vault"
+        }
+    }
+
+    fn from_call(name: String) -> ?IntegrationKind !Never {
+        if name == {
+            @ENV_INTEGRATION_ANDROID -> Val(IntegrationKind.Android)
+            @ENV_INTEGRATION_APPLE -> Val(IntegrationKind.Apple)
+            @ENV_INTEGRATION_CERTIFICATES -> Val(IntegrationKind.Certificates)
+            @ENV_INTEGRATION_HOSTS -> Val(IntegrationKind.Hosts)
+            @ENV_INTEGRATION_CODEX -> Val(IntegrationKind.CodexAgent)
+            @ENV_INTEGRATION_EDITOR -> Val(IntegrationKind.Editor)
+            @ENV_INTEGRATION_CLOUD -> Val(IntegrationKind.CloudCredentials)
+            @ENV_INTEGRATION_VAULT -> Val(IntegrationKind.Vault)
+            else -> None
+        }
+    }
+
+    // The executable task contract a secret-bearing integration must satisfy:
+    // its one task name, provider authority, and grant.
+    fn task_contract(self) -> ?IntegrationTaskContract !Never {
+        if self == {
+            .CloudCredentials -> Val(IntegrationTaskContract{task: "credential-store-check", provider: "credential-store", grant: "credential.read"})
+            .Vault -> Val(IntegrationTaskContract{task: "vault-check", provider: "vault", grant: "vault.read"})
+            else -> None
+        }
+    }
+
+    // Whether this integration can realize on `target` (already lowercased).
+    fn supports_target(self, target: String) -> Bool !Never {
+        if self == {
+            .Android -> target.contains("linux") || target.contains("android")
+            .Apple -> target.contains("darwin") || target.contains("macos") || target.contains("ios")
+            .Certificates | .Hosts | .CodexAgent | .Editor | .CloudCredentials | .Vault -> true
+        }
+    }
+}
+
+struct IntegrationTaskContract {
+    task: String
+    provider: String
+    grant: String
+}
+
+// One lowered integration import. Secret-bearing inputs are represented by
+// names only; values never enter this record, fingerprints, dossiers, image
+// layers, or logs.
+pub struct EnvironmentIntegration {
+    pub kind: IntegrationKind{IntegrationKind.Android}
+    pub name: String{""}
+    pub preset: String{""}
+    pub options: [String: String]{[String: String]{}}
+    pub packages: [String]{[String]{}}
+    pub files: [ManagedFile]{[ManagedFile]{}}
+    // Existing lifecycle/job facts selected by the preset. These are names
+    // only; activation still belongs to the ordinary environment lifecycle.
+    pub tasks: [String]{[String]{}}
+    // Provider authorities used by package and host facts. This is metadata,
+    // not a second resolver.
+    pub providers: [String]{[String]{}}
+    pub host_checks: [String]{[String]{}}
+    pub secrets: [String]{[String]{}}
+    pub grants: [String]{[String]{}}
+    pub losses: [String]{[String]{}}
+
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
+        loop key in envmodel_sorted_keys(self.options) -> lines.push("option={key}={self.options[key]}\n")
+        envmodel_push_labeled(&lines, "package", self.packages)
+        loop file in self.files -> lines.push("file={file.fingerprint()}\n")
+        envmodel_push_labeled(&lines, "host-check", self.host_checks)
+        envmodel_push_labeled(&lines, "task", self.tasks)
+        envmodel_push_labeled(&lines, "provider", self.providers)
+        envmodel_push_labeled(&lines, "secret-name", self.secrets)
+        envmodel_push_labeled(&lines, "grant", self.grants)
+        envmodel_push_labeled(&lines, "loss", self.losses)
+        lines.join("")
+    }
+
+    // Validate a target at the host/realization boundary. Graph evaluation
+    // keeps cross-platform modules composable, while an activation path can
+    // fail with the exact unsupported-host fact instead of silently omitting
+    // an SDK.
+    fn validate_target(self, target: String) !EnvironmentFactError {
+        lowered :: pkg_ascii_lower(target)
+        if !self.kind.supports_target(lowered) {
+            return Err(EnvironmentFactError.new("{self.kind.as_str()} integration `{self.name}` is not supported on target `{lowered}`"))
+        }
+    }
+}
+
+// The non-package portion of integration lowering. These facts stay in the
+// ordinary environment plan so trust, inspection, and activation all consume
+// one projection instead of treating integrations as report-only annotations.
+pub struct IntegrationTaskFact {
+    pub name: String
+    pub integration: IntegrationKind
+    pub packages: [String]{[String]{}}
+    pub secrets: [String]{[String]{}}
+    pub providers: [String]{[String]{}}
+    pub host_checks: [String]{[String]{}}
+    pub grants: [String]{[String]{}}
+
+    fn has_empty_field(self) -> Bool !Never {
+        self.name.trim() == "" || envmodel_any_blank(self.providers) || envmodel_any_blank(self.secrets) || envmodel_any_blank(self.host_checks) || envmodel_any_blank(self.grants)
+    }
+}
+
+pub struct IntegrationFactProjection {
+    pub tasks: [String]{[String]{}}
+    // Typed task contracts. `tasks` is only the stable disclosure projection;
+    // realization consumes these records and their ordinary package,
+    // provider, host, and grant facts.
+    pub task_facts: [IntegrationTaskFact]{[IntegrationTaskFact]{}}
+    pub providers: [String]{[String]{}}
+    pub host_checks: [String]{[String]{}}
+    pub grants: [String]{[String]{}}
+    pub losses: [String]{[String]{}}
+
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{}
+        loop task in self.task_facts {
+            lines.push("task-fact={task.integration.as_str()}\t{task.name}\t{task.packages.join(",")}\t{task.secrets.join(",")}\t{task.providers.join(",")}\t{task.host_checks.join(",")}\t{task.grants.join(",")}\n")
+        }
+        envmodel_push_labeled(&lines, "task", self.tasks)
+        envmodel_push_labeled(&lines, "provider", self.providers)
+        envmodel_push_labeled(&lines, "host-check", self.host_checks)
+        envmodel_push_labeled(&lines, "grant", self.grants)
+        envmodel_push_labeled(&lines, "loss", self.losses)
+        lines.join("")
+    }
+
+    fn validate(self) !EnvironmentFactError {
+        if self.losses.len() > 0 {
+            return Err(EnvironmentFactError.new("integration lowering lost declared facts: {self.losses.join("; ")}"))
+        }
+        loop task in self.task_facts {
+            if task.has_empty_field() -> return Err(EnvironmentFactError.new("integration task facts contain an empty executable field"))
+        }
+        loop task in self.task_facts {
+            contract :: task.integration.task_contract() ?? next
+            kind :: task.integration.as_str()
+            if task.name != contract.task {
+                return Err(EnvironmentFactError.new("{kind} integration task must be `{contract.task}`"))
+            }
+            if !self.tasks.contains(contract.task) {
+                return Err(EnvironmentFactError.new("integration task `{contract.task}` is not disclosed by its fact projection"))
+            }
+            if !task.providers.contains(contract.provider) || !self.providers.contains(contract.provider) {
+                return Err(EnvironmentFactError.new("{kind} integration task is missing provider `{contract.provider}`"))
+            }
+            if !task.grants.contains(contract.grant) || !self.grants.contains(contract.grant) {
+                return Err(EnvironmentFactError.new("{kind} integration task is missing grant `{contract.grant}`"))
+            }
+            if task.secrets.len() == 0 {
+                return Err(EnvironmentFactError.new("{kind} integration task needs at least one named secret reference"))
+            }
+        }
+    }
+}

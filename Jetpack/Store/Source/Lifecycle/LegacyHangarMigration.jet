@@ -1,0 +1,196 @@
+// Legacy Hangar path migration (Rust Store/Lifecycle.rs
+// `migrate_legacy_hangar`). A pre-D-ECO-HANGARPATH1 user Hangar is copied
+// into the native per-user data path. The old tree stays in place, so an
+// operator can roll back by removing the new tree and restoring the old
+// resolver. A staging tree makes a crash visible instead of presenting a
+// partial migration as a live Hangar. Links are copied only when their
+// targets stay inside the migrated tree or the Nix store compatibility root.
+
+@STORE_NIX_STORE_ROOT :: "/nix/store"
+
+// Rust `node_metadata`: the node's own metadata (never through a final
+// link), or None when absent.
+fn store_migration_node(path: String) -[FS]> ?Stat !StoreError {
+    if files.stat(path) == {
+        .Ok(info) -> Ok(Val(info))
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            Err(StoreError.Io(error))
+        }
+    }
+}
+
+// Rust `existing_hangar_destination`: a present native Hangar must be a real
+// directory.
+fn store_migration_existing_destination(path: String) -[FS]> Bool !StoreError {
+    info :: store_migration_node(path) ?? return Ok(false)
+    if info.is_symlink -> return Err(StoreError.Other("native Hangar path `{path}` is a symlink"))
+    if !info.is_dir -> return Err(StoreError.Other("native Hangar path `{path}` is not a directory"))
+    Ok(true)
+}
+
+// Rust `find_legacy_source`: the user legacy Hangar, else the machine one.
+fn store_migration_find_legacy_source(legacy_source: String) -[FS]> ?String !StoreError {
+    candidates := [String]{legacy_source}
+    if @HANGAR_DIR != legacy_source -> candidates.push(@HANGAR_DIR)
+    loop candidate in candidates {
+        node :: store_migration_node(candidate)
+        if node != None -> return Ok(Val(candidate))
+    }
+}
+
+// Rust `migrate_legacy_hangar`: true when a legacy Hangar was migrated.
+pub fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool !StoreError {
+    if !roots.dev_mode -> return Ok(false)
+    destination :: roots.hangar_dir()
+    parent :: files.dirname(destination)
+    if parent == "" || parent == destination -> return Err(StoreError.Other("native Hangar path has no parent"))
+    name :: files.basename(destination)
+    stage_name :: if name == "" -> "hangar" else -> name
+    stage :: files.join(parent, ".{stage_name}-migration.partial")
+    legacy_source :: pkg_legacy_user_hangar_dir()
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    if store_migration_node(stage) != None {
+        return Err(StoreError.Other("incomplete Hangar migration remains at `{stage}`; inspect or remove it before retrying"))
+    staged :: store_migration_node(stage)
+    if staged != None {
+        return Err(StoreError.Other("incomplete Hangar migration remains at `{stage}`; inspect or remove it before retrying"))
+    }
+    if source == destination -> return Ok(false)
+    if source == legacy_source {
+        source_root :: pkg_legacy_user_root()
+        if source_root != roots.root {
+            source_lock :: env_runtime_lock(source_root, "hangar")
+            return store_migration_copy_unlocked(source, stage, destination, parent)
+        }
+    }
+    store_migration_copy_unlocked(source, stage, destination, parent)
+}
+
+// Copy the legacy tree into the stage, make it durable, then publish it.
+fn store_migration_copy_unlocked(source: String, stage: String, destination: String, parent: String) -[FS, Env]> Bool !StoreError {
+    info :: store_migration_node(source) ?? return Err(StoreError.NotFound("legacy Hangar source `{source}` disappeared"))
+    if info.is_symlink || !info.is_dir -> return Err(StoreError.Other("legacy Hangar source `{source}` is not a directory"))
+    files.create_dir_all(parent)
+    store_migration_copy_tree(source, stage, source)
+    store_fsync_tree(stage)
+    files.rename(stage, destination)
+    store_sync_store_directory(parent)
+    Ok(true)
+}
+
+// Rust `copy_migration_tree`: directories in name order, regular files with
+// their permission bits, and links whose targets stay inside the migration
+// root or the Nix store.
+fn store_migration_copy_tree(source: String, destination: String, root: String) !StoreError -[FS, Env]> {
+    info :: files.stat(source)
+    if info.is_symlink {
+        target :: files.read_link(source)
+        if files.is_abs(target) {
+            if !store_migration_absolute_target_stays_in_nix_store(target) {
+                return Err(StoreError.Other("legacy Hangar symlink `{source}` escapes the approved compatibility root"))
+            }
+        } else if !store_migration_relative_target_stays_in_root(source, target, root) {
+            return Err(StoreError.Other("legacy Hangar symlink `{source}` escapes its migration root"))
+        }
+        files.symlink(target, destination)
+        return Ok()
+    }
+    if info.is_dir {
+        files.create_dir(destination)
+        entries := files.list_dir(source)
+        entries.sort_by(entry -> entry.name)
+        loop entry in entries {
+            store_migration_copy_tree(entry.path, files.join(destination, entry.name), root)
+        }
+        files.set_mode(destination, info.mode & 0o7777)
+        return Ok()
+    }
+    if info.is_file {
+        files.copy2(source, destination)
+        files.set_mode(destination, info.mode & 0o7777)
+        return Ok()
+    }
+    Err(StoreError.Other("legacy Hangar contains unsupported node `{source}`"))
+}
+
+// Normal path components (Rust `Path::components` without the root, `.`
+// and empty parts).
+fn store_migration_components(path: String) -> [String] !Never {
+    parts := [String]{}
+    loop part in files.split_slash(path) {
+        if part != "" && part != "." -> parts.push(part)
+    }
+    parts
+}
+
+// Component-wise `Path::starts_with`.
+fn store_migration_has_prefix(path: [String], prefix: [String]) -> Bool !Never {
+    if prefix.len() > path.len() -> return false
+    loop index in 0..<prefix.len() {
+        if path[index] != prefix[index] -> return false
+    }
+    true
+}
+
+// Walk a relative link target from `start` components; None when it climbs
+// above `floor` components or names an absolute part.
+fn store_migration_walk_target(start: [String], floor: Int, target: String) -> ?[String] !Never {
+    if files.is_abs(target) -> return None
+    normalized := start
+    loop part in files.split_slash(target) {
+        if {
+            part == "" || part == "." -> next
+            part == ".." -> {
+                if normalized.len() <= floor -> return None
+                normalized.pop()
+            }
+            else -> normalized.push(part)
+        }
+    }
+    Val(normalized)
+}
+
+// Rust `relative_target_stays_in_root`.
+fn store_migration_relative_target_stays_in_root(link: String, target: String, root: String) -[FS, Env]> Bool !Never {
+    parent :: files.dirname(link)
+    if parent == "" || parent == link -> return false
+    root_parts :: store_migration_components(root)
+    parent_parts :: store_migration_components(parent)
+    if !store_migration_has_prefix(parent_parts, root_parts) -> return false
+    normalized :: store_migration_walk_target(parent_parts, root_parts.len(), target) ?? return false
+    if !store_migration_has_prefix(normalized, root_parts) -> return false
+    canonical_root :: files.canonicalize(root) ?? return false
+    store_migration_existing_path_stays_in_root(files.join(parent, target), canonical_root)
+}
+
+// Rust `absolute_target_stays_in_nix_store`.
+fn store_migration_absolute_target_stays_in_nix_store(target: String) -[FS, Env]> Bool !Never {
+    store_parts :: store_migration_components(@STORE_NIX_STORE_ROOT)
+    target_parts :: store_migration_components(target)
+    if !store_migration_has_prefix(target_parts, store_parts) -> return false
+    relative := [String]{}
+    loop index in store_parts.len()..<target_parts.len() -> relative.push(target_parts[index])
+    normalized :: store_migration_walk_target(store_parts, store_parts.len(), relative.join("/")) ?? return false
+    if !store_migration_has_prefix(normalized, store_parts) -> return false
+    canonical_root :: files.canonicalize(@STORE_NIX_STORE_ROOT) ?? return true
+    store_migration_existing_path_stays_in_root(target, canonical_root)
+}
+
+// Rust `existing_path_stays_in_root`: canonicalize the nearest existing
+// ancestor of `path` and require it below `canonical_root`.
+fn store_migration_existing_path_stays_in_root(path: String, canonical_root: String) -[FS, Env]> Bool !Never {
+    probe := path
+    root_parts :: store_migration_components(canonical_root)
+    loop {
+        if files.canonicalize(probe) == {
+            .Ok(canonical) -> return store_migration_has_prefix(store_migration_components(canonical), root_parts)
+            .Err(error) -> {
+                if !store_io_is_not_found(error) -> return false
+                parent :: files.dirname(probe)
+                if parent == "" || parent == probe -> return false
+                probe = parent
+            }
+        }
+    }
+}

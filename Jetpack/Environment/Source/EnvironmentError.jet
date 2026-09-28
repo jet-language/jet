@@ -1,0 +1,54 @@
+// The Environment area's one error carrier. Rust `io::Error` values keep
+// their kind: file-system failures travel as `Io`, and the protocol-level
+// `ErrorKind::InvalidData` / `InvalidInput` / `Unsupported` refusals carry
+// their final text. Overlay failures keep the jet-pkg-model `OverlayError`
+// payload so `jet overlay` diagnostics render the same bytes.
+
+#Error
+pub enum EnvironmentError {
+    Io(IOError)
+    InvalidData(String)
+    InvalidInput(String)
+    NotFound(String)
+    Unsupported(String)
+    Conflict(String)
+    Other(String)
+    Overlay(OverlayError)
+    Transition(String)
+    ManagedFile(String)
+    Activation(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Io(error) -> "{error}"
+            .InvalidData(text) -> text
+            .InvalidInput(text) -> text
+            .NotFound(text) -> text
+            .Unsupported(text) -> text
+            .Conflict(text) -> text
+            .Other(text) -> text
+            .Overlay(error) -> error.message()
+            .Transition(text) -> text
+            .ManagedFile(text) -> text
+            .Activation(text) -> text
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .Io(error) -> {
+                if error == {
+                    .NotFound(context) -> true
+                    else -> false
+                }
+            }
+            .NotFound(text) -> true
+            else -> false
+        }
+    }
+}
+
+impl IOError -> EnvironmentError { EnvironmentError.Io(self) }
+
+impl OverlayError -> EnvironmentError { EnvironmentError.Overlay(self) }

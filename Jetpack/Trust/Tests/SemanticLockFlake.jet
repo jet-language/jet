@@ -1,17 +1,8 @@
-// Claims ported from crates/jetpack/src/SemanticLock.rs `flake_tests`: the
-// `flake.nix` projection and its semantic lock records. Claims that read or
-// render `flake.lock` JSON wait for the Core JSON codec (#3591); claims that
-// write project files wait for the file boundary.
-
-// The semantic lock records this unit projects for `graph` (no lock nodes,
-// registries, or composition record).
-fn trust_test_flake_lock(graph: FlakeGraph) -> SemanticLockFile {
-    records := [SemanticRecord]{graph.source_record()}
-    loop record in graph.input_records() -> records.push(record)
-    loop record in graph.output_records() -> records.push(record)
-    loop record in graph.unsupported_records() -> records.push(record)
-    SemanticLockFile{records, inputs: graph.lock_inputs(), source_maps: [SourceMapEntry]{}}
-}
+// Claims ported from crates/jetpack/src/SemanticLock.rs `flake_tests`. The
+// pinned fixture's flake.nix and flake.lock are inlined; its expected values
+// (tests/fixtures/nix-compat/stage-a-flake.expected.json) are the literals
+// asserted below. Claims that write project files wait for the file
+// boundary.
 
 fn trust_test_flake(text: String) -> FlakeGraph {
     FlakeGraph.parse("flake.nix", text) ?? panic("flake should parse")
@@ -23,6 +14,108 @@ fn trust_test_flake_error(text: String) -> TrustError {
         .Err(error) -> error
     }
 }
+
+fn trust_test_locked_flake(text: String, lock: String) -> FlakeGraph {
+    FlakeGraph.parse_with_lock("flake.nix", text, Val(lock), true) ?? panic("locked flake should parse")
+}
+
+fn trust_test_locked_flake_error(text: String, lock: String) -> TrustError {
+    if FlakeGraph.parse_with_lock("flake.nix", text, Val(lock), true) == {
+        .Ok(_) -> panic("expected the locked flake to fail closed")
+        .Err(error) -> error
+    }
+}
+
+fn trust_test_restored(graph: FlakeGraph) -> FlakeGraph {
+    FlakeGraph.from_semantic_lock(".jet/lock", graph.semantic_lock()) ?? panic("the semantic lock should restore the graph")
+}
+
+// The `Io` reason, or "" for any other failure.
+fn trust_test_io_reason(error: TrustError) -> String {
+    if error == {
+        .Io(reason) -> reason
+        else -> ""
+    }
+}
+
+fn trust_test_json_object(text: String) -> [String: DataTree] {
+    if trust_json_parse(text) == {
+        .Parsed(tree) -> trust_json_object(tree) ?? panic("expected a JSON object")
+        .Failed(reason) -> panic("JSON should parse: {reason}")
+    }
+}
+
+@TRUST_TEST_STAGE_A_FLAKE :: `{
+  inputs = {
+    nixpkgs.url = "nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+  outputs = { nixpkgs, flake-utils, ... }: {
+    packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;
+  };
+}
+`
+
+@TRUST_TEST_STAGE_A_LOCK :: `{
+  "nodes": {
+    "flake-utils": {
+      "inputs": {
+        "systems": ["systems"]
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1785571196,
+        "narHash": "sha256-KoTsyMQqnXQZq8deCEnu4QkyldkwH/bpMMhUcfMdGIw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "148bab9c1c3c53136ecb44a6ea356a0ed5b39b06",
+        "type": "github"
+      },
+      "original": {
+        "id": "nixpkgs",
+        "type": "indirect"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": "nixpkgs"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
+`
 
 #Test("parses follows outputs and round trips through semantic lock") {
     graph :: trust_test_flake(`
@@ -43,18 +136,10 @@ fn trust_test_flake_error(text: String) -> TrustError {
     assert_eq(graph.inputs[1].revision, graph.inputs[0].revision)
     assert_eq(graph.named_dev_shells().len(), 1)
 
-    lock :: trust_test_flake_lock(graph)
-    source :: trust_flake_lock_source(lock, ".jet/lock")
-    assert_eq(source, "flake.nix")
-    assert_eq(trust_flake_lock_fingerprint(lock), graph.source_fingerprint)
-    restored_inputs :: trust_flake_lock_inputs(lock, source) ?? panic("inputs should restore")
-    assert_eq(restored_inputs, graph.inputs)
-    restored_outputs :: trust_flake_lock_outputs(lock, source) ?? panic("outputs should restore")
-    assert_eq(restored_outputs, graph.outputs)
-    assert_eq(trust_flake_lock_unsupported(lock), graph.unsupported)
-    assert(trust_flake_lock_has_facts(lock))
-    reparsed :: trust_parse_semantic_lock(trust_write_semantic_lock(lock))
-    assert_eq(trust_write_semantic_lock(reparsed), trust_write_semantic_lock(lock))
+    restored :: trust_test_restored(graph)
+    assert_eq(restored.inputs, graph.inputs)
+    assert_eq(restored.outputs, graph.outputs)
+    assert_eq(restored.semantic_lock_text(), graph.semantic_lock_text())
 }
 
 #Test("ignores nested package references when pinning outputs") {
@@ -73,6 +158,211 @@ fn trust_test_flake_error(text: String) -> TrustError {
     assert_eq(package_outputs, [String]{"fetched"})
 }
 
+#Test("pinned flake lock fixture preserves nodes edges and registry resolution") {
+    graph :: FlakeGraph.parse_with_lock("tests/fixtures/nix-compat/stage-a-flake.nix", @TRUST_TEST_STAGE_A_FLAKE, Val(@TRUST_TEST_STAGE_A_LOCK), true) ?? panic("the pinned fixture should parse")
+    expected_revisions := [String: String]{}
+    expected_revisions["flake-utils"] = "11707dc2f618dd54ca8739b309ec4fc024de578b"
+    expected_revisions["nixpkgs"] = "148bab9c1c3c53136ecb44a6ea356a0ed5b39b06"
+    loop input in graph.inputs {
+        assert_eq(input.revision, expected_revisions.get(input.name) ?? panic("unexpected input {input.name}"))
+    }
+    node_names := [String]{}
+    loop node in graph.lock_nodes -> node_names.push(node.name)
+    assert_eq(node_names, [String]{"flake-utils", "nixpkgs", "root", "systems"})
+    flake_utils :: trust_flake_find_node(graph.lock_nodes, "flake-utils") ?? panic("flake-utils node")
+    assert_eq(flake_utils.inputs[0].name, "systems")
+    assert_eq(flake_utils.inputs[0].target, "[\"systems\"]")
+
+    registry :: graph.registries[0]
+    assert_eq(registry.alias, "nixpkgs")
+    assert_eq(registry.node, "nixpkgs")
+    locked :: trust_test_json_object(registry.locked)
+    assert_eq(trust_json_string_field(locked, "type"), Val("github"))
+    assert_eq(trust_json_string_field(locked, "owner"), Val("NixOS"))
+    assert_eq(trust_json_string_field(locked, "repo"), Val("nixpkgs"))
+
+    restored :: trust_test_restored(graph)
+    assert_eq(restored, graph)
+    assert_eq(restored.semantic_lock_text(), graph.semantic_lock_text())
+}
+
+#Test("transitive indirect registry resolution round trips") {
+    graph :: trust_test_locked_flake(`
+{
+  inputs.tools.url = "github:example/tools?rev=0123456789abcdef0123456789abcdef01234567";
+  outputs = { tools, ... }: {
+    packages.x86_64-linux.default = tools;
+  };
+}
+`, `
+{
+  "nodes": {
+    "root": { "inputs": { "tools": "tools" } },
+    "tools": {
+      "inputs": { "nixpkgs": "nixpkgs" },
+      "locked": { "owner": "example", "repo": "tools", "rev": "0123456789abcdef0123456789abcdef01234567", "type": "github" },
+      "original": { "owner": "example", "repo": "tools", "type": "github" }
+    },
+    "nixpkgs": {
+      "locked": { "owner": "NixOS", "repo": "nixpkgs", "rev": "89abcdef0123456789abcdef0123456789abcdef", "type": "github" },
+      "original": { "id": "nixpkgs", "type": "indirect" }
+    }
+  }
+}
+`)
+    found := false
+    loop registry in graph.registries {
+        if registry.alias != "nixpkgs" -> next
+        found = true
+        assert_eq(registry.node, "nixpkgs")
+        assert(registry.locked.contains("\"rev\":\"89abcdef"))
+    }
+    assert(found, "the nixpkgs registry entry must be resolved")
+
+    restored :: trust_test_restored(graph)
+    assert_eq(restored.registries, graph.registries)
+    assert_eq(restored.lock_nodes, graph.lock_nodes)
+}
+
+#Test("indirect registry alias ref and query identity round trips and rejects drift") {
+    source :: `{ inputs.nixpkgs.url = "nixpkgs/nixos-unstable?ref=nixos-unstable&dir=lib"; }`
+    lock :: `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0123456789abcdef0123456789abcdef01234567",
+        "type": "github"
+      },
+      "original": {
+        "dir": "lib",
+        "id": "nixpkgs",
+        "ref": "nixos-unstable",
+        "type": "indirect"
+      }
+    }
+  }
+}
+`
+    graph :: trust_test_locked_flake(source, lock)
+    assert_eq(graph.inputs[0].revision, "0123456789abcdef0123456789abcdef01234567")
+    assert_eq(graph.registries[0].alias, "nixpkgs")
+    assert_eq(graph.registries[0].node, "nixpkgs")
+    assert_eq(trust_test_restored(graph), graph)
+
+    wrong_ref :: trust_text_replace_all(lock, "\"ref\": \"nixos-unstable\"", "\"ref\": \"nixos-24.11\"")
+    assert(trust_test_io_reason(trust_test_locked_flake_error(source, wrong_ref)).contains("different source URL"))
+    wrong_query :: trust_text_replace_all(lock, "\"dir\": \"lib\"", "\"dir\": \"share\"")
+    assert(trust_test_io_reason(trust_test_locked_flake_error(source, wrong_query)).contains("different source URL"))
+}
+
+#Test("flake lock follow paths resolve to terminal node") {
+    nodes :: trust_test_json_object(`{
+  "root": { "inputs": { "flake-utils": "flake-utils" } },
+  "flake-utils": { "inputs": { "systems": "systems" } },
+  "systems": { "inputs": {} }
+}`)
+    through_root :: trust_flake_lock_node_name(Val(DataTree.Array([DataTree]{DataTree.Text("flake-utils"), DataTree.Text("systems")})), nodes, "root") ?? panic("the follow path should resolve")
+    assert_eq(through_root, Val("systems"))
+    direct :: trust_flake_lock_node_name(Val(DataTree.Array([DataTree]{DataTree.Text("systems")})), nodes, "flake-utils") ?? panic("the direct reference should resolve")
+    assert_eq(direct, Val("systems"))
+}
+
+#Test("flake lock revision drift fails closed") {
+    source :: `{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=aaaaaaaa"; }`
+    drift :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "bbbbbbbb" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+`)
+    conflicting :: if drift == {
+        .ConflictingInput(input, field) -> input == "nixpkgs" && field == "revision"
+        else -> false
+    }
+    assert(conflicting, "a drifted revision must conflict on `revision`")
+
+    wrong_repo :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "other", "repo": "repo" }
+    }
+  }
+}
+`)
+    assert(trust_test_io_reason(wrong_repo).contains("different source URL"))
+}
+
+#Test("flake lock metadata and indirect alias fail closed") {
+    source :: `{ inputs.nixpkgs.url = "nixpkgs"; }`
+    missing_original :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": { "locked": { "rev": "aaaaaaaa" } }
+  }
+}
+`)
+    assert(trust_test_io_reason(missing_original).contains("missing `original`"))
+
+    root_metadata :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": {
+      "inputs": { "nixpkgs": "nixpkgs" },
+      "original": { "type": "github" }
+    },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+`)
+    assert(trust_test_io_reason(root_metadata).contains("root node must not carry"))
+
+    empty_node_name :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+`)
+    assert(trust_test_io_reason(empty_node_name).contains("node name is empty"))
+
+    malformed_indirect :: trust_test_locked_flake_error(source, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "rev": "aaaaaaaa" },
+      "original": { "type": "indirect" }
+    }
+  }
+}
+`)
+    assert(trust_test_io_reason(malformed_indirect).contains("indirect input has no id"))
+}
+
 #Test("floating or conflicting foreign inputs fail closed") {
     floating :: if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`) == {
         .MissingRevision(_) -> true
@@ -86,31 +376,52 @@ fn trust_test_flake_error(text: String) -> TrustError {
     assert(conflicting, "conflicting urls must fail with ConflictingInput")
 }
 
+#Test("lock input without revision is not promoted from nar hash") {
+    error :: trust_test_locked_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`, `
+{
+  "nodes": {
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+    "nixpkgs": {
+      "locked": { "narHash": "sha256-deadbeef" },
+      "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+    }
+  }
+}
+`)
+    missing :: if error == {
+        .MissingRevision(input) -> input == "nixpkgs"
+        else -> false
+    }
+    assert(missing, "narHash is not an exact source revision")
+}
+
 #Test("semantic lock requires every flake input record") {
     lock := SemanticLockFile.empty()
     lock.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs", follows: ""}}
-    if trust_flake_lock_inputs(lock, "flake.nix") == {
-        .Ok(_) -> panic("expected MissingRevision")
+    missing :: if FlakeGraph.from_semantic_lock("flake.nix", lock) == {
+        .Ok(_) -> false
         .Err(error) -> {
             if error == {
-                .MissingRevision(input) -> assert_eq(input, "nixpkgs")
-                else -> panic("expected MissingRevision")
+                .MissingRevision(input) -> input == "nixpkgs"
+                else -> false
             }
         }
     }
+    assert(missing, "a lock input without its record must be MissingRevision")
 }
 
 #Test("a changed flake rejects a stale semantic lock") {
     source :: `{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567"; }`
     graph :: trust_test_flake(source)
-    locked :: graph
-    current :: FlakeGraph.project("flake.nix", source) ?? panic("unchanged flake should project")
+    lock_body :: trust_write_semantic_lock(graph.semantic_lock())
+    locked :: FlakeGraph.from_semantic_lock("flake.nix", trust_parse_semantic_lock(lock_body)) ?? panic("the written lock should restore")
+    current :: FlakeGraph.parse_with_lock("flake.nix", source, None, false) ?? panic("unchanged flake should project")
     unchanged_ok :: if locked.ensure_current(current) == {
         .Ok(_) -> true
         .Err(_) -> false
     }
     assert(unchanged_ok, "an unchanged flake keeps its lock")
-    changed :: FlakeGraph.project("flake.nix", "{source}\n# changed\n") ?? panic("changed flake should project")
+    changed :: FlakeGraph.parse_with_lock("flake.nix", "{source}\n# changed\n", None, false) ?? panic("changed flake should project")
     stale :: if locked.ensure_current(changed) == {
         .Ok(_) -> false
         .Err(error) -> {
@@ -121,9 +432,11 @@ fn trust_test_flake_error(text: String) -> TrustError {
         }
     }
     assert(stale, "a changed flake must reject the lock as StaleSemanticLock")
+    // The previous semantic plan stays readable after source drift.
+    assert_eq(locked.source_fingerprint, graph.source_fingerprint)
 }
 
-#Test("flake parts composition is graph data") {
+#Test("flake parts composition is graph data and round trips") {
     graph :: trust_test_flake(`
 {
   inputs = {
@@ -150,4 +463,7 @@ fn trust_test_flake_error(text: String) -> TrustError {
     }))
     assert(!graph.unsupported.contains("flake-parts"))
     assert(!graph.unsupported.contains("perSystem"))
+    restored :: trust_test_restored(graph)
+    assert_eq(restored.composition, graph.composition)
+    assert_eq(restored.stable_json(), graph.stable_json())
 }

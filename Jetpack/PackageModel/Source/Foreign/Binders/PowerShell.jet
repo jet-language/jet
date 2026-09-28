@@ -1,0 +1,211 @@
+// Persistent PowerShell 7 object-pipeline binder (D-FFI-PWSH1=A), ported from
+// jet_pkg_model::PowerShellBind. The shared supervisor lives in
+// Foreign/WorkerSupervisor.jet.
+
+// Parses the script with the PowerShell parser and prints each top-level
+// function name; a parse error prints `ParserError` and exits 2.
+@PKG_PWSH_VALIDATOR :: ```$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)
+if ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }
+$ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { [Console]::Out.WriteLine($_.Name) }
+```
+
+// The persistent worker. Hole: `allowed`, the quoted command allow-list.
+@PKG_PWSH_WORKER :: ```$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$inputStream = [Console]::OpenStandardInput()
+$outputStream = [Console]::OpenStandardOutput()
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+$allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+@(@@allowed@@) | ForEach-Object { [void]$allowed.Add($_) }
+$null = . $args[0] 2>$null 3>$null 4>$null 5>$null 6>$null
+$ready = $utf8.GetBytes('READY')
+$outputStream.Write([BitConverter]::GetBytes([int]$ready.Length), 0, 4)
+$outputStream.Write($ready, 0, $ready.Length)
+$outputStream.Flush()
+
+function Read-Exact([byte[]]$buffer, [int]$count) {
+  $offset = 0
+  while ($offset -lt $count) {
+    $read = $inputStream.Read($buffer, $offset, $count - $offset)
+    if ($read -eq 0) { return $false }
+    $offset += $read
+  }
+  return $true
+}
+
+while ($true) {
+  $header = [byte[]]::new(4)
+  if (-not (Read-Exact $header 4)) { break }
+  $length = [BitConverter]::ToInt32($header, 0)
+  if ($length -lt 1 -or $length -gt 1048576) { break }
+  $payload = [byte[]]::new($length)
+  if (-not (Read-Exact $payload $length)) { break }
+  $request = $null
+  try {
+    $request = $utf8.GetString($payload) | ConvertFrom-JSON -AsHashtable -Depth 64 2>$null 3>$null 4>$null 5>$null 6>$null
+    if ($request.op -eq 'shutdown') { break }
+    if ($request.op -ne 'invoke' -or -not $allowed.Contains([string]$request.command)) { throw 'rejected command identity' }
+    $value = & ([string]$request.command) $request.input 2>$null 3>$null 4>$null 5>$null 6>$null
+    $response = [ordered]@{ id = $request.id; ok = $true; value = $value }
+  } catch {
+    $response = [ordered]@{ id = if ($null -ne $request) { $request.id } else { 0 }; ok = $false; code = 'CommandFailed'; value = $null }
+  }
+  $json = $response | ConvertTo-JSON -Depth 64 -Compress 2>$null 3>$null 4>$null 5>$null 6>$null
+  $bytes = $utf8.GetBytes($json)
+  if ($bytes.Length -gt 1048576) { break }
+  $outputStream.Write([BitConverter]::GetBytes([int]$bytes.Length), 0, 4)
+  $outputStream.Write([BitConverter]::GetBytes([int64]$response.id), 0, 8)
+  $outputStream.Write($bytes, 0, $bytes.Length)
+  $outputStream.Flush()
+}
+```
+
+// The generated module's types after the import block. Hole: `abi`.
+@PKG_PWSH_JET_TYPES :: ```}
+use c.@@abi@@ as abi
+use core.encoding.json as json
+
+pub struct Session {
+    value: Int
+}
+
+#Error
+pub enum PowerShellError {
+    NotRunning
+    Timeout
+    Cancelled
+    Protocol
+    CommandFailed
+    Limit
+}
+
+```
+
+@PKG_PWSH_JET_SESSION :: ```impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(session: ^Session) {}
+
+pub fn open() -> Session !PowerShellError {
+    handle :: abi.open()
+    if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
+    return Ok(Session{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+```
+
+// Generated names a PowerShell function may not project onto.
+@PKG_PWSH_RESERVED :: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "Session", "PowerShellError"}
+
+// A discovered function: its PowerShell name (the worker's lookup key) and
+// its projected Jet name.
+struct PwshBoundFunction {
+    pwsh: String
+    jet: String
+}
+
+// Bind the top-level functions of the PowerShell script at `path`.
+pub fn pkg_powershell_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult !ForeignBindError {
+    language :: WorkerLanguage.PowerShell
+    pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
+    pkg_binder_require_lib_name(lib)
+    pwsh :: pkg_bridge_tool_path("pwsh") ?? return Err(ForeignBindError.ToolMissing("pwsh"))
+    script :: pkg_binder_canonicalize(path, "could not resolve the PowerShell script")
+    build :: pkg_worker_prepare_build(cache, "pwsh", lib, "PowerShell")
+    validator :: files.join(build, "validate.ps1")
+    pkg_binder_write(validator, @PKG_PWSH_VALIDATOR, "could not write PowerShell validator")
+    discovered :: pkg_worker_run_tool([String]{pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", validator, script}, "pwsh", language, true)
+    functions :: pkg_powershell_parse_function_names(discovered)
+    worker_source :: pkg_powershell_render_worker(functions)
+    worker_file :: files.join(cache, "{lib}_worker.ps1")
+    pkg_binder_write(worker_file, worker_source, "could not write PowerShell worker")
+    worker :: pkg_binder_canonicalize(worker_file, "could not resolve the PowerShell worker")
+    abi :: "jet_pwsh_{lib}"
+    archive :: pkg_worker_build_archive(language, abi, build, cache, pkg_powershell_render_c(lib, pwsh, worker, script, functions), "could not write PowerShell process bridge")
+    digest :: pkg_binder_identity_digest([String]{"jet-pwsh-bind-v1", source, script, pwsh, worker_source})
+    provenance := "schema=jet-pwsh-bind-v1\nsha256={digest}\npwsh={pwsh}\nscript={script}\nworker={worker}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.PowerShell, "PowerShell", lib, script, archive, "pwsh={pwsh};{pkg_binder_cc_ar_identity()}")
+    bound := [String]{}
+    loop function in functions -> bound.push(function.jet)
+    result :: ForeignBindResult{source: pkg_powershell_render_jet(lib, functions), bound: bound, archive: archive, provenance: provenance}
+    pkg_binder_remove_tree_quiet(build)
+    Ok(result)
+}
+
+// Project discovered names to Jet: `Get-Stateful` becomes `get_stateful`,
+// while the worker keeps the PowerShell spelling for lookup.
+fn pkg_powershell_parse_function_names(bytes: [U8]) -> [PwshBoundFunction] !ForeignBindError {
+    text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("PowerShell returned non-UTF-8 function metadata"))
+    out := [PwshBoundFunction]{}
+    loop line in pkg_binder_lines(text) {
+        name :: line.trim()
+        if name == "" -> next
+        if !pkg_powershell_ident(name) -> return Err(ForeignBindError.Source("PowerShell function `{name}` cannot be projected as a Jet identifier"))
+        parts := [String]{}
+        loop part in name.split("-") -> parts.push(pkg_ascii_lower(part))
+        jet :: parts.join("_")
+        if pkg_powershell_reserved(jet) -> return Err(ForeignBindError.Source("PowerShell function `{name}` projects to reserved Jet name `{jet}`"))
+        loop existing in out {
+            if pkg_ascii_lower(existing.jet) == pkg_ascii_lower(jet) -> return Err(ForeignBindError.Source("PowerShell function `{name}` collides with another generated Jet function `{jet}`"))
+        }
+        out.push(PwshBoundFunction{pwsh: name, jet: jet})
+    }
+    if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level PowerShell functions were found"))
+    Ok(out)
+}
+
+fn pkg_powershell_render_worker(functions: [PwshBoundFunction]) -> String !Never {
+    allowed := [String]{}
+    loop function in functions -> allowed.push("'{function.pwsh.replace("'", "''")}'")
+    pkg_binder_fill_template(@PKG_PWSH_WORKER, [String: String]{"allowed": allowed.join(", ")})
+}
+
+fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> String !Never {
+    abi :: "jet_pwsh_{lib}"
+    out := [String]{"#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n"}
+    loop function in functions {
+        out.push("    fn {function.jet}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function.jet}\"\n")
+    }
+    out.push(pkg_binder_fill_template(@PKG_PWSH_JET_TYPES, [String: String]{"abi": abi}))
+    out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
+    out.push(@PKG_PWSH_JET_SESSION)
+    loop function in functions {
+        out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree !PowerShellError {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+    }
+    out.join("")
+}
+
+// The generated surface for the binder registry's rendering probe.
+pub fn pkg_powershell_render_probe() -> String !Never {
+    pkg_powershell_render_jet("registry", [PwshBoundFunction]{PwshBoundFunction{pwsh: "Transform", jet: "transform"}})
+}
+
+fn pkg_powershell_render_c(lib: String, pwsh: String, worker: String, script: String, functions: [PwshBoundFunction]) -> String !Never {
+    abi :: "jet_pwsh_{lib}"
+    wrappers := [String]{}
+    loop function in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.pwsh))
+    pkg_worker_render_supervisor_c(abi, pwsh, worker, script, wrappers.join(""), "\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path")
+}
+
+// A PowerShell function name: ASCII letter or `_`, then letters, digits,
+// `_`, or `-`.
+fn pkg_powershell_ident(value: String) -> Bool !Never {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return false
+    first :: Int.from_u8(raw[0])
+    if !pkg_binder_is_ascii_alpha(first) && first != 95 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !pkg_bytes_is_word(code) && code != 45 -> return false
+    }
+    true
+}
+
+fn pkg_powershell_reserved(value: String) -> Bool !Never {
+    @PKG_PWSH_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+}

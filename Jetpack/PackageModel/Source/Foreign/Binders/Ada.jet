@@ -1,0 +1,371 @@
+// GNAT C-ABI binder with checked scalar constraints (D-FFI-ADA1=A), ported
+// from jet_pkg_model::AdaBind. An Ada package spec exports scalar functions
+// with `Convention => C`; constrained subtypes become range checks in the
+// generated Jet wrapper, and a pthread-once C bridge elaborates the GNAT
+// runtime before the first call.
+
+@ADA_BIND_SCHEMA :: "jet-ada-bind-v1"
+@ADA_TOOL_ACTION :: "rejected the Ada binding source"
+
+pub struct AdaBindResult {
+    pub source: String
+    pub bound: [String]
+    pub archive: String
+    pub runtime_dir: String
+    pub provenance: String
+}
+
+enum AdaScalar {
+    Int
+    Float
+
+    fn jet(self) -> String !Never {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+        }
+    }
+
+    fn c(self) -> String !Never {
+        if self == {
+            .Int -> "int64_t"
+            .Float -> "double"
+        }
+    }
+
+    // The GNAT scalar spellings the C ABI bridge accepts.
+    fn parse(name: String) -> ?AdaScalar !Never {
+        if pkg_ascii_lower(name.trim()) == {
+            "interfaces.c.long_long" | "long_long_integer" -> Val(AdaScalar.Int)
+            "interfaces.c.double" | "long_float" -> Val(AdaScalar.Float)
+            else -> None
+        }
+    }
+}
+
+struct AdaConstraint {
+    low: String
+    high: String
+}
+
+// A resolved Ada type: its scalar and the subtype range, if any.
+struct AdaType {
+    scalar: AdaScalar
+    constraint: ?AdaConstraint
+}
+
+struct AdaParam {
+    name: String
+    scalar: AdaScalar
+    constraint: ?AdaConstraint
+}
+
+struct AdaRoutine {
+    name: String
+    symbol: String
+    params: [AdaParam]
+    result: AdaScalar
+}
+
+// Parse the spec, compile it with its body through gnatmake/gnatbind, build
+// the C bridge archive, and render the Jet binding with provenance.
+pub fn pkg_ada_bind(spec_path: String, spec: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> AdaBindResult !ForeignBindError {
+    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    if files.suffix(spec_path) != ".ads" -> return Err(ForeignBindError.Source("the Ada binder requires a `.ads` package spec"))
+    body_path :: files.with_suffix(spec_path, ".adb")
+    body := ""
+    if files.read(body_path) == {
+        .Ok(text) -> body = text
+        .Err(error) -> return Err(ForeignBindError.Source("the package body `{body_path}` could not be read ({error})"))
+    }
+    routines :: pkg_ada_parse(spec)
+    pkg_binder_create_dir_all(cache, "could not create Ada binding cache")
+    stem :: files.stem(spec_path)
+    if !pkg_binder_is_ident(stem) -> return Err(ForeignBindError.Source("the Ada package filename is not bindable"))
+    build :: files.join(cache, ".ada-build-{lib}")
+    pkg_binder_remove_tree_quiet(build)
+    pkg_binder_create_dir_all(build, "could not create Ada build directory")
+    pkg_binder_write(files.join(build, "{stem}.ads"), spec, "could not stage Ada package")
+    pkg_binder_write(files.join(build, "{stem}.adb"), body, "could not stage Ada package")
+    pkg_ada_run([String]{"gnatmake", "-c", "-fPIC", "-gnat2022", "{stem}.adb"}, Val(build), "gnatmake")
+    pkg_ada_run([String]{"gnatbind", "-Ljet_ada_{lib}", "{stem}.ali"}, Val(build), "gnatbind")
+    pkg_ada_run([String]{"gnatmake", "-c", "-fPIC", "-gnat2022", "b~{stem}.adb"}, Val(build), "gnatmake")
+    bridge :: files.join(build, "jet_ada_{lib}.c")
+    bridge_obj :: files.join(build, "jet_ada_{lib}.o")
+    pkg_binder_write(bridge, pkg_ada_render_c(lib, routines), "could not write Ada bridge")
+    pkg_ada_run([String]{"cc", "-std=c11", "-fPIC", "-c", bridge, "-o", bridge_obj}, None, "cc")
+    archive :: files.join(cache, "libjet_ada_{lib}.a")
+    pkg_binder_remove_file_quiet(archive)
+    pkg_ada_run([String]{"ar", "rcs", archive, files.join(build, "{stem}.o"), files.join(build, "b~{stem}.o"), bridge_obj}, None, "ar")
+    runtime_dir :: pkg_ada_gnat_runtime_dir()
+    identity := [U8]{}
+    pkg_binder_append_field(&identity, @ADA_BIND_SCHEMA.bytes())
+    pkg_binder_append_field(&identity, spec.bytes())
+    pkg_binder_append_field(&identity, body.bytes())
+    loop byte in runtime_dir.bytes() -> identity.push(byte)
+    source :: pkg_ada_render_jet(lib, routines)
+    bound := [String]{}
+    constraints := [String]{}
+    loop routine in routines {
+        bound.push(routine.name)
+        loop param in routine.params {
+            if param.constraint == {
+                .Val(range) -> constraints.push("{routine.name}.{param.name}={range.low}..{range.high}")
+                .None -> {}
+            }
+        }
+    }
+    pkg_binder_remove_tree_quiet(build)
+    provenance := "schema={@ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Ada, "Ada", lib, spec_path, archive, "gnatmake/gnatbind/cc/ar")
+    Ok(AdaBindResult{source: source, bound: bound, archive: archive, runtime_dir: runtime_dir, provenance: provenance})
+}
+
+// The exported scalar functions of a package spec. Comments (`--`) are
+// dropped and statements split at top-level `;`.
+fn pkg_ada_parse(source: String) -> [AdaRoutine] !ForeignBindError {
+    stripped := [String]{}
+    loop line in pkg_binder_lines(source) {
+        stripped.push(line.split_once("--")?.before ?? line)
+    }
+    text :: stripped.join(" ")
+    subtypes := [String: AdaType]{}
+    routines := [AdaRoutine]{}
+    names := [String: String]{}
+    symbols := [String: String]{}
+    loop raw in pkg_ada_statements(text) {
+        statement :: pkg_binder_words(raw).join(" ")
+        if statement == "" -> next
+        lower :: pkg_ascii_lower(statement)
+        subtype_at :: pkg_binder_find(lower, "subtype ", 0)
+        if subtype_at >= 0 {
+            rest :: pkg_binder_tail(lower, subtype_at + 8)
+            named :: rest.split_once(" is ") ?? next
+            ranged :: named.after.split_once(" range ") ?? next
+            name :: named.before
+            bounds :: ranged.after.split_once("..") ?? return Err(ForeignBindError.Source("subtype `{name}` has a malformed range"))
+            base :: ranged.before
+            scalar :: AdaScalar.parse(base) ?? return Err(ForeignBindError.Source("subtype `{name}` uses an unsupported scalar base `{base}`"))
+            subtypes[name.trim()] = AdaType{scalar: scalar, constraint: Val(AdaConstraint{low: bounds.before.trim(), high: bounds.after.trim()})}
+            next
+        }
+        function_at :: pkg_binder_find(lower, "function ", 0)
+        if function_at < 0 {
+            if lower.contains("export") -> return Err(ForeignBindError.Source("exported Ada procedures are unsupported; export scalar functions instead"))
+            next
+        }
+        if !lower.contains("export") -> next
+        if !pkg_ada_convention_is_c(lower) -> return Err(ForeignBindError.Source("exported Ada functions must use `Convention => C`"))
+        header :: pkg_binder_tail(statement, function_at + 9)
+        open :: pkg_binder_find(header, "(", 0)
+        if open < 0 -> return Err(ForeignBindError.Source("malformed exported Ada function"))
+        name :: pkg_ascii_lower(pkg_binder_slice(header, 0, open).trim())
+        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("`{name}` is not a bindable Ada function name"))
+        close :: pkg_ada_matching_close(header, open)
+        if close < 0 -> return Err(ForeignBindError.Source("function `{name}` has no closed parameter list"))
+        after :: pkg_binder_tail(header, close + 1)
+        return_at :: pkg_binder_find(pkg_ascii_lower(after), "return ", 0)
+        if return_at < 0 -> return Err(ForeignBindError.Source("function `{name}` has no return type"))
+        result_words :: pkg_binder_words(pkg_binder_tail(after, return_at + 7))
+        result_name :: pkg_binder_trim_matches(if result_words.len() > 0 -> result_words[0] else -> "", ",")
+        result :: pkg_ada_resolve_type(result_name, subtypes) ?? return Err(ForeignBindError.Source("function `{name}` has unsupported return type `{result_name}`"))
+        symbol :: pkg_ada_quoted_after(after, "external_name =>") ?? return Err(ForeignBindError.Source("function `{name}` must declare `External_Name => \"...\"`"))
+        if !pkg_binder_is_ident(symbol) -> return Err(ForeignBindError.Source("`{symbol}` is not a bindable C symbol"))
+        params := [AdaParam]{}
+        loop group in pkg_binder_slice(header, open + 1, close).split(";") {
+            declared :: group.split_once(":") ?? return Err(ForeignBindError.Source("function `{name}` has a malformed parameter"))
+            trimmed_kind :: declared.after.trim()
+            lower_kind :: pkg_ascii_lower(trimmed_kind)
+            if lower_kind.starts_with("out ") || lower_kind.starts_with("in out ") -> return Err(ForeignBindError.Source("function `{name}` uses unsupported output parameters"))
+            kind :: if lower_kind.starts_with("in ") -> pkg_binder_tail(trimmed_kind, 3) else -> trimmed_kind
+            resolved :: pkg_ada_resolve_type(kind, subtypes) ?? return Err(ForeignBindError.Source("function `{name}` has unsupported parameter type `{kind}`"))
+            loop raw_param in declared.before.split(",") {
+                param :: pkg_ascii_lower(raw_param.trim())
+                if !pkg_binder_is_ident(param) -> return Err(ForeignBindError.Source("function `{name}` has invalid parameter `{param}`"))
+                params.push(AdaParam{name: param, scalar: resolved.scalar, constraint: resolved.constraint})
+            }
+        }
+        if names.get(name) == {
+            .Val(previous) -> return Err(ForeignBindError.Source("Ada overload `{name}` is ambiguous for Jet; exported name already maps to `{previous}`"))
+            .None -> names[name] = symbol
+        }
+        if symbols.get(symbol) == {
+            .Val(previous) -> return Err(ForeignBindError.Source("Ada exports `{symbol}` for both `{previous}` and `{name}`; use unique External_Name values"))
+            .None -> symbols[symbol] = name
+        }
+        routines.push(AdaRoutine{name: name, symbol: symbol, params: params, result: result.scalar})
+    }
+    if routines.len() == 0 -> return Err(ForeignBindError.Source("no supported exported Ada functions were found"))
+    Ok(routines)
+}
+
+// Whether any `Convention =>` clause names `C`.
+fn pkg_ada_convention_is_c(lower: String) -> Bool !Never {
+    parts :: lower.split("convention =>").to_list()
+    loop index in 1..<parts.len() {
+        tail :: parts[index].trim_start()
+        comma :: tail.split_once(",")?.before ?? tail
+        value :: comma.split_once(";")?.before ?? comma
+        if value.trim() == "c" -> return true
+    }
+    false
+}
+
+// A subtype range from the spec, else a bare GNAT scalar.
+fn pkg_ada_resolve_type(name: String, subtypes: [String: AdaType]) -> ?AdaType !Never {
+    lower :: pkg_ascii_lower(name.trim())
+    if subtypes.get(lower) == {
+        .Val(found) -> return Val(found)
+        .None -> {}
+    }
+    scalar :: AdaScalar.parse(lower) ?? return None
+    Val(AdaType{scalar: scalar, constraint: None})
+}
+
+fn pkg_ada_render_jet(lib: String, routines: [AdaRoutine]) -> String !Never {
+    abi :: "jet_ada_{lib}"
+    out := "#Import module c.{abi} {{\n"
+    loop routine in routines {
+        out = "{out}    fn {routine.name}{pkg_ada_params_jet(routine.params)} {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
+    }
+    out = "{out}}}\nuse c.{abi} as abi\n\npub enum AdaError {{ Constraint }}\n\n"
+    loop routine in routines {
+        out = "{out}pub fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} !AdaError {{\n"
+        loop param in routine.params {
+            if param.constraint == {
+                .Val(range) -> {
+                    out = "{out}    if {param.name} < {pkg_ada_jet_number(range.low, param.scalar)} || {param.name} > {pkg_ada_jet_number(range.high, param.scalar)} {{ return Err(AdaError.Constraint) }}\n"
+                }
+                .None -> {}
+            }
+        }
+        args := [String]{}
+        loop param in routine.params -> args.push(param.name)
+        out = "{out}    return Ok(abi.{routine.name}({args.join(", ")}))\n}}\n\n"
+    }
+    out
+}
+
+fn pkg_ada_params_jet(params: [AdaParam]) -> String !Never {
+    parts := [String]{}
+    loop param in params -> parts.push("{param.name}: {param.scalar.jet()}")
+    "({parts.join(", ")})"
+}
+
+// An Ada literal as a Jet number: digit separators dropped, and a Float
+// bound always carries a fraction or exponent.
+fn pkg_ada_jet_number(value: String, scalar: AdaScalar) -> String !Never {
+    out := value.replace("_", "")
+    if scalar == AdaScalar.Float && !out.contains(".") && !out.contains("e") && !out.contains("E") -> out = "{out}.0"
+    out
+}
+
+fn pkg_ada_render_c(lib: String, routines: [AdaRoutine]) -> String !Never {
+    abi :: "jet_ada_{lib}"
+    out := "#include <stdint.h>\n#include <pthread.h>\n#include <stdlib.h>\nextern void {abi}init(void);\nextern void {abi}final(void);\nstatic pthread_once_t once=PTHREAD_ONCE_INIT;\nstatic void finish(void){{{abi}final();}}\nstatic void init(void){{{abi}init();atexit(finish);}}\n"
+    loop routine in routines {
+        args := [String]{}
+        loop param in routine.params -> args.push(param.name)
+        params :: pkg_ada_params_c(routine.params)
+        out = "{out}extern {routine.result.c()} {routine.symbol}{params};\n{routine.result.c()} {abi}_{routine.name}{params}{{pthread_once(&once,init);return {routine.symbol}({args.join(",")});}}\n"
+    }
+    out
+}
+
+fn pkg_ada_params_c(params: [AdaParam]) -> String !Never {
+    if params.len() == 0 -> return "(void)"
+    parts := [String]{}
+    loop param in params -> parts.push("{param.scalar.c()} {param.name}")
+    "({parts.join(",")})"
+}
+
+// The absolute `adalib` directory `gnatls -v` reports that holds the shared
+// GNAT runtime.
+fn pkg_ada_gnat_runtime_dir() -[FS, Env, Exec, Time.Wait]> String !ForeignBindError {
+    output :: pkg_ada_capture([String]{"gnatls", "-v"}, None, "gnatls")
+    runtime_name :: BinderHostOs.current().shared_library("gnat", "libgnat.so")
+    loop line in pkg_binder_lines(String.from_bytes_lossy(output)) {
+        candidate :: pkg_binder_trim_end_matches(line.trim(), "/")
+        if candidate.ends_with("/adalib") && files.is_abs(candidate) && files.is_file(files.join(candidate, runtime_name)) -> return Ok(candidate)
+    }
+    Err(ForeignBindError.Source("the provisioned GNAT runtime library directory was not found"))
+}
+
+fn pkg_ada_run(argv: [String], cwd: ?String, tool: String) !ForeignBindError -[Exec, Time.Wait]> {
+    output :: pkg_ada_capture(argv, cwd, tool)
+    if Int.from_u8(output[0]) == 0 -> return Ok()
+    Err(ForeignBindError.ToolFailed{tool: tool, action: @ADA_TOOL_ACTION, detail: pkg_ada_launder(output[1..<output.len()])})
+}
+
+// The status byte (0 on success) followed by stdout then stderr.
+fn pkg_ada_capture(argv: [String], cwd: ?String, tool: String) -[Exec, Time.Wait]> [U8] !ForeignBindError {
+    output :: pkg_binder_capture(argv, cwd, tool, @ADA_TOOL_ACTION)
+    result := [U8]{if output.success -> U8{0} else -> U8{1}}
+    loop byte in output.stdout -> result.push(byte)
+    loop byte in output.stderr -> result.push(byte)
+    Ok(result)
+}
+
+fn pkg_ada_launder(bytes: [U8]) -> String !Never {
+    lines :: pkg_binder_lines(String.from_bytes_lossy(bytes))
+    loop line in lines {
+        if line.contains("compilation error") -> return "compilation error"
+    }
+    loop line in lines {
+        trimmed :: line.trim()
+        if trimmed == "" -> next
+        return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
+    }
+    @BINDER_TOOL_FAILURE_DETAIL
+}
+
+// The quoted value after `needle` (matched case-insensitively).
+fn pkg_ada_quoted_after(text: String, needle: String) -> ?String !Never {
+    at :: pkg_binder_find(pkg_ascii_lower(text), needle, 0)
+    if at < 0 -> return None
+    tail :: pkg_binder_tail(text, at + needle.bytes().len()).trim_start()
+    if tail == "" -> return None
+    quote :: if tail.starts_with("\"") -> "\"" else -> if tail.starts_with("'") -> "'" else -> ""
+    if quote == "" -> return None
+    body :: tail.removeprefix(quote)
+    Val(body.split_once(quote)?.before ?? body)
+}
+
+// Statements split at `;` outside parentheses.
+fn pkg_ada_statements(text: String) -> [String] !Never {
+    raw :: text.bytes()
+    out := [String]{}
+    start := 0
+    depth := 0
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == {
+            40 -> depth += 1
+            41 -> depth -= 1
+            59 -> {
+                if depth == 0 {
+                    out.push(pkg_bytes_text(raw, start, index))
+                    start = index + 1
+                }
+            }
+            else -> {}
+        }
+    }
+    if start < raw.len() -> out.push(pkg_bytes_text(raw, start, raw.len()))
+    out
+}
+
+// The byte index of the `)` closing the `(` at `open`, or -1.
+fn pkg_ada_matching_close(text: String, open: Int) -> Int !Never {
+    raw :: text.bytes()
+    depth := 0
+    loop index in open..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == 40 -> depth += 1
+        if code == 41 {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+    }
+    -1
+}

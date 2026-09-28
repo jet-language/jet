@@ -1,0 +1,448 @@
+// Captured plans (derive-only data) produced by module evaluation: the
+// per-module `EvaluatedModule`, the OCI `ImagePlan`, the dev-supervised
+// `DevServicePlan`, the typed secret declarations, and the runnable `EnvPlan`.
+
+// One `$NAME` read captured from a config surface. Environment variables are
+// always text, so the type is explicit in the plan instead of being inferred
+// again by an inspect or deploy consumer.
+pub struct EnvironmentRead {
+    pub name: String
+    pub ty: String
+}
+
+// One typed entry in an environment's `secrets:` map.
+//
+// The declaration is deliberately a plan fact, not a decrypted value. The
+// activation tier checks the policy against the encrypted store and the
+// Prelude resolves a composed value only for the individual read that asks
+// for it.
+pub struct SecretSpec {
+    pub name: String
+    pub description: ?String{None}
+    pub required: Bool{true}
+    pub allowed_environments: [String]{[String]{}}
+    pub rotation: SecretRotationPolicy{SecretRotationPolicy.Unset}
+    pub default: SecretDefault{SecretDefault.Unset}
+    pub generate: SecretGenerator{SecretGenerator.Unset}
+    pub declaration: SecretDeclaration{SecretDeclaration.Stored}
+    // Integration imports contribute an implicit required source name. It is
+    // not a second author spelling; an explicit map entry replaces it.
+    pub implicit: Bool{false}
+
+    fn stored(name: String) -> SecretSpec !Never {
+        SecretSpec{name: name}
+    }
+
+    fn implicit_source(name: String) -> SecretSpec !Never {
+        SecretSpec{name: name, implicit: true}
+    }
+
+    fn is_composed(self) -> Bool !Never {
+        if self.declaration == {
+            .Compose(_, _) -> true
+            .Stored -> false
+        }
+    }
+
+    // Stable trust identity. Secret defaults and generator recipes can carry
+    // sensitive material, so only their non-value shape enters the hash.
+    fn trust_fingerprint(self) -> String !Never {
+        declaration :: if self.declaration == {
+            .Stored -> "stored"
+            .Compose(_, from) -> {
+                sorted := from
+                sorted.sort()
+                "compose:{sorted.join(",")}"
+            }
+        }
+        allowed := self.allowed_environments
+        allowed.sort()
+        rotation :: if self.rotation == {
+            .Unset -> "none"
+            .MaxAge(seconds) -> "max_age:{seconds}"
+        }
+        default_profiles :: if self.default == {
+            .Unset -> ""
+            .PerProfile(values) -> envmodel_sorted_keys_of(values).join(",")
+        }
+        generator :: if self.generate == {
+            .Unset -> "none"
+            .Random(length) -> "random:{length}"
+        }
+        "{self.name}|{declaration}|{self.required}|{allowed.join(",")}|{rotation}|{default_profiles}|{generator}"
+    }
+}
+
+// Descriptions, defaults, and templates can carry sensitive material, so the
+// debug rendering names only their shape.
+impl SecretSpec.Debug {
+    fn debug(self) -> String {
+        description :: if self.description == {
+            .Val(_) -> "Some(\"<redacted>\")"
+            .None -> "None"
+        }
+        "SecretSpec {{ name: {self.name:Debug}, description: {description}, required: {self.required}, allowed_environments: {self.allowed_environments:Debug}, rotation: {self.rotation:Debug}, default: {self.default:Debug}, generate: {self.generate:Debug}, declaration: {self.declaration:Debug}, implicit: {self.implicit} }}"
+    }
+}
+
+pub enum SecretDeclaration {
+    Stored
+    Compose(template: String, from: [String])
+}
+
+impl SecretDeclaration.Debug {
+    fn debug(self) -> String {
+        if self == {
+            .Stored -> "Stored"
+            .Compose(_, from) -> "Compose {{ from: {from:Debug} }}"
+        }
+    }
+}
+
+// Rust `SecretRotationPolicy::None` is `Unset` here: `None` is the optional
+// literal in Jet.
+pub enum SecretRotationPolicy {
+    Unset
+    MaxAge(seconds: Int)
+}
+
+impl SecretRotationPolicy.Debug {
+    fn debug(self) -> String {
+        if self == {
+            .Unset -> "None"
+            .MaxAge(seconds) -> "MaxAge {{ seconds: {seconds} }}"
+        }
+    }
+}
+
+// Rust `SecretDefault::None` is `Unset` here.
+pub enum SecretDefault {
+    Unset
+    PerProfile(values: [String: String])
+}
+
+impl SecretDefault.Debug {
+    fn debug(self) -> String {
+        if self == {
+            .Unset -> "None"
+            .PerProfile(values) -> "PerProfile {{ profiles: {envmodel_sorted_keys_of(values):Debug} }}"
+        }
+    }
+}
+
+// Rust `SecretGenerator::None` is `Unset` here.
+pub enum SecretGenerator {
+    Unset
+    Random(length: Int)
+}
+
+impl SecretGenerator.Debug {
+    fn debug(self) -> String {
+        if self == {
+            .Unset -> "None"
+            .Random(length) -> "Random {{ length: {length} }}"
+        }
+    }
+}
+
+pub enum PromptPathMode {
+    Short
+    Full
+}
+
+pub enum PromptStripMode {
+    Off
+    On
+}
+
+// One environment's non-entry facts from one source module. Keeping these
+// facts beside the environment name prevents sibling `env.<name>` modules
+// from leaking services, lifecycle, files, or variable reads into the one
+// selected runtime plan.
+pub struct EnvironmentContribution {
+    pub name: String
+    pub environment_reads: [EnvironmentRead]
+    pub dev_services: [DevServicePlan]
+    pub secrets: [SecretSpec]
+    pub adapters: [AdapterPlan]
+    pub lifecycle: EnvironmentLifecycle
+    pub presets: [PresetSpec]
+    pub languages: [LanguageSpec]
+    pub files: [ManagedFile]
+}
+
+// The `(namespace, path)` key a contribution merges under, so `merge_all`
+// can combine same-keyed contributions from different modules.
+pub struct ModuleEntryKey {
+    pub namespace: Namespace
+    pub path: String
+}
+
+// One keyed contribution of one module.
+pub struct ModuleEntry {
+    pub key: ModuleEntryKey
+    pub entry: EntryContribution
+}
+
+// One module's contributions, keyed by `(namespace, path)`.
+pub struct EvaluatedModule {
+    pub name: String
+    pub entries: [ModuleEntry]
+    // U14: `image.<name>:` contributions.
+    pub images: [ImagePlan]
+    // Environment-scoped facts. Source evaluation selects one name before
+    // projecting these into `EnvPlan`.
+    pub environment_contributions: [EnvironmentContribution]
+    // D-ENV-INTEGRATIONS1: typed first-party integrations imported by this
+    // module and lowered into ordinary environment facts.
+    pub integrations: [EnvironmentIntegration]
+    // D-JPK-PROFILE1=D: source-backed package generation declarations. These
+    // are not environment presets and never affect shell selection.
+    pub package_profiles: [PackageProfileSpec]
+}
+
+// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
+pub struct AdapterPlan {
+    pub name: String
+    // A source ref string such as `"./vendor/weirdctl"`.
+    pub source: String
+    pub deps: [Pkg]
+    pub recipe: AdapterRecipe
+}
+
+pub enum AdapterRecipe {
+    // `Recipe.copy(...)`: copy the staged source tree as-is.
+    Copy
+    // `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
+    // `bin/<as>`.
+    Prebuilt(bin: String, as_name: String)
+    // `Recipe.build(steps: […])`: a finite, digestable executable action graph.
+    Build(recipe: BuildRecipe)
+}
+
+// U12: one captured dev-supervised `Service` record under an `env.<name>`
+// role-module's `services:` map. Jetpack's dev-runtime tier owns and
+// interprets every field here, so an unrecognized `extra` key is a
+// supervision-time error (E1262), not silently-forwarded metadata.
+pub struct DevServicePlan {
+    // The service name (the map key), e.g. `redis`.
+    pub name: String{""}
+    // The required `enable` flag (U12) — `false` captures the service
+    // (so `jet services logs` etc still knows its name) without supervising it.
+    pub enable: Bool{false}
+    // `ports: [Int]` — TCP ports the service listens on. The first port is
+    // the default readiness probe target when no explicit `ready:` is given.
+    pub ports: [Int]{[Int]{}}
+    // `run: ["program", "arg", …]` — the executable and argv that start the
+    // service. Falls back to the built-in catalog when the name matches a
+    // known service and this is unset.
+    pub run: ?[String]{None}
+    // `shutdown: .Term(...)`/`.Kill` — typed process shutdown policy. Falls
+    // back to a bounded TERM-then-KILL sequence when unset.
+    pub shutdown: ?ShutdownPolicy{None}
+    // `data_dir: "…"` — override for the persisted-state directory, which
+    // otherwise defaults to `.jet/services/<name>/data`.
+    pub data_dir: ?String{None}
+    // `ready: "…"` — a shell command polled until it exits 0; the readiness
+    // contract. Falls back to a TCP connect on `ports[0]` when unset and
+    // `ports` is non-empty, else to a bare process-alive check.
+    pub ready: ?String{None}
+    // D-JPK-SERVICEDEPTH1: typed readiness without shell-command parsing.
+    pub ready_probe: ?ReadyProbe{None}
+    // D-JPK-SERVICEDEPTH1: bounded restart behavior.
+    pub restart: ?RestartPolicy{None}
+    // Files whose changes may trigger a bounded restart.
+    pub watch: [String]{[String]{}}
+    // Service names that must be healthy before this service starts.
+    pub after: [String]{[String]{}}
+    // Ordinary `#Job` names to run successfully immediately before start.
+    pub before_start: [String]{[String]{}}
+    // Named sockets reserved by the service.
+    pub sockets: [String]{[String]{}}
+    // Any further field, captured verbatim as a display string (open record,
+    // U12) — checked against the known keys above at supervision time, not
+    // at field-check time (E1262). This includes retired spellings such as
+    // `depends_on`; `after` is the only dependency field.
+    pub extra: [DevServiceExtra]{[DevServiceExtra]{}}
+}
+
+// One unrecognized open-record field of a dev service, rendered for display.
+pub struct DevServiceExtra {
+    pub name: String
+    pub value: String
+}
+
+pub enum ReadyProbe {
+    Exec(command: String)
+    Http(url: String, status: ?Int)
+    Notify(path: String)
+    Tcp(host: String, port: Int)
+}
+
+pub enum RestartPolicy {
+    Never
+    OnFailure(max: Int, backoff_ms: Int, exponential: Bool)
+    Always(max: Int, backoff_ms: Int, exponential: Bool)
+}
+
+pub enum ShutdownPolicy {
+    // Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
+    Term(grace_ms: Int)
+    // Skip the graceful signal and terminate the verified process group.
+    Kill
+}
+
+// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`
+// names, and so which realize tier owns it. `Oci` is the container tier,
+// built natively from a `Package` or an `Environment`.
+pub enum ImageKind {
+    Oci
+}
+
+// U14/D-JPK-IMAGE1: a field-checked `image.<name>: { … }` contribution, built
+// natively from the referenced `Package` or `Environment`'s realized Hangar
+// output plus `expose`/`env_vars`/`files`/`base`.
+pub struct ImagePlan {
+    // The contribution path — the `<name>` in `image.<name>`.
+    pub name: String
+    // Which referent `from:` names, and which tier realizes this image.
+    pub kind: ImageKind
+    // The source package's name (`from: packages.<name>`) or environment's
+    // name (`from: env.<name>`).
+    pub from: String
+    // D-ENV-IMAGE1: true when `from:` projects an `env.<name>` into an OCI
+    // shell image. The source kind stays explicit in the plan so realization
+    // cannot confuse an environment with an executable package.
+    pub from_environment: Bool
+    // An explicit target platform, if any. Only environment images may carry
+    // one; OCI records it for the image realization path.
+    pub target: ?String
+    // `expose: [Int]` — TCP ports recorded as `ExposedPorts` in the OCI image
+    // config. Sorted + deduped for reproducibility.
+    pub expose: [Int]
+    // `env_vars: [KEY: "value"]` — baked into the OCI image config's `Env`
+    // list, sorted by key.
+    pub env_vars: [ImageEnvVar]
+    // `files: ["path", …]` — extra project-relative paths layered into the
+    // image alongside the package binary. Sorted before layering so the tar
+    // layer is byte-identical regardless of declaration order.
+    pub files: [String]
+    // `base: oci("<ref>")` — a base-image escape hatch (D-JPK-IMAGE1 option A).
+    // Local `file://` layouts are admitted by digest; remote refs stay
+    // explicit until a verified registry transport is configured.
+    pub base: ?String
+    // D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
+    // default for an environment image. Cache, signing, and provenance stay
+    // on Hangar and `.jet/lock`; this record does not duplicate those stores.
+    pub services: [String]
+    pub health: ?String
+    pub entrypoint: ?String
+    pub user: ?Int
+}
+
+// One `env_vars:` entry of an OCI image.
+pub struct ImageEnvVar {
+    pub key: String
+    pub value: String
+}
+
+// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
+// the named-source table, the package refs to realize (`package@source`),
+// and the prompt label. Only the `env` namespace and OCI images are consulted.
+pub struct EnvPlan {
+    pub table: SourceTable
+    // The source files that contributed to this graph, relative to the
+    // environment root and in deterministic discovery order.
+    pub source_files: [String]
+    // The semantic identity of the Package graph that produced this plan.
+    // Legacy environment plans have no Package authority and keep this None.
+    pub graph_identity: ?String
+    // Every typed environment read in the selected environment's root and
+    // discovered module contributions, in source/discovery order.
+    pub environment_reads: [EnvironmentRead]
+    pub package_refs: [String]
+    // U20 adapter packages declared in `packages:`. Kept separate from refs
+    // because they have inline build identity and no provider selector.
+    pub adapters: [AdapterPlan]
+    pub prompt: ?String
+    pub prompt_path: PromptPathMode
+    pub prompt_strip: PromptStripMode
+    // U14: every captured `Image`, validated so each `from` names a known
+    // executable package or declared environment.
+    pub images: [ImagePlan]
+    // U12: every captured dev-supervised `Service` in the selected environment,
+    // in source order. `jetpack services <verb>`'s health gate is the only
+    // consumer.
+    pub dev_services: [DevServicePlan]
+    // D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: every typed declaration
+    // in the selected environment's one `secrets:` map, in source order.
+    // Activation validates policy and source presence; the runtime Prelude
+    // resolves composed declarations on each `get` read.
+    pub secrets: [SecretSpec]
+    // Typed lifecycle facts for activation, checks, and reload.
+    pub lifecycle: EnvironmentLifecycle
+    // Named preset compositions from the selected environment before
+    // CLI/host selection.
+    pub presets: [PresetSpec]
+    // Typed language-pack selections from the selected environment before
+    // catalog expansion.
+    pub languages: [LanguageSpec]
+    // The preset selected by the evaluator/runtime, if one was requested.
+    pub selected_preset: ?ResolvedPreset
+    // One evaluator-owned expansion shared by realization and trust. The
+    // `language_packs` field remains as a compatibility view for existing
+    // environment consumers; it is populated from this expansion.
+    pub language_expansion: LanguageExpansion
+    // Expanded language packs, kept in the plan for disclosure and hashing.
+    pub language_packs: [LanguagePack]
+    // Exact typed language projection, including included/omitted tools and
+    // changed selection facts. Consumers must use this instead of reparsing
+    // the source or reconstructing pack defaults.
+    pub language_projections: [LanguageProjection]
+    // Managed environment-file declarations from the selected environment
+    // before `jet env sync` applies them.
+    pub files: [ManagedFile]
+    // D-ENV-INTEGRATIONS1: typed integrations from the selected environment
+    // before host realization.
+    pub integrations: [EnvironmentIntegration]
+    pub integration_facts: IntegrationFactProjection
+    // D-JPK-PROFILE1=D: source-backed package-generation declarations. These
+    // remain separate from the selected environment preset.
+    pub package_profiles: [PackageProfileSpec]
+    pub environment_names: [String]
+    // The one environment module whose packages/settings are active for this
+    // plan. `dev` is the deterministic beginner default when present.
+    pub active_environment: ?String
+    // Module names that contributed the selected environment module, in source order.
+    pub active_environment_provenance: [String]
+}
+
+pub struct EnvironmentFacts {
+    pub environment_names: [String]{[String]{}}
+    pub active_environment: ?String{None}
+    pub active_environment_provenance: [String]{[String]{}}
+    pub source_files: [String]{[String]{}}
+    // Every typed environment read retained for discovery and reporting from
+    // the selected environment. Consumers must use this projection instead of
+    // lexing `env.jet` again.
+    pub environment_reads: [EnvironmentRead]{[EnvironmentRead]{}}
+    pub dev_services: [DevServicePlan]{[DevServicePlan]{}}
+    pub lifecycle: EnvironmentLifecycle{EnvironmentLifecycle{}}
+    pub presets: [PresetSpec]{[PresetSpec]{}}
+    pub languages: [LanguageSpec]{[LanguageSpec]{}}
+    pub selected_preset: ?ResolvedPreset{None}
+    pub language_expansion: LanguageExpansion{LanguageExpansion{}}
+    pub language_packs: [LanguagePack]{[LanguagePack]{}}
+    pub language_projections: [LanguageProjection]{[LanguageProjection]{}}
+    pub files: [ManagedFile]{[ManagedFile]{}}
+    pub integrations: [EnvironmentIntegration]{[EnvironmentIntegration]{}}
+    pub integration_facts: IntegrationFactProjection{IntegrationFactProjection{}}
+    pub package_profiles: [PackageProfileSpec]{[PackageProfileSpec]{}}
+}
+
+// The keys of a string map in byte order (Rust `BTreeMap` key order).
+fn envmodel_sorted_keys_of(values: [String: String]) -> [String] !Never {
+    keys := values.keys().to_list()
+    keys.sort()
+    keys
+}

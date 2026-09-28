@@ -1,0 +1,763 @@
+// SQL DDL schema inference for the data binder, ported from
+// jet_pkg_model::CBind (`bind_sql` and the `sql_*` helpers). Only
+// `CREATE TABLE` statements are accepted; declared column types map to Jet
+// scalar and core value types, supported constraints are validated, and
+// NOT NULL / PRIMARY KEY columns stay required.
+
+fn pkg_data_bind_sql(input: String, root_name: ?String) -> SchemaBuilder !DataBindError {
+    cleaned :: pkg_data_strip_sql_comments(input)
+    statements :: pkg_data_split_sql_statements(cleaned)
+    if statements.len() == 0 -> return Err(DataBindError{message: "SQL input has no CREATE TABLE declaration"})
+    tables := [SqlTable]{}
+    table_names := [String]{}
+    loop statement in statements {
+        table :: pkg_data_parse_sql_table(statement)
+        key :: pkg_ascii_lower(table.name)
+        if table_names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate table {table.name}"})
+        table_names.push(key)
+        tables.push(table)
+    }
+    single_table :: tables.len() == 1
+    builder := SchemaBuilder.new()
+    loop table in tables {
+        preferred :: if single_table -> root_name ?? table.name else -> table.name
+        record :: builder.begin_record(preferred)
+        builder.set_fields(record.index, table.fields)
+    }
+    Ok(builder)
+}
+
+struct SqlTable {
+    name: String
+    fields: [FieldSeed]
+}
+
+// The SQL quote delimiters: single quote, double quote, and backtick.
+fn pkg_data_sql_is_quote(scalar: String) -> Bool !Never {
+    scalar == "'" || scalar == "\"" || scalar == "`"
+}
+
+// Drop `--` line comments and replace each block comment with spaces,
+// leaving quoted text intact.
+fn pkg_data_strip_sql_comments(input: String) -> String !DataBindError {
+    chars :: pkg_data_scalars(input)
+    out := [String]{}
+    index := 0
+    quote := ""
+    loop index < chars.len() {
+        ch :: chars[index]
+        if quote != "" {
+            out.push(ch)
+            if ch == quote {
+                if pkg_data_at(chars, index + 1) == quote {
+                    out.push(quote)
+                    index += 2
+                    next
+                }
+                quote = ""
+            }
+            index += 1
+            next
+        }
+        if {
+            pkg_data_sql_is_quote(ch) -> {
+                quote = ch
+                out.push(ch)
+                index += 1
+            }
+            ch == "-" && pkg_data_at(chars, index + 1) == "-" -> {
+                index += 2
+                loop index < chars.len() && chars[index] != "\n" -> index += 1
+            }
+            ch == "/" && pkg_data_at(chars, index + 1) == "*" -> {
+                index += 2
+                start :: index
+                loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") -> index += 1
+                if index + 1 >= chars.len() -> return Err(DataBindError{message: "SQL has an unterminated block comment"})
+                width :: if index - start > 1 -> index - start else -> 1
+                loop _ in 0..<width -> out.push(" ")
+                index += 2
+            }
+            else -> {
+                out.push(ch)
+                index += 1
+            }
+        }
+    }
+    if quote != "" -> return Err(DataBindError{message: "SQL has an unterminated quoted value"})
+    Ok(out.join(""))
+}
+
+// Statements split on `;` outside quotes and parentheses; blank ones dropped.
+fn pkg_data_split_sql_statements(input: String) -> [String] !DataBindError {
+    chars :: pkg_data_scalars(input)
+    statements := [String]{}
+    current := [String]{}
+    depth := 0
+    quote := ""
+    index := 0
+    loop index < chars.len() {
+        ch :: chars[index]
+        if quote != "" {
+            current.push(ch)
+            if ch == quote {
+                if pkg_data_at(chars, index + 1) == quote {
+                    current.push(quote)
+                    index += 2
+                    next
+                }
+                quote = ""
+            }
+            index += 1
+            next
+        }
+        if pkg_data_sql_is_quote(ch) {
+            quote = ch
+            current.push(ch)
+        } else {
+            if ch == {
+                "(" -> depth += 1
+                ")" -> {
+                    depth -= 1
+                    if depth < 0 -> return Err(DataBindError{message: "SQL has an unmatched close parenthesis"})
+                }
+                ";" -> {
+                    if depth == 0 {
+                        text :: current.join("")
+                        if text.trim() != "" {
+                            statements.push(text)
+                            current = [String]{}
+                        }
+                        index += 1
+                        next
+                    }
+                }
+                else -> {}
+            }
+            current.push(ch)
+        }
+        index += 1
+    }
+    if quote != "" -> return Err(DataBindError{message: "SQL has an unterminated quoted value"})
+    if depth != 0 -> return Err(DataBindError{message: "SQL has unbalanced parentheses"})
+    text :: current.join("")
+    if text.trim() != "" -> statements.push(text)
+    Ok(statements)
+}
+
+@SQL_SYMBOLS :: "(),.<>*%+=|&!~^:[]"
+
+// Punctuation, quoted values (delimiters removed, doubled delimiters kept
+// once), numbers with optional fraction and exponent, and names.
+fn pkg_data_sql_tokens(statement: String) -> [String] !DataBindError {
+    chars :: pkg_data_scalars(statement)
+    tokens := [String]{}
+    index := 0
+    loop index < chars.len() {
+        ch :: chars[index]
+        if {
+            pkg_data_is_ascii_whitespace(ch) -> index += 1
+            @SQL_SYMBOLS.contains(ch) -> {
+                tokens.push(ch)
+                index += 1
+            }
+            pkg_data_sql_is_quote(ch) -> {
+                index += 1
+                value := [String]{}
+                closed := false
+                loop index < chars.len() {
+                    if chars[index] == ch {
+                        if pkg_data_at(chars, index + 1) == ch {
+                            value.push(ch)
+                            index += 2
+                        } else {
+                            index += 1
+                            closed = true
+                            break
+                        }
+                    } else {
+                        value.push(chars[index])
+                        index += 1
+                    }
+                }
+                if !closed -> return Err(DataBindError{message: "SQL has an unterminated quoted token"})
+                tokens.push(value.join(""))
+            }
+            pkg_data_is_ascii_digit(ch) -> {
+                start :: index
+                index += 1
+                loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                if pkg_data_at(chars, index) == "." && pkg_data_is_ascii_digit(pkg_data_at(chars, index + 1)) {
+                    index += 1
+                    loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                }
+                if pkg_data_at(chars, index) == "e" || pkg_data_at(chars, index) == "E" {
+                    index += 1
+                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" -> index += 1
+                    digits :: index
+                    loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                    if digits == index -> return Err(DataBindError{message: "SQL numeric exponent has no digits"})
+                }
+                tokens.push(pkg_data_slice(chars, start, index))
+            }
+            pkg_data_is_ascii_alphanumeric(ch) || ch == "_" || ch == "$" -> {
+                start :: index
+                index += 1
+                loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_" || chars[index] == "$") -> index += 1
+                tokens.push(pkg_data_slice(chars, start, index))
+            }
+            ch == "+" || ch == "-" -> {
+                tokens.push(ch)
+                index += 1
+            }
+            else -> return Err(DataBindError{message: "SQL has unsupported character {ch}"})
+        }
+    }
+    Ok(tokens)
+}
+
+// A non-empty token that is not punctuation.
+fn pkg_data_sql_is_name(token: String) -> Bool !Never {
+    if token == {
+        "" | "(" | ")" | "," | "." | "<" | ">" | "*" | "%" | "+" | "=" | "|" | "&" | "!" | "~" | "^" | ":" | "[" | "]" | "-" -> false
+        else -> true
+    }
+}
+
+// A read position over one statement's (or one declaration's) tokens.
+struct SqlCursor {
+    tokens: [String]
+    index: Int
+
+    fn peek(self) -> ?String !Never {
+        if self.index < 0 || self.index >= self.tokens.len() -> return None
+        Val(self.tokens[self.index])
+    }
+
+    // Whether the current token is exactly `symbol`.
+    fn at(self, symbol: String) -> Bool !Never {
+        token :: self.peek() ?? return false
+        token == symbol
+    }
+
+    // Whether the current token is `word` ignoring ASCII case.
+    fn at_word(self, word: String) -> Bool !Never {
+        token :: self.peek() ?? return false
+        pkg_data_eq_ignore_case(token, word)
+    }
+
+    fn take_name(&self, what: String) -> String !DataBindError {
+        token :: self.peek() ?? return Err(DataBindError{message: "SQL {what} is missing"})
+        if !pkg_data_sql_is_name(token) -> return Err(DataBindError{message: "SQL {what} is invalid"})
+        self.index += 1
+        Ok(token)
+    }
+
+    fn take_digits(&self, what: String) -> Int !DataBindError {
+        value :: self.take_name(what)
+        pkg_data_parse_digits(value) ?? return Err(DataBindError{message: "SQL {what} must be a non-negative integer"})
+    }
+
+    fn take_positive_digits(&self, what: String) -> Int !DataBindError {
+        number :: self.take_digits(what)
+        if number == 0 -> return Err(DataBindError{message: "SQL {what} must be greater than zero"})
+        Ok(number)
+    }
+
+    // An optional `(n)` or `(p, s)` type modifier.
+    fn parenthesized_digits(&self, what: String, two: Bool) !DataBindError {
+        if !self.at("(") -> return Ok()
+        self.index += 1
+        first :: if what.contains("time precision") || what.contains("timestamp precision") -> self.take_digits(what) else -> self.take_positive_digits(what)
+        second := -1
+        if self.at(",") {
+            if !two -> return Err(DataBindError{message: "SQL {what} has an unsupported second modifier"})
+            self.index += 1
+            second = self.take_digits(what)
+        }
+        if !self.at(")") -> return Err(DataBindError{message: "SQL {what} modifier is not closed"})
+        self.index += 1
+        if second > first -> return Err(DataBindError{message: "SQL {what} scale exceeds its precision"})
+    }
+
+    // At most one SIGNED/UNSIGNED and one ZEROFILL, in any order.
+    fn numeric_modifiers(&self) !DataBindError {
+        signedness := false
+        zerofill := false
+        loop {
+            if {
+                self.at_word("SIGNED") || self.at_word("UNSIGNED") -> {
+                    if signedness -> return Err(DataBindError{message: "SQL numeric type repeats its signedness modifier"})
+                    signedness = true
+                    self.index += 1
+                }
+                self.at_word("ZEROFILL") -> {
+                    if zerofill -> return Err(DataBindError{message: "SQL numeric type repeats ZEROFILL"})
+                    zerofill = true
+                    self.index += 1
+                }
+                else -> return Ok()
+            }
+        }
+    }
+
+    // `WITH TIME ZONE` / `WITHOUT TIME ZONE` after a time type.
+    fn time_zone_modifier(&self) !DataBindError {
+        if !(self.at_word("WITH") || self.at_word("WITHOUT")) -> return Ok()
+        self.index += 1
+        if !self.at_word("TIME") -> return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        self.index += 1
+        if !self.at_word("ZONE") -> return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
+        self.index += 1
+    }
+
+    // The Jet type a column's declared SQL type maps to.
+    fn column_type(&self, column: String) -> String !DataBindError {
+        token :: self.peek() ?? return Err(DataBindError{message: "SQL column {column} has no type"})
+        first :: pkg_data_ascii_upper(token)
+        self.index += 1
+        if first == {
+            "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "MEDIUMINT" | "SERIAL" | "BIGSERIAL" -> {
+                self.numeric_modifiers()
+                Ok("Int")
+            }
+            "REAL" | "FLOAT" -> {
+                self.parenthesized_digits("floating-point precision", false)
+                self.numeric_modifiers()
+                Ok("Float")
+            }
+            "DOUBLE" -> {
+                if self.at_word("PRECISION") -> self.index += 1
+                self.numeric_modifiers()
+                Ok("Float")
+            }
+            "DECIMAL" | "NUMERIC" | "MONEY" -> {
+                self.parenthesized_digits("decimal precision", true)
+                self.numeric_modifiers()
+                Ok("Decimal")
+            }
+            "BOOL" | "BOOLEAN" -> Ok("Bool")
+            "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER" | "CLOB" -> {
+                if first == "CHARACTER" && self.at_word("VARYING") -> self.index += 1
+                if first == {
+                    "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER" -> self.parenthesized_digits("character width", false)
+                    else -> {
+                        if self.at("(") -> return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                    }
+                }
+                Ok("String")
+            }
+            "DATE" -> Ok("LocalDate")
+            "TIME" -> {
+                self.parenthesized_digits("time precision", false)
+                self.time_zone_modifier()
+                Ok("LocalTime")
+            }
+            "TIMESTAMP" | "DATETIME" -> {
+                self.parenthesized_digits("timestamp precision", false)
+                if first == "TIMESTAMP" -> self.time_zone_modifier()
+                Ok("DateTime")
+            }
+            "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BYTEA" | "BINARY" | "VARBINARY" -> {
+                if first == {
+                    "BINARY" | "VARBINARY" -> self.parenthesized_digits("binary width", false)
+                    else -> {
+                        if self.at("(") -> return Err(DataBindError{message: "SQL type {first} does not accept a width modifier"})
+                    }
+                }
+                Ok("[U8]")
+            }
+            else -> Err(DataBindError{message: "SQL type for {column} is unsupported"})
+        }
+    }
+
+    // A non-empty parenthesized token run with balanced parentheses.
+    fn balanced_expression(&self, what: String) !DataBindError {
+        if !self.at("(") -> return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        self.index += 1
+        start :: self.index
+        depth := 1
+        loop self.index < self.tokens.len() {
+            if self.tokens[self.index] == {
+                "(" -> depth += 1
+                ")" -> {
+                    depth -= 1
+                    if depth == 0 {
+                        if self.index == start -> return Err(DataBindError{message: "SQL {what} is empty"})
+                        self.index += 1
+                        return Ok()
+                    }
+                }
+                else -> {}
+            }
+            self.index += 1
+        }
+        Err(DataBindError{message: "SQL {what} is not closed"})
+    }
+
+    // A parenthesized, comma-separated name list.
+    fn name_list(&self, what: String) -> [String] !DataBindError {
+        if !self.at("(") -> return Err(DataBindError{message: "SQL {what} needs an open parenthesis"})
+        self.index += 1
+        names := [String]{}
+        loop {
+            names.push(self.take_name(what))
+            if self.at(",") {
+                self.index += 1
+                next
+            }
+            if !self.at(")") -> return Err(DataBindError{message: "SQL {what} list is not closed"})
+            self.index += 1
+            return Ok(names)
+        }
+    }
+
+    // `REFERENCES table[.segment...] [(columns)]` plus MATCH, ON DELETE/UPDATE
+    // actions, and deferral clauses.
+    fn reference(&self) !DataBindError {
+        _ :: self.take_name("referenced table")
+        loop self.at(".") {
+            self.index += 1
+            _ :: self.take_name("referenced table segment")
+        }
+        if self.at("(") {
+            _ :: self.name_list("referenced column")
+        }
+        loop {
+            token :: self.peek() ?? break
+            if pkg_data_ascii_upper(token) == {
+                "MATCH" -> {
+                    self.index += 1
+                    _ :: self.take_name("MATCH name")
+                }
+                "ON" -> {
+                    self.index += 1
+                    action_kind :: self.take_name("foreign-key action")
+                    if pkg_data_ascii_upper(action_kind) == {
+                        "DELETE" | "UPDATE" -> {}
+                        else -> return Err(DataBindError{message: "SQL foreign-key action needs DELETE or UPDATE"})
+                    }
+                    action :: self.take_name("foreign-key action")
+                    if pkg_data_ascii_upper(action) == {
+                        "NO" -> {
+                            following :: self.take_name("foreign-key action")
+                            if !pkg_data_eq_ignore_case(following, "ACTION") -> return Err(DataBindError{message: "SQL foreign-key action `NO` needs ACTION"})
+                        }
+                        "SET" -> {
+                            following :: self.take_name("foreign-key action")
+                            if pkg_data_ascii_upper(following) == {
+                                "NULL" | "DEFAULT" -> {}
+                                else -> return Err(DataBindError{message: "SQL foreign-key SET action needs NULL or DEFAULT"})
+                            }
+                        }
+                        "RESTRICT" | "CASCADE" -> {}
+                        else -> return Err(DataBindError{message: "SQL foreign-key action is unsupported"})
+                    }
+                }
+                "DEFERRABLE" -> self.index += 1
+                "NOT" -> {
+                    following :: SqlCursor{tokens: self.tokens, index: self.index + 1}
+                    if !following.at_word("DEFERRABLE") -> break
+                    self.index += 2
+                }
+                "INITIALLY" -> {
+                    self.index += 1
+                    mode :: self.take_name("constraint mode")
+                    if pkg_data_ascii_upper(mode) == {
+                        "DEFERRED" | "IMMEDIATE" -> {}
+                        else -> return Err(DataBindError{message: "SQL constraint mode is unsupported"})
+                    }
+                }
+                else -> break
+            }
+        }
+    }
+
+    // A DEFAULT value: a parenthesized expression, a signed or plain literal
+    // with optional fraction and exponent, or a call with arguments.
+    fn default_value(&self) !DataBindError {
+        if self.at("(") -> return self.balanced_expression("DEFAULT expression")
+        if self.at("+") || self.at("-") {
+            self.index += 1
+            _ :: self.take_name("DEFAULT numeric value")
+        } else {
+            _ :: self.take_name("DEFAULT value")
+        }
+        if self.at(".") {
+            self.index += 1
+            _ :: self.take_digits("DEFAULT numeric value")
+        }
+        if self.at_word("E") {
+            self.index += 1
+            if self.at("+") || self.at("-") -> self.index += 1
+            _ :: self.take_digits("DEFAULT exponent")
+        }
+        if self.at("(") {
+            self.index += 1
+            if self.at(")") {
+                self.index += 1
+            } else {
+                self.index -= 1
+                self.balanced_expression("DEFAULT function arguments")
+            }
+        }
+    }
+
+    // One column constraint; true when it makes the column required.
+    fn column_constraint(&self) -> Bool !DataBindError {
+        if self.at_word("CONSTRAINT") {
+            self.index += 1
+            _ :: self.take_name("constraint name")
+        }
+        token :: self.peek() ?? return Err(DataBindError{message: "SQL constraint is incomplete"})
+        required := false
+        if pkg_data_ascii_upper(token) == {
+            "NOT" -> {
+                self.index += 1
+                if !self.at_word("NULL") -> return Err(DataBindError{message: "SQL NOT constraint needs NULL"})
+                self.index += 1
+                required = true
+            }
+            "NULL" -> self.index += 1
+            "PRIMARY" -> {
+                self.index += 1
+                if !self.at_word("KEY") -> return Err(DataBindError{message: "SQL PRIMARY constraint needs KEY"})
+                self.index += 1
+                required = true
+                loop modifier in [String]{"ASC", "DESC", "AUTOINCREMENT", "AUTO_INCREMENT"} {
+                    if self.at_word(modifier) -> self.index += 1
+                }
+            }
+            "UNIQUE" -> {
+                self.index += 1
+                if self.at_word("KEY") || self.at_word("INDEX") -> self.index += 1
+                if self.peek() == {
+                    .Val(name) -> {
+                        if pkg_data_sql_is_name(name) && !pkg_data_sql_unique_stop_word(name) -> self.index += 1
+                    }
+                    .None -> {}
+                }
+            }
+            "KEY" | "INDEX" -> {
+                self.index += 1
+                if self.peek() == {
+                    .Val(name) -> {
+                        if pkg_data_sql_is_name(name) -> self.index += 1
+                    }
+                    .None -> {}
+                }
+            }
+            "REFERENCES" -> {
+                self.index += 1
+                self.reference()
+            }
+            "CHECK" -> {
+                self.index += 1
+                self.balanced_expression("CHECK expression")
+            }
+            "DEFAULT" -> {
+                self.index += 1
+                self.default_value()
+            }
+            "COLLATE" -> {
+                self.index += 1
+                _ :: self.take_name("collation name")
+            }
+            "GENERATED" -> {
+                self.index += 1
+                if self.at_word("ALWAYS") -> self.index += 1
+                if !self.at_word("AS") -> return Err(DataBindError{message: "SQL GENERATED constraint needs AS"})
+                self.index += 1
+                if self.at_word("IDENTITY") {
+                    self.index += 1
+                    if self.at("(") -> self.balanced_expression("IDENTITY options")
+                } else {
+                    self.balanced_expression("GENERATED expression")
+                    if !(self.at_word("VIRTUAL") || self.at_word("STORED")) -> return Err(DataBindError{message: "SQL GENERATED constraint needs VIRTUAL or STORED"})
+                    self.index += 1
+                }
+            }
+            "AUTO_INCREMENT" | "AUTOINCREMENT" -> self.index += 1
+            "ON" -> {
+                self.index += 1
+                if !self.at_word("UPDATE") -> return Err(DataBindError{message: "SQL ON constraint needs UPDATE"})
+                self.index += 1
+                self.default_value()
+            }
+            "COMMENT" -> {
+                self.index += 1
+                _ :: self.take_name("column comment")
+            }
+            else -> return Err(DataBindError{message: "SQL column constraint {token} is unsupported"})
+        }
+        Ok(required)
+    }
+}
+
+// Words after `UNIQUE` that start the next constraint rather than name an index.
+fn pkg_data_sql_unique_stop_word(value: String) -> Bool !Never {
+    if pkg_data_ascii_upper(value) == {
+        "NOT" | "NULL" | "PRIMARY" | "REFERENCES" | "CHECK" | "DEFAULT" | "COLLATE" | "GENERATED" | "AUTO_INCREMENT" | "AUTOINCREMENT" | "ON" | "COMMENT" -> true
+        else -> false
+    }
+}
+
+// One table constraint declaration. Returns the lower-cased columns it makes
+// required and whether it declared the table's PRIMARY KEY.
+fn pkg_data_sql_table_constraint(segment: [String], primary_seen: Bool) -> (required: [String], primary: Bool) !DataBindError {
+    cursor := SqlCursor{tokens: segment, index: 0}
+    if cursor.at_word("CONSTRAINT") {
+        cursor.index += 1
+        _ :: cursor.take_name("constraint name")
+    }
+    token :: cursor.peek() ?? return Err(DataBindError{message: "SQL table constraint is incomplete"})
+    required := [String]{}
+    primary := primary_seen
+    if pkg_data_ascii_upper(token) == {
+        "PRIMARY" -> {
+            if primary_seen -> return Err(DataBindError{message: "SQL table has more than one PRIMARY KEY constraint"})
+            primary = true
+            cursor.index += 1
+            if !cursor.at_word("KEY") -> return Err(DataBindError{message: "SQL table PRIMARY constraint needs KEY"})
+            cursor.index += 1
+            loop column in cursor.name_list("PRIMARY KEY column") -> required.push(pkg_ascii_lower(column))
+        }
+        "UNIQUE" -> {
+            cursor.index += 1
+            if cursor.at_word("KEY") || cursor.at_word("INDEX") {
+                cursor.index += 1
+                if cursor.peek() == {
+                    .Val(name) -> {
+                        if pkg_data_sql_is_name(name) -> cursor.index += 1
+                    }
+                    .None -> {}
+                }
+            }
+            _ :: cursor.name_list("UNIQUE column")
+        }
+        "FOREIGN" -> {
+            cursor.index += 1
+            if !cursor.at_word("KEY") -> return Err(DataBindError{message: "SQL FOREIGN constraint needs KEY"})
+            cursor.index += 1
+            _ :: cursor.name_list("FOREIGN KEY column")
+            if !cursor.at_word("REFERENCES") -> return Err(DataBindError{message: "SQL FOREIGN constraint needs REFERENCES"})
+            cursor.index += 1
+            cursor.reference()
+        }
+        "CHECK" -> {
+            cursor.index += 1
+            cursor.balanced_expression("table CHECK expression")
+        }
+        else -> return Err(DataBindError{message: "SQL table constraint {token} is unsupported"})
+    }
+    if cursor.index != segment.len() -> return Err(DataBindError{message: "SQL table constraint has trailing tokens"})
+    Ok((required: required, primary: primary))
+}
+
+// One `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] [schema.]name (...)`.
+fn pkg_data_parse_sql_table(statement: String) -> SqlTable !DataBindError {
+    tokens :: pkg_data_sql_tokens(statement)
+    cursor := SqlCursor{tokens: tokens, index: 0}
+    if !cursor.at_word("CREATE") -> return Err(DataBindError{message: "SQL input contains a non-CREATE TABLE statement"})
+    cursor.index += 1
+    if cursor.at_word("TEMP") || cursor.at_word("TEMPORARY") -> cursor.index += 1
+    if !cursor.at_word("TABLE") -> return Err(DataBindError{message: "SQL statement is not CREATE TABLE"})
+    cursor.index += 1
+    if cursor.at_word("IF") {
+        after_not :: SqlCursor{tokens: tokens, index: cursor.index + 1}
+        after_exists :: SqlCursor{tokens: tokens, index: cursor.index + 2}
+        if !after_not.at_word("NOT") || !after_exists.at_word("EXISTS") -> return Err(DataBindError{message: "SQL has incomplete IF NOT EXISTS"})
+        cursor.index += 3
+    }
+    first_name :: cursor.take_name("table name")
+    table_name := first_name
+    if cursor.at(".") {
+        cursor.index += 1
+        table_name = cursor.take_name("qualified table name")
+    }
+    if !cursor.at("(") -> return Err(DataBindError{message: "SQL table declaration needs an open parenthesis"})
+    open :: cursor.index
+    depth := 0
+    close := -1
+    index := open
+    loop index < tokens.len() {
+        if tokens[index] == {
+            "(" -> depth += 1
+            ")" -> {
+                depth -= 1
+                if depth == 0 {
+                    close = index
+                    break
+                }
+                if depth < 0 -> return Err(DataBindError{message: "SQL table has an unmatched close parenthesis"})
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    if close < 0 -> return Err(DataBindError{message: "SQL table declaration is missing a close parenthesis"})
+    if close + 1 < tokens.len() -> return Err(DataBindError{message: "SQL has tokens after the table declaration"})
+
+    segments := [[String]]{}
+    start := open + 1
+    depth = 0
+    loop position in (open + 1)..<close {
+        if tokens[position] == {
+            "(" -> depth += 1
+            ")" -> depth -= 1
+            "," -> {
+                if depth == 0 {
+                    if position == start -> return Err(DataBindError{message: "SQL table has an empty declaration"})
+                    segments.push(tokens[start..<position])
+                    start = position + 1
+                }
+            }
+            else -> {}
+        }
+    }
+    if start == close -> return Err(DataBindError{message: "SQL table has an empty declaration"})
+    segments.push(tokens[start..<close])
+
+    names := [String]{}
+    fields := [FieldSeed]{}
+    required_columns := [String]{}
+    primary_seen := false
+    loop segment in segments {
+        first :: if segment.len() > 0 -> pkg_data_ascii_upper(segment[0]) else -> ""
+        if first == {
+            "PRIMARY" | "UNIQUE" | "FOREIGN" | "CHECK" | "CONSTRAINT" -> {
+                constraint :: pkg_data_sql_table_constraint(segment, primary_seen)
+                primary_seen = constraint.primary
+                loop column in constraint.required {
+                    if !required_columns.contains(column) -> required_columns.push(column)
+                }
+                next
+            }
+            else -> {}
+        }
+        if segment.len() < 2 -> return Err(DataBindError{message: "SQL column needs a name and type"})
+        column :: segment[0]
+        if !pkg_data_sql_is_name(column) -> return Err(DataBindError{message: "SQL column name is invalid"})
+        key :: pkg_ascii_lower(column)
+        if names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate column {column}"})
+        names.push(key)
+        column_cursor := SqlCursor{tokens: segment, index: 1}
+        ty :: column_cursor.column_type(column)
+        required := false
+        loop column_cursor.index < segment.len() {
+            if column_cursor.column_constraint() -> required = true
+        }
+        fields.push(FieldSeed{wire_name: column, ty: pkg_data_bound_scalar(ty), optional: !required, note: None})
+    }
+    if fields.len() == 0 -> return Err(DataBindError{message: "SQL table {table_name} has no columns"})
+    loop column in required_columns {
+        if !names.contains(column) -> return Err(DataBindError{message: "SQL PRIMARY KEY names an unknown column"})
+    }
+    out := [FieldSeed]{}
+    loop field in fields {
+        seeded := field
+        if required_columns.contains(pkg_ascii_lower(field.wire_name)) -> seeded.optional = false
+        out.push(seeded)
+    }
+    Ok(SqlTable{name: table_name, fields: out})
+}

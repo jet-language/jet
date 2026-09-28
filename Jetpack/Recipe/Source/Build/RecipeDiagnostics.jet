@@ -1,0 +1,223 @@
+// The Recipe area's error carriers and the build-recipe diagnostics
+// (E1236/E1237/E1238/E1275), ported from jetpack::Recipe.
+//
+// `RecipeDiagnostic` is the Rust `Diagnostic` a recipe run reports: code plus
+// what/why/fix text, exactly as `Diagnostic::error(code, what, why, fix, None)`
+// builds it. `RecipeError` is the area's one lower-level carrier: Rust
+// `io::Error` values keep their kind (`Io` for Core failures, the named kinds
+// for Jetpack's own refusals with their final text), and toolchain-update
+// failures carry their detail as `Update`.
+
+#Error
+pub struct RecipeDiagnostic {
+    pub code: String
+    pub what: String
+    pub why: String
+    pub fix: String
+
+    fn new(code: String, what: String, why: String, fix: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic{code, what, why, fix}
+    }
+
+    // E1236: a build fetch is unlocked or carries credentials in its URL.
+    fn e1236(url: String) -> RecipeDiagnostic !Never {
+        if recipe_credentialed_fetch_url(url) -> return RecipeDiagnostic.e1236_credentialed_url()
+        RecipeDiagnostic.new(
+            "E1236",
+            "a build fetch is not an allowed locked, credential-free input",
+            "build hooks admit only content-hash-pinned fetches without URL userinfo or credential query fields; `{url}` is not an allowed build input.",
+            "add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`."
+        )
+    }
+
+    fn e1236_offline(url: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a build step needs the network but the build is offline",
+            "`--offline` forbids any network fetch; `{url}` is not in the local fetch cache.",
+            "run once online to populate the cache, or `jet registry vendor` the source and rebuild."
+        )
+    }
+
+    fn e1236_no_transport(url: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a build step needs a remote source with no transport available",
+            "`{url}` is a remote URL; the build seam holds no network ability by itself (zero-external-crate compiler).",
+            "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline."
+        )
+    }
+
+    fn e1236_credentialed_url() -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a build fetch contains embedded credentials",
+            "build-hook fetch URLs are action inputs and may be retained in cache metadata and logs; URL userinfo and credential query or fragment fields are therefore not allowed.",
+            "remove the credentials, use a public or vendored source, and keep authentication outside the build hook."
+        )
+    }
+
+    fn e1236_fetch(url: String, reason: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a locked build fetch failed",
+            "fetching `{url}` failed: {reason}",
+            "check the URL and the locked hash, or vendor the source."
+        )
+    }
+
+    fn e1236_mismatch(url: String, want: String, got: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a locked build fetch did not match its hash",
+            "`{url}` was fetched but its sha256 was `{got}`, not the locked `{want}`.",
+            "the source changed upstream or was tampered with; update the locked hash deliberately."
+        )
+    }
+
+    fn e1236_invalid_hash(url: String, hash: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1236",
+            "a locked build fetch has an invalid sha256",
+            "the fetch of `{url}` uses `{hash}`; a locked fetch needs exactly 64 hexadecimal SHA-256 characters.",
+            "replace it with the source's canonical SHA-256 hash, or vendor the source."
+        )
+    }
+
+    // E1237: a build step wrote outside the package output root.
+    fn e1237(dest: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1237",
+            "a build step tried to write outside the output root: `{dest}`",
+            "a build may only install files under its own package output root. Writing elsewhere would let a build mutate the machine or other packages.",
+            "install into a path under the output root (no `..`, no absolute paths)."
+        )
+    }
+
+    fn e1237_source(source: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1237",
+            "a build step tried to read an unsafe recipe source: `{source}`",
+            "recipe inputs must be existing files or directories below the staged source root; absolute, parent, and escaping symlink paths are rejected",
+            "use a project-relative source path inside the staged tree"
+        )
+    }
+
+    // An install step failed while reading or copying its staged source.
+    fn e1237_install(what: String, why: String, fix: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new("E1237", what, why, fix)
+    }
+
+    // The sandbox boundary refused a source or output tree.
+    fn sandbox_copy(what: String, error: RecipeError) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1237",
+            what,
+            "the sandbox boundary rejected a source or output tree: {error.message()}",
+            "remove symlinks and special files from the recipe source and output, then retry."
+        )
+    }
+
+    // E1238: a recipe or staged plan violated its declared build graph contract.
+    fn e1238(tool: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1238",
+            "build tool `{tool}` is not a realized dependency",
+            "build tools must be realized `Pkg` dependencies of the package, so the build is reproducible. A build never falls through to host `/usr/bin`.",
+            "add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar."
+        )
+    }
+
+    fn e1238_plan(detail: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1238",
+            "build recipe or staged plan action is not a valid declared action graph",
+            "{detail}; staged plans use only declared inputs, realized tools, effects, platform facts, and finite acyclic outputs",
+            "declare every authority fact, fix the graph, and retry the stage."
+        )
+    }
+
+    fn e1238_output_conflict(previous: String, previous_step: String, output: String, step: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.e1238_plan("recipe output `{output}` overlaps output `{previous}` owned by `{previous_step}`; `{step}` cannot claim the same staged path")
+    }
+
+    // A build tool exited unsuccessfully. `detail` is the why text; declared
+    // arguments and tool output never reach the diagnostic.
+    fn e1238_tool_failed(tool: String, detail: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1238",
+            "build tool `{tool}` exited with an error",
+            detail,
+            "check the build recipe and the tool's arguments."
+        )
+    }
+
+    // A build workspace filesystem failure (`recipe_io_error`).
+    fn recipe_io(what: String, error: RecipeError) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1238",
+            what,
+            error.message(),
+            "fix the build workspace permissions and retry the recipe."
+        )
+    }
+
+    // E1275: executable recipe steps need the native sandbox.
+    fn e1275(detail: String) -> RecipeDiagnostic !Never {
+        RecipeDiagnostic.new(
+            "E1275",
+            "build sandboxing is required but unavailable",
+            detail,
+            "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."
+        )
+    }
+}
+
+#Error
+pub enum RecipeError {
+    Io(IOError)
+    InvalidInput(String)
+    InvalidData(String)
+    PermissionDenied(String)
+    AlreadyExists(String)
+    NotFound(String)
+    Other(String)
+    Update(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Io(error) -> "{error}"
+            .InvalidInput(text) | .InvalidData(text) | .PermissionDenied(text) | .AlreadyExists(text) | .NotFound(text) | .Other(text) | .Update(text) -> text
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .Io(inner) -> {
+                if inner == {
+                    .NotFound(_) -> true
+                    else -> false
+                }
+            }
+            .NotFound(_) -> true
+            else -> false
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::AlreadyExists` across both carriers.
+    fn is_already_exists(self) -> Bool !Never {
+        if self == {
+            .Io(inner) -> {
+                if inner == {
+                    .AlreadyExists(_) -> true
+                    else -> false
+                }
+            }
+            .AlreadyExists(_) -> true
+            else -> false
+        }
+    }
+}
+
+impl IOError -> RecipeError { RecipeError.Io(self) }

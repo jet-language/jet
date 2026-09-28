@@ -1,0 +1,178 @@
+// Dependency provenance (D-BOUND-PROV1) and the presentation-only lock diff.
+// Both are projections of facts already stored in the lock; neither adds a
+// lock field nor performs a second verification.
+
+// D-BOUND-PROV1: evidence recorded once per locked dependency. Empty fields
+// are meaningful: an unattested dependency stays resolvable by default, but
+// `authority.trust.require` can require the missing rung.
+pub struct DependencyProvenance {
+    pub transparency: ?String{None}
+    pub publisher: ?String{None}
+    pub build: ?String{None}
+
+    fn empty() -> DependencyProvenance !Never {
+        DependencyProvenance{transparency: None, publisher: None, build: None}
+    }
+}
+
+pub enum ProvenanceStatus {
+    Enforced
+    Verified
+    Recorded
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Enforced -> "enforced"
+            .Verified -> "verified"
+            .Recorded -> "recorded"
+        }
+    }
+}
+
+pub struct ProvenanceField {
+    pub value: String
+    pub status: ProvenanceStatus
+
+    fn not_recorded() -> ProvenanceField !Never {
+        ProvenanceField{value: "not recorded", status: ProvenanceStatus.Recorded}
+    }
+}
+
+pub struct DependencyProvenanceReport {
+    pub name: String
+    pub version: String
+    pub integrity: ProvenanceField
+    pub transparency: ProvenanceField
+    pub publisher: ProvenanceField
+    pub build: ProvenanceField
+    pub required_effects: [String]
+    pub granted_effects: [String]
+    pub denied_effects: [String]
+    pub authority: String
+}
+
+// Enforce one manifest-selected provenance floor over every non-root lock
+// record. Integrity is deliberately not part of this switch; E1204 remains
+// the unconditional store check.
+pub fn pkg_lock_enforce_provenance_requirement(lock: LockFile, requirement: ProvenanceRequirement) !LockError {
+    if requirement == ProvenanceRequirement.None -> return
+    loop package in lock.packages {
+        if package.is_root() -> next
+        report :: package.provenance_report()
+        satisfied :: if requirement == {
+            .None -> true
+            .Logged -> report.transparency.status == ProvenanceStatus.Verified
+            // An envelope's generic build/provenance text is only a recorded
+            // fact, never an attestation, so it cannot lift a package over an
+            // explicit `attested` floor.
+            .Attested -> pkg_lock_nonblank(package.provenance_build()) != None
+        }
+        if !satisfied -> return Err(LockError.Invalid("dependency `{package.name}` {requirement.label()} provenance requirement is not recorded"))
+    }
+}
+
+// A presentation-only package change. The lock schema stays the source of
+// truth; these copies let a renderer outlive its input lock values.
+pub enum LockPackageChangeKind {
+    Added
+    Removed
+    Updated
+}
+
+pub struct LockPackageChange {
+    pub name: String
+    pub kind: LockPackageChangeKind
+    pub before_version: ?String
+    pub after_version: ?String
+    pub before_trust: ?String
+    pub after_trust: ?String
+    pub before_output: ?String
+    pub after_output: ?String
+}
+
+pub struct LockChannelChange {
+    pub name: String
+    pub before: ?String
+    pub after: ?String
+}
+
+pub struct LockDiff {
+    pub packages: [LockPackageChange]
+    pub channels: [LockChannelChange]
+
+    // Compare two lock snapshots without changing or interpreting the lock
+    // schema. `None` is a missing snapshot: an empty side of the diff.
+    // Package and channel names are compared in name order.
+    fn between(before: ?LockFile, after: ?LockFile) -> LockDiff !Never {
+        package_names := [String]{}
+        channel_names := [String]{}
+        loop side in [?LockFile]{before, after} {
+            lock :: side ?? next
+            loop package in lock.packages -> package_names.push(package.name)
+            loop channel in lock.source_channels -> channel_names.push(channel.name)
+        }
+        packages := [LockPackageChange]{}
+        loop name in pkg_overlay_sorted_unique(package_names) {
+            old :: pkg_lock_diff_package(before, name)
+            new :: pkg_lock_diff_package(after, name)
+            if old == {
+                .None -> {
+                    package :: new ?? next
+                    packages.push(LockPackageChange{name: name, kind: LockPackageChangeKind.Added, before_version: None, after_version: Val(package.version), before_trust: None, after_trust: Val(package.trust_grade()), before_output: None, after_output: package.output()})
+                }
+                .Val(previous) -> if new == {
+                    .None -> packages.push(LockPackageChange{name: name, kind: LockPackageChangeKind.Removed, before_version: Val(previous.version), after_version: None, before_trust: Val(previous.trust_grade()), after_trust: None, before_output: previous.output(), after_output: None})
+                    .Val(current) -> {
+                        if previous != current {
+                            packages.push(LockPackageChange{name: name, kind: LockPackageChangeKind.Updated, before_version: Val(previous.version), after_version: Val(current.version), before_trust: Val(previous.trust_grade()), after_trust: Val(current.trust_grade()), before_output: previous.output(), after_output: current.output()})
+                        }
+                    }
+                }
+            }
+        }
+        channels := [LockChannelChange]{}
+        loop name in pkg_overlay_sorted_unique(channel_names) {
+            old :: pkg_lock_diff_channel_exact(before, name)
+            new :: pkg_lock_diff_channel_exact(after, name)
+            if old != new -> channels.push(LockChannelChange{name: name, before: old, after: new})
+        }
+        LockDiff{packages: packages, channels: channels}
+    }
+
+    fn added_count(self) -> Int !Never {
+        self.count(LockPackageChangeKind.Added)
+    }
+
+    fn removed_count(self) -> Int !Never {
+        self.count(LockPackageChangeKind.Removed)
+    }
+
+    fn updated_count(self) -> Int !Never {
+        self.count(LockPackageChangeKind.Updated)
+    }
+
+    fn is_empty(self) -> Bool !Never {
+        self.packages.len() == 0 && self.channels.len() == 0
+    }
+
+    fn count(self, kind: LockPackageChangeKind) -> Int !Never {
+        total := 0
+        loop change in self.packages {
+            if change.kind == kind -> total += 1
+        }
+        total
+    }
+}
+
+// The first package record named `name` in `lock`.
+fn pkg_lock_diff_package(lock: ?LockFile, name: String) -> ?LockedPackage !Never {
+    present :: lock ?? return None
+    present.find_package(name)
+}
+
+// The exact ref of the first source channel named `name` in `lock`.
+fn pkg_lock_diff_channel_exact(lock: ?LockFile, name: String) -> ?String !Never {
+    present :: lock ?? return None
+    channel :: present.find_source_channel(name) ?? return None
+    Val(channel.exact)
+}

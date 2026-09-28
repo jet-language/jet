@@ -1,0 +1,196 @@
+// Policy gate and receipt for the one-shot local Nix compatibility import
+// (Rust NixFallbackPolicy.rs). This file owns only the invocation policy and
+// its receipt; the provider owns lock identity, output parsing and Store
+// publication. The gate runs before executable discovery, so `--offline`
+// cannot even inspect a Nix executable.
+
+@NIX_FALLBACK_POLICY_ENV :: "JETPACK_NIX_FALLBACK_POLICY"
+@NIX_FALLBACK_BIN_ENV :: "JETPACK_NIX_FALLBACK_BIN"
+@NIX_FALLBACK_ALLOW_VALUE :: "allow"
+@NIX_FALLBACK_RECEIPT_SCHEMA :: "jetpack.nix-fallback-policy.v1"
+@NIX_FALLBACK_MAX_STDOUT_BYTES :: 67108864
+@NIX_FALLBACK_MAX_STDERR_BYTES :: 16384
+// Nix environment the one-shot build must not inherit.
+@NIX_FALLBACK_SCRUBBED_ENV :: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
+
+pub enum NixFallbackMode {
+    Offline
+    Ci
+    NonInteractive
+    Interactive
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Offline -> "offline"
+            .Ci -> "ci"
+            .NonInteractive -> "non-interactive"
+            .Interactive -> "interactive"
+        }
+    }
+}
+
+// The machine-readable decision of one policy check.
+pub struct NixFallbackPolicyReceipt {
+    pub mode: NixFallbackMode
+    pub allowed: Bool
+    pub explicit: Bool
+    pub policy_value: String
+    pub reason: String
+    pub invocations: Int
+
+    fn json(self) -> String !Never {
+        nix_fallback_json(DataTree.Object([
+            "schema": DataTree.Text(@NIX_FALLBACK_RECEIPT_SCHEMA),
+            "mode": DataTree.Text(self.mode.label()),
+            "allowed": DataTree.Bool(self.allowed),
+            "explicit": DataTree.Bool(self.explicit),
+            "policy": DataTree.Text(self.policy_value),
+            "reason": DataTree.Text(self.reason),
+            "nix_invocations": DataTree.Int(self.invocations),
+        ]))
+    }
+
+    // Receipt facts retained with the producer record, key-ordered.
+    fn facts(self) -> [String: String] !Never {
+        facts := [String: String]{}
+        facts["nix.fallback.policy.schema"] = @NIX_FALLBACK_RECEIPT_SCHEMA
+        facts["nix.fallback.policy.mode"] = self.mode.label()
+        facts["nix.fallback.policy.allowed"] = "{self.allowed}"
+        facts["nix.fallback.policy.explicit"] = "{self.explicit}"
+        facts["nix.fallback.policy.value"] = self.policy_value
+        facts["nix.fallback.policy.reason"] = self.reason
+        facts["nix.fallback.policy.invocations"] = "{self.invocations}"
+        facts["nix.fallback.policy.receipt"] = self.json()
+        nixeval_key_ordered(facts)
+    }
+
+    // The refusal carried by a denied receipt.
+    fn refusal(self) -> NixError !Never {
+        NixError.Fallback("{self.reason}; receipt={self.json()}")
+    }
+}
+
+// The captured output of one permitted local Nix build and its facts.
+pub struct NixFallbackRun {
+    pub stdout: String
+    pub facts: [String: String]
+}
+
+// The pure policy decision for the observed offline, CI, terminal and
+// policy-variable state.
+pub fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: String) -> NixFallbackPolicyReceipt !Never {
+    explicit :: policy != ""
+    mode :: if {
+        offline -> NixFallbackMode.Offline
+        ci -> NixFallbackMode.Ci
+        interactive -> NixFallbackMode.Interactive
+        else -> NixFallbackMode.NonInteractive
+    }
+    valid_allow :: policy == @NIX_FALLBACK_ALLOW_VALUE
+    allowed :: !offline && (valid_allow || (!explicit && !ci && interactive))
+    reason :: if {
+        offline -> "--offline forbids local Nix fallback; no executable was inspected or invoked"
+        policy == "deny" -> "{@NIX_FALLBACK_POLICY_ENV}=deny forbids local Nix fallback"
+        (ci || !interactive) && !valid_allow -> "CI and non-interactive local Nix fallback require {@NIX_FALLBACK_POLICY_ENV}={@NIX_FALLBACK_ALLOW_VALUE}"
+        explicit && !valid_allow -> "{@NIX_FALLBACK_POLICY_ENV} must be exactly {@NIX_FALLBACK_ALLOW_VALUE}"
+        else -> "local Nix fallback allowed by interactive policy"
+    }
+    NixFallbackPolicyReceipt{
+        mode,
+        allowed,
+        explicit,
+        policy_value: if explicit -> ~policy else -> "unset",
+        reason,
+        invocations: if allowed -> 1 else -> 0,
+    }
+}
+
+// The policy decision for this process's environment and terminals.
+fn nix_fallback_authorize_from_environment(offline: Bool) -[Env]> NixFallbackPolicyReceipt !NixError {
+    ci :: (sys.get("CI") ?? "") != ""
+    interactive :: term.stdin().is_terminal() && term.stdout().is_terminal()
+    policy :: sys.get(@NIX_FALLBACK_POLICY_ENV) ?? ""
+    receipt :: nix_fallback_decide(offline, ci, interactive, policy)
+    if !receipt.allowed -> return Err(receipt.refusal())
+    Ok(receipt)
+}
+
+pub fn nix_fallback_allowed_from_environment(offline: Bool) -[Env]> Bool !Never {
+    if nix_fallback_authorize_from_environment(offline) == {
+        .Ok(_) -> true
+        else -> false
+    }
+}
+
+// Run one exact-lock compatibility evaluation after the policy gate passes.
+// The only Nix build process is spawned after the gate.
+pub fn nix_fallback_run(project: String, source_name: String, revision: String, system: String, attr: [String], offline: Bool) -[FS, Env, Exec, Time.Wait]> NixFallbackRun !NixError {
+    policy :: nix_fallback_authorize_from_environment(offline)
+    executable :: nix_fallback_discover_executable()
+    locked_source :: nix_fallback_locked_source_name(project, source_name, revision)
+    identity :: NixFallbackIdentity.from_project(project, locked_source, executable, system, attr)
+    if identity.nixpkgs_revision != revision -> return Err(NixError.Fallback("local Nix fallback revision differs from the catalog miss"))
+    lock_sha256 :: NixFallbackIdentity.project_lock_sha256(project, locked_source)
+    identity.validate_request(identity.locked_nixpkgs_input(), system, attr, lock_sha256)
+
+    // The lock stores the exact revision as provenance; Nix's flake CLI uses
+    // the same immutable revision in the path component before the attr.
+    input :: "github:NixOS/nixpkgs/{identity.nixpkgs_revision}#{identity.attrpath()}"
+    spec := process.cmd([String]{identity.executable, "build", "--json", "--no-link", "--no-write-lock-file", "--system", identity.system, input})
+    loop name in @NIX_FALLBACK_SCRUBBED_ENV -> spec = spec.env_remove(name)
+    receipt :: spec.stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not invoke the bound Nix executable: {err}"))
+    if receipt.output.bytes().len() > @NIX_FALLBACK_MAX_STDOUT_BYTES -> return Err(NixError.Fallback("local Nix fallback output exceeded {@NIX_FALLBACK_MAX_STDOUT_BYTES} bytes"))
+    if !receipt.success {
+        stderr :: nix_truncate_utf8(receipt.errors.trim(), @NIX_FALLBACK_MAX_STDERR_BYTES)
+        return Err(NixError.Fallback("local Nix fallback failed with status exit status: {receipt.code}; {stderr}"))
+    }
+
+    facts := policy.facts()
+    facts["nix.fallback.provenance"] = identity.provenance()
+    facts["nix.fallback.executable"] = identity.executable
+    facts["nix.fallback.executable.sha256"] = identity.executable_sha256
+    facts["nix.fallback.version"] = identity.version
+    facts["nix.fallback.locked-input"] = identity.locked_nixpkgs_input()
+    facts["nix.fallback.request"] = input
+    facts["nix.fallback.system"] = identity.system
+    facts["nix.fallback.attr"] = identity.attrpath()
+    facts["nix.fallback.lock.sha256"] = identity.lock_sha256
+    facts["nix.fallback.invocation"] = "one-shot"
+    Ok(NixFallbackRun{stdout: receipt.output, facts: nixeval_key_ordered(facts)})
+}
+
+// The lock source (`preferred`, then `nixpkgs`) pinned exactly to `revision`.
+fn nix_fallback_locked_source_name(project: String, preferred: String, revision: String) -[FS]> String !NixError {
+    expected :: "{@NIX_LOCKED_NIXPKGS_PREFIX}{revision}"
+    lock :: pkg_lock_load(project) ?? return Err(NixError.Fallback("project lock is unavailable for local Nix fallback"))
+    candidates := [String]{preferred}
+    if preferred != @REF_SOURCE_NIXPKGS -> candidates.push(@REF_SOURCE_NIXPKGS)
+    loop name in candidates {
+        loop channel in lock.source_channels {
+            if channel.name == name && channel.exact == expected -> return Ok(name)
+        }
+    }
+    Err(NixError.Fallback("project lock has no exact nixpkgs source matching the catalog miss"))
+}
+
+// `JETPACK_NIX_FALLBACK_BIN`, else the first `nix` regular file on PATH.
+fn nix_fallback_discover_executable() -[FS, Env]> String !NixError {
+    if sys.get(@NIX_FALLBACK_BIN_ENV) == {
+        .Val(path) -> {
+            if path == "" -> return Err(NixError.Fallback("{@NIX_FALLBACK_BIN_ENV} is empty"))
+            return Ok(path)
+        }
+        else -> {}
+    }
+    found :: files.which("nix") ?? return Err(NixError.Fallback("local Nix fallback requires an installed `nix` executable on PATH"))
+    Ok(found)
+}
+
+// At most `limit` bytes of `text`, cut back to a UTF-8 scalar boundary.
+fn nix_truncate_utf8(text: String, limit: Int) -> String !Never {
+    raw :: text.bytes()
+    if raw.len() <= limit -> return ~text
+    end := limit
+    loop end > 0 && (Int.from_u8(raw[end]) & 192) == 128 -> end -= 1
+    pkg_bytes_text(raw, 0, end)
+}

@@ -133,3 +133,84 @@ fn foundation_starts_alphabetic(text: String) -> Bool !Never {
     loop scalar in text.chars() -> return "{scalar}".is_alphabetic()
     false
 }
+
+// `sanitize_crate_name(raw)`: a generated Rust crate name from a stem, every
+// byte outside ASCII word characters replaced by `_`, `out` when empty, and a
+// leading digit guarded by `_`.
+pub fn foundation_sanitize_crate_name(raw: String) -> String !Never {
+    out := [String]{}
+    loop scalar in raw.chars() {
+        text :: "{scalar}"
+        bytes :: text.bytes()
+        word :: bytes.len() == 1 && foundation_ascii_word(Int.from_u8(bytes[0]))
+        out.push(if word -> text else -> "_")
+    }
+    name := out.join("")
+    if name == "" -> name = "out"
+    first :: Int.from_u8(name.bytes()[0])
+    if first >= 48 && first <= 57 -> name = "_{name}"
+    name
+}
+
+fn foundation_ascii_word(code: Int) -> Bool !Never {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+// `sanitize_generated_name(raw, NameCase::Snake, fallback)`: turn an external
+// name into a legal snake-case Jet field, function, or parameter name. An
+// upper-case letter after a lower-case letter or digit starts a new `_` word,
+// every letter is lower-cased, and a reserved result gains `_field`.
+pub fn foundation_generated_snake_name(input: String, fallback: String) -> String !Never {
+    raw := input
+    loop raw.starts_with("@") || raw.starts_with("$") {
+        raw = raw.removeprefix("@").removeprefix("$")
+    }
+    raw = raw.removeprefix("{{")
+    normalized := ""
+    previous_lower_or_digit := false
+    loop scalar in raw.chars() {
+        text :: "{scalar}"
+        if {
+            text == "_" -> {
+                if !normalized.ends_with("_") -> normalized = "{normalized}_"
+                previous_lower_or_digit = false
+            }
+            text.is_alphabetic() || text.is_numeric() -> {
+                upper :: text != text.to_lower()
+                lower :: text != text.to_upper()
+                if upper && previous_lower_or_digit && !normalized.ends_with("_") -> normalized = "{normalized}_"
+                normalized = "{normalized}{foundation_first_scalar(text.to_lower())}"
+                digit :: text.bytes().len() == 1 && Int.from_u8(text.bytes()[0]) >= 48 && Int.from_u8(text.bytes()[0]) <= 57
+                previous_lower_or_digit = lower || digit
+            }
+            normalized == "" -> previous_lower_or_digit = false
+            !normalized.ends_with("_") -> {
+                normalized = "{normalized}_"
+                previous_lower_or_digit = false
+            }
+            else -> {}
+        }
+    }
+    loop normalized.ends_with("_") -> normalized = normalized.removesuffix("_")
+    if normalized == "" -> normalized = fallback
+    // Every letter is already lower-case, so `canonical_name_case(_, Snake)`
+    // keeps the normalized spelling.
+    result := normalized
+    loop result.ends_with("_") -> result = result.removesuffix("_")
+    if result == "" -> result = fallback
+    // A preserved soft-public `_` is legal only before an alphabetic name.
+    body :: result.removeprefix("_")
+    if !foundation_starts_alphabetic(body) && body != "" -> result = body
+    if result == "" -> result = fallback
+    if !foundation_starts_alphabetic(result.removeprefix("_")) && result.removeprefix("_") != "" -> result = "field_{result}"
+    loop result == "_" || result.starts_with("__") || foundation_is_reserved_generated_name(result) {
+        result = "{result}_field"
+    }
+    result
+}
+
+// The first Unicode scalar of `text` (`to_lowercase().take(1)`).
+fn foundation_first_scalar(text: String) -> String !Never {
+    loop scalar in text.chars() -> return "{scalar}"
+    ""
+}

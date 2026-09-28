@@ -1,0 +1,121 @@
+// Environment-shell presets: named compositions of packages and variables
+// that may be selected explicitly or ambiently by hostname and user.
+
+pub struct PresetSpec {
+    pub name: String{""}
+    pub extends: [String]{[String]{}}
+    pub packages: [String]{[String]{}}
+    pub variables: [String: String]{[String: String]{}}
+    pub hostname: ?String{None}
+    pub user: ?String{None}
+}
+
+pub struct ResolvedPreset {
+    pub name: String{""}
+    // Ambient selection before inheritance expansion. Explicit CLI selection
+    // chooses one preset; ambient hostname and user matches may merge.
+    pub selected_presets: [String]{[String]{}}
+    pub applied: [String]{[String]{}}
+    pub packages: [String]{[String]{}}
+    pub variables: [String: String]{[String: String]{}}
+}
+
+#Error
+pub enum PresetError {
+    Missing(String)
+    Cycle([String])
+    Conflict(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Missing(name) -> "preset '{name}' does not exist"
+            .Cycle(names) -> "preset inheritance cycle: {names.join(" -> ")}"
+            .Conflict(name) -> "preset '{name}' is declared with conflicting facts"
+        }
+    }
+}
+
+pub struct PresetSet {
+    pub presets: [String: PresetSpec]{[String: PresetSpec]{}}
+
+    fn insert(&self, preset: PresetSpec) !PresetError {
+        self.insert_checked(preset)
+    }
+
+    // An equal re-declaration is accepted; a different one under the same
+    // name is a conflict.
+    fn insert_checked(&self, preset: PresetSpec) !PresetError {
+        if self.presets.get(preset.name) == .Val(existing) {
+            if existing != preset -> return Err(PresetError.Conflict(preset.name))
+            return Ok()
+        }
+        self.presets[preset.name] = preset
+    }
+
+    fn resolve(self, name: String) -> ResolvedPreset !PresetError {
+        self.resolve_many([String]{name})
+    }
+
+    fn resolve_many(self, names: [String]) -> ResolvedPreset !PresetError {
+        selected := [String]{}
+        loop name in names {
+            if !selected.contains(name) -> selected.push(name)
+        }
+        resolved := ResolvedPreset{name: selected.join("+"), selected_presets: selected}
+        stack := [String]{}
+        loop name in selected -> self.resolve_into(name, &stack, &resolved)
+        Ok(resolved)
+    }
+
+    fn auto_select(self, hostname: String, user: String) -> ?String !Never {
+        selected :: self.auto_select_many(hostname, user)
+        if selected.len() == 0 -> return None
+        Val(selected[0])
+    }
+
+    // Select ambient presets in deterministic priority order. All hostname
+    // matches merge before all user matches; `default` is the last resort.
+    fn auto_select_many(self, hostname: String, user: String) -> [String] !Never {
+        names :: envmodel_sorted_keys(self.presets)
+        selected := [String]{}
+        loop name in names {
+            if envmodel_optional_is(self.presets[name].hostname, hostname) -> selected.push(name)
+        }
+        loop name in names {
+            if envmodel_optional_is(self.presets[name].user, user) && !selected.contains(name) -> selected.push(name)
+        }
+        if selected.len() > 0 -> return selected
+        if self.presets.get("default") != None -> return [String]{"default"}
+        [String]{}
+    }
+
+    fn resolve_into(self, name: String, stack: &[String], resolved: &ResolvedPreset) !PresetError {
+        if stack.contains(name) {
+            cycle := [String]{}
+            started := false
+            loop item in stack {
+                if item == name -> started = true
+                if started -> cycle.push(item)
+            }
+            cycle.push(name)
+            return Err(PresetError.Cycle(cycle))
+        }
+        preset :: self.presets.get(name) ?? return Err(PresetError.Missing(name))
+        stack.push(name)
+        loop parent in preset.extends -> self.resolve_into(parent, &stack, &resolved)
+        if !resolved.applied.contains(name) -> resolved.applied.push(name)
+        loop package in preset.packages {
+            if !resolved.packages.contains(package) -> resolved.packages.push(package)
+        }
+        loop key in envmodel_sorted_keys(preset.variables) {
+            value :: preset.variables[key]
+            if resolved.variables.get(key) == {
+                .Val(existing) -> {
+                    if existing != value -> return Err(PresetError.Conflict("{name}.{key}"))
+                }
+                .None -> resolved.variables[key] = value
+            }
+        }
+        _ := stack.pop()
+    }
+}

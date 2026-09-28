@@ -1,0 +1,192 @@
+// The shared pure evaluator for module values: the build-I/O gate, one
+// expression through comptime, and the named computed-field graph resolved
+// in dependency order with recorded provenance.
+
+// What every module value evaluation reads besides its own expression: the
+// directory `embed_file` resolves against and the source's top-level pure
+// functions.
+pub struct ModuleEvalScope {
+    pub base_dir: String
+    pub funcs: [String: Func]
+}
+
+// One named field expression and the span that names it.
+pub struct NamedFieldExpr {
+    pub span: Span
+    pub expr: Expr
+}
+
+pub struct ComputedFieldProvenance {
+    pub field: String
+    pub dependencies: [String]
+    pub pure: Bool
+    pub source: String
+}
+
+pub struct ComputedFields {
+    pub values: [String: CtValue]
+    pub provenance: [ComputedFieldProvenance]
+}
+
+// Resolution state of one field during the dependency walk.
+enum ComputedFieldState {
+    Visiting
+    Done
+}
+
+// E3402: builtins that perform ambient I/O or network access. A sandboxed
+// package build / module-field evaluation must reach none of them. The fs/net
+// names are future-proofing for the build-from-source path; print/eprint/input
+// are reachable today, so the diagnostic is live (I4).
+fn envmodel_is_ambient_io_builtin(name: String) -> Bool !Never {
+    if name == {
+        "read_file" | "write_file" | "fetch" | "http_get" | "env_var" | "print" | "eprint" | "input" | "read_all_input" -> true
+        else -> false
+    }
+}
+
+// Scan a field expression for an ambient-I/O call; the first one fires E3402.
+pub fn envmodel_check_build_io(value: Expr) !EnvModelEvalError {
+    loop site in comptime_walk_calls(value) {
+        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: sema_e3402(site.name, Val(site.span))})
+    }
+}
+
+// `expr` with every enclosing parenthesis removed (Rust `Expr::without_parens`).
+fn envmodel_unparen(expr: Expr) -> Expr !Never {
+    current := expr
+    loop {
+        if current == {
+            .Paren(inner, _) -> current = inner
+            else -> return current
+        }
+    }
+}
+
+// The sibling field names `expr` reads, sorted and de-duplicated.
+pub fn envmodel_dependencies_for_expression(expr: Expr, field_names: [String]) -> [String] !Never {
+    dependencies := [String]{}
+    loop site in comptime_walk_identifiers(expr) {
+        if field_names.contains(site.name) && !dependencies.contains(site.name) -> dependencies.push(site.name)
+    }
+    dependencies.sort()
+    dependencies
+}
+
+// Evaluate one expression through the same purity and build-I/O gate used by
+// the named-field graph. Namespace-specific record shapes use this helper
+// for their nested values; they do not create a second evaluator.
+pub fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue !EnvModelEvalError {
+    envmodel_check_build_io(expr)
+    if envmodel_unparen(expr) == {
+        .Ident(name, _) -> {
+            if globals.get(name) == {
+                .Val(value) -> return Ok(value)
+                .None -> {}
+            }
+        }
+        .ListLit(values, _) -> {
+            items := [CtValue]{}
+            loop value in values -> items.push(envmodel_evaluate_expression(value, globals, scope))
+            return Ok(CtValue.List(items))
+        }
+        .StructLit(type_name, _, _, _, fields, _, _) -> {
+            lowered := [NamedCtValue]{}
+            loop field in fields -> lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)})
+            return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
+        }
+        .EnumLit(type_name, variant, _, args, _, _) -> {
+            lowered := [CtEnumArg]{}
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_expression(value, globals, scope)})
+                    .Named(label, value) -> lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_expression(value, globals, scope)})
+                }
+            }
+            return Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
+        }
+        .MapLit(entries, _) -> {
+            lowered := [CtMapEntry]{}
+            loop entry in entries {
+                key_value :: envmodel_evaluate_expression(entry.key, globals, scope)
+                key :: ast_comptime_key_from_value(key_value) ?? return Err(envmodel_error("E1333", "module map keys must be deterministic scalar values", "named module facts become stable plan keys", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
+                value :: envmodel_evaluate_expression(entry.value, globals, scope)
+                if !envmodel_ct_map_insert(&lowered, key, value) {
+                    return Err(envmodel_error("E1333", "module map contains a duplicate key", "one module fact cannot silently choose between two values for the same key", "remove the duplicate key or merge its values", Val(expr_span(expr))))
+                }
+            }
+            return Ok(CtValue.Map(lowered))
+        }
+        else -> {}
+    }
+    envmodel_comptime_evaluate(expr, globals, scope)
+}
+
+// The canonical Compiler comptime interpreter over this source's pure
+// functions; module values never declare extern names.
+pub fn envmodel_comptime_evaluate(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue !EnvModelEvalError {
+    Ok(comptime_evaluate(expr, scope.funcs, [String]{}, scope.base_dir, globals))
+}
+
+// Insert into a key-ordered comptime map (Rust `BTreeMap::insert`); false when
+// the key was already present, in which case the map is unchanged.
+pub fn envmodel_ct_map_insert(entries: &[CtMapEntry], key: CtKey, value: CtValue) -> Bool !Never {
+    index := 0
+    loop index < entries.len() {
+        order :: ast_comptime_key_compare(entries[index].key, key)
+        if order == 0 -> return false
+        if order > 0 -> break
+        index += 1
+    }
+    entries.insert(index, CtMapEntry{key: key, value: value})
+    true
+}
+
+// Resolve every named field in dependency order (sorted names first), then
+// record each field's dependencies and exact source text as provenance. A
+// dependency cycle is E0338 with the caller's why/fix copy.
+pub fn envmodel_evaluate_named_fields(fields: [String: NamedFieldExpr], globals: [String: CtValue], scope: ModuleEvalScope, source: ?String, cycle_why: String, cycle_fix: String) -> ComputedFields !EnvModelEvalError {
+    states := [String: ComputedFieldState]{}
+    stack := [String]{}
+    values := globals
+    names := fields.keys().to_list()
+    names.sort()
+    loop name in names {
+        envmodel_resolve_named_field(name, fields, names, &states, &values, &stack, scope, cycle_why, cycle_fix)
+    }
+    source_bytes :: (source ?? "").bytes()
+    provenance := [ComputedFieldProvenance]{}
+    loop field in names {
+        named :: fields[field]
+        text :: if source == None -> "" else -> pkg_bytes_text(source_bytes, named.span.start, named.span.end)
+        provenance.push(ComputedFieldProvenance{field: field, dependencies: envmodel_dependencies_for_expression(named.expr, names), pure: true, source: text.trim()})
+    }
+    Ok(ComputedFields{values: values, provenance: provenance})
+}
+
+fn envmodel_resolve_named_field(name: String, fields: [String: NamedFieldExpr], field_names: [String], states: &[String: ComputedFieldState], values: &[String: CtValue], stack: &[String], scope: ModuleEvalScope, cycle_why: String, cycle_fix: String) !EnvModelEvalError {
+    if states.get(name) == Val(ComputedFieldState.Done) -> return
+    named :: fields.get(name) ?? return
+    if states.get(name) == Val(ComputedFieldState.Visiting) {
+        start := 0
+        loop index in 0..<stack.len() {
+            if stack[index] == name {
+                start = index
+                break
+            }
+        }
+        cycle := [String]{}
+        loop index in start..<stack.len() -> cycle.push(stack[index])
+        cycle.push(name)
+        return Err(envmodel_error("E0338", "computed module fields form a cycle: {cycle.join(" -> ")}", cycle_why, cycle_fix, Val(named.span)))
+    }
+    states[name] = ComputedFieldState.Visiting
+    stack.push(name)
+    loop dependency in envmodel_dependencies_for_expression(named.expr, field_names) {
+        envmodel_resolve_named_field(dependency, fields, field_names, &states, &values, &stack, scope, cycle_why, cycle_fix)
+    }
+    value :: envmodel_evaluate_expression(named.expr, values, scope)
+    values[name] = value
+    _ := stack.pop()
+    states[name] = ComputedFieldState.Done
+}

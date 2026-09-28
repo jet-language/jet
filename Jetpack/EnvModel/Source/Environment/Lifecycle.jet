@@ -1,0 +1,84 @@
+// Environment lifecycle facts: dotenv sources, unset names, enter hooks and
+// checks, the formatter package, the Git hook directory, and reload policy.
+
+pub enum HookAction {
+    // The normal lifecycle spelling names one checked `#Job fn`.
+    Task(String)
+    // The explicit expert escape remains a trust-gated command record.
+    Command(String)
+}
+
+pub struct HookSpec {
+    pub name: String
+    pub action: HookAction
+    pub cwd: ?String{None}
+    pub trusted: Bool{false}
+}
+
+// One dotenv source and its disclosure policy. A bare string uses the safe
+// beginner default: load the file's ordinary variables. The record form adds
+// an explicit allowlist and names which allowed variables are secrets. Secret
+// names are facts only; values never enter plan fingerprints or dossiers.
+pub struct DotenvSpec {
+    pub file: String{""}
+    pub allow: [String]{[String]{}}
+    pub secrets: [String]{[String]{}}
+
+    fn fingerprint(self) -> String !Never {
+        "{self.file}\t{self.allow.join(",")}\t{self.secrets.join(",")}"
+    }
+}
+
+// D-ECO12=A: one typed package ref used by `jet fmt --lang`. The formatter is
+// a package fact, not a shell command or a second process supervisor.
+pub struct FormatterSpec {
+    pub package: String
+}
+
+pub enum ReloadPolicy {
+    Never
+    Prompt
+    Watch(paths: [String], debounce_ms: Int)
+}
+
+pub struct EnvironmentLifecycle {
+    pub dotenv: [DotenvSpec]{[DotenvSpec]{}}
+    pub unset: [String]{[String]{}}
+    pub on_enter: [HookSpec]{[HookSpec]{}}
+    pub checks: [HookSpec]{[HookSpec]{}}
+    // D-ECO12=A: external formatter package for non-`.jet` files.
+    pub formatter: ?FormatterSpec{None}
+    // D-ECO6=A: project-relative Git hook directory used by native Git.
+    pub git_hooks_path: ?String{None}
+    pub reload: ReloadPolicy{ReloadPolicy.Prompt}
+    // Distinguish the default policy from an author-provided policy when
+    // several imported modules are merged.
+    pub reload_explicit: Bool{false}
+
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{}
+        if self.formatter == .Val(formatter) -> lines.push("formatter\t{formatter.package}\n")
+        loop dotenv in self.dotenv -> lines.push("dotenv\t{dotenv.fingerprint()}\n")
+        loop name in self.unset -> lines.push("unset\t{name}\n")
+        hooks := [HookSpec]{}
+        hooks.extend(self.on_enter)
+        hooks.extend(self.checks)
+        loop hook in hooks {
+            action :: if hook.action == {
+                .Task(task) -> "task:{task}"
+                .Command(command) -> "command:{command}"
+            }
+            cwd :: hook.cwd ?? ""
+            trust :: if hook.trusted -> "trusted" else -> "untrusted"
+            lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
+        }
+        if self.git_hooks_path == .Val(path) -> lines.push("git-hooks-path\t{path}\n")
+        lines.push(if self.reload == {
+            .Never -> "reload\tnever\n"
+            .Prompt -> "reload\tprompt\n"
+            .Watch(paths, debounce_ms) -> "reload\twatch\t{paths.join(",")}\t{debounce_ms}\n"
+        })
+        lines.push(if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n")
+        lines.join("")
+    }
+}

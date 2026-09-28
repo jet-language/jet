@@ -1,0 +1,458 @@
+// Host-owned binary-cache bindings (Rust `Store/Cache.rs`, binding half).
+//
+// Workspace policy may request cache roles. The host binding maps a role to
+// ordered mirrors, trust material, and an optional typed credential-provider
+// label. Secrets never enter the binding file, URLs, argv, locks, or logs:
+// the binding names the trust key's host path, and the key bytes stay in
+// that file. This file also owns the host-path hygiene shared by the cache
+// transfer boundary and the local-output sealing helpers other Store code
+// calls before an output becomes reusable.
+
+@STORE_CACHE_BINDING_MAGIC :: "jet-cache-bind-v1"
+@STORE_CACHE_MAX_BINDING_BYTES :: 1048576
+@STORE_CACHE_MAX_INFO_BYTES :: 1048576
+@STORE_CACHE_TRUST_KEY_MAX_BYTES :: 4096
+
+// One host-owned cache role binding.
+pub struct CacheBinding {
+    pub role: String
+    // Ordered, host-owned mirror endpoints. The order is semantic.
+    pub mirrors: [String]
+    // Host path to the trust key. The key bytes are never serialized in the
+    // binding and never returned by inspection APIs.
+    pub trust_key: String
+    pub credential_provider: ?String
+    // Separate write authority. Read bindings cannot publish by accident.
+    pub allow_write: Bool
+
+    fn validate(self) !StoreError {
+        store_cache_validate_component(self.role, "cache role")
+        if self.mirrors.len() == 0 -> return Err(StoreError.InvalidData("cache binding needs at least one mirror"))
+        seen := [String]{}
+        loop mirror in self.mirrors {
+            store_cache_validate_endpoint(mirror)
+            endpoint :: store_cache_parse_endpoint(mirror)
+            store_cache_validate_endpoint_binding(self, endpoint, self.allow_write)
+            if seen.contains(mirror) -> return Err(StoreError.InvalidData("cache binding contains a duplicate mirror"))
+            seen.push(mirror)
+        }
+        if !self.trust_key.starts_with("/") -> return Err(StoreError.InvalidData("cache trust key must be an absolute host path"))
+        store_cache_validate_path_components(self.trust_key)
+        if self.credential_provider == {
+            .Val(provider) -> {
+                store_cache_validate_text(provider, "credential provider")
+                if provider == "" -> return Err(StoreError.InvalidData("credential provider cannot be empty"))
+            }
+            .None -> {}
+        }
+    }
+
+    // The `jet-cache-bind-v1` line format.
+    fn encode(self) -> String !StoreError {
+        self.validate()
+        out := "{@STORE_CACHE_BINDING_MAGIC}\n"
+        store_cache_line(&out, "role", self.role)
+        store_cache_line(&out, "key", self.trust_key)
+        store_cache_line(&out, "write", if self.allow_write -> "true" else -> "false")
+        if self.credential_provider == {
+            .Val(provider) -> store_cache_line(&out, "credential", provider)
+            .None -> {}
+        }
+        loop mirror in self.mirrors -> store_cache_line(&out, "mirror", mirror)
+        Ok(out)
+    }
+
+    fn decode(text: String) -> CacheBinding !StoreError {
+        if text.bytes().len() > @STORE_CACHE_MAX_BINDING_BYTES -> return Err(StoreError.InvalidData("cache binding is too large"))
+        lines :: store_cache_lines(text)
+        if lines.len() == 0 || lines[0] != @STORE_CACHE_BINDING_MAGIC -> return Err(StoreError.InvalidData("cache binding has an unknown format"))
+        role := None
+        key := None
+        credential := None
+        mirrors := [String]{}
+        allow_write := false
+        write_seen := false
+        loop raw in lines[1..<lines.len()] {
+            pair :: raw.split_once("=") ?? return Err(StoreError.InvalidData("cache binding has a malformed line"))
+            name :: pair.before
+            value :: pair.after
+            store_cache_validate_text(name, "cache binding field")
+            store_cache_validate_text(value, "cache binding value")
+            if {
+                name == "role" && role == None -> role = Val(value)
+                name == "key" && key == None -> key = Val(value)
+                name == "write" && !write_seen -> {
+                    allow_write = if value == {
+                        "true" -> true
+                        "false" -> false
+                        else -> return Err(StoreError.InvalidData("cache binding write field is not boolean"))
+                    }
+                    write_seen = true
+                }
+                name == "credential" && credential == None -> credential = Val(value)
+                name == "mirror" -> mirrors.push(value)
+                else -> return Err(StoreError.InvalidData("cache binding has an unknown or duplicate field"))
+            }
+        }
+        binding :: CacheBinding{
+            role: role ?? return Err(StoreError.InvalidData("cache binding has no role")),
+            mirrors: mirrors,
+            trust_key: key ?? return Err(StoreError.InvalidData("cache binding has no trust key")),
+            credential_provider: credential,
+            allow_write: allow_write,
+        }
+        binding.validate()
+        Ok(binding)
+    }
+
+    // Status object of one binding: role, mirrors, credential label, write.
+    fn status_fields(self) -> StatusFields !Never {
+        StatusFields.new().with("role", DataTree.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", DataTree.Bool(self.allow_write))
+    }
+}
+
+// Bind one host-owned cache role. Endpoint and trust policy are deliberately
+// not read from environment variables or repository files. Without an
+// explicit key, the role's default key is created once and pinned.
+pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], trust_key: ?String, credential_provider: ?String, allow_write: Bool) -> CacheBinding !StoreError {
+    requested_key :: trust_key ?? files.join(files.join(roots.root, "trust"), "cache-{role}.key")
+    binding :: CacheBinding{
+        role: role,
+        mirrors: mirrors,
+        trust_key: store_cache_absolutize_host_path(requested_key),
+        credential_provider: credential_provider,
+        allow_write: allow_write,
+    }
+    binding.validate()
+    if trust_key == {
+        .Val(requested) -> {
+            metadata :: files.stat(requested)
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("explicit cache trust key is not a regular file"))
+            store_cache_read_trust_key(binding.trust_key)
+        }
+        .None -> {
+            if files.stat(binding.trust_key) == {
+                .Ok(metadata) -> {
+                    if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache trust key is not a regular file"))
+                    store_cache_read_trust_key(binding.trust_key)
+                }
+                .Err(.NotFound(_)) -> store_cache_write_new_key(binding.trust_key)
+                .Err(error) -> return Err(StoreError.Io(error))
+            }
+        }
+    }
+    key :: store_cache_read_trust_key(binding.trust_key)
+    trust_pin_cache_key(roots.root, role, key) ?? return Err(StoreError.Other(err.message()))
+    path :: store_cache_binding_path(roots, role)
+    binding.validate()
+    _lock :: env_runtime_lock(roots.root, "cache-config")
+    store_cache_ensure_parent(path)
+    store_cache_atomic_replace(path, binding.encode().bytes())
+    Ok(binding)
+}
+
+// Read one role's binding and re-check its pinned trust key.
+pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBinding !StoreError {
+    path :: store_cache_binding_path(roots, role)
+    metadata :: files.stat(path)
+    if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_MAX_BINDING_BYTES {
+        return Err(StoreError.InvalidData("cache binding is not a regular file within its limit"))
+    }
+    text :: String.from_bytes(store_cache_read_regular_bounded(path, @STORE_CACHE_MAX_BINDING_BYTES)) ?? return Err(StoreError.InvalidData("cache binding is not UTF-8"))
+    binding :: CacheBinding.decode(text)
+    if binding.role != role -> return Err(StoreError.InvalidData("cache binding role disagrees with its file name"))
+    store_cache_validate_binding_trust(roots, binding)
+    Ok(binding)
+}
+
+// Every bound role in file-name order. A malformed binding is an error, not
+// an unbound role.
+pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] !StoreError {
+    directory :: store_cache_bindings_dir(roots)
+    entries :: files.list_dir(directory) ?? {
+        if err == {
+            .NotFound(_) -> return Ok([CacheBinding]{})
+            else -> return Err(StoreError.Io(err))
+        }
+    }
+    bindings := [CacheBinding]{}
+    loop entry in entries {
+        file_role :: store_cache_conf_stem(entry.name) ?? next
+        metadata :: files.stat(entry.path)
+        if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_MAX_BINDING_BYTES {
+            return Err(StoreError.InvalidData("cache binding directory contains a non-regular entry"))
+        }
+        text :: String.from_bytes(store_cache_read_regular_bounded(entry.path, @STORE_CACHE_MAX_BINDING_BYTES)) ?? return Err(StoreError.InvalidData("cache binding is not UTF-8"))
+        binding :: CacheBinding.decode(text)
+        if binding.role != file_role -> return Err(StoreError.InvalidData("cache binding role disagrees with its file name"))
+        store_cache_validate_binding_trust(roots, binding)
+        bindings.push(binding)
+    }
+    Ok(bindings)
+}
+
+// The stem of a `<stem>.conf` file name (Rust `extension() == "conf"`).
+fn store_cache_conf_stem(name: String) -> ?String !Never {
+    raw :: name.bytes()
+    dot := -1
+    loop index in 1..<raw.len() {
+        if Int.from_u8(raw[index]) == 46 -> dot = index
+    }
+    if dot <= 0 || pkg_bytes_text(raw, dot + 1, raw.len()) != "conf" -> return None
+    Val(pkg_bytes_text(raw, 0, dot))
+}
+
+fn store_cache_validate_binding_trust(roots: HangarRoots, binding: CacheBinding) !StoreError {
+    key :: store_cache_read_trust_key(binding.trust_key)
+    trust_verify_pinned_cache_key(roots.root, binding.role, key) ?? return Err(StoreError.Other(err.message()))
+}
+
+// Remove one role's binding; false when it was not bound.
+pub fn store_remove_cache_binding(roots: HangarRoots, role: String) -> Bool !StoreError {
+    path :: store_cache_binding_path(roots, role)
+    _lock :: env_runtime_lock(roots.root, "cache-config")
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache binding is not a regular file"))
+            files.remove(path)
+            Ok(true)
+        }
+        .Err(.NotFound(_)) -> Ok(false)
+        .Err(error) -> Err(StoreError.Io(error))
+    }
+}
+
+// Load a role's trust key; a missing key asks the host to rebind.
+fn store_cache_read_trust_key(path: String) -> TrustKey !StoreError {
+    metadata :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(.NotFound(_)) -> return Err(StoreError.InvalidData("cache trust key `{path}` is missing; rebind the cache role"))
+        .Err(error) -> return Err(StoreError.Io(error))
+    }
+    if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_TRUST_KEY_MAX_BYTES {
+        return Err(StoreError.InvalidData("cache trust key is not a regular file"))
+    }
+    key :: TrustKey.from_secret(store_cache_read_regular_bounded(path, @STORE_CACHE_TRUST_KEY_MAX_BYTES)) ?? return Err(StoreError.InvalidData(err.message()))
+    Ok(key)
+}
+
+// Create a fresh 32-byte role key exactly once, owner-only on Unix.
+fn store_cache_write_new_key(path: String) !StoreError {
+    store_cache_ensure_parent(path)
+    secret :: random.bytes(32) ?? return Err(StoreError.Other(err.message()))
+    if store_archive_lstat_ok(path) != None -> return Ok()
+    out :: files.create(path, if_exists: .Refuse)
+    out.write_all(secret)
+    out.fsync()
+    if sys.is_unix() -> files.set_mode(path, @STORE_MODE_PRIVATE_FILE)
+}
+
+fn store_cache_bindings_dir(roots: HangarRoots) -> String !Never {
+    files.join(files.join(roots.root, "cache"), "bindings")
+}
+
+fn store_cache_binding_path(roots: HangarRoots, role: String) -> String !StoreError {
+    store_cache_validate_component(role, "cache role")
+    Ok(files.join(store_cache_bindings_dir(roots), "{role}.conf"))
+}
+
+// A mirror must parse and provide read access.
+fn store_cache_validate_endpoint(endpoint: String) !StoreError {
+    if !store_cache_parse_endpoint(endpoint).capabilities().read {
+        return Err(StoreError.InvalidData("cache endpoint does not provide read access"))
+    }
+}
+
+// Check one endpoint against the binding's grant. Credential labels are
+// refused until a typed credential adapter exists: ambient credentials are
+// never used in their place.
+fn store_cache_validate_endpoint_binding(binding: CacheBinding, endpoint: CacheEndpoint, write: Bool) !StoreError {
+    caps :: endpoint.capabilities()
+    label :: endpoint.label()
+    has_credential :: binding.credential_provider != None
+    if {
+        !caps.read -> return Err(StoreError.InvalidData("{label} cache endpoint does not provide read access"))
+        write && !caps.write -> return Err(StoreError.InvalidData("{label} cache endpoint does not provide write access"))
+        !caps.trust -> return Err(StoreError.InvalidData("{label} cache endpoint does not provide trust support"))
+        caps.remote_execute -> return Err(StoreError.InvalidData("{label} cache endpoint exposes forbidden remote execution"))
+        has_credential && !caps.credential -> return Err(StoreError.InvalidData("{label} cache endpoint cannot consume a typed credential provider"))
+        has_credential && caps.credential -> return Err(StoreError.InvalidData("{label} cache endpoint has no typed credential adapter; refusing ambient credentials"))
+        caps.credential_required && !has_credential -> return Err(StoreError.InvalidData("{label} cache endpoint needs an explicit typed credential provider"))
+        else -> {}
+    }
+}
+
+// A role, entry id, or store name: 1..128 bytes of ASCII letters, digits,
+// `-`, `_`, `.`, and not `.` or `..`.
+fn store_cache_validate_component(value: String, label: String) !StoreError {
+    raw :: value.bytes()
+    safe := raw.len() > 0 && raw.len() <= 128 && value != "." && value != ".."
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        alphanumeric :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+        if !(alphanumeric || code == 45 || code == 95 || code == 46) -> safe = false
+    }
+    if !safe -> return Err(StoreError.InvalidData("{label} is not a safe name"))
+}
+
+// One-line text: no NUL, LF, or CR.
+fn store_cache_validate_text(value: String, label: String) !StoreError {
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 0 || code == 10 || code == 13 -> return Err(StoreError.InvalidData("{label} contains a line break"))
+    }
+}
+
+// An absolute host path none of whose existing prefixes is a symlink and
+// which has no `..` component.
+fn store_cache_validate_path_components(path: String) !StoreError {
+    if !path.starts_with("/") -> return Err(StoreError.InvalidData("cache path must be absolute"))
+    current := ""
+    loop component in store_archive_path_components(path) {
+        if component == "." || component == ".." -> return Err(StoreError.InvalidData("cache path contains an unsafe component"))
+        current = "{current}/{component}"
+        if store_archive_lstat_ok(current) == {
+            .Val(metadata) -> {
+                if metadata.is_symlink -> return Err(StoreError.InvalidData("cache path cannot traverse a symlink"))
+            }
+            .None -> {}
+        }
+    }
+}
+
+// Anchor a relative host path at the current directory, then validate it.
+fn store_cache_absolutize_host_path(path: String) -> String !StoreError {
+    if path.starts_with("/") {
+        store_cache_validate_path_components(path)
+        return Ok(path)
+    }
+    absolute :: files.join(files.cwd(), path)
+    store_cache_validate_path_components(absolute)
+    Ok(absolute)
+}
+
+fn store_cache_ensure_parent(path: String) !StoreError {
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(StoreError.InvalidData("cache path has no parent"))
+    store_cache_validate_path_components(parent)
+    files.create_dir_all(parent)
+}
+
+fn store_cache_ensure_directory(path: String) !StoreError {
+    store_cache_validate_path_components(path)
+    files.create_dir_all(path)
+    metadata :: files.stat(path)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("cache mirror is not a real directory"))
+}
+
+// Replace a small host file through an exclusive fsynced partial.
+fn store_cache_atomic_replace(path: String, bytes: [U8]) !StoreError {
+    if store_archive_lstat_ok(path) == {
+        .Val(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache binding path is not a regular file"))
+        }
+        .None -> {}
+    }
+    partial :: store_archive_with_extension(path, "partial-{process.current_pid()}-{store_archive_unique_suffix()}")
+    out :: files.create(partial, if_exists: .Refuse)
+    store_cache_finish_replace(out, partial, path, bytes) ?? {
+        files.remove(partial).drop("the failed partial is disposable")
+        return Err(err)
+    }
+}
+
+fn store_cache_finish_replace(out: FileWriter, partial: String, path: String, bytes: [U8]) !StoreError {
+    out.write_all(bytes)
+    out.fsync()
+    if sys.is_windows() -> files.remove(path)
+    files.rename(partial, path)
+}
+
+fn store_cache_read_regular_bounded(path: String, limit: Int) -> [U8] !StoreError {
+    store_read_bounded(path, limit)
+}
+
+// Remove a file, symlink, or writable-made tree; the path must exist.
+fn store_cache_remove_tree(path: String) !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink || !metadata.is_dir {
+        files.remove(path)
+        return Ok()
+    }
+    store_make_tree_writable_for_removal(path)
+    files.remove_all(path)
+}
+
+// Append one `name=value` line after checking both halves are one line.
+fn store_cache_line(output: &String, name: String, value: String) !StoreError {
+    store_cache_validate_text(name, "cache binding field")
+    store_cache_validate_text(value, "cache binding value")
+    output = "{output}{name}={value}\n"
+}
+
+// Rust `str::lines`: split on LF, drop one trailing CR per line, and no
+// final empty line.
+fn store_cache_lines(text: String) -> [String] !Never {
+    parts :: text.split("\n").to_list()
+    count :: if text.ends_with("\n") -> parts.len() - 1 else -> parts.len()
+    lines := [String]{}
+    loop index in 0..<count -> lines.push(parts[index].removesuffix("\r"))
+    lines
+}
+
+fn store_cache_now_seconds() -> Int !Never {
+    store_archive_now_secs()
+}
+
+// Make every directory in a tree writable (Rust `set_readonly(false)`: all
+// write bits) so a sealed tree can be removed. A missing path is fine.
+pub fn store_make_tree_writable_for_removal(path: String) !StoreError {
+    metadata :: store_archive_lstat_ok(path) ?? return Ok()
+    if metadata.is_dir {
+        files.set_mode(path, metadata.mode | @STORE_MODE_WRITE_BITS)
+        loop child in files.list_dir(path) -> store_make_tree_writable_for_removal(child.path)
+    }
+}
+
+// Validate then seal a locally produced output before it becomes reusable.
+// Files keep executable bits but lose all write bits; directories are sealed
+// bottom-up. Canonical archive validation rejects external hardlinks first.
+pub fn store_seal_local_output(path: String) !StoreError {
+    pkg_try_output_hash_of(path)
+    store_seal_node(path)
+}
+
+// Clear every write bit through a tree, leaving already-sealed nodes and
+// symlinks untouched.
+pub fn store_seal_node(path: String) !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink -> return Ok()
+    if metadata.is_dir {
+        loop child in files.list_dir(path) -> store_seal_node(child.path)
+    }
+    sealed_mode :: metadata.mode - (metadata.mode & @STORE_MODE_WRITE_BITS)
+    if sealed_mode == metadata.mode -> return Ok()
+    files.set_mode(path, sealed_mode)
+}
+
+// Make a tree durable: every file and directory, children first.
+pub fn store_fsync_tree(path: String) !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink -> return Ok()
+    if metadata.is_dir {
+        loop child in files.list_dir(path) -> store_fsync_tree(child.path)
+    }
+    store_sync_store_node(path, metadata.is_dir)
+}
+
+// `jet.status/v1` for `cache bind`.
+pub fn store_cache_binding_json(binding: CacheBinding) -> String !Never {
+    StatusEnvelope.new("cache-bind", true).with_fields(binding.status_fields()).json()
+}
+
+// `jet.status/v1` for `cache list`.
+pub fn store_cache_bindings_json(bindings: [CacheBinding]) -> String !Never {
+    values := [DataTree]{}
+    loop binding in bindings -> values.push(report_status_object(binding.status_fields()))
+    StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", DataTree.Array(values))).json()
+}

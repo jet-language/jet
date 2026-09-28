@@ -1,0 +1,355 @@
+// Canonical producer records (Rust `jetpack::Store::Producer`): the
+// immutable provider/action/source replay record committed beside every
+// Hangar package, its action identity, the post-publication lock-digest
+// refresh, and adapter build-hook producer validation.
+
+@STORE_PRODUCER_RECORD_HEADER :: "jet-producer-record-v1"
+@STORE_PRIVATE_UNTRUSTED_BUILD :: "private-untrusted"
+
+// Immutable producer facts committed beside package/object relations.
+pub struct ProducerRecord {
+    pub provider: String
+    pub immutable_source: String
+    pub source_digest: String
+    pub plan: ProviderPlanFacts
+    pub toolchain_facts: String
+    pub policy_facts: String
+    pub facts: [String: String]
+
+    fn new(provider: String, immutable_source: String, source_digest: String, plan: ProviderPlanFacts, toolchain_facts: String, policy_facts: String, facts: [String: String]) -> ProducerRecord !StoreError {
+        record :: ProducerRecord{provider, immutable_source, source_digest, plan, toolchain_facts, policy_facts, facts}
+        record.validate()
+        Ok(record)
+    }
+
+    fn encode(self) -> String !Never {
+        fields := [String: String]{
+            "provider": self.provider,
+            "immutable_source": self.immutable_source,
+            "source_digest": self.source_digest,
+            "plan": self.plan.render(),
+            "toolchain_facts": self.toolchain_facts,
+            "policy_facts": self.policy_facts,
+        }
+        loop fact in self.facts -> fields["fact.{fact.key}"] = fact.value
+        body := "{@STORE_PRODUCER_RECORD_HEADER}\n"
+        loop key in store_sorted_keys(fields) -> body = "{body}{store_hex_text(key)}\t{store_hex_text(fields[key])}\n"
+        checksum :: store_sha256_hex(body.bytes())
+        "{body}checksum\t{checksum}\n"
+    }
+
+    // Bind the producer record to the exact cache admission facts. These
+    // values are part of the immutable record, so a cache hit can rederive
+    // the action, builder, policy, and output identity before using bytes.
+    fn bind_cache_provenance(&self, reference: String, output: String, identity: CacheIdentity, references: [String]) !Never {
+        // Providers keep the detailed recipe in the replay plan. The cache
+        // admission fact is the stable recipe fingerprint shared by the
+        // expectation, local proof, and signed narinfo.
+        self.facts["action.recipe"] = identity.recipe_fingerprint
+        self.facts["cache.reference"] = reference
+        self.facts["cache.source"] = self.immutable_source
+        self.facts["cache.builder"] = trust_cache_builder_identity(self.provider, self.immutable_source, self.source_digest)
+        self.facts["cache.action"] = store_cache_action_identity(self, reference, identity, references)
+        self.facts["cache.output"] = output
+        self.facts["cache.platform"] = identity.platform
+        self.facts["cache.sandbox"] = "sandbox:policy-bound"
+        self.facts["cache.policy"] = identity.policy_fingerprint
+        if !self.facts.has_key("cache.reproducibility") -> self.facts["cache.reproducibility"] = "attested-v1"
+    }
+
+    fn decode(raw: String) -> ProducerRecord !StoreError {
+        if !raw.ends_with("\n") -> return Err(StoreError.Other("producer record is truncated"))
+        stripped :: pkg_bytes_text(raw.bytes(), 0, raw.bytes().len() - 1)
+        halves :: store_text_split_last(stripped, "checksum\t") ?? return Err(StoreError.Other("producer record is truncated"))
+        body :: halves.before
+        checksum :: halves.after
+        if !store_is_lower_hex(checksum, 64) || store_sha256_hex(body.bytes()) != checksum {
+            return Err(StoreError.Other("producer record checksum mismatch"))
+        }
+        lines :: store_text_lines(body)
+        if lines.len() == 0 || lines[0] != @STORE_PRODUCER_RECORD_HEADER {
+            return Err(StoreError.Other("unsupported producer record version"))
+        }
+        fields := [String: String]{}
+        loop index in 1..<lines.len() {
+            pair :: lines[index].split_once("\t") ?? return Err(StoreError.Other("producer record fact is truncated"))
+            key :: store_producer_unhex(pair.before)
+            value :: store_producer_unhex(pair.after)
+            if fields.has_key(key) -> return Err(StoreError.Other("duplicate producer record fact `{key}`"))
+            fields[key] = value
+        }
+        provider :: store_producer_take(fields, "provider")
+        immutable_source :: store_producer_take(fields, "immutable_source")
+        source_digest :: store_producer_take(fields, "source_digest")
+        plan :: ProviderPlanFacts.parse(store_producer_take(fields, "plan")) ?? return Err(StoreError.Other(err.message()))
+        toolchain_facts :: store_producer_take(fields, "toolchain_facts")
+        policy_facts :: store_producer_take(fields, "policy_facts")
+        facts := [String: String]{}
+        loop key in store_sorted_keys(fields) {
+            if key == {
+                "provider" | "immutable_source" | "source_digest" | "plan" | "toolchain_facts" | "policy_facts" -> next
+                else -> {}
+            }
+            if !key.starts_with("fact.") -> return Err(StoreError.Other("unknown producer record field `{key}`"))
+            name :: key.removeprefix("fact.")
+            if name == "" -> return Err(StoreError.Other("producer record has empty fact name"))
+            facts[name] = fields[key]
+        }
+        ProducerRecord.new(provider, immutable_source, source_digest, plan, toolchain_facts, policy_facts, facts)
+    }
+
+    fn validate(self) !StoreError {
+        named :: [(name: String, value: String)]{
+            (name: "provider", value: self.provider),
+            (name: "immutable_source", value: self.immutable_source),
+            (name: "source_digest", value: self.source_digest),
+            (name: "toolchain_facts", value: self.toolchain_facts),
+            (name: "policy_facts", value: self.policy_facts),
+        }
+        loop field in named {
+            if field.value.trim() == "" -> return Err(StoreError.Other("producer record has empty `{field.name}`"))
+        }
+        if self.facts.has_key("") -> return Err(StoreError.Other("producer record has empty fact name"))
+    }
+}
+
+// Rust `take`: a named required field of a decoded producer record.
+fn store_producer_take(fields: [String: String], key: String) -> String !StoreError {
+    value :: fields.get(key) ?? return Err(StoreError.Other("producer record misses `{key}`"))
+    Ok(value)
+}
+
+// Rust `unhex` with the producer record's error texts.
+fn store_producer_unhex(value: String) -> String !StoreError {
+    if store_unhex_text(value) == {
+        .Text(text) -> Ok(text)
+        .OddLength -> Err(StoreError.Other("producer record field is truncated"))
+        .NotLowerHex -> Err(StoreError.Other("producer record field is not lowercase hex"))
+        .NotUtf8 -> Err(StoreError.Other("producer record field is not UTF-8"))
+    }
+}
+
+// Build the canonical producer record shared by every store ingestion phase.
+pub fn store_canonical_producer(provider: String, immutable_source: String, source_digest: String, identity: CacheIdentity, facts: [String: String]) -> String !StoreError {
+    recorded := ~facts
+    recorded["action.recipe"] = identity.recipe_fingerprint
+    recorded["closure.authority"] = "hangar-cas"
+    recorded["cache.reproducibility"] = "attested-v1"
+    plan :: ProviderPlanFacts.from_facts(recorded)
+    record :: ProducerRecord.new(provider, immutable_source, source_digest, plan, "jetpack-std-provider", "policy={identity.policy_fingerprint}\nplatform={identity.platform}", recorded)
+    Ok(record.encode())
+}
+
+// Whether a producer was built as a private untrusted build.
+pub fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool !Never {
+    producer.facts.get("build.trust") == Val(@STORE_PRIVATE_UNTRUSTED_BUILD)
+}
+
+// The signed SLSA-style action identity of one cache admission.
+pub fn store_cache_action_identity(producer: ProducerRecord, reference: String, identity: CacheIdentity, references: [String]) -> String !Never {
+    canonical := "jet-slsa-action-v2".bytes()
+    canonical.push(U8{0})
+    plan :: producer.plan.render()
+    values :: [String]{
+        reference,
+        producer.provider,
+        producer.immutable_source,
+        producer.source_digest,
+        identity.recipe_fingerprint,
+        identity.policy_fingerprint,
+        identity.platform,
+        producer.toolchain_facts,
+        plan,
+    }
+    loop value in values -> store_push_frame(&canonical, value.bytes())
+    // A sorted set keeps the signed action independent of dependency order
+    // and duplicate input edges.
+    closure :: store_sorted_unique(references)
+    store_push_u64_be(&canonical, closure.len())
+    loop member in closure -> store_push_frame(&canonical, member.bytes())
+    "sha256:{store_sha256_hex(canonical)}"
+}
+
+// Refresh the immutable producer facts after its provider publishes the
+// realization it just recorded in the project lock. The lock digest is part
+// of the action key, so leaving the pre-publication digest in the closure
+// record would let a later replay accept stale provenance.
+pub fn store_refresh_lock_digest(roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry !StoreError {
+    if lock_digest == "" -> return Err(StoreError.InvalidData("cannot refresh a producer with an empty project lock digest"))
+    producer := ProducerRecord.decode(entry.producer_record)
+    if producer.provider == {
+        "nix" | "jetpackage" -> {}
+        else -> return Ok(~entry)
+    }
+    plan_facts :: producer.plan.facts()
+    if producer.facts.get("nix.lock.digest") == Val(lock_digest) && plan_facts.get("nix.lock.digest") == Val(lock_digest) {
+        return Ok(~entry)
+    }
+    producer.facts["nix.lock.digest"] = lock_digest
+    replay_facts := [String: String]{}
+    loop fact in plan_facts {
+        if fact.key.starts_with("cache.") -> next
+        if fact.key == "provider-facts" || fact.key == "provider-facts-digest" -> next
+        replay_facts[fact.key] = fact.value
+    }
+    replay_facts["nix.lock.digest"] = lock_digest
+    producer.plan = ProviderPlanFacts.from_facts(replay_facts)
+    producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
+    provider_refresh_provider_facts(&producer, entry.reference) ?? return Err(StoreError.Other("{err}"))
+
+    refreshed := ~entry
+    refreshed.producer_record = producer.encode()
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_recover_closure_journal_unlocked(roots)
+    // Producer refresh changes the canonical receipt inputs. Return the
+    // digest that the registration commits, so the subsequent project lock
+    // projection cannot retain the pre-refresh receipt.
+    refreshed.receipt = ""
+    AdmissionTransaction.recover_unlocked(roots)
+    transaction := AdmissionTransaction.new(roots)
+    mode :: if producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
+    batch := [StoreEntry]{refreshed}
+    transaction.commit(&batch, [AdmissionReceipt]{}, None, mode, None)
+    Ok(batch[0])
+}
+
+fn store_hook_fact_mismatch(name: String, expected: String, actual: ?String) -> StoreError !Never {
+    shown :: actual ?? "<missing>"
+    StoreError.InvalidData("adapter build hook provenance mismatch for `{name}`: expected `{expected}`, got `{shown}`")
+}
+
+fn store_validate_adapter_hook_producer(producer: ProducerRecord, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) !StoreError {
+    if plan.recipe == {
+        .Build(recipe) -> store_validate_build_hook_producer(producer, plan, recipe, table, expectation, require_current_backend)
+        else -> Ok()
+    }
+}
+
+fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPlan, recipe: BuildRecipe, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) !StoreError {
+    plan_facts :: producer.plan.facts()
+    recorded_sandbox :: producer.facts.get("build.sandbox")
+    planned_sandbox :: plan_facts.get("adapter.build.sandbox")
+    producer_policy :: producer.facts.get("build.sandbox_policy")
+    plan_policy :: plan_facts.get("adapter.build.sandbox_policy")
+    // Recipe's executor launches children only for Exec steps. Install,
+    // InstallTree and Fetch retain the non-executing run report.
+    executes := false
+    loop step in recipe.steps {
+        if step == {
+            .Exec(_, _) -> executes = true
+            else -> {}
+        }
+    }
+    if {
+        !executes -> {
+            checks :: [(name: String, expected: String, actual: ?String)]{
+                (name: "build.sandbox", expected: "non-executing", actual: recorded_sandbox),
+                (name: "adapter.build.sandbox", expected: "non-executing", actual: planned_sandbox),
+                (name: "build.sandbox_policy", expected: "no child launched", actual: producer_policy),
+                (name: "adapter.build.sandbox_policy", expected: "no child launched", actual: plan_policy),
+            }
+            loop check in checks {
+                if check.actual != Val(check.expected) -> return Err(store_hook_fact_mismatch(check.name, check.expected, check.actual))
+            }
+        }
+        require_current_backend -> {
+            sandbox :: env_detect_sandbox()
+            if sandbox.level != SandboxLevel.Strong {
+                return Err(StoreError.Unsupported("executable adapter cache requires a native sandbox before launch: {sandbox.reason}"))
+            }
+            mechanism :: sandbox.mechanism.as_str()
+            if recorded_sandbox != Val(mechanism) -> return Err(store_hook_fact_mismatch("build.sandbox", mechanism, recorded_sandbox))
+            if planned_sandbox != Val(mechanism) -> return Err(store_hook_fact_mismatch("adapter.build.sandbox", mechanism, planned_sandbox))
+        }
+        else -> {
+            recorded :: recorded_sandbox ?? return Err(store_hook_fact_mismatch("build.sandbox", "recorded native backend", None))
+            if recorded == {
+                "linux-bwrap" | "macos-seatbelt" | "windows-appcontainer" -> {}
+                else -> return Err(store_hook_fact_mismatch("build.sandbox", "recorded native backend", Val(recorded)))
+            }
+            if planned_sandbox != Val(recorded) -> return Err(store_hook_fact_mismatch("adapter.build.sandbox", recorded, planned_sandbox))
+        }
+    }
+    producer_truthful :: if recorded_sandbox == {
+        .Val(class) -> if producer_policy == {
+            .Val(policy) -> env_sandbox_receipt_is_truthful(class, policy)
+            .None -> false
+        }
+        .None -> false
+    }
+    if !producer_truthful -> return Err(store_hook_fact_mismatch("build.sandbox", "a native backend with a complete policy receipt", recorded_sandbox))
+    plan_truthful :: if plan_policy == {
+        .Val(policy) -> if recorded_sandbox == {
+            .Val(class) -> env_sandbox_receipt_is_truthful(class, policy)
+            .None -> false
+        }
+        .None -> false
+    }
+    if !plan_truthful -> return Err(store_hook_fact_mismatch("adapter.build.sandbox_policy", "a complete native policy receipt", plan_policy))
+    if producer_policy == None || producer_policy != plan_policy {
+        return Err(store_hook_fact_mismatch("build.sandbox_policy", producer_policy ?? "<recorded policy>", plan_policy))
+    }
+    if producer.provider != "adapter" -> return Err(store_hook_fact_mismatch("provider", "adapter", Val(producer.provider)))
+    if producer.source_digest != expectation.identity.source_fingerprint {
+        return Err(store_hook_fact_mismatch("source-digest", expectation.identity.source_fingerprint, Val(producer.source_digest)))
+    }
+    if producer.facts.get("adapter.source") != Val(plan.source) {
+        return Err(store_hook_fact_mismatch("provider-source", plan.source, producer.facts.get("adapter.source")))
+    }
+    identity :: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
+    if producer.facts.get("build.identity") != Val(identity) {
+        return Err(store_hook_fact_mismatch("build.identity", identity, producer.facts.get("build.identity")))
+    }
+    if plan_facts.get("adapter.build.identity") != Val(identity) {
+        return Err(store_hook_fact_mismatch("adapter.build.identity", identity, plan_facts.get("adapter.build.identity")))
+    }
+    capabilities :: recipe.declared_capabilities().join(",")
+    if producer.facts.get("build.capabilities") != Val(capabilities) {
+        return Err(store_hook_fact_mismatch("build.capabilities", capabilities, producer.facts.get("build.capabilities")))
+    }
+    dependencies :: provider_adapter_dependency_refs(plan).join(",")
+    authority :: table.trust_lines().join("\n")
+    if plan_facts.get("adapter.build.dependencies") != Val(dependencies) {
+        return Err(store_hook_fact_mismatch("adapter.build.dependencies", dependencies, plan_facts.get("adapter.build.dependencies")))
+    }
+    if plan_facts.get("adapter.build.authority") != Val(authority) {
+        return Err(store_hook_fact_mismatch("adapter.build.authority", authority, plan_facts.get("adapter.build.authority")))
+    }
+    if producer.facts.get("build.dependencies") != Val(dependencies) {
+        return Err(store_hook_fact_mismatch("build.dependencies", dependencies, producer.facts.get("build.dependencies")))
+    }
+}
+
+pub fn store_validate_cached_adapter_hook(entry: StoreEntry, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation) !StoreError {
+    if plan.recipe == {
+        .Build(_) -> {}
+        else -> return Ok()
+    }
+    if entry.cache_identity != expectation.identity {
+        return Err(StoreError.InvalidData("adapter cache identity is not the exact build-hook identity"))
+    }
+    producer :: ProducerRecord.decode(entry.producer_record)
+    store_validate_adapter_hook_producer(producer, plan, table, expectation, false)
+}
+
+pub fn store_bind_adapter_hook_identity(realized: &Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) !StoreError {
+    if plan.recipe == {
+        .Build(_) -> {}
+        else -> return Ok()
+    }
+    store_validate_adapter_hook_producer(realized.producer, plan, table, expectation, true)
+    subject :: realized.producer.facts.get("build.identity") ?? return Err(store_hook_fact_mismatch("build.identity", "exact subject", None))
+    expected :: provider_adapter_cache_identity(expectation.identity.source_fingerprint, subject, ctx)
+    if expected != expectation.identity {
+        return Err(StoreError.InvalidData("adapter cache expectation is not derived from the exact build-hook subject"))
+    }
+    checks :: [(name: String, expected: String, actual: String)]{
+        (name: "source-fingerprint", expected: expectation.identity.source_fingerprint, actual: realized.cache_identity.source_fingerprint),
+        (name: "policy-fingerprint", expected: expectation.identity.policy_fingerprint, actual: realized.cache_identity.policy_fingerprint),
+        (name: "platform", expected: expectation.identity.platform, actual: realized.cache_identity.platform),
+    }
+    loop check in checks {
+        if check.expected != check.actual -> return Err(store_hook_fact_mismatch(check.name, check.expected, Val(check.actual)))
+    }
+    realized.cache_identity = expected
+}

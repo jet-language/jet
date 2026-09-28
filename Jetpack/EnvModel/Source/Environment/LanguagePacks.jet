@@ -1,0 +1,453 @@
+// Language packs (D-ENV-LANGPACK1): the catalog of language toolchains and
+// the typed `languages` selections that expand into ordinary package refs.
+
+// The tier-one host platforms every built-in pack supports.
+@ENVMODEL_LANGUAGE_PLATFORMS :: [String]{"aarch64-macos", "aarch64-linux", "x86_64-macos", "x86_64-linux"}
+
+pub struct LanguagePack {
+    pub name: String{""}
+    pub packages: [String]{[String]{}}
+    pub venv_packages: [String]{[String]{}}
+    pub variables: [String: String]{[String: String]{}}
+    pub commands: [String: String]{[String: String]{}}
+    // Execution authority for the pack. `native` means the pack is selected
+    // for the host platform recorded in `platforms`.
+    pub host: String{""}
+    pub platforms: [String]{[String]{}}
+    // Union of the licenses declared by the catalog entries in this pack.
+    pub license: String{""}
+    // Command names the pack promises to expose. A missing mapping is a
+    // catalog error, never an empty PATH entry.
+    pub required_tools: [String]{[String]{}}
+
+    // Stable identity for one catalog entry. Pack metadata is environment
+    // policy, not presentation: variables and commands must invalidate trust
+    // even when its package list is unchanged.
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{"jet-language-pack-v1\n", "name={self.name}\n"}
+        envmodel_push_labeled(&lines, "package", self.packages)
+        envmodel_push_labeled(&lines, "venv-package", self.venv_packages)
+        loop name in envmodel_sorted_keys(self.variables) -> lines.push("var={name}={self.variables[name]}\n")
+        loop name in envmodel_sorted_keys(self.commands) -> lines.push("command={name}={self.commands[name]}\n")
+        lines.push("host={self.host}\n")
+        envmodel_push_labeled(&lines, "platform", self.platforms)
+        lines.push("license={self.license}\n")
+        envmodel_push_labeled(&lines, "required-tool", self.required_tools)
+        lines.join("")
+    }
+
+    fn validate(self) !EnvironmentFactError {
+        if self.packages.len() == 0 || envmodel_any_blank(self.packages) {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare at least one non-empty package"))
+        }
+        if envmodel_any_blank(self.venv_packages) {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' has an empty venv package"))
+        }
+        loop name in envmodel_sorted_keys(self.variables) {
+            if !envmodel_valid_env_name(name) -> return Err(EnvironmentFactError.new("language pack '{self.name}' has an invalid environment variable name"))
+        }
+        if self.host.trim() == "" {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare a host"))
+        }
+        if self.platforms.len() == 0 || envmodel_any_blank(self.platforms) {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare at least one non-empty platform"))
+        }
+        if self.license.trim() == "" {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare a license"))
+        }
+        if self.commands.len() == 0 {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare at least one command"))
+        }
+        loop name in envmodel_sorted_keys(self.commands) {
+            if name.trim() == "" || self.commands[name].trim() == "" {
+                return Err(EnvironmentFactError.new("language pack '{self.name}' has an empty command name or mapping"))
+            }
+        }
+        if self.required_tools.len() == 0 || envmodel_any_blank(self.required_tools) {
+            return Err(EnvironmentFactError.new("language pack '{self.name}' must declare non-empty required tools"))
+        }
+        loop tool in self.required_tools {
+            if self.commands.get(tool) == None {
+                return Err(EnvironmentFactError.new("language pack '{self.name}' required tool '{tool}' has no command mapping"))
+            }
+        }
+    }
+}
+
+// One user selection from `languages`. Expansion turns enabled selections
+// into ordinary package refs; the typed selection remains in the plan for
+// trust, cache, and user-facing disclosure.
+pub struct LanguageSpec {
+    pub name: String{""}
+    pub enable: Bool{false}
+    pub version: ?String{None}
+    pub channel: ?String{None}
+    pub venv: Bool{false}
+    pub extra_packages: [String]{[String]{}}
+
+    fn key(self) -> String !Never {
+        envmodel_language_key(self.name)
+    }
+
+    fn fingerprint(self) -> String !Never {
+        version :: self.version ?? ""
+        channel :: self.channel ?? ""
+        "{self.name}\tenable={self.enable}\tversion={version}\tchannel={channel}\tvenv={self.venv}\textra={self.extra_packages.join(",")}"
+    }
+
+    fn same_selection(self, other: LanguageSpec) -> Bool !Never {
+        self.key() == other.key() && self.enable == other.enable && self.version == other.version && self.channel == other.channel && self.venv == other.venv && self.extra_packages == other.extra_packages
+    }
+}
+
+// One typed language selection projected through its catalog entry. The
+// selection preserves author facts; `included` and `omitted` make the package
+// projection explicit for trust, image, and diagnostics consumers.
+pub struct LanguageProjection {
+    pub selection: LanguageSpec{LanguageSpec{}}
+    pub pack: LanguagePack{LanguagePack{}}
+    pub included: [String]{[String]{}}
+    pub omitted: [String]{[String]{}}
+    pub changed: [String]{[String]{}}
+    pub host: String{""}
+    pub platform: String{""}
+    pub license: String{""}
+    pub missing_tools: [String]{[String]{}}
+
+    fn fingerprint(self) -> String !Never {
+        "selection={self.selection.fingerprint()}\npack={self.pack.fingerprint()}included={self.included.join(",")}\nomitted={self.omitted.join(",")}\nchanged={self.changed.join(",")}\nhost={self.host}\nplatform={self.platform}\nlicense={self.license}\nmissing-tools={self.missing_tools.join(",")}\n"
+    }
+}
+
+pub struct LanguageExpansion {
+    pub applied: [String]{[String]{}}
+    // The exact catalog entries used by this expansion. Keeping these with the
+    // derived package list makes the expansion the one runtime fact shared by
+    // planning, trust, activation, and disclosure.
+    pub packs: [LanguagePack]{[LanguagePack]{}}
+    pub selections: [LanguageSpec]{[LanguageSpec]{}}
+    pub packages: [String]{[String]{}}
+    pub variables: [String: String]{[String: String]{}}
+    pub commands: [String: String]{[String: String]{}}
+    pub projections: [LanguageProjection]{[LanguageProjection]{}}
+
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{"jet-language-expansion-v1\n"}
+        loop selection in self.selections -> lines.push("selection={selection.fingerprint()}\n")
+        loop pack in self.packs -> lines.push("pack={pack.fingerprint()}")
+        envmodel_push_labeled(&lines, "expanded-package", self.packages)
+        loop name in envmodel_sorted_keys(self.variables) -> lines.push("expanded-var={name}={self.variables[name]}\n")
+        loop name in envmodel_sorted_keys(self.commands) -> lines.push("expanded-command={name}={self.commands[name]}\n")
+        loop projection in self.projections -> lines.push("projection={projection.fingerprint()}")
+        lines.join("")
+    }
+
+    // Add `package` to the expanded package list once.
+    fn add_package(&self, package: String) {
+        if !self.packages.contains(package) -> self.packages.push(package)
+    }
+}
+
+pub struct LanguagePackCatalog {
+    packs: [String: LanguagePack]{[String: LanguagePack]{}}
+
+    fn empty() -> LanguagePackCatalog !Never {
+        LanguagePackCatalog{}
+    }
+
+    fn builtin() -> LanguagePackCatalog !Never {
+        catalog := LanguagePackCatalog{}
+        loop pack in envmodel_core_language_packs() {
+            if catalog.register(pack) == .Err(_) -> panic("built-in language pack names are unique")
+        }
+        loop row in envmodel_extended_language_rows() {
+            if catalog.register(row.pack()) == .Err(_) -> panic("extended built-in language pack names are unique")
+        }
+        catalog
+    }
+
+    fn register(&self, pack: LanguagePack) !EnvironmentFactError {
+        if pack.name.trim() == "" -> return Err(EnvironmentFactError.new("language pack name cannot be empty"))
+        key :: envmodel_language_key(pack.name)
+        loop name in envmodel_sorted_keys(self.packs) {
+            if envmodel_language_key(name) == key -> return Err(EnvironmentFactError.new("language pack '{pack.name}' is already registered"))
+        }
+        pack.validate()
+        self.packs[pack.name] = pack
+    }
+
+    // Exact name first, then the same language key (case and punctuation
+    // insensitive) in catalog order.
+    fn get(self, name: String) -> ?LanguagePack !Never {
+        if self.packs.get(name) == .Val(pack) -> return Val(pack)
+        key :: envmodel_language_key(name)
+        loop pack_name in envmodel_sorted_keys(self.packs) {
+            if envmodel_language_key(pack_name) == key -> return Val(self.packs[pack_name])
+        }
+        None
+    }
+
+    fn names(self) -> [String] !Never {
+        envmodel_sorted_keys(self.packs)
+    }
+
+    // Stable catalog identity disclosed by `jet env info`; changing a pack's
+    // packages or host variables changes this fingerprint.
+    fn fingerprint(self) -> String !Never {
+        lines := [String]{"jet-language-catalog-v1\n"}
+        loop name in envmodel_sorted_keys(self.packs) -> lines.push("{self.packs[name].fingerprint()}\n")
+        pkg_sha256_hex(lines.join("").bytes())
+    }
+
+    fn expand(self, selections: [LanguageSpec]) -[Env]> LanguageExpansion !EnvironmentFactError {
+        self.expand_for_platform(selections, pkg_host_key())
+    }
+
+    // Expand selections for one explicit host platform. Keeping the target
+    // parameter here makes unsupported-host behavior testable without
+    // pretending the host is something it is not.
+    fn expand_for_platform(self, selections: [LanguageSpec], platform: String) -> LanguageExpansion !EnvironmentFactError {
+        expansion := LanguageExpansion{}
+        loop selection in selections {
+            pack :: self.get(selection.name) ?? return Err(EnvironmentFactError.new("language pack '{selection.name}' is not in the catalog"))
+            normalized := selection
+            normalized.name = pack.name
+            duplicate := false
+            loop existing in expansion.selections {
+                if existing.key() == normalized.key() {
+                    if !existing.same_selection(normalized) {
+                        return Err(EnvironmentFactError.new("language pack `{normalized.name}` is declared with conflicting selection facts"))
+                    }
+                    duplicate = true
+                    break
+                }
+            }
+            if duplicate -> next
+            expansion.selections.push(normalized)
+            projection := LanguageProjection{selection: normalized, pack: pack, host: pack.host, platform: platform, license: pack.license}
+            if selection.enable && pack.license.trim() == "" {
+                return Err(EnvironmentFactError.new("language pack `{pack.name}` has no license fact"))
+            }
+            if selection.enable && pack.platforms.len() > 0 && !pack.platforms.contains(platform) {
+                return Err(EnvironmentFactError.new("language pack `{pack.name}` does not support host platform `{platform}`"))
+            }
+            missing_tools := [String]{}
+            loop tool in pack.required_tools {
+                if pack.commands.get(tool) == None -> missing_tools.push(tool)
+            }
+            if selection.enable && missing_tools.len() > 0 {
+                return Err(EnvironmentFactError.new("language pack `{pack.name}` is missing catalog tools: {missing_tools.join(", ")}"))
+            }
+            projection.missing_tools = missing_tools
+            projection.changed.push("host={pack.host}")
+            projection.changed.push("platform={platform}")
+            projection.changed.push("license={pack.license}")
+            if selection.version == .Val(version) -> projection.changed.push("version={version}")
+            if selection.channel == .Val(channel) -> projection.changed.push("channel={channel}")
+            if selection.venv -> projection.changed.push("venv=true")
+            if selection.extra_packages.len() > 0 -> projection.changed.push("extra={selection.extra_packages.join(",")}")
+            if !selection.enable {
+                projection.omitted.extend(pack.packages)
+                projection.omitted.extend(pack.venv_packages)
+                projection.omitted.extend(selection.extra_packages)
+                projection.changed.push("enable=false")
+                expansion.projections.push(projection)
+                next
+            }
+            if !expansion.applied.contains(pack.name) {
+                expansion.applied.push(pack.name)
+                expansion.packs.push(pack)
+            }
+            loop package in pack.packages {
+                versioned :: envmodel_versioned_package(package, selection.version)
+                expansion.add_package(versioned)
+                projection.included.push(versioned)
+            }
+            loop package in selection.extra_packages {
+                expansion.add_package(package)
+                projection.included.push(package)
+            }
+            if {
+                selection.venv -> {
+                    loop package in pack.venv_packages {
+                        versioned :: envmodel_versioned_package(package, selection.version)
+                        expansion.add_package(versioned)
+                        projection.included.push(versioned)
+                    }
+                }
+                else -> projection.omitted.extend(pack.venv_packages)
+            }
+            loop key in envmodel_sorted_keys(pack.variables) -> envmodel_merge_language_fact(&expansion.variables, pack.name, "variable", key, pack.variables[key])
+            loop key in envmodel_sorted_keys(pack.commands) -> envmodel_merge_language_fact(&expansion.commands, pack.name, "command", key, pack.commands[key])
+            expansion.projections.push(projection)
+        }
+        Ok(expansion)
+    }
+
+    fn expand_names(self, names: [String]) -[Env]> LanguageExpansion !EnvironmentFactError {
+        selections := [LanguageSpec]{}
+        loop name in names -> selections.push(LanguageSpec{name: name, enable: true})
+        self.expand(selections)
+    }
+}
+
+// The case- and punctuation-insensitive identity of a language name: its
+// ASCII letters and digits, lowercased.
+fn envmodel_language_key(name: String) -> String !Never {
+    out := [U8]{}
+    loop byte in name.bytes() {
+        if pkg_bytes_is_word(Int.from_u8(byte)) && Int.from_u8(byte) != 95 -> out.push(byte)
+    }
+    pkg_ascii_lower(String.from_bytes(out) ?? "")
+}
+
+fn envmodel_merge_language_fact(facts: &[String: String], pack_name: String, kind: String, key: String, value: String) !EnvironmentFactError {
+    if facts.get(key) == {
+        .Val(existing) -> {
+            if existing != value -> return Err(EnvironmentFactError.new("language pack '{pack_name}' conflicts with existing {kind} '{key}'"))
+        }
+        .None -> facts[key] = value
+    }
+}
+
+// Pin a catalog package to the selected version unless it already carries a
+// version or channel marker.
+fn envmodel_versioned_package(package: String, version: ?String) -> String !Never {
+    selected :: version ?? return package
+    parts :: package.cut_last(@REF_PROVIDER_AT) ?? return package
+    if parts.before.contains("#version=") || parts.after.contains(@REF_CHANNEL_MARKER) -> return package
+    "{parts.before}{@REF_PROVIDER_AT}{parts.after}{@REF_CHANNEL_MARKER}version={selected}"
+}
+
+// The four core language families with their curated command maps.
+fn envmodel_core_language_packs() -> [LanguagePack] !Never {
+    [LanguagePack]{
+        LanguagePack{
+            name: "Rust",
+            packages: [String]{"rustc@nixpkgs", "cargo@nixpkgs", "rust-analyzer@nixpkgs", "rustfmt@nixpkgs", "clippy@nixpkgs"},
+            commands: [String: String]{"rustc": "rustc", "cargo": "cargo", "rust-analyzer": "rust-analyzer", "rustfmt": "rustfmt", "clippy": "clippy-driver"},
+            host: "native",
+            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            license: "Apache-2.0 OR MIT",
+            required_tools: [String]{"rustc", "cargo", "rust-analyzer", "rustfmt", "clippy"}
+        },
+        LanguagePack{
+            name: "Python",
+            packages: [String]{"python@nixpkgs", "pip@nixpkgs"},
+            venv_packages: [String]{"pythonPackages.virtualenv@nixpkgs"},
+            commands: [String: String]{"python": "python3", "pip": "pip"},
+            host: "native",
+            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            license: "MIT OR PSF-2.0",
+            required_tools: [String]{"python", "pip"}
+        },
+        LanguagePack{
+            name: "Go",
+            packages: [String]{"go@nixpkgs", "gopls@nixpkgs"},
+            commands: [String: String]{"go": "go", "gofmt": "gofmt", "gopls": "gopls"},
+            host: "native",
+            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            license: "BSD-3-Clause",
+            required_tools: [String]{"go", "gofmt", "gopls"}
+        },
+        LanguagePack{
+            name: "JavaScript",
+            packages: [String]{"nodejs@nixpkgs"},
+            commands: [String: String]{"node": "node", "npm": "npm", "npx": "npx"},
+            host: "native",
+            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            license: "MIT",
+            required_tools: [String]{"node", "npm", "npx"}
+        }
+    }
+}
+
+// One extended catalog row: every tool is both a command and a required tool.
+struct LanguageCatalogRow {
+    name: String
+    packages: [String]
+    tools: [String]
+    license: String
+
+    fn pack(self) -> LanguagePack !Never {
+        commands := [String: String]{}
+        loop tool in self.tools -> commands[tool] = tool
+        LanguagePack{name: self.name, packages: self.packages, commands: commands, host: "native", platforms: @ENVMODEL_LANGUAGE_PLATFORMS, license: self.license, required_tools: self.tools}
+    }
+}
+
+fn envmodel_extended_language_names() -> [String] !Never {
+    names := [String]{}
+    loop row in envmodel_extended_language_rows() -> names.push(row.name)
+    names
+}
+
+fn envmodel_extended_language_pack(name: String) -> LanguagePack !Never {
+    loop row in envmodel_extended_language_rows() {
+        if row.name == name -> return row.pack()
+    }
+    panic("unknown extended language pack: {name}")
+}
+
+fn envmodel_language_row(name: String, packages: [String], tools: [String], license: String) -> LanguageCatalogRow !Never {
+    LanguageCatalogRow{name: name, packages: packages, tools: tools, license: license}
+}
+
+fn envmodel_extended_language_rows() -> [LanguageCatalogRow] !Never {
+    [LanguageCatalogRow]{
+        envmodel_language_row("Ansible", [String]{"ansible@nixpkgs"}, [String]{"ansible", "ansible-playbook"}, "GPL-3.0-or-later"),
+        envmodel_language_row("C", [String]{"cc-toolchain@jetpack"}, [String]{"cc"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Clojure", [String]{"clojure@nixpkgs"}, [String]{"clojure"}, "EPL-1.0"),
+        envmodel_language_row("Cplusplus", [String]{"cc-toolchain@jetpack"}, [String]{"c++"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Crystal", [String]{"crystal@nixpkgs"}, [String]{"crystal"}, "Apache-2.0"),
+        envmodel_language_row("Cue", [String]{"cue@nixpkgs"}, [String]{"cue"}, "Apache-2.0"),
+        envmodel_language_row("Dart", [String]{"dart@nixpkgs"}, [String]{"dart"}, "BSD-3-Clause"),
+        envmodel_language_row("Deno", [String]{"deno@nixpkgs"}, [String]{"deno"}, "MIT"),
+        envmodel_language_row("Dotnet", [String]{"dotnet-sdk@nixpkgs"}, [String]{"dotnet"}, "MIT"),
+        envmodel_language_row("Elixir", [String]{"elixir@nixpkgs"}, [String]{"elixir", "mix"}, "Apache-2.0"),
+        envmodel_language_row("Elm", [String]{"elm@nixpkgs"}, [String]{"elm"}, "BSD-3-Clause"),
+        envmodel_language_row("Erlang", [String]{"erlang@nixpkgs", "rebar3@nixpkgs"}, [String]{"erl", "rebar3"}, "Apache-2.0"),
+        envmodel_language_row("Fortran", [String]{"gfortran@nixpkgs"}, [String]{"gfortran"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Gawk", [String]{"gawk@nixpkgs"}, [String]{"gawk"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Gleam", [String]{"gleam@nixpkgs"}, [String]{"gleam"}, "Apache-2.0"),
+        envmodel_language_row("Hare", [String]{"hare@nixpkgs"}, [String]{"hare"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Haskell", [String]{"ghc@nixpkgs", "cabal-install@nixpkgs"}, [String]{"ghc", "cabal"}, "BSD-3-Clause"),
+        envmodel_language_row("Helm", [String]{"kubernetes-helm@nixpkgs"}, [String]{"helm"}, "Apache-2.0"),
+        envmodel_language_row("Idris", [String]{"idris2@nixpkgs"}, [String]{"idris2"}, "BSD-3-Clause"),
+        envmodel_language_row("Java", [String]{"jdk@nixpkgs", "maven@nixpkgs"}, [String]{"java", "javac", "mvn"}, "GPL-2.0-with-classpath-exception"),
+        envmodel_language_row("Jsonnet", [String]{"jsonnet@nixpkgs"}, [String]{"jsonnet"}, "Apache-2.0"),
+        envmodel_language_row("Julia", [String]{"julia@nixpkgs"}, [String]{"julia"}, "MIT"),
+        envmodel_language_row("Kotlin", [String]{"kotlin@nixpkgs"}, [String]{"kotlinc"}, "Apache-2.0"),
+        envmodel_language_row("Lean4", [String]{"lean4@nixpkgs"}, [String]{"lean", "lake"}, "Apache-2.0"),
+        envmodel_language_row("Lobster", [String]{"lobster@nixpkgs"}, [String]{"lobster"}, "MIT"),
+        envmodel_language_row("Lua", [String]{"lua@nixpkgs", "luarocks@nixpkgs"}, [String]{"lua", "luarocks"}, "MIT"),
+        envmodel_language_row("Nim", [String]{"nim@nixpkgs"}, [String]{"nim", "nimble"}, "MIT"),
+        envmodel_language_row("Nix", [String]{"nix@nixpkgs"}, [String]{"nix"}, "LGPL-2.1-or-later"),
+        envmodel_language_row("Ocaml", [String]{"ocaml@nixpkgs", "opam@nixpkgs"}, [String]{"ocaml", "opam"}, "LGPL-2.1-with-linking-exception"),
+        envmodel_language_row("Odin", [String]{"odin@nixpkgs"}, [String]{"odin"}, "BSD-3-Clause"),
+        envmodel_language_row("Opentofu", [String]{"opentofu@nixpkgs"}, [String]{"tofu"}, "MPL-2.0"),
+        envmodel_language_row("Pascal", [String]{"fpc@nixpkgs"}, [String]{"fpc"}, "GPL-2.0-or-later"),
+        envmodel_language_row("Perl", [String]{"perl@nixpkgs"}, [String]{"perl"}, "Artistic-1.0 OR GPL-1.0-or-later"),
+        envmodel_language_row("Php", [String]{"php@nixpkgs", "composer@nixpkgs"}, [String]{"php", "composer"}, "PHP-3.01"),
+        envmodel_language_row("Pkl", [String]{"pkl@nixpkgs"}, [String]{"pkl"}, "Apache-2.0"),
+        envmodel_language_row("Purescript", [String]{"purescript@nixpkgs", "spago@nixpkgs"}, [String]{"purs", "spago"}, "BSD-3-Clause"),
+        envmodel_language_row("R", [String]{"R@nixpkgs"}, [String]{"R"}, "GPL-2.0-or-later"),
+        envmodel_language_row("Racket", [String]{"racket@nixpkgs"}, [String]{"racket"}, "LGPL-3.0-or-later"),
+        envmodel_language_row("Raku", [String]{"rakudo@nixpkgs"}, [String]{"raku"}, "Artistic-2.0"),
+        envmodel_language_row("Robotframework", [String]{"robotframework@nixpkgs"}, [String]{"robot"}, "Apache-2.0"),
+        envmodel_language_row("Ruby", [String]{"ruby@nixpkgs", "bundler@nixpkgs"}, [String]{"ruby", "bundle"}, "BSD-2-Clause"),
+        envmodel_language_row("Scala", [String]{"scala@nixpkgs", "sbt@nixpkgs"}, [String]{"scala", "sbt"}, "Apache-2.0"),
+        envmodel_language_row("Shell", [String]{"bash@nixpkgs", "shellcheck@nixpkgs"}, [String]{"bash", "shellcheck"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Solidity", [String]{"solc@nixpkgs"}, [String]{"solc"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Standardml", [String]{"smlnj@nixpkgs"}, [String]{"sml"}, "BSD-3-Clause"),
+        envmodel_language_row("Swift", [String]{"swift@nixpkgs"}, [String]{"swiftc"}, "Apache-2.0"),
+        envmodel_language_row("Terraform", [String]{"terraform@nixpkgs"}, [String]{"terraform"}, "MPL-2.0"),
+        envmodel_language_row("Texlive", [String]{"texlive@nixpkgs"}, [String]{"pdflatex"}, "GPL-3.0-or-later"),
+        envmodel_language_row("Typescript", [String]{"nodejs@nixpkgs", "nodePackages.typescript@nixpkgs"}, [String]{"node", "npm", "tsc"}, "Apache-2.0"),
+        envmodel_language_row("Typst", [String]{"typst@nixpkgs"}, [String]{"typst"}, "Apache-2.0"),
+        envmodel_language_row("Unison", [String]{"unison-language@nixpkgs"}, [String]{"unison"}, "MIT"),
+        envmodel_language_row("V", [String]{"vlang@nixpkgs"}, [String]{"v"}, "MIT"),
+        envmodel_language_row("Vala", [String]{"vala@nixpkgs"}, [String]{"valac"}, "LGPL-2.1-or-later"),
+        envmodel_language_row("Zig", [String]{"zig@nixpkgs"}, [String]{"zig"}, "MIT")
+    }
+}

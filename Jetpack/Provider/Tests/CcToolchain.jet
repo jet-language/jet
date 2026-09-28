@@ -1,0 +1,33 @@
+// Claims ported from crates/jetpack/src/Provider/cc_toolchain.rs #[cfg(test)].
+
+#Test("cc refs are one native provider surface") {
+    spec :: RefSpec.classify("cc-toolchain@jetpack") ?? panic("cc-toolchain@jetpack classifies")
+    assert(provider_cc_toolchain_is_reference(spec))
+    target :: provider_cc_toolchain_requested_target(spec) ?? panic("the host target is a valid toolchain target")
+    assert_eq(target, provider_cc_toolchain_host_target_triple())
+}
+
+#Test("cc target selector is explicit and safe") {
+    spec :: RefSpec.classify("cc-toolchain@jetpack#target=aarch64-unknown-linux-gnu") ?? panic("a target selector classifies")
+    target :: provider_cc_toolchain_requested_target(spec) ?? panic("an explicit target selector resolves")
+    assert_eq(target, "aarch64-unknown-linux-gnu")
+    if provider_cc_normalize_target("../host") == {
+        .Ok(_) -> panic("a path-like target must not normalize")
+        .Err(_) -> {}
+    }
+}
+
+#Test("cc manifest text cannot escape publication path") {
+    if provider_cc_validate_text_field("../outside", "version") == {
+        .Ok(_) -> panic("a path separator must be rejected")
+        .Err(_) -> {}
+    }
+    if provider_cc_validate_text_field("1\n2", "version") == {
+        .Ok(_) -> panic("a control character must be rejected")
+        .Err(_) -> {}
+    }
+    if provider_cc_validate_text_field("clang-18", "version") == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("a plain version must be accepted")
+    }
+}

@@ -1,0 +1,339 @@
+// Checked filesystem authority snapshots and the one authority error carrier
+// (jet-pkg-model Authority.rs). Every authority-sensitive reader goes through
+// AuthorityResolver (Resolver.jet); the records here keep the opened object,
+// its identity, and the bytes read from that same handle.
+//
+// Handles are the ratified Core directory/file handles (D-CORE-FILEDIR1,
+// D-CORE-FILEOPEN1); identity is the ratified Stat identity (D-CORE-FILESTAT1).
+
+@AUTHORITY_KIND_FILE :: "regular file"
+@AUTHORITY_KIND_DIRECTORY :: "directory"
+@AUTHORITY_KIND_SPECIAL :: "special file"
+@AUTHORITY_KIND_SYMLINK :: "symlink"
+@AUTHORITY_HARDLINK_DETAIL :: "authority file must have exactly one hard link"
+
+// The kind proven by a checked open.
+pub enum AuthorityKind {
+    File
+    Directory
+
+    fn name(self) -> String !Never {
+        if self == {
+            .File -> @AUTHORITY_KIND_FILE
+            .Directory -> @AUTHORITY_KIND_DIRECTORY
+        }
+    }
+}
+
+// Stable identity of the object that was opened.
+//
+// A regular file's identity includes its length and mtime: its bytes were
+// read from the opened handle, so drift in either means the snapshot no
+// longer describes what was read. A directory is identified by the object
+// itself (kind plus device and inode): its length and mtime change whenever a
+// legitimate writer creates or removes an entry below the authority root, and
+// a path swapped between two observations still yields a different inode.
+pub struct FileIdentity {
+    pub kind: AuthorityKind
+    pub length: Int
+    pub modified_ns: ?Int
+    pub device: Int
+    pub inode: Int
+
+    fn from_stat(info: Stat, kind: AuthorityKind) -> FileIdentity !Never {
+        if kind == AuthorityKind.Directory {
+            return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
+        }
+        FileIdentity{kind: kind, length: info.size, modified_ns: Val(info.modified.unix_ns), device: info.id.device, inode: info.id.inode}
+    }
+}
+
+// One no-follow opened file and the bytes read from that same handle.
+pub struct CheckedFile {
+    pub path: String
+    pub relative: String
+    pub identity: FileIdentity
+    pub handle: FileReader
+    pub bytes: [U8]
+
+    // Decode the bytes that were read from the opened object.
+    fn text(self) -> String !AuthorityError {
+        text :: String.from_bytes(self.bytes) ?? return Err(AuthorityError.Invalid{path: self.path, detail: "authority file is not valid UTF-8: {pkg_authority_utf8_error(self.bytes)}"})
+        Ok(text)
+    }
+}
+
+// One no-follow opened directory.
+pub struct CheckedDirectory {
+    pub path: String
+    pub relative: String
+    pub identity: FileIdentity
+    pub handle: Directory
+    allow_hardlinks: Bool
+}
+
+// A parsed canonical `package.jet` plus the opened manifest snapshot.
+pub struct CheckedManifest {
+    pub file: CheckedFile
+    pub facts: PackageFacts
+}
+
+// A checked member directory and its canonical manifest.
+pub struct CheckedMember {
+    pub directory: CheckedDirectory
+    pub manifest: CheckedManifest
+}
+
+// A member snapshot after checked Config composition and member validation.
+pub struct CheckedPackage {
+    pub member: CheckedMember
+    pub facts: PackageFacts
+}
+
+// Failure from the shared authority resolver.
+#Error
+pub enum AuthorityError {
+    Missing(String)
+    // `package.jet` parsed as text but violates the manifest vocabulary; kept
+    // typed so the registered manifest diagnostics reach the user.
+    ManifestParse(path: String, error: PackageParseError)
+    Io(path: String, operation: String, detail: String)
+    Symlink(String)
+    WrongKind(path: String, expected: String, actual: String)
+    Escapes(String)
+    AmbiguousManifest(String)
+    RetiredManifest(String)
+    WorkspaceAmbiguous([String])
+    WorkspaceNoModule
+    NestedMembers(root: String, member: String)
+    Invalid(path: String, detail: String)
+    Changed(String)
+    Unsupported(String)
+
+    fn is_missing(self) -> Bool !Never {
+        if self == {
+            .Missing(_) -> true
+            else -> false
+        }
+    }
+
+    // The Rust `Display` text.
+    fn message(self) -> String !Never {
+        if self == {
+            .Missing(path) -> "authority path `{path}` is missing"
+            .Io{path, operation, detail} -> "couldn't {operation} `{path}`: {detail}"
+            .Symlink(path) -> "authority path `{path}` is a symlink"
+            .WrongKind{path, expected, actual} -> "authority path `{path}` is a {actual}, expected a {expected}"
+            .Escapes(path) -> "authority path `{path}` escapes its root"
+            .AmbiguousManifest(path) -> "both `{@PACKAGE_FILE}` and `{@PAYLOAD_FILE}` exist in `{path}`"
+            .RetiredManifest(path) -> "retired manifest `{path}` is not accepted"
+            .WorkspaceAmbiguous(paths) -> "workspace authority is declared in {paths.len()} files"
+            .WorkspaceNoModule -> "canonical workspace source has no workspace module"
+            .NestedMembers{root, member} -> "Package root `{root}` cannot contain member Package `{member}` with its own members"
+            .Invalid{path, detail} -> "invalid authority `{path}`: {detail}"
+            .ManifestParse{path, error} -> "invalid manifest `{path}`: {error.message()}"
+            .Changed(path) -> "authority object `{path}` changed during resolution"
+            .Unsupported(detail) -> detail
+        }
+    }
+
+    fn diagnostic(self) -> Diagnostic !Never {
+        if self == {
+            .AmbiguousManifest(_) -> pkg_authority_error_diagnostic("E1206",
+                "the package has two manifest roots",
+                "`{@PACKAGE_FILE}` and `{@PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous",
+                "remove `{@PAYLOAD_FILE}` or migrate it into `{@PACKAGE_FILE}`")
+            .RetiredManifest(path) -> pkg_authority_error_diagnostic("E1226",
+                "retired manifest `{path}` is not a Package root",
+                "`{@PAYLOAD_FILE}` is retired; Package identity is read only from `{@PACKAGE_FILE}`",
+                "rename `{@PAYLOAD_FILE}` to `{@PACKAGE_FILE}`")
+            .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
+            .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
+            .NestedMembers{root, member} -> pkg_authority_error_diagnostic("E1323",
+                "member Package `{member}` declares `members`",
+                "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
+                "remove `members:` from `{member}` and lift its references into `{root}`")
+            .ManifestParse{path, error} -> pkg_manifest_parse_diagnostic(path, error)
+            .Missing(path) -> pkg_authority_error_diagnostic("E1334",
+                "authority file `{path}` is missing",
+                "authority metadata must exist before it can be used",
+                "restore the required metadata and try again")
+            .Symlink(path) -> pkg_authority_error_diagnostic("E1334",
+                "authority path `{path}` is a symlink",
+                "authority metadata is opened without following links",
+                "replace the symlink with the expected regular file or directory")
+            .WrongKind{path, expected, actual} -> pkg_authority_error_diagnostic("E1334",
+                "authority path `{path}` is not a {expected}",
+                "the opened object is a {actual}, not the required {expected}",
+                "replace `{path}` with a {expected}")
+            .Escapes(path) -> pkg_authority_error_diagnostic("E1322",
+                "authority path `{path}` escapes its root",
+                "authority identity is physical and cannot cross the checked root",
+                "use a relative path below the authority root")
+            .Invalid{path, detail} -> pkg_authority_error_diagnostic("E1334",
+                "authority metadata `{path}` is invalid",
+                detail,
+                "fix the metadata fields and try again")
+            .Changed(path) -> pkg_authority_error_diagnostic("E1334",
+                "authority object `{path}` changed during resolution",
+                "the opened authority snapshot no longer matches the object at its path",
+                "restore the authority input and retry the operation")
+            .Io{path, operation, detail} -> pkg_authority_error_diagnostic("E1334",
+                "couldn't {operation} authority `{path}`",
+                detail,
+                "restore access to the authority metadata and try again")
+            .Unsupported(detail) -> pkg_authority_error_diagnostic("E1334",
+                "authority resolution is unavailable on this platform",
+                detail,
+                "use a platform with descriptor-relative no-follow filesystem access")
+        }
+    }
+
+    fn workspace_diagnostic(self) -> Diagnostic !Never {
+        if self == {
+            .ManifestParse{path, error} -> pkg_manifest_parse_diagnostic(path, error)
+            .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
+            .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
+            .Symlink(_) | .Unsupported(_) -> self.diagnostic()
+            else -> pkg_authority_error_diagnostic("E1239",
+                "couldn't inspect workspace sources",
+                self.message(),
+                "restore the workspace metadata and try again")
+        }
+    }
+}
+
+fn pkg_authority_error_diagnostic(code: String, what: String, why: String, fix: String) -> Diagnostic !Never {
+    diagnostic_from_registry(code, None, what, why, fix)
+}
+
+// Rust `FromUtf8Error` Display: where the first invalid sequence starts.
+fn pkg_authority_utf8_error(bytes: [U8]) -> String !Never {
+    valid := 0
+    loop valid < bytes.len() {
+        lead :: Int.from_u8(bytes[valid])
+        width :: if {
+            lead < 0x80 -> 1
+            lead >= 0xC2 && lead <= 0xDF -> 2
+            lead >= 0xE0 && lead <= 0xEF -> 3
+            lead >= 0xF0 && lead <= 0xF4 -> 4
+            else -> 0
+        }
+        if width == 0 -> break
+        if valid + width > bytes.len() -> return "incomplete utf-8 byte sequence from index {valid}"
+        if String.from_bytes(bytes[valid..<valid + width]) == None -> break
+        valid += width
+    }
+    "invalid utf-8 sequence of 1 bytes from index {valid}"
+}
+
+// `authority_limit_error`: every walk/read bound is an `Invalid` detail.
+fn pkg_authority_limit_error(path: String, detail: String) -> AuthorityError !Never {
+    AuthorityError.Invalid{path: path, detail: detail}
+}
+
+// The `kind_name` of a no-follow Stat.
+fn pkg_authority_kind_name(info: Stat) -> String !Never {
+    if {
+        info.is_dir -> @AUTHORITY_KIND_DIRECTORY
+        info.is_file -> @AUTHORITY_KIND_FILE
+        else -> @AUTHORITY_KIND_SPECIAL
+    }
+}
+
+// `kind_name_from_file_type`: a directory entry kind, links included.
+fn pkg_authority_entry_kind_name(info: Stat) -> String !Never {
+    if {
+        info.is_dir -> @AUTHORITY_KIND_DIRECTORY
+        info.is_file -> @AUTHORITY_KIND_FILE
+        info.is_symlink -> @AUTHORITY_KIND_SYMLINK
+        else -> @AUTHORITY_KIND_SPECIAL
+    }
+}
+
+// `require_single_link_file`.
+fn pkg_authority_require_single_link(path: String, info: Stat) !AuthorityError {
+    if info.links == 1 -> return Ok()
+    Err(AuthorityError.Invalid{path: path, detail: @AUTHORITY_HARDLINK_DETAIL})
+}
+
+// The IOContext of a provider failure, when it carries one.
+fn pkg_io_error_context(error: IOError) -> ?IOContext !Never {
+    if error == {
+        .InvalidInput(context) -> Val(context)
+        .NotFound(context) -> Val(context)
+        .PermissionDenied(context) -> Val(context)
+        .TimedOut(context) -> Val(context)
+        .Cancelled(context) -> Val(context)
+        .Closed(context) -> Val(context)
+        .Protocol(context) -> Val(context)
+        .Other(context) -> Val(context)
+        else -> None
+    }
+}
+
+// The OS error number behind a provider failure, when known.
+fn pkg_io_os_code(error: IOError) -> ?Int !Never {
+    context :: pkg_io_error_context(error) ?? return None
+    context.os_code
+}
+
+// ELOOP: the final component was a link opened with no-follow.
+fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool !Never {
+    code :: pkg_io_os_code(error) ?? return false
+    if sys.is_linux() -> return code == 40
+    if sys.is_macos() -> return code == 62
+    false
+}
+
+// ENOTDIR: a directory open reached a non-directory.
+fn pkg_io_is_not_a_directory(error: IOError) -> Bool !Never {
+    pkg_io_os_code(error) == Val(20)
+}
+
+fn pkg_io_is_not_found(error: IOError) -> Bool !Never {
+    if error == {
+        .NotFound(_) -> true
+        else -> false
+    }
+}
+
+// `map_io`: the typed authority failure of one open.
+fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError !Never {
+    if pkg_io_is_not_found(error) -> return AuthorityError.Missing(path)
+    if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
+    if directory && pkg_io_is_not_a_directory(error) {
+        return AuthorityError.WrongKind{path: path, expected: @AUTHORITY_KIND_DIRECTORY, actual: @AUTHORITY_KIND_FILE}
+    }
+    operation :: if directory -> "open directory" else -> "open file"
+    AuthorityError.Io{path: path, operation: operation, detail: "{error}"}
+}
+
+// `root.join(relative)`: an empty relative keeps Rust's trailing separator.
+fn pkg_authority_join(root: String, relative: String) -> String !Never {
+    if relative == "" {
+        if root.ends_with("/") -> return root
+        return "{root}/"
+    }
+    files.join(root, relative)
+}
+
+// Whether `path` is `root` itself or lies below it, component-wise.
+fn pkg_authority_path_within(path: String, root: String) -> Bool !Never {
+    trimmed :: if root.ends_with("/") && root != "/" -> root.removesuffix("/") else -> root
+    if path == trimmed || path == "{trimmed}/" -> return true
+    if trimmed == "/" -> return path.starts_with("/")
+    path.starts_with("{trimmed}/")
+}
+
+// `Path::extension`: the text after the last `.` of the final component,
+// unless that dot starts the name.
+fn pkg_authority_extension(name: String) -> ?String !Never {
+    raw :: name.bytes()
+    index := raw.len() - 1
+    loop index > 0 {
+        if raw[index] == U8{46} -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
+        index -= 1
+    }
+    None
+}

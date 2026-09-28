@@ -1,0 +1,46 @@
+// The Image area's one error carrier. Rust `io::Error` values keep their kind:
+// file-system failures travel as `Io`, the builder's `invalid(...)` refusals
+// are `InvalidData`, a base that is not an OCI layout is `InvalidInput`, and a
+// destination holding different bytes is `AlreadyExists`. JSON failures keep
+// the parser's reason (Rust `io::Error::other(error)`).
+
+#Error
+pub enum ImageError {
+    Io(IOError)
+    InvalidData(String)
+    InvalidInput(String)
+    AlreadyExists(String)
+    Other(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Io(error) -> "{error}"
+            .InvalidData(text) -> text
+            .InvalidInput(text) -> text
+            .AlreadyExists(text) -> text
+            .Other(text) -> text
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound`.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .Io(error) -> {
+                if error == {
+                    .NotFound(_) -> true
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+}
+
+impl IOError -> ImageError { ImageError.Io(self) }
+
+impl EncodingError -> ImageError { ImageError.Other(self.reason) }
+
+// Rust `invalid(message)`: an `InvalidData` refusal with final text.
+fn image_invalid(message: String) -> ImageError !Never {
+    ImageError.InvalidData(message)
+}

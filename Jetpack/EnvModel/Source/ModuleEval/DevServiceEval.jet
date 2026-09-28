@@ -1,0 +1,441 @@
+// U12: field-check one dev-supervised `Service` record (an entry in an
+// `env.<name>` role-module's `services: { … }` map) and capture it as a
+// `DevServicePlan`.
+//
+// Same ratified `Service` grammar as every service record — open record,
+// required `enable: Bool`, E0975 — but `Jetpack::Services` (the dev-runtime
+// tier) is the only consumer and owns every field. The recognized fields are
+// extracted to typed plan fields here; anything else lands in `extra` for
+// `Jetpack::Services` to flag as E1262 at supervision time — never here, so a
+// forward-compatible extra key is never a hard parse/sema error.
+
+// The recognized fields of a dev service record.
+enum DevServiceField {
+    Enable
+    Ports
+    Run
+    Shutdown
+    DataDir
+    Ready
+    Restart
+    Watch
+    After
+    BeforeStart
+    Sockets
+    Other
+
+    fn parse(name: String) -> DevServiceField !Never {
+        if name == {
+            @SERVICE_FIELD_ENABLE -> DevServiceField.Enable
+            @DEV_SERVICE_FIELD_PORTS -> DevServiceField.Ports
+            @DEV_SERVICE_FIELD_RUN -> DevServiceField.Run
+            @DEV_SERVICE_FIELD_SHUTDOWN -> DevServiceField.Shutdown
+            @DEV_SERVICE_FIELD_DATA_DIR -> DevServiceField.DataDir
+            @DEV_SERVICE_FIELD_READY -> DevServiceField.Ready
+            @DEV_SERVICE_FIELD_RESTART -> DevServiceField.Restart
+            @DEV_SERVICE_FIELD_WATCH -> DevServiceField.Watch
+            @DEV_SERVICE_FIELD_AFTER -> DevServiceField.After
+            @DEV_SERVICE_FIELD_BEFORE_START -> DevServiceField.BeforeStart
+            @DEV_SERVICE_FIELD_SOCKETS -> DevServiceField.Sockets
+            else -> DevServiceField.Other
+        }
+    }
+}
+
+// The closed typed readiness probes (`ready: .exec(...)` and friends).
+enum ReadyProbeKind {
+    Exec
+    Http
+    Notify
+    Tcp
+
+    fn parse(name: String) -> ?ReadyProbeKind !Never {
+        if name == {
+            "exec" -> Val(ReadyProbeKind.Exec)
+            "http" -> Val(ReadyProbeKind.Http)
+            "notify" -> Val(ReadyProbeKind.Notify)
+            "tcp" -> Val(ReadyProbeKind.Tcp)
+            else -> None
+        }
+    }
+
+    fn name(self) -> String !Never {
+        if self == {
+            .Exec -> "exec"
+            .Http -> "http"
+            .Notify -> "notify"
+            .Tcp -> "tcp"
+        }
+    }
+
+    // Each probe has a closed argument shape.
+    fn accepts_arity(self, count: Int) -> Bool !Never {
+        if self == {
+            .Exec | .Notify -> count == 1
+            .Http | .Tcp -> count >= 1 && count <= 2
+        }
+    }
+}
+
+// U12: evaluate one `name: { … }` entry from an `env.<name>` role-module's
+// `services:` map into a `DevServicePlan`.
+pub fn envmodel_evaluate_dev_service(entry: ServiceEntry, scope: ModuleEvalScope, globals: [String: CtValue]) -> DevServicePlan !EnvModelEvalError {
+    plan := DevServicePlan{name: entry.name}
+    enable := None
+    loop field in entry.fields {
+        envmodel_check_build_io(field.value)
+        kind :: DevServiceField.parse(field.name)
+        if kind == DevServiceField.Ready {
+            if envmodel_ready_probe_from(field.value, scope, globals) == {
+                .Val(probe) -> {
+                    plan.ready_probe = Val(probe)
+                    next
+                }
+                .None -> {}
+            }
+        }
+        value :: envmodel_comptime_evaluate(field.value, globals, scope)
+        if kind == {
+            .Enable -> {
+                if value == {
+                    .Bool(flag) -> enable = Val(flag)
+                    else -> return Err(envmodel_service_enable_not_bool(field.name_span))
+                }
+            }
+            // A recognized name with the wrong shape is captured in `extra`
+            // rather than silently dropped, so `jet services` still surfaces
+            // it (E1262) instead of ignoring a typo'd value.
+            .Ports -> {
+                if envmodel_ports_from(value) == {
+                    .Val(ports) -> plan.ports = ports
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Run -> {
+                if envmodel_command_from(value) == {
+                    .Val(command) -> plan.run = Val(command)
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Shutdown -> {
+                if envmodel_shutdown_from(value) == {
+                    .Val(shutdown) -> plan.shutdown = Val(shutdown)
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .DataDir -> {
+                if value == {
+                    .Str(text) -> plan.data_dir = Val(text)
+                    else -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Ready -> {
+                if value == {
+                    .Str(text) -> plan.ready = Val(text)
+                    else -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Restart -> {
+                if envmodel_restart_from(value) == {
+                    .Val(restart) -> plan.restart = Val(restart)
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Watch -> {
+                if envmodel_strings_from(value) == {
+                    .Val(paths) -> plan.watch = paths
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .After -> {
+                if envmodel_strings_from(value) == {
+                    .Val(names) -> plan.after = names
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .BeforeStart -> {
+                if envmodel_strings_from(value) == {
+                    .Val(names) -> plan.before_start = names
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Sockets -> {
+                if envmodel_strings_from(value) == {
+                    .Val(names) -> plan.sockets = names
+                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                }
+            }
+            .Other -> envmodel_push_service_extra(&plan, field.name, value)
+        }
+    }
+    plan.enable = if enable == {
+        .Val(flag) -> flag
+        .None -> {
+            if plan.run == None -> return Err(envmodel_service_missing_enable(entry.name, entry.span))
+            true
+        }
+    }
+    Ok(plan)
+}
+
+fn envmodel_push_service_extra(plan: &DevServicePlan, name: String, value: CtValue) !Never {
+    plan.extra.push(DevServiceExtra{name: name, value: ast_comptime_value_show(value)})
+}
+
+fn envmodel_probe_error(what: String, why: String, fix: String, span: Span) -> EnvModelEvalError !Never {
+    envmodel_error("E1328", what, why, fix, Val(span))
+}
+
+// A typed readiness probe call (`exec`/`http`/`notify`/`tcp`), or None when
+// `value` is not one and the ordinary `ready:` shell-command path applies.
+fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> ?ReadyProbe !EnvModelEvalError {
+    call :: if value == {
+        .Call(call) -> call
+        else -> return Ok(None)
+    }
+    leaf :: call.name.cut_last(".")?.after ?? call.name
+    kind :: ReadyProbeKind.parse(leaf) ?? return Ok(None)
+    values := [CtValue]{}
+    loop arg in call.args {
+        envmodel_check_build_io(arg.expr)
+        values.push(envmodel_comptime_evaluate(arg.expr, globals, scope))
+    }
+    probe :: if kind == {
+        .Exec -> {
+            command :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed exec readiness needs one command", "ServiceProbe.exec carries one shell command string", "write ready: .exec(\"...\")", call.name_span))
+            ReadyProbe.Exec(command)
+        }
+        .Http -> {
+            url :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed HTTP readiness needs a URL", "ServiceProbe.http carries a URL and an optional status", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
+            status :: if values.len() > 1 {
+                code :: envmodel_probe_port_at(values, 1) ?? return Err(envmodel_probe_error("typed HTTP readiness status must be an integer", "ServiceProbe.http accepts an optional HTTP status code", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
+                Val(code)
+            } else {
+                None
+            }
+            ReadyProbe.Http{url: url, status: status}
+        }
+        .Notify -> {
+            path :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed notify readiness needs a path", "ServiceProbe.notify observes one project-relative readiness file", "write ready: .notify(\".jet/ready/api\")", call.name_span))
+            if files.is_absolute(path) || envmodel_path_has_parent_component(path) {
+                return Err(envmodel_probe_error("typed notify readiness path must stay inside the project", "ServiceProbe.notify observes a project-relative readiness file", "write a relative path without `..` or an absolute prefix", call.name_span))
+            }
+            ReadyProbe.Notify{path: path}
+        }
+        .Tcp -> {
+            host :: envmodel_probe_string_at(values, 0) ?? "127.0.0.1"
+            port_index :: if values.len() > 1 -> 1 else -> 0
+            port :: envmodel_probe_port_at(values, port_index) ?? return Err(envmodel_probe_error("typed TCP readiness needs a port", "ServiceProbe.tcp carries a host and port, or only a port", "write ready: .tcp(5432) or .tcp(\"127.0.0.1\", 5432)", call.name_span))
+            ReadyProbe.Tcp{host: host, port: port}
+        }
+    }
+    if !kind.accepts_arity(values.len()) {
+        return Err(envmodel_probe_error("typed {kind.name()} readiness has the wrong number of arguments", "each readiness probe has a closed argument shape", "use exec(command), http(url[, status]), notify(path), or tcp(port|host, port)", call.name_span))
+    }
+    Ok(Val(probe))
+}
+
+fn envmodel_probe_string_at(values: [CtValue], index: Int) -> ?String !Never {
+    if index >= values.len() -> return None
+    if values[index] == {
+        .Str(text) -> Val(text)
+        else -> None
+    }
+}
+
+// A nonzero `u16` at `index` (a port or an HTTP status).
+fn envmodel_probe_port_at(values: [CtValue], index: Int) -> ?Int !Never {
+    if index >= values.len() -> return None
+    if values[index] == {
+        .Int(number) -> if number > 0 && number <= 65535 -> Val(number) else -> None
+        else -> None
+    }
+}
+
+// True when a `/`-separated relative path has a `..` component
+// (Rust `Path::components` containing `ParentDir`).
+fn envmodel_path_has_parent_component(path: String) -> Bool !Never {
+    loop part in files.split_slash(path) {
+        if part == ".." -> return true
+    }
+    false
+}
+
+// `ports: [Int]` — None when `value` isn't a list of `Int` (the caller falls
+// back to capturing it in `extra`).
+fn envmodel_ports_from(value: CtValue) -> ?[Int] !Never {
+    items :: if value == {
+        .List(items) -> items
+        else -> return None
+    }
+    ports := [Int]{}
+    loop item in items {
+        if item == {
+            .Int(number) -> ports.push(number)
+            else -> return None
+        }
+    }
+    Val(ports)
+}
+
+fn envmodel_command_from(value: CtValue) -> ?[String] !Never {
+    strings :: envmodel_strings_from(value) ?? return None
+    if strings.len() == 0 -> return None
+    Val(strings)
+}
+
+fn envmodel_strings_from(value: CtValue) -> ?[String] !Never {
+    items :: if value == {
+        .List(items) -> items
+        else -> return None
+    }
+    strings := [String]{}
+    loop item in items {
+        if item == {
+            .Str(text) -> strings.push(text)
+            else -> return None
+        }
+    }
+    Val(strings)
+}
+
+// The final `.`-segment of an enum variant path (`RestartPolicy.OnFailure` ->
+// `OnFailure`).
+fn envmodel_variant_leaf(variant: String) -> String !Never {
+    variant.cut_last(".")?.after ?? variant
+}
+
+fn envmodel_restart_from(value: CtValue) -> ?RestartPolicy !Never {
+    if value == {
+        .Str(text) -> {
+            lowered :: pkg_ascii_lower(text)
+            if lowered == {
+                "never" -> Val(RestartPolicy.Never)
+                "on_failure" -> Val(RestartPolicy.OnFailure{max: 3, backoff_ms: 250, exponential: false})
+                "always" -> Val(RestartPolicy.Always{max: 3, backoff_ms: 250, exponential: false})
+                else -> None
+            }
+        }
+        .Enum(_, variant, args) -> {
+            parsed :: envmodel_restart_args(args) ?? return None
+            if envmodel_variant_leaf(variant) == {
+                "Never" -> if args.len() == 0 -> Val(RestartPolicy.Never) else -> None
+                "OnFailure" -> Val(RestartPolicy.OnFailure{max: parsed.max, backoff_ms: parsed.backoff_ms, exponential: parsed.exponential})
+                "Always" -> Val(RestartPolicy.Always{max: parsed.max, backoff_ms: parsed.backoff_ms, exponential: parsed.exponential})
+                else -> None
+            }
+        }
+        else -> None
+    }
+}
+
+fn envmodel_shutdown_from(value: CtValue) -> ?ShutdownPolicy !Never {
+    if value == {
+        .Enum(_, variant, args) -> {
+            if envmodel_variant_leaf(variant) == {
+                "Kill" -> if args.len() == 0 -> Val(ShutdownPolicy.Kill) else -> None
+                "Term" | "Graceful" -> envmodel_shutdown_term_args(args)
+                else -> None
+            }
+        }
+        else -> None
+    }
+}
+
+// `max`/`backoff` payload of a restart policy: labeled in any order, or
+// positional as `(max, backoff)`; each at most once.
+fn envmodel_restart_args(args: [CtEnumArg]) -> ?(max: Int, backoff_ms: Int, exponential: Bool) !Never {
+    max := 3
+    backoff_ms := 250
+    exponential := false
+    saw_max := false
+    saw_backoff := false
+    loop arg in args {
+        label :: envmodel_named_payload_field(arg.label)
+        wants_max :: if label == {
+            .Val(name) -> {
+                if name == {
+                    "max" -> {
+                        if saw_max -> return None
+                        true
+                    }
+                    "backoff" | "backoff_ms" -> {
+                        if saw_backoff -> return None
+                        false
+                    }
+                    else -> return None
+                }
+            }
+            .None -> {
+                if !saw_max -> true
+                else -> {
+                    if saw_backoff -> return None
+                    false
+                }
+            }
+        }
+        if wants_max {
+            max = envmodel_nonnegative_u32(arg.value) ?? return None
+            saw_max = true
+        } else {
+            backoff :: envmodel_backoff_value(arg.value) ?? return None
+            backoff_ms = backoff.ms
+            exponential = backoff.exponential
+            saw_backoff = true
+        }
+    }
+    Val((max: max, backoff_ms: backoff_ms, exponential: exponential))
+}
+
+fn envmodel_nonnegative_u32(value: CtValue) -> ?Int !Never {
+    if value == {
+        .Int(number) -> if number >= 0 && number <= 4294967295 -> Val(number) else -> None
+        else -> None
+    }
+}
+
+fn envmodel_nonnegative_u64(value: CtValue) -> ?Int !Never {
+    if value == {
+        .Int(number) -> if number >= 0 -> Val(number) else -> None
+        else -> None
+    }
+}
+
+fn envmodel_backoff_value(value: CtValue) -> ?(ms: Int, exponential: Bool) !Never {
+    if value == {
+        .Int(number) -> if number >= 0 -> Val((ms: number, exponential: false)) else -> None
+        .Str(text) -> if pkg_ascii_lower(text) == "exponential" -> Val((ms: 250, exponential: true)) else -> None
+        .Enum(_, variant, args) -> {
+            if envmodel_variant_leaf(variant) == {
+                "Exponential" -> if args.len() == 0 -> Val((ms: 250, exponential: true)) else -> None
+                "Fixed" -> {
+                    if args.len() != 1 -> return None
+                    ms :: envmodel_nonnegative_u64(args[0].value) ?? return None
+                    Val((ms: ms, exponential: false))
+                }
+                else -> None
+            }
+        }
+        else -> None
+    }
+}
+
+fn envmodel_shutdown_term_args(args: [CtEnumArg]) -> ?ShutdownPolicy !Never {
+    if args.len() > 1 -> return None
+    if args.len() == 0 -> return Val(ShutdownPolicy.Term{grace_ms: 3000})
+    arg :: args[0]
+    if envmodel_named_payload_field(arg.label) == {
+        .Val(name) -> {
+            if name != "grace" && name != "grace_ms" -> return None
+        }
+        .None -> {}
+    }
+    grace_ms :: envmodel_nonnegative_u64(arg.value) ?? return None
+    Val(ShutdownPolicy.Term{grace_ms: grace_ms})
+}
+
+// A payload label without the compiler-generated name prefix.
+fn envmodel_named_payload_field(label: ?String) -> ?String !Never {
+    name :: label ?? return None
+    Val(name.removeprefix(@GENERATED_NAME_PREFIX))
+}

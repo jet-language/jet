@@ -1,0 +1,1042 @@
+// The canonical foreign binder descriptor registry, ported from
+// jet_foundation::AST (ffi.rs and program_imports.rs ForeignLanguage).
+//
+// D-FFI-UNIFY1: one descriptor is the contract between a foreign schema,
+// generated Jet source, and the checked boundary. Adapters may vary their
+// transport, but they do not get a second ABI vocabulary. Every binder, the
+// hidden Rust bridge, and the C import stage read this one table.
+
+@FOREIGN_DESCRIPTOR_SCHEMA :: "jet-ffi-descriptor-v1"
+@FOREIGN_ABI_CONTRACT_VERSION :: 1
+
+// D-FFI-UNIFY1: registered foreign language roots.
+pub enum ForeignLanguage {
+    C
+    Cpp
+    Rust
+    Py
+    JS
+    Swift
+    Go
+    Java
+    DotNet
+    Tcl
+    Lua
+    Fortran
+    Cobol
+    Ada
+    Pascal
+    Dart
+    PowerShell
+    Perl
+    Ruby
+    Php
+    R
+    Octave
+    Com
+
+    // Every registered language in declaration order (`ForeignLanguage::ALL`).
+    fn all() -> [ForeignLanguage] !Never {
+        [ForeignLanguage]{
+            ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
+            ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
+            ForeignLanguage.DotNet, ForeignLanguage.Tcl, ForeignLanguage.Lua, ForeignLanguage.Fortran,
+            ForeignLanguage.Cobol, ForeignLanguage.Ada, ForeignLanguage.Pascal, ForeignLanguage.Dart,
+            ForeignLanguage.PowerShell, ForeignLanguage.Perl, ForeignLanguage.Ruby, ForeignLanguage.Php,
+            ForeignLanguage.R, ForeignLanguage.Octave, ForeignLanguage.Com
+        }
+    }
+
+    // The Rust `Debug` spelling of the variant; descriptor stamps embed it.
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .C -> "C"
+            .Cpp -> "Cpp"
+            .Rust -> "Rust"
+            .Py -> "Py"
+            .JS -> "JS"
+            .Swift -> "Swift"
+            .Go -> "Go"
+            .Java -> "Java"
+            .DotNet -> "DotNet"
+            .Tcl -> "Tcl"
+            .Lua -> "Lua"
+            .Fortran -> "Fortran"
+            .Cobol -> "Cobol"
+            .Ada -> "Ada"
+            .Pascal -> "Pascal"
+            .Dart -> "Dart"
+            .PowerShell -> "PowerShell"
+            .Perl -> "Perl"
+            .Ruby -> "Ruby"
+            .Php -> "Php"
+            .R -> "R"
+            .Octave -> "Octave"
+            .Com -> "Com"
+        }
+    }
+
+    // The `<lang>` mount root of `<lang>.<lib>`.
+    fn root(self) -> String !Never {
+        if self == {
+            .C -> @C_MODULE_ROOT
+            .Cpp -> @CPP_MODULE_ROOT
+            .Rust -> @KW_RUST
+            .Py -> @PY_MODULE_ROOT
+            .JS -> @JS_MODULE_ROOT
+            .Swift -> @SWIFT_MODULE_ROOT
+            .Go -> @GO_MODULE_ROOT
+            .Java -> @JAVA_MODULE_ROOT
+            .DotNet -> @CS_MODULE_ROOT
+            .Tcl -> @TCL_MODULE_ROOT
+            .Lua -> @LUA_MODULE_ROOT
+            .Fortran -> @FORTRAN_MODULE_ROOT
+            .Cobol -> @COBOL_MODULE_ROOT
+            .Ada -> @ADA_MODULE_ROOT
+            .Pascal -> @PASCAL_MODULE_ROOT
+            .Dart -> @DART_MODULE_ROOT
+            .PowerShell -> @PWSH_MODULE_ROOT
+            .Perl -> @PERL_MODULE_ROOT
+            .Ruby -> @RUBY_MODULE_ROOT
+            .Php -> @PHP_MODULE_ROOT
+            .R -> @R_MODULE_ROOT
+            .Octave -> @OCTAVE_MODULE_ROOT
+            .Com -> @COM_MODULE_ROOT
+        }
+    }
+
+    // The language whose mount root is `root`.
+    fn from_root(root: String) -> ?ForeignLanguage !Never {
+        loop language in ForeignLanguage.all() {
+            if language.root() == root -> return Val(language)
+        }
+        None
+    }
+
+    fn bindings_subdir(self) -> String !Never {
+        "{@BINDINGS_ROOT_SUBDIR}/{self.root()}"
+    }
+
+    // Prefix used by generated bridge symbols. It lives beside the descriptor
+    // table so the loader cannot grow a second language map.
+    fn bridge_prefix(self) -> String !Never {
+        if self == {
+            .C -> ""
+            .Cpp -> "jet_cpp_"
+            .Rust -> "jet_rust_"
+            .Py -> "jet_py_"
+            .JS -> "jet_js_"
+            .Swift -> "jet_swift_"
+            .Go -> "jet_go_"
+            .Java -> "jet_java_"
+            .DotNet -> "jet_cs_"
+            .Tcl -> "jet_tcl_"
+            .Lua -> "jet_lua_"
+            .Fortran -> "jet_fortran_"
+            .Cobol -> "jet_cobol_"
+            .Ada -> "jet_ada_"
+            .Pascal -> "jet_pascal_"
+            .Dart -> "jet_dart_"
+            .PowerShell -> "jet_pwsh_"
+            .Perl -> "jet_perl_"
+            .Ruby -> "jet_ruby_"
+            .Php -> "jet_php_"
+            .R -> "jet_r_"
+            .Octave -> "jet_octave_"
+            .Com -> "jet_com_"
+        }
+    }
+
+    fn abi_contract(self) -> ForeignAbiContract !Never {
+        if self == {
+            .C | .Cpp | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignAbiContract.c()
+            .Rust -> ForeignAbiContract.native()
+            else -> ForeignAbiContract.message()
+        }
+    }
+}
+
+pub enum BinderSurface {
+    Namespace
+
+    fn debug_name(self) -> String !Never { "Namespace" }
+}
+
+pub enum BinderStatus {
+    Active
+    Planned
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .Active -> "Active"
+            .Planned -> "Planned"
+        }
+    }
+}
+
+pub enum BinderRuntime {
+    DirectCAbi
+    ClangCppShim
+    LegacyRustExtern
+    SupervisedPythonSidecar
+    TargetDispatchedJs
+    SwiftCAbiBridge
+    GoCArchive
+    EmbeddedJvm
+    EmbeddedDotNet
+    EmbeddedTcl
+    EmbeddedLua
+    FortranIsoCBinding
+    GnuCobolCAbi
+    AdaGnatCAbi
+    FreePascalCdecl
+    DartApiDl
+    SupervisedPowerShell
+    SupervisedPerl
+    SupervisedRuby
+    SupervisedPhpPool
+    SupervisedR
+    SupervisedOctave
+    WindowsComAutomation
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .DirectCAbi -> "DirectCAbi"
+            .ClangCppShim -> "ClangCppShim"
+            .LegacyRustExtern -> "LegacyRustExtern"
+            .SupervisedPythonSidecar -> "SupervisedPythonSidecar"
+            .TargetDispatchedJs -> "TargetDispatchedJs"
+            .SwiftCAbiBridge -> "SwiftCAbiBridge"
+            .GoCArchive -> "GoCArchive"
+            .EmbeddedJvm -> "EmbeddedJvm"
+            .EmbeddedDotNet -> "EmbeddedDotNet"
+            .EmbeddedTcl -> "EmbeddedTcl"
+            .EmbeddedLua -> "EmbeddedLua"
+            .FortranIsoCBinding -> "FortranIsoCBinding"
+            .GnuCobolCAbi -> "GnuCobolCAbi"
+            .AdaGnatCAbi -> "AdaGnatCAbi"
+            .FreePascalCdecl -> "FreePascalCdecl"
+            .DartApiDl -> "DartApiDl"
+            .SupervisedPowerShell -> "SupervisedPowerShell"
+            .SupervisedPerl -> "SupervisedPerl"
+            .SupervisedRuby -> "SupervisedRuby"
+            .SupervisedPhpPool -> "SupervisedPhpPool"
+            .SupervisedR -> "SupervisedR"
+            .SupervisedOctave -> "SupervisedOctave"
+            .WindowsComAutomation -> "WindowsComAutomation"
+        }
+    }
+}
+
+pub enum BindingStubKind {
+    CHeader
+    CppHeader
+    RustExternBlock
+    PythonIntrospection
+    TypeScriptDeclarations
+    SwiftModule
+    GoExports
+    JvmClass
+    DotNetAssembly
+    TclScript
+    LuaScript
+    FortranIsoCBinding
+    GnuCobolCopybook
+    AdaSpec
+    PascalSource
+    DartContract
+    PowerShellScript
+    PerlScript
+    RubyScript
+    PhpScript
+    RScript
+    OctaveScript
+    ComTypeLibrary
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .CHeader -> "CHeader"
+            .CppHeader -> "CppHeader"
+            .RustExternBlock -> "RustExternBlock"
+            .PythonIntrospection -> "PythonIntrospection"
+            .TypeScriptDeclarations -> "TypeScriptDeclarations"
+            .SwiftModule -> "SwiftModule"
+            .GoExports -> "GoExports"
+            .JvmClass -> "JvmClass"
+            .DotNetAssembly -> "DotNetAssembly"
+            .TclScript -> "TclScript"
+            .LuaScript -> "LuaScript"
+            .FortranIsoCBinding -> "FortranIsoCBinding"
+            .GnuCobolCopybook -> "GnuCobolCopybook"
+            .AdaSpec -> "AdaSpec"
+            .PascalSource -> "PascalSource"
+            .DartContract -> "DartContract"
+            .PowerShellScript -> "PowerShellScript"
+            .PerlScript -> "PerlScript"
+            .RubyScript -> "RubyScript"
+            .PhpScript -> "PhpScript"
+            .RScript -> "RScript"
+            .OctaveScript -> "OctaveScript"
+            .ComTypeLibrary -> "ComTypeLibrary"
+        }
+    }
+}
+
+pub enum ForeignCallingConvention {
+    C
+    Cpp
+    Rust
+    HostMessage
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .C -> "C"
+            .Cpp -> "Cpp"
+            .Rust -> "Rust"
+            .HostMessage -> "HostMessage"
+        }
+    }
+}
+
+pub enum ForeignLayoutModel {
+    CAbi
+    AdapterTyped
+    OpaqueHandle
+    Message
+    Native
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .CAbi -> "CAbi"
+            .AdapterTyped -> "AdapterTyped"
+            .OpaqueHandle -> "OpaqueHandle"
+            .Message -> "Message"
+            .Native -> "Native"
+        }
+    }
+}
+
+pub enum ForeignOwnershipModel {
+    SignatureDeclared
+    AdapterOwned
+    ByValue
+    BorrowedInputCopiedOutput
+    OwnedHandle
+    SharedHandle
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .SignatureDeclared -> "SignatureDeclared"
+            .AdapterOwned -> "AdapterOwned"
+            .ByValue -> "ByValue"
+            .BorrowedInputCopiedOutput -> "BorrowedInputCopiedOutput"
+            .OwnedHandle -> "OwnedHandle"
+            .SharedHandle -> "SharedHandle"
+        }
+    }
+}
+
+pub enum ForeignErrorModel {
+    JetBoundary
+    AdapterResult
+    ErrorCode
+    TypedResult
+    PanicBoundary
+    ForeignException
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .JetBoundary -> "JetBoundary"
+            .AdapterResult -> "AdapterResult"
+            .ErrorCode -> "ErrorCode"
+            .TypedResult -> "TypedResult"
+            .PanicBoundary -> "PanicBoundary"
+            .ForeignException -> "ForeignException"
+        }
+    }
+}
+
+pub enum ForeignCallbackModel {
+    ReentrantThreadSafe
+    AdapterMarshalled
+    NoCallback
+    CAbi
+    HostRegistration
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .ReentrantThreadSafe -> "ReentrantThreadSafe"
+            .AdapterMarshalled -> "AdapterMarshalled"
+            .NoCallback -> "None"
+            .CAbi -> "CAbi"
+            .HostRegistration -> "HostRegistration"
+        }
+    }
+}
+
+pub enum ForeignAsyncModel {
+    JetTask
+    AdapterMarshalled
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .JetTask -> "JetTask"
+            .AdapterMarshalled -> "AdapterMarshalled"
+        }
+    }
+}
+
+pub enum ForeignTaskBoundary {
+    RejectCapturedState
+    AdapterMarshalled
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .RejectCapturedState -> "RejectCapturedState"
+            .AdapterMarshalled -> "AdapterMarshalled"
+        }
+    }
+}
+
+pub enum ForeignSafety {
+    GeneratedWrapper
+    UnsafeRaw
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .GeneratedWrapper -> "GeneratedWrapper"
+            .UnsafeRaw -> "UnsafeRaw"
+        }
+    }
+}
+
+// Scalar projection selected by a binder descriptor. `Unsupported` is a
+// deliberate fail-closed value, not a request to invent a fallback type.
+pub enum ForeignScalar {
+    Int
+    Float
+    Bool
+    Char
+    String
+    Unsupported
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+            .Bool -> "Bool"
+            .Char -> "Char"
+            .String -> "String"
+            .Unsupported -> "Unsupported"
+        }
+    }
+
+    fn jet_name(self) -> ?String !Never {
+        if self == {
+            .Int -> Val("Int")
+            .Float -> Val("Float")
+            .Bool -> Val("Bool")
+            .Char -> Val("Char")
+            .String -> Val("String")
+            .Unsupported -> None
+        }
+    }
+
+    // Rust type emitted at the checked C boundary for the matching Jet
+    // scalar. Closed with no placeholder arm.
+    fn c_rust_name(self) -> ?String !Never {
+        if self == {
+            .Int -> Val("std::os::raw::c_longlong")
+            .Float -> Val("f64")
+            .Bool -> Val("bool")
+            .Char -> Val("u32")
+            .String -> Val("*const std::os::raw::c_char")
+            .Unsupported -> None
+        }
+    }
+}
+
+// `[Int, Float]`: the Rust `Debug` spelling of a scalar list.
+fn pkg_foreign_scalar_list_debug(scalars: [ForeignScalar]) -> String !Never {
+    names := [String]{}
+    loop scalar in scalars -> names.push(scalar.debug_name())
+    "[{names.join(", ")}]"
+}
+
+pub struct ForeignAbiContract {
+    pub version: Int
+    pub calling_convention: ForeignCallingConvention
+    pub layout: ForeignLayoutModel
+    pub ownership: ForeignOwnershipModel
+    pub errors: ForeignErrorModel
+    pub callbacks: ForeignCallbackModel
+    pub async_completion: ForeignAsyncModel
+    pub task_boundary: ForeignTaskBoundary
+    pub safety: ForeignSafety
+    pub integer: ForeignScalar
+    pub floating: ForeignScalar
+    pub boolean: ForeignScalar
+    pub character: ForeignScalar
+    pub string: ForeignScalar
+
+    // `ForeignAbiContract::C`.
+    fn c() -> ForeignAbiContract !Never {
+        ForeignAbiContract{
+            version: @FOREIGN_ABI_CONTRACT_VERSION,
+            calling_convention: ForeignCallingConvention.C,
+            layout: ForeignLayoutModel.CAbi,
+            ownership: ForeignOwnershipModel.SignatureDeclared,
+            errors: ForeignErrorModel.JetBoundary,
+            callbacks: ForeignCallbackModel.ReentrantThreadSafe,
+            async_completion: ForeignAsyncModel.JetTask,
+            task_boundary: ForeignTaskBoundary.RejectCapturedState,
+            safety: ForeignSafety.GeneratedWrapper,
+            integer: ForeignScalar.Int,
+            floating: ForeignScalar.Float,
+            boolean: ForeignScalar.Bool,
+            character: ForeignScalar.Char,
+            string: ForeignScalar.String
+        }
+    }
+
+    // `ForeignAbiContract::CXX`.
+    fn cxx() -> ForeignAbiContract !Never {
+        contract := ForeignAbiContract.c()
+        contract.calling_convention = ForeignCallingConvention.Cpp
+        contract.layout = ForeignLayoutModel.OpaqueHandle
+        contract.ownership = ForeignOwnershipModel.OwnedHandle
+        contract
+    }
+
+    // `ForeignAbiContract::MESSAGE` (the adapter contract).
+    fn message() -> ForeignAbiContract !Never {
+        contract := ForeignAbiContract.c()
+        contract.calling_convention = ForeignCallingConvention.HostMessage
+        contract.layout = ForeignLayoutModel.AdapterTyped
+        contract.ownership = ForeignOwnershipModel.AdapterOwned
+        contract.errors = ForeignErrorModel.AdapterResult
+        contract.callbacks = ForeignCallbackModel.AdapterMarshalled
+        contract.async_completion = ForeignAsyncModel.AdapterMarshalled
+        contract.task_boundary = ForeignTaskBoundary.AdapterMarshalled
+        contract.safety = ForeignSafety.GeneratedWrapper
+        contract
+    }
+
+    // `ForeignAbiContract::NATIVE`.
+    fn native() -> ForeignAbiContract !Never {
+        contract := ForeignAbiContract.message()
+        contract.calling_convention = ForeignCallingConvention.Rust
+        contract.layout = ForeignLayoutModel.Native
+        contract
+    }
+
+    // Map a normalized C declaration to the one descriptor-owned Jet scalar.
+    // Unsupported pointers and declarations return `None` and are skipped by
+    // the binder; no generated fake signature can reach the compiler.
+    fn c_scalar(self, normalized: String) -> ?ForeignScalar !Never {
+        if self.layout != ForeignLayoutModel.CAbi -> return None
+        if normalized.ends_with("*") {
+            base :: normalized.removesuffix("*").trim()
+            if base == {
+                "char" | "signed char" | "unsigned char" -> return Val(ForeignScalar.String)
+                else -> return None
+            }
+        }
+        if normalized == {
+            "bool" | "_Bool" -> Val(ForeignScalar.Bool)
+            "float" | "double" | "long double" -> Val(ForeignScalar.Float)
+            "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int" | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed" | "signed int" | "long" | "unsigned long" | "long int" | "unsigned long int" | "long long" | "unsigned long long" | "long long int" | "size_t" | "ssize_t" | "ptrdiff_t" | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t" -> Val(ForeignScalar.Int)
+            else -> None
+        }
+    }
+
+    // Stable text included in generated stubs, binder output, and cache
+    // provenance. A descriptor mutation therefore invalidates every product
+    // made from it instead of silently reusing an old ABI.
+    fn stamp(self) -> String !Never {
+        "{@FOREIGN_DESCRIPTOR_SCHEMA};version={self.version};calling={self.calling_convention.debug_name()};layout={self.layout.debug_name()};ownership={self.ownership.debug_name()};errors={self.errors.debug_name()};callbacks={self.callbacks.debug_name()};async={self.async_completion.debug_name()};tasks={self.task_boundary.debug_name()};safety={self.safety.debug_name()};integer={self.integer.debug_name()};float={self.floating.debug_name()};bool={self.boolean.debug_name()};char={self.character.debug_name()};string={self.string.debug_name()}"
+    }
+
+    // Field-for-field equality; the stamp names every field.
+    fn same_as(self, other: ForeignAbiContract) -> Bool !Never {
+        self.stamp() == other.stamp()
+    }
+}
+
+pub enum BinderCapability {
+    TypedStub
+    SafeWrapper
+    OwnershipConversion
+    LayoutValidation
+    ErrorConversion
+    CallbackValidation
+    CacheProvenance
+    PackageProvider
+    TargetDispatch
+    UnsafeRawEscape
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .TypedStub -> "TypedStub"
+            .SafeWrapper -> "SafeWrapper"
+            .OwnershipConversion -> "OwnershipConversion"
+            .LayoutValidation -> "LayoutValidation"
+            .ErrorConversion -> "ErrorConversion"
+            .CallbackValidation -> "CallbackValidation"
+            .CacheProvenance -> "CacheProvenance"
+            .PackageProvider -> "PackageProvider"
+            .TargetDispatch -> "TargetDispatch"
+            .UnsafeRawEscape -> "UnsafeRawEscape"
+        }
+    }
+}
+
+pub enum ForeignProvider {
+    System
+    Cargo
+    Npm
+    PyPi
+    SwiftPm
+    Jetpack
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .System -> "System"
+            .Cargo -> "Cargo"
+            .Npm -> "Npm"
+            .PyPi -> "PyPi"
+            .SwiftPm -> "SwiftPm"
+            .Jetpack -> "Jetpack"
+        }
+    }
+}
+
+pub enum ForeignStubFile {
+    NoStub
+    Suffix(String)
+    StemSuffix(String)
+
+    fn debug_name(self) -> String !Never {
+        if self == {
+            .NoStub -> "None"
+            .Suffix(suffix) -> "Suffix(\"{suffix}\")"
+            .StemSuffix(suffix) -> "StemSuffix(\"{suffix}\")"
+        }
+    }
+}
+
+pub struct BinderDescriptor {
+    pub language: ForeignLanguage
+    pub surface: BinderSurface
+    pub status: BinderStatus
+    pub runtime: BinderRuntime
+    pub stub_kind: BindingStubKind
+    pub contract: ForeignAbiContract
+    pub capabilities: [BinderCapability]
+    pub effect_root: String
+    pub provider: ForeignProvider
+    pub cache_extension: String
+    pub type_stub_file: ForeignStubFile
+
+    fn abi_contract(self) -> ForeignAbiContract !Never {
+        self.contract
+    }
+
+    fn capabilities_debug(self) -> String !Never {
+        names := [String]{}
+        loop capability in self.capabilities -> names.push(capability.debug_name())
+        "[{names.join(", ")}]"
+    }
+
+    fn stamp(self) -> String !Never {
+        "{@FOREIGN_DESCRIPTOR_SCHEMA};language={self.language.debug_name()};surface={self.surface.debug_name()};status={self.status.debug_name()};runtime={self.runtime.debug_name()};stub={self.stub_kind.debug_name()};contract={self.contract.stamp()};effect={self.effect_root};provider={self.provider.debug_name()};cache={self.cache_extension};type-stub={self.type_stub_file.debug_name()};capabilities={self.capabilities_debug()};bridge={self.language.bridge_prefix()}"
+    }
+
+    fn capability_report(self) -> BinderCapabilityReport !Never {
+        BinderCapabilityReport{
+            schema: @FOREIGN_DESCRIPTOR_SCHEMA,
+            language: self.language,
+            status: self.status,
+            contract: self.contract,
+            effect_root: self.effect_root,
+            provider: self.provider,
+            capabilities: self.capabilities
+        }
+    }
+}
+
+pub struct BinderCapabilityReport {
+    pub schema: String
+    pub language: ForeignLanguage
+    pub status: BinderStatus
+    pub contract: ForeignAbiContract
+    pub effect_root: String
+    pub provider: ForeignProvider
+    pub capabilities: [BinderCapability]
+}
+
+fn pkg_binder_c_capabilities() -> [BinderCapability] !Never {
+    [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CallbackValidation, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.UnsafeRawEscape}
+}
+
+fn pkg_binder_target_capabilities() -> [BinderCapability] !Never {
+    [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CallbackValidation, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.TargetDispatch, BinderCapability.UnsafeRawEscape}
+}
+
+fn pkg_binder_adapter_capabilities() -> [BinderCapability] !Never {
+    [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CacheProvenance, BinderCapability.PackageProvider, BinderCapability.UnsafeRawEscape}
+}
+
+fn pkg_binder_planned_capabilities() -> [BinderCapability] !Never {
+    pkg_binder_c_capabilities()
+}
+
+fn pkg_binder_row(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignAbiContract, capabilities: [BinderCapability], effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor !Never {
+    BinderDescriptor{
+        language: language,
+        surface: BinderSurface.Namespace,
+        status: status,
+        runtime: runtime,
+        stub_kind: stub_kind,
+        contract: contract,
+        capabilities: capabilities,
+        effect_root: effect_root,
+        provider: provider,
+        cache_extension: "jet",
+        type_stub_file: type_stub_file
+    }
+}
+
+// Canonical descriptor table (`FOREIGN_BINDERS`). Driver routing and package
+// binders both read this table; no language adapter owns a parallel contract.
+pub fn pkg_foreign_binders() -> [BinderDescriptor] !Never {
+    c :: ForeignAbiContract.c()
+    message :: ForeignAbiContract.message()
+    no_stub :: ForeignStubFile.NoStub
+    [BinderDescriptor]{
+        pkg_binder_row(ForeignLanguage.C, BinderRuntime.DirectCAbi, BindingStubKind.CHeader, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Cpp, BinderRuntime.ClangCppShim, BindingStubKind.CppHeader, BinderStatus.Active, ForeignAbiContract.cxx(), pkg_binder_c_capabilities(), "FFI.Cpp", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Rust, BinderRuntime.LegacyRustExtern, BindingStubKind.RustExternBlock, BinderStatus.Planned, ForeignAbiContract.native(), pkg_binder_planned_capabilities(), "FFI", ForeignProvider.Cargo, no_stub),
+        pkg_binder_row(ForeignLanguage.Py, BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Py", ForeignProvider.PyPi, no_stub),
+        pkg_binder_row(ForeignLanguage.JS, BinderRuntime.TargetDispatchedJs, BindingStubKind.TypeScriptDeclarations, BinderStatus.Active, message, pkg_binder_target_capabilities(), "FFI", ForeignProvider.Npm, ForeignStubFile.Suffix("d.ts")),
+        pkg_binder_row(ForeignLanguage.Swift, BinderRuntime.SwiftCAbiBridge, BindingStubKind.SwiftModule, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI", ForeignProvider.SwiftPm, no_stub),
+        pkg_binder_row(ForeignLanguage.Go, BinderRuntime.GoCArchive, BindingStubKind.GoExports, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Go", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Java, BinderRuntime.EmbeddedJvm, BindingStubKind.JvmClass, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Java", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.DotNet, BinderRuntime.EmbeddedDotNet, BindingStubKind.DotNetAssembly, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.DotNet", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Tcl, BinderRuntime.EmbeddedTcl, BindingStubKind.TclScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Tcl", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Lua, BinderRuntime.EmbeddedLua, BindingStubKind.LuaScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Lua", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Fortran, BinderRuntime.FortranIsoCBinding, BindingStubKind.FortranIsoCBinding, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Fortran", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Cobol, BinderRuntime.GnuCobolCAbi, BindingStubKind.GnuCobolCopybook, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Cobol", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Ada, BinderRuntime.AdaGnatCAbi, BindingStubKind.AdaSpec, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Ada", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Pascal, BinderRuntime.FreePascalCdecl, BindingStubKind.PascalSource, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Pascal", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Dart, BinderRuntime.DartApiDl, BindingStubKind.DartContract, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Dart", ForeignProvider.System, ForeignStubFile.StemSuffix("_host.dart")),
+        pkg_binder_row(ForeignLanguage.PowerShell, BinderRuntime.SupervisedPowerShell, BindingStubKind.PowerShellScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.PowerShell", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Perl, BinderRuntime.SupervisedPerl, BindingStubKind.PerlScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Perl", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Ruby, BinderRuntime.SupervisedRuby, BindingStubKind.RubyScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Ruby", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Php, BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Php", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.R, BinderRuntime.SupervisedR, BindingStubKind.RScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.R", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Octave, BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Octave", ForeignProvider.System, no_stub),
+        pkg_binder_row(ForeignLanguage.Com, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Com", ForeignProvider.System, no_stub)
+    }
+}
+
+pub fn pkg_binder_descriptor(language: ForeignLanguage) -> ?BinderDescriptor !Never {
+    loop descriptor in pkg_foreign_binders() {
+        if descriptor.language == language -> return Val(descriptor)
+    }
+    None
+}
+
+pub fn pkg_foreign_abi_contract(language: ForeignLanguage) -> ForeignAbiContract !Never {
+    descriptor :: pkg_binder_descriptor(language) ?? return ForeignAbiContract.message()
+    descriptor.contract
+}
+
+// Basis assigned to one foreign boundary obligation. Foundation owns the
+// vocabulary so sema, TIR, and execution tiers read the same words.
+pub enum FfiEvidenceBasis {
+    Proved
+    Enforced
+    Contained
+    Trusted
+    Unknown
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Proved -> "proved"
+            .Enforced -> "enforced"
+            .Contained -> "contained"
+            .Trusted -> "trusted"
+            .Unknown -> "unknown"
+        }
+    }
+
+    fn parse(value: String) -> ?FfiEvidenceBasis !Never {
+        if value == {
+            "proved" -> Val(FfiEvidenceBasis.Proved)
+            "enforced" -> Val(FfiEvidenceBasis.Enforced)
+            "contained" -> Val(FfiEvidenceBasis.Contained)
+            "trusted" -> Val(FfiEvidenceBasis.Trusted)
+            "unknown" -> Val(FfiEvidenceBasis.Unknown)
+            else -> None
+        }
+    }
+
+    fn permits_guarantee(self) -> Bool !Never {
+        if self == {
+            .Proved | .Enforced | .Contained -> true
+            else -> false
+        }
+    }
+
+    fn is_unknown(self) -> Bool !Never {
+        self == FfiEvidenceBasis.Unknown
+    }
+}
+
+// The close-symbol provenance and concurrency spellings of a generated C
+// handle. The enums themselves are OpaqueHandleBinder's `CloseSource` and
+// `ThreadSafety`.
+fn pkg_ffi_close_source_name(source: CloseSource) -> String !Never {
+    if source == {
+        .Conventional -> "conventional"
+        .Overlay -> "overlay"
+    }
+}
+
+fn pkg_ffi_close_source_parse(value: String) -> ?CloseSource !Never {
+    if value == {
+        "conventional" -> Val(CloseSource.Conventional)
+        "overlay" -> Val(CloseSource.Overlay)
+        else -> None
+    }
+}
+
+fn pkg_ffi_thread_safety_name(safety: ThreadSafety) -> String !Never {
+    if safety == {
+        .Unspecified -> "unspecified"
+        .Safe -> "safe"
+        .Unsafe -> "unsafe"
+    }
+}
+
+fn pkg_ffi_thread_safety_parse(value: String) -> ?ThreadSafety !Never {
+    if value == {
+        "unspecified" -> Val(ThreadSafety.Unspecified)
+        "safe" -> Val(ThreadSafety.Safe)
+        "unsafe" -> Val(ThreadSafety.Unsafe)
+        else -> None
+    }
+}
+
+// Explicit native libraries attached to one foreign binding. `direct` is the
+// set the program names; `transitive` is the set an overlay supplied. Neither
+// is inferred from headers or symbols; both are canonical so cache
+// identities stay stable.
+pub struct FfiLinkClosure {
+    pub direct: [String]
+    pub transitive: [String]
+
+    fn new(direct: [String], transitive: [String]) -> FfiLinkClosure !Never {
+        direct_rows :: pkg_ffi_sorted_nonempty(direct)
+        transitive_rows := [String]{}
+        loop library in pkg_ffi_sorted_nonempty(transitive) {
+            if !direct_rows.contains(library) -> transitive_rows.push(library)
+        }
+        FfiLinkClosure{direct: direct_rows, transitive: transitive_rows}
+    }
+
+    fn empty() -> FfiLinkClosure !Never {
+        FfiLinkClosure{direct: [String]{}, transitive: [String]{}}
+    }
+
+    fn libraries(self) -> [String] !Never {
+        out := [String]{}
+        loop library in self.direct -> out.push(library)
+        loop library in self.transitive -> out.push(library)
+        out
+    }
+
+    // Stable human-readable encoding for binding metadata and bridge
+    // provenance. Empty lists stay explicit.
+    fn stable_key(self) -> String !Never {
+        "direct={self.direct.join(",")};transitive={self.transitive.join(",")}"
+    }
+}
+
+fn pkg_ffi_sorted_nonempty(values: [String]) -> [String] !Never {
+    out := [String]{}
+    loop value in values {
+        if value == "" || out.contains(value) -> next
+        out.push(value)
+    }
+    out.sort()
+    out
+}
+
+// One opaque C typedef promoted to a nominal Jet handle.
+pub struct FfiHandleFact {
+    pub lib: String
+    pub typedef_name: String
+    pub jet_name: String
+    pub close: String
+    pub close_source: CloseSource
+    pub thread_safety: ThreadSafety
+
+    // Stable field encoding for content-addressed bridge identities.
+    fn stable_key(self) -> String !Never {
+        "lib={self.lib};typedef={self.typedef_name};jet={self.jet_name};close={self.close};close-source={pkg_ffi_close_source_name(self.close_source)};thread-safety={pkg_ffi_thread_safety_name(self.thread_safety)}"
+    }
+}
+
+// Compiler-owned adapter used when a native close function returns a status.
+pub struct FfiCloseAdapter {
+    pub lib: String
+    pub handle_type: String
+    pub raw_function: String
+    pub adapter_function: String
+}
+
+// One bindgen export replaced by a user `#Import` overlay.
+pub struct COverlayOverride {
+    pub lib: String
+    pub generated_symbol: String
+    pub overlay_symbol: String
+}
+
+// The result of resolving one C `use` in one file. `scope == None` is a
+// file-wide import; `Val` names the inline module owning it.
+pub struct CImportLink {
+    pub importing_idx: Int
+    pub scope: ?String
+    pub alias: String
+    pub target_idx: Int
+}
+
+// One C library that the program links against.
+pub struct CLib {
+    pub lib: String
+    pub module_idx: Int
+}
+
+@FFI_BOUNDARY_OBLIGATIONS :: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
+
+// Lower-layer carrier projected from ForeignBoundaryContract.
+pub struct FfiBoundaryObligation {
+    pub name: String
+    pub basis: FfiEvidenceBasis
+    pub checker: String
+    pub assumptions: [String]
+    pub coverage_digest: String
+}
+
+// Lower-layer boundary facts carried by the bundle's C FFI record.
+pub struct FfiBoundaryFacts {
+    pub schema: String
+    pub digest: String
+    pub language: String
+    pub library: String
+    pub effect_root: String
+    pub effects: String
+    pub source_authority: String
+    pub artifact_coverage_digest: String
+    pub loaded_artifact: String
+    pub transitive_dependencies: ?[String]
+    pub reachable_callbacks: ?[String]
+    pub compiler_flags: ?[String]
+    pub target: String
+    pub generator: String
+    pub obligations: [FfiBoundaryObligation]
+
+    fn obligation(self, name: String) -> ?FfiBoundaryObligation !Never {
+        loop obligation in self.obligations {
+            if obligation.name == name -> return Val(obligation)
+        }
+        None
+    }
+
+    fn permits_guarantee(self, name: String) -> Bool !Never {
+        obligation :: self.obligation(name) ?? return false
+        obligation.basis.permits_guarantee()
+    }
+
+    fn has_unknown_obligations(self) -> Bool !Never {
+        loop obligation in self.obligations {
+            if obligation.basis.is_unknown() -> return true
+        }
+        false
+    }
+
+    fn validate(self) -> () !ForeignBridgeError {
+        required :: [String]{self.schema, self.digest, self.language, self.library, self.effect_root, self.effects, self.source_authority, self.artifact_coverage_digest, self.loaded_artifact, self.target, self.generator}
+        loop value in required {
+            if value.trim() == "" -> return Err(ForeignBridgeError{message: "foreign boundary carrier is incomplete"})
+        }
+        if !self.effects.split(";").to_list().contains(self.effect_root) -> return Err(ForeignBridgeError{message: "foreign boundary carrier narrowed its effect root"})
+        coverage_complete :: self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None
+        if !coverage_complete {
+            loop obligation in self.obligations {
+                if !obligation.basis.is_unknown() -> return Err(ForeignBridgeError{message: "foreign boundary carrier has incomplete artifact coverage"})
+            }
+        }
+        names := [String]{}
+        loop obligation in self.obligations {
+            if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest -> return Err(ForeignBridgeError{message: "foreign boundary carrier has invalid `{obligation.name}` obligation"})
+            if names.contains(obligation.name) -> return Err(ForeignBridgeError{message: "foreign boundary carrier repeats `{obligation.name}` obligation"})
+            names.push(obligation.name)
+        }
+        loop obligation in @FFI_BOUNDARY_OBLIGATIONS {
+            if !names.contains(obligation) -> return Err(ForeignBridgeError{message: "foreign boundary carrier omits `{obligation}` obligation"})
+        }
+        Ok(())
+    }
+}
+
+// Gathered C-FFI artifacts threaded into sema and codegen.
+pub struct CFfi {
+    pub import_links: [CImportLink]
+    pub libs: [CLib]
+    // Bindgen symbols replaced by matching user overlay declarations.
+    pub overlay_overrides: [COverlayOverride]
+    // Canonical boundary evidence projected from the binder provenance row.
+    pub boundaries: [FfiBoundaryFacts]
+    // Opaque typedef ownership and close provenance from generated bindings.
+    pub handle_facts: [FfiHandleFact]
+    // Explicit direct and transitive native libraries for the whole bundle.
+    pub link_closure: FfiLinkClosure
+    // Compiler-owned Unit adapters for status-returning native closers.
+    pub close_adapters: [FfiCloseAdapter]
+
+    fn empty() -> CFfi !Never {
+        CFfi{import_links: [CImportLink]{}, libs: [CLib]{}, overlay_overrides: [COverlayOverride]{}, boundaries: [FfiBoundaryFacts]{}, handle_facts: [FfiHandleFact]{}, link_closure: FfiLinkClosure.empty(), close_adapters: [FfiCloseAdapter]{}}
+    }
+
+    fn target_for(self, importing_idx: Int, alias: String) -> ?Int !Never {
+        self.target_for_scope(importing_idx, None, alias)
+    }
+
+    fn target_for_scope(self, importing_idx: Int, scope: ?String, alias: String) -> ?Int !Never {
+        loop link in self.import_links {
+            if link.importing_idx == importing_idx && link.scope == scope && link.alias == alias -> return Val(link.target_idx)
+        }
+        None
+    }
+
+    fn links_c(self) -> Bool !Never {
+        self.libs.len() > 0
+    }
+
+    fn handle_fact(self, lib: String, jet_name: String) -> ?FfiHandleFact !Never {
+        loop fact in self.handle_facts {
+            if fact.lib == lib && fact.jet_name == jet_name -> return Val(fact)
+        }
+        None
+    }
+
+    fn boundary_for(self, lib: String) -> ?FfiBoundaryFacts !Never {
+        loop boundary in self.boundaries {
+            if boundary.library == lib -> return Val(boundary)
+        }
+        None
+    }
+}

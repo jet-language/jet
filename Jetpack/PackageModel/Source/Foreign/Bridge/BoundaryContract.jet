@@ -1,0 +1,708 @@
+// The canonical foreign boundary contract, source receipts, and the family
+// capability matrix, ported from jet_pkg_model::ForeignBridge.
+//
+// Derivation references come from Compiler/JetFoundation/Source/Derivations.jet.
+// Evidence (jet_foundation::Evidence) and comparison records
+// (jet_foundation::TestingComparison) are referenced by their Rust-derived
+// names: EvidenceIdentity, EvidenceRecord, EvidenceOutcome, ComparisonRecord,
+// @TEST_COMPARISON_SCHEMA_VERSION.
+
+@FOREIGN_SOURCE_RECEIPT_SCHEMA :: "jet-ffi-source-receipt-v1"
+
+// Whether a foreign family has a checked replacement path or only a binder.
+pub enum ForeignBoundaryDisposition {
+    Supported
+    BinderOnly
+    Unsupported
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Supported -> "supported"
+            .BinderOnly -> "binder-only"
+            .Unsupported -> "unsupported"
+        }
+    }
+}
+
+// The source stays authoritative until a recorded comparison accepts the
+// replacement. A state marker, not a second evaluator.
+pub enum ForeignSourceAuthority {
+    ForeignUntilAccepted
+    ReplacementAccepted
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .ForeignUntilAccepted -> "foreign-until-accepted"
+            .ReplacementAccepted -> "replacement-accepted"
+        }
+    }
+}
+
+// The comparison API's outcome vocabulary.
+@FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"}
+
+// One raw case from the comparison/evidence machinery. The boundary keeps the
+// input and both raw observations; it runs no relation of its own.
+pub struct ForeignBoundaryObservation {
+    pub case_id: String
+    pub input: String
+    pub foreign: String
+    pub replacement: String
+    pub outcome: String
+    pub assumptions: [String]
+    pub evidence: ?EvidenceIdentity
+
+    fn new(case_id: String, input: String, foreign: String, replacement: String, outcome: String) -> ForeignBoundaryObservation !Never {
+        ForeignBoundaryObservation{case_id: case_id, input: input, foreign: foreign, replacement: replacement, outcome: outcome, assumptions: [String]{}, evidence: None}
+    }
+
+    fn with_assumptions(self, assumptions: [String]) -> ForeignBoundaryObservation !Never {
+        out := self
+        rows := [String]{}
+        loop assumption in assumptions {
+            if !rows.contains(assumption) -> rows.push(assumption)
+        }
+        rows.sort()
+        out.assumptions = rows
+        out
+    }
+
+    fn with_evidence(self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation !Never {
+        out := self
+        out.evidence = Val(evidence)
+        out
+    }
+
+    fn validate(self) -> () !ForeignBridgeError {
+        if self.case_id.trim() == "" || self.input.trim() == "" -> return Err(pkg_bridge_error("foreign boundary comparison cases need an id and input"))
+        if self.foreign.trim() == "" || self.replacement.trim() == "" -> return Err(pkg_bridge_error("foreign boundary comparison cases retain both raw foreign and replacement observations"))
+        if !@FOREIGN_BOUNDARY_COMPARISON_OUTCOMES.contains(self.outcome) -> return Err(pkg_bridge_error("unknown foreign boundary comparison outcome `{self.outcome}`"))
+        Ok(())
+    }
+}
+
+// Family-level capability projection over the canonical binder descriptor.
+pub struct ForeignBoundaryCapability {
+    pub language: ForeignLanguage
+    pub disposition: ForeignBoundaryDisposition
+    pub source_import: Bool
+    pub mixed_debug: Bool
+    pub native_export: Bool
+    pub build_host: Bool
+    pub reason: String
+}
+
+// Project the consumed family matrix without looking at command presence.
+// Active descriptors provide an executable binder. Only the named narrow
+// conversion families claim source import; C/C++ source import and
+// COM/Ada/Pascal semantic translation remain explicitly unavailable.
+pub fn pkg_foreign_boundary_capability(language: ForeignLanguage) -> ForeignBoundaryCapability !Never {
+    active :: if pkg_binder_descriptor(language) == {
+        .Val(descriptor) -> descriptor.status == BinderStatus.Active
+        .None -> false
+    }
+    source_import :: if language == {
+        .Py | .Java | .DotNet | .JS | .Go -> true
+        else -> false
+    }
+    binder_only :: if language == {
+        .Com | .Ada | .Pascal -> true
+        else -> false
+    }
+    disposition :: if {
+        !active -> ForeignBoundaryDisposition.Unsupported
+        binder_only -> ForeignBoundaryDisposition.BinderOnly
+        else -> ForeignBoundaryDisposition.Supported
+    }
+    reason :: if disposition == {
+        .Supported -> if source_import -> "active adapter with a narrow checked conversion subset" else -> "active checked binder; semantic source import is unavailable"
+        .BinderOnly -> "binder/adapter path is executable; semantic source translation is unavailable"
+        .Unsupported -> "no active binder descriptor is registered for this family"
+    }
+    mixed_debug :: if language == {
+        .C | .Cpp | .Py | .Java | .DotNet | .JS | .Go -> true
+        else -> false
+    }
+    native :: if language == {
+        .C | .Cpp -> true
+        else -> false
+    }
+    ForeignBoundaryCapability{language: language, disposition: disposition, source_import: source_import, mixed_debug: mixed_debug, native_export: native, build_host: native, reason: reason}
+}
+
+// The complete family matrix used by foreign inspection and comparison views.
+pub fn pkg_foreign_boundary_capabilities() -> [ForeignBoundaryCapability] !Never {
+    rows := [ForeignBoundaryCapability]{}
+    loop language in ForeignLanguage.all() -> rows.push(pkg_foreign_boundary_capability(language))
+    rows
+}
+
+// Build the canonical boundary row for an import operation. The capability
+// matrix stays the authority for semantic conversion; binder-only families
+// are never upgraded here.
+pub fn pkg_source_import_boundary(language: ForeignLanguage, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract !ForeignBridgeError {
+    descriptor :: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {language.debug_name()}"))
+    boundary :: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
+    boundary.validate()
+    Ok(boundary)
+}
+
+fn pkg_bridge_evidence_key(evidence: EvidenceIdentity) -> String !Never {
+    "{evidence.report_id}/{evidence.claim_id}/{evidence.evidence_id}"
+}
+
+// Stable receipt emitted when a checked comparison accepts a replacement
+// projection. It references the derivation/evidence/comparison records; it
+// never copies or re-evaluates their graphs.
+pub struct ForeignSourceReceipt {
+    pub schema: String
+    pub boundary_digest: String
+    pub boundary_identity: ForeignBoundaryIdentity
+    pub artifact_coverage_digest: String
+    pub source_identity: String
+    pub replacement_identity: String
+    pub source_authority: ForeignSourceAuthority
+    pub derivation: MirDerivationRef
+    pub evidence: [EvidenceIdentity]
+    pub comparison_artifact_id: String
+    pub comparison_schema_version: Int
+    pub comparison_status: String
+    pub comparison_relation: String
+    pub compared_samples: Int
+    pub discarded_cases: Int
+    pub first_difference: ?Int
+    pub comparison_reason: ?String
+
+    fn from_contract(contract: ForeignBoundaryContract, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt !ForeignBridgeError {
+        derivation :: contract.derivation ?? return Err(pkg_bridge_error("accepted foreign replacement is missing its derivation reference"))
+        comparison_artifact_id :: comparison.artifact_id() ?? return Err(pkg_bridge_error("{err}"))
+        receipt :: ForeignSourceReceipt{
+            schema: @FOREIGN_SOURCE_RECEIPT_SCHEMA,
+            boundary_digest: contract.digest(),
+            boundary_identity: contract.identity,
+            artifact_coverage_digest: contract.artifact_coverage.digest(),
+            source_identity: contract.identity.source,
+            replacement_identity: replacement_identity,
+            source_authority: contract.source_authority,
+            derivation: derivation,
+            evidence: contract.evidence,
+            comparison_artifact_id: comparison_artifact_id,
+            comparison_schema_version: comparison.schema_version,
+            comparison_status: comparison.status.as_str(),
+            comparison_relation: comparison.relation.as_str(),
+            compared_samples: comparison.samples.len(),
+            discarded_cases: comparison.discarded_cases,
+            first_difference: comparison.first_difference,
+            comparison_reason: comparison.reason
+        }
+        receipt.validate()
+        Ok(receipt)
+    }
+
+    fn validate(self) -> () !ForeignBridgeError {
+        if self.schema != @FOREIGN_SOURCE_RECEIPT_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign source receipt schema `{self.schema}`"))
+        if self.boundary_digest.trim() == "" || !self.boundary_identity.is_complete() || self.artifact_coverage_digest.trim() == "" || self.source_identity.trim() == "" || self.replacement_identity.trim() == "" || self.comparison_artifact_id.trim() == "" || !pkg_bridge_is_lower_hex64(self.comparison_artifact_id) -> return Err(pkg_bridge_error("foreign source receipt has incomplete identity or coverage"))
+        if self.source_authority != ForeignSourceAuthority.ReplacementAccepted -> return Err(pkg_bridge_error("foreign source receipt requires replacement-accepted source authority"))
+        if self.derivation.id.trim() == "" || self.evidence.len() == 0 -> return Err(pkg_bridge_error("foreign source receipt requires checked derivation and evidence references"))
+        if self.comparison_schema_version != @TEST_COMPARISON_SCHEMA_VERSION || self.comparison_status != "matched" || self.comparison_relation.trim() == "" || self.compared_samples == 0 || self.discarded_cases != 0 || self.first_difference != None -> return Err(pkg_bridge_error("foreign source receipt requires a non-empty matched comparison without discarded cases"))
+        Ok(())
+    }
+
+    // Queryable fields for the existing provenance/receipt channels.
+    fn provenance_fields(self) -> [(name: String, value: String)] !Never {
+        fields := [(name: String, value: String)]{
+            (name: "source-receipt-schema", value: self.schema),
+            (name: "source-receipt-boundary", value: self.boundary_digest),
+            (name: "source-receipt-coverage", value: self.artifact_coverage_digest),
+            (name: "source-receipt-authority", value: self.source_authority.as_str()),
+            (name: "source-receipt-source", value: self.source_identity),
+            (name: "source-receipt-replacement", value: self.replacement_identity),
+            (name: "source-receipt-derivation", value: self.derivation.id),
+            (name: "source-receipt-comparison-artifact", value: self.comparison_artifact_id),
+            (name: "source-receipt-comparison-schema", value: self.comparison_schema_version.to_string()),
+            (name: "source-receipt-comparison-status", value: self.comparison_status),
+            (name: "source-receipt-comparison-relation", value: self.comparison_relation),
+            (name: "source-receipt-compared-samples", value: self.compared_samples.to_string()),
+            (name: "source-receipt-discarded-cases", value: self.discarded_cases.to_string())
+        }
+        loop evidence in self.evidence -> fields.push((name: "source-receipt-evidence", value: pkg_bridge_evidence_key(evidence)))
+        if self.comparison_reason == .Val(reason) -> fields.push((name: "source-receipt-comparison-reason", value: reason))
+        fields
+    }
+
+    // Deterministic text form suitable for the existing receipt store.
+    fn render(self) -> String !ForeignBridgeError {
+        self.validate()
+        output := ""
+        loop field in self.provenance_fields() -> pkg_bridge_append_line(&output, field.name, field.value)
+        identity :: self.boundary_identity
+        output = output + "source-receipt-boundary-source={identity.source}\nsource-receipt-boundary-overlay={identity.overlay}\nsource-receipt-boundary-generator={identity.generator}\nsource-receipt-boundary-implementation={identity.implementation}\nsource-receipt-boundary-toolchain={identity.toolchain}\nsource-receipt-boundary-target={identity.target}\n"
+        Ok(output)
+    }
+}
+
+fn pkg_bridge_scalar_width(scalar: ForeignScalar) -> String !Never {
+    if scalar == {
+        .Int -> "target-declared-integer-width"
+        .Float -> "target-declared-floating-width"
+        .Bool -> "target-declared-boolean-width"
+        .Char -> "target-declared-character-width"
+        .String -> "pointer-plus-encoding"
+        .Unsupported -> "unsupported"
+    }
+}
+
+// The one consumed boundary row for a binder invocation.
+pub struct ForeignBoundaryContract {
+    pub schema: String
+    pub language: ForeignLanguage
+    pub library: String
+    pub descriptor: String
+    pub abi: ForeignAbiContract
+    pub scalar_widths: [String: String]
+    pub alignment: String
+    pub ownership: String
+    pub cleanup: String
+    pub encoding: String
+    pub nullability: String
+    pub errors: String
+    pub exceptions: String
+    pub callbacks: String
+    pub task_thread: String
+    pub target_availability: String
+    pub copy_cost: String
+    // The descriptor-owned effect root; never narrowed to purity by evidence.
+    pub effects: String
+    pub effect_root: String
+    // Exact loaded artifact and reachable native coverage shared by all rows.
+    pub artifact_coverage: ForeignArtifactCoverage
+    pub identity: ForeignBoundaryIdentity
+    pub disposition: ForeignBoundaryDisposition
+    pub source_import: Bool
+    pub source_authority: ForeignSourceAuthority
+    // Receipt of the checked comparison that made a replacement selectable.
+    pub source_receipt: ?ForeignSourceReceipt
+    pub derivation: ?MirDerivationRef
+    pub evidence: [EvidenceIdentity]
+    pub assumptions: [String]
+    pub observations: [ForeignBoundaryObservation]
+    // One evidence row for every canonical ABI/safety/effect obligation.
+    pub obligations: [ForeignObligationEvidence]
+
+    fn new(descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity) -> ForeignBoundaryContract !Never {
+        capability :: pkg_foreign_boundary_capability(descriptor.language)
+        contract :: descriptor.contract
+        scalar_widths := [String: String]{}
+        scalar_widths["integer"] = pkg_bridge_scalar_width(contract.integer)
+        scalar_widths["floating"] = pkg_bridge_scalar_width(contract.floating)
+        scalar_widths["boolean"] = pkg_bridge_scalar_width(contract.boolean)
+        scalar_widths["character"] = pkg_bridge_scalar_width(contract.character)
+        scalar_widths["string"] = pkg_bridge_scalar_width(contract.string)
+        is_cpp :: descriptor.language == ForeignLanguage.Cpp
+        is_c :: descriptor.language == ForeignLanguage.C
+        artifact_coverage :: ForeignArtifactCoverage.new("not-recorded", identity.target, identity.generator)
+        coverage_digest :: artifact_coverage.digest()
+        obligations := [ForeignObligationEvidence]{}
+        loop obligation in @FOREIGN_BOUNDARY_OBLIGATIONS {
+            obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FfiEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
+        }
+        alignment :: if {
+            is_cpp -> "opaque-handle; native class layout intentionally unclaimed"
+            is_c -> "target-declared C ABI; aggregate alignment requires #Layout(c)"
+            else -> "adapter-declared; no native aggregate layout is claimed"
+        }
+        ForeignBoundaryContract{
+            schema: @FOREIGN_BOUNDARY_SCHEMA,
+            language: descriptor.language,
+            library: library,
+            descriptor: descriptor.stamp(),
+            abi: contract,
+            scalar_widths: scalar_widths,
+            alignment: alignment,
+            ownership: if is_cpp -> "opaque-owned-handle" else -> contract.ownership.debug_name(),
+            cleanup: if is_cpp -> "consuming close removes the handle slot before delete" else -> "descriptor/overlay close contract",
+            encoding: if is_cpp -> "scalar subset; no implicit text conversion" else -> "descriptor-declared encoding",
+            nullability: if is_cpp -> "null handle is invalid; no nullable scalar claim" else -> "descriptor-declared; unknown remains unsupported",
+            errors: if is_cpp -> "Jet checked result plus take_error status" else -> contract.errors.debug_name(),
+            exceptions: if is_cpp -> "caught at the C++ shim; mapped to Exception" else -> "foreign exceptions are not translated implicitly",
+            callbacks: if is_cpp -> "C ABI callback pointer; captured state is rejected" else -> contract.callbacks.debug_name(),
+            task_thread: "async={contract.async_completion.debug_name()};task-boundary={contract.task_boundary.debug_name()};thread-crossing=descriptor-declared",
+            target_availability: "target={identity.target}; source/tool/overlay identities are exact",
+            copy_cost: if is_cpp -> "scalar by-value; handles are slot lookups, never native object copies" else -> "adapter/binder-declared conversion cost",
+            effects: "{descriptor.effect_root};foreign-unverified",
+            effect_root: descriptor.effect_root,
+            artifact_coverage: artifact_coverage,
+            identity: identity,
+            disposition: capability.disposition,
+            source_import: capability.source_import,
+            source_authority: ForeignSourceAuthority.ForeignUntilAccepted,
+            source_receipt: None,
+            derivation: None,
+            evidence: [EvidenceIdentity]{},
+            assumptions: [String]{},
+            observations: [ForeignBoundaryObservation]{},
+            obligations: obligations
+        }
+    }
+
+    fn validate(self) -> () !ForeignBridgeError {
+        if self.schema != @FOREIGN_BOUNDARY_SCHEMA -> return Err(pkg_bridge_error("unsupported foreign boundary schema `{self.schema}`"))
+        if self.library.trim() == "" || self.descriptor.trim() == "" -> return Err(pkg_bridge_error("foreign boundary requires a library and descriptor"))
+        if !self.identity.is_complete() -> return Err(pkg_bridge_error("foreign boundary identity is incomplete"))
+        if self.effect_root.trim() == "" || !self.effects.split(";").to_list().contains(self.effect_root) -> return Err(pkg_bridge_error("foreign effects cannot be narrowed below the descriptor effect root"))
+        if self.obligations.len() < @FOREIGN_BOUNDARY_OBLIGATIONS.len() -> return Err(pkg_bridge_error("foreign boundary is missing canonical obligation rows"))
+        names := [String]{}
+        loop obligation in self.obligations {
+            obligation.validate(self.artifact_coverage)
+            if names.contains(obligation.obligation) -> return Err(pkg_bridge_error("foreign boundary repeats obligation `{obligation.obligation}`"))
+            names.push(obligation.obligation)
+        }
+        loop name in @FOREIGN_BOUNDARY_OBLIGATIONS {
+            if !names.contains(name) -> return Err(pkg_bridge_error("foreign boundary omitted a canonical obligation row"))
+        }
+        if self.evidence.len() > 0 && self.derivation == None -> return Err(pkg_bridge_error("foreign boundary evidence requires a checked derivation reference"))
+        if !self.source_import && self.source_authority == ForeignSourceAuthority.ReplacementAccepted -> return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language.root()}"))
+        accepted :: self.source_authority == ForeignSourceAuthority.ReplacementAccepted
+        if self.source_receipt == {
+            .Val(receipt) -> {
+                if !accepted -> return Err(pkg_bridge_error("foreign source receipt requires replacement acceptance"))
+                receipt.validate()
+                if receipt.boundary_digest != self.digest() || receipt.boundary_identity != self.identity || receipt.artifact_coverage_digest != self.artifact_coverage.digest() || receipt.source_authority != self.source_authority -> return Err(pkg_bridge_error("foreign source receipt does not match its accepted boundary"))
+            }
+            .None -> {
+                if accepted -> return Err(pkg_bridge_error("accepted foreign replacement is missing its source receipt"))
+            }
+        }
+        loop observation in self.observations -> observation.validate()
+        if accepted {
+            if self.observations.len() == 0 -> return Err(pkg_bridge_error("a foreign replacement requires non-empty matched comparison observations"))
+            loop observation in self.observations {
+                if observation.outcome != "matched" -> return Err(pkg_bridge_error("a foreign replacement requires non-empty matched comparison observations"))
+            }
+        }
+        Ok(())
+    }
+
+    fn with_assumptions(self, assumptions: [String]) -> ForeignBoundaryContract !Never {
+        out := self
+        rows := [String]{}
+        loop assumption in assumptions {
+            if !rows.contains(assumption) -> rows.push(assumption)
+        }
+        rows.sort()
+        out.assumptions = rows
+        out
+    }
+
+    // Attach exact artifact coverage and retarget every existing obligation
+    // row to the same coverage digest.
+    fn with_artifact_coverage(self, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract !Never {
+        out := self
+        digest :: coverage.digest()
+        out.artifact_coverage = coverage
+        loop index in 0..<out.obligations.len() -> out.obligations[index].coverage_digest = digest
+        out
+    }
+
+    // Replace one obligation row without creating a parallel evidence store.
+    fn record_obligation(&self, obligation: ForeignObligationEvidence) -> () !ForeignBridgeError {
+        obligation.validate(self.artifact_coverage)
+        replaced := false
+        loop index in 0..<self.obligations.len() {
+            if self.obligations[index].obligation == obligation.obligation {
+                self.obligations[index] = obligation
+                replaced = true
+                break
+            }
+        }
+        if !replaced -> self.obligations.push(obligation)
+        self.obligations.sort_by(row -> row.obligation)
+        Ok(())
+    }
+
+    // Record one basis/checker/assumption row against this contract's exact
+    // loaded artifact coverage.
+    fn set_obligation(&self, name: String, basis: FfiEvidenceBasis, checker: String, assumptions: [String]) -> () !ForeignBridgeError {
+        self.record_obligation(ForeignObligationEvidence.new(name, basis, checker, assumptions, self.artifact_coverage))
+    }
+
+    fn obligation(self, name: String) -> ?ForeignObligationEvidence !Never {
+        loop obligation in self.obligations {
+            if obligation.obligation == name -> return Val(obligation)
+        }
+        None
+    }
+
+    // Safe/user-visible projections need a non-unknown basis and complete
+    // loaded-artifact coverage. TRUSTED stays callable outside that path.
+    fn permits_guarantee(self, name: String) -> Bool !Never {
+        if !self.artifact_coverage.is_complete() -> return false
+        obligation :: self.obligation(name) ?? return false
+        obligation.basis.permits_guarantee()
+    }
+
+    fn has_unknown_obligations(self) -> Bool !Never {
+        loop obligation in self.obligations {
+            if obligation.basis == FfiEvidenceBasis.Unknown -> return true
+        }
+        false
+    }
+
+    fn has_complete_artifact_coverage(self) -> Bool !Never {
+        self.artifact_coverage.is_complete()
+    }
+
+    // Project the canonical row into the lower-layer carrier used by sema,
+    // TIR, and execution tiers.
+    fn carrier_facts(self) -> FfiBoundaryFacts !Never {
+        obligations := [FfiBoundaryObligation]{}
+        loop obligation in self.obligations {
+            obligations.push(FfiBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
+        }
+        FfiBoundaryFacts{
+            schema: self.schema,
+            digest: self.digest(),
+            language: self.language.root(),
+            library: self.library,
+            effect_root: self.effect_root,
+            effects: self.effects,
+            source_authority: self.source_authority.as_str(),
+            artifact_coverage_digest: self.artifact_coverage.digest(),
+            loaded_artifact: self.artifact_coverage.loaded_artifact,
+            transitive_dependencies: self.artifact_coverage.transitive_dependencies,
+            reachable_callbacks: self.artifact_coverage.reachable_callbacks,
+            compiler_flags: self.artifact_coverage.compiler_flags,
+            target: self.artifact_coverage.target,
+            generator: self.artifact_coverage.generator,
+            obligations: obligations
+        }
+    }
+
+    fn attach_derivation(self, record: DerivationRecord) -> ForeignBoundaryContract !ForeignBridgeError {
+        if !derivation_record_validate(record) -> return Err(pkg_bridge_error("derivation {record.id} has a non-canonical identity"))
+        if record.identity != self.identity.derivation_identity() -> return Err(pkg_bridge_error("foreign boundary derivation identity does not match its source/build/run/target inputs"))
+        out := self
+        out.derivation = Val(derivation_record_reference(record))
+        Ok(out)
+    }
+
+    fn attach_evidence(self, record: EvidenceRecord) -> ForeignBoundaryContract !ForeignBridgeError {
+        record.validate() ?? return Err(pkg_bridge_error("foreign boundary evidence is invalid: {err}"))
+        derivation :: record.derivation ?? return Err(pkg_bridge_error("foreign boundary evidence must reference a checked derivation"))
+        if self.derivation != Val(derivation) -> return Err(pkg_bridge_error("foreign boundary evidence and derivation references disagree"))
+        out := self
+        if !out.evidence.contains(record.identity) {
+            out.evidence.push(record.identity)
+            out.evidence.sort_by(row -> pkg_bridge_evidence_key(row))
+        }
+        Ok(out)
+    }
+
+    // Consume the checked derivation, evidence, and comparison records before
+    // a replacement projection may become selectable. The receipt is the only
+    // new record; it references the canonical records.
+    fn accept_reasoned_replacement(&self, current_identity: ForeignBoundaryIdentity, current_coverage: ForeignArtifactCoverage, derivation: DerivationRecord, evidence: EvidenceRecord, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt !ForeignBridgeError {
+        self.validate()
+        if self.replacement_accepted() -> return Err(pkg_bridge_error("foreign replacement is already accepted for this boundary"))
+        if self.stale_against(current_identity) -> return Err(pkg_bridge_error("foreign replacement reasoning is stale against the current boundary identity"))
+        if self.coverage_stale_against(current_coverage) -> return Err(pkg_bridge_error("foreign replacement reasoning is stale against current artifact coverage"))
+        if replacement_identity.trim() == "" -> return Err(pkg_bridge_error("foreign replacement reasoning requires a replacement identity"))
+        if evidence.outcome.is_failure() || evidence.outcome.is_incomplete() || evidence.outcome == EvidenceOutcome.Unchecked -> return Err(pkg_bridge_error("foreign replacement evidence is not a complete successful observation: {evidence.outcome.as_str()}"))
+        comparison.assert_equal() ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {err}"))
+        candidate := self.attach_derivation(derivation)
+        candidate = candidate.attach_evidence(evidence)
+        candidate.record_comparison(comparison, Val(evidence.identity))
+        candidate.mark_replacement_accepted()
+        receipt :: ForeignSourceReceipt.from_contract(candidate, comparison, replacement_identity)
+        candidate.source_receipt = Val(receipt)
+        candidate.validate()
+        self = candidate
+        Ok(receipt)
+    }
+
+    fn record_observation(&self, observation: ForeignBoundaryObservation) -> () !ForeignBridgeError {
+        observation.validate()
+        self.observations.push(observation)
+        Ok(())
+    }
+
+    // Consume one canonical comparison record. Every sampled case keeps both
+    // raw sides; terminal outcomes retain their status/reason as assumptions.
+    fn record_comparison(&self, record: ComparisonRecord, evidence: ?EvidenceIdentity) -> () !ForeignBridgeError {
+        if record.schema_version != @TEST_COMPARISON_SCHEMA_VERSION -> return Err(pkg_bridge_error("unsupported comparison schema version {record.schema_version}"))
+        if record.universal_proof -> return Err(pkg_bridge_error("foreign boundary comparison cannot claim universal proof"))
+        outcome :: record.status.as_str()
+        relation :: record.relation.as_str()
+        if record.samples.len() == 0 {
+            reason :: record.reason ?? "comparison produced no samples"
+            assumptions := self.assumptions
+            assumptions.push("comparison-terminal:{outcome}:{reason}")
+            assumptions.push("comparison-relation:{relation}")
+            rows := [String]{}
+            loop assumption in assumptions {
+                if !rows.contains(assumption) -> rows.push(assumption)
+            }
+            rows.sort()
+            self.assumptions = rows
+            return Ok(())
+        }
+        loop sample in record.samples {
+            assumptions := [String]{"relation={relation}", "source={sample.identity.source}", "tool={sample.identity.tool}", "target={sample.identity.target}"}
+            if sample.reference_replay == .Val(replay) -> assumptions.push("reference-replay={replay.raw}")
+            if sample.candidate_replay == .Val(replay) -> assumptions.push("replacement-replay={replay.raw}")
+            observation := ForeignBoundaryObservation.new(sample.identity.case_id, sample.identity.input_id, sample.reference.raw, sample.candidate.raw, outcome).with_assumptions(assumptions)
+            if evidence == .Val(identity) -> observation = observation.with_evidence(identity)
+            self.record_observation(observation)
+        }
+        Ok(())
+    }
+
+    // Accept a replacement only after the checked workflow persisted its
+    // explicit source receipt.
+    fn accept_replacement(&self) -> () !ForeignBridgeError {
+        if self.source_receipt == None -> return Err(pkg_bridge_error("use accept_reasoned_replacement to attach the checked source receipt"))
+        self.mark_replacement_accepted()
+    }
+
+    fn mark_replacement_accepted(&self) -> () !ForeignBridgeError {
+        if !self.source_import -> return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language.root()}"))
+        if self.derivation == None || self.evidence.len() == 0 -> return Err(pkg_bridge_error("cannot accept a foreign replacement without checked derivation and evidence references"))
+        if self.observations.len() == 0 -> return Err(pkg_bridge_error("cannot accept a foreign replacement without all matched cases carrying evidence"))
+        loop observation in self.observations {
+            if observation.outcome != "matched" || observation.evidence == None -> return Err(pkg_bridge_error("cannot accept a foreign replacement without all matched cases carrying evidence"))
+        }
+        self.source_authority = ForeignSourceAuthority.ReplacementAccepted
+        Ok(())
+    }
+
+    fn stale_against(self, current: ForeignBoundaryIdentity) -> Bool !Never {
+        self.identity.differs_from(current)
+    }
+
+    // Stable digest for a complete boundary row; it only keys the row.
+    fn digest(self) -> String !Never {
+        identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+        loop field in self.stable_fields() -> identity.field(field.name, field.value.bytes())
+        identity.finish()
+    }
+
+    fn coverage_stale_against(self, current: ForeignArtifactCoverage) -> Bool !Never {
+        self.artifact_coverage.digest() != current.digest()
+    }
+
+    // Whether a consumer may select the replacement projection.
+    fn replacement_accepted(self) -> Bool !Never {
+        self.source_import && self.source_authority == ForeignSourceAuthority.ReplacementAccepted
+    }
+
+    // Compact source-safe marker carried by generated bindings.
+    fn stamp(self) -> String !Never {
+        "{self.schema};language={self.language.root()};library={self.library};disposition={self.disposition.as_str()};source-authority={self.source_authority.as_str()};digest={self.digest()}"
+    }
+
+    fn sorted_width_names(self) -> [String] !Never {
+        names := self.scalar_widths.keys().to_list()
+        names.sort()
+        names
+    }
+
+    // Queryable fields merged into the bridge provenance record.
+    fn provenance_fields(self) -> [(name: String, value: String)] !Never {
+        coverage :: self.artifact_coverage
+        fields := [(name: String, value: String)]{
+            (name: "boundary-schema", value: self.schema),
+            (name: "boundary-digest", value: self.digest()),
+            (name: "boundary-language", value: self.language.root()),
+            (name: "boundary-library", value: self.library),
+            (name: "boundary-descriptor", value: self.descriptor),
+            (name: "boundary-disposition", value: self.disposition.as_str()),
+            (name: "boundary-source-import", value: if self.source_import -> "true" else -> "false"),
+            (name: "boundary-source-authority", value: self.source_authority.as_str()),
+            (name: "boundary-alignment", value: self.alignment),
+            (name: "boundary-ownership", value: self.ownership),
+            (name: "boundary-cleanup", value: self.cleanup),
+            (name: "boundary-encoding", value: self.encoding),
+            (name: "boundary-nullability", value: self.nullability),
+            (name: "boundary-errors", value: self.errors),
+            (name: "boundary-exceptions", value: self.exceptions),
+            (name: "boundary-callbacks", value: self.callbacks),
+            (name: "boundary-task-thread", value: self.task_thread),
+            (name: "boundary-target-availability", value: self.target_availability),
+            (name: "boundary-copy-cost", value: self.copy_cost),
+            (name: "boundary-effects", value: self.effects),
+            (name: "boundary-effect-root", value: self.effect_root),
+            (name: "boundary-artifact-coverage", value: coverage.digest()),
+            (name: "boundary-loaded-artifact", value: coverage.loaded_artifact),
+            (name: "boundary-transitive-dependencies", value: pkg_bridge_provenance_optional_strings(coverage.transitive_dependencies)),
+            (name: "boundary-reachable-callbacks", value: pkg_bridge_provenance_optional_strings(coverage.reachable_callbacks)),
+            (name: "boundary-compiler-flags", value: pkg_bridge_provenance_optional_strings(coverage.compiler_flags)),
+            (name: "boundary-coverage-target", value: coverage.target),
+            (name: "boundary-coverage-generator", value: coverage.generator),
+            (name: "boundary-overlay-identity", value: self.identity.overlay),
+            (name: "boundary-generator-identity", value: self.identity.generator),
+            (name: "boundary-implementation-identity", value: self.identity.implementation),
+            (name: "boundary-toolchain-identity", value: self.identity.toolchain),
+            (name: "boundary-target-identity", value: self.identity.target)
+        }
+        loop name in self.sorted_width_names() -> fields.push((name: "boundary-width-{name}", value: self.scalar_widths[name]))
+        if self.derivation == .Val(derivation) -> fields.push((name: "boundary-derivation", value: derivation.id))
+        loop evidence in self.evidence -> fields.push((name: "boundary-evidence", value: pkg_bridge_evidence_key(evidence)))
+        loop assumption in self.assumptions -> fields.push((name: "boundary-assumption", value: assumption))
+        loop obligation in self.obligations {
+            fields.push((name: "boundary-obligation", value: "{obligation.obligation}\t{obligation.basis.as_str()}\t{obligation.checker}\t{obligation.coverage_digest}\t{obligation.assumptions.join("|")}"))
+        }
+        loop observation in self.observations {
+            fields.push((name: "boundary-comparison", value: "{observation.case_id}\t{observation.input}\t{observation.outcome}\t{observation.foreign}\t{observation.replacement}"))
+        }
+        if self.source_receipt == .Val(receipt) {
+            loop field in receipt.provenance_fields() -> fields.push(field)
+        }
+        fields
+    }
+
+    fn stable_fields(self) -> [(name: String, value: String)] !Never {
+        coverage :: self.artifact_coverage
+        obligation_rows := [String]{}
+        loop obligation in self.obligations {
+            obligation_rows.push("{obligation.obligation}:{obligation.basis.as_str()}:{obligation.checker}:{obligation.coverage_digest}:{obligation.assumptions.join("|")}")
+        }
+        fields := [(name: String, value: String)]{
+            (name: "schema", value: self.schema),
+            (name: "language", value: self.language.root()),
+            (name: "library", value: self.library),
+            (name: "descriptor", value: self.descriptor),
+            (name: "abi", value: self.abi.stamp()),
+            (name: "alignment", value: self.alignment),
+            (name: "ownership", value: self.ownership),
+            (name: "cleanup", value: self.cleanup),
+            (name: "encoding", value: self.encoding),
+            (name: "nullability", value: self.nullability),
+            (name: "errors", value: self.errors),
+            (name: "exceptions", value: self.exceptions),
+            (name: "callbacks", value: self.callbacks),
+            (name: "task_thread", value: self.task_thread),
+            (name: "target_availability", value: self.target_availability),
+            (name: "copy_cost", value: self.copy_cost),
+            (name: "effects", value: self.effects),
+            (name: "effect_root", value: self.effect_root),
+            (name: "artifact_coverage", value: coverage.digest()),
+            (name: "loaded_artifact", value: coverage.loaded_artifact),
+            (name: "transitive_dependencies", value: pkg_bridge_stable_optional_strings(coverage.transitive_dependencies)),
+            (name: "reachable_callbacks", value: pkg_bridge_stable_optional_strings(coverage.reachable_callbacks)),
+            (name: "compiler_flags", value: pkg_bridge_stable_optional_strings(coverage.compiler_flags)),
+            (name: "coverage_target", value: coverage.target),
+            (name: "coverage_generator", value: coverage.generator),
+            (name: "obligations", value: obligation_rows.join("\n")),
+            (name: "source_import", value: if self.source_import -> "true" else -> "false"),
+            (name: "source_authority", value: self.source_authority.as_str()),
+            (name: "source_identity", value: self.identity.source),
+            (name: "overlay_identity", value: self.identity.overlay),
+            (name: "generator_identity", value: self.identity.generator),
+            (name: "implementation_identity", value: self.identity.implementation),
+            (name: "toolchain_identity", value: self.identity.toolchain),
+            (name: "target_identity", value: self.identity.target)
+        }
+        loop name in self.sorted_width_names() -> fields.push((name: name, value: self.scalar_widths[name]))
+        fields
+    }
+}

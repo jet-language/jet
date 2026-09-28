@@ -1,0 +1,53 @@
+// Local Nix fallback policy gate claims ported from the tests of
+// crates/jetpack/src/NixFallbackPolicy.rs.
+
+#Test("nix offline policy refuses before any nix invocation") {
+    receipt :: nix_fallback_decide(true, false, true, @NIX_FALLBACK_ALLOW_VALUE)
+    assert(!receipt.allowed)
+    assert_eq(receipt.mode, NixFallbackMode.Offline)
+    assert_eq(receipt.invocations, 0)
+    assert(receipt.reason.contains("no executable was inspected or invoked"))
+    assert(receipt.json().contains("\"nix_invocations\":0"))
+}
+
+#Test("nix ci and non interactive modes need the explicit allow policy") {
+    cases :: [(ci: Bool, interactive: Bool)]{(ci: true, interactive: true), (ci: true, interactive: false), (ci: false, interactive: false)}
+    loop case in cases {
+        receipt :: nix_fallback_decide(false, case.ci, case.interactive, "")
+        assert(!receipt.allowed)
+        assert_eq(receipt.invocations, 0)
+        assert(receipt.reason.contains(@NIX_FALLBACK_POLICY_ENV))
+        assert(receipt.reason.contains(@NIX_FALLBACK_ALLOW_VALUE))
+    }
+    ci :: nix_fallback_decide(false, true, false, @NIX_FALLBACK_ALLOW_VALUE)
+    assert(ci.allowed)
+    assert_eq(ci.mode, NixFallbackMode.Ci)
+    headless :: nix_fallback_decide(false, false, false, @NIX_FALLBACK_ALLOW_VALUE)
+    assert(headless.allowed)
+    assert_eq(headless.mode, NixFallbackMode.NonInteractive)
+}
+
+#Test("nix interactive mode can use local fallback without ci policy") {
+    receipt :: nix_fallback_decide(false, false, true, "")
+    assert(receipt.allowed)
+    assert_eq(receipt.mode, NixFallbackMode.Interactive)
+    assert(!receipt.explicit)
+    assert_eq(receipt.invocations, 1)
+    facts :: receipt.facts()
+    parsed :: json.parse(facts.get("nix.fallback.policy.receipt") ?? panic("policy receipt fact")) ?? panic("machine-readable policy receipt")
+    assert_eq(parsed.field("schema") ?? panic("schema"), DataTree.Text(@NIX_FALLBACK_RECEIPT_SCHEMA))
+    assert_eq(parsed.field("allowed") ?? panic("allowed"), DataTree.Bool(true))
+}
+
+#Test("nix explicit refusal is not overridden by interactive mode") {
+    policies :: [String]{"deny", "yes"}
+    cases :: [(ci: Bool, interactive: Bool)]{(ci: false, interactive: true), (ci: false, interactive: false), (ci: true, interactive: true)}
+    loop policy in policies {
+        loop case in cases {
+            receipt :: nix_fallback_decide(false, case.ci, case.interactive, policy)
+            assert_eq(receipt.policy_value, policy)
+            assert(!receipt.allowed)
+            assert_eq(receipt.invocations, 0)
+        }
+    }
+}

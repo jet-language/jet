@@ -1,0 +1,479 @@
+// Claims ported from crates/jet-env-model/src/ModuleEval/Environment.rs #[cfg(test)].
+
+fn envmodel_test_preset_error(set: PresetSet, names: [String]) -> PresetError {
+    if set.resolve_many(names) == {
+        .Ok(_) -> panic("expected preset resolution to fail")
+        .Err(error) -> error
+    }
+}
+
+fn envmodel_test_fact_error(result: Result<LanguageExpansion, EnvironmentFactError>) -> String {
+    if result == {
+        .Ok(_) -> panic("expected the language expansion to fail")
+        .Err(error) -> error.message
+    }
+}
+
+fn envmodel_test_register_error(catalog: &LanguagePackCatalog, pack: LanguagePack) -> String {
+    if catalog.register(pack) == {
+        .Ok(_) -> panic("expected the language pack to be rejected")
+        .Err(error) -> error.message
+    }
+}
+
+fn envmodel_test_languages_error(value: CtValue) -> String {
+    if envmodel_languages_from_value(value) == {
+        .Ok(_) -> panic("expected the language selections to be rejected")
+        .Err(error) -> error.message
+    }
+}
+
+fn envmodel_test_lang(fields: [NamedCtValue]) -> CtValue {
+    CtValue.Struct("Lang", fields)
+}
+
+fn envmodel_test_field(name: String, value: CtValue) -> NamedCtValue {
+    NamedCtValue{name: name, value: value}
+}
+
+fn envmodel_test_projection(expansion: LanguageExpansion, name: String) -> LanguageProjection {
+    loop projection in expansion.projections {
+        if projection.selection.name == name -> return projection
+    }
+    panic("missing projection {name}")
+}
+
+fn envmodel_test_scratch(label: String) -[FS]> String {
+    files.tmpdir("jet-env-dotenv-{label}-") ?? panic("scratch directory")
+}
+
+fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
+    if envmodel_checked_dotenv_snapshot(root, relative) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+#Test("preset resolution is parent first and deduplicated") {
+    set := PresetSet{}
+    set.insert(PresetSpec{name: "base", packages: [String]{"git@nixpkgs"}}) ?? panic("insert base")
+    set.insert(PresetSpec{name: "dev", extends: [String]{"base"}, packages: [String]{"git@nixpkgs", "rustc@nixpkgs"}}) ?? panic("insert dev")
+    resolved :: set.resolve("dev") ?? panic("dev resolves")
+    assert_eq(resolved.applied, [String]{"base", "dev"})
+    assert_eq(resolved.packages, [String]{"git@nixpkgs", "rustc@nixpkgs"})
+}
+
+#Test("ambient hostname presets merge before user presets") {
+    set := PresetSet{}
+    set.insert(PresetSpec{name: "host", hostname: Val("build-01"), packages: [String]{"git@nixpkgs"}, variables: [String: String]{"HOST_MODE": "host"}}) ?? panic("insert host")
+    set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"ripgrep@nixpkgs"}, variables: [String: String]{"USER_MODE": "user"}}) ?? panic("insert sam")
+    selected :: set.auto_select_many("build-01", "sam")
+    assert_eq(selected, [String]{"host", "sam"})
+    resolved :: set.resolve_many(selected) ?? panic("ambient presets resolve")
+    assert_eq(resolved.name, "host+sam")
+    assert_eq(resolved.selected_presets, selected)
+    assert_eq(resolved.packages, [String]{"git@nixpkgs", "ripgrep@nixpkgs"})
+    assert_eq(resolved.variables.get("HOST_MODE"), Val("host"))
+    assert_eq(resolved.variables.get("USER_MODE"), Val("user"))
+}
+
+#Test("ambient preset variable conflicts are rejected") {
+    set := PresetSet{}
+    set.insert(PresetSpec{name: "host", hostname: Val("build-01"), variables: [String: String]{"MODE": "host"}}) ?? panic("insert host")
+    set.insert(PresetSpec{name: "sam", user: Val("sam"), variables: [String: String]{"MODE": "user"}}) ?? panic("insert sam")
+    selected :: set.auto_select_many("build-01", "sam")
+    assert_eq(selected, [String]{"host", "sam"})
+    assert_eq(envmodel_test_preset_error(set, selected), PresetError.Conflict("sam.MODE"))
+}
+
+#Test("ambient user precedes default and default is last resort") {
+    set := PresetSet{}
+    set.insert(PresetSpec{name: "default", packages: [String]{"default@nixpkgs"}}) ?? panic("insert default")
+    set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"user@nixpkgs"}}) ?? panic("insert sam")
+    assert_eq(set.auto_select_many("other", "sam"), [String]{"sam"})
+    assert_eq(set.auto_select_many("other", "other"), [String]{"default"})
+}
+
+#Test("preset cycles are rejected") {
+    set := PresetSet{}
+    set.insert(PresetSpec{name: "a", extends: [String]{"b"}}) ?? panic("insert a")
+    set.insert(PresetSpec{name: "b", extends: [String]{"a"}}) ?? panic("insert b")
+    cycle :: if envmodel_test_preset_error(set, [String]{"a"}) == {
+        .Cycle(_) -> true
+        else -> false
+    }
+    assert(cycle)
+}
+
+#Test("package profile resolver handles its full depth budget iteratively") {
+    set := PackageProfileSet{}
+    loop index in 0..<@ENVMODEL_MAX_RESOLVER_NODES {
+        extends :: if index > 0 -> [String]{"profile-{index - 1}"} else -> [String]{}
+        set.insert_checked(PackageProfileSpec{name: "profile-{index}", extends: extends}) ?? panic("the resolver budget must admit its declared limit")
+    }
+    resolved :: set.resolve("profile-{@ENVMODEL_MAX_RESOLVER_NODES - 1}") ?? panic("the deepest profile resolves")
+    assert_eq(resolved.applied.len(), @ENVMODEL_MAX_RESOLVER_NODES)
+    if set.insert_checked(PackageProfileSpec{name: "profile-overflow"}) == {
+        .Ok(_) -> panic("the resolver must fail closed above its scale budget")
+        .Err(error) -> assert(error.message().contains("100000"))
+    }
+}
+
+#Test("catalog has the core language families") {
+    catalog :: LanguagePackCatalog.builtin()
+    assert_eq(catalog.names().len(), 58)
+    loop name in [String]{"Rust", "Python", "Go", "JavaScript"} -> assert(catalog.get(name) != None)
+    expanded :: catalog.expand([LanguageSpec]{LanguageSpec{name: "Rust", enable: true}, LanguageSpec{name: "Python", enable: true}}) ?? panic("core languages expand")
+    assert(expanded.packages.contains("rustc@nixpkgs"))
+    assert(expanded.packages.contains("python@nixpkgs"))
+}
+
+#Test("catalog covers the extended language families with tool facts") {
+    catalog :: LanguagePackCatalog.builtin()
+    assert_eq(envmodel_extended_language_names().len(), 54)
+    loop name in envmodel_extended_language_names() {
+        pack :: catalog.get(name) ?? panic("missing pack {name}")
+        assert(pack.packages.len() > 0, "{name} has no package facts")
+        assert(pack.commands.len() > 0, "{name} has no command facts")
+        assert(pack.license != "", "{name} has no license fact")
+        assert_eq(pack.required_tools.len(), pack.commands.len())
+    }
+    selections := [LanguageSpec]{}
+    loop name in catalog.names() -> selections.push(LanguageSpec{name: name, enable: true})
+    expansion :: catalog.expand(selections) ?? panic("every catalog language expands")
+    assert_eq(expansion.applied.len(), 58)
+    loop projection in expansion.projections -> assert_eq(projection.missing_tools.len(), 0)
+}
+
+#Test("c language packs share the hermetic toolchain package") {
+    catalog :: LanguagePackCatalog.builtin()
+    loop entry in [String: String]{"C": "cc", "Cplusplus": "c++"} {
+        pack :: catalog.get(entry.key) ?? panic("built-in C pack")
+        assert_eq(pack.packages, [String]{"cc-toolchain@jetpack"})
+        assert_eq(pack.required_tools, [String]{entry.value})
+        assert_eq(pack.commands.get(entry.value), Val(entry.value))
+    }
+}
+
+#Test("catalog expands go and javascript with tool projection") {
+    catalog :: LanguagePackCatalog.builtin()
+    expanded :: catalog.expand([LanguageSpec]{LanguageSpec{name: "go", enable: true}, LanguageSpec{name: "javascript", enable: true}}) ?? panic("go and javascript expand")
+    assert_eq(expanded.applied, [String]{"Go", "JavaScript"})
+    assert(expanded.packages.contains("go@nixpkgs"))
+    assert(expanded.packages.contains("gopls@nixpkgs"))
+    assert(expanded.packages.contains("nodejs@nixpkgs"))
+    assert_eq(expanded.commands.get("gofmt"), Val("gofmt"))
+    assert_eq(expanded.commands.get("npx"), Val("npx"))
+    loop projection in expanded.projections -> assert_eq(projection.missing_tools.len(), 0)
+}
+
+#Test("catalog accepts a valid contribution and rejects duplicate names") {
+    catalog := LanguagePackCatalog.builtin()
+    catalog.register(LanguagePack{
+        name: "JetExperimental",
+        packages: [String]{"jet-tool@nixpkgs"},
+        venv_packages: [String]{"jet-tool-venv@nixpkgs"},
+        variables: [String: String]{"JET_EXPERIMENTAL": "1"},
+        commands: [String: String]{"jet": "jet"},
+        host: "native",
+        platforms: [String]{pkg_host_key()},
+        license: "MIT",
+        required_tools: [String]{"jet"}
+    }) ?? panic("a valid contribution registers")
+    assert(catalog.get("jet-experimental") != None)
+    duplicate :: envmodel_test_register_error(&catalog, LanguagePack{
+        name: "jet-experimental",
+        packages: [String]{"other@nixpkgs"},
+        commands: [String: String]{"other": "other"},
+        host: "native",
+        platforms: [String]{pkg_host_key()},
+        license: "MIT",
+        required_tools: [String]{"other"}
+    })
+    assert(duplicate.contains("already registered"))
+    expansion :: catalog.expand([LanguageSpec]{LanguageSpec{name: "JetExperimental", enable: true}}) ?? panic("the contribution expands")
+    assert_eq(expansion.packages, [String]{"jet-tool@nixpkgs"})
+}
+
+#Test("catalog contribution projects every declared fact and fingerprints it") {
+    catalog := LanguagePackCatalog.empty()
+    pack :: LanguagePack{
+        name: "Contributed",
+        packages: [String]{"compiler@nixpkgs"},
+        venv_packages: [String]{"compiler-tools@nixpkgs"},
+        variables: [String: String]{"COMPILER_MODE": "strict"},
+        commands: [String: String]{"compiler": "compiler", "compiler-fmt": "compiler-fmt"},
+        host: "native",
+        platforms: [String]{pkg_host_key()},
+        license: "MIT",
+        required_tools: [String]{"compiler", "compiler-fmt"}
+    }
+    original_fingerprint :: pack.fingerprint()
+    catalog.register(pack) ?? panic("the contribution registers")
+    expansion :: catalog.expand([LanguageSpec]{LanguageSpec{name: "contributed", enable: true, venv: true}}) ?? panic("the contribution expands")
+    assert_eq(expansion.applied, [String]{"Contributed"})
+    assert_eq(expansion.packages, [String]{"compiler@nixpkgs", "compiler-tools@nixpkgs"})
+    assert_eq(expansion.variables.get("COMPILER_MODE"), Val("strict"))
+    assert_eq(expansion.commands.get("compiler-fmt"), Val("compiler-fmt"))
+    projection :: expansion.projections[0]
+    assert_eq(projection.host, "native")
+    assert_eq(projection.platform, pkg_host_key())
+    assert_eq(projection.license, "MIT")
+    assert_eq(projection.missing_tools.len(), 0)
+    assert(projection.included.contains("compiler-tools@nixpkgs"))
+    assert(expansion.fingerprint().contains(original_fingerprint))
+    changed := catalog.get("Contributed") ?? panic("the contribution is registered")
+    changed.variables["COMPILER_MODE"] = "fast"
+    assert(changed.fingerprint() != original_fingerprint)
+}
+
+#Test("catalog rejects conflicting contributed variables and commands") {
+    catalog := LanguagePackCatalog.empty()
+    loop row in [[String]]{[String]{"First", "strict", "compiler"}, [String]{"Second", "fast", "other-compiler"}} {
+        catalog.register(LanguagePack{
+            name: row[0],
+            packages: [String]{"{row[0]}@nixpkgs"},
+            variables: [String: String]{"COMPILER_MODE": row[1]},
+            commands: [String: String]{"compiler": row[2]},
+            host: "native",
+            platforms: [String]{pkg_host_key()},
+            license: "MIT",
+            required_tools: [String]{"compiler"}
+        }) ?? panic("contribution registers")
+    }
+    error :: envmodel_test_fact_error(catalog.expand_names([String]{"First", "Second"}))
+    assert(error.contains("conflicts with existing variable"), error)
+
+    commands := LanguagePackCatalog.empty()
+    loop row in [[String]]{[String]{"One", "compiler"}, [String]{"Two", "other-compiler"}} {
+        commands.register(LanguagePack{
+            name: row[0],
+            packages: [String]{"{row[0]}@nixpkgs"},
+            commands: [String: String]{"compiler": row[1]},
+            host: "native",
+            platforms: [String]{pkg_host_key()},
+            license: "MIT",
+            required_tools: [String]{"compiler"}
+        }) ?? panic("contribution registers")
+    }
+    command_error :: envmodel_test_fact_error(commands.expand_names([String]{"One", "Two"}))
+    assert(command_error.contains("conflicts with existing command"), command_error)
+}
+
+#Test("language pack rejects unsupported platform and missing tool facts") {
+    catalog := LanguagePackCatalog.empty()
+    catalog.register(LanguagePack{
+        name: "Narrow",
+        packages: [String]{"narrow@nixpkgs"},
+        platforms: [String]{"x86_64-linux"},
+        host: "native",
+        license: "MIT",
+        required_tools: [String]{"narrow"},
+        commands: [String: String]{"narrow": "narrow"}
+    }) ?? panic("narrow registers")
+    unsupported :: envmodel_test_fact_error(catalog.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Narrow", enable: true}}, "aarch64-darwin"))
+    assert(unsupported.contains("does not support host platform"), unsupported)
+
+    missing := LanguagePackCatalog.empty()
+    missing.packs["Missing"] = LanguagePack{
+        name: "Missing",
+        packages: [String]{"missing@nixpkgs"},
+        host: "native",
+        platforms: [String]{"x86_64-linux"},
+        license: "MIT",
+        required_tools: [String]{"missing"},
+        commands: [String: String]{}
+    }
+    error :: envmodel_test_fact_error(missing.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Missing", enable: true}}, "x86_64-linux"))
+    assert(error.contains("missing catalog tools: missing"), error)
+    disabled :: missing.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Missing", enable: false}}, "x86_64-linux") ?? panic("a disabled selection expands")
+    assert_eq(disabled.packages.len(), 0)
+    assert_eq(disabled.projections[0].missing_tools, [String]{"missing"})
+
+    unlicensed := LanguagePackCatalog.empty()
+    unlicensed_error :: envmodel_test_register_error(&unlicensed, LanguagePack{
+        name: "Unlicensed",
+        packages: [String]{"unlicensed@nixpkgs"},
+        commands: [String: String]{"unlicensed": "unlicensed"},
+        host: "native",
+        platforms: [String]{"x86_64-linux"},
+        required_tools: [String]{"unlicensed"}
+    })
+    assert(unlicensed_error.contains("must declare a license"), unlicensed_error)
+
+    malformed := LanguagePackCatalog.empty()
+    invalid_venv :: envmodel_test_register_error(&malformed, LanguagePack{
+        name: "InvalidVenv",
+        packages: [String]{"tool@nixpkgs"},
+        venv_packages: [String]{""},
+        commands: [String: String]{"tool": "tool"},
+        host: "native",
+        platforms: [String]{"x86_64-linux"},
+        license: "MIT",
+        required_tools: [String]{"tool"}
+    })
+    assert(invalid_venv.contains("empty venv package"), invalid_venv)
+    invalid_variable :: envmodel_test_register_error(&malformed, LanguagePack{
+        name: "InvalidVariable",
+        packages: [String]{"tool@nixpkgs"},
+        variables: [String: String]{"not-valid": "1"},
+        commands: [String: String]{"tool": "tool"},
+        host: "native",
+        platforms: [String]{"x86_64-linux"},
+        license: "MIT",
+        required_tools: [String]{"tool"}
+    })
+    assert(invalid_variable.contains("invalid environment variable name"), invalid_variable)
+}
+
+#Test("typed language map preserves options and expands enabled tools") {
+    value :: CtValue.Map([CtMapEntry]{
+        CtMapEntry{key: CtKey.Str("python"), value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool(false)),
+            envmodel_test_field("venv", CtValue.Bool(true))
+        })},
+        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool(true)),
+            envmodel_test_field("channel", CtValue.Enum("Channel", "Stable", [CtEnumArg]{})),
+            envmodel_test_field("version", CtValue.Str("1.78")),
+            envmodel_test_field("extra", CtValue.List([CtValue]{CtValue.Str("rust-analyzer@nixpkgs")}))
+        })}
+    })
+    selections :: envmodel_languages_from_value(value) ?? panic("typed language map reads")
+    assert_eq(selections.len(), 2)
+    rust := LanguageSpec{}
+    python := LanguageSpec{}
+    loop selection in selections {
+        if selection.name == "rust" -> rust = selection
+        if selection.name == "python" -> python = selection
+    }
+    assert_eq(rust.channel, Val("Stable"))
+    assert(python.venv)
+
+    expansion :: LanguagePackCatalog.builtin().expand(selections) ?? panic("selections expand")
+    assert_eq(expansion.applied, [String]{"Rust"})
+    assert(expansion.packages.contains("rustc@nixpkgs#version=1.78"))
+    assert(expansion.packages.contains("rust-analyzer@nixpkgs"))
+    assert_eq(expansion.selections.len(), 2)
+    rust_projection :: envmodel_test_projection(expansion, "Rust")
+    assert(rust_projection.included.contains("rustc@nixpkgs#version=1.78"))
+    assert(rust_projection.changed.contains("channel=Stable"))
+    assert_eq(rust_projection.host, "native")
+    assert_eq(rust_projection.platform, pkg_host_key())
+    assert_eq(rust_projection.license, "Apache-2.0 OR MIT")
+    assert_eq(rust_projection.missing_tools.len(), 0)
+    python_projection :: envmodel_test_projection(expansion, "Python")
+    assert(python_projection.omitted.contains("python@nixpkgs"))
+    assert(python_projection.changed.contains("enable=false"))
+}
+
+#Test("language pack fingerprint keeps venv and environment facts") {
+    pack :: LanguagePack{
+        name: "Python",
+        packages: [String]{"python@nixpkgs"},
+        venv_packages: [String]{"pythonPackages.virtualenv@nixpkgs"},
+        variables: [String: String]{"PYTHONUTF8": "1"},
+        commands: [String: String]{"python": "python3"},
+        host: "native",
+        license: "PSF-2.0",
+        required_tools: [String]{"python"}
+    }
+    fingerprint :: pack.fingerprint()
+    assert(fingerprint.contains("venv-package=pythonPackages.virtualenv@nixpkgs"))
+    assert(fingerprint.contains("var=PYTHONUTF8=1"))
+    assert(fingerprint.contains("command=python=python3"))
+    assert(fingerprint.contains("host=native"))
+    assert(fingerprint.contains("license="))
+    assert(fingerprint.contains("required-tool="))
+}
+
+#Test("typed language records reject unknown and malformed fields") {
+    unknown :: CtValue.Map([CtMapEntry]{
+        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool(true)),
+            envmodel_test_field("surprise", CtValue.Bool(true))
+        })}
+    })
+    assert(envmodel_test_languages_error(unknown).contains("unknown language selection field"))
+    malformed :: CtValue.Map([CtMapEntry]{
+        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Str("yes"))
+        })}
+    })
+    assert(envmodel_test_languages_error(malformed).contains("Lang.enable must be Bool"))
+}
+
+#Test("git hooks path is typed project relative and fingerprinted") {
+    lifecycle := EnvironmentLifecycle{}
+    applied :: envmodel_lifecycle_from_field(&lifecycle, @ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str("scripts/githooks")) ?? panic("git hooks path reads")
+    assert(applied)
+    assert_eq(lifecycle.git_hooks_path, Val("scripts/githooks"))
+    assert(lifecycle.fingerprint().contains("git-hooks-path\tscripts/githooks\n"))
+    outside := EnvironmentLifecycle{}
+    rejected :: if envmodel_lifecycle_from_field(&outside, @ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str("../outside")) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(rejected)
+}
+
+#Test("checked dotenv snapshot rejects symlink escape") {
+    if sys.family() == "windows" -> return
+    root :: envmodel_test_scratch("symlink")
+    outside_dir :: envmodel_test_scratch("outside")
+    outside :: files.join(outside_dir, "secret")
+    files.write(outside, "SECRET=must-not-read\n") ?? panic("outside file")
+    files.symlink(outside, files.join(root, ".env")) ?? panic("dotenv symlink")
+    assert(envmodel_test_snapshot_refused(root, ".env"))
+    assert_eq(files.read(outside) ?? panic("outside readable"), "SECRET=must-not-read\n")
+    files.remove_all(root) ?? panic("scratch cleanup")
+    files.remove_all(outside_dir) ?? panic("scratch cleanup")
+}
+
+#Test("checked dotenv snapshot rejects final symlink swap") {
+    if sys.family() == "windows" -> return
+    root :: envmodel_test_scratch("final-swap")
+    outside_dir :: envmodel_test_scratch("final-outside")
+    outside :: files.join(outside_dir, "env")
+    files.write(files.join(root, ".env"), "ALLOWED=inside\n") ?? panic("inside dotenv")
+    snapshot :: envmodel_checked_dotenv_snapshot(root, ".env") ?? panic("a regular dotenv file is readable")
+    assert_eq(snapshot, "ALLOWED=inside\n".bytes())
+    files.write(outside, "ALLOWED=outside\n") ?? panic("outside file")
+    files.rename(files.join(root, ".env"), files.join(root, ".env.saved")) ?? panic("move dotenv aside")
+    files.symlink(outside, files.join(root, ".env")) ?? panic("swap in a symlink")
+    assert(envmodel_test_snapshot_refused(root, ".env"))
+    assert_eq(files.read(outside) ?? panic("outside readable"), "ALLOWED=outside\n")
+    files.remove_all(root) ?? panic("scratch cleanup")
+    files.remove_all(outside_dir) ?? panic("scratch cleanup")
+}
+
+#Test("checked dotenv snapshot rejects ancestor symlink swap") {
+    if sys.family() == "windows" -> return
+    root :: envmodel_test_scratch("ancestor-swap")
+    outside :: envmodel_test_scratch("ancestor-outside")
+    files.create_dir_all(files.join(root, "nested")) ?? panic("nested directory")
+    files.write(files.join(root, "nested/.env"), "ALLOWED=inside\n") ?? panic("nested dotenv")
+    files.write(files.join(outside, ".env"), "ALLOWED=outside\n") ?? panic("outside dotenv")
+    files.rename(files.join(root, "nested"), files.join(root, "nested.saved")) ?? panic("move nested aside")
+    files.symlink(outside, files.join(root, "nested")) ?? panic("swap in an ancestor symlink")
+    assert(envmodel_test_snapshot_refused(root, "nested/.env"))
+    assert_eq(files.read(files.join(outside, ".env")) ?? panic("outside readable"), "ALLOWED=outside\n")
+    files.remove_all(root) ?? panic("scratch cleanup")
+    files.remove_all(outside) ?? panic("scratch cleanup")
+}
+
+#Test("checked dotenv snapshot rejects hardlink to outside file") {
+    if sys.family() == "windows" -> return
+    root :: envmodel_test_scratch("hardlink")
+    outside_dir :: envmodel_test_scratch("hardlink-outside")
+    outside :: files.join(outside_dir, "env")
+    files.write(outside, "ALLOWED=outside\n") ?? panic("outside file")
+    files.hard_link(outside, files.join(root, ".env")) ?? panic("dotenv hard link")
+    if envmodel_checked_dotenv_snapshot(root, ".env") == {
+        .Ok(_) -> panic("hardlink must be rejected")
+        .Err(error) -> assert(error.message.contains("hard link"), error.message)
+    }
+    assert_eq(files.read(outside) ?? panic("outside readable"), "ALLOWED=outside\n")
+    files.remove_all(root) ?? panic("scratch cleanup")
+    files.remove_all(outside_dir) ?? panic("scratch cleanup")
+}

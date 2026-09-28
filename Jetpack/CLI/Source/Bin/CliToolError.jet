@@ -1,0 +1,21 @@
+// The error carrier of Jetpack's standalone CLI tools: the hermetic `cc`
+// driver and the `jetpack-nix-index` and `jetpack-trust-root` helper
+// binaries. Each failure carries its final diagnostic text, which the tool
+// prints verbatim; the Rust reference returns the same text as `String`.
+
+#Error
+pub struct CliToolError {
+    pub message: String
+
+    fn new(message: String) -> CliToolError !Never {
+        CliToolError{message: message}
+    }
+}
+
+// Rust `error.kind() == ErrorKind::NotFound`.
+fn cli_tool_is_not_found(error: IOError) -> Bool !Never {
+    if error == {
+        .NotFound(_) -> true
+        else -> false
+    }
+}

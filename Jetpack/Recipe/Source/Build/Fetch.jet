@@ -1,0 +1,233 @@
+// Locked, credential-free recipe fetches, ported from jetpack::Recipe
+// (`do_fetch` and its URL and digest checks).
+//
+// A locked fetch caches by content hash under a held no-follow directory and
+// is offline-satisfiable on a re-build (D-JPK-OFFLINE1). `file://` sources are
+// read directly; a remote scheme needs a transport the caller injects when it
+// already holds network capability. URL userinfo and credential query or
+// fragment fields are refused before any transport sees them (E1236).
+
+@RECIPE_MAX_READ_BYTES :: 536870912
+
+// The credential field names a build-hook fetch URL may never carry.
+@RECIPE_CREDENTIAL_KEYS :: [String]{
+    "auth", "authorization", "api_key", "apikey", "credential", "credentials", "password",
+    "passwd", "secret", "sig", "signature", "token", "access_token", "refresh_token",
+    "oauth_token", "client_secret", "private_key", "x_amz_credential", "x_amz_signature"
+}
+
+// Credential-shaped suffixes of a field name.
+@RECIPE_CREDENTIAL_SUFFIXES :: [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"}
+
+// A caller-injected remote transport: given a URL, the fetched bytes.
+pub struct RecipeTransport {
+    pub fetch: fn(String) -[Net]> [U8] !RecipeError
+}
+
+// A locked source fetch recorded for `.jet/lock` provenance.
+pub struct FetchRecord {
+    pub url: String
+    pub sha256: String
+}
+
+// Perform one locked fetch step into the content-addressed fetch cache.
+fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transport: ?RecipeTransport, report: &RunReport) !RecipeDiagnostic -[FS, Env, Net, Rand]> {
+    if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
+    // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
+    // validate too, defensively). An unchecked lock value never selects a
+    // cache path.
+    if !recipe_valid_sha256(sha256) -> return Err(RecipeDiagnostic.e1236_invalid_hash(url, sha256))
+    cache_root :: if PinnedRecipeDirectory.open_or_create(ctx.fetch_cache) == {
+        .Ok(root) -> root
+        .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, "opening fetch cache: {error.message()}")) }
+    }
+    cached :: files.join(cache_root.path(), sha256)
+    if recipe_read_file_nofollow(cached, @RECIPE_MAX_READ_BYTES) == {
+        .Ok(cached_bytes) -> {
+            // Offline-satisfiable only after re-verifying the immutable key. A
+            // corrupt or stale cache entry never becomes trusted input.
+            if pkg_sha256_hex(cached_bytes) == sha256 {
+                report.fetches.push(FetchRecord{url, sha256})
+                report.add_effect("net.fetch")
+                return Ok()
+            }
+            if cache_root.remove_name(sha256) == {
+                .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "removing invalid cache entry: {error.message()}"))
+                else -> {}
+            }
+        }
+        .Err(error) -> {
+            if !error.is_not_found() -> return Err(RecipeDiagnostic.e1236_fetch(url, "reading cache: {error.message()}"))
+        }
+    }
+    // Not cached: acquire the bytes. `file://` is offline-safe.
+    bytes :: if {
+        url.starts_with("file://") -> {
+            if recipe_read_file_nofollow(url.removeprefix("file://"), @RECIPE_MAX_READ_BYTES) == {
+                .Ok(read) -> read
+                .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, error.message())) }
+            }
+        }
+        // A network fetch under `--offline` with no cache hit is ungranted.
+        ctx.offline -> { return Err(RecipeDiagnostic.e1236_offline(url)) }
+        transport != None -> {
+            remote :: transport ?? return Err(RecipeDiagnostic.e1236_no_transport(url))
+            if remote.fetch(url) == {
+                .Ok(fetched) -> fetched
+                .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, error.message())) }
+            }
+        }
+        // No transport injected for a remote scheme: the build seam holds no
+        // network capability. The caller must vendor or mirror the source.
+        else -> { return Err(RecipeDiagnostic.e1236_no_transport(url)) }
+    }
+    if bytes.len() > @RECIPE_MAX_READ_BYTES -> return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
+    // Verify the locked hash before the bytes are ever used.
+    got :: pkg_sha256_hex(bytes)
+    if got != sha256 -> return Err(RecipeDiagnostic.e1236_mismatch(url, sha256, got))
+    temporary_name :: if cache_root.fresh_name("jet-fetch") == {
+        .Ok(name) -> name
+        .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, "allocating cache staging: {error.message()}")) }
+    }
+    if cache_root.publish_new_file(temporary_name, sha256, bytes) == {
+        .Err(error) -> {
+            _ :: cache_root.remove_name(temporary_name)
+            return Err(RecipeDiagnostic.e1236_fetch(url, "publishing cache: {error.message()}"))
+        }
+        else -> {}
+    }
+    if cache_root.sync() == {
+        .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "syncing fetch cache: {error.message()}"))
+        else -> {}
+    }
+    report.fetches.push(FetchRecord{url, sha256})
+    report.add_effect("net.fetch")
+}
+
+// Exactly 64 ASCII hexadecimal characters.
+fn recipe_valid_sha256(value: String) -> Bool !Never {
+    raw :: value.bytes()
+    if raw.len() != 64 -> return false
+    loop byte in raw {
+        if !recipe_is_hex_digit(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+fn recipe_is_hex_digit(code: Int) -> Bool !Never {
+    (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
+}
+
+// A declared input digest names `actual_hex` bare or with a `sha256-` /
+// `sha256:` prefix.
+fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool !Never {
+    if declared == actual_hex -> return true
+    if declared.starts_with("sha256-") && declared.removeprefix("sha256-") == actual_hex -> return true
+    declared.starts_with("sha256:") && declared.removeprefix("sha256:") == actual_hex
+}
+
+// Build hooks cannot receive a credential provider. URL userinfo and
+// credential query or fragment fields are refused at the recipe boundary so
+// the secret never reaches transport, cache metadata, diagnostics, or logs.
+fn recipe_credentialed_fetch_url(url: String) -> Bool !Never {
+    if pkg_text_has_control(url) -> return true
+    scheme :: url.split_once("://") ?? return false
+    rest :: scheme.after
+    authority :: recipe_until_any(rest, "/?#")
+    if authority.contains("@") -> return true
+    query_and_fragment :: rest.split_once("?")
+    if query_and_fragment == {
+        .None -> {
+            fragment :: rest.split_once("#") ?? return false
+            return recipe_credential_fields(fragment.after)
+        }
+        .Val(parts) -> {
+            if parts.after.split_once("#") == {
+                .Val(halves) -> return recipe_credential_fields(halves.before) || recipe_credential_fields(halves.after)
+                .None -> return recipe_credential_fields(parts.after)
+            }
+        }
+    }
+}
+
+// The prefix of `text` before the first byte listed in `stops`.
+fn recipe_until_any(text: String, stops: String) -> String !Never {
+    raw :: text.bytes()
+    stop_bytes :: stops.bytes()
+    loop index in 0..<raw.len() {
+        if stop_bytes.contains(raw[index]) -> return pkg_bytes_text(raw, 0, index)
+    }
+    text
+}
+
+// `&`/`;`-separated fields, any of whose keys is credential-shaped.
+fn recipe_credential_fields(fields: String) -> Bool !Never {
+    loop group in fields.split("&") {
+        loop field in group.split(";") {
+            key :: field.split_once("=")?.before ?? field
+            if recipe_credential_field_key(key) -> return true
+        }
+    }
+    false
+}
+
+fn recipe_credential_field_key(raw: String) -> Bool !Never {
+    key :: pkg_ascii_lower(recipe_percent_decode_ascii(raw.trim())).replace("-", "_")
+    if @RECIPE_CREDENTIAL_KEYS.contains(key) -> return true
+    loop suffix in @RECIPE_CREDENTIAL_SUFFIXES {
+        if key.ends_with(suffix) -> return true
+    }
+    false
+}
+
+// Decode `%XX` escapes byte by byte; each decoded byte becomes the scalar of
+// the same value (Rust `byte as char`), undecodable escapes stay literal.
+fn recipe_percent_decode_ascii(value: String) -> String !Never {
+    bytes :: value.bytes()
+    decoded := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) == 37 && index + 2 < bytes.len() {
+            high :: recipe_hex_value(Int.from_u8(bytes[index + 1]))
+            low :: recipe_hex_value(Int.from_u8(bytes[index + 2]))
+            if high >= 0 && low >= 0 {
+                recipe_push_latin1(&decoded, high * 16 + low)
+                index += 3
+                next
+            }
+        }
+        recipe_push_latin1(&decoded, Int.from_u8(bytes[index]))
+        index += 1
+    }
+    String.from_bytes(decoded) ?? panic("Latin-1 scalars always encode as UTF-8")
+}
+
+// Append the UTF-8 encoding of the scalar U+0000..U+00FF with value `code`.
+fn recipe_push_latin1(out: &[U8], code: Int) !Never {
+    if code < 128 {
+        out.push(U8{code})
+        return
+    }
+    out.push(U8{192 + code /% 64})
+    out.push(U8{128 + code % 64})
+}
+
+// The value of one hexadecimal digit, or -1.
+fn recipe_hex_value(code: Int) -> Int !Never {
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 97 && code <= 102 -> code - 87
+        code >= 65 && code <= 70 -> code - 55
+        else -> -1
+    }
+}
+
+// The only environment a recipe tool may observe. The native backend clears
+// the inherited environment and maps `JET_BUILD_OUTPUT` to the private output
+// mount; this map carries only declared deterministic values, in key order.
+fn recipe_build_env() -> [String: String] !Never {
+    env := [String: String]{}
+    env["JET_PROFILE"] = "default"
+    env["SOURCE_DATE_EPOCH"] = "0"
+    env
+}

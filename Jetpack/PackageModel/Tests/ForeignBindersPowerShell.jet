@@ -1,0 +1,46 @@
+// Claims ported from jet_pkg_model::PowerShellBind tests.
+
+#Test("projects powershell names without changing foreign lookup") {
+    functions :: pkg_powershell_parse_function_names("Get-Stateful\nFail\n".bytes()) ?? panic("PowerShell names parse")
+    projected := [String]{}
+    loop function in functions -> projected.push(function.jet)
+    assert_eq(projected, [String]{"get_stateful", "fail"})
+    jet :: pkg_powershell_render_jet("ops", functions)
+    worker :: pkg_powershell_render_worker(functions)
+    assert(jet.contains("pub fn get_stateful("))
+    assert(jet.contains("fn open() -> Int ="))
+    assert(jet.contains("pub fn open() -> Session !PowerShellError {{"))
+    assert(jet.contains("Session{{ value: handle }}"))
+    assert(!jet.contains("=>"))
+    assert(!jet.contains("Session.{{"))
+    assert(worker.contains("'Get-Stateful'"))
+}
+
+#Test("renders one response decoder for powershell operations") {
+    functions :: pkg_powershell_parse_function_names("Transform\nFail\n".bytes()) ?? panic("PowerShell names parse")
+    jet :: pkg_powershell_render_jet("ops", functions)
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.fail("), 1)
+    assert_eq(pkg_binders_test_count(jet, "return decode_response(raw, code)"), 2)
+}
+
+#Test("rejects generated powershell helper and alias collisions") {
+    cases :: [(name: String, jet: String)]{(name: "Take-Error", jet: "take_error"), (name: "ABI", jet: "abi")}
+    loop case in cases {
+        error :: if pkg_powershell_parse_function_names(case.name.bytes()) == {
+            .Ok(_) -> panic("generated PowerShell name collision was accepted")
+            .Err(error) -> error
+        }
+        assert_eq(error.message(), "PowerShell function `{case.name}` projects to reserved Jet name `{case.jet}`")
+    }
+}
+
+#Test("powershell non posix hosts fail instead of emitting a posix facade") {
+    error :: if pkg_worker_require_supported_host(WorkerLanguage.PowerShell, false) == {
+        .Ok(_) -> panic("a non-POSIX host was accepted")
+        .Err(error) -> error
+    }
+    assert_eq(error.message(), "persistent PowerShell bindings require a POSIX host process supervisor")
+}

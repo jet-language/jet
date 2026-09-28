@@ -1,0 +1,763 @@
+// The C3 lifecycle-root journal (Rust Store/Lifecycle.rs). Producers replace
+// roots in two durable steps. Each transition is one checksummed transaction
+// member `<sequence:020>-<checksum16>.txn` in the pinned journal directory,
+// published by exclusive create, file sync, no-replace rename and directory
+// sync. Recovery removes abandoned partials; replay authenticates every
+// member, applies transactions after the newest snapshot, and compaction
+// folds a long history into one snapshot. Every public operation holds the
+// Hangar lock for its whole read-modify-write.
+
+@STORE_LIFECYCLE_DB_DIR :: "lifecycle-db"
+@STORE_LIFECYCLE_JOURNAL_DIR :: "journal"
+@STORE_LIFECYCLE_PARTIAL_SUFFIX :: ".partial"
+@STORE_LIFECYCLE_TXN_SUFFIX :: ".txn"
+@STORE_LIFECYCLE_SNAPSHOT_FILE :: "snapshot"
+@STORE_LIFECYCLE_SNAPSHOT_PARTIAL :: "snapshot.partial"
+@STORE_LIFECYCLE_MAX_TRANSACTION_BYTES :: 2097152
+@STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES :: 16777216
+@STORE_LIFECYCLE_MAX_RECOVERY_BYTES :: 33554432
+@STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS :: 512
+@STORE_LIFECYCLE_COMPACT_AFTER_TRANSACTIONS :: 128
+// The longest `u64` sequence spelling; snapshot admission sizes with it.
+@STORE_LIFECYCLE_MAX_SEQUENCE_TEXT :: "18446744073709551615"
+
+// The durable publication steps a write passes, for fault injection.
+enum LifecycleWritePhase {
+    BeforeWrite
+    AfterWrite
+    AfterFileSync
+    AfterRename
+    AfterDirectorySync
+}
+
+// Fault injection for journal writes: fail with an OS error code at a phase.
+struct LifecycleWriteControl {
+    fail: ?LifecycleWritePhase
+    raw_os_error: Int
+
+    fn none() -> LifecycleWriteControl !Never {
+        LifecycleWriteControl{fail: None, raw_os_error: 5}
+    }
+
+    fn fail_at(phase: LifecycleWritePhase, raw_os_error: Int) -> LifecycleWriteControl !Never {
+        LifecycleWriteControl{fail: Val(phase), raw_os_error}
+    }
+
+    fn hit(self, phase: LifecycleWritePhase) !StoreError {
+        if self.fail == Val(phase) {
+            return Err(StoreError.Io(IOError.Other(IOContext{operation: .Write, resource: None, os_code: Val(self.raw_os_error), cause: Val("injected lifecycle journal failure")})))
+        }
+    }
+}
+
+// The Hangar lock plus the closure inputs every lifecycle operation reads
+// under it (Rust `with_lifecycle_lock`). Dropping it releases the lock.
+struct LifecycleSession {
+    lock: RuntimeLock
+    known: [String]
+    closure_head: String
+}
+
+// One authenticated transaction after the snapshot.
+struct LifecycleJournalTransaction {
+    sequence: Int
+    name: String
+    entry: LifecycleJournalEntry
+}
+
+// Rust `JournalScan`.
+struct LifecycleJournalScan {
+    snapshot: ?LifecycleSnapshotRecord
+    transactions: [LifecycleJournalTransaction]
+    transaction_names: [String]
+    last_sequence: Int
+
+    fn through(self) -> Int !Never {
+        if self.snapshot == {
+            .Val(record) -> record.through
+            .None -> 0
+        }
+    }
+}
+
+// Take the Hangar lock, recover abandoned partials and read the closure
+// inputs.
+fn store_lifecycle_session(roots: HangarRoots) -[FS, Env]> LifecycleSession !StoreError {
+    lock :: env_runtime_lock(roots.root, "hangar")
+    store_lifecycle_recover_unlocked(roots)
+    inputs :: store_lifecycle_inputs_unlocked(roots)
+    Ok(LifecycleSession{lock, known: inputs.known, closure_head: inputs.closure_head})
+}
+
+// Rust `prepare`.
+pub fn store_lifecycle_prepare(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    store_lifecycle_prepare_unlocked(roots, identity, targets, at, session.known)
+    store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, [LegacyRoot]{})
+}
+
+// Rust `commit`.
+pub fn store_lifecycle_commit(roots: HangarRoots, id: RootId, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    state := store_lifecycle_load_state(roots, session.known)
+    store_lifecycle_apply_or_compact(roots, &state, LifecycleJournalEntry.Commit{id, incarnation, witness, at}, LifecycleWriteControl.none())
+    store_lifecycle_snapshot_from_state(state, session.closure_head)
+}
+
+// Rust `remove_root`.
+pub fn store_lifecycle_remove_root(roots: HangarRoots, id: RootId, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    state := store_lifecycle_load_state(roots, session.known)
+    store_lifecycle_apply_or_compact(roots, &state, LifecycleJournalEntry.Tombstone{id, incarnation, witness, at}, LifecycleWriteControl.none())
+    store_lifecycle_snapshot_from_state(state, session.closure_head)
+}
+
+// Apply and persist `entry` unless it is already durable; a durable retry
+// only gives compaction its chance.
+fn store_lifecycle_apply_or_compact(roots: HangarRoots, state: &[String: LifecycleRoot], entry: LifecycleJournalEntry, control: LifecycleWriteControl) !StoreError -[FS, Env]> {
+    if store_lifecycle_entry_already_applied(state, entry) {
+        store_lifecycle_compact_if_needed(roots, state)
+        return Ok()
+    }
+    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_persist_entry(roots, entry, state, control)
+}
+
+// Apply and persist `entry` unless it is already durable.
+fn store_lifecycle_apply_if_new(roots: HangarRoots, state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) !StoreError -[FS, Env]> {
+    if store_lifecycle_entry_already_applied(state, entry) -> return Ok()
+    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_persist_entry(roots, entry, state, LifecycleWriteControl.none())
+}
+
+// Rust `atomic_update`: replace one typed root. The prepare and commit
+// records are serialized under one Hangar lock. If the process dies between
+// them, the prepared union stays protected and the same request resumes by
+// witness, metadata and target identity instead of silently rebinding.
+pub fn store_lifecycle_atomic_update(roots: HangarRoots, update: RootUpdate) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    expected := None
+    if update.expected_etag == {
+        .Val(text) -> expected = Val(RootEtag.parse(text))
+        .None -> {}
+    }
+    session :: store_lifecycle_session(roots)
+    store_lifecycle_atomic_update_unlocked(roots, update, expected, session.known, session.closure_head)
+}
+
+fn store_lifecycle_atomic_update_unlocked(roots: HangarRoots, update: RootUpdate, expected: ?RootEtag, known: [String], closure_head: String) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    proposed :: store_lifecycle_checked_targets(update.targets, known)
+    state := store_lifecycle_load_state(roots, known)
+    identity := update.identity
+    revision := 1
+    protected := proposed
+    if state.get(update.identity.id.as_str()) == {
+        .Val(root) -> {
+            current_etag :: root.etag()
+            previous :: root.previous_etag()
+            if root.phase == RootPhase.Prepared {
+                if !store_lifecycle_same_request(root, update, proposed) -> return Err(store_lifecycle_cas_conflict(expected, Val(current_etag)))
+                stale :: if expected == {
+                    .Val(value) -> value != current_etag && Val(value) != previous
+                    .None -> false
+                }
+                if stale -> return Err(store_lifecycle_cas_conflict(expected, Val(current_etag)))
+                identity = root.identity
+                revision = root.revision
+                protected = root.protected_targets
+            } else {
+                same :: root.phase == RootPhase.Committed && store_lifecycle_same_request(root, update, proposed)
+                stale :: if expected == {
+                    .Val(value) -> value != current_etag && !(same && Val(value) == previous)
+                    .None -> false
+                }
+                if stale -> return Err(store_lifecycle_cas_conflict(expected, Val(current_etag)))
+                if same -> return store_lifecycle_snapshot_from_state(state, closure_head)
+                if root.phase != RootPhase.Tombstoned && expected != Val(current_etag) -> return Err(store_lifecycle_cas_conflict(expected, Val(current_etag)))
+                if root.identity.kind != update.identity.kind || root.identity.producer != update.identity.producer {
+                    return Err(StoreError.InvalidData("lifecycle root identity changed kind or producer"))
+                }
+                next :: RootEtag.next_after(root)
+                identity = RootIdentity.new(update.identity.kind, update.identity.id, update.identity.producer, Incarnation.new(next.incarnation), update.identity.witness)
+                revision = next.revision
+                protected = store_lifecycle_union(proposed, root.protected_targets)
+            }
+        }
+        .None -> {
+            if expected != None -> return Err(store_lifecycle_cas_conflict(expected, None))
+            identity = RootIdentity.new(update.identity.kind, update.identity.id, update.identity.producer, Incarnation.new(1), update.identity.witness)
+        }
+    }
+    prepare :: LifecycleJournalEntry.Prepare{identity, proposed, protected, metadata: update.metadata, revision, at: update.at}
+    store_lifecycle_apply_if_new(roots, &state, prepare)
+    commit :: LifecycleJournalEntry.Commit{id: identity.id, incarnation: identity.incarnation, witness: identity.witness, at: update.at}
+    store_lifecycle_apply_if_new(roots, &state, commit)
+    store_lifecycle_snapshot_from_state(state, closure_head)
+}
+
+// Rust `prepare_if_absent`: prepare an immutable root only when its stable
+// identity is absent. The existence check and the append share one lock, so
+// no caller can observe an absent root and race another producer into it.
+pub fn store_lifecycle_prepare_if_absent(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    proposed :: store_lifecycle_checked_targets(targets, session.known)
+    state :: store_lifecycle_load_state(roots, session.known)
+    if state.get(identity.id.as_str()) == {
+        .Val(root) -> {
+            disagrees :: root.phase == RootPhase.Tombstoned || root.identity != identity || root.targets != proposed || root.metadata != RootMetadata.empty()
+            if disagrees -> return Err(StoreError.InvalidData("lifecycle root disagrees with immutable metadata"))
+            return store_lifecycle_snapshot_from_state(state, session.closure_head)
+        }
+        .None -> {}
+    }
+    store_lifecycle_prepare_unlocked(roots, identity, targets, at, session.known)
+    reloaded :: store_lifecycle_load_state(roots, session.known)
+    store_lifecycle_snapshot_from_state(reloaded, session.closure_head)
+}
+
+// Rust `atomic_remove`: tombstone a typed root with one compare-and-swap
+// check. Repeating a removal whose tombstone is durable succeeds.
+pub fn store_lifecycle_atomic_remove(roots: HangarRoots, id: RootId, expected_etag: String, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    expected :: RootEtag.parse(expected_etag)
+    session :: store_lifecycle_session(roots)
+    state := store_lifecycle_load_state(roots, session.known)
+    root :: state.get(id.as_str()) ?? return Err(StoreError.NotFound("lifecycle root was not found"))
+    if root.etag() != expected -> return Err(store_lifecycle_cas_conflict(Val(expected), Val(root.etag())))
+    if root.phase == RootPhase.Tombstoned -> return store_lifecycle_snapshot_from_state(state, session.closure_head)
+    if root.phase == RootPhase.Prepared {
+        commit :: LifecycleJournalEntry.Commit{id: root.identity.id, incarnation: root.identity.incarnation, witness: root.identity.witness, at}
+        store_lifecycle_apply_entry(&state, commit)
+        store_lifecycle_persist_entry(roots, commit, state, LifecycleWriteControl.none())
+    }
+    tombstone :: LifecycleJournalEntry.Tombstone{id: root.identity.id, incarnation: root.identity.incarnation, witness: root.identity.witness, at}
+    store_lifecycle_apply_if_new(roots, &state, tombstone)
+    store_lifecycle_snapshot_from_state(state, session.closure_head)
+}
+
+fn store_lifecycle_same_request(root: LifecycleRoot, update: RootUpdate, proposed: [String]) -> Bool !Never {
+    root.identity.kind == update.identity.kind && root.identity.producer == update.identity.producer && root.identity.witness == update.identity.witness && root.targets == proposed && root.metadata == update.metadata
+}
+
+// A compare-and-swap refusal (io kind AlreadyExists in the Rust reference).
+fn store_lifecycle_cas_conflict(expected: ?RootEtag, current: ?RootEtag) -> StoreError !Never {
+    expected_text :: if expected == {
+        .Val(etag) -> Val(etag.render())
+        .None -> None
+    }
+    current_text :: if current == {
+        .Val(etag) -> Val(etag.render())
+        .None -> None
+    }
+    StoreError.LifecycleConflict{expected: expected_text, current: current_text}
+}
+
+// Rust `import_legacy_root`.
+pub fn store_lifecycle_import_legacy_root(roots: HangarRoots, legacy: LegacyRoot) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    targets :: store_lifecycle_checked_targets(legacy.targets, session.known)
+    state := store_lifecycle_load_state(roots, session.known)
+    entry :: LifecycleJournalEntry.Legacy{identity: legacy.identity, targets, at: legacy.observed_at}
+    store_lifecycle_apply_or_compact(roots, &state, entry, LifecycleWriteControl.none())
+    store_lifecycle_snapshot_from_state(state, session.closure_head)
+}
+
+// Rust `list`: every durable root in root-id order.
+pub fn store_lifecycle_list(roots: HangarRoots) -[FS, Env, Time]> [LifecycleRoot] !StoreError {
+    snapshot :: store_lifecycle_snapshot(roots)
+    Ok(snapshot.root_list())
+}
+
+// Rust `snapshot`.
+pub fn store_lifecycle_snapshot(roots: HangarRoots) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    store_lifecycle_snapshot_with_legacy(roots, [LegacyRoot]{})
+}
+
+// Rust `protected_targets_unlocked`: the caller already owns the Hangar lock.
+// Clean uses this exact set so dropping a short-lived verification lease
+// cannot expose durable roots.
+fn store_lifecycle_protected_targets_unlocked(roots: HangarRoots) -[FS, Env, Time]> [String] !StoreError {
+    store_lifecycle_recover_unlocked(roots)
+    inputs :: store_lifecycle_inputs_unlocked(roots)
+    state :: store_lifecycle_load_state(roots, inputs.known)
+    store_lifecycle_validate_state_bounds(state)
+    Ok(store_lifecycle_protected_union(state, store_lifecycle_unix_now()))
+}
+
+// Rust `snapshot_with_legacy`: legacy roots absent from the journal are
+// protected in this view without being persisted.
+pub fn store_lifecycle_snapshot_with_legacy(roots: HangarRoots, legacy: [LegacyRoot]) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    session :: store_lifecycle_session(roots)
+    store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, legacy)
+}
+
+// Rust `recover`: the number of abandoned partial members removed.
+pub fn store_lifecycle_recover(roots: HangarRoots) -[FS, Env]> Int !StoreError {
+    lock :: env_runtime_lock(roots.root, "hangar")
+    recovered :: store_lifecycle_recover_unlocked(roots)
+    inputs :: store_lifecycle_inputs_unlocked(roots)
+    state :: store_lifecycle_load_state(roots, inputs.known)
+    store_lifecycle_compact_if_needed(roots, state)
+    Ok(recovered)
+}
+
+fn store_lifecycle_prepare_unlocked(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String]) !StoreError -[FS, Env]> {
+    store_lifecycle_prepare_unlocked_controlled(roots, identity, targets, at, known, LifecycleWriteControl.none())
+}
+
+fn store_lifecycle_prepare_unlocked_controlled(roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp, known: [String], control: LifecycleWriteControl) !StoreError -[FS, Env]> {
+    proposed :: store_lifecycle_checked_targets(targets, known)
+    state := store_lifecycle_load_state(roots, known)
+    protected := proposed
+    revision := 1
+    if state.get(identity.id.as_str()) == {
+        .Val(old) -> {
+            protected = store_lifecycle_union(proposed, old.protected_targets)
+            retry :: old.phase == RootPhase.Prepared && old.identity == identity && old.targets == proposed && old.protected_targets == protected
+            revision = if retry -> old.revision else -> old.revision + 1
+        }
+        .None -> {}
+    }
+    entry :: LifecycleJournalEntry.Prepare{identity, proposed, protected, metadata: RootMetadata.empty(), revision, at}
+    store_lifecycle_apply_or_compact(roots, &state, entry, control)
+}
+
+fn store_lifecycle_snapshot_unlocked(roots: HangarRoots, known: [String], closure_head: String, legacy: [LegacyRoot]) -[FS, Env, Time]> LifecycleSnapshot !StoreError {
+    state := store_lifecycle_load_state(roots, known)
+    loop root in legacy {
+        targets :: store_lifecycle_checked_targets(root.targets, known)
+        if state.has_key(root.identity.id.as_str()) -> next
+        store_lifecycle_apply_entry(&state, LifecycleJournalEntry.Legacy{identity: root.identity, targets, at: root.observed_at})
+    }
+    store_lifecycle_snapshot_from_state(state, closure_head)
+}
+
+// Targets protected by live, unexpired roots.
+fn store_lifecycle_protected_union(state: [String: LifecycleRoot], now: LifecycleTimestamp) -> [String] !Never {
+    protected := [String]{}
+    loop id in store_lifecycle_sorted_ids(state) {
+        root :: state[id]
+        if root.is_protecting(now) {
+            loop target in root.protected_targets -> protected.push(target)
+        }
+    }
+    store_lifecycle_sorted_set(protected)
+}
+
+// Rust `snapshot_from_state`: the protected set plus the deterministic
+// lifecycle and composite store revisions.
+fn store_lifecycle_snapshot_from_state(roots: [String: LifecycleRoot], closure_head: String) -[Time]> LifecycleSnapshot !StoreError {
+    store_lifecycle_validate_state_bounds(roots)
+    protected_targets :: store_lifecycle_protected_union(roots, store_lifecycle_unix_now())
+    canonical :: store_lifecycle_canonical_state(roots)
+    revision :: LifecycleRevision{value: "sha256-{pkg_sha256_hex(canonical.bytes())}"}
+    composite :: "jet-store-revision-v1\nclosure\t{closure_head}\nlifecycle\t{revision.as_str()}\n"
+    store_revision :: StoreRevision{lifecycle: revision, closure_head, digest: "sha256-{pkg_sha256_hex(composite.bytes())}"}
+    Ok(LifecycleSnapshot{roots, protected_targets, revision, store_revision})
+}
+
+// Rust `load_state`: the snapshot state plus every later transaction,
+// bounded by recovery work and checked against the known closure targets.
+fn store_lifecycle_load_state(roots: HangarRoots, known: [String]) -[FS, Env]> [String: LifecycleRoot] !StoreError {
+    journal :: store_lifecycle_ensure_journal_dir(roots)
+    scan :: store_lifecycle_scan_journal(journal)
+    through :: scan.through()
+    state := if scan.snapshot == {
+        .Val(record) -> record.roots
+        .None -> [String: LifecycleRoot]{}
+    }
+    store_lifecycle_validate_state_bounds(state)
+    store_lifecycle_validate_state_targets(state, known)
+    work := 0
+    loop id in store_lifecycle_sorted_ids(state) {
+        root :: state[id]
+        work += root.targets.len() + root.protected_targets.len() + 1
+    }
+    loop transaction in scan.transactions {
+        if transaction.sequence <= through -> next
+        work += transaction.entry.work()
+        if work > @STORE_LIFECYCLE_MAX_RECOVERY_WORK -> return Err(StoreError.InvalidData("lifecycle recovery exceeds work bound"))
+        if store_lifecycle_validate_entry_targets(transaction.entry, known) == {
+            .Err(error) -> return Err(store_lifecycle_corrupt_name(journal, transaction.name, error.message()))
+            .Ok(_) -> {}
+        }
+        if store_lifecycle_apply_entry(&state, transaction.entry) == {
+            .Err(error) -> return Err(store_lifecycle_corrupt_name(journal, transaction.name, error.message()))
+            .Ok(_) -> {}
+        }
+        store_lifecycle_validate_state_bounds(state)
+    }
+    Ok(state)
+}
+
+// Rust `entry_already_applied`: the state already records exactly this
+// transition, so a retry with a newer timestamp changes nothing.
+fn store_lifecycle_entry_already_applied(state: [String: LifecycleRoot], entry: LifecycleJournalEntry) -> Bool !Never {
+    if entry == {
+        .Prepare(identity, proposed, protected, metadata, revision, _) -> {
+            root :: state.get(identity.id.as_str()) ?? return false
+            root.phase == RootPhase.Prepared && root.identity == identity && root.targets == proposed && root.protected_targets == protected && root.metadata == metadata && root.revision == revision && root.committed_at == None && root.tombstoned_at == None
+        }
+        .Commit(id, incarnation, witness, _) -> {
+            root :: state.get(id.as_str()) ?? return false
+            root.phase == RootPhase.Committed && root.identity.incarnation == incarnation && root.identity.witness == witness && root.committed_at != None && root.tombstoned_at == None
+        }
+        .Tombstone(id, incarnation, witness, _) -> {
+            root :: state.get(id.as_str()) ?? return false
+            root.phase == RootPhase.Tombstoned && root.identity.incarnation == incarnation && root.identity.witness == witness && root.tombstoned_at != None
+        }
+        .Legacy(identity, targets, _) -> {
+            root :: state.get(identity.id.as_str()) ?? return false
+            root.legacy && root.phase == RootPhase.Committed && root.identity == identity && root.targets == targets && root.protected_targets == targets && root.committed_at != None
+        }
+    }
+}
+
+// Rust `validate_state_bounds`.
+fn store_lifecycle_validate_state_bounds(state: [String: LifecycleRoot]) !StoreError {
+    if state.len() > @STORE_LIFECYCLE_MAX_ROOTS -> return Err(StoreError.InvalidData("lifecycle state exceeds root-count bound"))
+    total := 0
+    loop id in store_lifecycle_sorted_ids(state) {
+        root :: state[id]
+        root.metadata.validate()
+        if root.revision == 0 -> return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
+        if root.targets.len() > @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT || root.protected_targets.len() > @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 {
+            return Err(StoreError.InvalidData("lifecycle root exceeds target-count bound"))
+        }
+        total += root.targets.len() + root.protected_targets.len()
+        if total > @STORE_LIFECYCLE_MAX_TOTAL_TARGETS -> return Err(StoreError.InvalidData("lifecycle state exceeds total-target bound"))
+    }
+}
+
+// Rust `validate_state_targets`: every target is a digest the closure knows.
+fn store_lifecycle_validate_state_targets(state: [String: LifecycleRoot], known: [String]) !StoreError {
+    loop id in store_lifecycle_sorted_ids(state) {
+        root :: state[id]
+        loop target in root.targets {
+            store_lifecycle_require_known_target(target, known)
+        }
+        loop target in root.protected_targets {
+            store_lifecycle_require_known_target(target, known)
+        }
+    }
+}
+
+fn store_lifecycle_require_known_target(target: String, known: [String]) !StoreError {
+    store_lifecycle_validate_target(target)
+    if !known.contains(target) -> return Err(StoreError.InvalidData("unknown lifecycle target `{target}`"))
+}
+
+// Rust `apply_entry`: one state transition with its invariants.
+fn store_lifecycle_apply_entry(state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) !StoreError {
+    if entry == {
+        .Prepare(identity, proposed, protected, metadata, revision, at) -> store_lifecycle_apply_prepare(state, identity, proposed, protected, metadata, revision, at)
+        .Commit(id, incarnation, witness, at) -> {
+            key :: id.as_str()
+            if !state.has_key(key) -> return Err(StoreError.InvalidData("commit references an unknown lifecycle root"))
+            root :: state[key]
+            if root.phase != RootPhase.Prepared || root.identity.incarnation != incarnation || root.identity.witness != witness {
+                return Err(StoreError.InvalidData("commit does not match the prepared lifecycle root"))
+            }
+            if at.get() < root.prepared_at.get() -> return Err(StoreError.InvalidData("lifecycle commit timestamp predates prepare"))
+            state[key].phase = RootPhase.Committed
+            state[key].protected_targets = root.targets
+            state[key].committed_at = Val(at)
+        }
+        .Tombstone(id, incarnation, witness, at) -> {
+            key :: id.as_str()
+            if !state.has_key(key) -> return Err(StoreError.InvalidData("tombstone references an unknown lifecycle root"))
+            root :: state[key]
+            if root.phase != RootPhase.Committed || root.identity.incarnation != incarnation || root.identity.witness != witness {
+                return Err(StoreError.InvalidData("tombstone does not match a committed lifecycle root"))
+            }
+            floor :: root.committed_at ?? root.prepared_at
+            if at.get() < floor.get() -> return Err(StoreError.InvalidData("lifecycle tombstone timestamp predates commit"))
+            state[key].phase = RootPhase.Tombstoned
+            state[key].protected_targets = [String]{}
+            state[key].tombstoned_at = Val(at)
+        }
+        .Legacy(identity, targets, at) -> {
+            if targets.len() == 0 -> return Err(StoreError.InvalidData("legacy lifecycle root has no targets"))
+            key :: identity.id.as_str()
+            if state.has_key(key) -> return Err(StoreError.InvalidData("legacy import duplicates a lifecycle root"))
+            if identity.incarnation.get() != 1 -> return Err(StoreError.InvalidData("legacy lifecycle root must use incarnation one"))
+            state[key] = LifecycleRoot{identity, targets, protected_targets: targets, phase: RootPhase.Committed, prepared_at: at, committed_at: Val(at), tombstoned_at: None, metadata: RootMetadata.empty(), revision: 1, legacy: true}
+        }
+    }
+}
+
+fn store_lifecycle_apply_prepare(state: &[String: LifecycleRoot], identity: RootIdentity, proposed: [String], protected: [String], metadata: RootMetadata, revision: Int, at: LifecycleTimestamp) !StoreError {
+    if proposed.len() == 0 || protected.len() == 0 || !store_lifecycle_is_subset(proposed, protected) {
+        return Err(StoreError.InvalidData("prepared lifecycle root has invalid target sets"))
+    }
+    metadata.validate()
+    if revision == 0 -> return Err(StoreError.InvalidData("prepared lifecycle root has zero revision"))
+    key :: identity.id.as_str()
+    if state.has_key(key) {
+        old :: state[key]
+        if old.phase == RootPhase.Prepared -> return Err(StoreError.InvalidData("lifecycle root already has a prepared replacement"))
+        if old.identity.kind != identity.kind || old.identity.producer != identity.producer {
+            return Err(StoreError.InvalidData("lifecycle root identity changed kind or producer"))
+        }
+        if identity.incarnation.get() != old.identity.incarnation.get() + 1 {
+            return Err(StoreError.InvalidData("lifecycle replacement skipped or reused an incarnation"))
+        }
+        if revision != old.revision + 1 -> return Err(StoreError.InvalidData("lifecycle replacement skipped or reused a revision"))
+        if identity.witness == old.identity.witness -> return Err(StoreError.InvalidData("lifecycle replacement reused its witness"))
+        if at.get() < old.last_transition().get() -> return Err(StoreError.InvalidData("lifecycle prepare timestamp moved backwards"))
+        if protected != store_lifecycle_union(old.protected_targets, proposed) {
+            return Err(StoreError.InvalidData("prepared lifecycle root does not protect old union new"))
+        }
+    } else {
+        if identity.incarnation.get() != 1 -> return Err(StoreError.InvalidData("first lifecycle incarnation must be one"))
+        if revision != 1 -> return Err(StoreError.InvalidData("first lifecycle revision must be one"))
+        if protected != proposed -> return Err(StoreError.InvalidData("first lifecycle root has unexpected protected targets"))
+    }
+    state[key] = LifecycleRoot{identity, targets: proposed, protected_targets: protected, phase: RootPhase.Prepared, prepared_at: at, committed_at: None, tombstoned_at: None, metadata, revision, legacy: false}
+}
+
+// Rust `checked_targets`: a nonempty, bounded, duplicate-free set of known
+// digests.
+fn store_lifecycle_checked_targets(targets: [String], known: [String]) -> [String] !StoreError {
+    if targets.len() == 0 -> return Err(StoreError.InvalidData("lifecycle root target set must not be empty"))
+    if targets.len() > @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT -> return Err(StoreError.InvalidData("lifecycle root exceeds target-count bound"))
+    exact := [String]{}
+    loop target in targets {
+        store_lifecycle_validate_target(target)
+        if exact.contains(target) -> return Err(StoreError.InvalidData("duplicate lifecycle target `{target}`"))
+        exact.push(target)
+        if !known.contains(target) -> return Err(StoreError.InvalidData("unknown lifecycle target `{target}`"))
+    }
+    Ok(store_lifecycle_sorted_set(exact))
+}
+
+// Rust `validate_entry_targets`.
+fn store_lifecycle_validate_entry_targets(entry: LifecycleJournalEntry, known: [String]) !StoreError {
+    targets :: if entry == {
+        .Prepare(_, proposed, protected, _, _, _) -> store_lifecycle_union(proposed, protected)
+        .Legacy(_, legacy_targets, _) -> legacy_targets
+        .Commit(_, _, _, _) | .Tombstone(_, _, _, _) -> [String]{}
+    }
+    loop target in targets {
+        store_lifecycle_require_known_target(target, known)
+    }
+}
+
+// Rust `persist_entry`: publish one transaction durably, then compact when
+// the history is long.
+fn store_lifecycle_persist_entry(roots: HangarRoots, entry: LifecycleJournalEntry, state: [String: LifecycleRoot], control: LifecycleWriteControl) !StoreError -[FS, Env]> {
+    store_lifecycle_validate_state_bounds(state)
+    store_lifecycle_validate_snapshot_wire(state)
+    journal :: store_lifecycle_ensure_journal_dir(roots)
+    sequence :: store_lifecycle_next_sequence(journal)
+    body :: store_lifecycle_render_entry(entry)
+    checksum :: pkg_sha256_hex(body.bytes())
+    wire :: "{body}{@STORE_LIFECYCLE_CHECKSUM_FIELD}{checksum}\n"
+    if wire.bytes().len() > @STORE_LIFECYCLE_MAX_TRANSACTION_BYTES -> return Err(StoreError.InvalidData("lifecycle transaction exceeds byte bound"))
+    base :: "{store_lifecycle_pad20(sequence)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}"
+    partial :: "{base}{@STORE_LIFECYCLE_PARTIAL_SUFFIX}"
+    final_name :: "{base}{@STORE_LIFECYCLE_TXN_SUFFIX}"
+    control.hit(LifecycleWritePhase.BeforeWrite)
+    file :: journal.create_new(partial)
+    file.write_all(wire.bytes())
+    control.hit(LifecycleWritePhase.AfterWrite)
+    file.fsync()
+    control.hit(LifecycleWritePhase.AfterFileSync)
+    journal.rename_open(file, partial, final_name, false)
+    control.hit(LifecycleWritePhase.AfterRename)
+    journal.sync()
+    control.hit(LifecycleWritePhase.AfterDirectorySync)
+    store_lifecycle_compact_if_needed(roots, state)
+}
+
+// Rust `recover_unlocked`: remove abandoned partial members and refuse
+// unknown ones; the number removed.
+fn store_lifecycle_recover_unlocked(roots: HangarRoots) -[FS, Env]> Int !StoreError {
+    journal :: store_lifecycle_ensure_journal_dir(roots)
+    recovered := 0
+    names := store_lifecycle_bounded_names(journal)
+    names.sort()
+    loop name in names {
+        if {
+            store_lifecycle_valid_partial_name(name) -> {
+                journal.open_read(name)
+                journal.remove_file(name)
+                recovered += 1
+            }
+            name != @STORE_LIFECYCLE_SNAPSHOT_FILE && !store_lifecycle_valid_transaction_name(name) -> {
+                return Err(store_lifecycle_corrupt_name(journal, name, "unknown journal member"))
+            }
+            else -> {}
+        }
+    }
+    if recovered != 0 -> journal.sync()
+    store_lifecycle_scan_journal(journal)
+    Ok(recovered)
+}
+
+fn store_lifecycle_next_sequence(journal: PinnedLifecycleDirectory) -[FS]> Int !StoreError {
+    scan :: store_lifecycle_scan_journal(journal)
+    Ok(scan.last_sequence + 1)
+}
+
+fn store_lifecycle_ensure_journal_dir(roots: HangarRoots) -[FS, Env]> PinnedLifecycleDirectory !StoreError {
+    PinnedLifecycleDirectory.open_or_create(files.join(files.join(roots.hangar_dir(), @STORE_LIFECYCLE_DB_DIR), @STORE_LIFECYCLE_JOURNAL_DIR))
+}
+
+fn store_lifecycle_bounded_names(journal: PinnedLifecycleDirectory) -[FS]> [String] !StoreError {
+    names :: journal.names(@STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS + 1)
+    if names.len() > @STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS -> return Err(StoreError.InvalidData("lifecycle journal exceeds member-count bound"))
+    Ok(names)
+}
+
+fn store_lifecycle_valid_partial_name(name: String) -> Bool !Never {
+    if name == @STORE_LIFECYCLE_SNAPSHOT_PARTIAL -> return true
+    name.ends_with(@STORE_LIFECYCLE_PARTIAL_SUFFIX) && name.bytes().len() == 20 + 1 + 16 + 8 && store_lifecycle_parse_sequence(name) != None
+}
+
+fn store_lifecycle_valid_transaction_name(name: String) -> Bool !Never {
+    raw :: name.bytes()
+    if !name.ends_with(@STORE_LIFECYCLE_TXN_SUFFIX) || raw.len() != 20 + 1 + 16 + 4 -> return false
+    if store_lifecycle_parse_sequence(name) == None || Int.from_u8(raw[20]) != 45 -> return false
+    store_lifecycle_is_lower_hex(pkg_bytes_text(raw, 21, 37), 16)
+}
+
+// The first twenty bytes as a sequence number.
+fn store_lifecycle_parse_sequence(name: String) -> ?Int !Never {
+    raw :: name.bytes()
+    if raw.len() < 20 -> return None
+    prefix :: String.from_bytes(raw[0..<20]) ?? return None
+    store_lifecycle_parse_u64(prefix)
+}
+
+// Rust `scan_journal`: authenticate every member, decode the transactions
+// after the snapshot, and prove the sequence is contiguous.
+fn store_lifecycle_scan_journal(journal: PinnedLifecycleDirectory) -[FS]> LifecycleJournalScan !StoreError {
+    names := store_lifecycle_bounded_names(journal)
+    names.sort()
+    snapshot := None
+    if names.contains(@STORE_LIFECYCLE_SNAPSHOT_FILE) {
+        raw :: store_lifecycle_read_member_bounded(journal, @STORE_LIFECYCLE_SNAPSHOT_FILE, @STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES)
+        if store_lifecycle_parse_snapshot(raw) == {
+            .Ok(record) -> snapshot = Val(record)
+            .Err(error) -> return Err(store_lifecycle_corrupt_name(journal, @STORE_LIFECYCLE_SNAPSHOT_FILE, error.message()))
+        }
+    }
+    through :: if snapshot == {
+        .Val(record) -> record.through
+        .None -> 0
+    }
+    transactions := [LifecycleJournalTransaction]{}
+    transaction_names := [String]{}
+    work := 0
+    decoded_bytes := 0
+    last_sequence := through
+    sequences := [Int]{}
+    loop name in names {
+        if store_lifecycle_valid_partial_name(name) || name == @STORE_LIFECYCLE_SNAPSHOT_FILE -> next
+        if !store_lifecycle_valid_transaction_name(name) -> return Err(store_lifecycle_corrupt_name(journal, name, "invalid journal member"))
+        sequence :: store_lifecycle_parse_sequence(name) ?? return Err(store_lifecycle_corrupt_name(journal, name, "invalid journal sequence"))
+        if sequences.contains(sequence) -> return Err(store_lifecycle_corrupt_name(journal, name, "duplicate journal sequence"))
+        sequences.push(sequence)
+        raw :: store_lifecycle_read_member_bounded(journal, name, @STORE_LIFECYCLE_MAX_TRANSACTION_BYTES)
+        body :: store_lifecycle_member_body(journal, name, raw)
+        checksum :: pkg_sha256_hex(body.bytes())
+        expected :: "{store_lifecycle_pad20(sequence)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}{@STORE_LIFECYCLE_TXN_SUFFIX}"
+        if name != expected -> return Err(store_lifecycle_corrupt_name(journal, name, "journal filename disagrees with checksum"))
+        transaction_names.push(name)
+        if sequence > last_sequence -> last_sequence = sequence
+        // A durable snapshot supersedes transaction semantics through its
+        // sequence. Every old file and filename is still authenticated, but
+        // it is neither decoded nor charged as recovery work after a crash
+        // between snapshot publication and journal deletion.
+        if sequence <= through -> next
+        decoded_bytes += raw.bytes().len()
+        if decoded_bytes > @STORE_LIFECYCLE_MAX_RECOVERY_BYTES -> return Err(StoreError.InvalidData("lifecycle journal exceeds aggregate byte bound"))
+        entry :: store_lifecycle_member_entry(journal, name, raw)
+        work += entry.work()
+        if work > @STORE_LIFECYCLE_MAX_RECOVERY_WORK -> return Err(StoreError.InvalidData("lifecycle journal exceeds work bound"))
+        transactions.push(LifecycleJournalTransaction{sequence, name, entry})
+    }
+    transactions.sort_by(transaction -> transaction.sequence)
+    expected_sequence := through + 1
+    loop transaction in transactions {
+        if transaction.sequence <= through -> next
+        if transaction.sequence != expected_sequence -> return Err(store_lifecycle_corrupt_name(journal, transaction.name, "journal sequence is missing, duplicate, or invalid"))
+        expected_sequence += 1
+    }
+    if snapshot == None && transactions.len() > 0 && transactions[0].sequence != 1 {
+        return Err(store_lifecycle_corrupt_name(journal, transactions[0].name, "journal starts after sequence one without a snapshot"))
+    }
+    Ok(LifecycleJournalScan{snapshot, transactions, transaction_names, last_sequence})
+}
+
+// The checksummed body of member `name`; a failure names the member.
+fn store_lifecycle_member_body(journal: PinnedLifecycleDirectory, name: String, raw: String) -> String !StoreError {
+    if store_lifecycle_checked_body(raw) == {
+        .Ok(text) -> Ok(text)
+        .Err(error) -> Err(store_lifecycle_corrupt_name(journal, name, error.message()))
+    }
+}
+
+// The decoded transaction of member `name`; a failure names the member.
+fn store_lifecycle_member_entry(journal: PinnedLifecycleDirectory, name: String, raw: String) -> LifecycleJournalEntry !StoreError {
+    if store_lifecycle_parse_entry(raw) == {
+        .Ok(entry) -> Ok(entry)
+        .Err(error) -> Err(store_lifecycle_corrupt_name(journal, name, error.message()))
+    }
+}
+
+// Rust `read_member_bounded`: read a regular member of at most `maximum`
+// bytes as UTF-8, without following a link.
+fn store_lifecycle_read_member_bounded(journal: PinnedLifecycleDirectory, name: String, maximum: Int) -[FS]> String !StoreError {
+    file :: journal.open_read(name)
+    length :: file.stat().size
+    if length > maximum -> return Err(StoreError.InvalidData("lifecycle journal member exceeds byte bound"))
+    bytes := [U8]{}
+    loop {
+        chunk :: file.read(maximum + 1 - bytes.len())
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> bytes.push(byte)
+        if bytes.len() > maximum -> break
+    }
+    if bytes.len() > maximum -> return Err(StoreError.InvalidData("lifecycle journal member exceeds byte bound"))
+    text :: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("lifecycle journal member is not UTF-8"))
+    Ok(text)
+}
+
+// Rust `compact_if_needed`: after more than 128 live transactions, publish a
+// snapshot through the newest sequence and delete the folded members.
+fn store_lifecycle_compact_if_needed(roots: HangarRoots, state: [String: LifecycleRoot]) !StoreError -[FS, Env]> {
+    journal :: store_lifecycle_ensure_journal_dir(roots)
+    scan :: store_lifecycle_scan_journal(journal)
+    through :: scan.through()
+    active := 0
+    loop transaction in scan.transactions {
+        if transaction.sequence > through -> active += 1
+    }
+    if active <= @STORE_LIFECYCLE_COMPACT_AFTER_TRANSACTIONS -> return Ok()
+    store_lifecycle_validate_state_bounds(state)
+    store_lifecycle_validate_snapshot_wire(state)
+    wire :: store_lifecycle_seal_body(store_lifecycle_render_snapshot(scan.last_sequence, state))
+    if wire.bytes().len() > @STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds byte bound"))
+    file :: journal.create_new(@STORE_LIFECYCLE_SNAPSHOT_PARTIAL)
+    file.write_all(wire.bytes())
+    file.fsync()
+    journal.rename_open(file, @STORE_LIFECYCLE_SNAPSHOT_PARTIAL, @STORE_LIFECYCLE_SNAPSHOT_FILE, true)
+    journal.sync()
+    loop transaction in scan.transactions {
+        if transaction.sequence <= scan.last_sequence -> journal.remove_file(transaction.name)
+    }
+    journal.sync()
+}
+
+// Rust `validate_snapshot_wire`: admission uses the longest sequence spelling
+// so a later compaction cannot fail after its transaction is durable.
+fn store_lifecycle_validate_snapshot_wire(state: [String: LifecycleRoot]) !StoreError {
+    body :: store_lifecycle_render_snapshot_text(@STORE_LIFECYCLE_MAX_SEQUENCE_TEXT, state)
+    wire_len :: body.bytes().len() + @STORE_LIFECYCLE_CHECKSUM_FIELD.bytes().len() + 64 + 1
+    if wire_len > @STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES -> return Err(StoreError.InvalidData("lifecycle state cannot fit a durable snapshot"))
+}
+
+// Rust `corrupt_name`: InvalidData naming the journal member.
+fn store_lifecycle_corrupt_name(journal: PinnedLifecycleDirectory, name: String, detail: String) -> StoreError !Never {
+    StoreError.InvalidData("lifecycle journal `{journal.member_path(name)}`: {detail}")
+}

@@ -19,6 +19,8 @@ pub enum NixError {
     FallbackFieldMissing(String)
     FallbackNotObject
     FallbackNonFinite
+    // NixIdentity/NixFallbackPolicy refusals; the text is final.
+    Fallback(String)
 
     fn message(self) -> String !Never {
         if self == {
@@ -34,6 +36,7 @@ pub enum NixError {
             .FallbackFieldMissing(label) -> "fallback document has no {label} field"
             .FallbackNotObject -> "expected a DataTree object"
             .FallbackNonFinite -> "fallback document contains a non-finite number"
+            .Fallback(detail) -> detail
         }
     }
 }

@@ -1,0 +1,384 @@
+// The lifecycle journal wire format (Rust Store/Lifecycle.rs render/parse).
+// A transaction or snapshot is a UTF-8 body followed by
+// `checksum\t<sha256 of the body>\n`. Identity fields are lowercase hex of
+// their UTF-8 bytes so tabs and newlines can never split a record; absent
+// optional fields are `-`. Parse failures are InvalidData with the Rust
+// reference's reason text, which the journal wraps with the member path.
+
+@STORE_LIFECYCLE_JOURNAL_VERSION :: "jet-lifecycle-journal-v1"
+@STORE_LIFECYCLE_SNAPSHOT_VERSION :: "jet-lifecycle-snapshot-v1"
+@STORE_LIFECYCLE_STATE_VERSION :: "jet-lifecycle-state-v1"
+@STORE_LIFECYCLE_CHECKSUM_FIELD :: "checksum\t"
+
+// Rust `render_entry`.
+fn store_lifecycle_render_entry(entry: LifecycleJournalEntry) -> String !Never {
+    out := [String]{"{@STORE_LIFECYCLE_JOURNAL_VERSION}\n"}
+    if entry == {
+        .Prepare(identity, proposed, protected, metadata, revision, at) -> {
+            label :: store_lifecycle_hex_option(metadata.label)
+            reference :: store_lifecycle_hex_option(metadata.reference)
+            expires :: store_lifecycle_timestamp_option(metadata.expires_at)
+            out.push("prepare\t{store_lifecycle_identity_fields(identity)}\t{revision}\t{at.get()}\t{label}\t{reference}\t{expires}\n")
+            loop target in proposed -> out.push("target\t{target}\n")
+            loop target in protected -> out.push("protect\t{target}\n")
+        }
+        .Commit(id, incarnation, witness, at) -> {
+            out.push("commit\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
+        }
+        .Tombstone(id, incarnation, witness, at) -> {
+            out.push("tombstone\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
+        }
+        .Legacy(identity, targets, at) -> {
+            out.push("legacy\t{store_lifecycle_identity_fields(identity)}\t{at.get()}\n")
+            loop target in targets -> out.push("target\t{target}\n")
+        }
+    }
+    out.join("")
+}
+
+// `kind\thex(id)\thex(producer)\tincarnation\thex(witness)`.
+fn store_lifecycle_identity_fields(identity: RootIdentity) -> String !Never {
+    "{identity.kind.wire()}\t{store_lifecycle_hex(identity.id.as_str())}\t{store_lifecycle_hex(identity.producer.as_str())}\t{identity.incarnation.get()}\t{store_lifecycle_hex(identity.witness.as_str())}"
+}
+
+// A body plus its checksum trailer.
+fn store_lifecycle_seal_body(body: String) -> String !Never {
+    "{body}{@STORE_LIFECYCLE_CHECKSUM_FIELD}{pkg_sha256_hex(body.bytes())}\n"
+}
+
+// Rust `parse_entry`.
+fn store_lifecycle_parse_entry(raw: String) -> LifecycleJournalEntry !StoreError {
+    body :: store_lifecycle_checked_body(raw)
+    lines :: store_lifecycle_lines(body)
+    if lines.len() == 0 || lines[0] != @STORE_LIFECYCLE_JOURNAL_VERSION -> return Err(StoreError.InvalidData("unsupported journal version"))
+    if lines.len() < 2 -> return Err(StoreError.InvalidData("missing lifecycle operation"))
+    fields :: lines[1].split("\t").to_list()
+    targets := [String]{}
+    protected := [String]{}
+    loop index in 2..<lines.len() {
+        line :: lines[index]
+        parts :: line.split("\t").to_list()
+        role :: if parts.len() == 2 -> parts[0] else -> ""
+        if role == {
+            "target" -> {
+                if targets.len() >= @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT -> return Err(StoreError.InvalidData("lifecycle transaction exceeds target-count bound"))
+                if targets.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle target `{parts[1]}`"))
+                targets.push(parts[1])
+            }
+            "protect" -> {
+                if protected.len() >= @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle transaction exceeds protected-target bound"))
+                if protected.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate protected target `{parts[1]}`"))
+                protected.push(parts[1])
+            }
+            else -> return Err(StoreError.InvalidData("invalid lifecycle journal line `{line}`"))
+        }
+    }
+    proposed :: store_lifecycle_sorted_set(targets)
+    protect :: store_lifecycle_sorted_set(protected)
+    no_sets :: proposed.len() == 0 && protect.len() == 0
+    operation :: fields[0]
+    if {
+        operation == "prepare" && fields.len() == 7 -> {
+            identity :: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
+            revision :: store_lifecycle_parse_legacy_revision(fields[4])
+            at :: store_lifecycle_parse_timestamp(fields[6])
+            Ok(LifecycleJournalEntry.Prepare{identity, proposed, protected: protect, metadata: RootMetadata.empty(), revision, at})
+        }
+        operation == "prepare" && fields.len() == 11 -> {
+            identity :: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
+            metadata :: store_lifecycle_parse_metadata(fields[8], fields[9], fields[10])
+            revision :: store_lifecycle_parse_revision(fields[6])
+            at :: store_lifecycle_parse_timestamp(fields[7])
+            Ok(LifecycleJournalEntry.Prepare{identity, proposed, protected: protect, metadata, revision, at})
+        }
+        operation == "commit" && fields.len() == 5 && no_sets -> {
+            id :: store_lifecycle_parse_id(fields[1])
+            incarnation :: store_lifecycle_parse_incarnation(fields[2])
+            witness :: store_lifecycle_parse_witness(fields[3])
+            at :: store_lifecycle_parse_timestamp(fields[4])
+            Ok(LifecycleJournalEntry.Commit{id, incarnation, witness, at})
+        }
+        operation == "tombstone" && fields.len() == 5 && no_sets -> {
+            id :: store_lifecycle_parse_id(fields[1])
+            incarnation :: store_lifecycle_parse_incarnation(fields[2])
+            witness :: store_lifecycle_parse_witness(fields[3])
+            at :: store_lifecycle_parse_timestamp(fields[4])
+            Ok(LifecycleJournalEntry.Tombstone{id, incarnation, witness, at})
+        }
+        operation == "legacy" && fields.len() == 7 && protect.len() == 0 -> {
+            identity :: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
+            at :: store_lifecycle_parse_timestamp(fields[6])
+            Ok(LifecycleJournalEntry.Legacy{identity, targets: proposed, at})
+        }
+        else -> Err(StoreError.InvalidData("invalid lifecycle journal operation"))
+    }
+}
+
+// Rust `checked_body`: the text before the last `checksum\t`, verified
+// against the 64-digit checksum that ends the member.
+fn store_lifecycle_checked_body(raw: String) -> String !StoreError {
+    split :: raw.cut_last(@STORE_LIFECYCLE_CHECKSUM_FIELD) ?? return Err(StoreError.InvalidData("missing checksum"))
+    if !split.after.ends_with("\n") -> return Err(StoreError.InvalidData("truncated checksum"))
+    checksum :: split.after.removesuffix("\n")
+    if checksum.bytes().len() != 64 || checksum.contains("\n") -> return Err(StoreError.InvalidData("invalid checksum"))
+    if pkg_sha256_hex(split.before.bytes()) != checksum -> return Err(StoreError.InvalidData("checksum mismatch"))
+    Ok(split.before)
+}
+
+// Rust `render_snapshot`, with the sequence already rendered so admission can
+// size the longest possible spelling.
+fn store_lifecycle_render_snapshot_text(through: String, roots: [String: LifecycleRoot]) -> String !Never {
+    out := [String]{"{@STORE_LIFECYCLE_SNAPSHOT_VERSION}\nthrough\t{through}\n{@STORE_LIFECYCLE_STATE_VERSION}\n"}
+    loop id in store_lifecycle_sorted_ids(roots) {
+        root :: roots[id]
+        committed :: store_lifecycle_timestamp_option(root.committed_at)
+        tombstoned :: store_lifecycle_timestamp_option(root.tombstoned_at)
+        legacy :: if root.legacy -> 1 else -> 0
+        label :: store_lifecycle_hex_option(root.metadata.label)
+        reference :: store_lifecycle_hex_option(root.metadata.reference)
+        expires :: store_lifecycle_timestamp_option(root.metadata.expires_at)
+        out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
+        loop target in root.targets -> out.push("target\t{target}\n")
+        loop target in root.protected_targets -> out.push("protect\t{target}\n")
+    }
+    out.join("")
+}
+
+fn store_lifecycle_render_snapshot(through: Int, roots: [String: LifecycleRoot]) -> String !Never {
+    store_lifecycle_render_snapshot_text("{through}", roots)
+}
+
+// A parsed snapshot: the journal sequence it covers and the root state.
+struct LifecycleSnapshotRecord {
+    through: Int
+    roots: [String: LifecycleRoot]
+}
+
+// Rust `parse_snapshot`.
+fn store_lifecycle_parse_snapshot(raw: String) -> LifecycleSnapshotRecord !StoreError {
+    body :: store_lifecycle_checked_body(raw)
+    lines :: store_lifecycle_lines(body)
+    if lines.len() == 0 || lines[0] != @STORE_LIFECYCLE_SNAPSHOT_VERSION -> return Err(StoreError.InvalidData("unsupported lifecycle snapshot version"))
+    if lines.len() < 2 || !lines[1].starts_with("through\t") -> return Err(StoreError.InvalidData("missing lifecycle snapshot sequence"))
+    through :: store_lifecycle_parse_u64(lines[1].removeprefix("through\t")) ?? return Err(StoreError.InvalidData("invalid lifecycle snapshot sequence"))
+    if through == 0 -> return Err(StoreError.InvalidData("lifecycle snapshot sequence must be nonzero"))
+    if lines.len() < 3 || lines[2] != @STORE_LIFECYCLE_STATE_VERSION -> return Err(StoreError.InvalidData("missing lifecycle snapshot state header"))
+    roots := [String: LifecycleRoot]{}
+    current := ""
+    work := 0
+    loop index in 3..<lines.len() {
+        line :: lines[index]
+        work += 1
+        if work > @STORE_LIFECYCLE_MAX_RECOVERY_WORK -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds work bound"))
+        fields :: line.split("\t").to_list()
+        record :: fields[0]
+        count :: fields.len()
+        if {
+            record == "root" && (count == 15 || count == 11) && (fields[10] == "0" || fields[10] == "1") -> {
+                if roots.len() >= @STORE_LIFECYCLE_MAX_ROOTS -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds root-count bound"))
+                identity :: store_lifecycle_parse_identity(fields[1], fields[2], fields[3], fields[4], fields[5])
+                id :: identity.id.as_str()
+                if roots.has_key(id) -> return Err(StoreError.InvalidData("duplicate lifecycle snapshot root `{id}`"))
+                phase :: RootPhase.parse(fields[6])
+                prepared_at :: store_lifecycle_parse_timestamp(fields[7])
+                committed_at :: store_lifecycle_parse_optional_timestamp(fields[8])
+                tombstoned_at :: store_lifecycle_parse_optional_timestamp(fields[9])
+                metadata :: if count == 15 -> store_lifecycle_parse_metadata(fields[12], fields[13], fields[14]) else -> RootMetadata.empty()
+                revision :: if count == 15 -> store_lifecycle_parse_revision(fields[11]) else -> store_lifecycle_parse_legacy_revision(fields[4])
+                roots[id] = LifecycleRoot{identity, targets: [String]{}, protected_targets: [String]{}, phase, prepared_at, committed_at, tombstoned_at, metadata, revision, legacy: fields[10] == "1"}
+                current = id
+            }
+            (record == "target" || record == "protect") && count == 2 -> {
+                if current == "" -> return Err(StoreError.InvalidData("snapshot target precedes root"))
+                if !roots.has_key(current) -> return Err(StoreError.InvalidData("snapshot target has no current root"))
+                set :: if record == "target" -> roots[current].targets else -> roots[current].protected_targets
+                if set.len() >= @STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle snapshot root exceeds target bound"))
+                if set.contains(fields[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle snapshot target `{fields[1]}`"))
+                if record == "target" {
+                    roots[current].targets.push(fields[1])
+                } else {
+                    roots[current].protected_targets.push(fields[1])
+                }
+            }
+            else -> return Err(StoreError.InvalidData("invalid lifecycle snapshot line `{line}`"))
+        }
+    }
+    loop id in store_lifecycle_sorted_ids(roots) {
+        roots[id].targets = store_lifecycle_sorted_set(roots[id].targets)
+        roots[id].protected_targets = store_lifecycle_sorted_set(roots[id].protected_targets)
+    }
+    store_lifecycle_validate_snapshot_state(roots)
+    if store_lifecycle_validate_state_bounds(roots) == {
+        .Err(error) -> return Err(StoreError.InvalidData(error.message()))
+        .Ok(_) -> {}
+    }
+    Ok(LifecycleSnapshotRecord{through, roots})
+}
+
+// Rust `validate_snapshot_state`: every root's phase agrees with its
+// timestamps and target sets.
+fn store_lifecycle_validate_snapshot_state(roots: [String: LifecycleRoot]) !StoreError {
+    loop id in store_lifecycle_sorted_ids(roots) {
+        root :: roots[id]
+        if id != root.identity.id.as_str() || root.targets.len() == 0 -> return Err(StoreError.InvalidData("invalid lifecycle snapshot root identity or targets"))
+        root.metadata.validate()
+        if root.revision == 0 -> return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has zero revision"))
+        consistent :: if root.phase == {
+            .Prepared -> root.committed_at == None && root.tombstoned_at == None && root.protected_targets.len() > 0 && store_lifecycle_is_subset(root.targets, root.protected_targets)
+            .Committed -> root.committed_at != None && root.tombstoned_at == None && root.protected_targets == root.targets
+            .Tombstoned -> root.committed_at != None && root.tombstoned_at != None && root.protected_targets.len() == 0
+        }
+        if !consistent -> return Err(StoreError.InvalidData("invalid lifecycle snapshot root `{id}`"))
+        if root.legacy && root.phase == RootPhase.Prepared -> return Err(StoreError.InvalidData("legacy lifecycle snapshot root `{id}` is prepared"))
+        committed_backwards :: if root.committed_at == {
+            .Val(committed) -> committed.get() < root.prepared_at.get()
+            .None -> false
+        }
+        floor :: root.committed_at ?? root.prepared_at
+        tombstoned_backwards :: if root.tombstoned_at == {
+            .Val(tombstoned) -> tombstoned.get() < floor.get()
+            .None -> false
+        }
+        if committed_backwards || tombstoned_backwards -> return Err(StoreError.InvalidData("lifecycle snapshot root `{id}` has backwards timestamps"))
+    }
+}
+
+// Rust `canonical_state`: the state text the lifecycle revision digests.
+fn store_lifecycle_canonical_state(roots: [String: LifecycleRoot]) -> String !Never {
+    out := [String]{"{@STORE_LIFECYCLE_STATE_VERSION}\n"}
+    loop id in store_lifecycle_sorted_ids(roots) {
+        root :: roots[id]
+        committed :: (root.committed_at ?? LifecycleTimestamp.from_unix_seconds(0)).get()
+        tombstoned :: (root.tombstoned_at ?? LifecycleTimestamp.from_unix_seconds(0)).get()
+        expires :: (root.metadata.expires_at ?? LifecycleTimestamp.from_unix_seconds(0)).get()
+        legacy :: if root.legacy -> 1 else -> 0
+        label :: store_lifecycle_hex_option(root.metadata.label)
+        reference :: store_lifecycle_hex_option(root.metadata.reference)
+        out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
+        loop target in root.targets -> out.push("target\t{target}\n")
+        loop target in root.protected_targets -> out.push("protect\t{target}\n")
+    }
+    out.join("")
+}
+
+fn store_lifecycle_parse_identity(kind: String, id: String, producer: String, incarnation: String, witness: String) -> RootIdentity !StoreError {
+    root_kind :: RootKind.parse(kind)
+    root_id :: store_lifecycle_parse_id(id)
+    root_producer :: ProducerId.new(store_lifecycle_unhex(producer))
+    root_incarnation :: store_lifecycle_parse_incarnation(incarnation)
+    root_witness :: store_lifecycle_parse_witness(witness)
+    Ok(RootIdentity.new(root_kind, root_id, root_producer, root_incarnation, root_witness))
+}
+
+fn store_lifecycle_parse_id(value: String) -> RootId !StoreError {
+    RootId.new(store_lifecycle_unhex(value))
+}
+
+fn store_lifecycle_parse_witness(value: String) -> RootWitness !StoreError {
+    RootWitness.new(store_lifecycle_unhex(value))
+}
+
+fn store_lifecycle_parse_incarnation(value: String) -> Incarnation !StoreError {
+    number :: store_lifecycle_parse_u64(value) ?? return Err(StoreError.InvalidData("invalid lifecycle incarnation"))
+    Incarnation.new(number)
+}
+
+fn store_lifecycle_parse_timestamp(value: String) -> LifecycleTimestamp !StoreError {
+    seconds :: store_lifecycle_parse_u64(value) ?? return Err(StoreError.InvalidData("invalid lifecycle timestamp"))
+    Ok(LifecycleTimestamp.from_unix_seconds(seconds))
+}
+
+fn store_lifecycle_parse_optional_timestamp(value: String) -> ?LifecycleTimestamp !StoreError {
+    if value == "-" -> return Ok(None)
+    Ok(Val(store_lifecycle_parse_timestamp(value)))
+}
+
+fn store_lifecycle_parse_revision(value: String) -> Int !StoreError {
+    revision :: store_lifecycle_parse_u64(value) ?? return Err(StoreError.InvalidData("invalid lifecycle root revision"))
+    if revision == 0 -> return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
+    Ok(revision)
+}
+
+// Pre-revision records reuse the incarnation field as the root revision.
+fn store_lifecycle_parse_legacy_revision(incarnation: String) -> Int !StoreError {
+    revision :: store_lifecycle_parse_u64(incarnation) ?? return Err(StoreError.InvalidData("invalid lifecycle root revision"))
+    Ok(revision)
+}
+
+fn store_lifecycle_parse_metadata(label: String, reference: String, expires: String) -> RootMetadata !StoreError {
+    metadata :: RootMetadata{label: store_lifecycle_unhex_option(label), reference: store_lifecycle_unhex_option(reference), expires_at: store_lifecycle_parse_optional_timestamp(expires)}
+    metadata.validate()
+    Ok(metadata)
+}
+
+fn store_lifecycle_timestamp_option(value: ?LifecycleTimestamp) -> String !Never {
+    if value == {
+        .Val(timestamp) -> "{timestamp.get()}"
+        .None -> "-"
+    }
+}
+
+fn store_lifecycle_hex_option(value: ?String) -> String !Never {
+    if value == {
+        .Val(text) -> store_lifecycle_hex(text)
+        .None -> "-"
+    }
+}
+
+fn store_lifecycle_unhex_option(value: String) -> ?String !StoreError {
+    if value == "-" -> return Ok(None)
+    Ok(Val(store_lifecycle_unhex(value)))
+}
+
+// Lowercase hex of the UTF-8 bytes.
+fn store_lifecycle_hex(value: String) -> String !Never {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        out.push(digits[code >> 4])
+        out.push(digits[code & 15])
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+fn store_lifecycle_unhex(value: String) -> String !StoreError {
+    raw :: value.bytes()
+    if raw.len() % 2 != 0 -> return Err(StoreError.InvalidData("odd hex field"))
+    bytes := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        high :: store_lifecycle_nibble(Int.from_u8(raw[index]))
+        low :: store_lifecycle_nibble(Int.from_u8(raw[index + 1]))
+        bytes.push(U8{high * 16 + low})
+        index += 2
+    }
+    text :: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("lifecycle field is not UTF-8"))
+    Ok(text)
+}
+
+fn store_lifecycle_nibble(code: Int) -> Int !StoreError {
+    if {
+        code >= 48 && code <= 57 -> Ok(code - 48)
+        code >= 97 && code <= 102 -> Ok(code - 87)
+        else -> Err(StoreError.InvalidData("invalid hex field"))
+    }
+}
+
+// Rust `str::lines`: split at LF, drop a CR before an LF; a final LF ends
+// the last line.
+fn store_lifecycle_lines(text: String) -> [String] !Never {
+    segments :: text.split("\n").to_list()
+    count :: if text.ends_with("\n") -> segments.len() - 1 else -> segments.len()
+    lines := [String]{}
+    loop index in 0..<count {
+        segment :: segments[index]
+        raw :: segment.bytes()
+        if index < segments.len() - 1 && raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 {
+            lines.push(pkg_bytes_text(raw, 0, raw.len() - 1))
+            next
+        }
+        lines.push(segment)
+    }
+    lines
+}

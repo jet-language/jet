@@ -1,0 +1,509 @@
+// Native standard Nix binary-cache transport (Rust Store/NixCache.rs).
+//
+// The cache wire format and Jet's local HMAC cache format are separate trust
+// protocols. This file owns the E1350 failure carrier, the configured cache
+// endpoint (endpoint text, trusted keys, a destination-checked HTTP client),
+// signed narinfo retrieval, the byte-capped hashing body reader, and the
+// store-path and URL validation rules every admission step shares.
+
+@STORE_NIX_DEFAULT_ENDPOINT :: "https://cache.nixos.org"
+@STORE_NIX_DEFAULT_PUBLIC_KEY :: "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+@STORE_NIX_MAX_METADATA_BYTES :: 1048576
+@STORE_NIX_MAX_PARALLEL_FETCHES :: 8
+@STORE_NIX_MAX_PARALLEL_METADATA_FETCHES :: 32
+@STORE_NIX_TRANSPORT_TIMEOUT_MS :: 120000
+@STORE_NIX_ENDPOINT_CONFIG :: "config/nix-cache-v1.endpoint"
+@STORE_NIX_TRUST_KEY_CONFIG :: "trust/nix-cache-v1.ed25519.pub"
+@STORE_NIX_STORE_HASH_ALPHABET :: "0123456789abcdfghijklmnpqrsvwxyz"
+
+// Which admission check refused a closure.
+pub enum NixCacheErrorKind {
+    Metadata
+    WrongKey
+    Signature
+    Transport
+    UnsupportedCompression
+    CompressedCorruption
+    NarCorruption
+    MissingReference
+    PathTraversal
+    DuplicateEntry
+    Admission
+
+    fn stage(self) -> String !Never {
+        if self == {
+            .Metadata -> "metadata validation"
+            .WrongKey -> "trusted-key selection"
+            .Signature -> "signature verification"
+            .Transport -> "native transport"
+            .UnsupportedCompression -> "compression selection"
+            .CompressedCorruption -> "compressed-byte verification"
+            .NarCorruption -> "NAR decoding"
+            .MissingReference -> "closure reference discovery"
+            .PathTraversal -> "path validation"
+            .DuplicateEntry -> "duplicate-entry validation"
+            .Admission -> "atomic Hangar admission"
+        }
+    }
+}
+
+// The one native Nix cache admission failure (diagnostic E1350).
+#Error
+pub struct NixCacheError {
+    pub kind: NixCacheErrorKind
+    pub detail: String
+
+    fn new(kind: NixCacheErrorKind, detail: String) -> NixCacheError !Never {
+        NixCacheError{kind, detail}
+    }
+
+    fn code(self) -> String !Never { "E1350" }
+
+    fn what(self) -> String !Never {
+        "native Nix cache admission failed during {self.kind.stage()}: {self.detail}"
+    }
+
+    fn why(self) -> String !Never {
+        "the signed Nix cache closure was not admitted because its {self.kind.stage()} check failed"
+    }
+
+    fn fix(self) -> String !Never {
+        "repair the cache metadata or network response, then retry the admission"
+    }
+
+    // Rust `Display` renders `what()`.
+    fn message(self) -> String !Never { self.what() }
+}
+
+// Store-area failures raised inside admission are atomic-admission failures,
+// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`.
+impl StoreError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, self.message()) }
+
+impl IOError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, "{self}") }
+
+fn store_nix_io_error(kind: NixCacheErrorKind, error: IOError) -> NixCacheError !Never {
+    NixCacheError.new(kind, "{error}")
+}
+
+// Signed narinfo plus the exact bytes that were verified for it.
+pub struct FetchedInfo {
+    pub info: NixNarInfo
+    pub fingerprint: [U8]
+    pub key_id: String
+    pub signature: [U8]
+}
+
+pub struct CacheInfo {
+    pub store_dir: String
+}
+
+// One configured binary cache: its endpoint, the keys it must be signed by,
+// and a client restricted to public (HTTPS) or loopback (HTTP) destinations.
+// The client pins each host's checked addresses for its lifetime, which is the
+// DNS-rebinding defence Rust implemented with pre-resolved socket addresses.
+pub struct CacheEndpoint {
+    pub endpoint: String
+    pub trusted_keys: [NixPublicKey]
+    client: HTTPClient
+
+    fn from_roots(roots: HangarRoots) -[FS]> CacheEndpoint !NixCacheError {
+        endpoint_path :: files.join(roots.root, @STORE_NIX_ENDPOINT_CONFIG)
+        key_path :: files.join(roots.root, @STORE_NIX_TRUST_KEY_CONFIG)
+        endpoint_present :: store_nix_optional_path_present(endpoint_path)
+        key_present :: store_nix_optional_path_present(key_path)
+        if endpoint_present != key_present {
+            return Err(NixCacheError.new(.Metadata, "Nix cache endpoint and trust key must be configured together"))
+        }
+        endpoint :: if endpoint_present -> store_nix_read_config(endpoint_path).trim() else -> @STORE_NIX_DEFAULT_ENDPOINT
+        store_nix_validate_endpoint(endpoint)
+        destinations :: store_nix_endpoint_destinations(endpoint)
+        key_text :: if key_present -> store_nix_read_config(key_path) else -> @STORE_NIX_DEFAULT_PUBLIC_KEY
+        key :: if NixPublicKey.parse(key_text) == {
+            .Ok(key) -> key
+            .Err(error) -> {
+                label :: if key_present -> "Nix cache trust key" else -> "embedded Nix cache trust key"
+                return Err(NixCacheError.new(.Metadata, "{label} is malformed: {error.message()}"))
+            }
+        }
+        client :: http_client.Client.new()
+            .destinations(destinations)
+            .redirects(.Disabled)
+            .timeouts(total: time.duration_ms(@STORE_NIX_TRANSPORT_TIMEOUT_MS))
+        Ok(CacheEndpoint{endpoint, trusted_keys: [NixPublicKey]{key}, client})
+    }
+
+    fn cache_info(self) -[Net, Time.Wait]> CacheInfo !NixCacheError {
+        url :: self.url("nix-cache-info")
+        bytes :: self.get(url, @STORE_NIX_MAX_METADATA_BYTES) ?? return Err(NixCacheError.new(.Transport, "Nix cache-info endpoint is absent"))
+        text :: String.from_bytes(bytes) ?? return Err(NixCacheError.new(.Metadata, "Nix cache-info is not UTF-8"))
+        store_dir := ?String{None}
+        loop line in text.lines() {
+            pair :: line.split_once(": ") ?? return Err(NixCacheError.new(.Metadata, "Nix cache-info has a malformed line"))
+            if pair.before == "StoreDir" {
+                if store_dir != None -> return Err(NixCacheError.new(.Metadata, "Nix cache-info repeats StoreDir"))
+                store_dir = Val(pair.after)
+            }
+        }
+        dir :: store_dir ?? return Err(NixCacheError.new(.Metadata, "Nix cache-info has no StoreDir"))
+        store_nix_validate_store_dir(dir)
+        Ok(CacheInfo{store_dir: dir})
+    }
+
+    // Fetch and verify one narinfo. `None` means the cache has no such path.
+    fn narinfo(self, store_path: String, store_dir: String) -[Net, Time.Wait]> ?FetchedInfo !NixCacheError {
+        store_nix_validate_store_path(store_path, store_dir)
+        basename :: store_nix_store_basename(store_path)
+        key :: basename.slice(0, 32)
+        url :: self.url("{key}.narinfo")
+        bytes :: self.get(url, @STORE_NIX_MAX_METADATA_BYTES) ?? return Ok(None)
+        text :: String.from_bytes(bytes) ?? return Err(NixCacheError.new(.Metadata, "Nix narinfo is not UTF-8 for {store_path}"))
+        info :: if NixNarInfo.parse(text) == {
+            .Ok(info) -> info
+            .Err(error) -> return Err(NixCacheError.new(store_nix_classify_narinfo_error(error.message()), "Nix narinfo is malformed for {store_path}: {error.message()}"))
+        }
+        if info.store_path != store_path {
+            return Err(NixCacheError.new(.Signature, "Nix narinfo StorePath disagrees with the requested path"))
+        }
+        fingerprint :: if info.fingerprint(store_dir) == {
+            .Ok(bytes) -> bytes
+            .Err(error) -> return Err(NixCacheError.new(.Signature, "Nix narinfo fingerprint is invalid for {store_path}: {error.message()}"))
+        }
+        key_matches := false
+        loop signature in info.signatures {
+            loop trusted in self.trusted_keys {
+                if trusted.key_id == signature.key_id -> key_matches = true
+            }
+        }
+        if !key_matches {
+            return Err(NixCacheError.new(.WrongKey, "Nix narinfo has no signature under a configured key name"))
+        }
+        verified :: if info.verified_signature(store_dir, self.trusted_keys) == {
+            .Ok(verified) -> verified
+            .Err(error) -> return Err(NixCacheError.new(.Signature, "Nix narinfo signature does not verify for {store_path}: {error.message()}"))
+        }
+        Ok(Val(FetchedInfo{info, fingerprint, key_id: verified.key_id, signature: verified.signature}))
+    }
+
+    fn object_url(self, relative: String) -> String !NixCacheError {
+        store_nix_validate_relative_endpoint_url(relative)
+        base := ~self.endpoint
+        loop base.ends_with("/") -> base = base.removesuffix("/")
+        Ok("{base}/{relative}")
+    }
+
+    fn url(self, relative: String) -> String !NixCacheError { self.object_url(relative) }
+
+    // Open one response. 404 and 410 are absence; any other non-200 status is
+    // a transport failure.
+    fn open(self, url: String) -[Net, Time.Wait]> ?HTTPResponse !NixCacheError {
+        response :: if self.client.send(http_client.request("GET", url)) == {
+            .Ok(response) -> response
+            .Err(error) -> return Err(NixCacheError.new(.Transport, "{error}"))
+        }
+        if response.status() == 404 || response.status() == 410 -> return Ok(None)
+        Ok(Val(response))
+    }
+
+    // Bounded metadata GET. The body is read to at most `limit + 1` bytes so an
+    // oversized response is a metadata failure, not a transport one.
+    fn get(self, url: String, limit: Int) -[Net, Time.Wait]> ?[U8] !NixCacheError {
+        response :: self.open(url) ?? return Ok(None)
+        if response.status() != 200 {
+            return Err(NixCacheError.new(.Transport, "Nix cache returned a non-success status"))
+        }
+        body :: response.body(limit: limit + 1)
+        bytes := [U8]{}
+        loop {
+            chunk :: if body.read(65536) == {
+                .Ok(chunk) -> chunk
+                .Err(error) -> return Err(NixCacheError.new(.Transport, "{error}"))
+            }
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> bytes.push(byte)
+            if bytes.len() > limit {
+                return Err(NixCacheError.new(.Metadata, "Nix cache response exceeds its bound"))
+            }
+        }
+        Ok(Val(bytes))
+    }
+}
+
+// Counts and hashes compressed bytes while enforcing the signed byte cap.
+pub struct HashingReader<R: io.Reader> {
+    reader: R
+    pub limit: Int
+    pub count: Int
+    hasher: crypto.Hasher
+    progress: ?ProgressHandle
+
+    fn new(reader: ^R, limit: Int, progress: ?ProgressHandle) -> HashingReader<R> !Never {
+        HashingReader{reader, limit, count: 0, hasher: crypto.Hasher.new(), progress}
+    }
+
+    // `sha256:<hex>` of every byte read so far.
+    fn digest(self) -> String !Never { "sha256:{self.hasher.digest()}" }
+
+    impl io.Reader {
+        fn read(&self, limit: Int) -[Net, Time.Wait]> [U8] !IOError {
+            if self.count >= self.limit {
+                extra :: self.reader.read(1)
+                if extra.len() == 0 -> return Ok([U8]{})
+                return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix cache response exceeded its signed byte limit")}))
+            }
+            remaining :: if self.limit - self.count < limit -> self.limit - self.count else -> limit
+            chunk :: self.reader.read(remaining)
+            if chunk.len() != 0 {
+                self.count += chunk.len()
+                self.hasher.update(~chunk)
+                store_nix_progress_transferred(self.progress, chunk.len())
+            }
+            Ok(chunk)
+        }
+    }
+}
+
+fn store_nix_progress_phase(progress: ?ProgressHandle, phase: String) !Never {
+    if progress == {
+        .Val(handle) -> handle.phase(phase)
+        else -> {}
+    }
+}
+
+fn store_nix_progress_objects(progress: ?ProgressHandle, done: Int, total: Int) !Never {
+    if progress == {
+        .Val(handle) -> handle.object_progress(done, total)
+        else -> {}
+    }
+}
+
+fn store_nix_progress_discovered(progress: ?ProgressHandle, bytes: Int) !Never {
+    if progress == {
+        .Val(handle) -> handle.discovered_bytes(bytes)
+        else -> {}
+    }
+}
+
+fn store_nix_progress_transferred(progress: ?ProgressHandle, bytes: Int) !Never {
+    if progress == {
+        .Val(handle) -> handle.transferred_bytes(bytes)
+        else -> {}
+    }
+}
+
+fn store_nix_is_ascii_whitespace(byte: U8) -> Bool !Never {
+    if Int.from_u8(byte) == {
+        9 | 10 | 12 | 13 | 32 -> true
+        else -> false
+    }
+}
+
+fn store_nix_is_ascii_control(byte: U8) -> Bool !Never {
+    code :: Int.from_u8(byte)
+    code < 32 || code == 127
+}
+
+fn store_nix_has_dot_component(path: String) -> Bool !Never {
+    loop component in path.split("/") {
+        if component == "." || component == ".." -> return true
+    }
+    false
+}
+
+fn store_nix_validate_endpoint(endpoint: String) !NixCacheError {
+    malformed := endpoint == ""
+    loop byte in endpoint.bytes() {
+        if Int.from_u8(byte) == {
+            63 | 35 | 64 | 92 -> malformed = true
+            else -> if store_nix_is_ascii_whitespace(byte) -> malformed = true
+        }
+    }
+    if malformed -> return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint is malformed"))
+    parts :: endpoint.split_once("://") ?? return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint has no supported scheme"))
+    scheme :: parts.before
+    rest :: parts.after
+    authority :: if rest.split_once("/") == {
+        .Val(split) -> split.before
+        else -> rest
+    }
+    path :: rest.removeprefix(authority)
+    if authority == "" -> return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint has no host"))
+    if store_nix_has_dot_component(path) || path.contains("//") || path.contains("%") {
+        return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint path is unsafe"))
+    }
+    if scheme == {
+        "https" -> return Ok()
+        "http" -> {
+            host :: store_nix_http_host(authority)
+            if host == {
+                "localhost" | "127.0.0.1" | "[::1]" | "::1" -> return Ok()
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint must be HTTPS or loopback HTTP"))
+}
+
+fn store_nix_http_host(authority: String) -> String !Never {
+    if authority.starts_with("[") {
+        inner :: authority.removeprefix("[")
+        return if inner.split_once("]") == {
+            .Val(split) -> split.before
+            else -> inner
+        }
+    }
+    if authority.split_once(":") == {
+        .Val(split) -> split.before
+        else -> authority
+    }
+}
+
+// The destination rule for the endpoint's scheme. HTTPS reaches only public
+// addresses; plain HTTP is restricted to loopback. Host and port syntax is
+// checked here so malformed authorities keep their path-validation errors.
+fn store_nix_endpoint_destinations(endpoint: String) -> HTTPDestinations !NixCacheError {
+    parts :: endpoint.split_once("://") ?? return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint has no supported scheme"))
+    scheme :: parts.before
+    authority :: if parts.after.split_once("/") == {
+        .Val(split) -> split.before
+        else -> parts.after
+    }
+    if authority.starts_with("[") {
+        split :: authority.removeprefix("[").split_once("]") ?? return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint IPv6 host is malformed"))
+        if split.after.starts_with(":") -> store_nix_parse_cache_port(split.after.removeprefix(":"))
+    } else {
+        if authority.cut_last(":") == {
+            .Val(split) -> store_nix_parse_cache_port(split.after)
+            else -> {}
+        }
+    }
+    if scheme == "https" -> return Ok(HTTPDestinations.Public)
+    Ok(HTTPDestinations.Loopback)
+}
+
+fn store_nix_parse_cache_port(port: String) -> Int !NixCacheError {
+    value :: if Int.parse(port) == {
+        .Ok(value) -> value
+        .Err(_) -> return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint port is malformed"))
+    }
+    if port.starts_with("+") || port.starts_with("-") || value > 65535 {
+        return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint port is malformed"))
+    }
+    if value == 0 -> return Err(NixCacheError.new(.PathTraversal, "Nix cache endpoint port must not be zero"))
+    Ok(value)
+}
+
+fn store_nix_validate_relative_endpoint_url(relative: String) !NixCacheError {
+    split :: relative.split_once("?")
+    path :: if split == {
+        .Val(parts) -> parts.before
+        else -> relative
+    }
+    query :: if split == {
+        .Val(parts) -> parts.after
+        else -> ""
+    }
+    unsafe := path == "" || path.starts_with("/") || path.contains("//") || path.contains("\\")
+    loop byte in path.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 0 || store_nix_is_ascii_control(byte) || code == 37 || code == 35 -> unsafe = true
+    }
+    if store_nix_has_dot_component(path) || query.bytes().len() > @STORE_NIX_MAX_METADATA_BYTES -> unsafe = true
+    loop byte in query.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 0 || store_nix_is_ascii_control(byte) || code == 35 -> unsafe = true
+    }
+    if unsafe -> return Err(NixCacheError.new(.PathTraversal, "Nix narinfo URL is not relative to the cache endpoint"))
+    Ok()
+}
+
+fn store_nix_validate_store_dir(value: String) !NixCacheError {
+    if value == "" || !files.is_abs(value) || value.ends_with("/") || value.contains("\\") || store_nix_has_dot_component(value) {
+        return Err(NixCacheError.new(.PathTraversal, "Nix StoreDir is unsafe"))
+    }
+    Ok()
+}
+
+fn store_nix_validate_store_path(value: String, store_dir: String) !NixCacheError {
+    prefix :: "{store_dir}/"
+    if !value.starts_with(prefix) -> return Err(NixCacheError.new(.PathTraversal, "Nix StorePath is outside StoreDir"))
+    basename :: value.removeprefix(prefix)
+    raw :: basename.bytes()
+    unsafe := basename.contains("/") || raw.len() < 34
+    if !unsafe && Int.from_u8(raw[32]) != 45 -> unsafe = true
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if code == 92 || code == 0 || store_nix_is_ascii_control(byte) -> unsafe = true
+    }
+    if unsafe -> return Err(NixCacheError.new(.PathTraversal, "Nix StorePath is not one direct safe child"))
+    alphabet :: @STORE_NIX_STORE_HASH_ALPHABET.bytes()
+    loop index in 0..<32 {
+        if !alphabet.contains(raw[index]) -> return Err(NixCacheError.new(.PathTraversal, "Nix StorePath hash is malformed"))
+    }
+    Ok()
+}
+
+fn store_nix_store_basename(value: String) -> String !NixCacheError {
+    basename :: if value.cut_last("/") == {
+        .Val(split) -> split.after
+        else -> value
+    }
+    raw :: basename.bytes()
+    if raw.len() < 34 || Int.from_u8(raw[32]) != 45 {
+        return Err(NixCacheError.new(.PathTraversal, "Nix StorePath basename is malformed"))
+    }
+    Ok(basename)
+}
+
+fn store_nix_store_name(value: String) -> String !NixCacheError {
+    basename :: store_nix_store_basename(value)
+    Ok(basename.slice(33, basename.bytes().len()))
+}
+
+// A one-line, bounded, regular configuration file (no symlink).
+fn store_nix_read_config(path: String) -[FS]> String !NixCacheError {
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> return Err(store_nix_io_error(.Metadata, error))
+    }
+    if info.is_symlink || !info.is_file || info.size > 4096 {
+        return Err(NixCacheError.new(.Metadata, "Nix cache configuration is not a bounded regular file"))
+    }
+    text :: if files.read(path) == {
+        .Ok(text) -> text
+        .Err(error) -> return Err(store_nix_io_error(.Metadata, error))
+    }
+    if text.lines().len() != 1 || text.trim() == "" {
+        return Err(NixCacheError.new(.Metadata, "Nix cache configuration has multiple or empty lines"))
+    }
+    Ok(text.trim())
+}
+
+fn store_nix_optional_path_present(path: String) -[FS]> Bool !NixCacheError {
+    if files.stat(path) == {
+        .Ok(_) -> Ok(true)
+        .Err(.NotFound(_)) -> Ok(false)
+        .Err(error) -> Err(store_nix_io_error(.Metadata, error))
+    }
+}
+
+// Map a narinfo parse failure onto the admission check it belongs to.
+fn store_nix_classify_narinfo_error(detail: String) -> NixCacheErrorKind !Never {
+    if {
+        detail.contains("duplicate") -> NixCacheErrorKind.DuplicateEntry
+        detail.contains("URL") || detail.contains("StorePath") || detail.contains("store path") || detail.contains("store reference") -> NixCacheErrorKind.PathTraversal
+        detail.contains("compression") -> NixCacheErrorKind.UnsupportedCompression
+        else -> NixCacheErrorKind.Metadata
+    }
+}
+
+// Map a NAR stream failure onto the admission check it belongs to.
+fn store_nix_classify_nar_error(message: String) -> NixCacheErrorKind !Never {
+    detail :: message.lower()
+    if {
+        detail.contains("duplicate") -> NixCacheErrorKind.DuplicateEntry
+        detail.contains("signed byte limit") || detail.contains("compressed") || detail.contains("zstd") || detail.contains("checksum") || detail.contains("frame") || detail.contains("data corruption") -> NixCacheErrorKind.CompressedCorruption
+        detail.contains("path") || detail.contains("name") || detail.contains("symlink") -> NixCacheErrorKind.PathTraversal
+        else -> NixCacheErrorKind.NarCorruption
+    }
+}

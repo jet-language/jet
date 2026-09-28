@@ -82,6 +82,18 @@ fn trust_text_split_last(text: String, code: Int) -> ?TrustTextSplit !Never {
     Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + 1, raw.len())})
 }
 
+// Rust `rsplit_once(needle)` for a text needle.
+fn trust_text_split_last_text(text: String, needle: String) -> ?TrustTextSplit !Never {
+    raw :: text.bytes()
+    pattern :: needle.bytes()
+    at := raw.len() - pattern.len()
+    loop at >= 0 {
+        if pkg_bytes_starts_with(raw, at, pattern) -> return Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
+        at -= 1
+    }
+    None
+}
+
 // Rust `split(byte)`: every piece, including empty ones.
 fn trust_text_split(text: String, code: Int) -> [String] !Never {
     raw :: text.bytes()

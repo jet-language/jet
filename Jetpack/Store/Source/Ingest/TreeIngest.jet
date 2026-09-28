@@ -1,0 +1,891 @@
+// Atomic Hangar tree ingest and verified output hashing (Rust Store/Ingest.rs).
+//
+// Ingest copies a source tree without following links, rejects or copies
+// semantic xattrs by policy, seals and hashes the staged copy, and publishes it
+// through one AdmissionTransaction as `hangar/objects/<digest>/` plus a package
+// record. Verified output digests are memoized per process against a
+// (device, inode, size, mtime) stamp; persistent Hangar verification uses the
+// seal and never treats this stamp as a durable integrity proof.
+
+// The (device, inode, size, mtime) tuple a process-local digest is valid for.
+pub struct DigestStamp {
+    pub device: Int
+    pub inode: Int
+    pub size: Int
+    pub modified_ns: Int
+}
+
+pub fn store_object_stamp(info: files.Stat) -> DigestStamp !Never {
+    DigestStamp{device: info.id.device, inode: info.id.inode, size: info.size, modified_ns: info.modified.unix_ns}
+}
+
+// One memoized digest: which kind of digest it is, and the stamp it holds for.
+pub struct VerifiedDigestMemo {
+    pub path: String
+    pub stamp: DigestStamp
+    pub digest: String
+}
+
+// Process-local digest memo (Rust `VERIFIED_DIGESTS`) and the per-path miss
+// counts tests use to prove a digest was not recomputed.
+store_verified_digests := [String: VerifiedDigestMemo]{}
+store_verified_digest_hash_counts := [String: Int]{}
+
+fn store_output_digest_key(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -> String !Never {
+    root :: hangar_root ?? ""
+    "output\n{root}\n{allow_semantic_xattrs}\n{path}"
+}
+
+fn store_file_digest_key(path: String) -> String !Never { "file\n{path}" }
+
+fn store_note_verified_digest_miss(path: String) !Never {
+    store_verified_digest_hash_counts[path] = (store_verified_digest_hash_counts.get(path) ?? 0) + 1
+}
+
+pub fn store_reset_verified_digest_hash_count(path: String) !Never {
+    store_verified_digest_hash_counts.remove(path)
+}
+
+pub fn store_verified_digest_hash_count(path: String) -> Int !Never {
+    store_verified_digest_hash_counts.get(path) ?? 0
+}
+
+pub struct VerificationStatus {
+    pub reused: Bool
+    pub resealed: Bool
+    pub reseal_needed: Bool
+}
+
+pub fn store_try_entry_output_hash(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> String !StoreError {
+    store_try_entry_output_hash_with_options(roots, entry, false)
+}
+
+pub fn store_try_entry_output_hash_with_options(roots: HangarRoots, entry: StoreEntry, force_full: Bool) -[FS, Env]> String !StoreError {
+    hangar :: roots.hangar_dir()
+    canonical_hangar :: files.canonicalize(hangar) ?? hangar
+    hangar_root :: if store_path_is_within(entry.out, hangar) || store_path_is_within(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+    if store_verified_output_hash_with_options(entry.out, hangar_root, entry.platform_artifact_kind != "", force_full, !force_full) == {
+        .Ok(verified) -> Ok(verified.digest)
+        .Err(error) -> {
+            if error.is_not_found() -> return Err(StoreError.Other("output `{entry.out}` does not exist"))
+            Err(StoreError.Other(error.message()))
+        }
+    }
+}
+
+// Memoized canonical output digest for staging and compatibility helpers.
+pub fn store_verified_output_hash(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -[FS, Env]> String !StoreError {
+    stamp :: store_object_stamp(files.stat(path))
+    key :: store_output_digest_key(path, store_normalize_memo_root(hangar_root), allow_semantic_xattrs)
+    if store_verified_digests.get(key) == {
+        .Val(memo) -> {
+            if memo.stamp == stamp {
+                store_probe_output_readable(path)
+                return Ok(memo.digest)
+            }
+        }
+        else -> {}
+    }
+    store_note_verified_digest_miss(path)
+    digest :: store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
+    store_verified_digests[key] = VerifiedDigestMemo{path, stamp, digest}
+    Ok(digest)
+}
+
+// Verify a Hangar output through its sealed stat manifest. A missing,
+// malformed, or drifting seal takes the full canonical hash path and writes
+// a fresh seal only when that hash agrees with the canonical object name.
+pub fn store_verified_output_hash_persistent(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -[FS, Env]> String !StoreError {
+    Ok(store_verified_output_hash_persistent_with_status(path, hangar_root, allow_semantic_xattrs, false).digest)
+}
+
+// Full cryptographic verification for `jetpack hangar verify`: bypasses the
+// seal and the memo, then refreshes the seal after a clean hash.
+pub fn store_full_verified_output_hash(path: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String !StoreError {
+    Ok(store_verified_output_hash_persistent_with_status(path, Val(hangar_root), allow_semantic_xattrs, true).digest)
+}
+
+// Doctor's read-only form of the seal decision: never mutates the Hangar.
+pub fn store_read_only_output_hash(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -[FS, Env]> String !StoreError {
+    if hangar_root == {
+        .Val(root) -> {
+            if store_check_seal(path, root) == {
+                .Val(digest) -> return Ok(digest)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
+}
+
+pub struct VerifiedOutputHash {
+    pub digest: String
+    pub status: VerificationStatus
+}
+
+pub fn store_verified_output_hash_persistent_with_status(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool, force_full: Bool) -[FS, Env]> VerifiedOutputHash !StoreError {
+    store_verified_output_hash_with_options(path, hangar_root, allow_semantic_xattrs, force_full, true)
+}
+
+pub fn store_verified_output_hash_with_options(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool, force_full: Bool, write_seal: Bool) -[FS, Env]> VerifiedOutputHash !StoreError {
+    if !force_full {
+        if hangar_root == {
+            .Val(root) -> {
+                if store_check_seal(path, root) == {
+                    .Val(digest) -> return Ok(VerifiedOutputHash{digest, status: VerificationStatus{reused: true, resealed: false, reseal_needed: false}})
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+    store_note_verified_digest_miss(path)
+    digest :: store_hash_output_content(path, hangar_root, allow_semantic_xattrs)
+    canonical_digest :: if hangar_root == {
+        .Val(root) -> store_object_digest_for_path(path, root)
+        else -> None
+    }
+    reseal_needed :: canonical_digest == Val(digest)
+    resealed := false
+    if write_seal && reseal_needed {
+        root :: hangar_root ?? panic("canonical digest requires a Hangar root")
+        store_write_seal(path, root, digest)
+        resealed = true
+    }
+    Ok(VerifiedOutputHash{digest, status: VerificationStatus{reused: false, resealed, reseal_needed: reseal_needed && !resealed}})
+}
+
+fn store_hash_output_content(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -[FS, Env]> String !StoreError {
+    result :: if hangar_root == {
+        .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs)
+        else -> {
+            hook := EnvelopeWalkHook.recording()
+            pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook)
+        }
+    }
+    if result == {
+        .Ok(digest) -> Ok(digest)
+        .Err(error) -> Err(StoreError.Other(error.message()))
+    }
+}
+
+// Memoized `sha256-<hex>` of one regular file.
+pub fn store_verified_file_hash(path: String) -[FS]> String !StoreError {
+    stamp :: store_object_stamp(files.stat(path))
+    key :: store_file_digest_key(path)
+    if store_verified_digests.get(key) == {
+        .Val(memo) -> {
+            if memo.stamp == stamp {
+                files.open(path)
+                return Ok(memo.digest)
+            }
+        }
+        else -> {}
+    }
+    store_note_verified_digest_miss(path)
+    digest :: "sha256-{crypto.sha256(files.read_bytes(path)).hex()}"
+    store_verified_digests[key] = VerifiedDigestMemo{path, stamp, digest}
+    Ok(digest)
+}
+
+pub fn store_refresh_verified_digest(path: String, hangar_root: String, allow_semantic_xattrs: Bool, digest: String) -[FS, Env]> !StoreError {
+    stamp :: store_object_stamp(files.stat(path))
+    key :: store_output_digest_key(path, store_normalize_memo_root(Val(hangar_root)), allow_semantic_xattrs)
+    store_verified_digests[key] = VerifiedDigestMemo{path, stamp, digest}
+    Ok()
+}
+
+pub fn store_invalidate_verified_digest(path: String) !Never {
+    stale := [String]{}
+    loop key in store_verified_digests.keys() {
+        if store_verified_digests[key].path == path -> stale.push(key)
+    }
+    loop key in stale -> store_verified_digests.remove(key)
+}
+
+fn store_normalize_memo_root(root: ?String) -[FS, Env]> ?String !Never {
+    if root == {
+        .Val(path) -> Val(files.canonicalize(path) ?? path)
+        else -> None
+    }
+}
+
+fn store_probe_output_readable(path: String) -[FS]> !StoreError {
+    info :: files.stat(path)
+    if info.is_symlink -> return Ok()
+    if info.is_dir {
+        loop entry in files.list_dir(path) -> store_probe_output_readable(entry.path)
+    } else if info.is_file {
+        files.open(path)
+    }
+    Ok()
+}
+
+// Component-wise `Path::starts_with`.
+pub fn store_path_is_within(path: String, root: String) -> Bool !Never {
+    base := ~root
+    loop base.len() > 1 && base.ends_with("/") -> base = base.removesuffix("/")
+    path == base || path.starts_with("{base}/") || (base == "/" && path.starts_with("/"))
+}
+
+// Directories made writable for a quarantine move, restored afterwards.
+// Rust restores on `Drop`; Jet callers call `restore()` on every exit.
+pub struct MovePathPermissions {
+    original: [MovedPathMode]
+
+    fn new() -> MovePathPermissions !Never { MovePathPermissions{original: [MovedPathMode]{}} }
+
+    fn make_writable(&self, path: String, root: String) -[FS]> !StoreError {
+        if !store_path_is_within(path, root) -> return Err(StoreError.Other("quarantine path escapes Hangar root"))
+        current := ~path
+        loop {
+            info :: files.stat(current)
+            if info.is_dir {
+                saved := false
+                loop entry in self.original {
+                    if entry.path == current -> saved = true
+                }
+                if !saved {
+                    files.set_mode(current, info.mode | 0o200)
+                    self.original.push(MovedPathMode{path: current, mode: info.mode})
+                }
+            }
+            if current == root -> return Ok()
+            parent :: files.dirname(current)
+            if parent == current || parent == "" -> break
+            current = parent
+        }
+        Err(StoreError.Other("quarantine path has no Hangar parent"))
+    }
+
+    fn renamed(&self, from: String, to: String) !Never {
+        loop index in 0..<self.original.len() {
+            path :: self.original[index].path
+            if store_path_is_within(path, from) {
+                suffix :: path.removeprefix(from)
+                self.original[index].path = "{to}{suffix}"
+            }
+        }
+    }
+
+    fn restore(&self) -[FS]> !StoreError {
+        first_error := ?StoreError{None}
+        index := self.original.len() - 1
+        loop index >= 0 {
+            entry :: self.original[index]
+            if files.stat(entry.path) == {
+                .Ok(_) -> {
+                    if files.set_mode(entry.path, entry.mode) == {
+                        .Err(error) -> if first_error == None -> first_error = Val(StoreError.Io(error))
+                        else -> {}
+                    }
+                }
+                else -> {}
+            }
+            index -= 1
+        }
+        self.original = [MovedPathMode]{}
+        if first_error == {
+            .Val(error) -> Err(error)
+            else -> Ok()
+        }
+    }
+}
+
+pub struct MovedPathMode {
+    pub path: String
+    pub mode: Int
+}
+
+store_quarantine_sequence := 0
+
+// Remove an invalid local cache candidate so provider realization cannot
+// mistake the same tampered directory for a fresh hit. Never removes external
+// outputs such as `/nix/store`; their provider must realize them again.
+pub fn store_quarantine_invalid_entry(roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) -[FS, Env, Time]> !StoreError {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    expected_id :: store_expected_entry_id(entry)
+    if entry.id != expected_id || !store_is_single_component(entry.id) {
+        return Err(StoreError.Other("invalid cache record identity"))
+    }
+    graph :: store_closure_graph_structure_unlocked(roots)
+    current := ?StoreEntry{None}
+    loop candidate in store_list_unlocked(roots) {
+        if current == None && candidate.id == entry.id -> current = Val(candidate)
+    }
+    found :: current ?? return Ok()
+    if found.envelope.output_hash != entry.envelope.output_hash || store_entry_action_key(found) != store_entry_action_key(entry) {
+        return Ok()
+    }
+    if found.id != store_expected_entry_id(found) -> return Err(StoreError.Other("invalid cache record identity"))
+    // A proven-mismatch check must re-hash real bytes: the process-local
+    // stamp memo and a sealed digest may both trust content this entry is
+    // explicitly suspected of drifting from.
+    store_invalidate_verified_digest(found.out)
+    proof :: store_verify_cache_entry_with_graph(roots, found, found.reference, expectation, Val(graph))
+    if proof.trusted() -> return Ok()
+    // Remove output bytes only on PROVEN drift: the forced real hash bypasses
+    // the memo and the seal and disagrees with the recorded digest. An
+    // unprovable read is not proof of drift; the record is quarantined either way.
+    quarantine_output :: found.envelope.output_hash != "" && if store_try_entry_output_hash_with_options(roots, found, true) == {
+        .Ok(actual) -> actual != found.envelope.output_hash
+        .Err(_) -> !(if store_try_entry_output_hash(roots, found) == {
+            .Ok(actual) -> actual == found.envelope.output_hash
+            .Err(_) -> false
+        })
+    }
+    hangar :: roots.hangar_dir()
+    permissions := MovePathPermissions.new()
+    operation :: store_quarantine_move(roots, found, expectation, quarantine_output, &permissions)
+    restored :: permissions.restore()
+    if operation == {
+        .Ok(_) -> restored
+        .Err(error) -> {
+            if restored == {
+                .Ok(_) -> Err(error)
+                .Err(restore) -> Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
+            }
+        }
+    }
+}
+
+fn store_quarantine_move(roots: HangarRoots, current: StoreEntry, expectation: CacheExpectation, quarantine_output: Bool, permissions: &MovePathPermissions) -[FS, Env, Time]> !StoreError {
+    hangar :: roots.hangar_dir()
+    permissions.make_writable(hangar, hangar)
+    quarantine :: files.join(hangar, "quarantine")
+    store_ensure_real_directory(quarantine, "Hangar quarantine")
+    stamp :: store_now_secs()
+    unique :: store_quarantine_suffix()
+    record :: files.join(hangar, current.id)
+    if files.stat(record) == {
+        .Ok(_) -> {
+            permissions.make_writable(record, hangar)
+            destination :: files.join(quarantine, "record-{current.id}-{stamp}-{unique}")
+            files.rename(record, destination)
+            permissions.renamed(record, destination)
+        }
+        else -> {}
+    }
+    canonical_output :: files.join(files.join(hangar, @STORE_OBJECTS_DIR), current.envelope.output_hash)
+    owned_output :: if current.out == canonical_output -> Val(current.out) else -> expectation.owned_output
+    if quarantine_output {
+        if owned_output == {
+            .Val(owned) -> {
+                if files.stat(owned) == {
+                    .Ok(_) -> {
+                        canonical_hangar :: files.canonicalize(hangar)
+                        canonical_owned :: files.canonicalize(owned)
+                        if !store_path_is_within(owned, hangar) || !store_path_is_within(canonical_owned, canonical_hangar) {
+                            return Err(StoreError.Other("derived cache output escapes canonical Hangar root"))
+                        }
+                        name :: files.basename(owned)
+                        if name == "" -> return Err(StoreError.Other("invalid owned output name"))
+                        permissions.make_writable(owned, hangar)
+                        destination :: files.join(quarantine, "output-{name}-{stamp}-{unique}")
+                        files.rename(owned, destination)
+                        store_remove_seal(owned, hangar) ?? {}
+                        permissions.renamed(owned, destination)
+                    }
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+    store_tombstone_closure_record_unlocked(roots, current.id)
+    Ok()
+}
+
+fn store_is_single_component(id: String) -> Bool !Never {
+    count := 0
+    loop part in id.split("/") {
+        if part != "" -> count += 1
+    }
+    count == 1
+}
+
+fn store_quarantine_suffix() -[Env, Time]> String !Never {
+    sequence :: store_quarantine_sequence
+    store_quarantine_sequence += 1
+    "{sys.pid()}-{time.instant().unix_ns}-{sequence}"
+}
+
+pub fn store_now_secs() -[Time]> Int !Never {
+    time.instant().unix_ns /% 1000000000
+}
+
+// Inputs for a Hangar Store v2 ingest. `outputs` maps each named output
+// (`out` required) to its source path. `cache_identity` records the
+// fingerprints Hangar already stores for the deriver/action.
+pub struct IngestRequest {
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub cache_identity: CacheIdentity
+    pub references: [String]
+    pub outputs: [String: String]
+    pub signature: String
+    pub provenance: String
+    // Explicit platform artifact kind. Empty rejects semantic xattrs;
+    // non-empty is the product surface that keeps them (plan E4-JP1).
+    pub platform_artifact_kind: String
+
+    fn allow_semantic_xattrs(self) -> Bool !Never { self.platform_artifact_kind != "" }
+}
+
+pub struct IngestedObject {
+    pub entry: StoreEntry
+    // True when an existing content-identical object was reused.
+    pub deduplicated: Bool
+}
+
+#Error
+pub enum IngestError {
+    PathLaw(PathLawError)
+    Mutated(String)
+    Invalid(String)
+    IO(String)
+
+    fn code(self) -> String !Never {
+        if self == {
+            .PathLaw(_) -> "E1299"
+            .Mutated(_) | .Invalid(_) | .IO(_) -> "E1315"
+        }
+    }
+
+    fn what(self) -> String !Never {
+        if self == {
+            .PathLaw(error) -> error.what()
+            .Mutated(message) -> "hangar ingest aborted: {message}"
+            .Invalid(message) -> "hangar ingest rejected: {message}"
+            .IO(message) -> "hangar ingest failed: {message}"
+        }
+    }
+
+    fn why(self) -> String !Never {
+        if self == {
+            .PathLaw(error) -> error.why()
+            .Mutated(_) -> "Race-safe no-follow ingest re-stats open handles and aborts if the source mutates (E4-JP1)."
+            .Invalid(message) | .IO(message) -> message
+        }
+    }
+
+    fn fix(self) -> String !Never {
+        if self == {
+            .PathLaw(error) -> error.fix()
+            .Mutated(_) -> "Re-run the ingest against a stable source tree; do not modify files while Hangar copies them."
+            .Invalid(_) -> "Fix the rejected tree (path law, special files, or unsupported xattrs) and ingest again."
+            .IO(_) -> "Check hangar permissions and free disk space, then retry."
+        }
+    }
+
+    fn message(self) -> String !Never { self.what() }
+
+    fn report(self, theme: Theme) !Never {
+        theme.error_coded(self.code(), self.what(), self.why(), self.fix())
+    }
+}
+
+impl IOError -> IngestError { IngestError.IO("{self}") }
+
+impl StoreError -> IngestError { IngestError.IO(self.message()) }
+
+// Sweep abandoned staging / `.partial` object dirs left by a crash.
+pub fn store_recover_hangar_staging(roots: HangarRoots) -[FS, Env, Time]> Int !StoreError {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    AdmissionTransaction.recover_unlocked(roots)
+}
+
+pub fn store_ensure_real_directory(path: String, label: String) -[FS]> !StoreError {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+            Ok()
+        }
+        .Err(.NotFound(_)) -> {
+            files.create_dir_all(path)
+            info :: files.stat(path)
+            if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+            Ok()
+        }
+        .Err(error) -> Err(StoreError.Io(error))
+    }
+}
+
+pub fn store_require_real_directory(path: String, label: String) -[FS]> !StoreError {
+    info :: files.stat(path)
+    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before reading"))
+    Ok()
+}
+
+// Atomic staged ingest: no-follow copy, path-law and canonical digest,
+// fsync/rename into `hangar/objects/<digest>/`, package record, referrers.
+// The same primary digest reuses the object (path-independent dedupe).
+pub fn store_ingest_tree(roots: HangarRoots, request: IngestRequest) -[FS, Env, Time]> IngestedObject !IngestError {
+    store_ingest_tree_observed(roots, request, None)
+}
+
+// `store_ingest_tree` with a hook run after each copied child source path
+// (Rust's test-only `with_after_child_copy_hook`, made an explicit argument).
+pub fn store_ingest_tree_observed(roots: HangarRoots, request: IngestRequest, after_child_copy: ?fn(String)) -[FS, Env, Time]> IngestedObject !IngestError {
+    hangar_lock :: if env_runtime_lock(roots.root, "hangar") == {
+        .Ok(lock) -> lock
+        .Err(error) -> return Err(IngestError.IO(error.message()))
+    }
+    store_ingest_tree_unlocked(roots, request, after_child_copy)
+}
+
+fn store_ingest_tree_unlocked(roots: HangarRoots, request: IngestRequest, after_child_copy: ?fn(String)) -[FS, Env, Time]> IngestedObject !IngestError {
+    if !request.outputs.has_key("out") -> return Err(IngestError.Invalid("ingest requires a named output `out`"))
+    output_names := request.outputs.keys()
+    output_names.sort()
+    loop name in output_names {
+        if !store_valid_output_name(name) -> return Err(IngestError.Invalid("named output `{name}` must be one path component"))
+    }
+    hangar :: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    AdmissionTransaction.recover_unlocked(roots)
+
+    stamp :: "{store_now_secs()}-{sys.pid()}"
+    stage_parent :: files.join(hangar, @STORE_STAGE_DIR)
+    store_ensure_real_directory(stage_parent, "Hangar ingest staging")
+    stage :: files.join(stage_parent, stamp)
+    files.create_dir(stage)
+
+    result :: store_ingest_stage_and_commit(roots, request, output_names, stage, after_child_copy)
+
+    // Always scrub this stage dir (success moved trees out; failure quarantines).
+    if result == {
+        .Ok(_) -> {
+            if files.stat(stage) == {
+                .Ok(_) -> files.remove_all(stage) ?? {}
+                else -> {}
+            }
+        }
+        .Err(error) -> {
+            quota_rejected :: if error == {
+                .IO(message) -> message.starts_with("Hangar quota admission failed:")
+                else -> false
+            }
+            if quota_rejected {
+                // The rejected stage is uncommitted input. Keeping it in the
+                // quarantine would defeat the ceiling that rejected it.
+                if files.stat(stage) == {
+                    .Ok(_) -> {
+                        store_make_tree_writable_for_removal(stage) ?? {}
+                        files.remove_all(stage) ?? {}
+                    }
+                    else -> {}
+                }
+            } else {
+                quarantine_root :: files.join(hangar, "quarantine")
+                if store_ensure_real_directory(quarantine_root, "Hangar quarantine") == {
+                    .Ok(_) -> {
+                        quarantine :: files.join(quarantine_root, "ingest-{stamp}")
+                        if files.stat(stage) == {
+                            .Ok(_) -> {
+                                if files.rename(stage, quarantine) == {
+                                    .Err(_) -> files.remove_all(stage) ?? {}
+                                    else -> {}
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                    .Err(_) -> {
+                        if files.stat(stage) == {
+                            .Ok(_) -> files.remove_all(stage) ?? {}
+                            else -> {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn store_ingest_stage_and_commit(roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: ?fn(String)) -[FS, Env, Time]> IngestedObject !IngestError {
+    hangar :: roots.hangar_dir()
+    named_digests := [String: String]{}
+    staged_outs := [String: String]{}
+    loop name in output_names {
+        source :: request.outputs[name]
+        destination :: files.join(files.join(stage, "outputs"), name)
+        files.create_dir_all(files.dirname(destination))
+        // Gate semantic xattrs on the *source* tree (the byte copy drops them).
+        if !request.allow_semantic_xattrs() -> store_reject_semantic_xattrs_tree(source)
+        store_copy_nofollow_tree_observed(source, destination, after_child_copy)
+        if request.allow_semantic_xattrs() -> store_copy_semantic_xattrs_tree(source, destination)
+        store_seal_node(destination)
+        hook := EnvelopeWalkHook.recording()
+        digest :: if pkg_try_output_hash_of_with_policy(destination, request.allow_semantic_xattrs(), &hook) == {
+            .Ok(digest) -> digest
+            .Err(error) -> {
+                message :: error.message()
+                return Err(if {
+                    message.contains("case-fold") || message.contains("reserved") || message.contains("trailing") || message.contains("store path rejected") -> IngestError.PathLaw(PathLawError{code: "archive", path: destination, detail: message})
+                    message.contains("changed while") || message.contains("changed before") -> IngestError.Mutated(message)
+                    else -> IngestError.Invalid(message)
+                })
+            }
+        }
+        named_digests[name] = digest
+        staged_outs[name] = destination
+    }
+    primary :: named_digests.get("out") ?? return Err(IngestError.Invalid("missing `out` digest"))
+    objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+    store_ensure_real_directory(objects, "Hangar object pool")
+    final_object :: files.join(objects, primary)
+    deduplicated :: files.is_dir(final_object)
+    // `final_object` is not published until below. Inspect the staged output
+    // when deciding whether to record its executable projection.
+    staged_bin :: files.is_dir(files.join(staged_outs["out"], "bin"))
+    envelope :: Envelope{
+        output_hash: primary,
+        platform: if request.cache_identity.platform == "" -> pkg_host_platform() else -> request.cache_identity.platform,
+        signature: request.signature,
+        provenance: if request.provenance == "" -> "{request.reference} via hangar-ingest" else -> request.provenance,
+    }
+    id :: store_entry_id(request.name, request.version, request.reference, final_object)
+    record_dir :: files.join(hangar, id)
+    now :: store_now_secs()
+    facts := [String: String]{}
+    loop name in output_names -> facts["output.{name}"] = named_digests[name]
+    producer := ProducerRecord.decode(store_canonical_producer("hangar-ingest", "cas:{primary}", primary, request.cache_identity, facts))
+    producer.bind_cache_provenance(request.reference, primary, request.cache_identity, request.references)
+    realized_at :: if store_read_meta(record_dir) == {
+        .Val(meta) -> meta.realized_at ?? now
+        else -> now
+    }
+    entry := StoreEntry{
+        id: id,
+        name: request.name,
+        version: request.version,
+        reference: request.reference,
+        out: final_object,
+        bin: if staged_bin -> files.join(final_object, "bin") else -> "",
+        rlib: "",
+        envelope: envelope,
+        cache_identity: request.cache_identity,
+        references: request.references,
+        named_outputs: named_digests,
+        platform_artifact_kind: request.platform_artifact_kind,
+        producer_record: producer.encode(),
+        receipt: "",
+        realized_at: realized_at,
+        last_used_at: now,
+    }
+    transaction := AdmissionTransaction.new(roots)
+    loop name in output_names {
+        staged :: staged_outs[name]
+        digest :: named_digests.get(name) ?? return Err(IngestError.Invalid("named output `{name}` has no digest"))
+        bytes :: if store_admission_size(staged) == {
+            .Ok(bytes) -> bytes
+            .Err(error) -> return Err(IngestError.IO("cannot measure staged output `{staged}`: {error.message()}"))
+        }
+        transaction.stage_object(AdmissionObject{source: staged, digest: digest, bytes: bytes, allow_semantic_xattrs: request.allow_semantic_xattrs(), repair_corrupt: false})
+    }
+    entries := [StoreEntry]{entry}
+    if transaction.commit(&entries, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            message :: error.message()
+            if message.starts_with("Hangar store limit exceeded") -> return Err(IngestError.IO("Hangar quota admission failed: {message}"))
+            return Err(IngestError.IO(message))
+        }
+    }
+    Ok(IngestedObject{entry: entries[0], deduplicated})
+}
+
+// One normal path component: no separators, not `.`, `..`, or empty.
+fn store_valid_output_name(name: String) -> Bool !Never {
+    if name.contains("/") || name.contains("\\") -> return false
+    name != "" && name != "." && name != ".."
+}
+
+fn store_source_metadata(path: String) -[FS]> files.Stat !IngestError {
+    if files.stat(path) == {
+        .Ok(info) -> Ok(info)
+        .Err(.NotFound(_)) -> Err(IngestError.IO("output `{path}` does not exist"))
+        .Err(error) -> Err(IngestError.IO("cannot inspect output `{path}`: {error}"))
+    }
+}
+
+fn store_read_output_directory(path: String) -[FS]> [files.DirEntry] !IngestError {
+    if files.list_dir(path) == {
+        .Ok(entries) -> Ok(entries)
+        .Err(error) -> Err(IngestError.IO("cannot read output directory `{path}`: {error}"))
+    }
+}
+
+fn store_reject_semantic_xattrs_tree(path: String) -[FS]> !IngestError {
+    info :: store_source_metadata(path)
+    if pkg_check_xattrs(path, false) == {
+        .Err(error) -> return Err(IngestError.Invalid(error.message()))
+        else -> {}
+    }
+    if info.is_symlink -> return Ok()
+    if info.is_dir {
+        loop entry in store_read_output_directory(path) -> store_reject_semantic_xattrs_tree(entry.path)
+    }
+    Ok()
+}
+
+// Preserve non-security xattrs onto the staged tree when an explicit platform
+// artifact kind opted in. Security/quarantine names stay excluded.
+fn store_copy_semantic_xattrs_tree(source: String, destination: String) -[FS]> !IngestError {
+    info :: store_source_metadata(source)
+    store_copy_semantic_xattrs_node(source, destination)
+    if info.is_symlink -> return Ok()
+    if info.is_dir {
+        entries :: if files.list_dir(source) == {
+            .Ok(entries) -> entries
+            .Err(error) -> return Err(IngestError.IO("{error}"))
+        }
+        loop entry in entries -> store_copy_semantic_xattrs_tree(entry.path, files.join(destination, entry.name))
+    }
+    Ok()
+}
+
+fn store_copy_semantic_xattrs_node(source: String, destination: String) -[FS]> !IngestError {
+    names :: if pkg_list_xattr_names(source) == {
+        .Ok(names) -> names
+        .Err(error) -> return Err(IngestError.Invalid(error.message()))
+    }
+    loop name in names {
+        if pkg_is_excluded_xattr(name) -> next
+        value :: if files.extended_attribute(source, name) == {
+            .Ok(.Val(value)) -> value
+            .Ok(.None) -> return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: attribute is missing"))
+            .Err(error) -> return Err(IngestError.IO("lgetxattr `{name}` on `{source}`: {error}"))
+        }
+        if files.set_extended_attribute(destination, name, value) == {
+            .Err(error) -> return Err(IngestError.IO("lsetxattr `{name}` on `{destination}`: {error}"))
+            else -> {}
+        }
+    }
+    Ok()
+}
+
+// Identity used to detect a source that mutates while it is copied.
+pub struct StableMetaIdentity {
+    pub device: Int
+    pub inode: Int
+    pub size: Int
+    pub mode: Int
+}
+
+fn store_stable_meta_identity(info: files.Stat) -> StableMetaIdentity !Never {
+    StableMetaIdentity{device: info.id.device, inode: info.id.inode, size: info.size, mode: info.mode}
+}
+
+pub struct DirectorySnapshotEntry {
+    pub name: String
+    pub identity: StableMetaIdentity
+}
+
+fn store_directory_snapshot(source: String) -[FS]> [DirectorySnapshotEntry] !IngestError {
+    snapshot := [DirectorySnapshotEntry]{}
+    path_names := [[U8]]{}
+    loop entry in store_read_output_directory(source) {
+        path_names.push(entry.name.bytes())
+        snapshot.push(DirectorySnapshotEntry{name: entry.name, identity: store_stable_meta_identity(store_source_metadata(entry.path))})
+    }
+    loop name in path_names {
+        if pkg_validate_path_component(name) == {
+            .Err(error) -> return Err(IngestError.PathLaw(error))
+            else -> {}
+        }
+    }
+    if pkg_reject_casefold_collisions(path_names) == {
+        .Err(error) -> return Err(IngestError.PathLaw(error))
+        else -> {}
+    }
+    snapshot.sort_by((entry: DirectorySnapshotEntry) -> entry.name)
+    Ok(snapshot)
+}
+
+pub fn store_copy_nofollow_tree(source: String, destination: String) -[FS]> !IngestError {
+    store_copy_nofollow_tree_observed(source, destination, None)
+}
+
+fn store_copy_nofollow_tree_observed(source: String, destination: String, after_child_copy: ?fn(String)) -[FS]> !IngestError {
+    info :: store_source_metadata(source)
+    before :: store_stable_meta_identity(info)
+    if {
+        info.is_dir && !info.is_symlink -> {
+            files.create_dir_all(destination)
+            children :: store_directory_snapshot(source)
+            loop child in children {
+                child_source :: files.join(source, child.name)
+                store_copy_nofollow_tree_observed(child_source, files.join(destination, child.name), after_child_copy)
+                if after_child_copy == {
+                    .Val(hook) -> hook(child_source)
+                    else -> {}
+                }
+            }
+            after_children :: if store_directory_snapshot(source) == {
+                .Ok(snapshot) -> snapshot
+                .Err(error) -> return Err(IngestError.Mutated("`{source}` directory entries changed during ingest: {error.what()}"))
+            }
+            if children != after_children -> return Err(IngestError.Mutated("`{source}` directory entries changed during ingest"))
+        }
+        info.is_symlink -> {
+            target :: if files.read_link(source) == {
+                .Ok(target) -> target
+                .Err(error) -> return Err(IngestError.IO("{error}"))
+            }
+            if files.symlink(target, destination) == {
+                .Err(error) -> return Err(IngestError.IO("{error}"))
+                else -> {}
+            }
+        }
+        info.is_file -> store_copy_nofollow_file(source, destination, info)
+        else -> return Err(IngestError.Invalid("unsupported special file: `{source}`"))
+    }
+    after :: if files.stat(source) == {
+        .Ok(after) -> after
+        .Err(.NotFound(_)) -> return Err(IngestError.Mutated("`{source}` disappeared during ingest"))
+        .Err(error) -> return Err(IngestError.IO("cannot re-inspect output `{source}`: {error}"))
+    }
+    if before != store_stable_meta_identity(after) -> return Err(IngestError.Mutated("`{source}` changed during ingest"))
+    Ok()
+}
+
+// Copy one regular file through a handle opened without following links,
+// re-checking the handle's identity before and after the read.
+fn store_copy_nofollow_file(source: String, destination: String, expected: files.Stat) -[FS]> !IngestError {
+    file :: if files.open(source, links: .Refuse) == {
+        .Ok(file) -> file
+        .Err(error) -> return Err(IngestError.IO("nofollow open `{source}`: {error}"))
+    }
+    opened :: if file.stat() == {
+        .Ok(info) -> info
+        .Err(error) -> return Err(IngestError.IO("{error}"))
+    }
+    if store_stable_meta_identity(opened) != store_stable_meta_identity(expected) {
+        return Err(IngestError.Mutated("`{source}` changed before copy"))
+    }
+    bytes := [U8]{}
+    loop chunk in file.chunks(65536) {
+        loop byte in chunk -> bytes.push(byte)
+    }
+    after :: if file.stat() == {
+        .Ok(info) -> info
+        .Err(error) -> return Err(IngestError.IO("{error}"))
+    }
+    if store_stable_meta_identity(opened) != store_stable_meta_identity(after) {
+        return Err(IngestError.Mutated("`{source}` changed while copying"))
+    }
+    if files.write_bytes(destination, bytes) == {
+        .Err(error) -> return Err(IngestError.IO("{error}"))
+        else -> {}
+    }
+    if files.set_mode(destination, expected.mode & 0o7777) == {
+        .Err(error) -> return Err(IngestError.IO("{error}"))
+        else -> {}
+    }
+    Ok()
+}

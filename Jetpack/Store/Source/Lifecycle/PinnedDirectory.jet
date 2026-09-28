@@ -1,0 +1,164 @@
+// The lifecycle journal's pinned directory (Rust Store/Lifecycle/Directory.rs).
+// Every path component from the filesystem root down is opened without
+// following links and the final directory stays held, so every later member
+// operation names an entry relative to that held directory. A component that
+// is renamed or replaced after opening cannot redirect journal writes.
+//
+// The Rust reference reaches this through openat/mkdirat/renameat/linkat/
+// unlinkat/fdopendir FFI on Unix and pinned handles on Windows. Here the held
+// directory is the ratified Core directory handle (D-CORE-FILEDIR1) and member
+// identity is the ratified Stat identity (D-CORE-FILESTAT1); the per-platform
+// flags and the unsupported-platform fallback are Core's responsibility.
+
+@STORE_PINNED_PRIVATE_MODE :: 0o700
+@STORE_PINNED_FILE_MODE :: 0o600
+
+pub struct PinnedLifecycleDirectory {
+    directory: Directory
+    path: String
+
+    // Open `path`, creating missing components as private directories. A
+    // relative path is taken from the current directory; `.` and `..`
+    // components are refused; a component that is a link is never followed.
+    fn open_or_create(path: String) -[FS, Env]> PinnedLifecycleDirectory !StoreError {
+        absolute :: store_pinned_absolute(path)
+        parts :: store_pinned_components(absolute)
+        directory := files.open_directory(parts.anchor)
+        loop name in parts.names {
+            if directory.open_directory(name) == {
+                .Ok(child) -> directory = child
+                .Err(error) -> {
+                    if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+                    if directory.create_directory(name, mode: @STORE_PINNED_PRIVATE_MODE) == {
+                        .Ok(_) -> directory.fsync()
+                        .Err(create_error) -> {
+                            if !store_io_is_already_exists(create_error) -> return Err(StoreError.Io(create_error))
+                        }
+                    }
+                    directory = directory.open_directory(name)
+                }
+            }
+        }
+        Ok(PinnedLifecycleDirectory{directory, path: absolute})
+    }
+
+    fn path(self) -> String !Never {
+        self.path
+    }
+
+    // The member path used in diagnostics (`path().join(name)`).
+    fn member_path(self, name: String) -> String !Never {
+        files.join(self.path, name)
+    }
+
+    // At most `maximum` member names of the held directory.
+    fn names(self, maximum: Int) -[FS]> [String] !StoreError {
+        names := [String]{}
+        loop entry in self.directory.list() {
+            if names.len() >= maximum -> break
+            names.push(entry.name)
+        }
+        Ok(names)
+    }
+
+    // Open a regular-file member for reading without following a link.
+    fn open_read(self, name: String) -[FS]> FileReader !StoreError {
+        store_pinned_valid_name(name)
+        Ok(self.directory.open(name))
+    }
+
+    // Exclusively create a private regular-file member.
+    fn create_new(self, name: String) -[FS]> FileWriter !StoreError {
+        store_pinned_valid_name(name)
+        Ok(self.directory.create(name, if_exists: .Refuse, mode: @STORE_PINNED_FILE_MODE))
+    }
+
+    // Rename the member `old_name`, which must still be the file behind
+    // `source`, to `new_name`. Without `replace` an existing destination fails
+    // with AlreadyExists and both names are left as they were.
+    fn rename_open(self, source: FileWriter, old_name: String, new_name: String, replace: Bool) !StoreError -[FS]> {
+        store_pinned_valid_name(old_name)
+        store_pinned_valid_name(new_name)
+        opened :: source.stat()
+        self.validate_open_name(opened, old_name)
+        policy :: if replace -> RenameIfExists.Replace else -> RenameIfExists.Refuse
+        self.directory.rename(old_name, new_name, if_exists: policy)
+        self.validate_open_name(opened, new_name)
+    }
+
+    // Unlink a regular-file member after proving the name still denotes the
+    // file just opened. Lifecycle mutations are cooperative under the Hangar
+    // lock; an external writer that ignores that ownership law is corruption,
+    // not a supported concurrent mutator.
+    fn remove_file(self, name: String) !StoreError -[FS]> {
+        file :: self.open_read(name)
+        self.validate_open_name(file.stat(), name)
+        self.directory.remove(name)
+    }
+
+    // Make earlier member creations, renames and removals durable.
+    fn sync(self) !StoreError -[FS]> {
+        self.directory.fsync()
+    }
+
+    // The member `name` is still a regular file with the identity of `opened`.
+    fn validate_open_name(self, opened: Stat, name: String) !StoreError -[FS]> {
+        current :: self.directory.entry_stat(name)
+        if !current.is_file || current.id != opened.id {
+            return Err(StoreError.Other("pinned directory member was replaced"))
+        }
+    }
+}
+
+// The anchor directory a pinned path starts from and its normal components.
+struct PinnedPathParts {
+    anchor: String
+    names: [String]
+}
+
+// Directory.rs `absolute`: join a relative path to the current directory and
+// refuse any `.` or `..` component.
+fn store_pinned_absolute(path: String) -[FS, Env]> String !StoreError {
+    absolute :: if files.is_abs(path) -> path else -> files.join(files.cwd(), path)
+    loop part in files.split_slash(absolute) {
+        if part == "." || part == ".." -> return Err(StoreError.InvalidInput("pinned directory path contains traversal"))
+    }
+    Ok(absolute)
+}
+
+// Split an absolute path into its root anchor (`/`, or a Windows drive root)
+// and the normal components below it.
+fn store_pinned_components(absolute: String) -> PinnedPathParts !StoreError {
+    parts := [String]{}
+    loop part in files.split_slash(absolute) {
+        if part != "" -> parts.push(part)
+    }
+    if absolute.starts_with("/") -> return Ok(PinnedPathParts{anchor: "/", names: parts})
+    if parts.len() == 0 -> return Err(StoreError.InvalidInput("pinned directory has no normal component"))
+    anchor :: "{parts[0]}/"
+    names := [String]{}
+    loop index in 1..<parts.len() -> names.push(parts[index])
+    Ok(PinnedPathParts{anchor, names})
+}
+
+// Directory.rs `valid_name`: one plain member name.
+fn store_pinned_valid_name(name: String) !StoreError {
+    invalid :: name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.bytes().contains(U8{0})
+    if invalid -> return Err(StoreError.InvalidInput("invalid pinned-directory member name"))
+}
+
+// The Core error kinds lifecycle recovery branches on (D-CORE-FILEERROR1
+// names AlreadyExists; NotFound is in the IOError tree today).
+fn store_io_is_not_found(error: IOError) -> Bool !Never {
+    if error == {
+        .NotFound(_) -> true
+        else -> false
+    }
+}
+
+fn store_io_is_already_exists(error: IOError) -> Bool !Never {
+    if error == {
+        .AlreadyExists(_) -> true
+        else -> false
+    }
+}

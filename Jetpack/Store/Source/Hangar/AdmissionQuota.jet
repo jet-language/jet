@@ -1,0 +1,156 @@
+// Hangar admission quota (Rust `jetpack::Store::Quota`): reserve the
+// incoming size against the configured byte ceiling, sweeping orphans and
+// evicting the least recently used unreachable objects to make room.
+
+@STORE_DEFAULT_MAX_HANGAR_BYTES :: 137438953472
+@STORE_HANGAR_MAX_BYTES_ENV :: "JETPACK_HANGAR_MAX_BYTES"
+@STORE_HANGAR_MAX_BYTES_CONFIG :: "config/hangar-max-bytes"
+@STORE_ADMISSION_RESERVE_BYTES :: 1048576
+@STORE_INT_MAX :: 9223372036854775807
+
+// One evictable Hangar object ordered by last use.
+struct StoreQuotaCandidate {
+    id: String
+    path: String
+    last_used_at: ?Int
+}
+
+// Reserve a small journal and metadata allowance with every admission.
+// Without this guard band, a tree that exactly fills the object budget could
+// still make the durable receipt and closure transaction exceed the ceiling.
+pub fn store_admission_reservation(incoming_bytes: Int) -> Int !Never {
+    if incoming_bytes > @STORE_INT_MAX - @STORE_ADMISSION_RESERVE_BYTES -> return @STORE_INT_MAX
+    incoming_bytes + @STORE_ADMISSION_RESERVE_BYTES
+}
+
+// The logical footprint of one admission source.
+pub fn store_admission_size(path: String) -> Int !StoreError {
+    store_quota_footprint(path, None)
+}
+
+// Enforce the per-Hangar byte ceiling before a staged tree is published.
+//
+// The footprint is a logical upper bound: file bytes are counted without
+// following symlinks and without deduplicating hardlinks. That can evict
+// earlier than physical allocation requires, but it cannot undercount disk
+// pressure. The incoming stage is excluded because its bytes are supplied as
+// `incoming_bytes` instead.
+pub fn store_ensure_hangar_capacity(roots: HangarRoots, incoming_bytes: Int, excluded: ?String) !StoreError {
+    hangar :: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    limit :: store_quota_configured_limit(roots)
+    if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return Ok()
+
+    live :: store_live_roots_unlocked(roots)
+    _ :: store_sweep_build_scratch(hangar)
+    retired := [String]{}
+    store_quota_sweep_orphans(roots, live, retired)
+    if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return Ok()
+
+    candidates := [StoreQuotaCandidate]{}
+    loop entry in store_object_dirs(hangar) {
+        // A malformed record has no trustworthy age or reachability facts.
+        // Leave it in place for the repair/quarantine path instead of making
+        // quota enforcement guess that it is safe to delete.
+        if store_malformed_object_reason(entry.path) != None -> next
+        meta :: store_read_meta(entry.path) ?? next
+        if store_is_live(entry.name, meta, live) -> next
+        candidates.push(StoreQuotaCandidate{id: entry.name, path: entry.path, last_used_at: meta.last_used_at})
+    }
+    // Oldest known use goes first. Unknown timestamps are last because they
+    // are less informative and therefore less safe to evict.
+    candidates.sort_by((left: StoreQuotaCandidate, right: StoreQuotaCandidate) -> ((left.last_used_at == None) <=> (right.last_used_at == None)).then((left.last_used_at ?? @STORE_INT_MAX) <=> (right.last_used_at ?? @STORE_INT_MAX)).then(left.id <=> right.id))
+
+    loop candidate in candidates {
+        _ :: store_tombstone_closure_record_unlocked(roots, candidate.id)
+        store_remove_hangar_node(candidate.path)
+        retired.push(candidate.id)
+        store_quota_sweep_orphans(roots, live, retired)
+        if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return Ok()
+    }
+
+    used :: store_quota_footprint(hangar, excluded)
+    Err(StoreError.Other("Hangar store limit exceeded: {used} bytes used + {incoming_bytes} bytes incoming exceeds {limit} bytes; no evictable objects remain"))
+}
+
+fn store_quota_configured_limit(roots: HangarRoots) -> Int !StoreError {
+    message :: "{@STORE_HANGAR_MAX_BYTES_ENV} or {@STORE_HANGAR_MAX_BYTES_CONFIG} must contain one positive byte count"
+    value :: if sys.get(@STORE_HANGAR_MAX_BYTES_ENV) == {
+        .Val(text) -> text
+        .None -> store_quota_config_text(roots) ?? return Ok(@STORE_DEFAULT_MAX_HANGAR_BYTES)
+    }
+    trimmed :: value.trim()
+    digits :: trimmed.removeprefix("+")
+    loop byte in digits.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return Err(StoreError.InvalidInput(message))
+    }
+    limit :: Int.parse(digits) ?? return Err(StoreError.InvalidInput(message))
+    if limit == 0 -> return Err(StoreError.InvalidInput(message))
+    Ok(limit)
+}
+
+// The quota config file text, or `None` when it does not exist.
+fn store_quota_config_text(roots: HangarRoots) -> ?String !StoreError {
+    path :: files.join(roots.root, @STORE_HANGAR_MAX_BYTES_CONFIG)
+    metadata :: if files.stat(path) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if StoreError.Io(error).is_not_found() -> return Ok(None)
+            return Err(StoreError.Io(error))
+        }
+    }
+    if metadata.is_symlink || !metadata.is_file {
+        return Err(StoreError.InvalidData("Hangar quota config is not a regular file: {path}"))
+    }
+    Ok(Val(files.read(path)))
+}
+
+fn store_quota_fits(hangar: String, incoming_bytes: Int, limit: Int, excluded: ?String) -> Bool !StoreError {
+    used :: store_quota_footprint(hangar, excluded)
+    if used > @STORE_INT_MAX - incoming_bytes -> return Ok(false)
+    Ok(used + incoming_bytes <= limit)
+}
+
+fn store_quota_footprint(path: String, excluded: ?String) -> Int !StoreError {
+    if excluded == Val(path) -> return Ok(0)
+    metadata :: files.stat(path)
+    if metadata.is_symlink || metadata.is_file -> return Ok(metadata.size)
+    if !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar footprint contains an unsupported node: {path}"))
+    total := 0
+    loop entry in files.list_dir(path) {
+        size :: store_quota_footprint(entry.path, excluded)
+        if total > @STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar footprint overflowed"))
+        total += size
+    }
+    Ok(total)
+}
+
+fn store_quota_sweep_orphans(roots: HangarRoots, live: LiveRoots, retired: [String]) !StoreError {
+    orphaned :: store_collect_orphaned_canonical_objects(roots, live, retired)
+    loop object in orphaned -> store_remove_hangar_node(object.path)
+    if orphaned.len() > 0 -> store_sync_store_directory(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR))
+
+    // Receipt deletion is safe only when every package record has readable,
+    // valid metadata. A damaged record must not turn this bounded path into a
+    // destructive guess; valid object eviction still proceeds above.
+    retained := ~live.receipts
+    uncertain := false
+    loop entry in store_object_dirs(roots.hangar_dir()) {
+        if retired.contains(entry.name) -> next
+        meta :: store_read_meta(entry.path) ?? {
+            uncertain = true
+            next
+        }
+        if meta.receipt != "" {
+            if !store_valid_receipt_digest(meta.receipt) {
+                uncertain = true
+            } else {
+                retained.push(meta.receipt)
+            }
+        }
+    }
+    if !uncertain {
+        _ :: store_sweep_receipts(roots.hangar_dir(), store_sorted_unique(retained), true)
+    }
+}

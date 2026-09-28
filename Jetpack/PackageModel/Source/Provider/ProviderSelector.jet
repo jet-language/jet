@@ -64,6 +64,54 @@ pub struct ProviderSelector {
             .Platform -> self.platform = value
         }
     }
+
+    // `version=…&revision=…&baseline=…&features=a+b&digest=…&platform=…`,
+    // empty facts omitted.
+    fn canonical(self) -> String !Never {
+        parts := [String]{}
+        if self.version != "" -> parts.push("version={self.version}")
+        if self.revision != "" -> parts.push("revision={self.revision}")
+        if self.baseline != "" -> parts.push("baseline={self.baseline}")
+        if self.features.len() > 0 -> parts.push("features={self.features.join("+")}")
+        if self.digest != "" -> parts.push("digest={self.digest}")
+        if self.platform != "" -> parts.push("platform={self.platform}")
+        parts.join("&")
+    }
+
+    // The carrier's `selector` object, fields in schema order.
+    fn to_json_tree(self) -> DataTree !Never {
+        features := [DataTree]{}
+        loop feature in self.features -> features.push(DataTree.Text(feature))
+        object := [String: DataTree]{}
+        object["raw"] = DataTree.Text(self.raw)
+        object["version"] = DataTree.Text(self.version)
+        object["revision"] = DataTree.Text(self.revision)
+        object["baseline"] = DataTree.Text(self.baseline)
+        object["features"] = DataTree.Array(features)
+        object["digest"] = DataTree.Text(self.digest)
+        object["platform"] = DataTree.Text(self.platform)
+        DataTree.Object(object)
+    }
+
+    // Read the carrier's `selector` object; every field is required.
+    fn from_json_tree(value: ?DataTree) -> ProviderSelector !ProviderFactsError {
+        object :: pkg_json_object(value ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
+        raw_features :: object.get("features") ?? return Err(ProviderFactsError{message: "provider selector lacks `features`"})
+        feature_values :: pkg_json_array(raw_features) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_ARRAY})
+        features := [String]{}
+        loop feature in feature_values {
+            features.push(pkg_json_text(feature) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_STRING}))
+        }
+        Ok(ProviderSelector{
+            raw: pkg_provider_required_text(object, "raw", "provider selector lacks `raw`"),
+            version: pkg_provider_required_text(object, "version", "provider selector lacks `version`"),
+            revision: pkg_provider_required_text(object, "revision", "provider selector lacks `revision`"),
+            baseline: pkg_provider_required_text(object, "baseline", "provider selector lacks `baseline`"),
+            features: features,
+            digest: pkg_provider_required_text(object, "digest", "provider selector lacks `digest`"),
+            platform: pkg_provider_required_text(object, "platform", "provider selector lacks `platform`")
+        })
+    }
 }
 
 // One selector fact key. `rev`, `feature`, `hash`/`sha256`, and `target` are

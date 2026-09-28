@@ -1,0 +1,259 @@
+// D-JPK-PROFILE1=D: source-backed package generations. One resolver serves
+// JetOS/user composition, tool projections, and package-generation commands.
+
+// The fail-closed scale budget of the generation resolver.
+@ENVMODEL_MAX_RESOLVER_NODES :: 100000
+@ENVMODEL_RESOLVER_BUDGET_NAME :: "__jet_resolver_budget__:"
+
+// One source-backed package-generation declaration. This is deliberately
+// separate from `PresetSpec`, which is the environment-shell preset surface
+// and may select host/user variables.
+pub struct PackageProfileSpec {
+    pub name: String{""}
+    pub extends: [String]{[String]{}}
+    // Canonical package refs as written by the shared package-sugar parser.
+    pub packages: [String]{[String]{}}
+    // Exact path -> selected provider identity, from the ratified collision
+    // map. The provider is checked against realized contenders later.
+    pub collisions: [String: String]{[String: String]{}}
+    // Source modules that contributed this equal declaration.
+    pub sources: [String]{[String]{}}
+}
+
+// One package ref after generation composition. `declared_by` keeps source
+// generation identity when equal package facts are de-duplicated.
+pub struct PackageProfilePackage {
+    pub raw: String{""}
+    pub declared_by: [String]{[String]{}}
+}
+
+// One resolved generation view. It is still source-backed; generation
+// publication and activation consume this exact object later.
+pub struct ResolvedPackageProfile {
+    pub name: String{""}
+    pub selected_profiles: [String]{[String]{}}
+    pub applied: [String]{[String]{}}
+    pub packages: [PackageProfilePackage]{[PackageProfilePackage]{}}
+    pub collisions: [String: String]{[String: String]{}}
+    pub sources: [String]{[String]{}}
+}
+
+// One resolved package fact with both the source spelling and the
+// realization identity that a lock, explain view, or generation writer must
+// preserve.
+pub struct PackageProfileFact {
+    pub raw: String
+    pub target: String
+    pub source: String
+    pub upstream: ?String{None}
+    pub provider: String
+    pub channel: ?String{None}
+    pub declared_by: [String]{[String]{}}
+    // The provider identity, selector, typed facts, and native provenance
+    // carried with this package. Consumers must not reconstruct it from `raw`
+    // after planning.
+    pub provider_facts: ProviderFacts
+}
+
+// The read-only, source-backed generation plan. Realization and activation
+// may consume this plan later; they must not reconstruct package identity
+// from the display string.
+pub struct PackageProfilePlan {
+    pub name: String{""}
+    pub selected_profiles: [String]{[String]{}}
+    pub applied: [String]{[String]{}}
+    pub packages: [PackageProfileFact]{[PackageProfileFact]{}}
+    pub collisions: [String: String]{[String: String]{}}
+    pub sources: [String]{[String]{}}
+    pub fingerprint: String{""}
+    pub provider_facts: [String: ProviderFacts]{[String: ProviderFacts]{}}
+
+    // Seal the plan: its canonical length-prefixed identity and the per-ref
+    // provider facts index.
+    fn finalize(^self) -> PackageProfilePlan !Never {
+        updated := self
+        lines := [String]{"jet-package-profile-plan-v1\n"}
+        envmodel_fingerprint_field(&lines, "name", updated.name)
+        loop value in updated.selected_profiles -> envmodel_fingerprint_field(&lines, "selected", value)
+        loop value in updated.applied -> envmodel_fingerprint_field(&lines, "applied", value)
+        loop value in updated.sources -> envmodel_fingerprint_field(&lines, "source", value)
+        loop package in updated.packages {
+            envmodel_fingerprint_field(&lines, "package.raw", package.raw)
+            envmodel_fingerprint_field(&lines, "package.target", package.target)
+            envmodel_fingerprint_field(&lines, "package.source", package.source)
+            envmodel_fingerprint_field(&lines, "package.upstream", package.upstream ?? "<none>")
+            envmodel_fingerprint_field(&lines, "package.provider", package.provider)
+            envmodel_fingerprint_field(&lines, "package.channel", package.channel ?? "<none>")
+            loop owner in package.declared_by -> envmodel_fingerprint_field(&lines, "package.declared_by", owner)
+            envmodel_fingerprint_field(&lines, "package.provider_facts", package.provider_facts.digest())
+        }
+        loop path in envmodel_sorted_keys(updated.collisions) {
+            envmodel_fingerprint_field(&lines, "collision.path", path)
+            envmodel_fingerprint_field(&lines, "collision.provider", updated.collisions[path])
+        }
+        updated.fingerprint = "sha256-{pkg_sha256_hex(lines.join("").bytes())}"
+        facts := [String: ProviderFacts]{}
+        loop package in updated.packages -> facts[package.raw] = package.provider_facts
+        updated.provider_facts = facts
+        updated
+    }
+}
+
+fn envmodel_fingerprint_field(lines: &[String], key: String, value: String) {
+    lines.push("{key}\t{value.bytes().len()}\t{value}\n")
+}
+
+#Error
+pub enum PackageProfileError {
+    Missing(String)
+    Cycle([String])
+    Conflict(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Missing(name) -> "package generation '{name}' does not exist"
+            .Cycle(names) -> "package generation inheritance cycle: {names.join(" -> ")}"
+            .Conflict(name) && name.starts_with(@ENVMODEL_RESOLVER_BUDGET_NAME) -> "package generation resolver exceeds {name.removeprefix(@ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
+            .Conflict(name) -> "package generation fact '{name}' conflicts"
+        }
+    }
+}
+
+fn envmodel_resolver_budget_error() -> PackageProfileError !Never {
+    PackageProfileError.Conflict("{@ENVMODEL_RESOLVER_BUDGET_NAME}{@ENVMODEL_MAX_RESOLVER_NODES}")
+}
+
+// Resolver visit state: absent, entered (on the stack), or finished.
+@ENVMODEL_PROFILE_ENTERED :: 1
+@ENVMODEL_PROFILE_FINISHED :: 2
+
+pub struct PackageProfileSet {
+    pub profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
+
+    // An equal re-declaration merges its source modules; different facts
+    // under one name conflict.
+    fn insert_checked(&self, profile: PackageProfileSpec) !PackageProfileError {
+        if self.profiles.get(profile.name) == .Val(existing) {
+            if existing.extends != profile.extends || existing.packages != profile.packages || existing.collisions != profile.collisions {
+                return Err(PackageProfileError.Conflict(profile.name))
+            }
+            merged := existing
+            loop source in profile.sources {
+                if !merged.sources.contains(source) -> merged.sources.push(source)
+            }
+            self.profiles[profile.name] = merged
+            return Ok()
+        }
+        if self.profiles.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+        self.profiles[profile.name] = profile
+    }
+
+    fn resolve(self, name: String) -> ResolvedPackageProfile !PackageProfileError {
+        self.resolve_many([String]{name})
+    }
+
+    // Parent-first, iterative depth-first composition. Iteration keeps the
+    // full resolver budget within a bounded native stack.
+    fn resolve_many(self, names: [String]) -> ResolvedPackageProfile !PackageProfileError {
+        selected := [String]{}
+        selected_seen := [String: Bool]{}
+        loop name in names {
+            if selected_seen.get(name) == None {
+                selected_seen[name] = true
+                if selected.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                selected.push(name)
+            }
+        }
+        resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
+        state := [String: Int]{}
+        stack := [String]{}
+        frame_names := [String]{}
+        frame_next := [Int]{}
+        source_seen := [String: Bool]{}
+        declared_by_seen := [String: Bool]{}
+        package_indices := [String: Int]{}
+        loop name in selected {
+            if (state.get(name) ?? 0) == @ENVMODEL_PROFILE_FINISHED -> next
+            frame_names.push(name)
+            frame_next.push(0)
+            loop frame_names.len() > 0 {
+                top :: frame_names.len() - 1
+                current :: frame_names[top]
+                if state.get(current) == None {
+                    if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
+                    if state.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                    state[current] = @ENVMODEL_PROFILE_ENTERED
+                    stack.push(current)
+                }
+                profile :: self.profiles[current]
+                parent_index :: frame_next[top]
+                frame_next[top] = parent_index + 1
+                if parent_index >= profile.extends.len() {
+                    _ := frame_names.pop()
+                    _ := frame_next.pop()
+                    _ := stack.pop()
+                    state[current] = @ENVMODEL_PROFILE_FINISHED
+                    resolved.applied.push(current)
+                    loop source in profile.sources {
+                        if source_seen.get(source) == None {
+                            source_seen[source] = true
+                            if resolved.sources.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                            resolved.sources.push(source)
+                        }
+                    }
+                    loop raw in profile.packages {
+                        package_index :: if package_indices.get(raw) == {
+                            .Val(index) -> index
+                            .None -> {
+                                if resolved.packages.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                index :: resolved.packages.len()
+                                package_indices[raw] = index
+                                resolved.packages.push(PackageProfilePackage{raw: raw})
+                                index
+                            }
+                        }
+                        // Length-prefixed so distinct (raw, profile) pairs never share a key.
+                        owner_key :: "{raw.bytes().len()}:{raw}{current}"
+                        if declared_by_seen.get(owner_key) == None {
+                            declared_by_seen[owner_key] = true
+                            resolved.packages[package_index].declared_by.push(current)
+                        }
+                    }
+                    loop path in envmodel_sorted_keys(profile.collisions) {
+                        provider :: profile.collisions[path]
+                        if resolved.collisions.get(path) == {
+                            .Val(existing) -> {
+                                if existing != provider -> return Err(PackageProfileError.Conflict("{current}.collisions.{path}"))
+                            }
+                            .None -> {
+                                if resolved.collisions.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                resolved.collisions[path] = provider
+                            }
+                        }
+                    }
+                    next
+                }
+                parent :: profile.extends[parent_index]
+                parent_state :: state.get(parent) ?? 0
+                if parent_state == {
+                    @ENVMODEL_PROFILE_ENTERED -> {
+                        cycle := [String]{}
+                        started := false
+                        loop item in stack {
+                            if item == parent -> started = true
+                            if started -> cycle.push(item)
+                        }
+                        cycle.push(parent)
+                        return Err(PackageProfileError.Cycle(cycle))
+                    }
+                    @ENVMODEL_PROFILE_FINISHED -> {}
+                    else -> {
+                        frame_names.push(parent)
+                        frame_next.push(0)
+                    }
+                }
+            }
+        }
+        Ok(resolved)
+    }
+}

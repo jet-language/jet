@@ -1,0 +1,101 @@
+// The Store area's one error carrier, ported from the `std::io::Error`
+// values the Rust Hangar engine returns. Each Rust `ErrorKind` that callers
+// branch on keeps its own variant; the message text is the Rust message
+// byte for byte. `Io` carries a Core boundary failure unchanged, so a
+// `NotFound` from the filesystem stays distinguishable from a Hangar fact.
+
+#Error
+pub enum StoreError {
+    Io(IOError)
+    NotFound(String)
+    InvalidData(String)
+    InvalidInput(String)
+    AlreadyExists(String)
+    PermissionDenied(String)
+    Unsupported(String)
+    Interrupted(String)
+    // Rust `Lifecycle::CasConflict` (io kind AlreadyExists), recognized by
+    // external-root callers the way Rust downcasts it.
+    LifecycleConflict(expected: ?String, current: ?String)
+    Other(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Io(error) -> "{error}"
+            .NotFound(text) -> text
+            .InvalidData(text) -> text
+            .InvalidInput(text) -> text
+            .AlreadyExists(text) -> text
+            .PermissionDenied(text) -> text
+            .Unsupported(text) -> text
+            .Interrupted(text) -> text
+            .LifecycleConflict(_, _) -> "lifecycle root compare-and-swap conflict"
+            .Other(text) -> text
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound`.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .NotFound(_) -> true
+            .Io(error) -> if error == {
+                .NotFound(_) -> true
+                else -> false
+            }
+            else -> false
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::AlreadyExists`.
+    fn is_already_exists(self) -> Bool !Never {
+        if self == {
+            .AlreadyExists(_) -> true
+            .LifecycleConflict(_, _) -> true
+            .Io(error) -> if error == {
+                .AlreadyExists(_) -> true
+                else -> false
+            }
+            else -> false
+        }
+    }
+
+    // Rust `io::Error::new(error.kind(), text)`: keep the kind, replace the
+    // message.
+    fn with_message(self, text: String) -> StoreError !Never {
+        if self == {
+            .NotFound(_) -> StoreError.NotFound(text)
+            .InvalidData(_) -> StoreError.InvalidData(text)
+            .InvalidInput(_) -> StoreError.InvalidInput(text)
+            .AlreadyExists(_) -> StoreError.AlreadyExists(text)
+            .PermissionDenied(_) -> StoreError.PermissionDenied(text)
+            .Unsupported(_) -> StoreError.Unsupported(text)
+            .Interrupted(_) -> StoreError.Interrupted(text)
+            .Io(error) -> if error == {
+                .NotFound(_) -> StoreError.NotFound(text)
+                .PermissionDenied(_) -> StoreError.PermissionDenied(text)
+                .InvalidInput(_) -> StoreError.InvalidInput(text)
+                .AlreadyExists(_) -> StoreError.AlreadyExists(text)
+                .Unsupported(_) -> StoreError.Unsupported(text)
+                else -> StoreError.Other(text)
+            }
+            else -> StoreError.Other(text)
+        }
+    }
+}
+
+impl IOError -> StoreError { StoreError.Io(self) }
+
+// Rust `jet_pkg_model::Store::list_checked` returns `io::Error`; its
+// InvalidData facts keep their kind.
+impl HangarReadError -> StoreError {
+    if self == {
+        .Io(error) -> StoreError.Io(error)
+        .InvalidData(text) -> StoreError.InvalidData(text)
+    }
+}
+
+// Rust maps envelope hashing failures with `io::Error::other`.
+impl EnvelopeError -> StoreError { StoreError.Other(self.message()) }
+
+// Rust maps producer-plan failures with `io::Error::other`.
+impl ProviderPlanFactsError -> StoreError { StoreError.Other(self.message()) }

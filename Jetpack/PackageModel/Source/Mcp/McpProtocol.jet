@@ -441,6 +441,27 @@ pub struct McpPeer {
         Ok(negotiated)
     }
 
+    // Process the stable-session `initialize` and produce the typed result.
+    fn initialize(&self, params: McpInitializeParams, server_info: McpImplementation, server_capabilities: McpCapabilities) -> McpInitializeResult !McpLifecycleError {
+        protocol :: self.negotiated ?? return Err(McpLifecycleError.NotNegotiated)
+        if protocol.lifecycle != McpLifecycleProfile.Session -> return Err(McpLifecycleError.StatelessRevision)
+        if self.lifecycle != McpLifecycleState.Negotiated -> return Err(McpLifecycleError.InvalidState{operation: "initialize", lifecycle: self.lifecycle})
+        if params.protocol_version != protocol.revision.as_str() {
+            return Err(McpLifecycleError.ProtocolVersionMismatch{expected: protocol.revision, received: pkg_mcp_redacted_revision(params.protocol_version)})
+        }
+        if params.to_json_tree(self.policy.limits) == {
+            .Ok(_) -> {}
+            .Err(_) -> return Err(McpLifecycleError.InvalidInitialize)
+        }
+        result :: McpInitializeResult.new(protocol.revision, server_capabilities, server_info)
+        if result.to_json_tree(self.policy.limits) == {
+            .Ok(_) -> {}
+            .Err(_) -> return Err(McpLifecycleError.InvalidInitialize)
+        }
+        self.lifecycle = McpLifecycleState.Initializing
+        Ok(result)
+    }
+
     // The stable `initialized` notification.
     fn initialized(&self) !McpLifecycleError {
         if self.negotiated == None -> return Err(McpLifecycleError.NotNegotiated)

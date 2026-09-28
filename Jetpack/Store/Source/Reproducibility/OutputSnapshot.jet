@@ -1,0 +1,332 @@
+// Output snapshots and first-difference evidence for reproducibility
+// certification (Rust Store/Reproducibility.rs).
+//
+// A snapshot records, for every node the canonical output hash visits, its
+// kind, mode, content digest, symlink target, first hardlink peer, and
+// semantic xattr names. Two snapshots of one action are compared node by node
+// in path order; the first disagreement becomes the durable evidence.
+
+// Which property two outputs of one action first disagreed on.
+pub enum DifferenceKind {
+    ActionIdentity
+    CanonicalOutput
+    NodeKind
+    Mode
+    Bytes
+    SymlinkTarget
+    Hardlink
+    Xattrs
+    MissingLeft
+    MissingRight
+    Provenance
+    SourceFingerprint
+    RecipeFingerprint
+    PolicyFingerprint
+    Platform
+    PlatformArtifactKind
+    NamedOutput
+    NamedOutputPath
+    ProducerProvenance
+    References
+
+    fn label(self) -> String !Never {
+        if self == {
+            .ActionIdentity -> "action-identity"
+            .CanonicalOutput -> "canonical-output"
+            .NodeKind -> "node-kind"
+            .Mode -> "mode"
+            .Bytes -> "bytes"
+            .SymlinkTarget -> "symlink-target"
+            .Hardlink -> "hardlink"
+            .Xattrs -> "xattrs"
+            .MissingLeft -> "missing-left"
+            .MissingRight -> "missing-right"
+            .Provenance -> "provenance"
+            .SourceFingerprint -> "source-fingerprint"
+            .RecipeFingerprint -> "recipe-fingerprint"
+            .PolicyFingerprint -> "policy-fingerprint"
+            .Platform -> "platform"
+            .PlatformArtifactKind -> "platform-artifact-kind"
+            .NamedOutput -> "named-output"
+            .NamedOutputPath -> "named-output-path"
+            .ProducerProvenance -> "producer-provenance"
+            .References -> "references"
+        }
+    }
+}
+
+pub struct FirstDifference {
+    pub path: String
+    pub kind: DifferenceKind
+    pub left: String
+    pub right: String
+}
+
+pub enum ObservedNodeKind {
+    Directory
+    Symlink
+    File
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Directory -> "directory"
+            .Symlink -> "symlink"
+            .File -> "file"
+        }
+    }
+}
+
+pub struct NodeObservation {
+    pub kind: ObservedNodeKind
+    pub mode: Int
+    pub digest: ?String
+    pub target: ?String
+    pub hardlink: ?String
+    pub xattrs: [String]
+
+    // `kind=…;mode=…;digest=…;target=…;hardlink=…;xattrs=…` evidence text.
+    fn value(self) -> String !Never {
+        digest :: self.digest ?? "<none>"
+        target :: self.target ?? "<none>"
+        hardlink :: self.hardlink ?? "<none>"
+        "kind={self.kind.label()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
+    }
+}
+
+// One output's canonical digest plus every observed node, keyed by the
+// node's path relative to the output root (`""` is the root itself).
+pub struct OutputSnapshot {
+    pub digest: String
+    pub nodes: [String: NodeObservation]
+}
+
+fn store_repro_invalid(detail: String) -> StoreError !Never { StoreError.InvalidData(detail) }
+
+// Verify both outputs, then compare their canonical trees and entry metadata.
+fn store_repro_compare_entries(left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> ?FirstDifference !StoreError {
+    store_repro_verify_existing_output(left_roots, left)
+    store_repro_verify_existing_output(right_roots, right)
+    left_snapshot :: store_repro_snapshot_for_entry(left_roots, left)
+    right_snapshot :: store_repro_snapshot_for_entry(right_roots, right)
+    if left_snapshot.digest != right_snapshot.digest {
+        if store_repro_first_node_difference(left_snapshot, right_snapshot) == {
+            .Val(difference) -> return Ok(Val(difference))
+            else -> return Ok(Val(FirstDifference{path: ".", kind: .CanonicalOutput, left: left_snapshot.digest, right: right_snapshot.digest}))
+        }
+    }
+    Ok(store_repro_metadata_difference(left, right))
+}
+
+fn store_repro_snapshot_for_entry(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> OutputSnapshot !StoreError {
+    hangar :: roots.hangar_dir()
+    canonical_hangar :: files.canonicalize(hangar) ?? hangar
+    hangar_root :: if store_path_is_within(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+    store_repro_snapshot_output(entry.out, hangar_root, entry.platform_artifact_kind != "")
+}
+
+fn store_repro_snapshot_output(path: String, hangar_root: ?String, allow_semantic_xattrs: Bool) -[FS, Env]> OutputSnapshot !StoreError {
+    canonical :: files.canonicalize(path)
+    hook := EnvelopeWalkHook.recording()
+    hashed :: if hangar_root == {
+        .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, &hook)
+        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook)
+    }
+    digest :: if hashed == {
+        .Ok(digest) -> digest
+        .Err(error) -> return Err(StoreError.Other(error.message()))
+    }
+    nodes := [String: NodeObservation]{}
+    hardlink_first := [String: String]{}
+    loop event in hook.events {
+        if event.stage != EnvelopeWalkStage.Node -> next
+        if !store_path_is_within(event.path, canonical) {
+            return Err(store_repro_invalid("reproducibility observation escaped its output root"))
+        }
+        relative :: event.path.removeprefix(canonical).removeprefix("/")
+        observation :: store_repro_observe_node(event.path, relative, &hardlink_first)
+        if nodes.has_key(relative) -> return Err(store_repro_invalid("reproducibility observed one output node twice"))
+        nodes[relative] = observation
+    }
+    confirmed :: if hangar_root == {
+        .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs)
+        else -> pkg_try_output_hash_of(path)
+    }
+    if confirmed == {
+        .Ok(value) -> if value != digest -> return Err(store_repro_invalid("output changed while collecting reproducibility evidence"))
+        .Err(error) -> return Err(StoreError.Other(error.message()))
+    }
+    Ok(OutputSnapshot{digest, nodes})
+}
+
+fn store_repro_observe_node(path: String, relative: String, hardlink_first: &[String: String]) -[FS]> NodeObservation !StoreError {
+    info :: files.stat(path)
+    names :: if pkg_list_xattr_names(path) == {
+        .Ok(names) -> names
+        .Err(error) -> return Err(StoreError.Other(error.message()))
+    }
+    xattrs := [String]{}
+    loop name in names {
+        if !pkg_is_excluded_xattr(name) -> xattrs.push(name)
+    }
+    if info.is_dir && !info.is_symlink {
+        return Ok(NodeObservation{kind: .Directory, mode: info.mode, digest: None, target: None, hardlink: None, xattrs})
+    }
+    if info.is_symlink {
+        target :: files.read_link(path)
+        return Ok(NodeObservation{kind: .Symlink, mode: info.mode, digest: None, target: Val(store_repro_path_display(target)), hardlink: None, xattrs})
+    }
+    if !info.is_file -> return Err(store_repro_invalid("reproducibility observed an unsupported special file"))
+    hardlink := ?String{None}
+    if info.links > 1 {
+        identity :: "{info.id.device}:{info.id.inode}"
+        if hardlink_first.get(identity) == {
+            .Val(first) -> hardlink = Val(store_repro_path_display(first))
+            else -> {}
+        }
+        hardlink_first[identity] = relative
+    }
+    Ok(NodeObservation{kind: .File, mode: info.mode, digest: Val(store_repro_read_file_digest(path)), target: None, hardlink, xattrs})
+}
+
+// `sha256-<hex>` of a file read through a no-follow handle whose metadata
+// must not change while it is read.
+fn store_repro_read_file_digest(path: String) -[FS]> String !StoreError {
+    file :: files.open(path, links: .Refuse)
+    before :: store_repro_metadata_fingerprint(file.stat())
+    bytes := [U8]{}
+    loop chunk in file.chunks(65536) {
+        loop byte in chunk -> bytes.push(byte)
+    }
+    after :: store_repro_metadata_fingerprint(file.stat())
+    if before != after -> return Err(store_repro_invalid("file changed while collecting reproducibility evidence"))
+    Ok("sha256-{crypto.sha256(bytes).hex()}")
+}
+
+fn store_repro_metadata_fingerprint(info: files.Stat) -> String !Never {
+    modified :: info.modified.unix_ns
+    changed :: info.changed.unix_ns
+    "{info.id.device}:{info.id.inode}:{info.size}:{modified /% 1000000000}:{modified % 1000000000}:{changed /% 1000000000}:{changed % 1000000000}:{info.mode}"
+}
+
+fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot) -> ?FirstDifference !Never {
+    paths := left.nodes.keys()
+    loop path in right.nodes.keys() {
+        if !left.nodes.has_key(path) -> paths.push(path)
+    }
+    paths.sort()
+    loop path in paths {
+        if left.nodes.get(path) == {
+            .Val(left_node) -> {
+                if right.nodes.get(path) == {
+                    .Val(right_node) -> if left_node != right_node -> return Val(store_repro_node_difference(path, left_node, right_node))
+                    else -> return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingRight, left: left_node.value(), right: "<missing>"})
+                }
+            }
+            else -> {
+                right_node :: right.nodes[path]
+                return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingLeft, left: "<missing>", right: right_node.value()})
+            }
+        }
+    }
+    None
+}
+
+fn store_repro_node_difference(path: String, left: NodeObservation, right: NodeObservation) -> FirstDifference !Never {
+    kind :: if {
+        left.kind != right.kind -> DifferenceKind.NodeKind
+        left.mode != right.mode -> DifferenceKind.Mode
+        left.digest != right.digest -> DifferenceKind.Bytes
+        left.target != right.target -> DifferenceKind.SymlinkTarget
+        left.hardlink != right.hardlink -> DifferenceKind.Hardlink
+        else -> DifferenceKind.Xattrs
+    }
+    FirstDifference{path: store_repro_path_display(path), kind, left: left.value(), right: right.value()}
+}
+
+fn store_repro_metadata_difference(left: StoreEntry, right: StoreEntry) -> ?FirstDifference !Never {
+    checks :: [(kind: DifferenceKind, left: String, right: String)]{
+        (kind: .Provenance, left: left.envelope.provenance, right: right.envelope.provenance),
+        (kind: .SourceFingerprint, left: left.cache_identity.source_fingerprint, right: right.cache_identity.source_fingerprint),
+        (kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint),
+        (kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint),
+        (kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform),
+        (kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind),
+    }
+    loop check in checks {
+        if check.left != check.right -> return Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right})
+    }
+    names := left.named_outputs.keys()
+    loop name in right.named_outputs.keys() {
+        if !left.named_outputs.has_key(name) -> names.push(name)
+    }
+    names.sort()
+    loop name in names {
+        left_digest :: left.named_outputs.get(name)
+        right_digest :: right.named_outputs.get(name)
+        if left_digest != right_digest {
+            return Val(FirstDifference{path: "output/{name}", kind: .NamedOutput, left: left_digest ?? "<missing>", right: right_digest ?? "<missing>"})
+        }
+    }
+    left_provenance :: if ProducerRecord.decode(left.producer_record) == {
+        .Ok(producer) -> Val(store_repro_producer_provenance_facts(producer))
+        .Err(_) -> None
+    }
+    right_provenance :: if ProducerRecord.decode(right.producer_record) == {
+        .Ok(producer) -> Val(store_repro_producer_provenance_facts(producer))
+        .Err(_) -> None
+    }
+    if left_provenance != right_provenance {
+        return Val(FirstDifference{
+            path: ".",
+            kind: .ProducerProvenance,
+            left: store_repro_json_map(left_provenance ?? [String: String]{}),
+            right: store_repro_json_map(right_provenance ?? [String: String]{}),
+        })
+    }
+    None
+}
+
+// The producer facts that identify an action's provenance, excluding the
+// realized-output facts that legitimately differ between agreeing builds.
+fn store_repro_producer_provenance_facts(producer: ProducerRecord) -> [String: String] !Never {
+    facts := [String: String]{
+        "provider": producer.provider,
+        "immutable_source": producer.immutable_source,
+        "source_digest": producer.source_digest,
+        "toolchain_facts": producer.toolchain_facts,
+        "policy_facts": producer.policy_facts,
+    }
+    loop fact in producer.facts {
+        if !store_repro_is_action_ignored_fact(producer.provider, fact.key) && fact.key != "provider-facts" && fact.key != "provider-facts-digest" {
+            facts["fact.{fact.key}"] = fact.value
+        }
+    }
+    loop fact in producer.plan.facts() {
+        if !store_repro_is_action_ignored_fact(producer.provider, fact.key) -> facts["plan.{fact.key}"] = fact.value
+    }
+    facts
+}
+
+fn store_repro_is_output_fact(key: String) -> Bool !Never {
+    key.starts_with("output.") || key.starts_with("nix.output.") || key == "cache.output"
+}
+
+fn store_repro_is_action_ignored_fact(provider: String, key: String) -> Bool !Never {
+    store_repro_is_output_fact(key) || key == "cache.reproducibility" || (provider == "nix" && key == "nix.reference")
+}
+
+// A sorted-key JSON object of string values (Rust `json_map`).
+fn store_repro_json_map(map: [String: String]) -> String !Never {
+    json.canonical(store_repro_text_object(map))
+}
+
+fn store_repro_text_object(map: [String: String]) -> DataTree !Never {
+    object := [String: DataTree]{}
+    loop entry in map -> object[entry.key] = DataTree.Text(entry.value)
+    DataTree.Object(object)
+}
+
+fn store_repro_path_display(path: String) -> String !Never {
+    if path == "" -> return "."
+    path
+}

@@ -1,0 +1,131 @@
+// Immutable per-build node evidence for `explain-build` (Rust
+// `jet_store::BuildRecord`). The CAS payload is JSON so tools can inspect it
+// without a second codec.
+
+@STORE_BUILD_RECORD_SCHEMA :: "jet.build-record/v1"
+
+// One compiler-owned node execution recorded for `explain-build`.
+pub struct BuildNodeRecord {
+    pub kind: String
+    pub key: String
+    pub subject: String
+    pub duration_ms: Float
+    pub why_ran: String
+    pub inputs: [String]
+}
+
+// Immutable per-build node evidence stored in the machine-wide CAS.
+pub struct BuildRecord {
+    pub schema: String
+    pub program: String
+    pub nodes: [BuildNodeRecord]
+
+    fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord !Never {
+        BuildRecord{schema: @STORE_BUILD_RECORD_SCHEMA, program, nodes}
+    }
+
+    // Compact JSON in field order; a negative or non-finite duration is
+    // recorded as 0.
+    fn to_json(self) -> String !Never {
+        nodes := [DataTree]{}
+        loop node in self.nodes {
+            inputs := [DataTree]{}
+            loop input in node.inputs -> inputs.push(DataTree.Text(input))
+            finite :: node.duration_ms - node.duration_ms == 0.0
+            duration :: if finite && node.duration_ms >= 0.0 -> node.duration_ms else -> 0.0
+            nodes.push(DataTree.Object([
+                "kind": DataTree.Text(node.kind),
+                "key": DataTree.Text(node.key),
+                "subject": DataTree.Text(node.subject),
+                "duration_ms": DataTree.Float(duration),
+                "why_ran": DataTree.Text(node.why_ran),
+                "inputs": DataTree.Array(inputs),
+            ]))
+        }
+        document :: DataTree.Object([
+            "schema": DataTree.Text(self.schema),
+            "program": DataTree.Text(self.program),
+            "nodes": DataTree.Array(nodes),
+        ])
+        json.to_string(document) ?? panic("compact JSON rendering of a DataTree is total")
+    }
+
+    // Parse a record, refusing any schema other than the current one.
+    fn from_json(payload: String) -> BuildRecord !BuildRecordError {
+        value :: json.parse(payload) ?? return Err(BuildRecordError{reason: "build record is not valid JSON"})
+        object :: store_build_record_object(value) ?? return Err(BuildRecordError{reason: "build record must be an object: expected a DataTree object"})
+        schema_value :: object.get("schema") ?? return Err(BuildRecordError{reason: "build record is missing schema"})
+        schema :: store_build_record_text(schema_value) ?? return Err(BuildRecordError{reason: "build record schema is invalid: expected a DataTree string"})
+        if schema != @STORE_BUILD_RECORD_SCHEMA -> return Err(BuildRecordError{reason: "unsupported build record schema `{schema}`"})
+        program_value :: object.get("program") ?? return Err(BuildRecordError{reason: "build record is missing program"})
+        program :: store_build_record_text(program_value) ?? return Err(BuildRecordError{reason: "build record program is invalid: expected a DataTree string"})
+        nodes_value :: object.get("nodes") ?? return Err(BuildRecordError{reason: "build record is missing nodes"})
+        values :: store_build_record_array(nodes_value) ?? return Err(BuildRecordError{reason: "build record nodes are invalid: expected a DataTree array"})
+        nodes := [BuildNodeRecord]{}
+        loop item in values {
+            node :: store_build_record_object(item) ?? return Err(BuildRecordError{reason: "build record node is invalid: expected a DataTree object"})
+            duration_value :: node.get("duration_ms") ?? return Err(BuildRecordError{reason: "build record node is missing duration_ms"})
+            duration_ms :: store_build_record_number(duration_value) ?? return Err(BuildRecordError{reason: "build record node duration_ms is invalid"})
+            if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 {
+                return Err(BuildRecordError{reason: "build record node duration_ms is out of range"})
+            }
+            inputs_value :: node.get("inputs") ?? return Err(BuildRecordError{reason: "build record node is missing inputs"})
+            input_values :: store_build_record_array(inputs_value) ?? return Err(BuildRecordError{reason: "build record node inputs are invalid: expected a DataTree array"})
+            inputs := [String]{}
+            loop input in input_values {
+                inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a DataTree string"}))
+            }
+            nodes.push(BuildNodeRecord{
+                kind: store_build_record_string_field(node, "kind"),
+                key: store_build_record_string_field(node, "key"),
+                subject: store_build_record_string_field(node, "subject"),
+                duration_ms,
+                why_ran: store_build_record_string_field(node, "why_ran"),
+                inputs,
+            })
+        }
+        Ok(BuildRecord{schema, program, nodes})
+    }
+}
+
+// Why a build record payload was refused (the Rust `String` error).
+#Error
+pub struct BuildRecordError {
+    pub reason: String
+}
+
+fn store_build_record_string_field(node: [String: DataTree], name: String) -> String !BuildRecordError {
+    value :: node.get(name) ?? return Err(BuildRecordError{reason: "build record node is missing {name}"})
+    text :: store_build_record_text(value) ?? return Err(BuildRecordError{reason: "build record node {name} is invalid: expected a DataTree string"})
+    Ok(text)
+}
+
+fn store_build_record_object(value: DataTree) -> ?[String: DataTree] !Never {
+    if value == {
+        .Object(entries) -> Val(entries)
+        else -> None
+    }
+}
+
+fn store_build_record_array(value: DataTree) -> ?[DataTree] !Never {
+    if value == {
+        .Array(items) -> Val(items)
+        else -> None
+    }
+}
+
+fn store_build_record_text(value: DataTree) -> ?String !Never {
+    if value == {
+        .Text(text) -> Val(text)
+        else -> None
+    }
+}
+
+// A JSON number as a Float (Rust `Int as f64` or `Float`), or None.
+fn store_build_record_number(value: DataTree) -> ?Float !Never {
+    if value == {
+        .Int(whole) -> Val(Float.from_int(whole))
+        .Float(fraction) -> Val(fraction)
+        else -> None
+    }
+}

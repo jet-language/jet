@@ -1,0 +1,85 @@
+// The CLI area's one error carrier for command failures that travel before a
+// command renders its diagnostic. Rust `io::Error` values keep their kind:
+// file-system failures travel as `Io`, and the `ErrorKind::InvalidData` /
+// `PermissionDenied` / `Other` refusals carry their final text.
+// `ProviderFacts` is the E1335 package-generation refusal (Rust spelled it as
+// an `"E1335: "` message prefix) and `ManagedTool` the E1340 managed-tool
+// write refusal (Rust matched the "managed tool `" message text).
+
+#Error
+pub enum CliError {
+    Io(IOError)
+    InvalidData(String)
+    NotFound(String)
+    PermissionDenied(String)
+    AlreadyExists(String)
+    Other(String)
+    ProviderFacts(String)
+    ManagedTool(String)
+    Store(StoreError)
+    Environment(EnvironmentError)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Io(error) -> "{error}"
+            .InvalidData(text) -> text
+            .NotFound(text) -> text
+            .PermissionDenied(text) -> text
+            .AlreadyExists(text) -> text
+            .Other(text) -> text
+            .ProviderFacts(text) -> "E1335: {text}"
+            .ManagedTool(text) -> text
+            .Store(error) -> error.message()
+            .Environment(error) -> error.message()
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::NotFound` across the carriers.
+    fn is_not_found(self) -> Bool !Never {
+        if self == {
+            .Io(error) -> cli_io_error_is_not_found(error)
+            .NotFound(_) -> true
+            .Store(error) -> error.is_not_found()
+            .Environment(error) -> error.is_not_found()
+            else -> false
+        }
+    }
+
+    // Rust `error.kind() == ErrorKind::PermissionDenied`.
+    fn is_permission_denied(self) -> Bool !Never {
+        if self == {
+            .Io(error) -> cli_io_error_is_permission_denied(error)
+            .PermissionDenied(_) -> true
+            .Store(error) -> cli_store_error_is_permission_denied(error)
+            else -> false
+        }
+    }
+}
+
+fn cli_io_error_is_not_found(error: IOError) -> Bool !Never {
+    if error == {
+        .NotFound(_) -> true
+        else -> false
+    }
+}
+
+fn cli_io_error_is_permission_denied(error: IOError) -> Bool !Never {
+    if error == {
+        .PermissionDenied(_) -> true
+        else -> false
+    }
+}
+
+fn cli_store_error_is_permission_denied(error: StoreError) -> Bool !Never {
+    if error == {
+        .PermissionDenied(_) -> true
+        .Io(inner) -> cli_io_error_is_permission_denied(inner)
+        else -> false
+    }
+}
+
+impl IOError -> CliError { CliError.Io(self) }
+
+impl StoreError -> CliError { CliError.Store(self) }
+
+impl EnvironmentError -> CliError { CliError.Environment(self) }

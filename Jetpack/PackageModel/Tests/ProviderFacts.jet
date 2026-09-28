@@ -1,0 +1,120 @@
+// Carrier claims ported from crates/jet-pkg-model/src/ProviderFacts.rs
+// #[cfg(test)]; the two selector-only claims are in ProviderSelector.jet.
+
+fn pkg_test_has_loss(facts: ProviderFacts, needle: String) -> Bool {
+    loop loss in facts.losses {
+        if loss.reason.contains(needle) -> return true
+    }
+    false
+}
+
+fn pkg_test_validate_error(facts: ProviderFacts) -> String {
+    if facts.validate() == {
+        .Ok(_) -> panic("provider facts must fail validation")
+        .Err(error) -> error.message
+    }
+}
+
+#Test("provider facts round trip identity provenance and native bytes") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@npm#2.0.17")
+    facts.set_resolved_source("npm:left-pad@2.0.17")
+    facts.set_native_document("package.json", "{{\"name\":\"left-pad\"}}\n")
+    facts.add_fact("package.version", ProviderFactValue.Text("2.0.17"), "package.json.version")
+    facts.validate() ?? panic("lossless provider facts")
+    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@npm")
+    round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("provider facts JSON")
+    assert_eq(round_trip, facts)
+    assert(round_trip.explain_lines().contains("native package.json: retained"))
+}
+
+#Test("mutable selector is an explicit loss") {
+    facts :: ProviderFacts.for_reference("npm", "vite#^5@npm")
+    assert(!facts.is_lossless())
+    error :: pkg_test_validate_error(facts)
+    assert(error.contains("lossy") || error.contains("exact"))
+}
+
+#Test("external provider requires a qualified source suffix") {
+    facts :: ProviderFacts.for_reference("npm", "left-pad#1.0.0")
+    assert(pkg_test_has_loss(facts, "fully qualified provider source suffix"))
+    _ :: pkg_test_validate_error(facts)
+}
+
+#Test("mutable revision ref is an explicit loss") {
+    facts :: ProviderFacts.for_reference("swiftpm", "swift-log#revision=feature/main@swiftpm")
+    keyed := false
+    loop loss in facts.losses {
+        if loss.key == "provider.selector.revision" -> keyed = true
+    }
+    assert(keyed)
+    _ :: pkg_test_validate_error(facts)
+}
+
+#Test("source alias is retained and external provider mismatch conflicts") {
+    alias :: ProviderFacts.for_reference("nix", "ripgrep@default")
+    assert_eq(alias.facts.get("provider.authority"), Val(ProviderFactValue.Text("default")))
+    alias.validate() ?? panic("named source authority is valid")
+    conflict :: ProviderFacts.for_reference("npm", "left-pad@cargo#1.0.0")
+    keyed := false
+    loop item in conflict.conflicts {
+        if item.key == "provider" -> keyed = true
+    }
+    assert(keyed)
+    _ :: pkg_test_validate_error(conflict)
+}
+
+#Test("resolved selector makes an unpinned source explicit") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
+    facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    facts.set_resolved_source("left-pad#version=2.0.17@npm")
+    facts.validate() ?? panic("resolved source selector is lossless")
+    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@catalog")
+    round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("carrier round trip")
+    assert_eq(round_trip, facts)
+    mentioned := false
+    loop line in facts.explain_lines() {
+        if line.contains("provider.resolved_selector") -> mentioned = true
+    }
+    assert(mentioned)
+}
+
+#Test("conflicting native documents are reported") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@npm#1.0.0")
+    facts.set_native_document("package.json", "one")
+    facts.set_native_document("package.json", "two")
+    keyed := false
+    loop conflict in facts.conflicts {
+        if conflict.key == "provider.native_document" -> keyed = true
+    }
+    assert(keyed)
+    _ :: pkg_test_validate_error(facts)
+}
+
+#Test("resolved selector does not hide unsupported requested facts") {
+    facts := ProviderFacts.for_reference("npm", "left-pad#channel=next@catalog")
+    facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    assert(pkg_test_has_loss(facts, "unsupported selector fact"))
+    _ :: pkg_test_validate_error(facts)
+}
+
+#Test("selector carrier tampering is rejected") {
+    npm := ProviderFacts.for_reference("npm", "left-pad#version=2.0.17@npm")
+    npm.selector.raw = "#version=2.0.17&channel=next"
+    _ :: pkg_test_validate_error(npm)
+    core := ProviderFacts.for_reference("core", "profile@core")
+    core.selector.version = "2.0.17"
+    _ :: pkg_test_validate_error(core)
+}
+
+#Test("resolved selector rejects unsupported facts") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
+    facts.set_resolved_selector("#version=2.0.17&channel=next", "policy.providers.catalog")
+    assert(pkg_test_has_loss(facts, "unsupported resolved selector fact"))
+    _ :: pkg_test_validate_error(facts)
+}
+
+#Test("duplicate selector facts are explicit loss") {
+    facts :: ProviderFacts.for_reference("npm", "left-pad#version=2.0.17&version=2.0.17&features=ssl+ssl@npm")
+    assert(pkg_test_has_loss(facts, "duplicate selector fact"))
+    _ :: pkg_test_validate_error(facts)
+}

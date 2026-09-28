@@ -1,12 +1,86 @@
-// Claims ported from crates/jet-pkg-model/src/MCP.rs #[cfg(test)]. The
-// initialize exchange and codec round trips carry DataTree values and are
-// not part of this unit.
+// Claims ported from crates/jet-pkg-model/src/MCP.rs #[cfg(test)].
 
-#Test("stable mcp peer negotiates the stable revision") {
+fn pkg_test_mcp_list_request(id: Int, params: DataTree) -> McpMessage {
+    McpMessage.Request(McpRequest.new(McpRequestId.Number(id), "tools/list", Val(params)) ?? panic("valid tools/list request"))
+}
+
+fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
+    if result == {
+        .InvalidJson -> "InvalidJson"
+        .InvalidMessage(_) -> "InvalidMessage"
+        .MessageTooLarge(_, _) -> "MessageTooLarge"
+        .SchemaTooDeep(_) -> "SchemaTooDeep"
+        .CapabilityLimitExceeded(_, _) -> "CapabilityLimitExceeded"
+        .InvalidLimit(name, _, _) -> "InvalidLimit {name}"
+    }
+}
+
+#Test("stable mcp peer negotiates and completes the session lifecycle") {
     peer := McpPeer.server(McpPolicy.stable())
     selected :: peer.negotiate([String]{@MCP_PREVIEW_REVISION, @MCP_STABLE_REVISION}) ?? panic("stable negotiation")
     assert_eq(selected.revision, McpRevision.Stable20251125)
     assert_eq(peer.state(), McpLifecycleState.Negotiated)
+    client_info :: McpImplementation.new("client", "1") ?? panic("client identity")
+    params :: McpInitializeParams.new(McpRevision.Stable20251125, McpCapabilities.empty(), Val(client_info))
+    server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
+    _ :: peer.initialize(params, server_info, McpCapabilities.empty()) ?? panic("initialize")
+    peer.initialized() ?? panic("initialized")
+    peer.shutdown() ?? panic("shutdown")
+    peer.exit() ?? panic("exit")
+    assert_eq(peer.state(), McpLifecycleState.Closed)
+    assert_eq(peer.audit_facts().as_map()["mcp.protocol_version"], @MCP_STABLE_REVISION)
+}
+
+#Test("mcp stateless preview revision refuses session initialize") {
+    preview := McpPeer.server(McpPolicy.stable_and([McpRevision]{McpRevision.Preview20260728}))
+    _ :: preview.negotiate([String]{@MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
+    if preview.initialize(McpInitializeParams.new(McpRevision.Preview20260728, McpCapabilities.empty(), None), server_info, McpCapabilities.empty()) == {
+        .Ok(_) -> panic("stateless revisions have no session initialize")
+        .Err(error) -> assert_eq(error, McpLifecycleError.StatelessRevision)
+    }
+    preview.exit() ?? panic("stateless exit")
+}
+
+#Test("mcp codecs round trip messages and enforce bounds") {
+    request :: pkg_test_mcp_list_request(7, DataTree.Object([String: DataTree]{}))
+    codec :: McpCodec.Stable20251125
+    encoded :: codec.encode_message(request, McpLimits.defaults()) ?? panic("encode")
+    assert_eq(codec.decode_message(encoded, McpLimits.defaults()) ?? panic("decode"), request)
+    tiny := McpLimits.defaults()
+    tiny.max_message_bytes = 1
+    if codec.encode_message(request, tiny) == {
+        .Ok(_) -> panic("one byte cannot hold a request")
+        .Err(error) -> assert_eq(pkg_test_mcp_codec_error(error), "MessageTooLarge")
+    }
+}
+
+#Test("mcp codec rejects invalid limits and malformed json") {
+    request :: pkg_test_mcp_list_request(1, DataTree.Object([String: DataTree]{}))
+    codec :: McpCodec.Stable20251125
+    zero := McpLimits.defaults()
+    zero.max_message_bytes = 0
+    if codec.encode_message(request, zero) == {
+        .Ok(_) -> panic("a zero byte limit is invalid")
+        .Err(error) -> assert_eq(pkg_test_mcp_codec_error(error), "InvalidLimit max_message_bytes")
+    }
+    if codec.decode_message("{{", McpLimits.defaults()) == {
+        .Ok(_) -> panic("truncated JSON must not decode")
+        .Err(error) -> assert_eq(error, McpCodecError.InvalidJson)
+    }
+}
+
+#Test("mcp codec rejects nested values beyond the schema bound") {
+    nested :: DataTree.Object(["nested": DataTree.Object(["value": DataTree.Object([String: DataTree]{})])])
+    request :: pkg_test_mcp_list_request(2, nested)
+    codec :: McpCodec.Stable20251125
+    encoded :: codec.encode_message(request, McpLimits.defaults()) ?? panic("encode")
+    shallow := McpLimits.defaults()
+    shallow.max_schema_depth = 1
+    if codec.decode_message(encoded, shallow) == {
+        .Ok(_) -> panic("depth two exceeds a bound of one")
+        .Err(error) -> assert_eq(pkg_test_mcp_codec_error(error), "SchemaTooDeep")
+    }
 }
 
 #Test("mcp preview requires explicit opt in and uses the stateless profile") {

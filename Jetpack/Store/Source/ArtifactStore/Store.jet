@@ -1,0 +1,932 @@
+// The local content-addressed artifact store (Rust `jet_store::Store`): a
+// verified blob CAS (`cas/`), an immutable action cache (`ac/`), per-namespace
+// LTO objects (`lto/<namespace>/`), build-record pointers, one machine-wide
+// lock, owner-checked leases, a checksummed access journal, capacity
+// admission against a cap and a free-disk reserve, and deterministic LRU
+// pruning. Corrupt entries are moved to `quarantine/` before a miss is
+// reported, so a later publish repairs them.
+
+// A deterministic store listing entry.
+pub struct ArtifactEntryStatus {
+    pub kind: ArtifactEntryKind
+    pub key: String
+    pub namespace: ?String
+    pub size_bytes: Int
+    pub last_use: Int
+    pub pinned: Bool
+    pub path: String
+}
+
+// Store state suitable for status UIs and deterministic tests.
+pub struct ArtifactStoreStatus {
+    pub root: String
+    pub footprint_bytes: Int
+    pub limit_bytes: Int
+    pub reserve_bytes: Int
+    pub available_bytes: ?Int
+    pub live_leases: Int
+    pub host_limit_bytes: ?Int
+    pub entries: [ArtifactEntryStatus]
+    pub tiers: [String]
+}
+
+// The result of one deterministic prune operation.
+pub struct ArtifactPruneReport {
+    pub target_bytes: Int
+    pub before_bytes: Int
+    pub after_bytes: Int
+    pub removed: [ArtifactEntryStatus]
+    pub pinned_bytes: Int
+    pub blocked: Bool
+}
+
+// A verified action record that points at one immutable CAS object.
+pub struct StoredArtifact {
+    pub action: ActionHandle
+    pub object: ObjectHandle
+    pub path: String
+    pub executable: Bool
+}
+
+// Result of looking up a named artifact. Corrupt records and objects are
+// quarantined before `Corrupt` is returned.
+pub enum ArtifactLookup {
+    Missing
+    Corrupt
+    Hit(StoredArtifact)
+}
+
+// Result of restoring a named artifact to a display path.
+pub enum ArtifactRestore {
+    Missing
+    Corrupt
+    Hit(object: ObjectHandle, executable: Bool)
+}
+
+// One scanned entry with its journal and lease facts.
+struct ArtifactStoredEntry {
+    key: ArtifactEntryKey
+    path: String
+    size_bytes: Int
+    last_use: Int
+    pinned: Bool
+
+    fn status(self) -> ArtifactEntryStatus !Never {
+        namespace :: if self.key == {
+            .Lto(namespace, _) -> Val(namespace)
+            else -> None
+        }
+        key :: if self.key == {
+            .Blob(key) | .Action(key) -> key
+            .Lto(_, key) -> key
+        }
+        ArtifactEntryStatus{
+            kind: self.key.kind(),
+            key,
+            namespace,
+            size_bytes: self.size_bytes,
+            last_use: self.last_use,
+            pinned: self.pinned,
+            path: self.path,
+        }
+    }
+}
+
+fn store_artifact_sort_entries(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] !Never {
+    out := entries
+    out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.key.kind().rank() <=> right.key.kind().rank()).then(left.key.primary() <=> right.key.primary()).then(left.key.secondary() <=> right.key.secondary()))
+    out
+}
+
+fn store_artifact_footprint(entries: [ArtifactStoredEntry]) -> Int !Never {
+    total := 0
+    loop entry in entries -> total = store_artifact_saturating_add(total, entry.size_bytes)
+    total
+}
+
+// Multiplication clamped at the largest Int (Rust `saturating_mul` on u64).
+fn store_artifact_saturating_mul(left: Int, right: Int) -> Int !Never {
+    if left != 0 && right > @STORE_ARTIFACT_INT_MAX /% left -> return @STORE_ARTIFACT_INT_MAX
+    left * right
+}
+
+// The local content-addressed artifact store. `owner` is this process's
+// identity, drawn once when the store opens and written into its lock and
+// lease files.
+pub struct ArtifactStore {
+    config: ArtifactStoreConfig
+    owner: ArtifactProcessIdentity
+
+    fn open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+        if config.root() == "" -> return Err(ArtifactStoreError.Config("store root cannot be empty"))
+        store :: ArtifactStore{config, owner: ArtifactProcessIdentity.current()}
+        store.ensure_layout()
+        Ok(store)
+    }
+
+    fn new(root: String) -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+        ArtifactStore.open(ArtifactStoreConfig.new(root))
+    }
+
+    fn from_env() -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+        ArtifactStore.open(ArtifactStoreConfig.from_env())
+    }
+
+    fn config(self) -> ArtifactStoreConfig !Never { self.config }
+
+    fn root(self) -> String !Never { self.config.root() }
+
+    fn owner(self) -> ArtifactProcessIdentity !Never { self.owner }
+
+    // The effective capacity: the explicit cap, else a tenth of the volume
+    // capped at 20 GiB, never above the persisted host limit.
+    fn limit(self) -[FS, Exec, Time]> Int !Never {
+        total :: if store_artifact_filesystem_stats(self.root()) == {
+            .Val(stats) -> Val(stats.total_bytes)
+            else -> None
+        }
+        self.limit_with_disk(total)
+    }
+
+    fn effective_limit(self) -[FS, Exec, Time]> Int !Never { self.limit() }
+
+    fn object_path(self, object: ObjectHandle) -> String !Never {
+        files.join(files.join(self.root(), "cas"), object.key())
+    }
+
+    fn action_path(self, action: ActionHandle) -> String !Never {
+        files.join(files.join(self.root(), "ac"), action.key())
+    }
+
+    fn lto_path(self, namespace: String, object: ObjectHandle) -> String !Never {
+        files.join(files.join(files.join(self.root(), "lto"), namespace), object.key())
+    }
+
+    fn publish_blob(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+        object :: ObjectHandle.from_bytes(bytes)
+        self.publish_object(object, bytes)
+        Ok(object)
+    }
+
+    fn publish_object(self, object: ObjectHandle, bytes: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+        actual :: ObjectHandle.from_bytes(bytes)
+        if actual != object {
+            return Err(ArtifactStoreError.Corrupt{path: self.object_path(object), reason: "published bytes are {actual.text()}, expected {object.text()}"})
+        }
+        self.publish_data(ArtifactEntryKey.Blob(object.key()), self.object_path(object), bytes)
+    }
+
+    fn get_blob(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+        key :: ArtifactEntryKey.Blob(object.key())
+        path :: self.object_path(object)
+        if store_artifact_read_file(path) == {
+            .Missing -> Ok(None)
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(key, path, reason)
+                Ok(None)
+            }
+            .Bytes(bytes) -> {
+                if bytes.len() != object.length() || ArtifactDigest.hash(bytes) != object.digest() {
+                    self.quarantine_after_read(key, path, "digest or length mismatch")
+                    return Ok(None)
+                }
+                self.touch_after_read(key, bytes.len())
+                Ok(Val(bytes))
+            }
+        }
+    }
+
+    // Read a blob when only its digest is available. This is the lookup used
+    // by build-record pointers; the bytes remain verified before returning.
+    fn blob_by_digest(self, digest: ArtifactDigest) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+        key :: ArtifactEntryKey.Blob(digest.to_hex())
+        path :: files.join(files.join(self.root(), "cas"), digest.to_hex())
+        if store_artifact_read_file(path) == {
+            .Missing -> Ok(None)
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(key, path, reason)
+                Ok(None)
+            }
+            .Bytes(bytes) -> {
+                if ArtifactDigest.hash(bytes) != digest {
+                    self.quarantine_after_read(key, path, "digest mismatch")
+                    return Ok(None)
+                }
+                self.touch_after_read(key, bytes.len())
+                Ok(Val(bytes))
+            }
+        }
+    }
+
+    // Publish one immutable build record through the ordinary blob CAS.
+    // `key` is the caller's content key. The small index pointer is mutable
+    // only so `latest_build_record` can find the newest content key.
+    fn publish_build_record(self, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+        object :: self.publish_blob(record.to_json().bytes())
+        self.ensure_layout()
+        pointer :: self.build_record_pointer_path(key)
+        if self.read_build_pointer(pointer) == {
+            .Val(existing) -> {
+                if existing != object {
+                    if self.build_record(key) != Val(record) -> return Err(ArtifactStoreError.Conflict{path: pointer})
+                }
+            }
+            else -> {}
+        }
+        latest :: self.latest_build_record_pointer_path(record.program)
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        store_artifact_atomic_write(pointer, object.text().bytes())
+        store_artifact_atomic_write(latest, key.bytes())
+        Ok(object)
+    }
+
+    // Load an immutable build record addressed by its content key.
+    fn build_record(self, key: String) -[FS, Env, Exec, Time, Rand]> ?BuildRecord !ArtifactStoreError {
+        pointer :: self.build_record_pointer_path(key)
+        object :: self.read_build_pointer(pointer) ?? return Ok(None)
+        bytes :: self.get_blob(object) ?? return Ok(None)
+        payload :: String.from_bytes(bytes) ?? return Err(ArtifactStoreError.Corrupt{path: pointer, reason: "build record blob is not UTF-8"})
+        if BuildRecord.from_json(payload) == {
+            .Ok(record) -> Ok(Val(record))
+            .Err(error) -> Err(ArtifactStoreError.Corrupt{path: self.build_record_pointer_path(key), reason: error.reason})
+        }
+    }
+
+    // Load the most recent record for a logical program path.
+    fn latest_build_record(self, program: String) -[FS, Env, Exec, Time, Rand]> ?BuildRecord !ArtifactStoreError {
+        path :: self.latest_build_record_pointer_path(program)
+        key :: if store_artifact_read_file(path) == {
+            .Missing -> {
+                return Ok(None)
+            }
+            .Corrupt(reason) -> {
+                return Err(ArtifactStoreError.Corrupt{path: path, reason: reason})
+            }
+            .Bytes(bytes) -> {
+                text :: String.from_bytes(bytes) ?? return Err(ArtifactStoreError.Corrupt{path: path, reason: "latest build pointer is not UTF-8"})
+                text.trim()
+            }
+        }
+        self.build_record(key)
+    }
+
+    fn build_record_pointer_path(self, key: String) -> String !Never {
+        files.join(files.join(files.join(self.root(), "build-records"), "records"), ArtifactDigest.hash(key.bytes()).to_hex())
+    }
+
+    fn latest_build_record_pointer_path(self, program: String) -> String !Never {
+        files.join(files.join(files.join(self.root(), "build-records"), "latest"), ArtifactDigest.hash(program.bytes()).to_hex())
+    }
+
+    fn read_build_pointer(self, path: String) -[FS]> ?ObjectHandle !ArtifactStoreError {
+        bytes :: if store_artifact_read_file(path) == {
+            .Missing -> {
+                return Ok(None)
+            }
+            .Corrupt(reason) -> {
+                return Err(ArtifactStoreError.Corrupt{path: path, reason: reason})
+            }
+            .Bytes(read) -> read
+        }
+        text :: String.from_bytes(bytes) ?? return Err(ArtifactStoreError.Corrupt{path: path, reason: "build record pointer is not UTF-8"})
+        parts :: store_artifact_split_once(text.trim(), ":") ?? return Err(ArtifactStoreError.Corrupt{path: path, reason: "build record pointer has invalid handle"})
+        digest :: ArtifactDigest.from_hex(parts.before)
+        length :: store_artifact_parse_count(parts.after) ?? return Err(ArtifactStoreError.Corrupt{path: path, reason: "build record pointer has invalid length"})
+        Ok(Val(ObjectHandle.new(digest, length)))
+    }
+
+    fn get_object(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+        self.get_blob(object)
+    }
+
+    fn contains(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> Bool !ArtifactStoreError {
+        found :: self.get_blob(object)
+        Ok(found != None)
+    }
+
+    fn publish_action(self, action: ActionHandle, record: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+        path :: self.action_path(action)
+        key :: ArtifactEntryKey.Action(action.key())
+        encoded :: store_artifact_encode_action(action, record)
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        if store_artifact_read_file(path) == {
+            .Missing -> {}
+            .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+            .Bytes(existing) -> {
+                if store_artifact_decode_action(action, existing) == {
+                    .Ok(value) -> {
+                        if value != record -> return Err(ArtifactStoreError.Conflict{path: path})
+                        return self.append_journal_locked("touch", key, existing.len())
+                    }
+                    .Err(error) -> self.quarantine_locked(key, path, error.reason)
+                }
+            }
+        }
+        self.ensure_capacity_locked(encoded.len(), path)
+        store_artifact_atomic_write(path, encoded)
+        self.append_journal_locked("put", key, encoded.len())
+    }
+
+    fn get_action(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+        key :: ArtifactEntryKey.Action(action.key())
+        path :: self.action_path(action)
+        if store_artifact_read_file(path) == {
+            .Missing -> Ok(None)
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(key, path, reason)
+                Ok(None)
+            }
+            .Bytes(bytes) -> {
+                if store_artifact_decode_action(action, bytes) == {
+                    .Ok(record) -> {
+                        self.touch_after_read(key, bytes.len())
+                        Ok(Val(record))
+                    }
+                    .Err(error) -> {
+                        if store_artifact_is_unsupported_version(bytes) -> return Ok(None)
+                        self.quarantine_after_read(key, path, error.reason)
+                        Ok(None)
+                    }
+                }
+            }
+        }
+    }
+
+    fn action(self, key: String) -> ActionHandle !Never { ActionHandle.from_key(key) }
+
+    fn publish_lto(self, namespace: String, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+        valid :: LtoNamespace.new(namespace)
+        object :: ObjectHandle.from_bytes(bytes)
+        key :: ArtifactEntryKey.Lto{namespace: valid.name(), key: object.key()}
+        self.publish_data(key, self.lto_path(valid.name(), object), bytes)
+        Ok(object)
+    }
+
+    fn get_lto(self, namespace: String, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+        valid :: LtoNamespace.new(namespace)
+        key :: ArtifactEntryKey.Lto{namespace: valid.name(), key: object.key()}
+        path :: self.lto_path(valid.name(), object)
+        if store_artifact_read_file(path) == {
+            .Missing -> Ok(None)
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(key, path, reason)
+                Ok(None)
+            }
+            .Bytes(bytes) -> {
+                if bytes.len() != object.length() || ArtifactDigest.hash(bytes) != object.digest() {
+                    self.quarantine_after_read(key, path, "digest or length mismatch")
+                    return Ok(None)
+                }
+                self.touch_after_read(key, bytes.len())
+                Ok(Val(bytes))
+            }
+        }
+    }
+
+    fn lto_namespace(self, namespace: String) -> LtoNamespace !ArtifactStoreError {
+        LtoNamespace.new(namespace)
+    }
+
+    fn acquire_lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+        targets := [LeaseTarget]{}
+        loop object in objects -> targets.push(LeaseTarget.Blob(object))
+        self.acquire_artifact_lease(targets)
+    }
+
+    fn lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+        self.acquire_lease(objects)
+    }
+
+    // Pin `targets` from pruning until the returned lease is closed.
+    fn acquire_artifact_lease(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        directory :: files.join(self.root(), "leases")
+        path :: files.join(directory, "lease-{self.owner.pid()}-{store_artifact_unique_token()}")
+        keys := [ArtifactEntryKey]{}
+        loop target in targets -> keys.push(target.entry_key())
+        text := self.owner.owner_line("lease")
+        loop key in store_artifact_unique_keys(keys) -> text = "{text}{key.kind_name()}|{key.wire_value()}\n"
+        store_artifact_create_new_synced(path, text.bytes())
+        store_artifact_sync_dir(directory)
+        Ok(ArtifactLease{path, owner: self.owner})
+    }
+
+    fn status(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus !ArtifactStoreError {
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        self.status_locked()
+    }
+
+    // The persisted machine-level cap, if one was configured.
+    fn host_limit(self) -[FS]> ?Int !ArtifactStoreError {
+        path :: self.host_limit_path()
+        bytes :: if files.read_bytes(path) == {
+            .Ok(read) -> read
+            .Err(error) -> {
+                if store_artifact_io_missing(error) -> return Ok(None)
+                return Err(ArtifactStoreError.Io(error))
+            }
+        }
+        text :: String.from_bytes(bytes) ?? return Err(ArtifactStoreError.Config("host limit is not valid UTF-8: {path}"))
+        value :: text.trim()
+        if value == "" -> return Err(ArtifactStoreError.Config("host limit is empty: {path}"))
+        Ok(Val(store_artifact_parse_size(value)))
+    }
+
+    // Persist or clear the stricter machine-level cap.
+    fn set_host_limit(self, limit_bytes: ?Int) !ArtifactStoreError -[FS, Env, Time, Rand]> {
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        path :: self.host_limit_path()
+        if limit_bytes == {
+            .Val(limit) -> store_artifact_atomic_write(path, "{limit}\n".bytes())
+            else -> {
+                if files.remove(path) == {
+                    .Ok(_) -> store_artifact_sync_dir(self.root())
+                    .Err(error) -> {
+                        if store_artifact_io_missing(error) -> return Ok()
+                        Err(ArtifactStoreError.Io(error))
+                    }
+                }
+            }
+        }
+    }
+
+    fn prune(self, target_bytes: ?Int) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport !ArtifactStoreError {
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        target :: if target_bytes == {
+            .Val(bytes) -> bytes
+            else -> self.limit()
+        }
+        self.prune_locked(target)
+    }
+
+    fn prune_to(self, target_bytes: Int) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport !ArtifactStoreError {
+        self.prune(Val(target_bytes))
+    }
+
+    // Publish a file as one CAS blob and an immutable action record keyed by
+    // the caller's already-computed lower-case SHA-256 build key.
+    fn publish_file(self, key: String, source: String) -[FS, Env, Exec, Time, Rand]> StoredArtifact !ArtifactStoreError {
+        action :: store_artifact_action_for_key(key)
+        metadata :: files.stat(source)
+        if metadata.is_symlink || !metadata.is_file {
+            return Err(ArtifactStoreError.Corrupt{path: source, reason: "published artifact is not a regular file"})
+        }
+        bytes :: files.read_bytes(source)
+        object :: self.publish_blob(bytes)
+        record :: store_artifact_encode_record(object, store_artifact_is_executable(metadata))
+        self.publish_action(action, record)
+        if self.lookup_artifact(key) == {
+            .Hit(artifact) -> Ok(artifact)
+            else -> Err(ArtifactStoreError.Corrupt{path: self.action_path(action), reason: "published artifact disappeared before verification"})
+        }
+    }
+
+    // Verify and locate a named artifact without copying it.
+    fn lookup_artifact(self, key: String) -[FS, Env, Exec, Time, Rand]> ArtifactLookup !ArtifactStoreError {
+        action :: store_artifact_action_for_key(key)
+        action_key :: ArtifactEntryKey.Action(action.key())
+        action_path :: self.action_path(action)
+        record :: if store_artifact_read_file(action_path) == {
+            .Missing -> {
+                return Ok(ArtifactLookup.Missing)
+            }
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(action_key, action_path, reason)
+                return Ok(ArtifactLookup.Corrupt)
+            }
+            .Bytes(bytes) -> {
+                if store_artifact_decode_action(action, bytes) == {
+                    .Ok(decoded) -> decoded
+                    .Err(error) -> {
+                        if store_artifact_is_unsupported_version(bytes) -> return Ok(ArtifactLookup.Missing)
+                        self.quarantine_after_read(action_key, action_path, error.reason)
+                        return Ok(ArtifactLookup.Corrupt)
+                    }
+                }
+            }
+        }
+        decoded :: if store_artifact_decode_record(record) == {
+            .Val(found) -> found
+            else -> {
+                self.quarantine_after_read(action_key, action_path, "artifact record has an unknown version or short header")
+                return Ok(ArtifactLookup.Corrupt)
+            }
+        }
+        object :: decoded.object
+        object_key :: ArtifactEntryKey.Blob(object.key())
+        object_path :: self.object_path(object)
+        if store_artifact_read_file(object_path) == {
+            .Missing -> {
+                self.quarantine_after_read(action_key, action_path, "artifact record references a missing object")
+                Ok(ArtifactLookup.Corrupt)
+            }
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(object_key, object_path, reason)
+                self.quarantine_after_read(action_key, action_path, "artifact record references a corrupt object")
+                Ok(ArtifactLookup.Corrupt)
+            }
+            .Bytes(bytes) -> {
+                if bytes.len() != object.length() || ArtifactDigest.hash(bytes) != object.digest() {
+                    self.quarantine_after_read(object_key, object_path, "digest or length mismatch")
+                    self.quarantine_after_read(action_key, action_path, "artifact record references a corrupt object")
+                    return Ok(ArtifactLookup.Corrupt)
+                }
+                self.touch_after_read(object_key, bytes.len())
+                self.touch_after_read(action_key, record.len())
+                Ok(ArtifactLookup.Hit(StoredArtifact{action, object, path: object_path, executable: decoded.executable}))
+            }
+        }
+    }
+
+    // Verify and copy a named artifact to `destination`, preserving its
+    // executable bit. Corrupt entries are removed from the active namespace.
+    fn restore_file(self, key: String, destination: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore !ArtifactStoreError {
+        if self.lookup_artifact(key) == {
+            .Missing -> Ok(ArtifactRestore.Missing)
+            .Corrupt -> Ok(ArtifactRestore.Corrupt)
+            .Hit(artifact) -> {
+                lease :: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)})
+                defer close(^lease)
+                bytes :: files.read_bytes(artifact.path)
+                store_artifact_atomic_write(destination, bytes)
+                store_artifact_set_executable(destination, artifact.executable)
+                Ok(ArtifactRestore.Hit{object: artifact.object, executable: artifact.executable})
+            }
+        }
+    }
+
+    fn publish_data(self, key: ArtifactEntryKey, path: String, bytes: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+        self.ensure_layout()
+        lock :: self.acquire_lock()
+        defer close(^lock)
+        if store_artifact_read_file(path) == {
+            .Missing -> {}
+            .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+            .Bytes(existing) -> {
+                if existing == bytes -> return self.append_journal_locked("touch", key, existing.len())
+                self.quarantine_locked(key, path, "existing bytes do not match their key")
+            }
+        }
+        self.ensure_capacity_locked(bytes.len(), path)
+        store_artifact_atomic_write(path, bytes)
+        self.append_journal_locked("put", key, bytes.len())
+    }
+
+    // Scanned entries with their last use and whether a live lease pins them.
+    fn annotated_entries(self, journal: ArtifactJournalState, pinned: [String]) -[FS]> [ArtifactStoredEntry] !ArtifactStoreError {
+        entries := self.scan_entries()
+        loop index in 0..<entries.len() {
+            entries[index].last_use = journal.last_use_of(entries[index].key)
+            entries[index].pinned = pinned.contains(entries[index].key.identity())
+        }
+        Ok(entries)
+    }
+
+    fn pinned_identities(self, leases: [ArtifactLeaseRecord]) -> [String] !Never {
+        pinned := [String]{}
+        loop lease in leases {
+            loop target in lease.targets {
+                identity :: target.identity()
+                if !pinned.contains(identity) -> pinned.push(identity)
+            }
+        }
+        pinned
+    }
+
+    fn status_locked(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus !ArtifactStoreError {
+        journal_path :: files.join(self.root(), "journal")
+        journal := store_artifact_read_journal(journal_path)
+        if !journal.valid {
+            self.compact_journal_locked()
+            journal = store_artifact_read_journal(journal_path)
+        }
+        leases :: self.read_leases_locked(true)
+        entries :: store_artifact_sort_entries(self.annotated_entries(journal, self.pinned_identities(leases)))
+        footprint :: store_artifact_footprint(entries)
+        disk :: store_artifact_filesystem_stats(self.root())
+        total :: if disk == {
+            .Val(stats) -> Val(stats.total_bytes)
+            else -> None
+        }
+        available :: if disk == {
+            .Val(stats) -> Val(stats.available_bytes)
+            else -> None
+        }
+        statuses := [ArtifactEntryStatus]{}
+        loop entry in entries -> statuses.push(entry.status())
+        Ok(ArtifactStoreStatus{
+            root: self.root(),
+            footprint_bytes: footprint,
+            limit_bytes: self.limit_with_disk(total),
+            reserve_bytes: self.config.reserve_bytes(),
+            available_bytes: available,
+            live_leases: leases.len(),
+            host_limit_bytes: self.host_limit(),
+            entries: statuses,
+            tiers: [String]{"local"},
+        })
+    }
+
+    // Remove unpinned entries, least recently used first (ties by key), until
+    // the footprint fits `target_bytes`.
+    fn prune_locked(self, target_bytes: Int) -[FS, Env, Rand]> ArtifactPruneReport !ArtifactStoreError {
+        journal :: store_artifact_read_journal(files.join(self.root(), "journal"))
+        leases :: self.read_leases_locked(true)
+        entries :: self.annotated_entries(journal, self.pinned_identities(leases))
+        before :: store_artifact_footprint(entries)
+        pinned_bytes := 0
+        loop entry in entries {
+            if entry.pinned -> pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
+        }
+        order := store_artifact_sort_entries(entries)
+        order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use))
+        after := before
+        removed := [ArtifactEntryStatus]{}
+        loop entry in order {
+            if after <= target_bytes -> break
+            if entry.pinned -> next
+            if files.remove(entry.path) == {
+                .Ok(_) -> {
+                    store_artifact_sync_dir(files.dirname(entry.path))
+                    after = store_artifact_saturating_sub(after, entry.size_bytes)
+                    self.append_journal_locked("remove", entry.key, entry.size_bytes)
+                    removed.push(entry.status())
+                }
+                .Err(error) -> {
+                    if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.Io(error))
+                }
+            }
+        }
+        if removed.len() > 0 || journal.bytes > @STORE_ARTIFACT_MAX_JOURNAL_BYTES -> self.compact_journal_locked()
+        Ok(ArtifactPruneReport{
+            target_bytes,
+            before_bytes: before,
+            after_bytes: after,
+            removed,
+            pinned_bytes,
+            blocked: after > target_bytes,
+        })
+    }
+
+    // Admit `incoming` bytes for `path`: within the limit after pruning, and
+    // leaving twice the payload plus the reserve free on disk.
+    fn ensure_capacity_locked(self, incoming: Int, path: String) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+        disk :: store_artifact_filesystem_stats(self.root())
+        total :: if disk == {
+            .Val(stats) -> Val(stats.total_bytes)
+            else -> None
+        }
+        available :: if disk == {
+            .Val(stats) -> Val(stats.available_bytes)
+            else -> None
+        }
+        limit :: self.limit_with_disk(total)
+        if incoming > limit {
+            return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
+        }
+        footprint :: store_artifact_footprint(self.scan_entries())
+        if store_artifact_saturating_add(footprint, incoming) > limit {
+            self.prune_locked(store_artifact_saturating_sub(limit, incoming)).drop("admission re-measures the footprint after pruning")
+        }
+        after :: store_artifact_footprint(self.scan_entries())
+        disk_needed :: store_artifact_saturating_add(store_artifact_saturating_mul(incoming, 2), self.config.reserve_bytes())
+        disk_ok :: if available == {
+            .Val(free) -> free >= disk_needed
+            else -> true
+        }
+        if store_artifact_saturating_add(after, incoming) > limit || !disk_ok {
+            return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
+        }
+    }
+
+    fn limit_with_disk(self, total_bytes: ?Int) -[FS]> Int !Never {
+        adaptive :: if total_bytes == {
+            .Val(total) -> {
+                tenth :: total /% 10
+                capped :: if tenth < @STORE_ARTIFACT_DEFAULT_CAP_BYTES -> tenth else -> @STORE_ARTIFACT_DEFAULT_CAP_BYTES
+                if capped < 1 -> 1 else -> capped
+            }
+            else -> @STORE_ARTIFACT_DEFAULT_CAP_BYTES
+        }
+        configured :: self.config.cap_bytes() ?? adaptive
+        host :: self.host_limit() ?? None
+        if host == {
+            .Val(limit) -> if limit < configured -> limit else -> configured
+            else -> configured
+        }
+    }
+
+    fn host_limit_path(self) -> String !Never { files.join(self.root(), "host-limit") }
+
+    fn ensure_layout(self) !ArtifactStoreError -[FS]> {
+        files.create_dir_all(self.root())
+        layout :: [String]{"cas", "ac", "lto", "locks", "leases", "quarantine", "build-records"}
+        loop name in layout {
+            store_artifact_ensure_dir(files.join(self.root(), name))
+        }
+        records :: files.join(self.root(), "build-records")
+        store_artifact_ensure_dir(files.join(records, "records"))
+        store_artifact_ensure_dir(files.join(records, "latest"))
+    }
+
+    // Best-effort quarantine after a failed verification: a lock or rename
+    // failure leaves the entry for the next reader.
+    fn quarantine_after_read(self, key: ArtifactEntryKey, path: String, reason: String) -[FS, Env, Time, Rand]> {
+        lock :: self.acquire_lock() ?? return
+        defer close(^lock)
+        self.quarantine_locked(key, path, reason).drop("a reader reports the miss whether or not the quarantine lands")
+    }
+
+    // Best-effort journal touch after a verified read.
+    fn touch_after_read(self, key: ArtifactEntryKey, length: Int) -[FS, Env, Time, Rand]> {
+        lock :: self.acquire_lock() ?? return
+        defer close(^lock)
+        self.append_journal_locked("touch", key, length).drop("recency is advisory; the verified bytes are returned regardless")
+    }
+
+    fn quarantine_locked(self, key: ArtifactEntryKey, path: String, reason: String) !ArtifactStoreError -[FS, Env, Rand]> {
+        if !files.lexists(path) -> return Ok()
+        quarantine :: files.join(self.root(), "quarantine")
+        store_artifact_ensure_dir(quarantine)
+        destination :: files.join(quarantine, "{key.kind_name()}-{key.storage_key()}-{store_artifact_unique_token()}")
+        if files.rename(path, destination) == {
+            .Ok(_) -> {
+                store_artifact_sync_dir(files.dirname(path))
+                store_artifact_sync_dir(quarantine)
+                length :: if files.stat(destination) == {
+                    .Ok(info) -> info.size
+                    else -> 0
+                }
+                self.append_journal_locked("remove", key, length)
+            }
+            .Err(error) -> {
+                if store_artifact_io_missing(error) -> return Ok()
+                Err(ArtifactStoreError.Io(error))
+            }
+        }
+    }
+
+    fn append_journal_locked(self, operation: String, key: ArtifactEntryKey, length: Int) !ArtifactStoreError -[FS, Env, Rand]> {
+        journal_path :: files.join(self.root(), "journal")
+        state := store_artifact_read_journal(journal_path)
+        if !state.valid {
+            self.compact_journal_locked()
+            state = store_artifact_read_journal(journal_path)
+        }
+        sequence :: store_artifact_saturating_add(state.last_sequence, 1)
+        store_artifact_append_synced(journal_path, store_artifact_journal_line(operation, key, length, sequence).bytes())
+    }
+
+    // Rewrite the journal as one `put` per present entry, oldest use first.
+    fn compact_journal_locked(self) !ArtifactStoreError -[FS, Env, Rand]> {
+        journal_path :: files.join(self.root(), "journal")
+        journal :: store_artifact_read_journal(journal_path)
+        entries := self.annotated_entries(journal, [String]{})
+        entries = store_artifact_sort_entries(entries)
+        entries.sort_by(entry -> entry.last_use)
+        contents := ""
+        loop index in 0..<entries.len() {
+            contents = "{contents}{store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1)}"
+        }
+        store_artifact_atomic_write(journal_path, contents.bytes())
+    }
+
+    // The parsed leases whose owners may still be running. Leases of dead
+    // owners are removed when `clean_stale` is set.
+    fn read_leases_locked(self, clean_stale: Bool) -[FS, Env]> [ArtifactLeaseRecord] !ArtifactStoreError {
+        directory :: files.join(self.root(), "leases")
+        live := [ArtifactLeaseRecord]{}
+        loop path in store_artifact_sorted_children(directory) {
+            if !files.basename(path).starts_with("lease-") -> next
+            bytes :: if files.read_bytes(path) == {
+                .Ok(read) -> read
+                .Err(error) -> {
+                    if store_artifact_io_missing(error) -> next
+                    return Err(ArtifactStoreError.Io(error))
+                }
+            }
+            record :: store_artifact_parse_lease(bytes) ?? next
+            if store_artifact_owner_liveness(record.owner, self.owner) == {
+                .Val(alive) -> {
+                    if alive -> live.push(record)
+                    if !alive && clean_stale && store_artifact_try_remove(path) -> store_artifact_sync_dir(directory)
+                }
+                else -> live.push(record)
+            }
+        }
+        Ok(live)
+    }
+
+    fn scan_entries(self) -[FS]> [ArtifactStoredEntry] !ArtifactStoreError {
+        entries := [ArtifactStoredEntry]{}
+        store_artifact_scan_flat_namespace(files.join(self.root(), "cas"), .Blob, None, &entries)
+        store_artifact_scan_flat_namespace(files.join(self.root(), "ac"), .Action, None, &entries)
+        lto_root :: files.join(self.root(), "lto")
+        loop namespace_path in store_artifact_sorted_children(lto_root) {
+            metadata :: if files.stat(namespace_path) == {
+                .Ok(info) -> info
+                .Err(error) -> {
+                    if store_artifact_io_missing(error) -> next
+                    return Err(ArtifactStoreError.Io(error))
+                }
+            }
+            if !metadata.is_dir || metadata.is_symlink -> next
+            namespace :: files.basename(namespace_path)
+            LtoNamespace.new(namespace) ?? next
+            store_artifact_scan_flat_namespace(namespace_path, .Lto, Val(namespace), &entries)
+        }
+        Ok(store_artifact_sort_entries(entries))
+    }
+
+    // Take the machine-wide store lock, reclaiming it from a dead owner and
+    // waiting for a live one with capped exponential backoff up to the
+    // configured bound.
+    fn acquire_lock(self) -[FS, Env, Time]> ArtifactStoreLock !ArtifactStoreError {
+        locks :: files.join(self.root(), "locks")
+        path :: files.join(locks, "store.lock")
+        owner_line :: self.owner.owner_line("lock")
+        started :: time.instant()
+        deadline_ns :: store_artifact_saturating_add(started.unix_ns, self.config.lock_wait().ns)
+        retry_ms := @STORE_ARTIFACT_LOCK_RETRY_MS
+        loop {
+            if files.create(path, if_exists: .Refuse) == {
+                .Ok(writer) -> {
+                    writer.write_all(owner_line.bytes())
+                    writer.fsync()
+                    close(^writer)
+                    store_artifact_sync_dir(locks)
+                    return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})
+                }
+                .Err(error) -> {
+                    if !files.lexists(path) -> return Err(ArtifactStoreError.Io(error))
+                }
+            }
+            existing_owner :: if files.read_bytes(path) == {
+                .Ok(bytes) -> store_artifact_parse_owner_line(bytes)
+                else -> None
+            }
+            owner_pid :: if existing_owner == {
+                .Val(identity) -> Val(identity.pid())
+                else -> None
+            }
+            is_live :: if existing_owner == {
+                .Val(identity) -> store_artifact_owner_liveness(identity, self.owner) ?? true
+                else -> true
+            }
+            if !is_live && store_artifact_try_remove(path) {
+                store_artifact_sync_dir(locks)
+                retry_ms = @STORE_ARTIFACT_LOCK_RETRY_MS
+                next
+            }
+            now :: time.instant()
+            if now.unix_ns >= deadline_ns {
+                return Err(ArtifactStoreError.Locked{path: path, owner_pid: owner_pid, elapsed_ns: now.unix_ns - started.unix_ns})
+            }
+            remaining_ns :: deadline_ns - now.unix_ns
+            wait_ns :: if retry_ms * 1000000 < remaining_ns -> retry_ms * 1000000 else -> remaining_ns
+            time.sleep(time.duration_ns(wait_ns))
+            retry_ms = if retry_ms * 2 < @STORE_ARTIFACT_LOCK_RETRY_MAX_MS -> retry_ms * 2 else -> @STORE_ARTIFACT_LOCK_RETRY_MAX_MS
+        }
+    }
+}
+
+// Append the regular, digest-named files of one namespace directory.
+fn store_artifact_scan_flat_namespace(directory: String, kind: ArtifactEntryKind, namespace: ?String, output: &[ArtifactStoredEntry]) !ArtifactStoreError -[FS]> {
+    loop path in store_artifact_sorted_children(directory) {
+        metadata :: if files.stat(path) == {
+            .Ok(info) -> info
+            .Err(error) -> {
+                if store_artifact_io_missing(error) -> next
+                return Err(ArtifactStoreError.Io(error))
+            }
+        }
+        if metadata.is_symlink || !metadata.is_file -> next
+        name :: files.basename(path)
+        ArtifactDigest.from_hex(name) ?? next
+        key :: if kind == {
+            .Blob -> ArtifactEntryKey.Blob(name)
+            .Action -> ArtifactEntryKey.Action(name)
+            .Lto -> ArtifactEntryKey.Lto{namespace: namespace ?? panic("an LTO scan always names its namespace"), key: name}
+        }
+        output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
+    }
+}
+
+// Remove one file; whether it was removed.
+fn store_artifact_try_remove(path: String) -[FS]> Bool !Never {
+    if files.remove(path) == {
+        .Ok(_) -> true
+        else -> false
+    }
+}

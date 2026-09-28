@@ -1,0 +1,838 @@
+// One policy-bound, credential-clean fetch path for the native registries
+// (CRAN, LuaRocks, RubyGems, CPAN, Packagist), ported from
+// jetpack::Provider::fetch.
+//
+// Downloads go through one Core HTTP client that connects only to public
+// addresses (D-CORE-HTTPDEST1), follows at most five redirects and only to
+// the authorized hosts (D-CORE-HTTPREDIRECT1), ignores ambient proxies, and
+// caps every body (D-CORE-HTTPBODYLIMIT1). Archives are inspected as streams:
+// raw tar headers through the preflight walker, then entry kinds, names, and
+// sizes through Core's tar reader (D-CORE-CODECSTREAM1, D-CORE-TARSTREAM1).
+
+@PROVIDER_MAX_DOWNLOAD_BYTES :: 67108864
+@PROVIDER_MAX_ARCHIVE_ENTRIES :: 4096
+@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES :: 67108864
+@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES :: 268435456
+@PROVIDER_MAX_ARCHIVE_PATH_BYTES :: 4096
+@PROVIDER_FETCH_MAX_REDIRECTS :: 5
+// A tar stream decoded through gzip may carry at most this much after its end
+// marker: the pipe capacity the Rust `gzip -dc` preflight child could fill
+// before the closed reader stopped it.
+@PROVIDER_TAR_TRAILER_BYTES :: 65536
+@PROVIDER_TAR_BLOCK :: 512
+@PROVIDER_READ_CHUNK :: 65536
+// Rust `std::io::Error` text for `read_exact` at end of input.
+@PROVIDER_SHORT_READ :: "failed to fill whole buffer"
+
+// ── Error carrier ──
+
+// Which provider diagnostic a registry failure reason becomes.
+pub enum RegistryErrorKind {
+    Cran
+    LuaRocks
+    Registry(String)
+    NativeRelease
+    NativeCatalog
+}
+
+// The registry layer's failure: a final reason text (Rust `String` errors of
+// the fetch and provider helpers) or a provider error passed through as is.
+#Error
+pub enum RegistryError {
+    Reason(String)
+    Provider(ProviderError)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Reason(reason) -> reason
+            .Provider(error) -> error.message()
+        }
+    }
+
+    // The provider diagnostic this failure surfaces as.
+    fn into_provider(self, kind: RegistryErrorKind) -> ProviderError !Never {
+        if self == {
+            .Provider(error) -> error
+            .Reason(reason) -> {
+                if kind == {
+                    .Cran -> ProviderError.Cran(reason)
+                    .LuaRocks -> ProviderError.LuaRocks(reason)
+                    .Registry(title) -> ProviderError.Registry(title: title, reason: reason)
+                    .NativeRelease -> ProviderError.BuildFailed("native jetpackage `{@NATIVE_PACKAGE}`: {reason}")
+                    .NativeCatalog -> ProviderError.BuildFailed("local unofficial native catalog: {reason}")
+                }
+            }
+        }
+    }
+}
+
+impl ProviderError -> RegistryError { RegistryError.Provider(self) }
+
+fn provider_registry_fail(reason: String) -> RegistryError !Never {
+    RegistryError.Reason(reason)
+}
+
+// ── Filesystem steps with a failure context (`{context}: {error}`) ──
+
+fn provider_registry_read_bytes(path: String, context: String) -[FS]> [U8] !RegistryError {
+    if files.read_bytes(path) == {
+        .Ok(bytes) -> Ok(bytes)
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_read_text(path: String, context: String) -[FS]> String !RegistryError {
+    if files.read(path) == {
+        .Ok(text) -> Ok(text)
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_write_text(path: String, text: String, context: String) !RegistryError -[FS]> {
+    if files.write(path, text) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_create_dir_all(path: String, context: String) !RegistryError -[FS]> {
+    if files.create_dir_all(path) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_copy(from: String, to: String, context: String) !RegistryError -[FS]> {
+    if files.copy2(from, to) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_set_mode(path: String, mode: Int, context: String) !RegistryError -[FS]> {
+    if files.set_mode(path, mode) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_seal(path: String, context: String) !RegistryError -[FS]> {
+    if store_seal_local_output(path) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error.message()}"))
+    }
+}
+
+// Whether anything (file, directory, or link) exists at `path`.
+fn provider_registry_exists(path: String) -[FS]> Bool !Never {
+    files.exists(path) || files.is_symlink(path)
+}
+
+// The directory a source archive unpacked into: its only entry when that is
+// a directory, else the unpack directory itself.
+fn provider_registry_archive_root(unpack: String) -[FS]> String !RegistryError {
+    entries :: if files.list_dir(unpack) == {
+        .Ok(listed) -> listed
+        .Err(error) -> { return Err(RegistryError.Reason("could not inspect unpacked source: {error}")) }
+    }
+    if entries.len() == 1 && files.is_dir(entries[0].path) -> return Ok(entries[0].path)
+    Ok(unpack)
+}
+
+// Build scratch under `<store>/<build scratch>/<label>-…`, removed by the
+// caller's `defer provider_registry_remove_scratch(path)`.
+fn provider_registry_scratch(store: String, label: String, context: String) -[FS]> String !RegistryError {
+    parent :: files.join(store, @PROVIDER_BUILD_SCRATCH_DIR)
+    provider_registry_create_dir_all(parent, context)
+    if provider_exclusive_temp_dir(parent, "{label}-{process.current_pid()}-") == {
+        .Ok(path) -> Ok(path)
+        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+    }
+}
+
+fn provider_registry_remove_scratch(path: String) -[FS]> {
+    if files.remove_all(path) == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+}
+
+// ── Text helpers (Rust `str` semantics) ──
+
+// `str::split_whitespace`.
+fn provider_registry_words(text: String) -> [String] !Never {
+    raw :: text.bytes()
+    words := [String]{}
+    cursor := 0
+    loop cursor < raw.len() {
+        cursor = pkg_bytes_skip_space(raw, cursor)
+        if cursor >= raw.len() -> break
+        start :: cursor
+        loop cursor < raw.len() && pkg_bytes_space_width(raw, cursor) == 0 -> cursor += 1
+        words.push(pkg_bytes_text(raw, start, cursor))
+    }
+    words
+}
+
+// The byte offset of the first `needle` at or after `from`.
+fn provider_registry_find(text: String, needle: String, from: Int) -> ?Int !Never {
+    raw :: text.bytes()
+    wanted :: needle.bytes()
+    if wanted.len() == 0 -> return if from <= raw.len() -> Val(from) else -> None
+    position := from
+    loop position + wanted.len() <= raw.len() {
+        if pkg_bytes_starts_with(raw, position, wanted) -> return Val(position)
+        position += 1
+    }
+    None
+}
+
+// The byte offset of the last `needle`.
+fn provider_registry_rfind(text: String, needle: String) -> ?Int !Never {
+    raw :: text.bytes()
+    wanted :: needle.bytes()
+    position := raw.len() - wanted.len()
+    loop position >= 0 {
+        if pkg_bytes_starts_with(raw, position, wanted) -> return Val(position)
+        position -= 1
+    }
+    None
+}
+
+// `text[start..end]` by byte offsets.
+fn provider_registry_slice(text: String, start: Int, end: Int) -> String !Never {
+    raw :: text.bytes()
+    pkg_bytes_text(raw, start, if end > raw.len() -> raw.len() else -> end)
+}
+
+// `text[start..]` by byte offsets.
+fn provider_registry_tail(text: String, start: Int) -> String !Never {
+    raw :: text.bytes()
+    pkg_bytes_text(raw, start, raw.len())
+}
+
+// `str::rsplit_once`.
+fn provider_registry_rsplit_once(text: String, needle: String) -> ?(before: String, after: String) !Never {
+    at :: provider_registry_rfind(text, needle) ?? return None
+    Val((before: provider_registry_slice(text, 0, at), after: provider_registry_tail(text, at + needle.bytes().len())))
+}
+
+// A `u64` parse (`str::parse::<u64>`): an optional `+`, then ASCII digits.
+fn provider_registry_parse_u64(text: String) -> ?Int !Never {
+    digits :: text.removeprefix("+")
+    raw :: digits.bytes()
+    if raw.len() == 0 -> return None
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    Int.parse(digits) ?? None
+}
+
+fn provider_registry_is_ascii_alnum(code: Int) -> Bool !Never {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+fn provider_registry_is_hex(code: Int) -> Bool !Never {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
+}
+
+// Exactly `length` ASCII hex digits.
+fn provider_registry_valid_hex(value: String, length: Int) -> Bool !Never {
+    raw :: value.bytes()
+    if raw.len() != length -> return false
+    loop byte in raw {
+        if !provider_registry_is_hex(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+// A relative path whose every component is a plain name (Rust
+// `Path::components` all `Normal`): no root, no `..`, no leading `.`.
+fn provider_registry_safe_relative(path: String) -> Bool !Never {
+    if path == "" || path.starts_with("/") -> return false
+    pieces :: path.split("/").to_list()
+    normal := 0
+    loop index in 0..<pieces.len() {
+        piece :: pieces[index]
+        if {
+            piece == "" -> {}
+            piece == ".." -> return false
+            piece == "." && index == 0 -> return false
+            piece == "." -> {}
+            else -> normal += 1
+        }
+    }
+    normal > 0
+}
+
+// The first 16 hex digits of the SHA-256 of `value`.
+fn provider_registry_stable_suffix(value: String) -> String !Never {
+    provider_registry_slice(pkg_sha256_hex(value.bytes()), 0, 16)
+}
+
+// ── Authority ──
+
+// Where a native registry provider may fetch from: its registry, the
+// normalized allowed authorities (always including the registry's), and the
+// denied ones. Allow and deny never overlap.
+pub struct RegistryAuthority {
+    pub provider: String
+    pub registry: String
+    pub allow: [String]
+    pub deny: [String]
+
+    // The configured `authority.providers.<provider>` entry of the project
+    // package, else the provider defaults.
+    fn load(ctx: ProviderCtx, provider: String, default_registry: String, default_allow: [String]) -[FS]> RegistryAuthority !RegistryError {
+        registry := default_registry
+        allow := default_allow
+        deny := [String]{}
+        if ctx.project_dir == {
+            .Val(project) -> {
+                if PackageFacts.load(project) == {
+                    .Ok(loaded) -> {
+                        if loaded == {
+                            .Val(manifest) -> {
+                                loop configured in manifest.authority.providers {
+                                    if configured.provider == provider {
+                                        registry = configured.registry
+                                        allow = configured.allow
+                                        deny = configured.deny
+                                        break
+                                    }
+                                }
+                            }
+                            .None -> {}
+                        }
+                    }
+                    .Err(error) -> { return Err(RegistryError.Reason("could not parse authority.providers: {error.message()}")) }
+                }
+            }
+            .None -> {}
+        }
+        normalized_allow := [String]{provider_registry_authority_of(registry)}
+        loop value in allow -> normalized_allow.push(provider_registry_normalize_authority(value))
+        normalized_deny := [String]{}
+        loop value in deny -> normalized_deny.push(provider_registry_normalize_authority(value))
+        normalized_allow = provider_sorted_unique(normalized_allow)
+        normalized_deny = provider_sorted_unique(normalized_deny)
+        loop value in normalized_deny {
+            if normalized_allow.contains(value) -> return Err(RegistryError.Reason("authority.providers.{provider} denies an explicitly allowed authority"))
+        }
+        result :: RegistryAuthority{provider: provider, registry: registry, allow: normalized_allow, deny: normalized_deny}
+        result.check_url(result.registry)
+        Ok(result)
+    }
+
+    fn registry(self) -> String !Never {
+        self.registry
+    }
+
+    // The fetch-policy fingerprint recorded in locks and cache identities.
+    fn provenance(self) -> String !Never {
+        "provider={self.provider} registry={self.registry} allow={self.allow.join(",")} deny={self.deny.join(",")}"
+    }
+
+    // Fetch `url` as UTF-8 text through scratch.
+    fn text(self, url: String, scratch: String) -[Net, Time.Wait, FS]> String !RegistryError {
+        path :: files.join(scratch, "fetch-{provider_registry_stable_suffix(url)}-metadata")
+        self.to_path(url, path, scratch)
+        bytes :: provider_registry_read_bytes(path, "could not read fetch")
+        String.from_bytes(bytes) ?? return Err(RegistryError.Reason("metadata from `{url}` is not UTF-8"))
+    }
+
+    // Fetch `url` into `destination`. The body lands in scratch first, so a
+    // refused hop, failed status, or oversized body never creates the
+    // destination.
+    fn to_path(self, url: String, destination: String, scratch: String) !RegistryError -[Net, Time.Wait, FS]> {
+        self.check_url(url)
+        client :: http_client.Client.new()
+            .destinations(.Public)
+            .proxy(.None)
+            .redirects(.Follow{max: @PROVIDER_FETCH_MAX_REDIRECTS, to: .Hosts(self.allow)})
+        request :: http_client.request("GET", url).total_timeout(60s)
+        response :: if client.send(request) == {
+            .Ok(sent) -> sent
+            .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
+        }
+        status :: response.status()
+        if status < 200 || status >= 300 -> return Err(RegistryError.Reason("fetch `{url}` returned HTTP {status}"))
+        body_path :: files.join(scratch, "fetch-{provider_registry_stable_suffix(url)}.body")
+        out :: if files.create(body_path) == {
+            .Ok(writer) -> writer
+            .Err(error) -> { return Err(RegistryError.Reason("could not stage fetched bytes: {error}")) }
+        }
+        body :: response.body(limit: @PROVIDER_MAX_DOWNLOAD_BYTES)
+        if body.copy_to(^out) == {
+            .Ok(_) -> {}
+            .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
+        }
+        provider_registry_ensure_download_budget(body_path)
+        if files.rename(body_path, destination) == {
+            .Ok(_) -> {}
+            .Err(_) -> provider_registry_copy(body_path, destination, "could not preserve fetched bytes")
+        }
+        Ok()
+    }
+
+    fn check_url(self, url: String) !RegistryError {
+        authority :: provider_registry_authority_of(url)
+        if self.deny.contains(authority) || !self.allow.contains(authority) {
+            return Err(RegistryError.Reason("authority.providers.{self.provider} does not authorize `{authority}`"))
+        }
+        Ok()
+    }
+}
+
+// The lowercase host of an HTTPS URL, refusing credentials, non-443 ports,
+// malformed hosts, and non-public IP literals (D-CORE-NETPUBLIC1 table).
+fn provider_registry_authority_of(url: String) -> String !RegistryError {
+    if pkg_text_has_control(url) -> return Err(RegistryError.Reason("provider fetch URL contains control characters"))
+    if !url.starts_with("https://") -> return Err(RegistryError.Reason("provider fetch URL must use HTTPS"))
+    rest :: url.removeprefix("https://")
+    raw :: rest.bytes()
+    end := 0
+    loop end < raw.len() {
+        code :: Int.from_u8(raw[end])
+        if code == 47 || code == 63 || code == 35 -> break
+        end += 1
+    }
+    written :: pkg_bytes_text(raw, 0, end)
+    if written == "" || written.contains("@") || written.contains("\\") {
+        return Err(RegistryError.Reason("provider URL has invalid or credentialed authority `{written}`"))
+    }
+    authority := pkg_ascii_lower(written)
+    if {
+        authority.ends_with(":443") -> authority = authority.removesuffix(":443")
+        authority.contains(":") -> return Err(RegistryError.Reason("provider HTTPS URL may only use port 443"))
+        else -> {}
+    }
+    if !provider_registry_valid_host(authority) -> return Err(RegistryError.Reason("provider URL has invalid authority `{authority}`"))
+    if provider_registry_ipv4_octets(authority) == {
+        .Val(octets) -> {
+            address :: ip.ipv4(octets[0], octets[1], octets[2], octets[3]) ?? return Err(RegistryError.Reason("provider URL has invalid authority `{authority}`"))
+            if !ip.is_global(address) -> return Err(RegistryError.Reason("provider URL targets a non-public address `{authority}`"))
+        }
+        .None -> {}
+    }
+    Ok(authority)
+}
+
+// Rust `Ipv4Addr::from_str`: four decimal octets, no leading zeros.
+fn provider_registry_ipv4_octets(text: String) -> ?[Int] !Never {
+    parts :: text.split(".").to_list()
+    if parts.len() != 4 -> return None
+    octets := [Int]{}
+    loop part in parts {
+        raw :: part.bytes()
+        if raw.len() == 0 || raw.len() > 3 -> return None
+        if raw.len() > 1 && Int.from_u8(raw[0]) == 48 -> return None
+        value := 0
+        loop byte in raw {
+            code :: Int.from_u8(byte)
+            if code < 48 || code > 57 -> return None
+            value = value * 10 + (code - 48)
+        }
+        if value > 255 -> return None
+        octets.push(value)
+    }
+    Val(octets)
+}
+
+// A DNS name of at most 253 bytes whose dot-separated labels are 1-63 ASCII
+// letters, digits, or `-`, never starting or ending with `-`.
+fn provider_registry_valid_host(authority: String) -> Bool !Never {
+    if authority.bytes().len() > 253 -> return false
+    loop label in authority.split(".") {
+        raw :: label.bytes()
+        if raw.len() == 0 || raw.len() > 63 -> return false
+        if label.starts_with("-") || label.ends_with("-") -> return false
+        loop byte in raw {
+            code :: Int.from_u8(byte)
+            if !provider_registry_is_ascii_alnum(code) && code != 45 -> return false
+        }
+    }
+    true
+}
+
+// A configured allow/deny entry: a URL or a bare authority.
+fn provider_registry_normalize_authority(value: String) -> String !RegistryError {
+    if value.contains("://") -> return provider_registry_authority_of(value)
+    if value == "" || value.contains("/") || value.contains("@") || value.contains("\\") || value.contains("?") || value.contains("#") {
+        return Err(RegistryError.Reason("invalid provider authority `{value}`"))
+    }
+    provider_registry_authority_of("https://{value}")
+}
+
+// ── Download and archive budgets ──
+
+fn provider_registry_ensure_download_budget(path: String) !RegistryError -[FS]> {
+    stat :: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> { return Err(RegistryError.Reason("could not inspect fetched bytes: {error}")) }
+    }
+    if stat.size > @PROVIDER_MAX_DOWNLOAD_BYTES -> return Err(RegistryError.Reason("fetched object is {stat.size} bytes; limit is {@PROVIDER_MAX_DOWNLOAD_BYTES}"))
+    Ok()
+}
+
+// A source archive admitted for extraction: within the download budget,
+// raw headers within the entry, payload, and total budgets, and a listing of
+// only safe relative regular files and directories.
+fn provider_registry_validate_tar_archive(path: String, gzip: Bool) !RegistryError -[FS]> {
+    provider_registry_ensure_download_budget(path)
+    provider_registry_preflight_tar(path, gzip)
+    listing :: provider_registry_tar_listing(path, gzip)
+    count := 0
+    loop entry in listing {
+        count += 1
+        if count > @PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
+        trimmed := entry.name
+        loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
+        if entry.name == "" || !provider_registry_safe_relative(trimmed) {
+            return Err(RegistryError.Reason("source archive contains unsafe path `{entry.name}`"))
+        }
+    }
+    total := 0
+    loop entry in listing {
+        if entry.kind == {
+            .File | .Directory -> {}
+            else -> return Err(RegistryError.Reason("source archives may contain only regular files and directories"))
+        }
+        if entry.size > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive entry is {entry.size} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        }
+        total += entry.size
+        if total > @PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
+    }
+    Ok()
+}
+
+// Walk the raw tar headers of the (decoded) archive stream.
+fn provider_registry_preflight_tar(path: String, gzip: Bool) !RegistryError -[FS]> {
+    preflight := RegistryTarPreflight.new()
+    if !gzip {
+        file := if files.open(path) == {
+            .Ok(reader) -> reader
+            .Err(error) -> { return Err(RegistryError.Reason("could not open archive: {error}")) }
+        }
+        loop !preflight.done {
+            chunk :: if file.read(@PROVIDER_READ_CHUNK) == {
+                .Ok(bytes) -> bytes
+                .Err(error) -> { return Err(RegistryError.Reason("truncated tar header: {error}")) }
+            }
+            if chunk.len() == 0 -> break
+            preflight.feed(chunk)
+        }
+        return preflight.finish()
+    }
+    unreadable :: "source is not a readable gzip tar archive"
+    file := files.open(path) ?? return Err(RegistryError.Reason(unreadable))
+    plain := gzip.reader(&file)
+    loop !preflight.done {
+        chunk :: if plain.read(@PROVIDER_READ_CHUNK) == {
+            .Ok(bytes) -> bytes
+            .Err(_) -> {
+                preflight.finish()
+                return Err(RegistryError.Reason(unreadable))
+            }
+        }
+        if chunk.len() == 0 -> break
+        preflight.feed(chunk)
+    }
+    preflight.finish()
+    // The rest of the gzip stream must still decode, and past the end
+    // marker at most the pipe capacity may follow.
+    trailing := preflight.trailing
+    loop {
+        chunk :: plain.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason(unreadable))
+        if chunk.len() == 0 -> break
+        trailing += chunk.len()
+        if trailing > @PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason(unreadable))
+    }
+    Ok()
+}
+
+// The raw tar header walker (Rust `inspect_tar_stream`), fed decoded bytes in
+// any chunking. It counts every header, metadata records included, bounds
+// stored payloads and logical (sparse or PAX) sizes, and stops at the first
+// all-zero header.
+pub struct RegistryTarPreflight {
+    pending: [U8]
+    remaining: Int
+    capture_left: Int
+    capture: [U8]
+    capture_kind: Int
+    entries: Int
+    total: Int
+    pax_logical_size: ?Int
+    pub done: Bool
+    // Bytes fed after the end marker.
+    pub trailing: Int
+
+    fn new() -> RegistryTarPreflight !Never {
+        RegistryTarPreflight{pending: [U8]{}, remaining: 0, capture_left: 0, capture: [U8]{}, capture_kind: -1, entries: 0, total: 0, pax_logical_size: None, done: false, trailing: 0}
+    }
+
+    fn feed(&self, chunk: [U8]) !RegistryError {
+        index := 0
+        loop index < chunk.len() {
+            if self.done {
+                self.trailing += chunk.len() - index
+                return Ok()
+            }
+            if self.remaining > 0 {
+                available :: chunk.len() - index
+                count :: if self.remaining < available -> self.remaining else -> available
+                if self.capture_kind >= 0 && self.capture_left > 0 {
+                    meaningful :: if self.capture_left < count -> self.capture_left else -> count
+                    loop offset in 0..<meaningful -> self.capture.push(chunk[index + offset])
+                    self.capture_left -= meaningful
+                }
+                self.remaining -= count
+                index += count
+                if self.remaining == 0 -> self.finish_payload()
+                next
+            }
+            need :: @PROVIDER_TAR_BLOCK - self.pending.len()
+            available :: chunk.len() - index
+            count :: if need < available -> need else -> available
+            loop offset in 0..<count -> self.pending.push(chunk[index + offset])
+            index += count
+            if self.pending.len() == @PROVIDER_TAR_BLOCK {
+                header :: self.pending
+                self.pending = [U8]{}
+                self.header(header)
+            }
+        }
+        Ok()
+    }
+
+    // End of input: complete only after the end marker.
+    fn finish(self) !RegistryError {
+        if self.done -> return Ok()
+        if self.remaining > 0 -> return Err(RegistryError.Reason("truncated tar payload: {@PROVIDER_SHORT_READ}"))
+        Err(RegistryError.Reason("truncated tar header: {@PROVIDER_SHORT_READ}"))
+    }
+
+    fn header(&self, header: [U8]) !RegistryError {
+        zero := true
+        loop byte in header {
+            if Int.from_u8(byte) != 0 {
+                zero = false
+                break
+            }
+        }
+        if zero {
+            self.done = true
+            return Ok()
+        }
+        self.entries += 1
+        if self.entries > @PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
+        stored :: provider_registry_tar_number(header[124..<136])
+        kind :: Int.from_u8(header[156])
+        // `x`, `g`, `L`, `K`: PAX records and GNU long names/links.
+        metadata :: kind == 120 || kind == 103 || kind == 76 || kind == 75
+        logical :: if self.pax_logical_size == {
+            .Val(size) -> size
+            .None -> {
+                if kind == 83 -> provider_registry_tar_number(header[483..<495]) ?? stored else -> stored
+            }
+        }
+        self.pax_logical_size = None
+        if logical > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive entry is {logical} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        }
+        self.total += logical
+        if self.total > @PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
+        if stored > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive payload is {stored} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        }
+        self.remaining = (stored + 511) / 512 * 512
+        self.capture = [U8]{}
+        self.capture_left = if metadata -> stored else -> 0
+        self.capture_kind = if metadata -> kind else -> -1
+        if self.remaining == 0 -> self.finish_payload()
+        Ok()
+    }
+
+    // A PAX record set names the logical size of the next entry.
+    fn finish_payload(&self) !RegistryError {
+        kind :: self.capture_kind
+        self.capture_kind = -1
+        if kind != 120 && kind != 103 -> return Ok()
+        text :: String.from_bytes(self.capture) ?? return Err(RegistryError.Reason("tar PAX metadata is not UTF-8"))
+        self.pax_logical_size = provider_registry_pax_logical_size(text)
+        if self.pax_logical_size == {
+            .Val(size) -> {
+                if size > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES -> return Err(RegistryError.Reason("sparse source archive entry exceeds the per-entry limit"))
+            }
+            .None -> {}
+        }
+        Ok()
+    }
+}
+
+// The first `<len> GNU.sparse.realsize=<n>` or `GNU.sparse.size=<n>` record.
+fn provider_registry_pax_logical_size(text: String) -> ?Int !Never {
+    loop line in provider_lines(text) {
+        record :: line.split_once(" ") ?? next
+        field :: record.after.split_once("=") ?? next
+        if field.before != "GNU.sparse.realsize" && field.before != "GNU.sparse.size" -> next
+        size :: provider_registry_parse_u64(field.after) ?? next
+        return Val(size)
+    }
+    None
+}
+
+// A tar numeric field: base-256 when the high bit is set, else octal text
+// padded with NUL or space.
+fn provider_registry_tar_number(field: [U8]) -> Int !RegistryError {
+    if field.len() > 0 && Int.from_u8(field[0]) >= 128 {
+        value := Int.from_u8(field[0]) - 128
+        loop index in 1..<field.len() {
+            byte :: Int.from_u8(field[index])
+            if value > (9223372036854775807 - byte) / 256 -> return Err(RegistryError.Reason("tar size overflows"))
+            value = value * 256 + byte
+        }
+        return Ok(value)
+    }
+    start := 0
+    end := field.len()
+    loop start < end && (Int.from_u8(field[start]) == 0 || Int.from_u8(field[start]) == 32) -> start += 1
+    loop end > start && (Int.from_u8(field[end - 1]) == 0 || Int.from_u8(field[end - 1]) == 32) -> end -= 1
+    text :: String.from_bytes(field[start..<end]) ?? return Err(RegistryError.Reason("tar size is not ASCII"))
+    digits :: text.removeprefix("+")
+    if text == "" -> return Ok(0)
+    if digits == "" -> return Err(RegistryError.Reason("tar size is malformed"))
+    value := 0
+    loop byte in digits.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 55 -> return Err(RegistryError.Reason("tar size is malformed"))
+        if value > (9223372036854775807 - (code - 48)) / 8 -> return Err(RegistryError.Reason("tar size is malformed"))
+        value = value * 8 + (code - 48)
+    }
+    Ok(value)
+}
+
+// ── Tar listing and extraction through Core's tar reader ──
+
+pub enum RegistryTarKind {
+    File
+    Directory
+    Symlink
+    Hardlink
+    Special
+}
+
+// One listed archive entry: its stored name, kind, and logical size.
+pub struct RegistryTarEntry {
+    pub name: String
+    pub kind: RegistryTarKind
+    pub size: Int
+}
+
+fn provider_registry_tar_kind(kind: archive.TarKind) -> RegistryTarKind !Never {
+    if kind == {
+        .File -> RegistryTarKind.File
+        .Directory -> RegistryTarKind.Directory
+        .Symlink(_) -> RegistryTarKind.Symlink
+        .Hardlink(_) -> RegistryTarKind.Hardlink
+        else -> RegistryTarKind.Special
+    }
+}
+
+// Every entry of the archive (Rust `tar -t[v][z]f`), stopping one past the
+// entry budget so the caller reports it.
+fn provider_registry_tar_listing(path: String, gzip: Bool) -[FS]> [RegistryTarEntry] !RegistryError {
+    unreadable :: "source is not a readable tar archive"
+    file := if files.open(path) == {
+        .Ok(reader) -> reader
+        .Err(error) -> { return Err(RegistryError.Reason("could not inspect source archive: {error}")) }
+    }
+    listing := [RegistryTarEntry]{}
+    if gzip {
+        plain := gzip.reader(&file)
+        tar := archive.tar_reader(&plain)
+        loop listing.len() <= @PROVIDER_MAX_ARCHIVE_ENTRIES {
+            found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
+            entry :: found ?? break
+            listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
+        }
+    } else {
+        tar := archive.tar_reader(&file)
+        loop listing.len() <= @PROVIDER_MAX_ARCHIVE_ENTRIES {
+            found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
+            entry :: found ?? break
+            listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
+        }
+    }
+    Ok(listing)
+}
+
+// Extract a validated archive of regular files and directories under
+// `destination` (Rust `tar -x[z]f … -C destination` as an unprivileged user:
+// no owners, permission bits under the process umask).
+fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) !RegistryError -[FS]> {
+    file := if files.open(path) == {
+        .Ok(reader) -> reader
+        .Err(error) -> { return Err(RegistryError.Reason("could not open archive: {error}")) }
+    }
+    if gzip {
+        plain := gzip.reader(&file)
+        tar := archive.tar_reader(&plain)
+        loop {
+            found :: tar.next() ?? return Err(RegistryError.Reason("source is not a readable tar archive"))
+            entry :: found ?? break
+            prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
+            target :: prepared ?? next
+            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+                .Ok(writer) -> writer
+                .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
+            }
+            loop {
+                chunk :: tar.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
+                if chunk.len() == 0 -> break
+                out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
+            }
+        }
+    } else {
+        tar := archive.tar_reader(&file)
+        loop {
+            found :: tar.next() ?? return Err(RegistryError.Reason("source is not a readable tar archive"))
+            entry :: found ?? break
+            prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
+            target :: prepared ?? next
+            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+                .Ok(writer) -> writer
+                .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
+            }
+            loop {
+                chunk :: tar.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
+                if chunk.len() == 0 -> break
+                out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
+            }
+        }
+    }
+    Ok()
+}
+
+// Create a directory entry (and return None) or a regular file's parent
+// directories (and return the file's target path).
+fn provider_registry_prepare_entry(name: String, kind: RegistryTarKind, destination: String) -[FS]> ?String !RegistryError {
+    trimmed := name
+    loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
+    if !provider_registry_safe_relative(trimmed) -> return Err(RegistryError.Reason("source archive contains unsafe path `{name}`"))
+    target :: files.join(destination, trimmed)
+    if kind == {
+        .Directory -> {
+            provider_registry_create_dir_all(target, "could not create `{trimmed}`")
+            Ok(None)
+        }
+        .File -> {
+            provider_registry_create_dir_all(files.dirname(target), "could not create `{trimmed}`")
+            Ok(Val(target))
+        }
+        else -> Err(RegistryError.Reason("source archives may contain only regular files and directories"))
+    }
+}

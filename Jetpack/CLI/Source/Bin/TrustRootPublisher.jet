@@ -1,0 +1,163 @@
+// `jetpack-trust-root`: prepare the public trust-root files for the Jet
+// publication site, ported from crates/jetpack/src/bin/jetpack-trust-root.rs.
+//
+// This tool accepts public Ed25519 trust files only. It never generates,
+// reads, or copies a signing secret. The production key ceremony remains an
+// operator action outside this repository.
+
+@TRUST_ROOT_MAX_PUBLIC_KEY_BYTES :: 4096
+
+// The `export` options, each taking one path.
+enum TrustRootExportOption {
+    Output
+    Bootstrap
+    IndexKey
+    CacheKey
+    ToolchainKey
+
+    fn parse(flag: String) -> ?TrustRootExportOption !Never {
+        if flag == {
+            "--output" -> Val(TrustRootExportOption.Output)
+            "--bootstrap" -> Val(TrustRootExportOption.Bootstrap)
+            "--index-key" -> Val(TrustRootExportOption.IndexKey)
+            "--cache-key" -> Val(TrustRootExportOption.CacheKey)
+            "--toolchain-key" -> Val(TrustRootExportOption.ToolchainKey)
+            else -> None
+        }
+    }
+
+    fn flag(self) -> String !Never {
+        if self == {
+            .Output -> "--output"
+            .Bootstrap -> "--bootstrap"
+            .IndexKey -> "--index-key"
+            .CacheKey -> "--cache-key"
+            .ToolchainKey -> "--toolchain-key"
+        }
+    }
+}
+
+// The parsed `export` request. Every slot keeps the last value given.
+struct TrustRootExportRequest {
+    output: ?String
+    bootstrap: ?String
+    index_key: ?String
+    cache_key: ?String
+    toolchain_key: ?String
+
+    fn parse(args: [String]) -> TrustRootExportRequest !CliToolError {
+        if (args.get(0) ?? "") != "export" -> return Err(CliToolError.new(cli_trust_root_usage()))
+        request := TrustRootExportRequest{output: None, bootstrap: None, index_key: None, cache_key: None, toolchain_key: None}
+        i := 1
+        loop i < args.len() {
+            option :: TrustRootExportOption.parse(args[i]) ?? return Err(CliToolError.new("unknown option `{args[i]}`\n\n{cli_trust_root_usage()}"))
+            value :: args.get(i + 1) ?? return Err(CliToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            if value.starts_with("-") -> return Err(CliToolError.new("{option.flag()} needs a path\n\n{cli_trust_root_usage()}"))
+            if option == {
+                .Output -> request.output = Val(value)
+                .Bootstrap -> request.bootstrap = Val(value)
+                .IndexKey -> request.index_key = Val(value)
+                .CacheKey -> request.cache_key = Val(value)
+                .ToolchainKey -> request.toolchain_key = Val(value)
+            }
+            i = i + 2
+        }
+        Ok(request)
+    }
+
+    // The requested key files in role order: index, cache, toolchain.
+    fn key_paths(self) -> [(role: String, path: String)] !Never {
+        paths := [(role: String, path: String)]{}
+        if self.index_key == .Val(path) -> paths.push((role: "index", path: path))
+        if self.cache_key == .Val(path) -> paths.push((role: "cache", path: path))
+        if self.toolchain_key == .Val(path) -> paths.push((role: "toolchain", path: path))
+        paths
+    }
+}
+
+// Process entry: run `args` (without the program name) and return the exit
+// code, reporting a failure on stderr.
+pub fn cli_trust_root_main(args: [String]) -[FS, IO]> Int {
+    if cli_trust_root_run(args) == {
+        .Ok(_) -> 0
+        .Err(error) -> {
+            eprint("jetpack-trust-root: {error.message}")
+            1
+        }
+    }
+}
+
+fn cli_trust_root_run(args: [String]) !CliToolError -[FS, IO]> {
+    request :: TrustRootExportRequest.parse(args)
+    output :: request.output ?? return Err(CliToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
+    keys := [PublicTrustKey]{}
+    loop entry in request.key_paths() {
+        value :: cli_trust_root_read_public_key(entry.path) ?? return Err(CliToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
+        key :: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CliToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
+        keys.push(key)
+    }
+    bootstrap :: if request.bootstrap == {
+        .Val(path) -> Val(RootBootstrap.load(path) ?? return Err(CliToolError.new("load trusted-root bootstrap: {err.message()}")))
+        .None -> None
+    }
+    manifest :: trust_public_trust_manifest("jet-lang.dev", bootstrap, keys) ?? return Err(CliToolError.new("render trust manifest: {err.message()}"))
+
+    cli_trust_root_write_immutable(files.join(output, "trust-manifest.json"), manifest.bytes())
+    loop key in keys {
+        cli_trust_root_write_immutable(files.join(output, key.path_for_publication()), "{key.key_id}:{key.public_key}\n".bytes())
+    }
+    cli_trust_root_write_immutable(files.join(output, "README.md"), cli_trust_root_readme(keys).bytes())
+    print("prepared public trust root: {output} ({keys.len()} key(s)); production hosting remains pending")
+    Ok()
+}
+
+fn cli_trust_root_usage() -> String !Never {
+    "usage: jetpack-trust-root export --output <dir> [--bootstrap <jetpack-root>] [--index-key <file>] [--cache-key <file>] [--toolchain-key <file>]"
+}
+
+// The trimmed text of one regular, bounded, UTF-8 public-key file.
+fn cli_trust_root_read_public_key(path: String) -[FS]> String !CliToolError {
+    metadata :: files.stat(path) ?? return Err(CliToolError.new("{err}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("public trust key is not a regular file"))
+    if metadata.size > @TRUST_ROOT_MAX_PUBLIC_KEY_BYTES -> return Err(CliToolError.new("public trust key is too large"))
+    bytes :: files.read_bytes(path) ?? return Err(CliToolError.new("{err}"))
+    value :: String.from_bytes(bytes) ?? return Err(CliToolError.new("public trust key is not UTF-8"))
+    Ok(value.trim())
+}
+
+// Publish `body` at `path` exactly once. An existing regular file with the
+// same bytes is accepted; any other existing entry is refused.
+fn cli_trust_root_write_immutable(path: String, body: [U8]) !CliToolError -[FS]> {
+    parent :: files.dirname(path)
+    if parent != "" {
+        files.create_dir_all(parent) ?? return Err(CliToolError.new("create {parent}: {err}"))
+    }
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("publication path is not a regular file: {path}"))
+            existing :: files.read_bytes(path) ?? return Err(CliToolError.new("read {path}: {err}"))
+            if existing == body -> return Ok()
+            return Err(CliToolError.new("immutable publication file changed: {path}"))
+        }
+        .Err(error) -> {
+            if !cli_tool_is_not_found(error) -> return Err(CliToolError.new("inspect {path}: {error}"))
+            writer :: files.create(path, if_exists: .Refuse) ?? return Err(CliToolError.new("create {path}: {err}"))
+            writer.write_all(body) ?? return Err(CliToolError.new("write {path}: {err}"))
+            writer.fsync() ?? return Err(CliToolError.new("write {path}: {err}"))
+            Ok()
+        }
+    }
+}
+
+// The publication README. The prose is byte-identical to the Rust reference,
+// whose line continuations join some words without a space.
+fn cli_trust_root_readme(keys: [PublicTrustKey]) -> String !Never {
+    out := "# Jet public trust root\n\nThis directory contains publication-safe trust metadata. It contains publickeys only. `TrustKey` HMAC secrets and signing keys stay in the offlinepublisher or host trust stores and must never be copied here.\n\nThe stable index public-key document is published at\n`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\nvalue, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\nThe signed index URL is configured separately in\n`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\ntrusted automatically.\n\n## Files\n\n- `trust-manifest.json` records the domain, root pin, role, algorithm, key id,and exact client trust-file path.\n"
+    loop key in keys {
+        out = "{out}- `{key.path_for_publication()}` is the `{key.role}` role's public key.\n"
+    }
+    if keys.len() == 0 {
+        out = "{out}- No production key is installed. The manifest is deliberatelymarked `awaiting-key-ceremony`.\n"
+    }
+    "{out}\n## Rotation\n\nGenerate a new offline threshold-root decision. Verify the replacement publickeys and root metadata with the old root, then run the exporter with the newpublic-key files and bootstrap pin. Publish the new immutable key files andmanifest together only after review. Revoke the old key at the root's agreedexpiry; do not put private material in this tree.\n\nThe real DNS, TLS, signer, and hosting publication are still pending ownerapproval.\n"
+}

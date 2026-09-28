@@ -1,0 +1,240 @@
+// Exact identity gate for the one-shot local Nix compatibility fallback
+// (Rust NixIdentity.rs). No ambient `nixpkgs` name is ever resolved: the
+// identity binds the executable bytes, the reported Nix version, the locked
+// nixpkgs revision, the target system, the attribute path and the canonical
+// project-lock digest before a fallback evaluation may be constructed.
+
+@NIX_FALLBACK_PROVENANCE_SCHEMA :: "jetpack-nix-fallback-v1"
+@NIX_LOCKED_NIXPKGS_PREFIX :: "github:NixOS/nixpkgs#"
+@NIX_FALLBACK_PROVENANCE_FIELDS :: [String]{"schema", "executable", "executable_sha256", "version", "nixpkgs_revision", "system", "attr", "lock_sha256"}
+@NIX_VERSION_OUTPUT_PREFIX :: "nix (Nix) "
+
+// All inputs that identify one permitted local Nix fallback evaluation.
+pub struct NixFallbackIdentity {
+    pub executable: String
+    pub executable_sha256: String
+    pub version: String
+    pub nixpkgs_revision: String
+    pub system: String
+    pub attr: [String]
+    pub lock_sha256: String
+
+    // Inspect one explicit executable and bind it to the exact project lock.
+    // `source_name` is the lock's declared source name, never a live channel
+    // lookup. The executable is invoked only for `--version` here.
+    fn from_project(project: String, source_name: String, executable: String, system: String, attr: [String]) -[FS, Env, Exec, Time.Wait]> NixFallbackIdentity !NixError {
+        binding :: nix_fallback_project_binding(project, source_name)
+        inspected :: nix_fallback_inspect_executable(executable)
+        NixFallbackIdentity.from_observed(inspected.path, inspected.sha256, inspected.version, binding.revision, system, attr, binding.lock_sha256)
+    }
+
+    // Construct an identity from already observed executable facts; every
+    // field is still validated, and the executable bytes are re-hashed.
+    fn from_observed(executable: String, executable_sha256: String, version: String, nixpkgs_revision: String, system: String, attr: [String], lock_sha256: String) -[FS, Env]> NixFallbackIdentity !NixError {
+        path :: nix_fallback_canonical_executable(executable)
+        nix_fallback_validate_sha256(executable_sha256, "Nix executable")
+        bytes :: files.read_bytes(path) ?? return Err(NixError.Fallback("could not read Nix executable `{path}`: {err}"))
+        if executable_sha256 != pkg_sha256_hex(bytes) -> return Err(NixError.Fallback("Nix executable bytes differ from the bound executable identity"))
+        nix_fallback_validate_version(version)
+        nix_fallback_validate_revision(nixpkgs_revision)
+        nix_fallback_validate_system(system)
+        nix_fallback_validate_attr(attr)
+        nix_fallback_validate_sha256(lock_sha256, "project lock")
+        Ok(NixFallbackIdentity{executable: path, executable_sha256, version, nixpkgs_revision, system, attr, lock_sha256})
+    }
+
+    // The canonical project-lock digest bound by `source_name`.
+    fn project_lock_sha256(project: String, source_name: String) -[FS]> String !NixError {
+        binding :: nix_fallback_project_binding(project, source_name)
+        Ok(binding.lock_sha256)
+    }
+
+    // Decode and revalidate the exact identity persisted in a lock or receipt.
+    fn from_provenance(value: String) -[FS, Env]> NixFallbackIdentity !NixError {
+        tree :: json.parse(value) ?? return Err(NixError.Fallback("invalid Nix fallback provenance: {err}"))
+        fields := [String: DataTree]{}
+        if tree == {
+            .Object(entries) -> fields = entries
+            else -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
+        }
+        if fields.len() != @NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {
+            return Err(NixError.Fallback("Nix fallback provenance has an unknown or missing identity field"))
+        }
+        schema :: nix_fallback_provenance_text(fields, "schema")
+        if schema != @NIX_FALLBACK_PROVENANCE_SCHEMA -> return Err(NixError.Fallback("unsupported Nix fallback provenance schema"))
+        executable :: nix_fallback_provenance_text(fields, "executable")
+        executable_sha256 :: nix_fallback_provenance_text(fields, "executable_sha256")
+        version :: nix_fallback_provenance_text(fields, "version")
+        nixpkgs_revision :: nix_fallback_provenance_text(fields, "nixpkgs_revision")
+        system :: nix_fallback_provenance_text(fields, "system")
+        attr :: nix_fallback_provenance_attr(fields)
+        lock_sha256 :: nix_fallback_provenance_text(fields, "lock_sha256")
+        NixFallbackIdentity.from_observed(executable, executable_sha256, version, nixpkgs_revision, system, attr, lock_sha256)
+    }
+
+    // The exact source input allowed for a fallback invocation. A bare
+    // `nixpkgs`, channel name or floating flake ref has no representation.
+    fn locked_nixpkgs_input(self) -> String !Never {
+        "{@NIX_LOCKED_NIXPKGS_PREFIX}{self.nixpkgs_revision}"
+    }
+
+    fn attrpath(self) -> String !Never {
+        self.attr.join(".")
+    }
+
+    // Check the complete request immediately before the local Nix call, so a
+    // caller cannot bind an identity and then substitute an ambient source,
+    // system, attr or changed lock.
+    fn validate_request(self, nixpkgs_input: String, system: String, attr: [String], lock_sha256: String) !NixError {
+        if nixpkgs_input != self.locked_nixpkgs_input() -> return Err(NixError.Fallback("local Nix fallback requires the exact locked nixpkgs revision"))
+        if system != self.system -> return Err(NixError.Fallback("local Nix fallback system differs from its bound identity"))
+        if attr != self.attr -> return Err(NixError.Fallback("local Nix fallback attr differs from its bound identity"))
+        if lock_sha256 != self.lock_sha256 -> return Err(NixError.Fallback("project lock changed before local Nix fallback evaluation"))
+    }
+
+    // Machine-readable provenance stored with a Jetpack import and its lock.
+    fn provenance(self) -> String !Never {
+        attrs := [DataTree]{}
+        loop segment in self.attr -> attrs.push(DataTree.Text(segment))
+        nix_fallback_json(DataTree.Object([
+            "schema": DataTree.Text(@NIX_FALLBACK_PROVENANCE_SCHEMA),
+            "executable": DataTree.Text(self.executable),
+            "executable_sha256": DataTree.Text(self.executable_sha256),
+            "version": DataTree.Text(self.version),
+            "nixpkgs_revision": DataTree.Text(self.nixpkgs_revision),
+            "system": DataTree.Text(self.system),
+            "attr": DataTree.Array(attrs),
+            "lock_sha256": DataTree.Text(self.lock_sha256),
+        ]))
+    }
+
+    // Re-hash and re-read the recorded executable before a later Jetpack-only
+    // run. A changed binary or version cannot reuse the import.
+    fn verify_executable(self) !NixError -[FS, Env, Exec, Time.Wait]> {
+        inspected :: nix_fallback_inspect_executable(self.executable)
+        if inspected.path != self.executable || inspected.sha256 != self.executable_sha256 || inspected.version != self.version {
+            return Err(NixError.Fallback("recorded Nix executable identity no longer matches the installed executable"))
+        }
+    }
+}
+
+fn nix_fallback_inspect_executable(executable: String) -[FS, Env, Exec, Time.Wait]> (path: String, sha256: String, version: String) !NixError {
+    path :: nix_fallback_canonical_executable(executable)
+    bytes :: files.read_bytes(path) ?? return Err(NixError.Fallback("could not read Nix executable `{path}`: {err}"))
+    digest :: pkg_sha256_hex(bytes)
+    receipt :: process.cmd([String]{path, "--version"}).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not inspect Nix executable `{path}`: {err}"))
+    if !receipt.success -> return Err(NixError.Fallback("Nix executable `{path}` rejected `--version`"))
+    version :: nix_fallback_reported_version(receipt.output) ?? return Err(NixError.Fallback("Nix `--version` output has no exact Nix version"))
+    nix_fallback_validate_version(version)
+    Ok((path: path, sha256: digest, version: version))
+}
+
+// The first `nix (Nix) <version>` line of `nix --version` output.
+fn nix_fallback_reported_version(text: String) -> ?String !Never {
+    loop line in text.split("\n") {
+        trimmed :: line.trim()
+        if trimmed.starts_with(@NIX_VERSION_OUTPUT_PREFIX) -> return Val(trimmed.removeprefix(@NIX_VERSION_OUTPUT_PREFIX).trim())
+    }
+    None
+}
+
+fn nix_fallback_canonical_executable(executable: String) -[FS, Env]> String !NixError {
+    if executable == "" -> return Err(NixError.Fallback("Nix executable path is empty"))
+    path :: files.canonicalize(executable) ?? return Err(NixError.Fallback("could not resolve Nix executable `{executable}`: {err}"))
+    info :: files.stat(path) ?? return Err(NixError.Fallback("could not stat Nix executable `{path}`: {err}"))
+    if !info.is_file -> return Err(NixError.Fallback("Nix executable `{path}` is not a regular file"))
+    if sys.family() != "windows" && info.mode & 0o111 == 0 -> return Err(NixError.Fallback("Nix executable `{path}` is not executable"))
+    Ok(path)
+}
+
+// The canonical lock digest (package receipts cleared) and the exact nixpkgs
+// revision of the source channel `source_name` (or `nixpkgs` for `jetpack`).
+fn nix_fallback_project_binding(project: String, source_name: String) -[FS]> (lock_sha256: String, revision: String) !NixError {
+    lock_path :: pkg_lock_path(project)
+    info :: files.stat(lock_path) ?? return Err(NixError.Fallback("could not inspect project lock `{lock_path}`: {err}"))
+    if info.is_symlink || !info.is_file -> return Err(NixError.Fallback("project lock `{lock_path}` is not a regular file"))
+    raw :: files.read(lock_path) ?? return Err(NixError.Fallback("could not read project lock `{lock_path}`: {err}"))
+    lock := pkg_lock_parse(raw) ?? return Err(NixError.Fallback("could not parse project lock: {err.message()}"))
+    exact :: nix_fallback_locked_exact(lock, source_name) ?? return Err(NixError.Fallback("project lock has no exact source channel `{source_name}`"))
+    revision :: nix_fallback_revision_from_locked_input(exact)
+    loop index in 0..<lock.packages.len() -> lock.packages[index].receipt = None
+    digest :: pkg_sha256_hex(pkg_lock_write(lock).bytes())
+    nix_fallback_validate_sha256(digest, "project lock")
+    Ok((lock_sha256: digest, revision: revision))
+}
+
+fn nix_fallback_locked_exact(lock: LockFile, source_name: String) -> ?String !Never {
+    loop channel in lock.source_channels {
+        if channel.name == source_name || (source_name == @REF_SOURCE_JETPACK && channel.name == @REF_SOURCE_NIXPKGS) -> return Val(channel.exact)
+    }
+    None
+}
+
+fn nix_fallback_revision_from_locked_input(input: String) -> String !NixError {
+    if !input.starts_with(@NIX_LOCKED_NIXPKGS_PREFIX) -> return Err(NixError.Fallback("local Nix fallback rejects ambient or unpinned nixpkgs input"))
+    revision :: input.removeprefix(@NIX_LOCKED_NIXPKGS_PREFIX)
+    nix_fallback_validate_revision(revision)
+    Ok(revision)
+}
+
+fn nix_fallback_has_every_field(fields: [String: DataTree]) -> Bool !Never {
+    loop field in @NIX_FALLBACK_PROVENANCE_FIELDS {
+        if fields.get(field) == None -> return false
+    }
+    true
+}
+
+fn nix_fallback_provenance_text(fields: [String: DataTree], name: String) -> String !NixError {
+    value :: fields.get(name) ?? return Err(NixError.Fallback("Nix fallback provenance is missing `{name}`"))
+    nix_fallback_tree_text(value)
+}
+
+fn nix_fallback_tree_text(value: DataTree) -> String !NixError {
+    if value == {
+        .Text(text) -> return Ok(text)
+        else -> return Err(NixError.Fallback("expected a DataTree string"))
+    }
+}
+
+fn nix_fallback_provenance_attr(fields: [String: DataTree]) -> [String] !NixError {
+    value :: fields.get("attr") ?? return Err(NixError.Fallback("Nix fallback provenance is missing `attr`"))
+    items := [DataTree]{}
+    if value == {
+        .Array(values) -> items = values
+        else -> return Err(NixError.Fallback("expected a DataTree array"))
+    }
+    attr := [String]{}
+    loop item in items -> attr.push(nix_fallback_tree_text(item))
+    Ok(attr)
+}
+
+fn nix_fallback_validate_version(version: String) !NixError {
+    raw :: version.bytes()
+    if raw.len() == 0 || !nixeval_is_ascii_digit(Int.from_u8(raw[0])) -> return Err(NixError.Fallback("Nix version is not exact"))
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        // `.` `-` `+` `_`; a non-ASCII scalar is never alphanumeric ASCII.
+        if !nixeval_is_ascii_alphanumeric(code) && code != 46 && code != 45 && code != 43 && code != 95 -> return Err(NixError.Fallback("Nix version is not exact"))
+    }
+}
+
+fn nix_fallback_validate_revision(revision: String) !NixError {
+    if !nix_is_lower_hex(revision, 40) -> return Err(NixError.Fallback("nixpkgs revision must be exactly 40 lowercase hexadecimal characters"))
+}
+
+fn nix_fallback_validate_system(system: String) !NixError {
+    if !nixeval_is_required_system(system) -> return Err(NixError.Fallback("unsupported Nix fallback system `{system}`"))
+}
+
+fn nix_fallback_validate_attr(attr: [String]) !NixError {
+    if attr.len() == 0 -> return Err(NixError.Fallback("Nix fallback attr must be a non-empty exact attribute path"))
+    loop segment in attr {
+        if segment == "" || nix_text_has_control_or_space(segment) || segment.contains("#") {
+            return Err(NixError.Fallback("Nix fallback attr must be a non-empty exact attribute path"))
+        }
+    }
+}
+
+fn nix_fallback_validate_sha256(value: String, label: String) !NixError {
+    if !nix_is_lower_hex(value, 64) -> return Err(NixError.Fallback("{label} identity must be a 64-character lowercase SHA-256 digest"))
+}

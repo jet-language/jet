@@ -1,0 +1,103 @@
+// Shared response decoders for generated worker bindings and the registry of
+// response renderers, ported from jet_pkg_model::Bindgen. The canonical
+// foreign binder table (`pkg_foreign_binders`) stays the support denominator;
+// this registry owns only each renderer's probe and response protocol.
+
+// Shared response protocol used by generated worker bindings: a
+// machine-readable response plus a human-readable explanation for the CLI.
+pub enum DecoderProtocol {
+    // Supervised workers return `{ok, value}` and use the shared status map.
+    StandardEnvelope
+    // The embedded Lua VM returns the encoded function value directly.
+    LuaRawJson
+}
+
+// The one response decoder a generated binding uses.
+pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String !Never {
+    lines :: if protocol == {
+        .StandardEnvelope -> [String]{
+            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "    if code == {{",
+            "        1 -> {{ return Err({error}.NotRunning) }}",
+            "        2 -> {{ return Err({error}.Timeout) }}",
+            "        3 -> {{ return Err({error}.Cancelled) }}",
+            "        5 -> {{ return Err({error}.Limit) }}",
+            "        0 -> {{}}",
+            "        else -> {{ return Err({error}.Protocol) }}",
+            "    }}",
+            "    response := json.parse(raw) ?? return Err({error}.Protocol)",
+            "    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false",
+            "    if !succeeded -> return Err({error}.CommandFailed)",
+            "    return Ok(response.field(\"value\") ?? DataTree.Null)",
+            "}}"
+        }
+        .LuaRawJson -> [String]{
+            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "    decode_status(code)",
+            "    value := json.parse(raw) ?? return Err({error}.Protocol)",
+            "    return Ok(value)",
+            "}}"
+        }
+    }
+    "{lines.join("\n")}\n\n"
+}
+
+// The Lua status adapter shared by response and table-view calls.
+pub fn pkg_render_lua_decode_status(error: String) -> String !Never {
+    lines :: [String]{
+        "fn decode_status(code: Int) -> Bool !{error} {{",
+        "    if code == 1 -> return Err({error}.NotRunning)",
+        "    if code == 2 -> return Err({error}.Timeout)",
+        "    if code == 3 -> return Err({error}.Cancelled)",
+        "    if code == 5 -> return Err({error}.Limit)",
+        "    if code == 4 -> return Err({error}.CommandFailed)",
+        "    if code == 6 -> return Err({error}.Protocol)",
+        "    if code != 0 -> return Err({error}.Protocol)",
+        "    return Ok(true)",
+        "}}"
+    }
+    "{lines.join("\n")}\n\n"
+}
+
+// One active generated response binder: its canonical descriptor key, its
+// response protocol, and the probe that renders a representative binding.
+pub struct RendererDescriptor {
+    pub language: ForeignLanguage
+    pub runtime: BinderRuntime
+    pub stub_kind: BindingStubKind
+    pub protocol: DecoderProtocol
+    pub render_probe: fn() -> String
+}
+
+// One entry per active generated response binder.
+@PKG_GENERATOR_REGISTRY :: [RendererDescriptor]{
+    RendererDescriptor{language: ForeignLanguage.Lua, runtime: BinderRuntime.EmbeddedLua, stub_kind: BindingStubKind.LuaScript, protocol: DecoderProtocol.LuaRawJson, render_probe: pkg_lua_render_probe},
+    RendererDescriptor{language: ForeignLanguage.PowerShell, runtime: BinderRuntime.SupervisedPowerShell, stub_kind: BindingStubKind.PowerShellScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_powershell_render_probe},
+    RendererDescriptor{language: ForeignLanguage.Perl, runtime: BinderRuntime.SupervisedPerl, stub_kind: BindingStubKind.PerlScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_perl_render_probe},
+    RendererDescriptor{language: ForeignLanguage.Ruby, runtime: BinderRuntime.SupervisedRuby, stub_kind: BindingStubKind.RubyScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_ruby_render_probe},
+    RendererDescriptor{language: ForeignLanguage.Php, runtime: BinderRuntime.SupervisedPhpPool, stub_kind: BindingStubKind.PhpScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_php_render_probe},
+    RendererDescriptor{language: ForeignLanguage.R, runtime: BinderRuntime.SupervisedR, stub_kind: BindingStubKind.RScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_r_render_probe},
+    RendererDescriptor{language: ForeignLanguage.Octave, runtime: BinderRuntime.SupervisedOctave, stub_kind: BindingStubKind.OctaveScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_octave_render_probe}
+}
+
+// The response renderer for one canonical binder descriptor. The descriptor
+// table is the denominator; the registry supplies the renderer-owned probe and
+// protocol without a second match list.
+fn pkg_renderer_for(descriptor: BinderDescriptor) -> ?RendererDescriptor !Never {
+    if descriptor.status != BinderStatus.Active -> return None
+    loop renderer in @PKG_GENERATOR_REGISTRY {
+        if renderer.language == descriptor.language && renderer.stub_kind == descriptor.stub_kind -> return Val(renderer)
+    }
+    None
+}
+
+// The single active canonical descriptor a renderer entry names, if exactly
+// one matches.
+fn pkg_renderer_canonical_for(renderer: RendererDescriptor) -> ?BinderDescriptor !Never {
+    found := [BinderDescriptor]{}
+    loop descriptor in pkg_foreign_binders() {
+        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> found.push(descriptor)
+    }
+    if found.len() != 1 -> return None
+    Val(found[0])
+}

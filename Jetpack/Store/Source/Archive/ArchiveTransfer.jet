@@ -1,0 +1,1098 @@
+// Canonical Hangar archive operations (Rust `Store/Archive.rs`): export,
+// import, verify, sign, copy, repair, and broker attestation over the one
+// archive format in HangarArchiveFormat.jet.
+//
+// No archive operation publishes an object before the complete archive has
+// been decoded, authenticated, and re-hashed in quarantine. Every operation
+// that reads or changes the Hangar holds the `hangar` runtime lock for its
+// whole snapshot.
+
+// Export a package closure into the canonical signed archive.
+pub fn store_export_archive(roots: HangarRoots, target: String, include_closure: Bool, key: ?String) -> (bytes: [U8], report: HangarArchiveReport) !StoreError {
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    archive :: store_archive_build_unlocked(roots, target, include_closure, false)
+    signer :: store_archive_signing_key(roots, key, true)
+    signed :: store_archive_sign_decoded(archive, signer)
+    bytes :: signed.encode()
+    Ok((bytes: bytes, report: signed.report()))
+}
+
+// Export a closure without a signer secret for an authenticated broker
+// request. The broker verifies the contents and applies its own store
+// signature before promotion. The explicit unsigned trailer keeps the bytes
+// structurally complete for the archive decoder.
+pub fn store_export_unsigned_archive(roots: HangarRoots, target: String, include_closure: Bool) -> [U8] !StoreError {
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    archive :: store_archive_build_unlocked(roots, target, include_closure, false)
+    archive.encode()
+}
+
+// Import a complete archive. Objects are decoded and hashed in a private
+// staging directory before the closure WAL and package projections are
+// touched. Existing identical objects are reused; conflicting objects fail
+// closed.
+pub fn store_import_archive(roots: HangarRoots, bytes: [U8], key: ?String, allow_unsigned: Bool) -> HangarArchiveReport !StoreError {
+    if bytes.len() > @STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    archive :: HangarArchive.decode(bytes)
+    archive.verify_signature(roots, key, allow_unsigned)
+    store_archive_import_verified(roots, archive, false)
+}
+
+// Import an archive returned by an authenticated shared-store broker. The
+// broker has already authenticated the peer, checked writer authority, and
+// verified the archive with its private signing key. The client repeats the
+// bounded decode, content hash, and metadata checks before importing, but
+// never reads the administrator's signing secret.
+pub fn store_import_broker_archive(roots: HangarRoots, bytes: [U8]) -> HangarArchiveReport !StoreError {
+    if bytes.len() > @STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    archive :: HangarArchive.decode(bytes)
+    if archive.signature == None -> return Err(StoreError.InvalidData("shared-store broker returned an unsigned archive"))
+    store_archive_verify_contents(roots, archive, false)
+    store_archive_import_verified(roots, archive, false)
+}
+
+// Report the archive, renaming a package root to its local entry identity,
+// then import it under the Hangar lock.
+fn store_archive_import_verified(roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> HangarArchiveReport !StoreError {
+    report := archive.report()
+    loop object in archive.objects {
+        if object.id != archive.root_id || object.meta == "" -> next
+        meta :: pkg_parse_meta(object.meta) ?? return Err(StoreError.InvalidData("archive root has malformed package metadata"))
+        report.root = store_archive_portable_entry(roots, object, meta).id
+        break
+    }
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    store_archive_import_unlocked(roots, archive, allow_nix_absolute_symlinks)
+    Ok(report)
+}
+
+// Sweep archive verification/import stages left by a crashed process. The
+// Hangar lock is held by the caller, so a live archive operation cannot be
+// mistaken for abandoned state. A symlinked stage root stops recovery rather
+// than allowing cleanup to follow an attacker-controlled path.
+pub fn store_recover_archive_staging_unlocked(roots: HangarRoots) -> Int !StoreError {
+    store_sweep_abandoned_directory(files.join(roots.hangar_dir(), @STORE_ARCHIVE_STAGE), "Hangar archive staging")
+}
+
+// Restore a repair quarantine left by a process crash. Only names written by
+// `store_repair_archive` are considered, and the backup is re-hashed before
+// it can return to the canonical object pool.
+pub fn store_recover_repair_quarantine_unlocked(roots: HangarRoots) -> Int !StoreError {
+    hangar :: roots.hangar_dir()
+    quarantine :: files.join(hangar, "quarantine")
+    observed :: store_archive_lstat(quarantine)
+    metadata :: observed ?? return Ok(0)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar quarantine is not a real directory"))
+    objects :: files.join(hangar, "objects")
+    store_ensure_real_directory(objects, "Hangar object pool")
+    permissions := MovePathPermissions.default()
+    recovered :: store_archive_recover_quarantine_entries(roots, quarantine, objects, &permissions) ? count -> count ! error -> {
+        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+        return Err(error)
+    }
+    permissions.restore()
+    Ok(recovered)
+}
+
+fn store_archive_recover_quarantine_entries(roots: HangarRoots, quarantine: String, objects: String, permissions: &MovePathPermissions) -> Int !StoreError {
+    hangar :: roots.hangar_dir()
+    permissions.make_writable(quarantine, hangar)
+    permissions.make_writable(objects, hangar)
+    recovered := 0
+    loop item in files.list_dir(quarantine) {
+        repair_name :: item.name.removeprefix("repair-")
+        if repair_name == item.name -> next
+        if !repair_name.starts_with("sha256-") -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        digest_tail :: repair_name.removeprefix("sha256-").bytes()
+        if digest_tail.len() < 64 -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        loop index in 0..<64 {
+            if !store_archive_is_hex_digit(Int.from_u8(digest_tail[index])) -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        }
+        if digest_tail.len() == 64 || Int.from_u8(digest_tail[64]) != 45 -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        if digest_tail.len() == 65 -> return Err(StoreError.InvalidData("repair quarantine name has no recovery nonce"))
+        digest_hex :: String.from_bytes(digest_tail[0..<64]) ?? return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        digest :: "sha256-{digest_hex}"
+        store_archive_validate_digest(digest)
+        backup :: item.path
+        backup_metadata :: files.stat(backup)
+        if backup_metadata.is_symlink || !backup_metadata.is_dir -> return Err(StoreError.InvalidData("repair quarantine contains a non-directory backup"))
+        actual :: pkg_try_output_hash_of_in_hangar(backup, hangar, true)
+        if actual != digest {
+            // A repair can crash after moving an already-corrupt object.
+            // Preserve that evidence, but do not let it block the next signed
+            // repair or pretend it is safe to restore.
+            rejected :: files.join(quarantine, "rejected-repair-{digest}-{store_archive_unique_suffix()}")
+            if store_archive_lstat_ok(rejected) != None -> return Err(StoreError.InvalidData("rejected repair quarantine name already exists"))
+            files.rename(backup, rejected)
+            store_sync_store_directory(quarantine)
+            recovered += 1
+            next
+        }
+        destination :: files.join(objects, digest)
+        if store_archive_lstat(destination) == {
+            .Val(existing) -> {
+                if existing.is_symlink || !existing.is_dir -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` is not a directory"))
+                existing_hash :: pkg_try_output_hash_of_in_hangar(destination, hangar, true)
+                if existing_hash != digest -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` has a conflicting digest"))
+                store_archive_remove_tree(backup)
+            }
+            .None -> {
+                store_archive_make_tree_writable(backup)
+                files.rename(backup, destination)
+                store_archive_seal_tree(destination) ?? {
+                    sealing :: err
+                    store_archive_make_tree_writable(destination) ?? return Err(StoreError.Other("{sealing.message()}; repair quarantine restore failed: {err.message()}"))
+                    files.rename(destination, backup) ?? return Err(StoreError.Other("{sealing.message()}; repair quarantine restore failed: {StoreError.Io(err).message()}"))
+                    return Err(sealing)
+                }
+                store_write_seal(destination, hangar, digest)
+                store_sync_store_directory(objects)
+            }
+        }
+        recovered += 1
+    }
+    Ok(recovered)
+}
+
+// Have the shared-store broker sign a bounded, content-verified archive.
+// This keeps the administrator's signing secret inside the broker process.
+pub fn store_attest_archive(roots: HangarRoots, bytes: [U8], key: String) -> [U8] !StoreError {
+    if bytes.len() > @STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    archive :: HangarArchive.decode(bytes)
+    if archive.signature != None -> return Err(StoreError.InvalidData("shared-store write archive must not carry a client signature"))
+    store_archive_verify_contents(roots, archive, false)
+    signer :: store_archive_signing_key(roots, Val(key), false)
+    store_archive_sign_decoded(archive, signer).encode()
+}
+
+// Read a bounded archive file for a CLI or connector caller.
+pub fn store_read_archive_file(path: String) -> [U8] !StoreError {
+    store_archive_read_bounded(path)
+}
+
+// Atomically write a canonical archive file.
+pub fn store_write_archive_file(path: String, bytes: [U8]) !StoreError {
+    if bytes.len() > @STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+    store_archive_write_atomic(path, bytes)
+}
+
+// Verify an archive or one live Hangar entry without changing state.
+pub fn store_verify_archive(roots: HangarRoots, target: String, key: ?String) -> HangarArchiveReport !StoreError {
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    if files.is_file(target) {
+        archive :: HangarArchive.decode(store_archive_read_bounded(target))
+        archive.verify_signature(roots, key, false)
+        store_archive_verify_contents(roots, archive, false)
+        return Ok(archive.report())
+    }
+    entry :: store_archive_select_entry_unlocked(roots, target)
+    store_archive_verify_live_entry_unlocked(roots, entry)
+    sidecar :: store_archive_signature_path(roots, entry)
+    if files.is_file(sidecar) {
+        archive :: HangarArchive.decode(store_archive_read_bounded(sidecar))
+        archive.verify_signature(roots, key, false)
+        store_archive_verify_contents(roots, archive, false)
+        if !store_archive_names_object(archive, entry.id) -> return Err(StoreError.InvalidData("the signed archive does not name the requested entry"))
+        return Ok(archive.report())
+    }
+    Ok(HangarArchiveReport{objects: 1, bytes: 0, signed: false, root: entry.id})
+}
+
+// Sign an archive in place, or create a signed single-object archive for a
+// live entry. The latter is stored as a hidden sidecar under the entry so
+// signing never mutates immutable package metadata.
+pub fn store_sign_archive(roots: HangarRoots, target: String, destination: ?String, key: ?String) -> HangarArchiveReport !StoreError {
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    if files.is_file(target) {
+        archive :: HangarArchive.decode(store_archive_read_bounded(target))
+        store_archive_verify_contents(roots, archive, false)
+        signer :: store_archive_signing_key(roots, key, true)
+        signed :: store_archive_sign_decoded(archive, signer)
+        store_archive_write_atomic(destination ?? target, signed.encode())
+        return Ok(signed.report())
+    }
+    entry :: store_archive_select_entry_unlocked(roots, target)
+    archive :: store_archive_build_unlocked(roots, entry.id, false, false)
+    signer :: store_archive_signing_key(roots, key, true)
+    signed :: store_archive_sign_decoded(archive, signer)
+    sidecar :: destination ?? store_archive_signature_path(roots, entry)
+    store_archive_write_atomic(sidecar, signed.encode())
+    Ok(signed.report())
+}
+
+// Copy a closure to another local Jetpack root through the same archive path
+// used by export/import. The source lock covers the complete archive
+// snapshot; the destination imports the source-verified archive without
+// requiring a second, unrelated local trust key. Remote archive transport is
+// deliberately not inferred from a URL: SSH/HTTP endpoints fail before any
+// bytes are copied.
+pub fn store_copy_archive(roots: HangarRoots, target: String, destination: String, key: ?String) -> HangarArchiveReport !StoreError {
+    if destination.contains("://") {
+        return Err(StoreError.InvalidData("Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive"))
+    }
+    exported :: store_export_archive(roots, target, true, key)
+    archive :: HangarArchive.decode(exported.bytes)
+    archive.verify_signature(roots, key, false)
+    store_archive_import_verified(HangarRoots.at(destination), archive, false)
+}
+
+// Repair a corrupt live object from a signed archive. No source archive is
+// guessed: a missing repair input is a safe, actionable error. The damaged
+// object is quarantined before import and restored if any import step fails.
+pub fn store_repair_archive(roots: HangarRoots, target: String, source_archive: ?String, key: ?String) -> HangarArchiveReport !StoreError {
+    _lock :: env_runtime_lock(roots.root, "hangar")
+    store_archive_repair_unlocked(roots, target, source_archive, key)
+}
+
+fn store_archive_repair_unlocked(roots: HangarRoots, target: String, source_archive: ?String, key: ?String) -> HangarArchiveReport !StoreError {
+    hangar :: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    store_ensure_real_directory(files.join(hangar, "objects"), "Hangar object pool")
+    store_recover_closure_journal_unlocked(roots)
+    entry :: store_archive_select_entry_unlocked(roots, target)
+    store_archive_verify_live_entry_unlocked(roots, entry) ? _ -> {
+        return Ok(HangarArchiveReport{objects: 1, bytes: 0, signed: files.is_file(store_archive_signature_path(roots, entry)), root: entry.id})
+    } ! error -> {
+        if source_archive == None {
+            return Err(StoreError.InvalidData("Hangar entry `{entry.id}` is corrupt: {error.message()}; supply `--from <signed.hangar>` to repair it"))
+        }
+    }
+    source :: source_archive ?? return Err(StoreError.InvalidData("Hangar entry `{entry.id}` is corrupt; supply `--from <signed.hangar>` to repair it"))
+    archive :: HangarArchive.decode(store_archive_read_bounded(source))
+    archive.verify_signature(roots, key, false)
+    store_archive_verify_contents(roots, archive, false)
+    if archive.root_id != entry.id -> return Err(StoreError.InvalidData("repair archive root does not match the requested entry"))
+    if !store_archive_names_object(archive, entry.id) -> return Err(StoreError.InvalidData("repair archive does not contain the requested entry"))
+    object_path :: store_archive_repair_output_path(roots, entry)
+    if !store_archive_is_under(object_path, hangar) {
+        return Err(StoreError.InvalidData("external provider outputs cannot be repaired by copying a Hangar archive"))
+    }
+    quarantine :: files.join(hangar, "quarantine")
+    store_ensure_real_directory(quarantine, "Hangar quarantine")
+    backup :: files.join(quarantine, "repair-{entry.envelope.output_hash}-{store_archive_unique_suffix()}")
+    had_object :: store_archive_lstat(object_path) != None
+    permissions := MovePathPermissions.default()
+    report :: store_archive_repair_swap(roots, archive, object_path, backup, quarantine, had_object, &permissions) ? value -> value ! error -> {
+        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+        return Err(error)
+    }
+    permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
+    Ok(report)
+}
+
+// Quarantine the damaged object, import the signed archive, and either drop
+// the backup or roll the object back.
+fn store_archive_repair_swap(roots: HangarRoots, archive: HangarArchive, object_path: String, backup: String, quarantine: String, had_object: Bool, permissions: &MovePathPermissions) -> HangarArchiveReport !StoreError {
+    hangar :: roots.hangar_dir()
+    object_parent :: store_archive_parent_or(object_path, hangar)
+    writable_source :: if had_object -> object_path else -> object_parent
+    permissions.make_writable(writable_source, hangar)
+    permissions.make_writable(quarantine, hangar)
+    if had_object {
+        files.rename(object_path, backup)
+        permissions.renamed(object_path, backup)
+        store_sync_store_directory(quarantine)
+        store_sync_store_directory(object_parent)
+    }
+    report :: archive.report()
+    store_archive_import_unlocked(roots, archive, false) ? _ -> {
+        if had_object {
+            store_archive_remove_tree(backup) ?? return Err(StoreError.Other("repair committed; quarantined backup remains at `{backup}`: {err.message()}"))
+            store_sync_store_directory(quarantine)
+        }
+        return Ok(report)
+    } ! error -> {
+        rollback_errors := [String]{}
+        files.stat(object_path) ? _ -> {
+            store_archive_remove_tree(object_path) ?? rollback_errors.push("removing imported output: {err.message()}")
+        } ! missing -> {
+            if missing == {
+                .NotFound(_) -> {}
+                else -> rollback_errors.push("checking imported output: {StoreError.Io(missing).message()}")
+            }
+        }
+        if had_object {
+            if rollback_errors.len() == 0 {
+                files.rename(backup, object_path) ? _ -> {
+                    permissions.renamed(backup, object_path)
+                    store_sync_store_directory(object_parent) ?? rollback_errors.push("syncing restored output: {err.message()}")
+                } ! failed -> {
+                    rollback_errors.push("restoring quarantined output: {StoreError.Io(failed).message()}")
+                }
+            } else {
+                rollback_errors.push("quarantined output remains at `{backup}`")
+            }
+        }
+        if rollback_errors.len() > 0 {
+            detail :: rollback_errors.join("; ")
+            return Err(error.with_message("{error.message()}; repair rollback: {detail}"))
+        }
+        return Err(error)
+    }
+}
+
+// The canonical content-addressed object path of a Hangar entry.
+fn store_archive_repair_output_path(roots: HangarRoots, entry: StoreEntry) -> String !StoreError {
+    store_archive_validate_digest(entry.envelope.output_hash)
+    expected :: files.join(files.join(roots.hangar_dir(), "objects"), entry.envelope.output_hash)
+    if entry.out != expected -> return Err(StoreError.InvalidData("Hangar entry output is not its canonical content-addressed object"))
+    Ok(expected)
+}
+
+// Assemble the archive for `target`: its output (or complete closure) as
+// content-addressed trees, plus the package records that own those outputs.
+fn store_archive_build_unlocked(roots: HangarRoots, target: String, include_closure: Bool, allow_nix_absolute_symlinks: Bool) -> HangarArchive !StoreError {
+    hangar :: roots.hangar_dir()
+    store_require_real_directory(hangar, "Hangar root")
+    entry :: store_archive_select_entry_unlocked(roots, target)
+    store_archive_verify_live_entry_unlocked(roots, entry)
+    objects_dir :: files.join(hangar, "objects")
+    store_require_real_directory(objects_dir, "Hangar object pool")
+    graph :: store_closure_graph_structure_unlocked(roots)
+    root_digest :: entry.envelope.output_hash
+    digests := if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
+    if digests.len() == 0 -> digests.push(root_digest)
+    digests = store_archive_sorted_unique(digests)
+
+    selected := [String: StoreEntry]{}
+    selected[entry.id] = entry
+    loop candidate in store_list_unlocked(roots) {
+        owns := digests.contains(candidate.envelope.output_hash)
+        loop output in candidate.named_outputs {
+            if digests.contains(output.value) -> owns = true
+        }
+        if owns -> selected[candidate.id] = candidate
+    }
+
+    canonical_objects :: files.canonicalize(objects_dir) ?? objects_dir
+    objects := [HangarArchiveObject]{}
+    loop digest in digests {
+        object :: graph.objects.get(digest) ?? return Err(StoreError.InvalidData("closure object `{digest}` is absent from the Hangar graph"))
+        if !store_archive_is_under(object.path, canonical_objects) {
+            return Err(StoreError.InvalidData("closure object `{digest}` is outside the local Hangar object pool"))
+        }
+        objects.push(HangarArchiveObject{
+            id: digest,
+            digest: digest,
+            meta: "",
+            root_mode: files.stat(object.path).mode,
+            nodes: store_archive_collect_nodes(object.path, allow_nix_absolute_symlinks),
+        })
+    }
+    loop id in store_archive_sorted_unique(selected.keys().to_list()) {
+        candidate :: selected[id]
+        primary :: candidate.envelope.output_hash
+        if !digests.contains(primary) -> next
+        objects.push(HangarArchiveObject{id: candidate.id, digest: primary, meta: candidate.meta_json(), root_mode: 0, nodes: [HangarArchiveNode]{}})
+    }
+    objects.sort_by(object -> object.digest)
+    objects.sort_by(object -> object.id)
+    output_ids := [String]{}
+    package_ids := [String]{}
+    loop object in objects {
+        if object.meta == "" {
+            if output_ids.contains(object.digest) -> return Err(StoreError.InvalidData("archive contains duplicate output records"))
+            output_ids.push(object.digest)
+        } else {
+            if package_ids.contains(object.id) -> return Err(StoreError.InvalidData("archive contains duplicate package records"))
+            package_ids.push(object.id)
+        }
+    }
+    Ok(HangarArchive{root_id: entry.id, objects, nix_manifest: None, signature: None})
+}
+
+// One output moved from staging into the object pool, for rollback.
+struct HangarArchiveMove {
+    destination: String
+    staged: String
+}
+
+// Stage, verify, and publish every archived output, then register the
+// package records. Staging is removed on every path; a failure rolls back
+// every published object.
+fn store_archive_import_unlocked(roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> Int !StoreError {
+    hangar :: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    archive_stage :: files.join(hangar, @STORE_ARCHIVE_STAGE)
+    store_ensure_real_directory(archive_stage, "Hangar archive staging")
+    objects_dir :: files.join(hangar, "objects")
+    store_ensure_real_directory(objects_dir, "Hangar object pool")
+    stage :: files.join(archive_stage, "{process.current_pid()}-{store_archive_unique_suffix()}")
+    stage_objects :: files.join(stage, "objects")
+    files.create_dir(stage)
+    files.create_dir(stage_objects)
+    moved := [HangarArchiveMove]{}
+    count :: store_archive_import_staged(roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, &moved) ? value -> value ! error -> {
+        failure := error
+        store_archive_rollback_import_moves(moved, hangar) ?? {
+            failure = StoreError.Other("{error.message()}; archive import rollback failed: {err.message()}")
+        }
+        store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
+        return Err(failure)
+    }
+    store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
+    Ok(count)
+}
+
+fn store_archive_import_staged(roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool, stage: String, stage_objects: String, objects_dir: String, moved: &[HangarArchiveMove]) -> Int !StoreError {
+    hangar :: roots.hangar_dir()
+    package_records := [StoreEntry]{}
+    seen_digests := [String]{}
+    loop object in archive.objects {
+        if object.meta != "" {
+            meta :: pkg_parse_meta(object.meta) ?? return Err(StoreError.InvalidData("package record `{object.id}` has malformed meta.json"))
+            entry :: store_archive_portable_entry(roots, object, meta)
+            if entry.envelope.output_hash != object.digest {
+                return Err(StoreError.InvalidData("package record `{entry.id}` names `{object.digest}` but its primary output is `{entry.envelope.output_hash}`"))
+            }
+            package_records.push(entry)
+            next
+        }
+        if seen_digests.contains(object.digest) -> return Err(StoreError.InvalidData("archive contains duplicate output `{object.digest}`"))
+        seen_digests.push(object.digest)
+        store_archive_validate_digest(object.digest)
+        output :: files.join(stage_objects, object.digest)
+        store_archive_write_nodes(output, object.nodes, object.root_mode, allow_nix_absolute_symlinks)
+        actual :: store_archive_output_hash(output, hangar, allow_nix_absolute_symlinks)
+        if actual != object.digest -> return Err(StoreError.InvalidData("archive output `{object.digest}` re-hashes as `{actual}`"))
+    }
+    seen_digests = store_archive_sorted_unique(seen_digests)
+
+    loop entry in package_records {
+        if !seen_digests.contains(entry.envelope.output_hash) {
+            return Err(StoreError.InvalidData("package record `{entry.id}` has no archived primary output"))
+        }
+        loop reference in entry.references {
+            if !seen_digests.contains(reference) -> return Err(StoreError.InvalidData("package record `{entry.id}` references missing output `{reference}`"))
+        }
+        loop output in entry.named_outputs {
+            if !seen_digests.contains(output.value) -> return Err(StoreError.InvalidData("package record `{entry.id}` names a missing output"))
+        }
+    }
+
+    store_archive_validate_import_destinations(roots, package_records, seen_digests)
+
+    incoming_bytes := 0
+    loop digest in seen_digests {
+        if !files.is_dir(files.join(objects_dir, digest)) {
+            incoming_bytes = store_admission_size(stage_objects)
+            break
+        }
+    }
+    store_ensure_hangar_capacity(roots, store_admission_reservation(incoming_bytes), Val(stage))
+
+    loop digest in seen_digests {
+        staged :: files.join(stage_objects, digest)
+        destination :: files.join(objects_dir, digest)
+        if store_archive_lstat_ok(destination) == {
+            .Val(existing) -> {
+                if existing.is_symlink -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` is a symlink"))
+                actual :: store_verified_output_hash_persistent(destination, Val(hangar), false)
+                if actual != digest -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` has a conflicting digest"))
+                store_archive_remove_tree(staged)
+            }
+            .None -> {
+                // The staging tree is sealed before publication so every
+                // validation reads the final immutable bytes. Reopen only for
+                // this same-filesystem rename; seal the canonical path again
+                // before exposing it to the closure transaction.
+                store_archive_make_tree_writable(staged)
+                files.rename(staged, destination)
+                moved.push(HangarArchiveMove{destination, staged})
+                store_archive_seal_tree(destination)
+                store_write_seal(destination, hangar, digest)
+            }
+        }
+    }
+
+    store_sync_store_directory(objects_dir)
+    store_register_entries_unlocked(roots, package_records)
+    Ok(package_records.len())
+}
+
+// Rebuild a local StoreEntry for an archived package record: its identity
+// must match its metadata, and its paths are remapped under the local
+// content-addressed object.
+fn store_archive_portable_entry(roots: HangarRoots, object: HangarArchiveObject, meta: ParsedMeta) -> StoreEntry !StoreError {
+    store_archive_validate_id(object.id)
+    source_id :: store_entry_id(meta.name, meta.version, meta.reference, meta.out)
+    if source_id != object.id {
+        return Err(StoreError.InvalidData("archive package record `{object.id}` does not match its metadata identity"))
+    }
+    out :: files.join(files.join(roots.hangar_dir(), "objects"), object.digest)
+    bin :: store_archive_map_member_path(meta.out, meta.bin, out)
+    rlib :: store_archive_map_member_path(meta.out, meta.rlib, out)
+    id :: store_entry_id(meta.name, meta.version, meta.reference, out)
+    store_archive_validate_id(id)
+    now :: store_archive_now_secs()
+    Ok(StoreEntry{
+        id,
+        name: meta.name,
+        version: meta.version,
+        reference: meta.reference,
+        out,
+        bin,
+        rlib,
+        envelope: meta.envelope,
+        cache_identity: meta.cache_identity,
+        references: meta.references,
+        named_outputs: meta.named_outputs,
+        platform_artifact_kind: meta.platform_artifact_kind,
+        producer_record: meta.producer_record,
+        receipt: meta.receipt,
+        realized_at: meta.realized_at ?? now,
+        last_used_at: meta.last_used_at ?? now,
+    })
+}
+
+// Move a metadata member path from the source output root to `destination`.
+fn store_archive_map_member_path(source_out: String, member: String, destination: String) -> String !StoreError {
+    if member == "" -> return Ok("")
+    if source_out == "" || store_archive_path_components(source_out).contains("..") {
+        return Err(StoreError.InvalidData("archive package metadata has an unsafe primary output path"))
+    }
+    suffix :: store_archive_strip_prefix(member, source_out) ?? return Err(StoreError.InvalidData("archive package metadata points outside its primary output"))
+    if suffix.contains("..") -> return Err(StoreError.InvalidData("archive package metadata points outside its primary output"))
+    // Rust `Path::join` of the remaining components; an empty suffix keeps
+    // the joined trailing separator.
+    joined :: suffix.join("/")
+    Ok("{destination}/{joined}")
+}
+
+fn store_archive_verify_live_entry_unlocked(roots: HangarRoots, entry: StoreEntry) !StoreError {
+    store_verify_hangar_object_unlocked(roots, entry) ?? return Err(StoreError.Other(err.what()))
+}
+
+// The Hangar output identity of a staged tree. Nix closures may keep
+// absolute links, which only the in-Hangar hash admits.
+fn store_archive_output_hash(path: String, hangar: String, allow_nix_absolute_symlinks: Bool) -> String !StoreError {
+    if allow_nix_absolute_symlinks {
+        actual :: pkg_try_output_hash_of_in_hangar(path, hangar, false)
+        return Ok(actual)
+    }
+    actual :: pkg_try_output_hash_of(path)
+    Ok(actual)
+}
+
+// Re-hash one archived output staged under `stage`.
+fn store_archive_verify_object(roots: HangarRoots, object: HangarArchiveObject, stage: String, allow_nix_absolute_symlinks: Bool) !StoreError {
+    actual :: store_archive_output_hash(files.join(stage, object.digest), roots.hangar_dir(), allow_nix_absolute_symlinks)
+    if actual != object.digest -> return Err(StoreError.InvalidData("output `{object.digest}` re-hashes as `{actual}`"))
+}
+
+// Materialize every output in a private verification stage, re-hash it, and
+// check that every package record names archived outputs. The stage is
+// removed on every path.
+fn store_archive_verify_contents(roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) !StoreError {
+    hangar :: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    archive_stage :: files.join(hangar, @STORE_ARCHIVE_STAGE)
+    store_ensure_real_directory(archive_stage, "Hangar archive staging")
+    stage :: files.join(archive_stage, "verify-{process.current_pid()}-{store_archive_unique_suffix()}")
+    store_archive_verify_staged(roots, archive, stage, allow_nix_absolute_symlinks) ?? {
+        store_archive_remove_tree(stage).drop("an abandoned verification stage is swept by Hangar recovery")
+        return Err(err)
+    }
+    store_archive_remove_tree(stage).drop("an abandoned verification stage is swept by Hangar recovery")
+}
+
+fn store_archive_verify_staged(roots: HangarRoots, archive: HangarArchive, stage: String, allow_nix_absolute_symlinks: Bool) !StoreError {
+    files.create_dir(stage)
+    outputs := [String]{}
+    loop object in archive.objects {
+        if object.meta != "" -> next
+        store_archive_write_nodes(files.join(stage, object.digest), object.nodes, object.root_mode, allow_nix_absolute_symlinks)
+        store_archive_verify_object(roots, object, stage, allow_nix_absolute_symlinks)
+        outputs.push(object.digest)
+    }
+    loop object in archive.objects {
+        if object.meta == "" -> next
+        meta :: pkg_parse_meta(object.meta) ?? return Err(StoreError.InvalidData("archive contains malformed package metadata"))
+        if meta.envelope.output_hash != object.digest || !outputs.contains(object.digest) {
+            return Err(StoreError.InvalidData("archive package metadata has no matching output"))
+        }
+        if store_entry_id(meta.name, meta.version, meta.reference, meta.out) != object.id {
+            return Err(StoreError.InvalidData("archive package metadata does not match its identity"))
+        }
+        loop reference in meta.references {
+            if !outputs.contains(reference) -> return Err(StoreError.InvalidData("archive package metadata references a missing output"))
+        }
+        loop output in meta.named_outputs {
+            if !outputs.contains(output.value) -> return Err(StoreError.InvalidData("archive package metadata names a missing output"))
+        }
+    }
+}
+
+// Archive operations are receipt consumers too. Upgrade legacy package
+// projections before selecting an entry so export, sign, and repair never
+// publish or act on a pre-receipt view.
+fn store_archive_select_entry_unlocked(roots: HangarRoots, target: String) -> StoreEntry !StoreError {
+    store_migrate_closure_graph_unlocked(roots)
+    store_archive_select_entry_from(store_list_unlocked(roots), target)
+}
+
+// The first entry whose id, reference, output digest, or `name@version`
+// equals `target`.
+fn store_archive_select_entry_from(entries: [StoreEntry], target: String) -> StoreEntry !StoreError {
+    loop entry in entries {
+        if entry.id == target || entry.reference == target || entry.envelope.output_hash == target || "{entry.name}@{entry.version}" == target {
+            return Ok(entry)
+        }
+    }
+    Err(StoreError.InvalidData("no Hangar entry matches `{target}`"))
+}
+
+fn store_archive_names_object(archive: HangarArchive, id: String) -> Bool !Never {
+    loop object in archive.objects {
+        if object.id == id -> return true
+    }
+    false
+}
+
+// Collect an output tree as path-sorted archive nodes. Hardlinked files
+// become hardlink nodes naming their first path; symlinks must stay inside
+// the output unless a Nix closure keeps an absolute link.
+fn store_archive_collect_nodes(root: String, allow_nix_absolute_symlinks: Bool) -> [HangarArchiveNode] !StoreError {
+    observed :: store_archive_lstat(root)
+    metadata :: observed ?? return Err(StoreError.InvalidData("output `{root}` is missing"))
+    if metadata.is_symlink -> return Err(StoreError.InvalidData("Hangar output root may not be a symlink"))
+    canonical_root :: files.canonicalize(root)
+    hardlinks := [String: String]{}
+    nodes := [HangarArchiveNode]{}
+    store_archive_collect_nodes_at(root, "", canonical_root, &hardlinks, &nodes, allow_nix_absolute_symlinks)
+    nodes.sort_by(node -> node.path)
+    Ok(nodes)
+}
+
+fn store_archive_collect_nodes_at(path: String, relative: String, canonical_root: String, hardlinks: &[String: String], out: &[HangarArchiveNode], allow_nix_absolute_symlinks: Bool) !StoreError {
+    if out.len() >= @STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("output tree contains too many nodes"))
+    metadata :: files.stat(path)
+    if {
+        metadata.is_dir -> {
+            if relative != "" {
+                out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Directory, mode: metadata.mode, bytes: [U8]{}})
+            }
+            loop child in files.list_dir(path) {
+                child_relative :: if relative == "" -> child.name else -> "{relative}/{child.name}"
+                store_archive_collect_nodes_at(child.path, child_relative, canonical_root, &hardlinks, &out, allow_nix_absolute_symlinks)
+            }
+        }
+        metadata.is_file -> {
+            if metadata.size > @STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive file exceeds the 512 MiB limit"))
+            node_path :: store_archive_portable_path(relative)
+            identity :: "{metadata.id.device}:{metadata.id.inode}"
+            if metadata.links > 1 {
+                if hardlinks.get(identity) == {
+                    .Val(first) -> {
+                        out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.Hardlink, mode: metadata.mode, bytes: first.bytes()})
+                        return Ok()
+                    }
+                    .None -> hardlinks[identity] = node_path
+                }
+            }
+            contents :: store_archive_read_bounded_limit(path, @STORE_ARCHIVE_MAX_NODE_BYTES, "archive file")
+            out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.File, mode: metadata.mode, bytes: contents})
+        }
+        metadata.is_symlink -> {
+            target :: files.read_link(path)
+            if target == "" || target.contains("\\") || store_archive_has_ascii_control(target.bytes()) {
+                return Err(StoreError.InvalidData("symlink target is not portable"))
+            }
+            if target.starts_with("/") {
+                if !allow_nix_absolute_symlinks -> return Err(StoreError.InvalidData("absolute symlinks are not portable Hangar archive nodes"))
+            } else {
+                resolved :: files.canonicalize(path) ?? return Err(StoreError.InvalidData("symlink `{path}` is dangling or cyclic: {StoreError.Io(err).message()}"))
+                if !store_archive_is_under(resolved, canonical_root) -> return Err(StoreError.InvalidData("symlink target escapes the Hangar output root"))
+            }
+            out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Symlink, mode: metadata.mode, bytes: target.bytes()})
+        }
+        else -> return Err(StoreError.InvalidData("special files are not portable Hangar archive nodes"))
+    }
+}
+
+fn store_archive_portable_path(relative: String) -> String !StoreError {
+    if relative == "" -> return Err(StoreError.InvalidData("archive path is empty"))
+    store_archive_validate_relative(relative)
+    Ok(relative)
+}
+
+// Restore archived nodes under `root`: the directory skeleton first, then
+// files, hardlinks, and symlinks, and finally directory modes deepest first
+// so a read-only parent never blocks a later child.
+fn store_archive_write_nodes(root: String, nodes: [HangarArchiveNode], root_mode: Int, allow_nix_absolute_symlinks: Bool) !StoreError {
+    store_archive_validate_no_path_collisions(nodes)
+    files.create_dir_all(root)
+    loop node in nodes {
+        if node.kind != HangarArchiveNodeKind.Directory -> next
+        path :: files.join(root, node.path)
+        if !store_archive_is_under(path, root) -> return Err(StoreError.InvalidData("archive node escapes its output root"))
+        files.create_dir_all(path)
+    }
+    loop node in nodes {
+        if node.kind != HangarArchiveNodeKind.File -> next
+        path :: files.join(root, node.path)
+        if !store_archive_is_under(path, root) -> return Err(StoreError.InvalidData("archive node escapes its output root"))
+        if node.bytes.len() > @STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive file exceeds the 512 MiB limit"))
+        files.create_dir_all(files.dirname(path))
+        store_archive_write_atomic(path, node.bytes)
+        store_archive_set_mode(path, node.mode)
+    }
+    loop node in nodes {
+        if node.kind != HangarArchiveNodeKind.Hardlink -> next
+        path :: files.join(root, node.path)
+        target :: store_archive_hardlink_target(root, node.bytes)
+        if !files.is_file(target) -> return Err(StoreError.InvalidData("archive hardlink target is not a regular file"))
+        files.create_dir_all(files.dirname(path))
+        files.hard_link(target, path)
+    }
+    loop node in nodes {
+        if node.kind != HangarArchiveNodeKind.Symlink -> next
+        path :: files.join(root, node.path)
+        target :: String.from_bytes(node.bytes) ?? return Err(StoreError.InvalidData("archive symlink target is not UTF-8"))
+        store_archive_link_target(root, path, node.bytes, allow_nix_absolute_symlinks)
+        files.create_dir_all(files.dirname(path))
+        files.symlink(target, path)
+    }
+    directories := [HangarArchiveNode]{}
+    loop node in nodes {
+        if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node)
+    }
+    directories.sort_by(node -> 0 - store_archive_separator_count(node.path))
+    loop node in directories -> store_archive_set_mode(files.join(root, node.path), node.mode)
+    if root_mode != 0 -> store_archive_set_mode(root, root_mode)
+}
+
+fn store_archive_separator_count(path: String) -> Int !Never {
+    count := 0
+    loop byte in path.bytes() {
+        if Int.from_u8(byte) == 47 -> count += 1
+    }
+    count
+}
+
+// The in-root path a relative link target resolves to; absolute targets are
+// admitted only for Nix closures.
+fn store_archive_link_target(root: String, link: String, bytes: [U8], allow_nix_absolute_symlinks: Bool) -> String !StoreError {
+    target :: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("archive link target is not UTF-8"))
+    if target == "" || target.contains("\\") || store_archive_has_ascii_control(bytes) {
+        return Err(StoreError.InvalidData("archive link target is not portable"))
+    }
+    if target.starts_with("/") {
+        if allow_nix_absolute_symlinks -> return Ok(target)
+        return Err(StoreError.InvalidData("archive link target is absolute"))
+    }
+    parent :: store_archive_parent_or(link, root)
+    candidate :: files.join(parent, target)
+    relative :: store_archive_strip_prefix(candidate, root) ?? return Err(StoreError.InvalidData("archive link target escapes its output root"))
+    normalized := [String]{}
+    loop component in relative {
+        if component == {
+            "." -> {}
+            ".." -> {
+                if normalized.len() == 0 -> return Err(StoreError.InvalidData("archive link target escapes its output root"))
+                normalized = normalized[0..<(normalized.len() - 1)]
+            }
+            else -> normalized.push(component)
+        }
+    }
+    joined :: normalized.join("/")
+    Ok("{root}/{joined}")
+}
+
+fn store_archive_hardlink_target(root: String, bytes: [U8]) -> String !StoreError {
+    target :: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("archive hardlink target is not UTF-8"))
+    store_archive_validate_relative(target)
+    Ok(files.join(root, target))
+}
+
+// Existing objects must be real directories; existing package records must
+// be real directories whose meta.json equals the archived record.
+fn store_archive_validate_import_destinations(roots: HangarRoots, entries: [StoreEntry], digests: [String]) !StoreError {
+    hangar :: roots.hangar_dir()
+    objects_dir :: files.join(hangar, "objects")
+    loop digest in digests {
+        existing :: store_archive_lstat_ok(files.join(objects_dir, digest)) ?? next
+        if existing.is_symlink || !existing.is_dir -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` is not a directory"))
+    }
+    loop entry in entries {
+        destination :: files.join(hangar, entry.id)
+        observed :: store_archive_lstat(destination)
+        existing :: observed ?? next
+        if existing.is_symlink || !existing.is_dir -> return Err(StoreError.InvalidData("existing Hangar record `{entry.id}` is not a directory"))
+        meta_path :: files.join(destination, "meta.json")
+        meta_metadata :: files.stat(meta_path)
+        if meta_metadata.is_symlink || !meta_metadata.is_file {
+            return Err(StoreError.InvalidData("existing Hangar record `{entry.id}` has an unsafe meta.json"))
+        }
+        if files.read(meta_path) != entry.meta_json() -> return Err(StoreError.InvalidData("existing Hangar record `{entry.id}` conflicts with the archive"))
+    }
+}
+
+// Move every published object back to staging, newest first.
+fn store_archive_rollback_import_moves(moved: [HangarArchiveMove], hangar: String) !StoreError {
+    index := moved.len() - 1
+    loop index >= 0 {
+        entry :: moved[index]
+        if store_archive_lstat_ok(entry.destination) != None {
+            store_remove_seal(entry.destination, hangar)
+            store_archive_make_tree_writable(entry.destination)
+            files.rename(entry.destination, entry.staged)
+        }
+        index -= 1
+    }
+}
+
+// Replace any signature with a fresh HMAC over the unsigned payload.
+fn store_archive_sign_decoded(archive: HangarArchive, key: TrustKey) -> HangarArchive !StoreError {
+    unsigned :: archive.unsigned()
+    signature :: key.sign(unsigned.encode_unsigned())
+    Ok(HangarArchive{root_id: unsigned.root_id, objects: unsigned.objects, nix_manifest: unsigned.nix_manifest, signature: Val(HangarArchiveSignature.from_trust(signature))})
+}
+
+// Load the archive signer key, creating the default private key on first use
+// when `create` allows it.
+fn store_archive_signing_key(roots: HangarRoots, requested: ?String, create: Bool) -> TrustKey !StoreError {
+    path :: if requested == {
+        .Val(value) -> store_archive_key_path(roots, value)
+        .None -> files.join(files.join(roots.root, "trust"), @STORE_ARCHIVE_KEY)
+    }
+    if !files.is_file(path) {
+        if !create -> return Err(StoreError.InvalidData("archive signer key `{path}` is unavailable; pass `--key <file>`"))
+        if !sys.is_unix() -> return Err(StoreError.InvalidData("archive signer key creation requires private file permissions on this platform"))
+        store_archive_write_private_atomic(path, store_archive_entropy())
+    }
+    metadata :: files.stat(path)
+    if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("archive signer key is not a regular file"))
+    secret :: store_archive_decode_secret(store_archive_read_bounded_limit(path, 4096, "archive signer key"))
+    key :: TrustKey.from_secret(secret) ?? return Err(StoreError.InvalidData("invalid archive signer key: {err.message()}"))
+    Ok(key)
+}
+
+// A path-like request names a key file; a bare name is `<root>/trust/<name>.key`.
+fn store_archive_key_path(roots: HangarRoots, requested: String) -> String !Never {
+    if store_archive_path_components(requested).len() > 1 || requested.starts_with("/") || files.is_file(requested) -> return requested
+    files.join(files.join(roots.root, "trust"), "{requested}.key")
+}
+
+// A key file holds raw secret bytes or at least 32 even-length hex digits,
+// with one optional trailing newline.
+fn store_archive_decode_secret(bytes: [U8]) -> [U8] !StoreError {
+    trimmed := bytes
+    if trimmed.len() > 0 && Int.from_u8(trimmed[trimmed.len() - 1]) == 10 -> trimmed = trimmed[0..<(trimmed.len() - 1)]
+    hex := trimmed.len() >= 32 && trimmed.len() % 2 == 0
+    loop byte in trimmed {
+        if !store_archive_is_hex_digit(Int.from_u8(byte)) -> hex = false
+    }
+    if !hex -> return Ok(trimmed)
+    out := [U8]{}
+    index := 0
+    loop index < trimmed.len() {
+        high :: store_archive_hex_value(trimmed[index]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
+        low :: store_archive_hex_value(trimmed[index + 1]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
+        out.push(U8{(high << 4) | low})
+        index += 2
+    }
+    Ok(out)
+}
+
+fn store_archive_hex_value(byte: U8) -> ?Int !Never {
+    code :: Int.from_u8(byte)
+    if {
+        code >= 48 && code <= 57 -> Val(code - 48)
+        code >= 97 && code <= 102 -> Val(code - 87)
+        code >= 65 && code <= 70 -> Val(code - 55)
+        else -> None
+    }
+}
+
+// Exactly one 32-byte key from the OS CSPRNG.
+fn store_archive_entropy() -> [U8] !StoreError {
+    bytes :: random.bytes(32) ?? return Err(StoreError.Other("archive signer key: {err.message()}"))
+    Ok(bytes)
+}
+
+// The hidden signed sidecar of a live entry.
+fn store_archive_signature_path(roots: HangarRoots, entry: StoreEntry) -> String !Never {
+    files.join(files.join(roots.hangar_dir(), entry.id), ".hangar")
+}
+
+fn store_archive_read_bounded(path: String) -> [U8] !StoreError {
+    store_archive_read_bounded_limit(path, @STORE_MAX_ARCHIVE_BYTES, "archive input")
+}
+
+// Read a regular, non-symlink file of at most `limit` bytes, refusing a file
+// that grows past the bound while it is read.
+fn store_archive_read_bounded_limit(path: String, limit: Int, label: String) -> [U8] !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink -> return Err(StoreError.InvalidData("archive input may not be a symlink"))
+    if !metadata.is_file || metadata.size > limit {
+        return Err(StoreError.InvalidData("{label} is not a regular file within the size limit"))
+    }
+    reader :: files.open(path, links: .Refuse)
+    bytes := [U8]{}
+    loop chunk in reader.chunks(65536) {
+        loop byte in chunk -> bytes.push(byte)
+        if bytes.len() > limit -> return Err(StoreError.InvalidData("{label} exceeded its bound while being read"))
+    }
+    Ok(bytes)
+}
+
+// Publish `bytes` through an exclusive, fsynced partial file and a rename,
+// then sync the parent directory.
+fn store_archive_write_atomic(path: String, bytes: [U8]) !StoreError {
+    parent :: files.dirname(path)
+    if parent != "" -> files.create_dir_all(parent)
+    if store_archive_lstat_ok(path) == {
+        .Val(existing) -> {
+            if existing.is_symlink -> return Err(StoreError.InvalidData("archive destination may not be a symlink"))
+        }
+        .None -> {}
+    }
+    partial :: store_archive_with_extension(path, "jet-partial-{process.current_pid()}-{store_archive_unique_suffix()}")
+    store_archive_publish_partial(partial, path, bytes, None) ?? {
+        files.remove(partial).drop("the failed partial may never have been created")
+        return Err(err)
+    }
+    if parent != "" -> files.fsync(parent)
+}
+
+fn store_archive_publish_partial(partial: String, path: String, bytes: [U8], mode: ?Int) !StoreError {
+    out :: files.create(partial, if_exists: .Refuse, mode: mode)
+    if mode == {
+        .Val(private) -> {
+            out.set_mode(private)
+            if (out.stat().mode & @STORE_MODE_PERMISSION_BITS) != private {
+                return Err(StoreError.InvalidData("archive signer key could not be made private before writing"))
+            }
+        }
+        .None -> {}
+    }
+    out.write_all(bytes)
+    out.fsync()
+    files.rename(partial, path)
+}
+
+// Like `store_archive_write_atomic`, but the partial is created and verified
+// owner-only (0600) before any secret byte is written.
+fn store_archive_write_private_atomic(path: String, bytes: [U8]) !StoreError {
+    parent :: files.dirname(path)
+    if parent != "" -> files.create_dir_all(parent)
+    if store_archive_lstat_ok(path) == {
+        .Val(existing) -> {
+            if existing.is_symlink -> return Err(StoreError.InvalidData("archive destination may not be a symlink"))
+        }
+        .None -> {}
+    }
+    partial :: store_archive_with_extension(path, "jet-partial-{process.current_pid()}-{store_archive_unique_suffix()}")
+    store_archive_publish_partial(partial, path, bytes, Val(@STORE_MODE_PRIVATE_FILE)) ?? {
+        failure :: err
+        files.remove(partial) ?? {
+            if err == {
+                .NotFound(_) -> {}
+                else -> return Err(failure.with_message("{failure.message()}; could not remove private archive-key staging file: {StoreError.Io(err).message()}"))
+            }
+        }
+        return Err(failure)
+    }
+    if parent != "" -> files.fsync(parent)
+}
+
+// Remove a file, symlink, or tree without following links; a missing path is
+// already removed.
+fn store_archive_remove_tree(path: String) !StoreError {
+    observed :: store_archive_lstat(path)
+    metadata :: observed ?? return Ok()
+    if {
+        metadata.is_symlink -> files.remove(path)
+        metadata.is_dir -> {
+            store_archive_make_tree_writable(path)
+            files.remove_all(path)
+        }
+        else -> {
+            store_archive_set_mode(path, @STORE_MODE_PRIVATE_FILE)
+            files.remove(path)
+        }
+    }
+}
+
+// Add the owner write bit through a tree. Links are not followed: a Nix
+// closure may retain a dangling absolute link by design.
+fn store_archive_make_tree_writable(path: String) !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink -> return Ok()
+    if metadata.is_dir {
+        loop child in files.list_dir(path) -> store_archive_make_tree_writable(child.path)
+    }
+    files.set_mode(path, metadata.mode | @STORE_MODE_OWNER_WRITE)
+}
+
+// Clear every write bit through a tree. Symlink permissions are not
+// meaningful and setting them would follow the link.
+fn store_archive_seal_tree(path: String) !StoreError {
+    metadata :: files.stat(path)
+    if metadata.is_symlink -> return Ok()
+    if metadata.is_dir {
+        loop child in files.list_dir(path) -> store_archive_seal_tree(child.path)
+    }
+    files.set_mode(path, metadata.mode - (metadata.mode & @STORE_MODE_WRITE_BITS))
+}
+
+fn store_archive_set_mode(path: String, mode: Int) !StoreError {
+    files.set_mode(path, mode & @STORE_MODE_PERMISSION_BITS)
+}
+
+// No-follow metadata, or None when the path does not exist.
+fn store_archive_lstat(path: String) -> ?files.Stat !StoreError {
+    info :: files.stat(path) ?? {
+        if err == {
+            .NotFound(_) -> return Ok(None)
+            else -> return Err(StoreError.Io(err))
+        }
+    }
+    Ok(Val(info))
+}
+
+// No-follow metadata, or None when it cannot be read (Rust `.is_ok()`).
+fn store_archive_lstat_ok(path: String) -> ?files.Stat !Never {
+    info :: files.stat(path) ?? return None
+    Val(info)
+}
+
+// `path` with its final extension replaced (Rust `Path::with_extension`).
+fn store_archive_with_extension(path: String, extension: String) -> String !Never {
+    parent :: files.dirname(path)
+    name :: files.basename(path)
+    raw :: name.bytes()
+    dot := -1
+    loop index in 1..<raw.len() {
+        if Int.from_u8(raw[index]) == 46 -> dot = index
+    }
+    stem :: if dot > 0 -> String.from_bytes(raw[0..<dot]) ?? name else -> name
+    if parent == "" -> return "{stem}.{extension}"
+    files.join(parent, "{stem}.{extension}")
+}
+
+// `path`'s parent directory, or `fallback` when it has none.
+fn store_archive_parent_or(path: String, fallback: String) -> String !Never {
+    parent :: files.dirname(path)
+    if parent == "" -> return fallback
+    parent
+}
+
+fn store_archive_unique_suffix() -> String !Never {
+    "{process.current_pid()}-{time.instant().unix_ns}"
+}
+
+fn store_archive_now_secs() -> Int !Never {
+    time.instant().unix_ns /% 1000000000
+}
+
+fn store_archive_sorted_unique(values: [String]) -> [String] !Never {
+    sorted := values
+    sorted.sort()
+    out := [String]{}
+    loop value in sorted {
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
+    }
+    out
+}
