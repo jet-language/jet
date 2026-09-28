@@ -6037,6 +6037,7 @@ impl<'a> LowerCtx<'a> {
     fn register_file_owner_leaf(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
         let name = format!("file_owner_live_{}", place.0);
         let flag = self.bind_local(&TLocal::generated(name), Type::Bool, true, false, false)?;
+        self.clear_live_flag_at_entry(flag)?;
         let initialized = self.emit(
             "file.owner.initialized",
             Some(Type::Bool),
@@ -6147,6 +6148,35 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    /// Write `false` to a cleanup live flag in the function's entry block.
+    /// The binding site sets the real value, but a cleanup frame may be
+    /// exited on a path that never reached the binding; the flag must read
+    /// `false` there, never an uninitialized slot. Entry-block instructions
+    /// run before control leaves the entry block, so this dominates every
+    /// path. When the binding itself is in the entry block, this write lands
+    /// before the binding's own write, which is the existing order.
+    fn clear_live_flag_at_entry(&mut self, flag: MirPlaceId) -> Result<(), LowerError> {
+        let Some(entry) = self.blocks.first().map(|block| block.id) else {
+            return Ok(());
+        };
+        let saved = self.current;
+        self.current = entry;
+        let result = (|| {
+            let off = self.emit(
+                "cleanup.live.entry",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(false)),
+            )?;
+            self.emit(
+                "cleanup.live.entry.write",
+                None,
+                MirOperation::WritePlace { place: flag, value: off },
+            )
+        })();
+        self.current = saved;
+        result.map(|_| ())
+    }
+
     fn register_owned_drop(
         &mut self,
         place: MirPlaceId,
@@ -6161,6 +6191,7 @@ impl<'a> LowerCtx<'a> {
         }
         let live_local = TLocal::generated(format!("owned_live_{}", place.0)).as_mutable();
         let live = self.bind_local(&live_local, Type::Bool, true, false, false)?;
+        self.clear_live_flag_at_entry(live)?;
         let initial = self.emit(
             "owned.local.live.initial",
             Some(Type::Bool),
