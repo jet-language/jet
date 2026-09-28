@@ -83,29 +83,28 @@ struct NixEvalLexer {
         nixeval_byte(self.bytes, self.position + offset)
     }
 
-    fn push(&self, token: NixEvalToken) -> Bool !NixEvalError {
+    fn push(&self, token: NixEvalToken) !NixEvalError {
         estimated :: self.bytes.len() * 4 + (self.tokens.len() + 1) * @NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
         if estimated > @NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
         if self.tokens.len() >= @NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {@NIXEVAL_TOKEN_LIMIT} tokens"))
         self.tokens.push(token)
-        Ok(true)
     }
 
-    fn skip_space_and_comments(&self) -> Bool !NixEvalError {
+    fn skip_space_and_comments(&self) !NixEvalError {
         loop {
             loop nixeval_is_ascii_whitespace(self.at(0)) -> self.position += 1
-            if self.at(0) == 35 {
-                loop self.position < self.bytes.len() && self.at(0) != 10 -> self.position += 1
-                next
+            if {
+                self.at(0) == 35 -> {
+                    loop self.position < self.bytes.len() && self.at(0) != 10 -> self.position += 1
+                }
+                self.at(0) == 47 && self.at(1) == 42 -> {
+                    self.position += 2
+                    loop self.position + 1 < self.bytes.len() && !(self.at(0) == 42 && self.at(1) == 47) -> self.position += 1
+                    if self.position + 1 >= self.bytes.len() -> return Err(NixEvalError.Syntax("unterminated comment"))
+                    self.position += 2
+                }
+                else -> break
             }
-            if self.at(0) == 47 && self.at(1) == 42 {
-                self.position += 2
-                loop self.position + 1 < self.bytes.len() && !(self.at(0) == 42 && self.at(1) == 47) -> self.position += 1
-                if self.position + 1 >= self.bytes.len() -> return Err(NixEvalError.Syntax("unterminated comment"))
-                self.position += 2
-                next
-            }
-            return Ok(true)
         }
     }
 
@@ -117,39 +116,51 @@ struct NixEvalLexer {
     fn token(&self) -> NixEvalToken !NixEvalError {
         byte :: self.at(0)
         next_byte :: self.at(1)
-        if {
-            byte == 123 -> return Ok(self.single(NixEvalToken.LeftBrace, 1))
-            byte == 125 -> return Ok(self.single(NixEvalToken.RightBrace, 1))
-            byte == 91 -> return Ok(self.single(NixEvalToken.LeftBracket, 1))
-            byte == 93 -> return Ok(self.single(NixEvalToken.RightBracket, 1))
-            byte == 40 -> return Ok(self.single(NixEvalToken.LeftParen, 1))
-            byte == 41 -> return Ok(self.single(NixEvalToken.RightParen, 1))
-            byte == 61 && next_byte == 61 -> return Ok(self.single(NixEvalToken.EqualEqual, 2))
-            byte == 61 -> return Ok(self.single(NixEvalToken.Equal, 1))
-            byte == 33 && next_byte == 61 -> return Ok(self.single(NixEvalToken.NotEqual, 2))
-            byte == 33 -> return Err(NixEvalError.Unsupported("unary `!` is not supported"))
-            byte == 47 && next_byte == 47 -> return Ok(self.single(NixEvalToken.Merge, 2))
-            byte == 47 -> return Ok(NixEvalToken.Path(self.path()))
-            byte == 58 -> return Ok(self.single(NixEvalToken.Colon, 1))
-            byte == 59 -> return Ok(self.single(NixEvalToken.Semicolon, 1))
-            byte == 46 && next_byte == 46 && self.at(2) == 46 -> return Ok(self.single(NixEvalToken.Ellipsis, 3))
-            byte == 46 && (next_byte == 47 || (next_byte == 46 && self.at(2) == 47)) -> return Ok(NixEvalToken.Path(self.path()))
-            byte == 46 -> return Ok(self.single(NixEvalToken.Dot, 1))
-            byte == 44 -> return Ok(self.single(NixEvalToken.Comma, 1))
-            byte == 63 -> return Ok(self.single(NixEvalToken.Question, 1))
-            byte == 34 -> return self.string()
-            byte == 39 && next_byte == 39 -> return self.indented_string()
-            byte == 45 && nixeval_is_ascii_digit(next_byte) -> return Ok(NixEvalToken.Integer(self.integer()))
-            nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(self.integer()))
-            nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(self.identifier()))
-            else -> {
-                // The reference reports the byte as a Latin-1 character.
-                shown := [U8]{}
-                nixeval_push_scalar(&shown, byte)
-                character :: String.from_bytes(shown) ?? "?"
-                return Err(NixEvalError.Unsupported("character `{character}` is not supported"))
+        if byte == {
+            123 -> self.single(NixEvalToken.LeftBrace, 1)
+            125 -> self.single(NixEvalToken.RightBrace, 1)
+            91 -> self.single(NixEvalToken.LeftBracket, 1)
+            93 -> self.single(NixEvalToken.RightBracket, 1)
+            40 -> self.single(NixEvalToken.LeftParen, 1)
+            41 -> self.single(NixEvalToken.RightParen, 1)
+            58 -> self.single(NixEvalToken.Colon, 1)
+            59 -> self.single(NixEvalToken.Semicolon, 1)
+            44 -> self.single(NixEvalToken.Comma, 1)
+            63 -> self.single(NixEvalToken.Question, 1)
+            34 -> self.string()
+            61 -> {
+                if {
+                    next_byte == 61 -> self.single(NixEvalToken.EqualEqual, 2)
+                    else -> self.single(NixEvalToken.Equal, 1)
+                }
             }
+            33 -> {
+                if next_byte != 61 -> return Err(NixEvalError.Unsupported("unary `!` is not supported"))
+                self.single(NixEvalToken.NotEqual, 2)
+            }
+            47 -> {
+                if {
+                    next_byte == 47 -> self.single(NixEvalToken.Merge, 2)
+                    else -> NixEvalToken.Path(self.path())
+                }
+            }
+            46 -> {
+                if {
+                    next_byte == 46 && self.at(2) == 46 -> self.single(NixEvalToken.Ellipsis, 3)
+                    next_byte == 47 || (next_byte == 46 && self.at(2) == 47) -> NixEvalToken.Path(self.path())
+                    else -> self.single(NixEvalToken.Dot, 1)
+                }
+            }
+            else -> self.word_token(byte, next_byte)
         }
+    }
+
+    // Indented strings, integers and identifiers; any other byte is unsupported.
+    fn word_token(&self, byte: Int, next_byte: Int) -> NixEvalToken !NixEvalError {
+        if byte == 39 && next_byte == 39 -> return self.indented_string()
+        if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(self.integer()))
+        if nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(self.identifier()))
+        Err(nixeval_unsupported_character(byte))
     }
 
     fn string(&self) -> NixEvalToken !NixEvalError {
@@ -284,74 +295,81 @@ fn nixeval_capture_interpolation(bytes: [U8], position: &Int) -> String !NixEval
     brackets := 0
     loop position < bytes.len() {
         byte :: nixeval_byte(bytes, position)
-        if {
-            byte == 34 -> nixeval_skip_double_string(bytes, &position)
-            byte == 39 && nixeval_byte(bytes, position + 1) == 39 -> nixeval_skip_indented_string(bytes, &position)
-            byte == 123 -> {
+        if byte == {
+            34 -> position = nixeval_double_string_end(bytes, position)
+            123 -> {
                 braces += 1
                 position += 1
             }
-            byte == 125 && braces == 0 && parentheses == 0 && brackets == 0 -> {
-                expression :: nixeval_slice(bytes, start, position)
-                position += 1
-                return Ok(expression)
-            }
-            byte == 125 -> {
+            125 -> {
+                if braces == 0 && parentheses == 0 && brackets == 0 {
+                    expression :: nixeval_slice(bytes, start, position)
+                    position += 1
+                    return Ok(expression)
+                }
                 if braces == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
                 braces -= 1
                 position += 1
             }
-            byte == 40 -> {
+            40 -> {
                 parentheses += 1
                 position += 1
             }
-            byte == 41 -> {
+            41 -> {
                 if parentheses == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
                 parentheses -= 1
                 position += 1
             }
-            byte == 91 -> {
+            91 -> {
                 brackets += 1
                 position += 1
             }
-            byte == 93 -> {
+            93 -> {
                 if brackets == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
                 brackets -= 1
                 position += 1
             }
-            else -> position += nixeval_scalar_width(bytes, position)
+            else -> {
+                if {
+                    byte == 39 && nixeval_byte(bytes, position + 1) == 39 -> position = nixeval_indented_string_end(bytes, position)
+                    else -> position += nixeval_scalar_width(bytes, position)
+                }
+            }
         }
     }
     Err(NixEvalError.Syntax("unterminated string interpolation"))
 }
 
-fn nixeval_skip_double_string(bytes: [U8], position: &Int) -> Bool !NixEvalError {
-    position += 1
+// Byte offset just past the double-quoted string that opens at `start`.
+fn nixeval_double_string_end(bytes: [U8], start: Int) -> Int !NixEvalError {
+    position := start + 1
     loop position < bytes.len() {
         byte :: nixeval_byte(bytes, position)
         if byte == 92 {
-            position += 1
-            if position >= bytes.len() -> return Err(NixEvalError.Syntax("unterminated string escape"))
-            position += 1
+            if position + 1 >= bytes.len() -> return Err(NixEvalError.Syntax("unterminated string escape"))
+            position += 2
             next
         }
-        if byte == 34 {
-            position += 1
-            return Ok(true)
-        }
+        if byte == 34 -> return Ok(position + 1)
         position += nixeval_scalar_width(bytes, position)
     }
     Err(NixEvalError.Syntax("unterminated string interpolation expression"))
 }
 
-fn nixeval_skip_indented_string(bytes: [U8], position: &Int) -> Bool !NixEvalError {
-    position += 2
+// Byte offset just past the indented string that opens at `start`.
+fn nixeval_indented_string_end(bytes: [U8], start: Int) -> Int !NixEvalError {
+    position := start + 2
     loop position + 1 < bytes.len() {
-        if nixeval_byte(bytes, position) == 39 && nixeval_byte(bytes, position + 1) == 39 {
-            position += 2
-            return Ok(true)
-        }
+        if nixeval_byte(bytes, position) == 39 && nixeval_byte(bytes, position + 1) == 39 -> return Ok(position + 2)
         position += nixeval_scalar_width(bytes, position)
     }
     Err(NixEvalError.Syntax("unterminated indented string interpolation expression"))
+}
+
+// The reference reports an unsupported byte as its Latin-1 character.
+fn nixeval_unsupported_character(byte: Int) -> NixEvalError !Never {
+    shown := [U8]{}
+    nixeval_push_scalar(&shown, byte)
+    character :: String.from_bytes(shown) ?? "?"
+    NixEvalError.Unsupported("character `{character}` is not supported")
 }

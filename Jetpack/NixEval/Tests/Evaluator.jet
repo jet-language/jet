@@ -479,14 +479,14 @@ fn nixeval_test_shell(source: String, system: String) -> NixEvalDevShell {
 fn nixeval_test_shell_error(source: String, system: String) -> NixEvalError {
     if nixeval_evaluate_devshell(source, system) == {
         .Ok(_) -> panic("devShell source must fail closed")
-        .Err(error) -> return error
+        .Err(error) -> error
     }
 }
 
 fn nixeval_test_authority_shell_error(source: String, system: String, authority: ^NixEvalAuthority) -> NixEvalError {
-    if nixeval_evaluate_devshell_with_import_authority(source, system, Val(^authority)) == {
+    if nixeval_evaluate_devshell_with_import_authority(source, system, ^Val(authority)) == {
         .Ok(_) -> panic("authorized devShell source must fail closed")
-        .Err(error) -> return error
+        .Err(error) -> error
     }
 }
 
@@ -497,7 +497,7 @@ fn nixeval_test_derivation(source: String, system: String) -> NixEvalDerivation 
 fn nixeval_test_derivation_error(source: String, system: String) -> NixEvalError {
     if nixeval_evaluate_derivation(source, system) == {
         .Ok(_) -> panic("derivation source must fail closed")
-        .Err(error) -> return error
+        .Err(error) -> error
     }
 }
 
@@ -688,7 +688,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
     files["sub/shell.nix"] = `{ pkgs }: pkgs.mkShell { packages = [ "${pkgs.fd}" ]; buildInputs = import ../inputs.nix pkgs; }`
     files["inputs.nix"] = "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
     authority :: nixeval_test_map_authority(files, "missing test import")
-    evaluated :: nixeval_evaluate_devshell_with_import_authority("{{ outputs = {{ devShells.x86_64-linux.default = (import ./sub/shell.nix) {{ pkgs = pkgs; }}; }}; }}", "x86_64-linux", Val(^authority)) ?? panic("authorized relative imports must evaluate")
+    evaluated :: nixeval_evaluate_devshell_with_import_authority("{{ outputs = {{ devShells.x86_64-linux.default = (import ./sub/shell.nix) {{ pkgs = pkgs; }}; }}; }}", "x86_64-linux", ^Val(authority)) ?? panic("authorized relative imports must evaluate")
     assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
 }
 
@@ -720,7 +720,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
         source :: nixeval_test_text(document, value, "source")
         system :: nixeval_test_text(document, value, "system")
         authority :: nixeval_test_map_authority(nixeval_test_string_map(document, nixeval_test_get(value, "files")), "fixture has no")
-        evaluated :: nixeval_evaluate_devshell_with_import_authority(source, system, Val(^authority)) ?? panic("authority fixture source must evaluate")
+        evaluated :: nixeval_evaluate_devshell_with_import_authority(source, system, ^Val(authority)) ?? panic("authority fixture source must evaluate")
         assert_eq(evaluated.packages, nixeval_test_strings(document, nixeval_test_get(value, "jet_packages")))
         assert_eq(evaluated.unsupported, nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported")))
     }
@@ -1045,7 +1045,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
         assert_eq(nix_cross_packages, expected_cross_packages)
         loop seed in seeds {
             authority :: nixeval_test_map_authority(responses, "unlisted authority request")
-            evaluated :: nixeval_evaluate_devshell_with_import_authority(nixeval_test_breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized breadth value must evaluate")
+            evaluated :: nixeval_evaluate_devshell_with_import_authority(nixeval_test_breadth_variant(source, seed), system, ^Val(authority)) ?? panic("authorized breadth value must evaluate")
             assert_eq(evaluated.packages, expected_packages)
             assert_eq(evaluated.cross_packages, expected_cross_packages)
             assert_eq(evaluated.unsupported, expected_unsupported)
@@ -1059,7 +1059,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
         expected_inputs :: nixeval_test_strings(document, nixeval_test_get(value, "jet_input_sources"))
         loop seed in seeds {
             authority :: nixeval_test_map_authority(responses, "unlisted authority request")
-            evaluated :: nixeval_evaluate_derivation_with_import_authority(nixeval_test_breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized fixed-output derivation must evaluate")
+            evaluated :: nixeval_evaluate_derivation_with_import_authority(nixeval_test_breadth_variant(source, seed), system, ^Val(authority)) ?? panic("authorized fixed-output derivation must evaluate")
             assert_eq(evaluated.input_sources, expected_inputs)
         }
         nix_value :: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))

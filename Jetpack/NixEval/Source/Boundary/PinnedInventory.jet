@@ -2,7 +2,7 @@
 // skipped surface has an explicit authority or semantic reason; it is never
 // silently treated as an empty value.
 
-enum NixEvalInventoryStatus {
+pub enum NixEvalInventoryStatus {
     Covered
     Skipped
 }
@@ -16,7 +16,7 @@ impl NixEvalInventoryStatus {
     }
 }
 
-enum NixEvalInventoryClass {
+pub enum NixEvalInventoryClass {
     Evaluable
     Buildable
     Skipped
@@ -32,18 +32,18 @@ impl NixEvalInventoryClass {
     }
 }
 
-struct NixEvalInventoryEntry {
-    surface: String
-    status: NixEvalInventoryStatus
-    class: NixEvalInventoryClass
-    reason: String
+pub struct NixEvalInventoryEntry {
+    pub surface: String
+    pub status: NixEvalInventoryStatus
+    pub class: NixEvalInventoryClass
+    pub reason: String
 }
 
 fn nixeval_inventory_entry(surface: String, status: NixEvalInventoryStatus, class: NixEvalInventoryClass, reason: String) -> NixEvalInventoryEntry !Never {
     NixEvalInventoryEntry{surface, status, class, reason}
 }
 
-fn nixeval_pinned_inventory() -> [NixEvalInventoryEntry] !Never {
+pub fn nixeval_pinned_inventory() -> [NixEvalInventoryEntry] !Never {
     [NixEvalInventoryEntry]{
         nixeval_inventory_entry("stage-a-values", .Covered, .Evaluable, "pinned literal and value fixtures"),
         nixeval_inventory_entry("stage-a-errors", .Covered, .Evaluable, "pinned rejection and diagnostic fixtures"),

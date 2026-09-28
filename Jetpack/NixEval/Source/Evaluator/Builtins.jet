@@ -3,212 +3,112 @@
 
 impl NixEvaluator {
     fn builtins_field(&self, field: String) -> ?Int !Never {
-        native := NixEvalNative.ToString
         if field == {
-            "toString" -> native = NixEvalNative.ToString
-            "hasContext" -> native = NixEvalNative.HasContext
-            "derivation" -> native = NixEvalNative.Derivation(false)
-            "derivationStrict" -> native = NixEvalNative.Derivation(true)
-            "attrNames" -> native = NixEvalNative.Builtin(NixEvalBuiltin.AttrNames)
-            "attrValues" -> native = NixEvalNative.Builtin(NixEvalBuiltin.AttrValues)
-            "getAttr" -> native = NixEvalNative.Builtin(NixEvalBuiltin.GetAttr)
-            "hasAttr" -> native = NixEvalNative.Builtin(NixEvalBuiltin.HasAttr)
-            "isAttrs" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsAttrs)
-            "isBool" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsBool)
-            "isFunction" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsFunction)
-            "isInt" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsInt)
-            "isList" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsList)
-            "isNull" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsNull)
-            "isPath" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsPath)
-            "isString" -> native = NixEvalNative.Builtin(NixEvalBuiltin.IsString)
-            "length" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Length)
-            "head" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Head)
-            "tail" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Tail)
-            "concatLists" -> native = NixEvalNative.Builtin(NixEvalBuiltin.ConcatLists)
-            "concatStringsSep" -> native = NixEvalNative.Builtin(NixEvalBuiltin.ConcatStringsSep)
-            "map" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Map)
-            "filter" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Filter)
-            "replaceStrings" -> native = NixEvalNative.Builtin(NixEvalBuiltin.ReplaceStrings)
-            "substring" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Substring)
-            "baseNameOf" -> native = NixEvalNative.Builtin(NixEvalBuiltin.BaseNameOf)
-            "dirOf" -> native = NixEvalNative.Builtin(NixEvalBuiltin.DirOf)
-            "stringLength" -> native = NixEvalNative.Builtin(NixEvalBuiltin.StringLength)
-            "toJSON" -> native = NixEvalNative.Builtin(NixEvalBuiltin.ToJSON)
-            "fromJSON" -> native = NixEvalNative.Builtin(NixEvalBuiltin.FromJSON)
-            "storePath" -> native = NixEvalNative.Builtin(NixEvalBuiltin.StorePath)
-            "throw" -> native = NixEvalNative.Builtin(NixEvalBuiltin.Throw)
-            "fetchurl" -> native = NixEvalNative.Fetch(NixEvalFetcher.Fetchurl)
-            "fetchTarball" -> native = NixEvalNative.Fetch(NixEvalFetcher.FetchTarball)
-            "fetchTree" -> native = NixEvalNative.Fetch(NixEvalFetcher.FetchTree)
-            "fetchGit" -> native = NixEvalNative.Fetch(NixEvalFetcher.FetchGit)
-            "getFlake" -> native = NixEvalNative.GetFlake
-            "currentSystem" -> return Val(self.value_thunk(NixEvalValue.Str(self.system)))
-            "storeDir" -> return Val(self.value_thunk(NixEvalValue.Str("/nix/store")))
-            else -> return None
+            "currentSystem" -> Val(self.value_thunk(NixEvalValue.Str(self.system)))
+            "storeDir" -> Val(self.value_thunk(NixEvalValue.Str("/nix/store")))
+            else -> {
+                native :: nixeval_builtin_native(field) ?? return None
+                Val(self.value_thunk(NixEvalValue.Native(native)))
+            }
         }
-        Val(self.value_thunk(NixEvalValue.Native(native)))
     }
 
     fn apply_builtin(&self, builtin: NixEvalBuiltin, argument: NixEvalValue) -> NixEvalValue !NixEvalError {
         if builtin == {
             .AttrNames -> {
-                if argument == {
-                    .AttrSet(fields) -> {
-                        names := [Int]{}
-                        loop entry in fields -> names.push(self.value_thunk(NixEvalValue.Str(entry.key)))
-                        return Ok(NixEvalValue.List(names))
-                    }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: argument.type_name()})
-                }
+                fields :: nixeval_attribute_set(argument, "attribute set")
+                self.attribute_names(fields)
             }
             .AttrValues -> {
-                if argument == {
-                    .AttrSet(fields) -> {
-                        values := [Int]{}
-                        loop entry in fields -> values.push(entry.value)
-                        return Ok(NixEvalValue.List(values))
-                    }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: argument.type_name()})
-                }
+                fields :: nixeval_attribute_set(argument, "attribute set")
+                values := [Int]{}
+                loop name in nixeval_sorted(fields.keys().to_list()) -> values.push(fields[name])
+                NixEvalValue.List(values)
             }
-            .GetAttr -> return Ok(self.partial(NixEvalOperation.GetAttr, argument))
-            .HasAttr -> return Ok(self.partial(NixEvalOperation.HasAttr, argument))
-            .IsAttrs -> {
-                if argument == {
-                    .AttrSet(_) | .Packages(_) | .CrossPackages(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsBool -> {
-                if argument == {
-                    .Bool(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsFunction -> {
-                if argument == {
-                    .Function(_, _) | .Native(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsInt -> {
-                if argument == {
-                    .Integer(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsList -> {
-                if argument == {
-                    .List(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsNull -> {
-                if argument == {
-                    .Null -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsPath -> {
-                if argument == {
-                    .Path(_) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
-            .IsString -> {
-                if argument == {
-                    .Str(_) | .Contextual(_, _) -> return Ok(NixEvalValue.Bool(true))
-                    else -> return Ok(NixEvalValue.Bool(false))
-                }
-            }
+            .IsAttrs -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsBool -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsFunction -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsInt -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsList -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsNull -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsPath -> NixEvalValue.Bool(builtin.admits(argument))
+            .IsString -> NixEvalValue.Bool(builtin.admits(argument))
             .Length -> {
-                if argument == {
-                    .List(values) -> return Ok(NixEvalValue.Integer(values.len()))
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list", actual: argument.type_name()})
-                }
+                values :: nixeval_list(argument, "list")
+                NixEvalValue.Integer(values.len())
             }
             .Head -> {
-                if argument == {
-                    .List(values) -> {
-                        if values.len() == 0 -> return Err(NixEvalError.Invalid("head called on an empty list"))
-                        return self.force(values[0])
-                    }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list", actual: argument.type_name()})
-                }
+                values :: nixeval_list(argument, "list")
+                if values.len() == 0 -> return Err(NixEvalError.Invalid("head called on an empty list"))
+                self.force(values[0])
             }
             .Tail -> {
-                if argument == {
-                    .List(values) -> {
-                        if values.len() == 0 -> return Err(NixEvalError.Invalid("tail called on an empty list"))
-                        return Ok(NixEvalValue.List(values[1..<values.len()]))
-                    }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list", actual: argument.type_name()})
-                }
+                values :: nixeval_list(argument, "list")
+                if values.len() == 0 -> return Err(NixEvalError.Invalid("tail called on an empty list"))
+                NixEvalValue.List(values[1..<values.len()])
             }
             .ConcatLists -> {
-                lists := [Int]{}
-                if argument == {
-                    .List(values) -> lists = values
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list of lists", actual: argument.type_name()})
-                }
+                lists :: nixeval_list(argument, "list of lists")
                 flattened := [Int]{}
                 loop list in lists {
                     forced :: self.force(list)
-                    if forced == {
-                        .List(items) -> {
-                            loop item in items -> flattened.push(item)
-                        }
-                        else -> return Err(NixEvalError.TypeMismatch{expected: "list of lists", actual: "non-list item"})
-                    }
+                    items :: forced.list_items() ?? return Err(NixEvalError.TypeMismatch{expected: "list of lists", actual: "non-list item"})
+                    loop item in items -> flattened.push(item)
                 }
-                return Ok(NixEvalValue.List(flattened))
+                NixEvalValue.List(flattened)
             }
-            .ConcatStringsSep -> return Ok(self.partial(NixEvalOperation.ConcatStringsSep, argument))
-            .Map -> return Ok(self.partial(NixEvalOperation.Map, argument))
-            .Filter -> return Ok(self.partial(NixEvalOperation.Filter, argument))
-            .ReplaceStrings -> return Ok(self.partial(NixEvalOperation.ReplaceStrings, argument))
-            .Substring -> return Ok(self.partial(NixEvalOperation.Substring, argument))
+            .GetAttr -> self.partial(NixEvalOperation.GetAttr, argument)
+            .HasAttr -> self.partial(NixEvalOperation.HasAttr, argument)
+            .ConcatStringsSep -> self.partial(NixEvalOperation.ConcatStringsSep, argument)
+            .Map -> self.partial(NixEvalOperation.Map, argument)
+            .Filter -> self.partial(NixEvalOperation.Filter, argument)
+            .ReplaceStrings -> self.partial(NixEvalOperation.ReplaceStrings, argument)
+            .Substring -> self.partial(NixEvalOperation.Substring, argument)
             .BaseNameOf -> {
                 value :: argument.plain_string()
-                return Ok(NixEvalValue.Str(nixeval_last_segment(value, "/")))
+                NixEvalValue.Str(nixeval_last_segment(value, "/"))
             }
             .DirOf -> {
                 value :: argument.plain_string()
-                bytes :: value.bytes()
-                slash :: nixeval_last_byte(bytes, 47)
-                if {
-                    slash < 0 -> return Ok(NixEvalValue.Str("."))
-                    slash == 0 -> return Ok(NixEvalValue.Str("/"))
-                    else -> return Ok(NixEvalValue.Str(nixeval_slice(bytes, 0, slash)))
-                }
+                NixEvalValue.Str(nixeval_directory(value))
             }
             .StringLength -> {
                 value :: argument.plain_string()
-                return Ok(NixEvalValue.Integer(nixeval_scalar_count(value)))
+                NixEvalValue.Integer(nixeval_scalar_count(value))
             }
             .ToJSON -> {
                 encoded :: self.encode_json(argument, 0)
-                return Ok(NixEvalValue.Str(encoded))
+                NixEvalValue.Str(encoded)
             }
             .FromJSON -> {
                 text :: argument.plain_string()
-                if NixEvalJson.parse(text) == {
-                    .Ok(document) -> return self.json_to_value(document, document.root, 0)
-                    .Err(error) -> {
-                        reason :: error.message()
-                        if reason == "JSON value is too deeply nested" -> return Err(NixEvalError.ResourceLimit(reason))
-                        return Err(NixEvalError.Invalid(reason))
-                    }
-                }
+                self.from_json(text)
             }
             .StorePath -> {
                 path :: argument.plain_string()
                 if !nixeval_is_store_path(path) -> return Err(NixEvalError.Unsupported("builtins.storePath requires a canonical /nix/store path"))
-                return Ok(NixEvalValue.Contextual{value: ~path, contexts: [String]{"path:{path}"}})
+                NixEvalValue.Contextual{value: ~path, contexts: [String]{"path:{path}"}}
             }
-            .Throw -> {
-                message :: argument.plain_string()
-                return Err(NixEvalError.Invalid("foreign flake evaluation threw: {message}"))
+            .Throw -> nixeval_throw(argument)
+        }
+    }
+
+    // `builtins.attrNames`: the attribute names in key order, as strings.
+    fn attribute_names(&self, fields: [String: Int]) -> NixEvalValue !Never {
+        names := [Int]{}
+        loop name in nixeval_sorted(fields.keys().to_list()) -> names.push(self.value_thunk(NixEvalValue.Str(name)))
+        NixEvalValue.List(names)
+    }
+
+    // `builtins.fromJSON`: the reference reader's depth failure is a resource
+    // limit; every other JSON failure is an invalid expression.
+    fn from_json(&self, text: String) -> NixEvalValue !NixEvalError {
+        if NixEvalJson.parse(text) == {
+            .Ok(document) -> return self.json_to_value(document, document.root, 0)
+            .Err(error) -> {
+                reason :: error.message()
+                if reason == "JSON value is too deeply nested" -> return Err(NixEvalError.ResourceLimit(reason))
+                return Err(NixEvalError.Invalid(reason))
             }
         }
     }
@@ -225,51 +125,33 @@ impl NixEvaluator {
         if operation == {
             .GetAttr -> {
                 name :: first.plain_string()
-                if second == {
-                    .AttrSet(fields) -> {
-                        binding :: self.attr_field(fields, name) ?? return Err(NixEvalError.Missing(name))
-                        return self.force(binding)
-                    }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: second.type_name()})
-                }
+                fields :: nixeval_attribute_set(second, "attribute set")
+                binding :: self.attr_field(fields, name) ?? return Err(NixEvalError.Missing(name))
+                self.force(binding)
             }
             .HasAttr -> {
                 name :: first.plain_string()
-                if second == {
-                    .AttrSet(fields) -> return Ok(NixEvalValue.Bool(self.attr_field(fields, name) != None))
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: second.type_name()})
-                }
+                fields :: nixeval_attribute_set(second, "attribute set")
+                NixEvalValue.Bool(self.attr_field(fields, name) != None)
             }
             .Map | .Filter -> {
-                values := [Int]{}
-                if second == {
-                    .List(items) -> values = items
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list", actual: second.type_name()})
-                }
-                output := [Int]{}
+                values :: nixeval_list(second, "list")
                 keep_matches :: operation == NixEvalOperation.Filter
+                output := [Int]{}
                 loop value in values {
                     result :: self.apply(first, value)
                     if !keep_matches {
                         output.push(self.value_thunk(result))
                         next
                     }
-                    if result == {
-                        .Bool(keep) -> {
-                            if keep -> output.push(value)
-                        }
-                        else -> return Err(NixEvalError.TypeMismatch{expected: "boolean predicate result", actual: result.type_name()})
-                    }
+                    keep :: nixeval_predicate(result)
+                    if keep -> output.push(value)
                 }
-                return Ok(NixEvalValue.List(output))
+                NixEvalValue.List(output)
             }
             .ConcatStringsSep -> {
                 separator :: first.plain_string()
-                values := [Int]{}
-                if second == {
-                    .List(items) -> values = items
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "list", actual: second.type_name()})
-                }
+                values :: nixeval_list(second, "list")
                 output := [U8]{}
                 contexts := [String]{}
                 loop index in 0..<values.len() {
@@ -281,7 +163,7 @@ impl NixEvaluator {
                         if !nixeval_contains_text(contexts, context) -> contexts.push(context)
                     }
                 }
-                return Ok(NixEvalText{value: String.from_bytes(output) ?? "", contexts}.into_value())
+                NixEvalText{value: String.from_bytes(output) ?? "", contexts}.into_value()
             }
             .ReplaceStrings -> {
                 from :: self.string_list(first)
@@ -293,14 +175,7 @@ impl NixEvaluator {
                 output := [U8]{}
                 position := 0
                 loop position < bytes.len() {
-                    matched := -1
-                    loop index in 0..<from.len() {
-                        needle :: from[index].bytes()
-                        if needle.len() > 0 && nixeval_matches_at(bytes, needle, position) {
-                            matched = index
-                            break
-                        }
-                    }
+                    matched :: nixeval_first_match(bytes, from, position)
                     if matched >= 0 {
                         nixeval_push_text(&output, to[matched])
                         position += from[matched].bytes().len()
@@ -310,19 +185,11 @@ impl NixEvaluator {
                     loop offset in 0..<width -> output.push(bytes[position + offset])
                     position += width
                 }
-                return Ok(NixEvalText{value: String.from_bytes(output) ?? "", contexts: subject.contexts}.into_value())
+                NixEvalText{value: String.from_bytes(output) ?? "", contexts: subject.contexts}.into_value()
             }
             .Substring -> {
-                start := 0
-                length := 0
-                if first == {
-                    .Integer(value) -> start = value
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "integer substring start", actual: first.type_name()})
-                }
-                if second == {
-                    .Integer(value) -> length = value
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "integer substring length", actual: second.type_name()})
-                }
+                start :: nixeval_integer(first, "integer substring start")
+                length :: nixeval_integer(second, "integer substring length")
                 subject_value :: self.force(arguments[2])
                 subject :: subject_value.stringify()
                 if start < 0 -> return Err(NixEvalError.Invalid("negative start position in substring"))
@@ -338,17 +205,13 @@ impl NixEvaluator {
                     position += width
                     scalar += 1
                 }
-                return Ok(NixEvalText{value: String.from_bytes(output) ?? "", contexts: subject.contexts}.into_value())
+                NixEvalText{value: String.from_bytes(output) ?? "", contexts: subject.contexts}.into_value()
             }
         }
     }
 
     fn string_list(&self, value: NixEvalValue) -> [String] !NixEvalError {
-        items := [Int]{}
-        if value == {
-            .List(values) -> items = values
-            else -> return Err(NixEvalError.TypeMismatch{expected: "string list", actual: value.type_name()})
-        }
+        items :: nixeval_list(value, "string list")
         strings := [String]{}
         loop item in items {
             forced :: self.force(item)
@@ -358,85 +221,201 @@ impl NixEvaluator {
     }
 
     fn apply_fetch(&self, fetcher: NixEvalFetcher, argument: NixEvalValue) -> NixEvalValue !NixEvalError {
-        fields := [String: Int]{}
-        if argument == {
-            .AttrSet(values) -> fields = values
-            else -> return Err(NixEvalError.TypeMismatch{expected: "fixed-output fetcher attribute set", actual: argument.type_name()})
-        }
+        fields :: nixeval_attribute_set(argument, "fixed-output fetcher attribute set")
         if self.authority == None -> return Err(NixEvalError.Unsupported("fixed-output fetchers require explicit fetch authority and verified bytes"))
-        url := ""
-        url_value :: self.field_value(fields, "url")
-        if url_value == {
-            .Val(value) -> url = value.plain_string()
-            else -> {
-                uri_value :: self.field_value(fields, "uri")
-                uri :: uri_value ?? return Err(NixEvalError.Missing("url"))
-                url = uri.plain_string()
-            }
+        url_field :: self.first_string_field(fields, [String]{"url", "uri"})
+        url :: url_field ?? return Err(NixEvalError.Missing("url"))
+        hash_field :: self.first_string_field(fields, [String]{"hash", "sha256", "narHash"})
+        hash :: hash_field ?? return Err(NixEvalError.Unsupported("fixed-output fetchers require a declared hash"))
+        name_field :: self.first_string_field(fields, [String]{"name"})
+        name :: name_field ?? nixeval_fetch_name(url)
+        revision_field :: self.first_string_field(fields, [String]{"rev", "ref"})
+        revision :: revision_field ?? ""
+        if !nixeval_is_request_text(url) || !nixeval_is_request_text(hash) || !nixeval_is_request_text(name) || !nixeval_is_request_text(revision) {
+            return Err(NixEvalError.ResourceLimit("fixed-output fetcher authority request is too large"))
         }
-        hash := ""
-        found := false
-        hash_fields :: [String]{"hash", "sha256", "narHash"}
-        loop field in hash_fields {
-            hash_value :: self.field_value(fields, field)
-            if hash_value == {
-                .Val(value) -> {
-                    hash = value.plain_string()
-                    found = true
-                    break
-                }
-                else -> {}
-            }
-        }
-        if !found -> return Err(NixEvalError.Unsupported("fixed-output fetchers require a declared hash"))
-        name := ""
-        name_value :: self.field_value(fields, "name")
-        if name_value == {
-            .Val(value) -> name = value.plain_string()
-            else -> name = nixeval_fetch_name(url)
-        }
-        revision := ""
-        rev_value :: self.field_value(fields, "rev")
-        if rev_value == {
-            .Val(value) -> revision = value.plain_string()
-            else -> {
-                ref_value :: self.field_value(fields, "ref")
-                if ref_value == {
-                    .Val(value) -> revision = value.plain_string()
-                    else -> {}
-                }
-            }
-        }
-        request_fields :: [String]{~url, ~hash, ~name, ~revision}
-        loop value in request_fields {
-            if value.bytes().len() > @NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(value, 0) || nixeval_contains_byte(value, 10) {
-                return Err(NixEvalError.ResourceLimit("fixed-output fetcher authority request is too large"))
-            }
-        }
-        kind :: fetcher.name()
-        path := ""
-        if self.ask("@fetch:{kind}\n{url}\n{hash}\n{name}\n{revision}") == {
-            .Ok(answer) -> path = answer
-            .Err(denial) -> return Err(NixEvalError.Unsupported("fixed-output fetcher {kind} was denied by explicit fetch authority: {denial.message()}"))
-        }
+        path :: self.ask(NixEvalRequest.Fetch{kind: fetcher.name(), url, hash, name, revision})
         if !nixeval_is_store_path(path) -> return Err(NixEvalError.Invalid("fixed-output fetch authority returned a non-store path"))
         Ok(NixEvalValue.Contextual{value: ~path, contexts: [String]{"path:{path}"}})
     }
+
+    // The plain string of the first present field among `names`.
+    fn first_string_field(&self, fields: [String: Int], names: [String]) -> ?String !NixEvalError {
+        loop name in names {
+            found :: self.field_value(fields, name)
+            value :: found ?? next
+            return Ok(Val(value.plain_string()))
+        }
+        Ok(None)
+    }
+}
+
+// A fetcher request field: bounded, single-line and NUL-free.
+fn nixeval_is_request_text(value: String) -> Bool !Never {
+    value.bytes().len() <= @NIXEVAL_MAX_PATH_BYTES && !nixeval_contains_byte(value, 0) && !nixeval_contains_byte(value, 10)
+}
+
+// The builtin a `builtins.<field>` selection names, if it is supported.
+fn nixeval_builtin_native(field: String) -> ?NixEvalNative !Never {
+    if field == {
+        "toString" -> Val(NixEvalNative.ToString)
+        "hasContext" -> Val(NixEvalNative.HasContext)
+        "derivation" -> Val(NixEvalNative.Derivation(false))
+        "derivationStrict" -> Val(NixEvalNative.Derivation(true))
+        "attrNames" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.AttrNames))
+        "attrValues" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.AttrValues))
+        "getAttr" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.GetAttr))
+        "hasAttr" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.HasAttr))
+        "isAttrs" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsAttrs))
+        "isBool" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsBool))
+        "isFunction" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsFunction))
+        "isInt" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsInt))
+        "isList" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsList))
+        "isNull" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsNull))
+        "isPath" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsPath))
+        "isString" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.IsString))
+        "length" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Length))
+        "head" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Head))
+        "tail" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Tail))
+        "concatLists" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.ConcatLists))
+        "concatStringsSep" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.ConcatStringsSep))
+        "map" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Map))
+        "filter" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Filter))
+        "replaceStrings" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.ReplaceStrings))
+        "substring" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Substring))
+        "baseNameOf" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.BaseNameOf))
+        "dirOf" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.DirOf))
+        "stringLength" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.StringLength))
+        "toJSON" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.ToJSON))
+        "fromJSON" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.FromJSON))
+        "storePath" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.StorePath))
+        "throw" -> Val(NixEvalNative.Builtin(NixEvalBuiltin.Throw))
+        "fetchurl" -> Val(NixEvalNative.Fetch(NixEvalFetcher.Fetchurl))
+        "fetchTarball" -> Val(NixEvalNative.Fetch(NixEvalFetcher.FetchTarball))
+        "fetchTree" -> Val(NixEvalNative.Fetch(NixEvalFetcher.FetchTree))
+        "fetchGit" -> Val(NixEvalNative.Fetch(NixEvalFetcher.FetchGit))
+        "getFlake" -> Val(NixEvalNative.GetFlake)
+        else -> None
+    }
+}
+
+// The integer an integer-typed builtin argument holds.
+fn nixeval_integer(value: NixEvalValue, expected: String) -> Int !NixEvalError {
+    if value == {
+        .Integer(number) -> Ok(number)
+        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+    }
+}
+
+// The boolean a `builtins.filter` predicate must return.
+fn nixeval_predicate(value: NixEvalValue) -> Bool !NixEvalError {
+    if value == {
+        .Bool(keep) -> Ok(keep)
+        else -> Err(NixEvalError.TypeMismatch{expected: "boolean predicate result", actual: value.type_name()})
+    }
+}
+
+// `builtins.throw` always fails with its message.
+fn nixeval_throw(argument: NixEvalValue) -> NixEvalValue !NixEvalError {
+    message :: argument.plain_string()
+    Err(NixEvalError.Invalid("foreign flake evaluation threw: {message}"))
+}
+
+// `builtins.dirOf`: the text before the last `/`, `/` for a root child, or `.`.
+fn nixeval_directory(value: String) -> String !Never {
+    bytes :: value.bytes()
+    slash :: nixeval_last_byte(bytes, 47)
+    if {
+        slash < 0 -> "."
+        slash == 0 -> "/"
+        else -> nixeval_slice(bytes, 0, slash)
+    }
+}
+
+impl NixEvalBuiltin {
+    // The type predicate of an `is*` builtin; other builtins admit nothing.
+    fn admits(self, value: NixEvalValue) -> Bool !Never {
+        if self == {
+            .IsAttrs -> {
+                if value == {
+                    .AttrSet(_) | .Packages(_) | .CrossPackages(_) -> true
+                    else -> false
+                }
+            }
+            .IsBool -> {
+                if value == {
+                    .Bool(_) -> true
+                    else -> false
+                }
+            }
+            .IsFunction -> {
+                if value == {
+                    .Function(_, _) | .Native(_) -> true
+                    else -> false
+                }
+            }
+            .IsInt -> {
+                if value == {
+                    .Integer(_) -> true
+                    else -> false
+                }
+            }
+            .IsList -> {
+                if value == {
+                    .List(_) -> true
+                    else -> false
+                }
+            }
+            .IsNull -> value == NixEvalValue.Null
+            .IsPath -> {
+                if value == {
+                    .Path(_) -> true
+                    else -> false
+                }
+            }
+            .IsString -> value.text() != None
+            else -> false
+        }
+    }
+}
+
+// The fields of an attribute set argument, or a type mismatch naming `expected`.
+fn nixeval_attribute_set(value: NixEvalValue, expected: String) -> [String: Int] !NixEvalError {
+    if value == {
+        .AttrSet(fields) -> Ok(fields)
+        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+    }
+}
+
+// The items of a list argument, or a type mismatch naming `expected`.
+fn nixeval_list(value: NixEvalValue, expected: String) -> [Int] !NixEvalError {
+    if value == {
+        .List(items) -> Ok(items)
+        else -> Err(NixEvalError.TypeMismatch{expected, actual: value.type_name()})
+    }
+}
+
+// Index of the first non-empty needle matching at `position`, or -1.
+fn nixeval_first_match(bytes: [U8], needles: [String], position: Int) -> Int !Never {
+    loop index in 0..<needles.len() {
+        needle :: needles[index].bytes()
+        if needle.len() > 0 && nixeval_matches_at(bytes, needle, position) -> return index
+    }
+    -1
 }
 
 // The last non-empty path segment of a URL without query or fragment.
 fn nixeval_fetch_name(url: String) -> String !Never {
     bytes :: url.bytes()
-    end := bytes.len()
     query :: nixeval_first_byte(bytes, 63)
-    if query >= 0 -> end = query
-    fragment :: nixeval_first_byte(nixeval_slice(bytes, 0, end).bytes(), 35)
-    if fragment >= 0 -> end = fragment
+    base :: if query < 0 -> bytes else -> bytes[0..<query]
+    fragment :: nixeval_first_byte(base, 35)
+    end :: if fragment < 0 -> base.len() else -> fragment
     stop := end
     index := end - 1
     loop index >= -1 {
-        if index < 0 || Int.from_u8(bytes[index]) == 47 {
-            if stop > index + 1 -> return nixeval_slice(bytes, index + 1, stop)
+        if index < 0 || Int.from_u8(base[index]) == 47 {
+            if stop > index + 1 -> return nixeval_slice(base, index + 1, stop)
             stop = index
         }
         index -= 1

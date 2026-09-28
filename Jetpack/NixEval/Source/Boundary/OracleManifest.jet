@@ -51,9 +51,15 @@
 enum NixEvalOracleBuildStatus {
     Blocked
     Ready
-}
 
-impl NixEvalOracleBuildStatus {
+    fn parse(label: String) -> ?NixEvalOracleBuildStatus !Never {
+        if label == {
+            "blocked" -> Val(NixEvalOracleBuildStatus.Blocked)
+            "ready" -> Val(NixEvalOracleBuildStatus.Ready)
+            else -> None
+        }
+    }
+
     fn label(self) -> String !Never {
         if self == {
             .Blocked -> "blocked"
@@ -65,6 +71,14 @@ impl NixEvalOracleBuildStatus {
 enum NixEvalCorpusStatus {
     BlockedOnOracleBuildHashes
     BitExact
+
+    fn parse(label: String) -> ?NixEvalCorpusStatus !Never {
+        if label == {
+            "blocked_on_oracle_build_hashes" -> Val(NixEvalCorpusStatus.BlockedOnOracleBuildHashes)
+            "bit_exact" -> Val(NixEvalCorpusStatus.BitExact)
+            else -> None
+        }
+    }
 }
 
 struct NixEvalOracleBuild {
@@ -91,11 +105,7 @@ struct NixEvalOracleDraft {
     corpus_status: String
 
     fn parse(text: String) -> NixEvalOracleDraft !NixEvalError {
-        document := NixEvalJson{nodes: [NixEvalJsonNode]{}, root: 0}
-        if NixEvalJson.parse(text) == {
-            .Ok(parsed) -> document = parsed
-            .Err(error) -> return Err(NixEvalError.Manifest(error.message()))
-        }
+        document :: nixeval_oracle_document(text)
         root :: nixeval_oracle_object(document, document.root, "root")
         nixeval_oracle_exact_keys(root, [String]{"schema", "nix", "nixpkgs", "corpus_status"}, "root")
         schema :: root.get("schema") ?? return Err(nixeval_oracle_missing("root.schema"))
@@ -106,14 +116,14 @@ struct NixEvalOracleDraft {
         nixeval_oracle_exact_keys(nix, [String]{"version", "tag_object", "source_commit", "builds"}, "nix")
         builds_object :: nixeval_oracle_child_object(document, nix, "builds")
         builds := [String: NixEvalOracleDraftBuild]{}
-        loop entry in builds_object {
-            path :: "nix.builds.{entry.key}"
-            build :: nixeval_oracle_object(document, entry.value, path)
+        loop system in nixeval_sorted(builds_object.keys().to_list()) {
+            path :: "nix.builds.{system}"
+            build :: nixeval_oracle_object(document, builds_object[system], path)
             nixeval_oracle_exact_keys(build, [String]{"build_nar_hash", "executable_nar_hash", "status"}, path)
             build_nar_hash :: nixeval_oracle_optional_sri(document, build, "build_nar_hash")
             executable_nar_hash :: nixeval_oracle_optional_sri(document, build, "executable_nar_hash")
             status :: nixeval_oracle_required_string(document, build, "status")
-            builds[entry.key] = NixEvalOracleDraftBuild{build_nar_hash, executable_nar_hash, status}
+            builds[system] = NixEvalOracleDraftBuild{build_nar_hash, executable_nar_hash, status}
         }
 
         nixpkgs :: nixeval_oracle_child_object(document, root, "nixpkgs")
@@ -139,27 +149,16 @@ struct NixEvalOracleDraft {
             return Err(NixEvalError.Manifest("`nixpkgs.last_modified` must be `{@NIXEVAL_NIXPKGS_LAST_MODIFIED}`, got `{self.nixpkgs_last_modified}`"))
         }
         nixeval_oracle_exact("nixpkgs.nar_hash", self.nixpkgs_nar_hash, @NIXEVAL_NIXPKGS_NAR_HASH)
-        systems := [String]{}
-        loop entry in self.builds -> systems.push(entry.key)
+        systems :: nixeval_sorted(self.builds.keys().to_list())
         if systems != nixeval_required_systems() {
             return Err(NixEvalError.Manifest("oracle systems must be exactly {nixeval_debug_strings(nixeval_required_systems())}, got {nixeval_debug_strings(systems)}"))
         }
         builds := [String: NixEvalOracleBuild]{}
         loop entry in self.builds {
-            status := NixEvalOracleBuildStatus.Blocked
-            if entry.value.status == {
-                "blocked" -> status = NixEvalOracleBuildStatus.Blocked
-                "ready" -> status = NixEvalOracleBuildStatus.Ready
-                else -> return Err(NixEvalError.Manifest("nix.builds.{entry.key}.status must be `blocked` or `ready`"))
-            }
+            status :: NixEvalOracleBuildStatus.parse(entry.value.status) ?? return Err(NixEvalError.Manifest("nix.builds.{entry.key}.status must be `blocked` or `ready`"))
             builds[entry.key] = NixEvalOracleBuild{build_nar_hash: entry.value.build_nar_hash, executable_nar_hash: entry.value.executable_nar_hash, status}
         }
-        corpus_status := NixEvalCorpusStatus.BitExact
-        if self.corpus_status == {
-            "blocked_on_oracle_build_hashes" -> corpus_status = NixEvalCorpusStatus.BlockedOnOracleBuildHashes
-            "bit_exact" -> corpus_status = NixEvalCorpusStatus.BitExact
-            else -> return Err(NixEvalError.Manifest("`corpus_status` must be `blocked_on_oracle_build_hashes` or `bit_exact`"))
-        }
+        corpus_status :: NixEvalCorpusStatus.parse(self.corpus_status) ?? return Err(NixEvalError.Manifest("`corpus_status` must be `blocked_on_oracle_build_hashes` or `bit_exact`"))
         Ok(NixEvalOracleManifest{
             nix_version: self.nix_version,
             nix_tag_object: self.nix_tag_object,
@@ -173,14 +172,14 @@ struct NixEvalOracleDraft {
     }
 }
 
-struct NixEvalOracleManifest {
-    nix_version: String
-    nix_tag_object: String
-    nix_source_commit: String
+pub struct NixEvalOracleManifest {
+    pub nix_version: String
+    pub nix_tag_object: String
+    pub nix_source_commit: String
     builds: [String: NixEvalOracleBuild]
-    nixpkgs_revision: String
-    nixpkgs_last_modified: Int
-    nixpkgs_nar_hash: String
+    pub nixpkgs_revision: String
+    pub nixpkgs_last_modified: Int
+    pub nixpkgs_nar_hash: String
     corpus_status: NixEvalCorpusStatus
 
     fn embedded() -> NixEvalOracleManifest !NixEvalError {
@@ -210,9 +209,7 @@ struct NixEvalOracleManifest {
     }
 
     fn systems(self) -> [String] !Never {
-        systems := [String]{}
-        loop entry in self.builds -> systems.push(entry.key)
-        systems
+        nixeval_sorted(self.builds.keys().to_list())
     }
 
     fn product_ready(self) -> Bool !Never {
@@ -226,7 +223,7 @@ struct NixEvalOracleManifest {
 }
 
 // An observed oracle build identity; both hashes are canonical SHA-256 SRI.
-struct NixEvalOracleIdentity {
+pub struct NixEvalOracleIdentity {
     system: String
     build_nar_hash: String
     executable_nar_hash: String
@@ -238,12 +235,20 @@ struct NixEvalOracleIdentity {
     }
 }
 
-struct NixEvalVerifiedOracle {
-    system: String
+pub struct NixEvalVerifiedOracle {
+    pub system: String
 }
 
 fn nixeval_oracle_missing(path: String) -> NixEvalError !Never {
     NixEvalError.Manifest("missing `{path}`")
+}
+
+// The manifest text as a JSON document; syntax errors are manifest errors.
+fn nixeval_oracle_document(text: String) -> NixEvalJson !NixEvalError {
+    if NixEvalJson.parse(text) == {
+        .Ok(document) -> return Ok(document)
+        .Err(error) -> return Err(NixEvalError.Manifest(error.message()))
+    }
 }
 
 fn nixeval_oracle_object(document: NixEvalJson, index: Int, path: String) -> [String: Int] !NixEvalError {
@@ -282,29 +287,26 @@ fn nixeval_oracle_optional_sri(document: NixEvalJson, parent: [String: Int], key
             if !nixeval_is_canonical_sha256_sri(value) -> return Err(NixEvalError.Manifest("`{key}` must be canonical SHA-256 SRI"))
             return Ok(Val(value))
         }
-        else -> return Err(NixEvalError.Manifest("`{key}` must be a string or null"))
+        else -> {}
     }
+    Err(NixEvalError.Manifest("`{key}` must be a string or null"))
 }
 
-fn nixeval_oracle_exact_keys(parent: [String: Int], expected: [String], path: String) -> Bool !NixEvalError {
-    actual := [String]{}
-    loop entry in parent -> actual.push(entry.key)
+fn nixeval_oracle_exact_keys(parent: [String: Int], expected: [String], path: String) !NixEvalError {
+    actual :: nixeval_sorted(parent.keys().to_list())
     wanted := ~expected
     wanted.sort()
     if actual != wanted {
         return Err(NixEvalError.Manifest("`{path}` keys must be exactly {nixeval_debug_strings(wanted)}, got {nixeval_debug_strings(actual)}"))
     }
-    Ok(true)
 }
 
-fn nixeval_oracle_exact(field: String, actual: String, expected: String) -> Bool !NixEvalError {
+fn nixeval_oracle_exact(field: String, actual: String, expected: String) !NixEvalError {
     if actual != expected -> return Err(NixEvalError.Manifest("`{field}` must be `{expected}`, got `{actual}`"))
-    Ok(true)
 }
 
-fn nixeval_oracle_compare_identity(system: String, field: String, expected: String, actual: String) -> Bool !NixEvalError {
+fn nixeval_oracle_compare_identity(system: String, field: String, expected: String, actual: String) !NixEvalError {
     if expected != actual -> return Err(NixEvalError.OracleIdentityMismatch{system, field, expected, actual})
-    Ok(true)
 }
 
 // `sha256-` followed by exactly 44 canonical base64 characters ending in `=`
@@ -341,23 +343,27 @@ fn nixeval_debug_strings(values: [String]) -> String !Never {
 fn nixeval_debug_string(value: String) -> String !Never {
     out := [U8]{}
     nixeval_push_byte(&out, 34)
-    hex :: "0123456789abcdef"
+    hex :: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
-        if {
-            code == 34 -> nixeval_push_text(&out, "\\\"")
-            code == 92 -> nixeval_push_text(&out, "\\\\")
-            code == 10 -> nixeval_push_text(&out, "\\n")
-            code == 13 -> nixeval_push_text(&out, "\\r")
-            code == 9 -> nixeval_push_text(&out, "\\t")
-            code == 0 -> nixeval_push_text(&out, "\\0")
-            code < 32 || code == 127 -> {
-                nixeval_push_text(&out, "\\u{{")
-                if code >= 16 -> out.push(hex.bytes()[code /% 16])
-                out.push(hex.bytes()[code % 16])
-                nixeval_push_text(&out, "}}")
+        if code == {
+            34 -> nixeval_push_text(&out, "\\\"")
+            92 -> nixeval_push_text(&out, "\\\\")
+            10 -> nixeval_push_text(&out, "\\n")
+            13 -> nixeval_push_text(&out, "\\r")
+            9 -> nixeval_push_text(&out, "\\t")
+            0 -> nixeval_push_text(&out, "\\0")
+            else -> {
+                if {
+                    code < 32 || code == 127 -> {
+                        nixeval_push_text(&out, "\\u{{")
+                        if code >= 16 -> out.push(hex[code /% 16])
+                        out.push(hex[code % 16])
+                        nixeval_push_text(&out, "}}")
+                    }
+                    else -> out.push(byte)
+                }
             }
-            else -> out.push(byte)
         }
     }
     nixeval_push_byte(&out, 34)

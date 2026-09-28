@@ -148,6 +148,36 @@ impl NixEvalValue {
         }
     }
 
+    fn attr_fields(self) -> ?[String: Int] !Never {
+        if self == {
+            .AttrSet(fields) -> Val(fields)
+            else -> None
+        }
+    }
+
+    fn list_items(self) -> ?[Int] !Never {
+        if self == {
+            .List(items) -> Val(items)
+            else -> None
+        }
+    }
+
+    // The package name a devShell package entry spells: a package, or a
+    // string whose contexts name no project path.
+    fn package_text(self) -> String !NixEvalError {
+        if self == {
+            .Package(name) -> return Ok(name)
+            .Contextual(_, contexts) -> {
+                loop context in contexts {
+                    if nixeval_has_prefix(context, "path:") -> return Err(NixEvalError.Unsupported("path string contexts are not devShell packages"))
+                }
+            }
+            else -> {}
+        }
+        text :: self.text() ?? return Err(NixEvalError.Unsupported("package expression has type {self.type_name()}"))
+        Ok(text)
+    }
+
     // String coercion with its string contexts.
     fn stringify(self) -> NixEvalText !NixEvalError {
         if self == {
@@ -156,8 +186,9 @@ impl NixEvalValue {
             .Integer(value) -> return Ok(NixEvalText{value: "{value}", contexts: [String]{}})
             .Package(name) -> return Ok(NixEvalText{value: ~name, contexts: [String]{"package:{name}"}})
             .Path(path) -> return Ok(NixEvalText{value: ~path, contexts: [String]{"path:{path}"}})
-            else -> return Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))
+            else -> {}
         }
+        Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))
     }
 
     fn plain_string(self) -> String !NixEvalError {
@@ -165,29 +196,39 @@ impl NixEvalValue {
         Ok(text.value)
     }
 
+    // Nix `==` over the bounded value kinds: strings compare by text, and a
+    // package equals the string naming its last attribute segment.
     fn equals(self, other: NixEvalValue) -> Bool !Never {
         if self == {
-            .Null -> return other == NixEvalValue.Null
-            .Bool(value) -> return other == NixEvalValue.Bool(value)
-            .Integer(value) -> return other == NixEvalValue.Integer(value)
+            .Null -> other == NixEvalValue.Null
+            .Bool(value) -> other == NixEvalValue.Bool(value)
+            .Integer(value) -> other == NixEvalValue.Integer(value)
             .Package(package) -> {
                 if other == {
-                    .Package(right) -> return package == right
-                    else -> {}
+                    .Package(right) -> package == right
+                    else -> nixeval_package_named(package, other.text())
                 }
-                string :: other.text() ?? return false
-                return nixeval_last_segment(package, "./:") == string
             }
-            else -> {}
+            .Str(left) | .Contextual(left, _) -> {
+                if other == {
+                    .Package(package) -> nixeval_package_named(package, Val(left))
+                    else -> nixeval_same_text(other.text(), left)
+                }
+            }
+            else -> false
         }
-        left :: self.text() ?? return false
-        if other == {
-            .Package(package) -> return nixeval_last_segment(package, "./:") == left
-            else -> {}
-        }
-        right :: other.text() ?? return false
-        left == right
     }
+}
+
+// True when `text` names the last attribute segment of `package`.
+fn nixeval_package_named(package: String, text: ?String) -> Bool !Never {
+    name :: text ?? return false
+    nixeval_last_segment(package, "./:") == name
+}
+
+fn nixeval_same_text(text: ?String, expected: String) -> Bool !Never {
+    value :: text ?? return false
+    value == expected
 }
 
 // A coerced string and its contexts (`package:<name>` or `path:<path>`).
@@ -241,19 +282,15 @@ fn nixeval_cross_package_name(raw: String) -> ?String !Never {
 fn nixeval_is_store_path(path: String) -> Bool !Never {
     name :: nixeval_strip_prefix(path, "/nix/store/") ?? return false
     bytes :: name.bytes()
-    dash :: nixeval_first_byte(bytes, 45)
-    if dash != 32 || dash + 1 >= bytes.len() -> return false
+    if nixeval_first_byte(bytes, 45) != 32 || bytes.len() <= 33 -> return false
     alphabet :: "0123456789abcdfghijklmnpqrsvwxyz".bytes()
     loop index in 0..<32 {
-        found := false
-        loop allowed in alphabet {
-            if bytes[index] == allowed -> found = true
-        }
-        if !found -> return false
+        if nixeval_first_byte(alphabet, Int.from_u8(bytes[index])) < 0 -> return false
     }
+    label_marks :: "+._?=-".bytes()
     loop index in 33..<bytes.len() {
         byte :: Int.from_u8(bytes[index])
-        if !(nixeval_is_ascii_alphanumeric(byte) || byte == 43 || byte == 46 || byte == 95 || byte == 63 || byte == 61 || byte == 45) -> return false
+        if !nixeval_is_ascii_alphanumeric(byte) && nixeval_first_byte(label_marks, byte) < 0 -> return false
     }
     true
 }

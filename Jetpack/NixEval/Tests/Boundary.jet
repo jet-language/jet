@@ -77,7 +77,7 @@ fn nixeval_test_identity(build: String, executable: String) -> NixEvalOracleIden
 fn nixeval_test_oracle_error(manifest: NixEvalOracleManifest, observed: NixEvalOracleIdentity) -> NixEvalError {
     if manifest.verify_oracle(observed) == {
         .Ok(_) -> panic("oracle verification must fail closed")
-        .Err(error) -> return error
+        .Err(error) -> error
     }
 }
 
@@ -92,7 +92,7 @@ fn nixeval_test_mismatch_field(error: NixEvalError) -> String {
 fn nixeval_test_manifest_error(text: String) -> NixEvalError {
     if NixEvalOracleManifest.parse_and_validate(text) == {
         .Ok(_) -> panic("manifest must be rejected")
-        .Err(error) -> return error
+        .Err(error) -> error
     }
 }
 

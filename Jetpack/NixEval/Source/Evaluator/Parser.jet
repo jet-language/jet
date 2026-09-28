@@ -68,12 +68,11 @@ struct NixEvalParser {
         self.base + self.nodes.len() - 1
     }
 
-    fn enter(&self) -> Bool !NixEvalError {
+    fn enter(&self) !NixEvalError {
         if self.depth >= @NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.ResourceLimit("foreign flake parser exceeded {@NIXEVAL_EXPRESSION_LIMIT} nested expressions"))
         }
         self.depth += 1
-        Ok(true)
     }
 
     fn leave(&self, node: Int) -> Int !Never {
@@ -84,11 +83,10 @@ struct NixEvalParser {
     fn expression(&self) -> Int !NixEvalError {
         self.enter()
         lambda :: self.try_lambda()
-        if lambda == {
-            .Val(node) -> return Ok(self.leave(node))
-            else -> {}
+        node :: if lambda == {
+            .Val(parsed) -> parsed
+            else -> self.equality()
         }
-        node :: self.equality()
         Ok(self.leave(node))
     }
 
@@ -212,29 +210,29 @@ struct NixEvalParser {
     fn atom_inner(&self) -> Int !NixEvalError {
         token :: self.bump()
         if token == {
-            .Str(value) -> return Ok(self.add(NixEvalExpr.Str(value)))
-            .Interpolated(parts) -> return self.string_context(parts)
-            .Path(value) -> return Ok(self.add(NixEvalExpr.Path(value)))
-            .Integer(value) -> return Ok(self.add(NixEvalExpr.Integer(value)))
+            .Str(value) -> self.add(NixEvalExpr.Str(value))
+            .Interpolated(parts) -> self.string_context(parts)
+            .Path(value) -> self.add(NixEvalExpr.Path(value))
+            .Integer(value) -> self.add(NixEvalExpr.Integer(value))
             .Identifier(name) -> {
                 if name == {
-                    "true" -> return Ok(self.add(NixEvalExpr.Bool(true)))
-                    "false" -> return Ok(self.add(NixEvalExpr.Bool(false)))
-                    "null" -> return Ok(self.add(NixEvalExpr.Null))
-                    "let" -> return self.let_expression()
-                    "with" -> return self.with_expression()
-                    "if" -> return self.if_expression()
-                    else -> return Ok(self.add(NixEvalExpr.Identifier(name)))
+                    "true" -> self.add(NixEvalExpr.Bool(true))
+                    "false" -> self.add(NixEvalExpr.Bool(false))
+                    "null" -> self.add(NixEvalExpr.Null)
+                    "let" -> self.let_expression()
+                    "with" -> self.with_expression()
+                    "if" -> self.if_expression()
+                    else -> self.add(NixEvalExpr.Identifier(name))
                 }
             }
-            .LeftBrace -> return self.attrset()
-            .LeftBracket -> return self.list()
+            .LeftBrace -> self.attrset()
+            .LeftBracket -> self.list()
             .LeftParen -> {
                 expression :: self.expression()
                 self.expect_right_paren()
-                return Ok(expression)
+                expression
             }
-            else -> return Err(NixEvalError.Syntax("unexpected token {token.describe()}"))
+            else -> nixeval_unexpected_token(token)
         }
     }
 
@@ -377,16 +375,14 @@ struct NixEvalParser {
         true
     }
 
-    fn expect_equal(&self) -> Bool !NixEvalError {
+    fn expect_equal(&self) !NixEvalError {
         if self.peek() != NixEvalToken.Equal -> return Err(NixEvalError.Syntax("expected `=`"))
         self.position += 1
-        Ok(true)
     }
 
-    fn expect_right_paren(&self) -> Bool !NixEvalError {
+    fn expect_right_paren(&self) !NixEvalError {
         if self.peek() != NixEvalToken.RightParen -> return Err(NixEvalError.Syntax("expected `)`"))
         self.position += 1
-        Ok(true)
     }
 
     fn bump(&self) -> NixEvalToken !Never {
@@ -401,4 +397,8 @@ struct NixEvalParser {
         if self.position < self.tokens.len() -> return ~self.tokens[self.position]
         ~self.tokens[self.tokens.len() - 1]
     }
+}
+
+fn nixeval_unexpected_token(token: NixEvalToken) -> Int !NixEvalError {
+    Err(NixEvalError.Syntax("unexpected token {token.describe()}"))
 }

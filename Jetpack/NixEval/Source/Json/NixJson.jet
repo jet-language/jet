@@ -93,20 +93,15 @@ struct NixEvalJson {
 
     // Structural equality of one node here and one node in `other`.
     fn same(self, index: Int, other: NixEvalJson, other_index: Int) -> Bool !Never {
-        left :: self.nodes[index]
         right :: other.nodes[other_index]
-        if left == {
-            .Null -> return right == NixEvalJsonNode.Null
-            .Bool(value) -> return right == NixEvalJsonNode.Bool(value)
-            .Num(value) -> return right == NixEvalJsonNode.Num(value)
-            .Str(value) -> return right == NixEvalJsonNode.Str(value)
+        if self.nodes[index] == {
             .Array(items) -> {
                 others :: other.array(other_index) ?? return false
                 if items.len() != others.len() -> return false
                 loop position in 0..<items.len() {
                     if !self.same(items[position], other, others[position]) -> return false
                 }
-                return true
+                true
             }
             .Object(fields) -> {
                 others :: other.object(other_index) ?? return false
@@ -115,8 +110,9 @@ struct NixEvalJson {
                     counterpart :: others.get(entry.key) ?? return false
                     if !self.same(entry.value, other, counterpart) -> return false
                 }
-                return true
+                true
             }
+            else -> self.nodes[index] == right
         }
     }
 }
@@ -152,22 +148,27 @@ struct NixEvalJsonParser {
         if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.Json("JSON value is too deeply nested"))
         self.skip_whitespace()
         next :: self.peek()
-        if {
-            next == 123 -> return self.object(depth)
-            next == 91 -> return self.array(depth)
-            next == 34 -> {
+        if next == {
+            123 -> self.object(depth)
+            91 -> self.array(depth)
+            34 -> {
                 text :: self.string()
-                return Ok(self.add(NixEvalJsonNode.Str(text)))
+                self.add(NixEvalJsonNode.Str(text))
             }
-            next == 116 || next == 102 -> return self.boolean()
-            next == 110 -> return self.null()
-            next == 45 || nixeval_is_ascii_digit(next) -> return self.number()
-            next < 0 -> return Err(NixEvalError.Json("unexpected end of input"))
-            else -> {
-                width :: nixeval_scalar_width(self.bytes, self.position)
-                return Err(NixEvalError.Json("unexpected character `{nixeval_slice(self.bytes, self.position, self.position + width)}`"))
-            }
+            116 | 102 -> self.boolean()
+            110 -> self.null()
+            else -> self.number_or_unexpected(next)
         }
+    }
+
+    // A number when `next` can start one; otherwise the reference error for
+    // the character at the cursor.
+    fn number_or_unexpected(&self, next: Int) -> Int !NixEvalError {
+        if next == 45 || nixeval_is_ascii_digit(next) -> return self.number()
+        if next < 0 -> return Err(NixEvalError.Json("unexpected end of input"))
+        width :: nixeval_scalar_width(self.bytes, self.position)
+        character :: nixeval_slice(self.bytes, self.position, self.position + width)
+        Err(NixEvalError.Json("unexpected character `{character}`"))
     }
 
     fn object(&self, depth: Int) -> Int !NixEvalError {

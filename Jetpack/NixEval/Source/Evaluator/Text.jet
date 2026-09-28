@@ -222,3 +222,19 @@ fn nixeval_sorted_unique(values: [String]) -> [String] !Never {
     }
     out
 }
+
+// Names in byte order. `[K: V]` iterates in insertion order, while Nix
+// attribute sets, JSON objects and the reference `BTreeMap`s are key-ordered,
+// so key iteration goes through `nixeval_sorted(map.keys().to_list())`.
+fn nixeval_sorted(names: [String]) -> [String] !Never {
+    sorted := ~names
+    sorted.sort()
+    sorted
+}
+
+// A copy of `map` whose insertion order is its key order.
+fn nixeval_key_ordered(map: [String: String]) -> [String: String] !Never {
+    ordered := [String: String]{}
+    loop name in nixeval_sorted(map.keys().to_list()) -> ordered[name] = map[name]
+    ordered
+}
