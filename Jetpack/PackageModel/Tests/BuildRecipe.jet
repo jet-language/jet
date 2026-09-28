@@ -1,0 +1,135 @@
+// Claims ported from crates/jet-pkg-model/src/Recipe.rs #[cfg(test)].
+
+fn pkg_test_staged_fragment(platform: String) -> BuildPlanFragment {
+    action := PlanFragmentAction.new("compile", "planner")
+    action.inputs = [String]{"manifest"}
+    action.outputs = [String]{"result.bin"}
+    action.effects = [BuildEffect]{BuildEffect.Exec}
+    action.platform = platform
+    BuildPlanFragment{actions: [PlanFragmentAction]{action}}
+}
+
+fn pkg_test_staged_action(platform: String) -> StagedPlanAction {
+    StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner"}, effects: [BuildEffect]{BuildEffect.Exec}, platform: platform})
+}
+
+fn pkg_test_staged_identity(action: StagedPlanAction, fragment: BuildPlanFragment) -> String {
+    action.identity(fragment) ?? panic("staged identity should validate")
+}
+
+fn pkg_test_staged_error(action: StagedPlanAction, fragment: BuildPlanFragment) -> StagedPlanError {
+    if action.validate(fragment) == {
+        .Ok(_) -> panic("expected a staged plan error")
+        .Err(error) -> error
+    }
+}
+
+#Test("staged identity binds finite inputs authority and fragment") {
+    action :: pkg_test_staged_action("linux-x86_64")
+    fragment :: pkg_test_staged_fragment("linux-x86_64")
+    identity :: pkg_test_staged_identity(action, fragment)
+    assert_eq(identity, pkg_test_staged_identity(action, fragment))
+    staged_lock :: action.lock(fragment) ?? panic("staged lock should validate")
+    assert_eq(staged_lock.canonical_identity(), identity)
+
+    changed_stage := ~action
+    changed_stage.stage = 1
+    changed_stage.stage_bound = 2
+    assert(identity != pkg_test_staged_identity(changed_stage, fragment))
+
+    changed_input := ~action
+    changed_input.inputs[0].digest = "sha256-other"
+    assert(identity != pkg_test_staged_identity(changed_input, fragment))
+
+    changed_authority := ~action
+    changed_authority.authority.effects.push(BuildEffect.FS)
+    assert(identity != pkg_test_staged_identity(changed_authority, fragment))
+
+    changed_fragment := ~fragment
+    changed_fragment.actions[0].outputs = [String]{"other.bin"}
+    assert(identity != pkg_test_staged_identity(action, changed_fragment))
+}
+
+#Test("staged validation rejects cycles and overlapping outputs") {
+    action :: pkg_test_staged_action("linux-x86_64")
+    first := pkg_test_staged_fragment("linux-x86_64").actions[0]
+    first.dependencies = [String]{"second"}
+    second := PlanFragmentAction.new("second", "planner")
+    second.inputs = [String]{"manifest"}
+    second.outputs = [String]{"other.bin"}
+    second.dependencies = [String]{"compile"}
+    second.effects = [BuildEffect]{BuildEffect.Exec}
+    second.platform = "linux-x86_64"
+    cycle :: pkg_test_staged_error(action, BuildPlanFragment{actions: [PlanFragmentAction]{first, second}})
+    assert(cycle.message().contains("cycle"))
+
+    overlapping := pkg_test_staged_fragment("linux-x86_64")
+    nested := PlanFragmentAction.new("nested", "planner")
+    nested.inputs = [String]{"manifest"}
+    nested.outputs = [String]{"result.bin/child"}
+    nested.effects = [BuildEffect]{BuildEffect.Exec}
+    nested.platform = "linux-x86_64"
+    overlapping.actions.push(nested)
+    assert(pkg_test_staged_error(action, overlapping).message().contains("overlap"))
+
+    windows_escape := pkg_test_staged_fragment("linux-x86_64")
+    windows_escape.actions[0].outputs = [String]{"..\\escape"}
+    assert(pkg_test_staged_error(action, windows_escape).message().contains("slash-separated"))
+}
+
+#Test("hook identity binds provider source") {
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
+    local_id :: recipe.build_identity_for_source("tool", "./vendor/tool", "sha256-source", "linux-x86_64")
+    remote_id :: recipe.build_identity_for_source("tool", "github:owner/tool", "sha256-source", "linux-x86_64")
+    assert(local_id != remote_id)
+}
+
+#Test("hook identity binds capability set") {
+    copy_recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
+    exec_recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc", args: [String]{"-c", "main.c"}}}}
+    copy_id :: copy_recipe.build_identity_for_source("tool", "./tool", "source", "linux-x86_64")
+    exec_id :: exec_recipe.build_identity_for_source("tool", "./tool", "source", "linux-x86_64")
+    assert(copy_id != exec_id)
+    assert_eq(copy_recipe.declared_capabilities(), [String]{"fs.write"})
+    assert_eq(exec_recipe.declared_capabilities(), [String]{"exec:cc"})
+}
+
+#Test("hook identity binds all authority facts") {
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "a", dest: "bin/a"}}}
+    base :: recipe.build_identity_for_source("tool", "registry:stable", "source-a", "linux-x86_64")
+    assert(base != recipe.build_identity_for_source("other", "registry:stable", "source-a", "linux-x86_64"))
+    assert(base != recipe.build_identity_for_source("tool", "registry:next", "source-a", "linux-x86_64"))
+    assert(base != recipe.build_identity_for_source("tool", "registry:stable", "source-b", "linux-x86_64"))
+    assert(base != recipe.build_identity_for_source("tool", "registry:stable", "source-a", "darwin-arm64"))
+    tree :: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: "a", dest: "bin/a"}}}
+    assert(base != tree.build_identity_for_source("tool", "registry:stable", "source-a", "linux-x86_64"))
+}
+
+#Test("hook identity binds declared tool dependencies") {
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc", args: [String]{"main.c"}}}}
+    stable :: recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"cc@default"})
+    assert(stable != recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"cc@trusted"}))
+    // Repeated builds derive one identity from the same declared facts.
+    assert_eq(stable, recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"cc@default"}))
+    // Dependency ordering must not make repeated builds diverge.
+    assert_eq(
+        recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"cc@default", "ar@default"}),
+        recipe.build_identity_for_source_with_dependencies("tool", "./vendor/tool", "source", "linux-x86_64", [String]{"ar@default", "cc@default"})
+    )
+}
+
+#Test("canonical hash frames steps and fields") {
+    nul :: String.from_bytes([U8{0}]) ?? panic("NUL is valid UTF-8")
+    first :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc{nul}ar", args: [String]{"main"}}}}
+    second :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "cc", args: [String]{"ar{nul}main"}}}}
+    // Field boundaries are part of recipe identity.
+    assert(first.recipe_hash() != second.recipe_hash())
+    assert_eq(first.recipe_hash(), first.recipe_hash())
+}
+
+#Test("canonical hook identity frames authority fields") {
+    recipe :: BuildRecipe{steps: [BuildStep]{}}
+    first :: recipe.build_identity_for_source_with_dependencies("pkg\nsource", "provider", "digest", "linux", [String]{"tool\nref"})
+    second :: recipe.build_identity_for_source_with_dependencies("pkg", "source\nprovider", "digest", "linux", [String]{"tool\nref"})
+    assert(first != second)
+}

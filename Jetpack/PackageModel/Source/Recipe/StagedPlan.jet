@@ -1,0 +1,433 @@
+// Finite staged plan actions, ported from jet_pkg_model::Recipe.
+//
+// A staged action runs sandboxed and emits a typed `BuildPlanFragment`. The
+// fragment is checked against the action's declaration before publication and
+// then lowered into the same `BuildPlan` action graph as ordinary recipes; it
+// is not an alternate graph. Validation lives in the model so evaluator and
+// engine cannot disagree about what a finite staged fragment means.
+
+@STAGED_PLAN_FORMAT :: "jet.staged-plan.v1"
+
+// One exact input made visible to a finite staged plan action.
+pub struct PlanInput {
+    pub path: String
+    pub digest: String
+
+    fn new(path: String, digest: String) -> PlanInput !Never {
+        PlanInput{path: path, digest: digest}
+    }
+
+    // Inputs ordered by path, then digest.
+    fn sorted(inputs: [PlanInput]) -> [PlanInput] !Never {
+        out := inputs
+        out.sort_by((left: PlanInput, right: PlanInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+        out
+    }
+}
+
+// The only authority a staged plan action may observe.
+pub struct PlanAuthority {
+    pub tools: [String]
+    pub effects: [BuildEffect]
+    pub platform: String
+}
+
+// A typed finite action emitted by a staged plan action.
+pub struct PlanFragmentAction {
+    pub name: String
+    pub tool: String
+    pub args: [String]
+    pub inputs: [String]
+    pub outputs: [String]
+    pub env: [String: String]
+    pub effects: [BuildEffect]
+    pub dependencies: [String]
+    pub platform: String
+
+    fn new(name: String, tool: String) -> PlanFragmentAction !Never {
+        PlanFragmentAction{name: name, tool: tool, args: [String]{}, inputs: [String]{}, outputs: [String]{}, env: [String: String]{}, effects: [BuildEffect]{}, dependencies: [String]{}, platform: ""}
+    }
+}
+
+// Typed output of a finite staged plan action.
+pub struct BuildPlanFragment {
+    pub actions: [PlanFragmentAction]
+
+    fn canonical_bytes(self) -> [U8] !Never {
+        writer := RecipeCanonicalWriter.new("jet.build-plan-fragment.v1")
+        self.write_canonical(&writer)
+        writer.bytes
+    }
+
+    // Actions by name; every set-like field sorted so emission order never
+    // changes the identity.
+    fn write_canonical(self, writer: &RecipeCanonicalWriter) !Never {
+        actions := self.actions
+        actions.sort_by(action -> action.name)
+        writer.push_count(actions.len())
+        loop action in actions {
+            writer.push_text(action.name)
+            writer.push_text(action.tool)
+            writer.push_texts(action.args)
+            inputs := action.inputs
+            inputs.sort()
+            writer.push_texts(inputs)
+            outputs := action.outputs
+            outputs.sort()
+            writer.push_texts(outputs)
+            keys := action.env.keys().to_list()
+            keys.sort()
+            writer.push_count(keys.len())
+            loop key in keys {
+                writer.push_text(key)
+                writer.push_text(action.env[key])
+            }
+            effects :: BuildEffect.sorted(action.effects)
+            writer.push_count(effects.len())
+            loop build_effect in effects -> writer.push_text(build_effect.flag())
+            dependencies := action.dependencies
+            dependencies.sort()
+            writer.push_texts(dependencies)
+            writer.push_text(action.platform)
+        }
+    }
+}
+
+// Metadata for one sandboxed plan action. The fragment is supplied only after
+// the action runs, then checked against this declaration before publication.
+pub struct StagedPlanAction {
+    pub name: String
+    pub stage: Int
+    pub stage_bound: Int
+    pub inputs: [PlanInput]
+    pub authority: PlanAuthority
+
+    fn new(name: String, stage: Int, stage_bound: Int, inputs: [PlanInput], authority: PlanAuthority) -> StagedPlanAction !Never {
+        StagedPlanAction{name: name, stage: stage, stage_bound: stage_bound, inputs: inputs, authority: authority}
+    }
+
+    // Validate the declaration before the sandbox is entered.
+    fn validate_declaration(self) !StagedPlanError {
+        if self.name.trim() == "" || pkg_staged_has_control(self.name) -> return Err(StagedPlanError.EmptyActionName)
+        if self.stage_bound == 0 -> return Err(StagedPlanError.InvalidStageBound)
+        if self.stage >= self.stage_bound -> return Err(StagedPlanError.StageOutOfBounds{stage: self.stage, bound: self.stage_bound})
+        if self.authority.platform.trim() == "" || pkg_staged_has_control(self.authority.platform) -> return Err(StagedPlanError.EmptyPlatform)
+        declared := [String]{}
+        loop input in self.inputs {
+            if pkg_staged_path_problem(input.path) == {
+                .Val(reason) -> return Err(StagedPlanError.InvalidInput{path: input.path, reason: reason})
+                .None -> {}
+            }
+            if input.digest.trim() == "" || pkg_staged_has_control(input.digest) -> return Err(StagedPlanError.MissingInputDigest(input.path))
+            if declared.contains(input.path) -> return Err(StagedPlanError.DuplicateInput(input.path))
+            declared.push(input.path)
+        }
+        _ := pkg_staged_unique_tools(self.authority.tools)
+        _ := pkg_staged_unique_effects(self.authority.effects)
+    }
+
+    // Validate the fragment before it can enter the executable graph.
+    fn validate(self, fragment: BuildPlanFragment) !StagedPlanError {
+        self.validate_declaration()
+        declared_inputs := [String]{}
+        loop input in self.inputs -> declared_inputs.push(input.path)
+        authority_tools :: pkg_staged_unique_tools(self.authority.tools)
+        authority_effects :: pkg_staged_unique_effects(self.authority.effects)
+        names := [String]{}
+        output_owners := [(output: String, owner: String)]{}
+        dependencies := [String: [String]]{}
+        if fragment.actions.len() == 0 -> return Err(StagedPlanError.EmptyFragment)
+        loop action in fragment.actions {
+            if action.name.trim() == "" || pkg_staged_has_control(action.name) -> return Err(StagedPlanError.EmptyFragmentActionName)
+            if names.contains(action.name) -> return Err(StagedPlanError.DuplicateFragmentActionName(action.name))
+            names.push(action.name)
+            if action.tool.trim() == "" || pkg_staged_has_control(action.tool) -> return Err(StagedPlanError.EmptyFragmentTool(action.name))
+            if !authority_tools.contains(action.tool) -> return Err(StagedPlanError.UnauthorizedTool{action: action.name, tool: action.tool})
+            if action.platform != self.authority.platform {
+                return Err(StagedPlanError.PlatformMismatch{action: action.name, expected: self.authority.platform, actual: action.platform})
+            }
+            loop build_effect in pkg_staged_unique_effects(action.effects) {
+                if !authority_effects.contains(build_effect) -> return Err(StagedPlanError.UnauthorizedEffect{action: action.name, build_effect: build_effect})
+            }
+            loop input in action.inputs {
+                if pkg_staged_path_problem(input) == {
+                    .Val(reason) -> return Err(StagedPlanError.InvalidInput{path: input, reason: reason})
+                    .None -> {}
+                }
+                if !declared_inputs.contains(input) -> return Err(StagedPlanError.UndeclaredInput{action: action.name, path: input})
+            }
+            if action.outputs.len() == 0 -> return Err(StagedPlanError.MissingOutput(action.name))
+            loop output in action.outputs {
+                if pkg_staged_path_problem(output) == {
+                    .Val(reason) -> return Err(StagedPlanError.InvalidOutput{path: output, reason: reason})
+                    .None -> {}
+                }
+                loop owned in output_owners {
+                    if pkg_staged_paths_overlap(owned.output, output) {
+                        return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: ~output, second_owner: action.name})
+                    }
+                }
+                output_owners.push((output: output, owner: action.name))
+            }
+            loop dependency in action.dependencies {
+                if dependency == action.name || dependency.trim() == "" -> return Err(StagedPlanError.InvalidDependency{action: action.name, dependency: dependency})
+            }
+            dependencies[action.name] = action.dependencies
+            loop entry in action.env {
+                if entry.key.trim() == "" || pkg_staged_has_control(entry.key) || pkg_staged_has_control(entry.value) -> return Err(StagedPlanError.InvalidEnvironment(action.name))
+            }
+            loop arg in action.args {
+                if pkg_staged_has_control(arg) -> return Err(StagedPlanError.InvalidArguments(action.name))
+            }
+        }
+        loop action in pkg_staged_sorted_keys(dependencies) {
+            loop dependency in dependencies[action] {
+                if !names.contains(dependency) -> return Err(StagedPlanError.UnknownDependency{action: ~action, dependency: dependency})
+            }
+        }
+        pkg_staged_detect_cycle(dependencies)
+    }
+
+    // Stable identity over the declaration and emitted fragment. Exact input
+    // digests and every authority fact are part of the identity.
+    fn identity(self, fragment: BuildPlanFragment) -> String !StagedPlanError {
+        self.validate(fragment)
+        writer := RecipeCanonicalWriter.new(@STAGED_PLAN_FORMAT)
+        self.write_canonical(&writer)
+        fragment.write_canonical(&writer)
+        Ok("staged-plan-sha256:{pkg_recipe_sha256_hex(writer.bytes)}")
+    }
+
+    fn fragment_digest(self, fragment: BuildPlanFragment) -> String !StagedPlanError {
+        self.validate(fragment)
+        Ok("sha256-{pkg_recipe_sha256_hex(fragment.canonical_bytes())}")
+    }
+
+    fn lock(self, fragment: BuildPlanFragment) -> StagedPlanLock !StagedPlanError {
+        identity :: self.identity(fragment)
+        fragment_digest :: self.fragment_digest(fragment)
+        Ok(StagedPlanLock{action_identity: identity, fragment_digest: fragment_digest, stage: self.stage, stage_bound: self.stage_bound, inputs: self.inputs, authority: self.authority})
+    }
+
+    fn write_canonical(self, writer: &RecipeCanonicalWriter) !Never {
+        writer.push_text(self.name)
+        writer.push_count(self.stage)
+        writer.push_count(self.stage_bound)
+        inputs :: PlanInput.sorted(self.inputs)
+        writer.push_count(inputs.len())
+        loop input in inputs {
+            writer.push_text(input.path)
+            writer.push_text(input.digest)
+        }
+        tools := self.authority.tools
+        tools.sort()
+        writer.push_texts(tools)
+        effects :: BuildEffect.sorted(self.authority.effects)
+        writer.push_count(effects.len())
+        loop build_effect in effects -> writer.push_text(build_effect.flag())
+        writer.push_text(self.authority.platform)
+    }
+}
+
+// Exact facts written beside a staged fragment for offline replay.
+pub struct StagedPlanLock {
+    pub action_identity: String
+    pub fragment_digest: String
+    pub stage: Int
+    pub stage_bound: Int
+    pub inputs: [PlanInput]
+    pub authority: PlanAuthority
+
+    // The lock file text (`StagedPlanLock::encode`). Every set-like field is
+    // sorted so the text is deterministic.
+    fn render(self) -> String !Never {
+        lines := [String]{
+            "jet-staged-plan-lock-v1",
+            "action_identity={self.action_identity}",
+            "fragment_digest={self.fragment_digest}",
+            "stage={self.stage}",
+            "stage_bound={self.stage_bound}",
+            "platform={self.authority.platform}"
+        }
+        loop input in PlanInput.sorted(self.inputs) -> lines.push("input={input.path}\t{input.digest}")
+        tools := self.authority.tools
+        tools.sort()
+        loop tool in tools -> lines.push("tool={tool}")
+        loop build_effect in BuildEffect.sorted(self.authority.effects) -> lines.push("effect={build_effect.flag()}")
+        body :: lines.join("\n")
+        "{body}\n"
+    }
+
+    // The engine writes the exact same facts it keys.
+    fn canonical_identity(self) -> String !Never {
+        self.action_identity
+    }
+}
+
+// Why a staged plan declaration or fragment was rejected.
+#Error
+pub enum StagedPlanError {
+    EmptyActionName
+    InvalidStageBound
+    StageOutOfBounds(stage: Int, bound: Int)
+    EmptyPlatform
+    InvalidInput(path: String, reason: String)
+    MissingInputDigest(String)
+    DuplicateInput(String)
+    DuplicateTool(String)
+    DuplicateEffect(String)
+    EmptyFragment
+    EmptyFragmentActionName
+    DuplicateFragmentActionName(String)
+    EmptyFragmentTool(String)
+    UnauthorizedTool(action: String, tool: String)
+    UnauthorizedEffect(action: String, build_effect: BuildEffect)
+    PlatformMismatch(action: String, expected: String, actual: String)
+    UndeclaredInput(action: String, path: String)
+    MissingOutput(String)
+    InvalidOutput(path: String, reason: String)
+    OutputConflict(first: String, first_owner: String, second: String, second_owner: String)
+    InvalidDependency(action: String, dependency: String)
+    UnknownDependency(action: String, dependency: String)
+    DependencyCycle([String])
+    InvalidEnvironment(String)
+    InvalidArguments(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .EmptyActionName -> "staged plan action name is empty"
+            .InvalidStageBound -> "staged plan stage bound must be positive"
+            .StageOutOfBounds(stage, bound) -> "staged plan stage {stage} is outside finite bound {bound}"
+            .EmptyPlatform -> "staged plan platform is empty"
+            .InvalidInput(path, reason) -> "input `{path}` is invalid: {reason}"
+            .MissingInputDigest(path) -> "input `{path}` has no digest"
+            .DuplicateInput(path) -> "input `{path}` is declared more than once"
+            .DuplicateTool(tool) -> "tool `{tool}` is declared more than once"
+            .DuplicateEffect(flag) -> "effect `{flag}` is declared more than once"
+            .EmptyFragment -> "staged plan emitted no actions"
+            .EmptyFragmentActionName -> "staged plan emitted an action with no name"
+            .DuplicateFragmentActionName(name) -> "staged plan emitted duplicate action `{name}`"
+            .EmptyFragmentTool(name) -> "staged action `{name}` has no tool"
+            .UnauthorizedTool(action, tool) -> "staged action `{action}` uses undeclared tool `{tool}`"
+            .UnauthorizedEffect(action, build_effect) -> "staged action `{action}` uses undeclared effect `{build_effect.flag()}`"
+            .PlatformMismatch(action, expected, actual) -> "staged action `{action}` targets `{actual}`, not declared platform `{expected}`"
+            .UndeclaredInput(action, path) -> "staged action `{action}` reads undeclared input `{path}`"
+            .MissingOutput(name) -> "staged action `{name}` has no output"
+            .InvalidOutput(path, reason) -> "output `{path}` is invalid: {reason}"
+            .OutputConflict(first, first_owner, second, second_owner) -> "staged outputs `{first}` ({first_owner}) and `{second}` ({second_owner}) overlap"
+            .InvalidDependency(action, dependency) -> "staged action `{action}` has invalid dependency `{dependency}`"
+            .UnknownDependency(action, dependency) -> "staged action `{action}` depends on unknown action `{dependency}`"
+            .DependencyCycle(chain) -> "staged action graph contains a cycle: {chain.join(" -> ")}"
+            .InvalidEnvironment(name) -> "staged action `{name}` has invalid environment facts"
+            .InvalidArguments(name) -> "staged action `{name}` has invalid argument facts"
+        }
+    }
+}
+
+// Where a dependency-graph walk has reached a node.
+enum StagedPlanVisit {
+    Visiting
+    Done
+}
+
+// Authority names are non-blank, free of control characters, and unique.
+fn pkg_staged_unique_tools(values: [String]) -> [String] !StagedPlanError {
+    out := [String]{}
+    loop value in values {
+        if value.trim() == "" || pkg_staged_has_control(value) {
+            return Err(StagedPlanError.InvalidInput{path: value, reason: "authority name is empty or contains control characters"})
+        }
+        if out.contains(value) -> return Err(StagedPlanError.DuplicateTool(value))
+        out.push(value)
+    }
+    Ok(out)
+}
+
+// The effects in canonical order, rejecting a repeated effect.
+fn pkg_staged_unique_effects(values: [BuildEffect]) -> [BuildEffect] !StagedPlanError {
+    seen := [BuildEffect]{}
+    loop build_effect in values {
+        if seen.contains(build_effect) -> return Err(StagedPlanError.DuplicateEffect(build_effect.flag()))
+        seen.push(build_effect)
+    }
+    Ok(BuildEffect.sorted(seen))
+}
+
+// Why `path` is not a slash-separated path below the sandbox root, or None.
+fn pkg_staged_path_problem(path: String) -> ?String !Never {
+    if path.trim() == "" || pkg_staged_has_control(path) -> return Val("path is empty or contains control characters")
+    if path.contains("\\") -> return Val("path must use slash-separated relative names")
+    if path.starts_with("/") || path.split("/").to_list().contains("..") -> return Val("path must stay below the declared sandbox root")
+    None
+}
+
+// Whether `value` holds a Unicode control scalar (C0, DEL, or C1).
+fn pkg_staged_has_control(value: String) -> Bool !Never {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 32 || code == 127 -> return true
+        // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
+        if code == 0xC2 && index + 1 < raw.len() {
+            next_code :: Int.from_u8(raw[index + 1])
+            if next_code >= 0x80 && next_code <= 0x9F -> return true
+        }
+    }
+    false
+}
+
+// Equal paths, or one nested under the other.
+fn pkg_staged_paths_overlap(left: String, right: String) -> Bool !Never {
+    left == right || pkg_staged_nested_under(left, right) || pkg_staged_nested_under(right, left)
+}
+
+fn pkg_staged_nested_under(child: String, parent: String) -> Bool !Never {
+    if !child.starts_with(parent) -> return false
+    suffix :: child.removeprefix(parent)
+    suffix.starts_with("/") || suffix.starts_with("\\")
+}
+
+fn pkg_staged_sorted_keys(map: [String: [String]]) -> [String] !Never {
+    keys := map.keys().to_list()
+    keys.sort()
+    keys
+}
+
+// Reject a dependency cycle, reporting the chain that closes it. Roots are
+// walked in name order.
+fn pkg_staged_detect_cycle(dependencies: [String: [String]]) !StagedPlanError {
+    states := [String: StagedPlanVisit]{}
+    loop node in pkg_staged_sorted_keys(dependencies) -> pkg_staged_visit(node, dependencies, &states, [String]{})
+}
+
+// Depth-first walk from `node`; `stack` is the path that reached it.
+fn pkg_staged_visit(node: String, dependencies: [String: [String]], states: &[String: StagedPlanVisit], stack: [String]) !StagedPlanError {
+    if states.get(node) == {
+        .Val(state) -> {
+            if state == StagedPlanVisit.Done -> return
+            return Err(StagedPlanError.DependencyCycle(pkg_staged_cycle_chain(stack, node)))
+        }
+        .None -> {}
+    }
+    states[node] = StagedPlanVisit.Visiting
+    path := stack
+    path.push(node)
+    edges :: dependencies.get(node) ?? [String]{}
+    loop dependency in edges -> pkg_staged_visit(dependency, dependencies, &states, path)
+    states[node] = StagedPlanVisit.Done
+}
+
+// The walk stack from the first visit of `node`, closed by `node` again.
+fn pkg_staged_cycle_chain(stack: [String], node: String) -> [String] !Never {
+    start := 0
+    loop index in 0..<stack.len() {
+        if stack[index] == node {
+            start = index
+            break
+        }
+    }
+    chain := [String]{}
+    loop index in start..<stack.len() -> chain.push(stack[index])
+    chain.push(node)
+    chain
+}

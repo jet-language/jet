@@ -61,4 +61,27 @@ pub enum BuildEffect {
             else -> None
         }
     }
+
+    // Position in the canonical table, the order Rust's derived `Ord` uses.
+    fn rank(self) -> Int !Never {
+        if self == {
+            .Net -> 0
+            .FS -> 1
+            .IO -> 2
+            .DB -> 3
+            .Time -> 4
+            .Rand -> 5
+            .Env -> 6
+            .Exec -> 7
+            .Log -> 8
+            .GPU -> 9
+        }
+    }
+
+    // The effects in canonical table order, keeping repeats.
+    fn sorted(effects: [BuildEffect]) -> [BuildEffect] !Never {
+        out := effects
+        out.sort_by(written -> written.rank())
+        out
+    }
 }

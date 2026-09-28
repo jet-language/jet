@@ -281,9 +281,12 @@ fn pkg_overlay_parse_package_line(line: String) -> ?PackageOverride !OverlayErro
     rest :: pkg_overlay_trim_end_all(closed.after.trim(), ",")
     if !rest.starts_with(".") -> return Err(OverlayError.Malformed("`package(...)` override needs a field like `.patches`"))
     field_rest :: rest.removeprefix(".")
-    operation :: pkg_overlay_split_operator(field_rest) ?? return Err(OverlayError.Malformed("`package(...)` override needs `:`, `=`, or `+=`"))
-    field :: operation.before.trim()
-    value :: operation.after.trim()
+    operation := field_rest.split_once("+=")
+    if operation == None -> operation = field_rest.split_once(":")
+    if operation == None -> operation = field_rest.split_once("=")
+    parts :: operation ?? return Err(OverlayError.Malformed("`package(...)` override needs `:`, `=`, or `+=`"))
+    field :: parts.before.trim()
+    value :: parts.after.trim()
     if field == "flags" {
         payload :: pkg_overlay_priority_payload(value)
         result.flags = pkg_overlay_parse_string_list(payload.value)
@@ -292,20 +295,6 @@ fn pkg_overlay_parse_package_line(line: String) -> ?PackageOverride !OverlayErro
     }
     result.apply_field(field, value)
     Ok(Val(result))
-}
-
-// Split at the first `+=`, else the first `:`, else the first `=`.
-fn pkg_overlay_split_operator(text: String) -> ?(before: String, after: String) !Never {
-    if text.split_once("+=") == {
-        .Val(parts) -> return Val((before: parts.before, after: parts.after))
-        .None -> {}
-    }
-    if text.split_once(":") == {
-        .Val(parts) -> return Val((before: parts.before, after: parts.after))
-        .None -> {}
-    }
-    parts :: text.split_once("=") ?? return None
-    Val((before: parts.before, after: parts.after))
 }
 
 fn pkg_overlay_parse_patch_list(input: String) -> [String] !OverlayError {
