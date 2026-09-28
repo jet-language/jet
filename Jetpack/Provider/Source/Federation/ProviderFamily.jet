@@ -1,0 +1,93 @@
+// Federated provider families and their contracts under Jetpack authority
+// (D-WD6), ported from jetpack::ProviderGraph.
+//
+// External provider prefixes and trust-root configuration remain
+// owner-gated. A contract records the surface this build actually owns.
+
+pub enum ProviderFamily {
+    Core
+    Nix
+    Path
+    Github
+    JetRegistry
+    Npm
+    PyPI
+    Cargo
+    SwiftPM
+    Maven
+    NuGet
+    Conan
+    Vcpkg
+    Homebrew
+    Binary
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Core -> "core"
+            .Nix -> "nix"
+            .Path -> "path"
+            .Github -> "github"
+            .JetRegistry -> "jet-registry"
+            .Npm -> "npm"
+            .PyPI -> "pypi"
+            .Cargo -> "cargo"
+            .SwiftPM -> "swiftpm"
+            .Maven -> "maven"
+            .NuGet -> "nuget"
+            .Conan -> "conan"
+            .Vcpkg -> "vcpkg"
+            .Homebrew -> "homebrew"
+            .Binary -> "binary"
+        }
+    }
+
+    // Core, Nix, Path, and the Jet registry are local or first party.
+    fn is_local_or_first_party(self) -> Bool !Never {
+        if self == {
+            .Core | .Nix | .Path | .JetRegistry -> true
+            else -> false
+        }
+    }
+}
+
+pub struct ProviderContract {
+    pub family: ProviderFamily
+    pub parses_refs: Bool
+    pub probes_metadata: Bool
+    pub resolves_channels: Bool
+    pub fetches_bytes: Bool
+    pub verifies_hash_signature: Bool
+    pub exposes_audit_facts: Bool
+    pub reports_offline_satisfiability: Bool
+
+    // The surface this build owns for `family`. Metadata normalization does
+    // not imply Jet can fetch or lock bytes from a foreign ecosystem, so those
+    // capabilities stay false until a real provider adapter supplies them.
+    fn for_family(family: ProviderFamily) -> ProviderContract !Never {
+        first_party :: family.is_local_or_first_party()
+        byte_owner :: first_party || family == ProviderFamily.Binary
+        ProviderContract{
+            family: family,
+            parses_refs: true,
+            probes_metadata: true,
+            resolves_channels: first_party,
+            fetches_bytes: byte_owner,
+            verifies_hash_signature: byte_owner,
+            exposes_audit_facts: true,
+            reports_offline_satisfiability: byte_owner
+        }
+    }
+
+    // The contract of every built-in family, in family order.
+    fn built_in() -> [ProviderContract] !Never {
+        families :: [ProviderFamily]{
+            ProviderFamily.Core, ProviderFamily.Nix, ProviderFamily.Path, ProviderFamily.Github,
+            ProviderFamily.JetRegistry, ProviderFamily.Npm, ProviderFamily.PyPI, ProviderFamily.Cargo,
+            ProviderFamily.SwiftPM, ProviderFamily.Maven, ProviderFamily.NuGet, ProviderFamily.Conan,
+            ProviderFamily.Vcpkg, ProviderFamily.Homebrew, ProviderFamily.Binary
+        }
+        contracts := [ProviderContract]{}
+        loop family in families -> contracts.push(ProviderContract.for_family(family))
+        contracts
+    }
+}

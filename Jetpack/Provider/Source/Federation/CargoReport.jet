@@ -1,0 +1,303 @@
+// Cargo.toml / Cargo.lock normalization, ported from the Cargo arm of
+// jetpack::ProviderGraph::normalize_provider_document.
+
+// One `key = value` line under its section header.
+struct TOMLAssignment {
+    section: String
+    array_table: Bool
+    key: String
+    value: String
+}
+
+impl ProviderFactReport {
+    // The report `normalize_provider_document(Cargo, document)` yields:
+    // package identity, dependencies by kind and target, features, the build
+    // hook, source ownership, and Cargo.lock records, with every native field
+    // retained as a typed fact.
+    fn cargo_document(document: String) -> ProviderFactReport !Never {
+        assignments :: provider_toml_assignments(document)
+        package_values := [TOMLAssignment]{}
+        loop entry in assignments {
+            if !entry.array_table && entry.section == "package" -> package_values.push(entry)
+        }
+        facts := MetadataFacts.empty(ProviderFamily.Cargo, provider_first_toml_value(package_values, "name") ?? "")
+        facts.version = provider_first_toml_value(package_values, "version") ?? ""
+        facts.license = provider_first_toml_value(package_values, "license") ?? ""
+        conflicts := [String]{}
+        identity_keys :: [String]{"name", "version", "license"}
+        loop key in identity_keys {
+            values := [String]{}
+            loop entry in package_values {
+                if entry.key == key -> values.push(entry.value)
+            }
+            if provider_distinct_values(values).len() > 1 -> conflicts.push("Cargo package declares conflicting `{key}` values")
+        }
+        losses := [String]{}
+        loop entry in package_values {
+            if identity_keys.contains(entry.key) && !provider_toml_string_value(entry.value) {
+                losses.push("Cargo package field `{entry.key}` must be a TOML string")
+            }
+        }
+        native_values := [String: String]{}
+        loop index in 0..<assignments.len() {
+            entry :: assignments[index]
+            native_key :: if entry.array_table -> "provider.cargo.native.lock.{entry.section}.{index}.{entry.key}" else -> "provider.cargo.native.manifest.{entry.section}.{entry.key}"
+            if native_values.get(native_key) == {
+                .Val(previous) -> {
+                    if previous != entry.value -> conflicts.push("Cargo native field {native_key} has conflicting values")
+                }
+                .None -> {}
+            }
+            native_values[native_key] = entry.value
+            facts.add_typed_text(native_key, entry.value)
+            if provider_cargo_dependency_kind(entry.section) == {
+                .Val(kind) -> {
+                    if !provider_toml_dependency_value(entry.value) -> losses.push("Cargo dependency `{entry.key}` must be a string or inline table")
+                    facts.add_typed_text("provider.cargo.dependency.{kind.label()}.{entry.key}", entry.value)
+                    if kind == {
+                        .Runtime -> facts.dependencies.push(entry.key)
+                        .Dev -> facts.dev_dependencies.push(entry.key)
+                        .Build -> facts.build_dependencies.push(entry.key)
+                    }
+                    if entry.section.starts_with("target.") -> facts.platforms.push(provider_cargo_target_platform(entry.section))
+                }
+                .None -> {}
+            }
+            if entry.section == "features" -> facts.add_typed_text("provider.cargo.variant.feature.{entry.key}", entry.value)
+            if entry.section == "package" && entry.key == "build" {
+                build_value :: provider_toml_value_text(entry.value)
+                if {
+                    build_value == "false" -> {}
+                    !provider_toml_string_value(entry.value) -> losses.push("Cargo package field `build` must be a string or false")
+                    else -> {
+                        facts.scripts.push(build_value)
+                        facts.add_typed_text("provider.cargo.hook.build", entry.value)
+                    }
+                }
+            }
+            if entry.section == "package" {
+                if entry.key == {
+                    "repository" | "homepage" | "authors" | "publish" | "links" -> facts.add_typed_text("provider.cargo.source.{entry.key}", entry.value)
+                    else -> {}
+                }
+            }
+        }
+        facts.dependencies = provider_sorted_unique(facts.dependencies)
+        facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
+        facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
+        facts.platforms = provider_sorted_unique(facts.platforms)
+        lock_records :: provider_cargo_lock_records(assignments)
+        has_package_name := false
+        loop entry in package_values {
+            if entry.key == "name" -> has_package_name = true
+        }
+        if {
+            has_package_name || lock_records.len() == 0 -> {}
+            lock_records.len() == 1 -> {
+                facts.name = provider_toml_value_text(lock_records[0].get("name") ?? "")
+                facts.version = provider_toml_value_text(lock_records[0].get("version") ?? "")
+            }
+            else -> {
+                facts.name = "cargo-lock"
+                facts.version = "set"
+                names := [String]{}
+                loop record in lock_records {
+                    if record.get("name") == {
+                        .Val(value) -> names.push(provider_toml_value_text(value))
+                        .None -> {}
+                    }
+                }
+                facts.dependencies = names
+                losses.push("Cargo.lock contains multiple package identities; lock each package separately")
+            }
+        }
+        loop record in lock_records {
+            raw_name :: record.get("name") ?? {
+                losses.push("Cargo.lock package has no name")
+                next
+            }
+            name :: provider_toml_value_text(raw_name)
+            record_version :: provider_toml_value_text(record.get("version") ?? "")
+            string_keys :: [String]{"name", "version", "source", "checksum"}
+            loop key in string_keys {
+                if record.get(key) == {
+                    .Val(value) -> {
+                        if !provider_toml_string_value(value) -> losses.push("Cargo.lock field `{key}` for package `{name}` must be a TOML string")
+                    }
+                    .None -> {}
+                }
+            }
+            if name == facts.name && facts.version != "" && record_version != "" && record_version != facts.version {
+                conflicts.push("Cargo.lock package `{name}` version `{record_version}` conflicts with manifest version `{facts.version}`")
+            }
+            projected_keys :: [String]{"version", "source", "checksum", "dependencies"}
+            loop key in projected_keys {
+                if record.get(key) == {
+                    .Val(value) -> {
+                        projection_key :: "provider.cargo.lock.{name}.{key}"
+                        if facts.first_typed(projection_key) == {
+                            .Val(previous) -> {
+                                if previous != value -> conflicts.push("Cargo.lock field {projection_key} has conflicting values")
+                            }
+                            .None -> {}
+                        }
+                        facts.add_typed_text(projection_key, value)
+                    }
+                    .None -> {}
+                }
+            }
+            registry_source :: if record.get("source") == {
+                .Val(source) -> provider_toml_value_text(source).starts_with("registry+")
+                .None -> false
+            }
+            if registry_source && !record.has_key("checksum") -> losses.push("Cargo.lock registry package `{name}` has no checksum")
+            if name == facts.name {
+                if record.get("checksum") == {
+                    .Val(checksum) -> facts.integrity_hash = provider_toml_value_text(checksum)
+                    .None -> {}
+                }
+            }
+        }
+        facts.source_identity = "cargo:{facts.name}@{facts.version}"
+        report := ProviderFactReport.with_identity(facts)
+        loop loss in losses -> report.losses.push(loss)
+        loop conflict in conflicts -> report.conflicts.push(conflict)
+        report.retaining("toml", document)
+    }
+}
+
+// Which dependency list a Cargo section feeds.
+enum CargoDependencyKind {
+    Runtime
+    Dev
+    Build
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Runtime -> "runtime"
+            .Dev -> "dev"
+            .Build -> "build"
+        }
+    }
+}
+
+// Every `key = value` line with the `[section]` or `[[section]]` it sits in.
+fn provider_toml_assignments(document: String) -> [TOMLAssignment] !Never {
+    section := ""
+    array_table := false
+    assignments := [TOMLAssignment]{}
+    loop raw_line in provider_lines(document) {
+        line :: raw_line.trim()
+        if line.starts_with("[[") && line.ends_with("]]") {
+            section = line.removeprefix("[[").removesuffix("]]").trim()
+            array_table = true
+            next
+        }
+        if line.starts_with("[") && line.ends_with("]") {
+            section = line.removeprefix("[").removesuffix("]").trim()
+            array_table = false
+            next
+        }
+        pair :: line.split_once("=") ?? next
+        key :: pair.before.trim()
+        if key == "" -> next
+        assignments.push(TOMLAssignment{section: ~section, array_table: array_table, key: key, value: pair.after.trim()})
+    }
+    assignments
+}
+
+fn provider_first_toml_value(entries: [TOMLAssignment], key: String) -> ?String !Never {
+    loop entry in entries {
+        if entry.key == key -> return Val(provider_toml_value_text(entry.value))
+    }
+    None
+}
+
+// The value with a trailing comment removed and one pair of matching
+// quotes stripped.
+fn provider_toml_value_text(raw: String) -> String !Never {
+    value :: provider_toml_value_without_comment(raw).trim()
+    if !provider_toml_quoted(value) -> return value
+    bytes :: value.bytes()
+    pkg_bytes_text(bytes, 1, bytes.len() - 1)
+}
+
+// The value up to the first `#` outside quotes. Inside double quotes a
+// backslash escapes the next character.
+fn provider_toml_value_without_comment(value: String) -> String !Never {
+    bytes :: value.bytes()
+    quote := 0
+    escaped := false
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if {
+            quote == 34 && code == 34 && !escaped -> quote = 0
+            quote == 39 && code == 39 -> quote = 0
+            quote == 0 && (code == 34 || code == 39) -> quote = code
+            quote == 0 && code == 35 -> return pkg_bytes_text(bytes, 0, index)
+            else -> {}
+        }
+        escaped = code == 92 && !escaped
+    }
+    ~value
+}
+
+fn provider_toml_quoted(value: String) -> Bool !Never {
+    bytes :: value.bytes()
+    if bytes.len() < 2 -> return false
+    first :: Int.from_u8(bytes[0])
+    last :: Int.from_u8(bytes[bytes.len() - 1])
+    (first == 34 && last == 34) || (first == 39 && last == 39)
+}
+
+fn provider_toml_string_value(value: String) -> Bool !Never {
+    provider_toml_quoted(provider_toml_value_without_comment(value).trim())
+}
+
+// A string or an inline table.
+fn provider_toml_dependency_value(raw: String) -> Bool !Never {
+    value :: provider_toml_value_without_comment(raw).trim()
+    provider_toml_string_value(value) || (value.starts_with("{{") && value.ends_with("}}") && value.bytes().len() >= 2)
+}
+
+fn provider_cargo_dependency_kind(raw_section: String) -> ?CargoDependencyKind !Never {
+    section :: raw_section.removeprefix("target.")
+    if section == {
+        "dependencies" -> return Val(CargoDependencyKind.Runtime)
+        "dev-dependencies" -> return Val(CargoDependencyKind.Dev)
+        "build-dependencies" -> return Val(CargoDependencyKind.Build)
+        else -> {}
+    }
+    if {
+        section.ends_with(".dependencies") -> Val(CargoDependencyKind.Runtime)
+        section.ends_with(".dev-dependencies") -> Val(CargoDependencyKind.Dev)
+        section.ends_with(".build-dependencies") -> Val(CargoDependencyKind.Build)
+        else -> None
+    }
+}
+
+// The target of a `target.<cfg>.<kind>` section.
+fn provider_cargo_target_platform(section: String) -> String !Never {
+    target :: section.removeprefix("target.")
+    suffixes :: [String]{".dependencies", ".dev-dependencies", ".build-dependencies"}
+    loop suffix in suffixes {
+        if target.ends_with(suffix) -> return target.removesuffix(suffix)
+    }
+    target
+}
+
+// One record per `[[package]]` entry; a repeated `name` starts the next.
+fn provider_cargo_lock_records(assignments: [TOMLAssignment]) -> [[String: String]] !Never {
+    records := [[String: String]]{}
+    current := [String: String]{}
+    loop entry in assignments {
+        if !entry.array_table || entry.section != "package" -> next
+        if entry.key == "name" && current.has_key("name") {
+            records.push(current)
+            current = [String: String]{}
+        }
+        current[entry.key] = entry.value
+    }
+    if current.len() > 0 -> records.push(current)
+    records
+}

@@ -30,7 +30,7 @@ pub struct ProviderPlanFacts {
     // Decode the exact rendering (`decode`); any other version, malformed line,
     // non-lowercase hex, non-UTF-8 field, empty key, or repeated key fails.
     fn parse(raw: String) -> ProviderPlanFacts !ProviderPlanFactsError {
-        lines :: provider_plan_lines(raw)
+        lines :: provider_lines(raw)
         if lines.len() == 0 || lines[0] != @PROVIDER_PLAN_FACTS_HEADER -> return Err(ProviderPlanFactsError.UnsupportedVersion)
         facts := [String: String]{}
         loop index in 1..<lines.len() {
@@ -70,7 +70,7 @@ pub enum ProviderPlanFactsError {
 
 // `str::lines`: split at LF, drop a CR before an LF, and a final LF ends the
 // last line.
-fn provider_plan_lines(raw: String) -> [String] !Never {
+fn provider_lines(raw: String) -> [String] !Never {
     segments :: raw.split("\n").to_list()
     count :: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
     lines := [String]{}

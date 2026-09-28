@@ -1,0 +1,86 @@
+// Claims ported from crates/jetpack/src/ProviderGraph.rs #[cfg(test)] for the
+// Cargo, Maven, NuGet XML, and Conan recipe shapes. Every Rust test also calls
+// `validate()`, `shared_facts()`, `export_json()`, or `lock_record()`, which
+// need the ProviderFacts carrier (#3591); here a lossless claim is the
+// report's own losses and conflicts being empty.
+
+// Whether one message contains every part.
+fn provider_test_has(messages: [String], parts: [String]) -> Bool {
+    loop message in messages {
+        matched := true
+        loop part in parts {
+            if !message.contains(part) -> matched = false
+        }
+        if matched -> return true
+    }
+    false
+}
+
+fn provider_test_lossless(report: ProviderFactReport) {
+    assert_eq(report.losses, [String]{})
+    assert_eq(report.conflicts, [String]{})
+}
+
+#Test("cargo conformance retains lock variants hooks and source ownership") {
+    native :: "[package]\nname = \"app\"\nversion = \"1.0.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\nbuild = \"build.rs\"\n\n[dependencies]\nserde = \"1.0\"\n\n[target.x86_64-unknown-linux-gnu.dependencies]\ncc = \"1.0\"\n\n[features]\ndefault = [\"serde\"]\n\n[[package]]\nname = \"app\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"abc123\"\n"
+    report :: ProviderFactReport.cargo_document(native)
+    provider_test_lossless(report)
+    assert(report.facts.dependencies.contains("serde"))
+    assert(report.facts.dependencies.contains("cc"))
+    assert(report.facts.scripts.contains("build.rs"))
+    assert(report.facts.typed.has_key("provider.cargo.variant.feature.default"))
+    assert(report.facts.typed.has_key("provider.cargo.lock.serde.checksum"))
+    assert(report.facts.typed.has_key("provider.cargo.source.repository"))
+    assert_eq(report.native_format, "toml")
+    assert_eq(report.native_document, native)
+}
+
+#Test("cargo comments keep identity and malformed fields report loss") {
+    commented :: ProviderFactReport.cargo_document("[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n")
+    provider_test_lossless(commented)
+    assert_eq(commented.facts.name, "app")
+    assert_eq(commented.facts.version, "1.0.0")
+    malformed :: ProviderFactReport.cargo_document("[package]\nname = 7\nversion = \"1.0.0\"\n[dependencies]\nserde = false\n")
+    assert(provider_test_has(malformed.losses, [String]{"package field `name`"}))
+    assert(provider_test_has(malformed.losses, [String]{"dependency `serde`"}))
+    missing_checksum :: ProviderFactReport.cargo_document("[package]\nname = \"app\"\nversion = \"1.0.0\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\n")
+    assert(provider_test_has(missing_checksum.losses, [String]{"registry package", "checksum"}))
+}
+
+#Test("maven project report is lossless and retains the native document") {
+    maven :: "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.2.3</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version></dependency></dependencies></project>"
+    report :: ProviderFactReport.maven_document(maven)
+    provider_test_lossless(report)
+    assert_eq(report.native_format, "xml")
+    assert_eq(report.native_document, maven)
+}
+
+#Test("maven reports surface conflict and reject malformed native shapes") {
+    conflicting :: ProviderFactReport.maven_document("<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>")
+    assert(provider_test_has(conflicting.conflicts, [String]{"conflicting version"}))
+    namespaced :: ProviderFactReport.maven_document("<project xmlns=\"urn:unsupported\"><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version></project>")
+    assert(provider_test_has(namespaced.losses, [String]{"unsupported XML namespace"}))
+    duplicate :: ProviderFactReport.maven_document("<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>1.0.0</version></dependency><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>2.0.0</version></dependency></dependencies></project>")
+    assert(provider_test_has(duplicate.conflicts, [String]{"org.example:dep", "conflicting version"}))
+}
+
+#Test("nuget xml and conan recipe conformance retains native facts and identity") {
+    nuget :: "<package>\n  <metadata>\n    <id>widget</id>\n    <version>1.2.3</version>\n    <licenseExpression>MIT</licenseExpression>\n    <repository type=\"git\" url=\"https://example.invalid/widget\" commit=\"abc\" />\n    <dependencies><group targetFramework=\"net8.0\"><dependency id=\"serde\" version=\"[1.0.0]\" /></group></dependencies>\n  </metadata>\n</package>"
+    conan :: "from conan import ConanFile\nclass Widget(ConanFile):\n    name = \"widget\"\n    version = \"1.2.3\"\n    license = \"MIT\"\n    settings = \"os\", \"arch\", \"compiler\", \"build_type\"\n    options = {{\"shared\": [True, False]}}\n    generators = \"CMakeDeps\"\n    def requirements(self):\n        self.requires(\"zlib/1.3.1\")\n"
+    reports :: [ProviderFactReport]{ProviderFactReport.nuget_xml_document(nuget), ProviderFactReport.conan_recipe_document(conan)}
+    documents :: [String]{nuget, conan}
+    loop index in 0..<reports.len() {
+        report :: reports[index]
+        provider_test_lossless(report)
+        assert_eq(report.native_document, documents[index])
+        assert_eq(report.facts.name, "widget")
+        assert_eq(report.facts.version, "1.2.3")
+    }
+}
+
+#Test("nuget ranges and conan hooks are losses") {
+    ranged :: ProviderFactReport.nuget_xml_document("<package><metadata><id>widget</id><version>1.2.3</version><dependencies><dependency id=\"serde\" version=\"[1.0.0,2.0.0)\" /></dependencies></metadata></package>")
+    assert(provider_test_has(ranged.losses, [String]{"serde", "exact version"}))
+    hook :: ProviderFactReport.conan_recipe_document("name = \"widget\"\nversion = \"1.2.3\"\ndef generate(self):\n    self.run(\"cmake\")\n")
+    assert(provider_test_has(hook.losses, [String]{"executable build or Python hook"}))
+}

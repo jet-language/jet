@@ -1,0 +1,461 @@
+// Maven POM normalization, ported from the Maven arm of
+// jetpack::ProviderGraph::normalize_provider_document, with its bounded
+// tag/attribute scanner. Namespaces beyond the POM's own and entity decoding
+// beyond the five predefined entities are refused, not guessed.
+
+@MAVEN_POM_NAMESPACE :: "http://maven.apache.org/POM/4.0.0"
+@MAVEN_XML_SCHEMA_NAMESPACE :: "http://www.w3.org/2001/XMLSchema-instance"
+
+// One XML opening (or closing) tag found in a document.
+struct XmlOpening {
+    start: Int
+    end: Int
+    text: String
+}
+
+impl ProviderFactReport {
+    // The report `normalize_provider_document(Maven, document)` yields:
+    // project coordinates, licenses, dependencies by scope, build plugins as
+    // hooks, profiles as variants, SCM and repository sources, and audit tags.
+    fn maven_document(document: String) -> ProviderFactReport !Never {
+        if provider_maven_xml_loss(document) == {
+            .Val(loss) -> return ProviderFactReport.unreadable(ProviderFamily.Maven, "maven", loss).retaining("xml", document)
+            .None -> {}
+        }
+        project_group :: provider_xml_direct_child_values(document, "project", "groupId")
+        project_artifact :: provider_xml_direct_child_values(document, "project", "artifactId")
+        project_version :: provider_xml_direct_child_values(document, "project", "version")
+        parent_blocks :: provider_xml_blocks(document, "parent")
+        group := project_group.get(0) ?? ""
+        if project_group.len() == 0 && parent_blocks.len() > 0 -> group = provider_xml_tag(parent_blocks[0], "groupId") ?? ""
+        facts := MetadataFacts.empty(ProviderFamily.Maven, project_artifact.get(0) ?? "")
+        facts.version = project_version.get(0) ?? ""
+        license_blocks :: provider_xml_blocks(document, "license")
+        loop block in license_blocks {
+            if provider_xml_tag(block, "name") == {
+                .Val(name) -> {
+                    facts.license = name
+                    break
+                }
+                .None -> {}
+            }
+        }
+        facts.source_identity = "maven:{group}:{facts.name}@{facts.version}"
+        facts.add_typed_text("provider.maven.coordinate.group", group)
+        artifact_name :: ~facts.name
+        gav :: ~facts.source_identity
+        facts.add_typed_text("provider.maven.coordinate.artifact", artifact_name)
+        facts.add_typed_text("provider.maven.coordinate.gav", gav)
+        project_fields :: [String]{"packaging", "name", "description", "url"}
+        loop key in project_fields {
+            values :: provider_xml_direct_child_values(document, "project", key)
+            loop index in 0..<values.len() -> facts.add_typed_text("provider.maven.project.{key}.{index}", values[index])
+        }
+        raw_licenses :: provider_xml_tag_values(document, "license")
+        loop index in 0..<raw_licenses.len() -> facts.add_typed_text("provider.maven.license.raw.{index}", raw_licenses[index])
+        license_fields :: [String]{"name", "url", "distribution"}
+        loop index in 0..<license_blocks.len() {
+            loop field in license_fields {
+                if provider_xml_tag(license_blocks[index], field) == {
+                    .Val(value) -> facts.add_typed_text("provider.maven.license.{field}.{index}", value)
+                    .None -> {}
+                }
+            }
+        }
+        losses := [String]{}
+        conflicts := [String]{}
+        coordinates :: [(field: String, values: [String])]{(field: "groupId", values: project_group), (field: "artifactId", values: project_artifact), (field: "version", values: project_version)}
+        loop coordinate in coordinates {
+            distinct :: provider_distinct_values(coordinate.values)
+            if distinct.len() > 1 -> conflicts.push("Maven project declares conflicting {coordinate.field} values: {distinct.join(", ")}")
+        }
+        if group == "" -> losses.push("Maven project has no exact groupId")
+        if facts.name == "" -> losses.push("Maven project has no exact artifactId")
+        if !provider_maven_exact_value(facts.version) -> losses.push("Maven project version `{facts.version}` is not an exact version")
+        if group != "" && !provider_maven_exact_value(group) -> losses.push("Maven project groupId `{group}` is not an exact identity")
+        dependency_versions := [String: String]{}
+        dependency_blocks :: provider_xml_blocks(document, "dependency")
+        loop index in 0..<dependency_blocks.len() {
+            block :: dependency_blocks[index]
+            artifact :: provider_xml_tag(block, "artifactId") ?? ""
+            dependency_group :: provider_xml_tag(block, "groupId") ?? ""
+            dependency_version :: provider_xml_tag(block, "version") ?? ""
+            declared_versions :: provider_distinct_values(provider_xml_tag_values(block, "version"))
+            if declared_versions.len() > 1 -> conflicts.push("Maven dependency `{dependency_group}:{artifact}` declares conflicting version values: {declared_versions.join(", ")}")
+            declared_scope :: provider_xml_tag(block, "scope")
+            scope :: declared_scope ?? "compile"
+            coordinate :: provider_format_dependency("{dependency_group}:{artifact}", dependency_version)
+            if artifact == "" || dependency_group == "" -> losses.push("Maven dependency {index} lacks an exact groupId or artifactId")
+            if {
+                dependency_version == "" -> losses.push("Maven dependency `{coordinate}` has no exact version")
+                !provider_maven_exact_value(dependency_version) -> losses.push("Maven dependency `{coordinate}` has a non-exact version")
+                else -> {}
+            }
+            dependency_key :: "{dependency_group}:{artifact}"
+            if dependency_versions.get(dependency_key) == {
+                .Val(previous) -> {
+                    if previous != dependency_version -> conflicts.push("Maven dependency `{dependency_key}` declares conflicting version values: {previous}, {dependency_version}")
+                }
+                .None -> {}
+            }
+            dependency_versions[dependency_key] = dependency_version
+            facts.dependencies.push(coordinate)
+            facts.add_typed_text("provider.maven.dependency.{index}.coordinate", coordinate)
+            facts.add_typed_text("provider.maven.dependency.{index}.kind", scope)
+            if declared_scope == None -> facts.add_typed_text("provider.maven.dependency.{index}.scope.defaulted", "true")
+            optional_fields :: [String]{"optional", "type", "classifier", "systemPath"}
+            loop field in optional_fields {
+                if provider_xml_tag(block, field) == {
+                    .Val(value) -> facts.add_typed_text("provider.maven.dependency.{index}.{field}", value)
+                    .None -> {}
+                }
+            }
+            if scope == {
+                "test" -> facts.dev_dependencies.push(coordinate)
+                "provided" | "system" -> facts.build_dependencies.push(coordinate)
+                else -> {}
+            }
+        }
+        plugin_blocks :: provider_xml_blocks(document, "plugin")
+        loop index in 0..<plugin_blocks.len() {
+            block :: plugin_blocks[index]
+            artifact :: provider_xml_tag(block, "artifactId") ?? ""
+            declared_group :: provider_xml_tag(block, "groupId")
+            plugin_group :: declared_group ?? "org.apache.maven.plugins"
+            plugin_version :: provider_xml_tag(block, "version") ?? ""
+            plugin :: provider_format_dependency("{plugin_group}:{artifact}", plugin_version)
+            if artifact == "" -> losses.push("Maven build plugin {index} has no artifactId")
+            if !provider_maven_exact_value(plugin_version) -> losses.push("Maven build plugin `{plugin}` has no exact version")
+            facts.scripts.push(plugin)
+            facts.add_typed_text("provider.maven.hook.{index}", plugin)
+            facts.add_typed_text("provider.maven.hook.{index}.group", plugin_group)
+            if declared_group == None -> facts.add_typed_text("provider.maven.hook.{index}.group.defaulted", "true")
+            goals :: provider_xml_tag_values(block, "goal")
+            loop goal_index in 0..<goals.len() -> facts.add_typed_text("provider.maven.hook.{index}.goal.{goal_index}", goals[goal_index])
+        }
+        profile_blocks :: provider_xml_blocks(document, "profile")
+        profile_fields :: [String]{"os", "arch", "jdk", "activeByDefault"}
+        loop index in 0..<profile_blocks.len() {
+            block :: profile_blocks[index]
+            if provider_xml_tag(block, "id") == {
+                .Val(id) -> facts.add_typed_text("provider.maven.variant.profile.{index}.id", id)
+                .None -> {}
+            }
+            loop field in profile_fields {
+                raw_value :: provider_xml_tag(block, field) ?? next
+                value :: if field == "os" -> provider_xml_tag(raw_value, "name") ?? raw_value else -> raw_value
+                facts.add_typed_text("provider.maven.variant.profile.{index}.{field}", value)
+                if field == "os" || field == "arch" -> facts.platforms.push(value)
+            }
+        }
+        scm_blocks :: provider_xml_blocks(document, "scm")
+        scm_fields :: [String]{"url", "connection", "developerConnection", "tag"}
+        loop index in 0..<scm_blocks.len() {
+            loop field in scm_fields {
+                if provider_xml_tag(scm_blocks[index], field) == {
+                    .Val(value) -> facts.add_typed_text("provider.maven.source.scm.{field}.{index}", value)
+                    .None -> {}
+                }
+            }
+        }
+        repository_blocks :: provider_xml_blocks(document, "repository")
+        loop index in 0..<repository_blocks.len() {
+            if provider_xml_tag(repository_blocks[index], "url") == {
+                .Val(url) -> facts.add_typed_text("provider.maven.source.repository.{index}", url)
+                .None -> {}
+            }
+        }
+        audit_tags :: [String]{"signature", "sha1", "sha256", "yanked", "vulnerability", "advisory"}
+        loop audit_tag in audit_tags {
+            values :: provider_xml_tag_values(document, audit_tag)
+            loop index in 0..<values.len() -> facts.add_typed_text("provider.maven.audit.{audit_tag}.{index}", values[index])
+        }
+        facts.dependencies = provider_sorted_unique(facts.dependencies)
+        facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
+        facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
+        facts.platforms = provider_sorted_unique(facts.platforms)
+        report := ProviderFactReport.with_identity(facts)
+        loop loss in losses -> report.losses.push(loss)
+        loop conflict in conflicts -> report.conflicts.push(conflict)
+        report.retaining("xml", document)
+    }
+}
+
+// Not blank, not a property reference, not a range, not LATEST/RELEASE.
+fn provider_maven_exact_value(raw: String) -> Bool !Never {
+    value :: raw.trim()
+    if value == "" || value.contains("${{") || value.contains(",") -> return false
+    if value.contains("[") || value.contains("]") || value.contains("(") || value.contains(")") -> return false
+    lower :: pkg_ascii_lower(value)
+    lower != "latest" && lower != "release"
+}
+
+// Why the POM is outside the XML subset this provider normalizes, or None.
+fn provider_maven_xml_loss(document: String) -> ?String !Never {
+    bytes :: document.bytes()
+    stack := [String]{}
+    cursor := 0
+    root_seen := false
+    loop cursor < bytes.len() {
+        start :: provider_find(bytes, "<".bytes(), cursor, bytes.len())
+        if start < 0 {
+            if pkg_bytes_text(bytes, cursor, bytes.len()).trim() != "" && root_seen && stack.len() == 0 -> return Val("Maven POM has non-whitespace text outside the project element")
+            break
+        }
+        if pkg_bytes_text(bytes, cursor, start).trim() != "" && (!root_seen || stack.len() == 0) -> return Val("Maven POM has text outside the project element")
+        if pkg_bytes_starts_with(bytes, start, "<!--".bytes()) {
+            close :: provider_find(bytes, "-->".bytes(), start + 4, bytes.len())
+            if close < 0 -> return Val("Maven POM has an unterminated XML comment")
+            cursor = close + 3
+            next
+        }
+        if pkg_bytes_starts_with(bytes, start, "<![CDATA[".bytes()) {
+            close :: provider_find(bytes, "]]>".bytes(), start + 9, bytes.len())
+            if close < 0 -> return Val("Maven POM has an unterminated CDATA section")
+            cursor = close + 3
+            next
+        }
+        if pkg_bytes_starts_with(bytes, start, "<?".bytes()) {
+            close :: provider_find(bytes, "?>".bytes(), start + 2, bytes.len())
+            if close < 0 -> return Val("Maven POM has an unterminated processing instruction")
+            cursor = close + 2
+            next
+        }
+        if pkg_bytes_starts_with(bytes, start, "<!".bytes()) {
+            end :: provider_xml_opening_end(bytes, start, bytes.len())
+            if end < 0 -> return Val("Maven POM has an unterminated declaration")
+            cursor = end + 1
+            next
+        }
+        end :: provider_xml_opening_end(bytes, start, bytes.len())
+        if end < 0 -> return Val("Maven POM has an unterminated XML element")
+        opening :: pkg_bytes_text(bytes, start, end + 1)
+        name :: provider_xml_opening_name(opening)
+        if name == "" -> return Val("Maven POM has an XML element with no name")
+        if name.contains(":") -> return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
+        if stack.len() > 0 && (opening.contains("xmlns=") || opening.contains("xmlns:")) -> return Val("Maven POM uses a nested XML namespace that this provider cannot normalize")
+        closing :: opening.starts_with("</")
+        self_closing :: opening.trim_end().ends_with("/>")
+        if {
+            closing -> {
+                if self_closing -> return Val("Maven POM has an invalid self-closing end element")
+                if stack.len() == 0 || stack[stack.len() - 1] != name -> return Val("Maven POM has mismatched closing element `{name}`")
+                stack = provider_without_last(stack)
+            }
+            stack.len() == 0 -> {
+                if root_seen -> return Val("Maven POM has multiple root elements")
+                if name != "project" -> return Val("Maven POM has no project root element")
+                if provider_xml_attribute(opening, "xmlns") == {
+                    .Val(namespace) -> {
+                        if namespace != @MAVEN_POM_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                    }
+                    .None -> {}
+                }
+                if provider_xml_attribute(opening, "xmlns:xsi") == {
+                    .Val(namespace) -> {
+                        if namespace != @MAVEN_XML_SCHEMA_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                    }
+                    .None -> {}
+                }
+                if opening.contains("xmlns:") && !opening.contains("xmlns:xsi=") -> return Val("Maven POM uses a namespaced XML vocabulary that this provider cannot normalize")
+                root_seen = true
+                if !self_closing -> stack.push(name)
+            }
+            !self_closing -> stack.push(name)
+            else -> {}
+        }
+        cursor = end + 1
+    }
+    if !root_seen -> return Val("Maven POM has no project root element")
+    if stack.len() > 0 -> return Val("Maven POM has an unterminated XML element")
+    None
+}
+
+fn provider_without_last(values: [String]) -> [String] !Never {
+    out := [String]{}
+    loop index in 0..<(values.len() - 1) -> out.push(values[index])
+    out
+}
+
+// The first offset in `from..<to` where `needle` starts and ends before
+// `to`, or -1.
+fn provider_find(bytes: [U8], needle: [U8], from: Int, to: Int) -> Int !Never {
+    at := from
+    loop at + needle.len() <= to {
+        if pkg_bytes_starts_with(bytes, at, needle) -> return at
+        at += 1
+    }
+    -1
+}
+
+// The offset of the `>` closing the tag that starts at `start`, skipping
+// quoted attribute values, or -1 before `to`.
+fn provider_xml_opening_end(bytes: [U8], start: Int, to: Int) -> Int !Never {
+    quote := 0
+    loop index in start..<to {
+        code :: Int.from_u8(bytes[index])
+        if {
+            quote != 0 && code == quote -> quote = 0
+            quote == 0 && (code == 39 || code == 34) -> quote = code
+            quote == 0 && code == 62 -> return index
+            else -> {}
+        }
+    }
+    -1
+}
+
+// The element name of an opening or closing tag.
+fn provider_xml_opening_name(opening: String) -> String !Never {
+    rest := opening.removeprefix("<")
+    loop rest.starts_with("/") -> rest = rest.removeprefix("/")
+    bytes :: rest.bytes()
+    end := 0
+    loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && Int.from_u8(bytes[end]) != 62 && Int.from_u8(bytes[end]) != 47 -> end += 1
+    pkg_bytes_text(bytes, 0, end)
+}
+
+// Every `<element` opening followed by whitespace, `>`, or `/`.
+fn provider_xml_openings(document: String, element: String) -> [XmlOpening] !Never {
+    bytes :: document.bytes()
+    needle :: "<{element}".bytes()
+    openings := [XmlOpening]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        start :: provider_find(bytes, needle, cursor, bytes.len())
+        if start < 0 -> break
+        name_end :: start + needle.len()
+        boundary :: pkg_bytes_code(bytes, name_end)
+        if pkg_bytes_space_width(bytes, name_end) == 0 && boundary != 62 && boundary != 47 {
+            cursor = name_end
+            next
+        }
+        end :: provider_xml_opening_end(bytes, start, bytes.len())
+        if end < 0 -> break
+        openings.push(XmlOpening{start: start, end: end, text: pkg_bytes_text(bytes, start, end + 1)})
+        cursor = end + 1
+    }
+    openings
+}
+
+// Each non-self-closing `<element …>…</element>` block's full text.
+fn provider_xml_blocks(document: String, element: String) -> [String] !Never {
+    bytes :: document.bytes()
+    closing :: "</{element}>".bytes()
+    blocks := [String]{}
+    loop opening in provider_xml_openings(document, element) {
+        if opening.text.trim_end().ends_with("/>") -> next
+        close :: provider_find(bytes, closing, opening.end + 1, bytes.len())
+        if close < 0 -> next
+        blocks.push(pkg_bytes_text(bytes, opening.start, close + closing.len()))
+    }
+    blocks
+}
+
+// Unescaped, trimmed text of each non-self-closing `<element>` up to its
+// first `</element>`.
+fn provider_xml_tag_values(document: String, element: String) -> [String] !Never {
+    bytes :: document.bytes()
+    closing :: "</{element}>".bytes()
+    values := [String]{}
+    loop opening in provider_xml_openings(document, element) {
+        if opening.text.trim_end().ends_with("/>") -> next
+        close :: provider_find(bytes, closing, opening.end + 1, bytes.len())
+        if close < 0 -> next
+        values.push(provider_xml_unescape(pkg_bytes_text(bytes, opening.end + 1, close).trim()))
+    }
+    values
+}
+
+fn provider_xml_tag(document: String, element: String) -> ?String !Never {
+    provider_xml_tag_values(document, element).get(0)
+}
+
+// Values of `child` elements directly inside the first `parent` element,
+// skipping comments, CDATA, and nested elements.
+fn provider_xml_direct_child_values(document: String, parent: String, child: String) -> [String] !Never {
+    parents :: provider_xml_openings(document, parent)
+    if parents.len() == 0 -> return [String]{}
+    bytes :: document.bytes()
+    body_start :: parents[0].end + 1
+    body_end :: provider_find(bytes, "</{parent}>".bytes(), body_start, bytes.len())
+    if body_end < 0 -> return [String]{}
+    child_closing :: "</{child}>".bytes()
+    values := [String]{}
+    depth := 0
+    cursor := body_start
+    loop cursor < body_end {
+        start :: provider_find(bytes, "<".bytes(), cursor, body_end)
+        if start < 0 -> break
+        if pkg_bytes_starts_with(bytes, start, "<!--".bytes()) {
+            close :: provider_find(bytes, "-->".bytes(), start + 4, body_end)
+            cursor = if close < 0 -> body_end else -> close + 3
+            next
+        }
+        if pkg_bytes_starts_with(bytes, start, "<![CDATA[".bytes()) {
+            close :: provider_find(bytes, "]]>".bytes(), start + 9, body_end)
+            cursor = if close < 0 -> body_end else -> close + 3
+            next
+        }
+        end :: provider_xml_opening_end(bytes, start, body_end)
+        if end < 0 -> break
+        opening :: pkg_bytes_text(bytes, start, end + 1)
+        if opening.starts_with("</") {
+            if depth > 0 -> depth -= 1
+            cursor = end + 1
+            next
+        }
+        if opening.starts_with("<?") || opening.starts_with("<!") {
+            cursor = end + 1
+            next
+        }
+        self_closing :: opening.trim_end().ends_with("/>")
+        if depth == 0 && !self_closing && provider_xml_opening_name(opening) == child {
+            close :: provider_find(bytes, child_closing, end + 1, body_end)
+            if close >= 0 {
+                values.push(provider_xml_unescape(pkg_bytes_text(bytes, end + 1, close).trim()))
+                cursor = close + child_closing.len()
+                next
+            }
+        }
+        if !self_closing -> depth += 1
+        cursor = end + 1
+    }
+    values
+}
+
+// The five predefined entities; `&amp;` last so `&amp;lt;` stays `&lt;`.
+fn provider_xml_unescape(value: String) -> String !Never {
+    value.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+}
+
+// The value of `key="…"` or `key='…'` in an opening tag, where the key
+// follows whitespace, `<`, or `/`.
+fn provider_xml_attribute(opening: String, key: String) -> ?String !Never {
+    bytes :: opening.bytes()
+    quotes :: [String]{"\"", "'"}
+    loop quote in quotes {
+        marker :: "{key}={quote}".bytes()
+        cursor := 0
+        loop cursor < bytes.len() {
+            start :: provider_find(bytes, marker, cursor, bytes.len())
+            if start < 0 -> break
+            before :: pkg_bytes_code(bytes, start - 1)
+            boundary :: start == 0 || before == 60 || before == 47 || provider_ends_with_space(bytes, start)
+            if boundary {
+                value_start :: start + marker.len()
+                close :: provider_find(bytes, quote.bytes(), value_start, bytes.len())
+                if close >= 0 -> return Val(pkg_bytes_text(bytes, value_start, close))
+            }
+            cursor = start + marker.len()
+        }
+    }
+    None
+}
+
+// Whether a White_Space scalar ends right before `at`.
+fn provider_ends_with_space(bytes: [U8], at: Int) -> Bool !Never {
+    loop width in 1..<4 {
+        if at - width >= 0 && pkg_bytes_space_width(bytes, at - width) == width -> return true
+    }
+    false
+}
