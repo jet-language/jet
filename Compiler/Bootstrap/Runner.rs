@@ -91,7 +91,7 @@ pub(crate) struct BootstrapJetCompileResult<SourceProgram = (), RuntimeConfig = 
 }
 
 pub(crate) type BootstrapSourceResume =
-    Box<dyn Fn(jet_jit::SourceDeoptRequest) -> Result<jet_jit::SourceDeoptReply, String> + 'static>;
+    Box<dyn Fn(&mut jet_jit::SourceDeoptRequest) -> Result<jet_jit::SourceDeoptReply, String> + 'static>;
 pub(crate) type BootstrapSourceResumeFactory<'a, SourceProgram, RuntimeConfig> =
     Box<dyn FnOnce(SourceProgram, RuntimeConfig, SourceResourceLease) -> BootstrapSourceResume + 'a>;
 
@@ -330,6 +330,21 @@ impl BootstrapRunCompletionOwner {
                 pending_jobs,
             })
         }
+    }
+    /// Whether physical resource retirement was requested and how many roots
+    /// still hold the arena open. No resource session means neither.
+    fn resource_liveness(&self) -> Result<(bool, usize), BootstrapRunCompletionFinishError> {
+        let Some(resources) = &self.resources else {
+            return Ok((false, 0));
+        };
+        let arena = resources.arena();
+        let retirement_requested = arena
+            .is_retirement_requested()
+            .map_err(BootstrapRunCompletionFinishError::State)?;
+        let retained_roots = arena
+            .retained_root_count()
+            .map_err(BootstrapRunCompletionFinishError::State)?;
+        Ok((retirement_requested, retained_roots))
     }
     fn take_callback_failures(
         &self,
@@ -641,6 +656,9 @@ pub(crate) fn invoke_bootstrap_entry<Output>(
 /// diagnostics; Native artifacts reach the AOT backend, Web artifacts retain
 /// their exact target payloads, and user-program Source runtime artifacts use
 /// the checked whole-entry JIT seam, separate from the compiler factory entry.
+// Runs only inside the generated compiler artifact: it restores the compiler
+// image that `append_embedded_compiler_image` embeds at that crate's root.
+#[cfg(jet_bootstrap_compiler_artifact)]
 pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig>(
     lease: &AuthorizedSourceLease,
     config: &MirRustConfig<'_>,
@@ -697,6 +715,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
     }
 }
 
+#[cfg(jet_bootstrap_compiler_artifact)]
 fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
     lease: &AuthorizedSourceLease,
     config: &MirRustConfig<'_>,

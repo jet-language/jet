@@ -24,6 +24,9 @@ const RUNNER_SOURCES: &[&str] = &[
 ];
 
 fn main() {
+    // Set only by the generated self-hosting compiler artifact's build
+    // script; declared here so the shared Host/Runner sources check cleanly.
+    println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
     let target = std::env::var("TARGET").expect("Cargo always provides TARGET to build scripts");
     println!("cargo:rustc-env=JET_BUILD_TARGET={target}");
     let facts = BuildIdentity::build_facts().expect("compiler build facts must be readable");

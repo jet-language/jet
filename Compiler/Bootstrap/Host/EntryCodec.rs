@@ -83,6 +83,7 @@ pub(crate) type BootstrapEntrySharedPayloadDecoder<T, P> = fn(
     &P,
 ) -> Result<T, String>;
 
+#[cfg(jet_bootstrap_compiler_artifact)]
 pub(crate) trait BootstrapEntrySharedMarshaller<O, T, P>: Clone + Send + Sync + 'static
 where
     O: crate::JetSharedPhysicalOwnerApi,
@@ -116,6 +117,9 @@ pub(crate) trait BootstrapEntryPhysicalBindings: Clone + Send + Sync + 'static {
     type InterpreterTransferReceipt: 'static;
     type InterpreterTransferBorrowEntry: 'static;
     type InterpreterTransferActivation: 'static;
+    // Shared marshalling is bounded on the generated crate's flat Prelude
+    // owner trait, which exists only inside the compiler artifact.
+    #[cfg(jet_bootstrap_compiler_artifact)]
     type SharedMarshaller<O, T>: BootstrapEntrySharedMarshaller<O, T, Self>
     where
         O: crate::JetSharedPhysicalOwnerApi,
@@ -133,6 +137,7 @@ pub(crate) trait BootstrapEntryPhysicalBindings: Clone + Send + Sync + 'static {
     /// invocation binding, an interop root, or a logical alias lease. The
     /// generated converters are static function pointers; an invocation
     /// resolver supplies a short-lived binding whenever they run.
+    #[cfg(jet_bootstrap_compiler_artifact)]
     fn shared_marshaller<O: crate::JetSharedPhysicalOwnerApi, T: 'static>(
         &self,
         owner: O,
@@ -156,7 +161,7 @@ pub(crate) trait BootstrapEntryPhysicalBindings: Clone + Send + Sync + 'static {
         checked_type: &MirType,
         program: &MirProgram,
         physical_identity: usize,
-        root: jet_jit::SourceSharedInterop,
+        root: jet_jit::SourceSharedInterop::SourceSharedInterop,
         payload_shape: &BootstrapEntryHostTypeShape,
     ) -> Result<Option<MirRuntimeValue>, String>;
 
@@ -663,7 +668,7 @@ impl<T> BootstrapPreparedRuntimeValue<T> {
         borrow_entries: &mut Vec<P::InterpreterTransferBorrowEntry>,
     ) -> MirRuntimeValue
     where
-        P: BootstrapEntryPhysicalBindings,
+        P: BootstrapEntryPhysicalBindings<PreparedInterpreterValue = T>,
     {
         match self {
             Self::Runtime(value) => value,
@@ -772,7 +777,8 @@ pub(crate) fn bootstrap_entry_shape_node_type(
     let child = |node| bootstrap_entry_shape_node_type(shape, node, depth + 1);
     Ok(match node {
         BootstrapEntryHostTypeNode::Scalar(ty)
-        | BootstrapEntryHostTypeNode::Handle { ty, .. } => ty.clone(),
+        | BootstrapEntryHostTypeNode::Handle { ty, .. }
+        | BootstrapEntryHostTypeNode::Closure { ty, .. } => ty.clone(),
         BootstrapEntryHostTypeNode::Option(inner) => {
             MirType::from_kind(MirTypeKind::Option(Box::new(child(*inner)?)))
         }
@@ -788,6 +794,7 @@ pub(crate) fn bootstrap_entry_shape_node_type(
         BootstrapEntryHostTypeNode::Map { key, value } => MirType::from_kind(
             MirTypeKind::Map {
                 key: Box::new(child(*key)?),
+                value: Box::new(child(*value)?),
             },
         ),
         BootstrapEntryHostTypeNode::Tuple(fields) => MirType::from_kind(MirTypeKind::Tuple(
@@ -1934,6 +1941,7 @@ pub(crate) fn append_bootstrap_entry_codec(
         entry_id = entry.0,
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    Ok(())
 }
 
 fn emit_interpreter_host_projection(
@@ -1949,15 +1957,15 @@ fn emit_interpreter_host_projection(
         ("__JET_HOST_FIELD_TYPE__", host_field),
         ("__JET_HOST_MAP_ENTRY_TYPE__", host_map_entry),
         ("__JET_HOST_ENUM_ARG_TYPE__", host_enum_arg),
-        ("__JET_HOST_DATA__", symbols.variant_path("JetEvalHostValue", "Data")?),
-        ("__JET_HOST_ABSENT__", symbols.variant_path("JetEvalHostValue", "Absent")?),
-        ("__JET_HOST_PRESENT__", symbols.variant_path("JetEvalHostValue", "Present")?),
-        ("__JET_HOST_FAILED__", symbols.variant_path("JetEvalHostValue", "Failed")?),
-        ("__JET_HOST_LIST__", symbols.variant_path("JetEvalHostValue", "List")?),
-        ("__JET_HOST_MAP__", symbols.variant_path("JetEvalHostValue", "Map")?),
-        ("__JET_HOST_STRUCT__", symbols.variant_path("JetEvalHostValue", "Struct")?),
-        ("__JET_HOST_ENUM__", symbols.variant_path("JetEvalHostValue", "Enum")?),
-        ("__JET_HOST_CLOSURE__", symbols.variant_path("JetEvalHostValue", "Closure")?),
+        ("__JET_HOST_DATA__", symbols.variant_symbol("JetEvalHostValue", "Data")?),
+        ("__JET_HOST_ABSENT__", symbols.variant_symbol("JetEvalHostValue", "Absent")?),
+        ("__JET_HOST_PRESENT__", symbols.variant_symbol("JetEvalHostValue", "Present")?),
+        ("__JET_HOST_FAILED__", symbols.variant_symbol("JetEvalHostValue", "Failed")?),
+        ("__JET_HOST_LIST__", symbols.variant_symbol("JetEvalHostValue", "List")?),
+        ("__JET_HOST_MAP__", symbols.variant_symbol("JetEvalHostValue", "Map")?),
+        ("__JET_HOST_STRUCT__", symbols.variant_symbol("JetEvalHostValue", "Struct")?),
+        ("__JET_HOST_ENUM__", symbols.variant_symbol("JetEvalHostValue", "Enum")?),
+        ("__JET_HOST_CLOSURE__", symbols.variant_symbol("JetEvalHostValue", "Closure")?),
         ("__JET_HOST_MAP_KEY__", symbols.field_symbol("JetEvalHostMapEntry", "key")?),
         ("__JET_HOST_MAP_VALUE__", symbols.field_symbol("JetEvalHostMapEntry", "value")?),
         ("__JET_HOST_FIELD_NAME__", symbols.field_symbol("JetEvalHostField", "name")?),
@@ -2312,27 +2320,27 @@ fn emit_prepared_interpreter_transfer(
         ),
         (
             "__SHAPE_OWNER_CURSOR__",
-            symbols.variant_path("JetEvalHostOwner", "Cursor")?,
+            symbols.variant_symbol("JetEvalHostOwner", "Cursor")?,
         ),
         (
             "__SHAPE_OWNER_DECLARED__",
-            symbols.variant_path("JetEvalHostOwner", "Declared")?,
+            symbols.variant_symbol("JetEvalHostOwner", "Declared")?,
         ),
         (
             "__SHAPE_OWNER_CORE__",
-            symbols.variant_path("JetEvalHostOwner", "Core")?,
+            symbols.variant_symbol("JetEvalHostOwner", "Core")?,
         ),
         (
             "__SHAPE_OWNER_NATIVE__",
-            symbols.variant_path("JetEvalHostOwner", "Native")?,
+            symbols.variant_symbol("JetEvalHostOwner", "Native")?,
         ),
         (
             "__SHAPE_BINDING_CALLABLE__",
-            symbols.variant_path("JetEvalNativeBindingIdentity", "Callable")?,
+            symbols.variant_symbol("JetEvalNativeBindingIdentity", "Callable")?,
         ),
         (
             "__SHAPE_BINDING_INTERFACE__",
-            symbols.variant_path("JetEvalNativeBindingIdentity", "Interface")?,
+            symbols.variant_symbol("JetEvalNativeBindingIdentity", "Interface")?,
         ),
         (
             "__SHAPE_CORE_FACT__",
@@ -2447,7 +2455,7 @@ fn emit_prepared_interpreter_transfer(
                 "Closure" => "__SHAPE_CLOSURE__",
                 _ => "__SHAPE_HANDLE__",
             },
-            symbols.variant_path("JetEvalHostTypeNode", variant)?,
+            symbols.variant_symbol("JetEvalHostTypeNode", variant)?,
         ));
     }
     for variant in [
@@ -2477,7 +2485,7 @@ fn emit_prepared_interpreter_transfer(
                 "Closure" => "__HOST_CLOSURE__",
                 _ => "__HOST_SHARED_CARRIER__",
             },
-            symbols.variant_path("JetEvalHostValue", variant)?,
+            symbols.variant_symbol("JetEvalHostValue", variant)?,
         ));
     }
     let mut generated = String::from(
@@ -3138,7 +3146,7 @@ fn emit_shaped_runtime_value_codec(
                 "Struct" => "__AGGREGATE_STRUCT__",
                 _ => "__AGGREGATE_ENUM__",
             },
-            symbols.variant_path("JetEvalRuntimeAggregate", variant)?,
+            symbols.variant_symbol("JetEvalRuntimeAggregate", variant)?,
         ));
     }
     for variant in [
@@ -3182,7 +3190,7 @@ fn emit_shaped_runtime_value_codec(
                 "RuntimeFailure" => "__EVAL_RUNTIME_FAILURE__",
                 _ => "__EVAL_HOST_CURSOR__",
             },
-            symbols.variant_path("JetEvalRuntimeValue", variant)?,
+            symbols.variant_symbol("JetEvalRuntimeValue", variant)?,
         ));
     }
     for variant in ["Option", "Result", "List", "Map", "Tuple", "Struct", "Enum", "Closure", "Handle"] {
@@ -3198,7 +3206,7 @@ fn emit_shaped_runtime_value_codec(
                 "Closure" => "__SHAPE_CLOSURE__",
                 _ => "__SHAPE_HANDLE__",
             },
-            symbols.variant_path("JetEvalHostTypeNode", variant)?,
+            symbols.variant_symbol("JetEvalHostTypeNode", variant)?,
         ));
     }
     let mut generated = String::from(
@@ -5252,14 +5260,17 @@ fn emit_from_runtime_converter(
                         &format!("{arg}.1"),
                         &format!("&{ty_var}"),
                         "program",
-                        &format!("&{{ let mut p = path.to_vec(); p.push(format!(\"{{}}::{{}}[{index}]\", {owner_name:?}, {variant_name:?})); p }}"),
+                        &format!(
+                            "&{{ let mut p = path.to_vec(); p.push(format!(\"{{}}::{{}}[{index}]\", {owner_name:?}, {variant_name:?})); p }}",
+                            owner_name = definition.name,
+                            variant_name = variant.name,
+                        ),
                     )?;
                     let expected_name = name.map_or_else(|| "None".to_string(), |name| format!("Some({name:?})"));
                     decode.push(format!(
                         "let {ty_var} = __jet_bootstrap_entry_variant_field_type(program, ::jet_foundation::MIR::MirTypeId({owner}), {variant_name:?}, {index})?; let {arg} = __jet_bootstrap_entry_next_enum_arg(&mut args, {expected_name})?; let {arg}_value = {expr};",
                         owner = id,
                         variant_name = variant.name,
-                        owner_name = definition.name,
                     ));
                     payload_values.push(match symbol {
                         Some(symbol) if matches!(variant.payload, MirVariantPayload::Named(_)) => {
@@ -6092,7 +6103,7 @@ pub(crate) fn validate_runtime_value(program:&MirProgram,ty:&MirType,value:&MirR
             for (key_value,item) in entries{validate_const_key(program,key,key_value,depth+1)?;if !seen.insert(key_value){return Err("compiler-entry map has duplicate keys".to_string());}validate_runtime_value(program,item_ty,item,depth+1)?;}Ok(())
         },
         K::Shared(_) => {
-            let root = jet_jit::SourceSharedInterop::from_native_owned(value)?;
+            let root = jet_jit::SourceSharedInterop::SourceSharedInterop::from_native_owned(value)?;
             if root.type_id() == jet_jit::SourceSharedInterop::checked_type_id_for_program(program, ty) {
                 Ok(())
             } else {

@@ -1549,7 +1549,7 @@ fn find_next_definition(input: &str, from: usize) -> Option<(&'static str, usize
     let enum_position = find_keyword(input, "pub enum", from);
     match (struct_position, enum_position) {
         (Some(left), Some(right)) if left < right => Some(("struct", left + 4)),
-        (Some(left), Some(right)) => Some(("enum", right + 4)),
+        (Some(_), Some(right)) => Some(("enum", right + 4)),
         (Some(position), None) => Some(("struct", position + 4)),
         (None, Some(position)) => Some(("enum", position + 4)),
         (None, None) => None,

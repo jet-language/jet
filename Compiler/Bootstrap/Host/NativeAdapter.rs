@@ -62,8 +62,21 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
             "JetEvalConfig.host_adapter is not the checked optional adapter field".to_string(),
         )
     })?;
+    let adapter_trait = symbols
+        .metadata
+        .traits
+        .iter()
+        .find(|row| row.trait_id == first_method.trait_id)
+        .ok_or_else(|| {
+            BootstrapHostCodecError::InvalidMetadata(
+                "JetEvalHostAdapter method metadata names no checked trait".to_string(),
+            )
+        })?;
+    // Trait-object bounds are nominal refs; match the checked trait by name.
     if receiver_type.trait_bounds().is_none_or(|bounds| {
-        !bounds.iter().any(|bound| bound.id == first_method.trait_id)
+        !bounds
+            .iter()
+            .any(|bound| bound.name == adapter_trait.name || bound.name == adapter_trait.key)
     }) {
         return Err(BootstrapHostCodecError::InvalidMetadata(
             "JetEvalConfig.host_adapter does not carry the exact JetEvalHostAdapter trait bound"
@@ -298,9 +311,9 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         let receiver = match metadata.receiver_access {
             Some(jet_foundation::MIR::MirAccess::Read) => "&self",
             Some(jet_foundation::MIR::MirAccess::Write) => "&mut self",
-            None => {
+            Some(jet_foundation::MIR::MirAccess::Move) | None => {
                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                    "JetEvalHostAdapter.{} has no checked receiver access",
+                    "JetEvalHostAdapter.{} has no borrowed (read or write) checked receiver",
                     metadata.name
                 )))
             }
@@ -847,10 +860,11 @@ fn emit_native_callback_helpers(
 
     let span = symbols.type_symbol("Span")?;
     let callback_transfer = callable_symbol(symbols, "jet_eval_callback_transfer")?;
+    let callback_invoke = callable_symbol(symbols, "jet_eval_callback_invoke")?;
     let callback_release = callable_symbol(symbols, "jet_eval_callback_release")?;
     let task_root = symbols.type_symbol("JetEvalTaskRoot")?;
     let task_root_take = callable_symbol(symbols, "jet_eval_task_root_take")?;
-    let task_callback_invoke = callable_symbol(symbols, "jet_eval_task_callback_invoke")?;
+    let _task_callback_invoke = callable_symbol(symbols, "jet_eval_task_callback_invoke")?;
     let task_root_release = callable_symbol(symbols, "jet_eval_task_root_release")?;
     let callback_value = symbols.variant_path("JetEvalCallbackOutcome", "Value")?;
     let merge_callback_output = callable_symbol(symbols, "jet_eval_merge_callback_output")?;

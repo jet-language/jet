@@ -5940,6 +5940,10 @@ fn lower_or_fallback_expr(
     }
 
     ctx.switch_to(failure_block);
+    // The ambient `err` binding and the fallback body get their own cleanup
+    // frame: `err` is bound only on the failure path, so its owned-drop must
+    // not be queued on a frame the success path also exits.
+    ctx.push_lexical_frame();
     let error_binding = if failure_is_never {
         ctx.terminate(MirTerminator::Unreachable {
             reason: "checked result failure is uninhabited".to_string(),
@@ -5976,6 +5980,7 @@ fn lower_or_fallback_expr(
     } else {
         lower_fallback_block(ctx, expr, fallback)?
     };
+    ctx.pop_lexical_frame()?;
     if let Some((name, previous_type, previous_place, previous_value)) = error_binding {
         ctx.local_types.remove(&name);
         ctx.local_places.remove(&name);

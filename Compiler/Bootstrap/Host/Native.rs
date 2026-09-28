@@ -14,6 +14,7 @@ use crate::Codegen::MIRRust::{
     MirRustTraitMethodMetadata, MirRustVariantMetadata,
 };
 use jet_jit::SourceResources::SourceResourceRetireError;
+use jet_foundation::MIR::{MirFieldId, MirProgram, MirType, MirTypeId};
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::path::Path;
@@ -619,7 +620,11 @@ impl<'a> BootstrapCodecSymbols<'a> {
             })
     }
 
-    fn variant_symbol(&self, owner: &str, variant: &str) -> Result<&str, BootstrapHostCodecError> {
+    pub(crate) fn variant_symbol(
+        &self,
+        owner: &str,
+        variant: &str,
+    ) -> Result<&str, BootstrapHostCodecError> {
         let owner_id = self.definition_id(owner)?;
         self.metadata
             .variants
@@ -867,7 +872,7 @@ fn checked_bootstrap_native_helper_roots(
         "jet_eval_shared_payload_finalize",
         "jet_eval_host_type_shape_from_program",
     ];
-    let mut roots = BTreeMap::<u32, MirFunctionId>::new();
+    let mut roots = BTreeMap::<u64, MirFunctionId>::new();
     for name in seeds {
         let binding = checked_bootstrap_callable(metadata, name)?;
         if binding.metadata.symbol.is_empty() {
@@ -956,13 +961,6 @@ fn checked_bootstrap_native_helper_roots(
         host_type_shape,
         shared_payload_finalize,
     })
-}
-
-fn bootstrap_required_callable<'a>(
-    metadata: &'a BootstrapBindingDescriptor,
-    name: &str,
-) -> Result<&'a MirRustCallableMetadata, BootstrapHostCodecError> {
-    Ok(&checked_bootstrap_callable(metadata, name)?.metadata)
 }
 
 fn validate_bootstrap_numeric_callable_type(
@@ -1075,7 +1073,7 @@ pub(crate) fn append_bootstrap_host_glue(
         bindings,
         &symbols,
         program,
-        entry.metadata.function,
+        entry.function,
     )?;
     emit_bootstrap_source_resource_bridge(&mut glue, &symbols)?;
     emit_bootstrap_callback(&mut glue, &symbols)?;
@@ -1175,7 +1173,7 @@ fn __jet_bootstrap_native_numeric_unit_conversion(
         &mut glue,
         bindings,
         &symbols,
-        entry.metadata,
+        entry,
         &eval_runtime_config.symbol,
         &native_helper_roots,
     )?;
@@ -1217,7 +1215,7 @@ fn emit_bootstrap_native_execution_helpers(
     let result_stdout = symbols.field_symbol("JetEvalResult", "stdout")?;
     let result_stderr = symbols.field_symbol("JetEvalResult", "stderr")?;
     let result_soft_stop = symbols.field_symbol("JetEvalResult", "soft_stop")?;
-    let result_exit_code = symbols.field_symbol("JetEvalResult", "exit_code")?;
+    let result_exit_code = symbols.field_symbol("JetDriverCompileResult", "exit_code")?;
     let error_diagnostic = symbols.field_symbol("JetEvalError", "diagnostic")?;
     let diagnostic_code = symbols.field_symbol("Diagnostic", "code")?;
     let diagnostic_what = symbols.field_symbol("Diagnostic", "what")?;
@@ -2775,7 +2773,7 @@ fn emit_bootstrap_native_compile_entry(
     let native_callable_type =
         symbols.field_symbol("JetEvalNativeCallableBinding", "callable_type")?;
     let entry_id = entry.function.0.to_string();
-    let entry_symbol = &entry.symbol;
+    let _entry_symbol = &entry.symbol;
     let helper_roots = helpers
         .roots
         .iter()
@@ -3204,7 +3202,7 @@ fn emit_bootstrap_host_factory(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
     default_symbol: &str,
-    runtime_config_symbol: &str,
+    _runtime_config_symbol: &str,
 ) -> Result<(), BootstrapHostCodecError> {
     let request_type = symbols.type_symbol("JetDriverCompileRequest")?;
     let request_sources = symbols.field_symbol("JetDriverCompileRequest", "authorized_sources")?;
@@ -3406,7 +3404,7 @@ fn emit_bootstrap_web_asset_provider(
         asset_fields
             .iter()
             .find(|(candidate, _)| *candidate == name)
-            .map(|(_, symbol)| symbol.as_str())
+            .map(|(_, symbol)| *symbol)
             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(name.to_string()))
     };
     writeln!(
@@ -3601,6 +3599,8 @@ fn emit_bootstrap_manifest_adapter(
             "    let comptime_stdout = ({value}).{result_comptime_stdout}.clone();\n",
             "    let comptime_stderr = ({value}).{result_comptime_stderr}.clone();\n",
             "    let soft_stop = ({value}).{result_soft_stop};\n",
+            "    let exit_code = ({value}).{result_exit_code}.as_ref().ok().map(|code| code.to_string_rep().parse::<i64>().map_err(|_| \"Jet compile exit code does not fit i64\".to_string())).transpose()?;\n",
+            "    let reports = __jet_bootstrap_reports_from_result(&{value}, snapshot)?;\n",
             "    let source_program = ({value}).{result_mir}.ok();\n",
             "    let mir = source_program.as_ref().map(__jet_bootstrap_mir_program_to_host).transpose()?;\n",
             "    let entry_function = ({value}).{result_entry_function}.as_ref().ok().map(|function| Ok(::jet_foundation::MIR::MirFunctionId(function.{function_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet entry function ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
@@ -3654,7 +3654,7 @@ fn emit_bootstrap_manifest_adapter(
             "    let fields = manifest.{manifest_fields}.iter().map(|row| {{\n",
             "        let field_id = ::jet_foundation::MIR::MirFieldId(({row}).{field_field}.{field_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest field ID is not an unsigned integer\".to_string())?);\n",
             "        let owner_id = ::jet_foundation::MIR::MirTypeId(({row}).{field_owner}.{type_value}.to_string_rep().parse::<u64>().map_err(|_| \"manifest field owner ID is not an unsigned integer\".to_string())?);\n",
-            "        let ty = mir.as_ref().and_then(|program| program.fields.iter().find(|candidate| candidate.id == field_id && candidate.owner == owner_id)).map(|candidate| candidate.field.ty.clone()).ok_or_else(|| format!(\"manifest field {:?}/{:?} is absent from converted MIR\", field_id, owner_id))?;\n",
+            "        let ty = mir.as_ref().and_then(|program| program.fields.iter().find(|candidate| candidate.id == field_id && candidate.owner == owner_id)).map(|candidate| candidate.field.ty.clone()).ok_or_else(|| format!(\"manifest field {{:?}}/{{:?}} is absent from converted MIR\", field_id, owner_id))?;\n",
             "        Ok((field_id, owner_id, ({row}).{field_source_name}.clone(), ({row}).{field_symbol}.clone(), ty))\n",
             "    }}).collect::<Result<Vec<_>, String>>()?;\n",
             "    let variants = manifest.{manifest_variants}.iter().map(|row| Ok(crate::Codegen::MIRRust::MirRustVariantMetadata {{\n",
@@ -3693,6 +3693,7 @@ fn emit_bootstrap_manifest_adapter(
             "        return_type: ({row}).{trait_method_return_type}.clone(),\n",
             "    }})).collect::<Result<Vec<_>, String>>()?;\n",
             "    let bindings = {descriptor}::from_rows(callables, types, fields, variants, traits, trait_methods);\n",
+            "    let source = ({value}).{result_source}.as_ref().ok().cloned().ok_or_else(|| \"complete bootstrap compiler result has no emitted Rust source\".to_string())?;\n",
             "    Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete: true, emitted_source: Some(source), bindings: Some(bindings), source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact: None, web_artifacts: None, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }})\n",
             "}}\n",
         ),
@@ -4641,7 +4642,7 @@ fn emit_bootstrap_value_codec(
                  ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok({ct_failed}({report_told}(__jet_bootstrap_ct_from_host(value)?))),
                  ::jet_foundation::MIR::MirRuntimeValue::Absent {{ .. }} => return Err(\"a typed absent value is returned directly as JetEvalRuntimeValue::Absent\".to_string()),
                  ::jet_foundation::MIR::MirRuntimeValue::Unit => Ok({ct_unit}),
-                ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => return Err("native Prelude returned an unmaterializable value".to_string()),
+                ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => return Err(\"native Prelude returned an unmaterializable value\".to_string()),
              }}
          }}"
     )
@@ -5052,7 +5053,7 @@ fn emit_bootstrap_source_resource_bridge(
     let transfer_handle = symbols.field_symbol("JetEvalHostTransfer", "handle")?;
     let transfer_raw = symbols.field_symbol("JetEvalHostTransfer", "raw")?;
     let host_owner = symbols.type_symbol("JetEvalHostOwner")?;
-    let host_core_owner = symbols.type_symbol("JetEvalHostCoreOwner")?;
+    let _host_core_owner = symbols.type_symbol("JetEvalHostCoreOwner")?;
     let host_core_owner_fact = symbols.field_symbol("JetEvalHostCoreOwner", "fact")?;
     let host_core_owner_ty = symbols.field_symbol("JetEvalHostCoreOwner", "ty")?;
     let source_handle = symbols.type_symbol("MirHandleId")?;
@@ -5605,9 +5606,9 @@ fn emit_bootstrap_foreign_callback(
     let ownership = symbols.type_symbol("MirOwnership")?;
     let access = symbols.type_symbol("MirAccess")?;
     let effects = symbols.type_symbol("MirEffectFacts")?;
-    let named_span = symbols.type_symbol("MirNamedSpan")?;
-    let applicability = symbols.type_symbol("MirTargetApplicability")?;
-    let eval = symbols.type_symbol("JetEvalRuntimeValue")?;
+    let _named_span = symbols.type_symbol("MirNamedSpan")?;
+    let _applicability = symbols.type_symbol("MirTargetApplicability")?;
+    let _eval = symbols.type_symbol("JetEvalRuntimeValue")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
     let host_result = symbols.type_symbol("JetEvalHostResult")?;

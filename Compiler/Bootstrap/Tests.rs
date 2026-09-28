@@ -2184,6 +2184,8 @@ fn main() {{
     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
         .expect("generated compiler identity receipt must be writable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
+    println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
+    println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("src/main.rs").display());
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("Cargo.toml").display());
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("build.rs").display());
@@ -2342,7 +2344,7 @@ fn run_generated_artifact_with_tier(
     );
 }
 
-fn assert_tier_provenance(receipt: &str, selected: &str, actual_tiers: &[&str]) -> &str {
+fn assert_tier_provenance<'r>(receipt: &'r str, selected: &str, actual_tiers: &[&str]) -> &'r str {
     let actual = receipt
         .lines()
         .find_map(|line| line.strip_prefix("actual_factory_tier="))

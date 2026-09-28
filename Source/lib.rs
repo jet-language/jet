@@ -132,12 +132,50 @@ pub mod BootstrapBuildIdentity {
     include!("../Compiler/Bootstrap/BuildIdentity.rs");
 }
 pub mod Compiler;
+// The private self-hosting bootstrap mounts the same Host/Runner module set
+// that `package_bootstrap_artifact` writes into the generated compiler crate,
+// so both crates resolve identical `crate::` paths.
 #[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/RuntimeMirCodec.rs"]
+#[allow(dead_code)]
+mod compiler_bootstrap_runtime_mir_codec;
+#[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/RuntimeMir.rs"]
+#[allow(dead_code)]
+mod compiler_bootstrap_runtime_mir;
+#[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/DiagnosticCodec.rs"]
+#[allow(dead_code)]
+mod compiler_bootstrap_diagnostic_codec;
+#[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/EntryCodec.rs"]
+#[allow(dead_code)]
+mod compiler_bootstrap_entry_codec;
+#[cfg(feature = "compiler-bootstrap-host")]
+#[allow(unused_imports)]
+pub(crate) use compiler_bootstrap_entry_codec::{
+    BootstrapEntryCodec, BootstrapEntryPhysicalBindings, BootstrapEntryValue,
+};
+#[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/CompilerImage.rs"]
+#[allow(dead_code)]
+mod compiler_bootstrap_compiler_image;
+#[cfg(feature = "compiler-bootstrap-host")]
+#[allow(unused_imports)]
+pub(crate) use compiler_bootstrap_compiler_image::{
+    archive_compiler_image, restore_compiler_image, CompilerImageError, CompilerImageHeader,
+    RestoredCompilerImage,
+};
+#[cfg(feature = "compiler-bootstrap-host")]
+#[allow(unused_imports)]
+pub(crate) use compiler_bootstrap_runtime_mir::{
+    execute_source_mir, SourceMirExecution, SourceMirExecutionError,
+};
+#[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Host/Native.rs"]
 #[doc(hidden)]
 #[allow(dead_code)]
-mod compiler_bootstrap_host {
-    include!("../Compiler/Bootstrap/Host/Native.rs");
-}
+mod compiler_bootstrap_host;
 #[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(unused_imports)]
@@ -145,20 +183,20 @@ pub(crate) use compiler_bootstrap_host::{
     append_bootstrap_host_glue, open_authorized_sources, AuthorizedSourceLease,
     AuthorizedSourceSnapshot, BootstrapBindingDescriptor, BootstrapHostCodecError,
 };
-
 #[cfg(feature = "compiler-bootstrap-host")]
+#[path = "../Compiler/Bootstrap/Runner.rs"]
 #[doc(hidden)]
 #[allow(dead_code)]
-mod compiler_bootstrap_runner {
-    include!("../Compiler/Bootstrap/Runner.rs");
-}
+mod compiler_bootstrap_runner;
 #[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(unused_imports)]
 pub(crate) use compiler_bootstrap_runner::{
     bootstrap_artifact_build_id, invoke_bootstrap_entry, prepare_bootstrap_artifact,
-    prepare_bootstrap_artifact_from_aot, run_bootstrap_artifact, BootstrapArtifact,
-    BootstrapRunError,
+    prepare_bootstrap_artifact_from_aot, BootstrapArtifact,
+    BootstrapBackendArtifact, BootstrapFactoryTier, BootstrapJetCompileResult,
+    BootstrapRunError, BootstrapRunOutput, BootstrapSourceResume, BootstrapSourceResumeFactory,
+    BootstrapWebArtifacts,
 };
 #[cfg(all(test, feature = "compiler-bootstrap-host"))]
 mod bootstrap_tests {

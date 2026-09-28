@@ -130,7 +130,7 @@ pub(crate) fn execute_decoded_source_mir<Resume>(
     resume: Resume,
 ) -> Result<SourceMirExecution, SourceMirExecutionError>
 where
-    Resume: Fn(SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
+    Resume: Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
 {
     let identity = program
         .execution_identity(Some(artifact))
@@ -194,7 +194,7 @@ where
         &SourceProgram,
         &crate::BootstrapBindingDescriptor,
     ) -> Result<MirProgram, String>,
-    Resume: Fn(SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
+    Resume: Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
 {
     let program = decode(source_program, bindings).map_err(SourceMirExecutionError::Carrier)?;
     execute_decoded_source_mir(

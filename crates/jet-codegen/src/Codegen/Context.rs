@@ -6282,10 +6282,12 @@ pub(crate) fn build_cx_items(
         }
     }
 
+    // Nothing below reads `boxed_edges`, so the full set is computed once.
+    let boxed_edges = find_box_edges(items, &cx);
+    cx.boxed_edges.extend(boxed_edges);
     for item in items {
         match item {
             Item::Struct(s) => {
-                cx.boxed_edges.extend(find_struct_box_edges(s, &cx));
                 if type_is_cloneable_struct(s, &cx.type_names)
                     && !cx.type_contains_secret(&Type::Named(s.name.clone()))
                 {
@@ -6358,7 +6360,6 @@ pub(crate) fn build_cx_items(
                 }
             }
             Item::Enum(e) => {
-                cx.boxed_edges.extend(find_enum_box_edges(e, &cx));
                 if type_is_cloneable_enum(e, &cx.type_names)
                     && !cx.type_contains_secret(&Type::Named(e.name.clone()))
                 {
@@ -7073,6 +7074,240 @@ pub(crate) fn field_type_hashable(
 /// D-MAP-KEY1: the backend's key walk mirrors sema's ratified eligibility
 /// rule. It only supplies the fact needed to emit the shared key adapter;
 /// comparison itself remains in `Prelude/Core/MapKey.rs`.
+
+/// Recursive-type edges that need a box, for every struct and enum root.
+///
+/// This is exactly the union over roots of `find_struct_box_edges` and
+/// `find_enum_box_edges`, which enumerate every simple path and mark an edge
+/// whose target is already on the path. That enumeration is exponential on a
+/// richly recursive type graph. When every multi-type cycle is made of roots,
+/// the union is: an edge `owner --field--> target` is boxed iff `target` can
+/// reach `owner` (same strongly connected component, or a self-loop on a type
+/// reachable from a root). Other shapes fall back to the path enumeration.
+pub(crate) fn find_box_edges(items: &[Item], cx: &Cx) -> HashSet<(String, String)> {
+    fn targets(ty: &Type, cx: &Cx, out: &mut Vec<String>) {
+        match ty {
+            Type::Named(n) if cx.type_names.contains(n) => out.push(n.clone()),
+            Type::Option(inner) | Type::List(inner) => targets(inner, cx, out),
+            Type::Map { key, value, .. }
+            | Type::Result {
+                ok: key,
+                err: value,
+            } => {
+                targets(key, cx, out);
+                targets(value, cx, out);
+            }
+            _ => {}
+        }
+    }
+    fn field_edges(fields: &[(String, Type)], cx: &Cx) -> Vec<(String, Vec<String>)> {
+        fields
+            .iter()
+            .map(|(name, ty)| {
+                let mut out = Vec::new();
+                targets(ty, cx, &mut out);
+                (name.clone(), out)
+            })
+            .collect()
+    }
+    fn variant_edges(variants: &[(String, VariantPayload)], cx: &Cx) -> Vec<(String, Vec<String>)> {
+        let mut edges = Vec::new();
+        for (name, payload) in variants {
+            match payload {
+                VariantPayload::Unit => {}
+                VariantPayload::Single(ty, _) => {
+                    let mut out = Vec::new();
+                    targets(ty, cx, &mut out);
+                    edges.push((name.clone(), out));
+                }
+                VariantPayload::Named(fields) => {
+                    for field in fields {
+                        let mut out = Vec::new();
+                        targets(&field.ty, cx, &mut out);
+                        edges.push((format!("{}.{}", name, field.name), out));
+                    }
+                }
+            }
+        }
+        edges
+    }
+    // Out-edges of a type reached by name: the same maps `walk_type_edge` reads.
+    let named_edges = |name: &str| -> Vec<(String, Vec<String>)> {
+        let mut edges = cx
+            .struct_fields
+            .get(name)
+            .map(|fields| field_edges(fields, cx))
+            .unwrap_or_default();
+        if let Some(variants) = cx.enum_variants.get(name) {
+            edges.extend(variant_edges(variants, cx));
+        }
+        edges
+    };
+    let mut roots: Vec<(String, Vec<(String, Vec<String>)>)> = Vec::new();
+    for item in items {
+        match item {
+            Item::Struct(s) => {
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone()))
+                    .collect::<Vec<_>>();
+                roots.push((s.name.clone(), field_edges(&fields, cx)));
+            }
+            Item::Enum(e) => {
+                let variants = e
+                    .variants
+                    .iter()
+                    .map(|variant| (variant.name.clone(), variant.payload.clone()))
+                    .collect::<Vec<_>>();
+                roots.push((e.name.clone(), variant_edges(&variants, cx)));
+            }
+            _ => {}
+        }
+    }
+    let exact = || {
+        let mut boxed = HashSet::new();
+        for item in items {
+            match item {
+                Item::Struct(s) => boxed.extend(find_struct_box_edges(s, cx)),
+                Item::Enum(e) => boxed.extend(find_enum_box_edges(e, cx)),
+                _ => {}
+            }
+        }
+        boxed
+    };
+    let root_names = roots
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<HashSet<_>>();
+    // A root walks its own definition first, then later visits by name use
+    // the maps; the SCC shortcut assumes the two agree.
+    for (name, edges) in &roots {
+        if cx.type_names.contains(name) && named_edges(name) != *edges {
+            return exact();
+        }
+    }
+
+    // Graph over every type reachable from a root.
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut nodes: Vec<String> = Vec::new();
+    let mut adjacency: Vec<Vec<(String, Vec<String>)>> = Vec::new();
+    let mut pending: Vec<usize> = Vec::new();
+    for (name, edges) in &roots {
+        if index.contains_key(name) {
+            continue;
+        }
+        index.insert(name.clone(), nodes.len());
+        pending.push(nodes.len());
+        nodes.push(name.clone());
+        adjacency.push(edges.clone());
+    }
+    while let Some(node) = pending.pop() {
+        let successors = adjacency[node]
+            .iter()
+            .flat_map(|(_, targets)| targets.iter().cloned())
+            .collect::<Vec<_>>();
+        for target in successors {
+            if index.contains_key(&target) {
+                continue;
+            }
+            index.insert(target.clone(), nodes.len());
+            pending.push(nodes.len());
+            adjacency.push(named_edges(&target));
+            nodes.push(target);
+        }
+    }
+
+    // Iterative Tarjan strongly connected components.
+    let count = nodes.len();
+    let mut order = vec![usize::MAX; count];
+    let mut low = vec![0usize; count];
+    let mut on_stack = vec![false; count];
+    let mut component = vec![usize::MAX; count];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut next_order = 0usize;
+    let mut components = 0usize;
+    let successors = |node: usize| -> Vec<usize> {
+        adjacency[node]
+            .iter()
+            .flat_map(|(_, targets)| targets.iter().map(|target| index[target]))
+            .collect()
+    };
+    for start in 0..count {
+        if order[start] != usize::MAX {
+            continue;
+        }
+        let mut frames: Vec<(usize, Vec<usize>, usize)> = vec![(start, successors(start), 0)];
+        order[start] = next_order;
+        low[start] = next_order;
+        next_order += 1;
+        stack.push(start);
+        on_stack[start] = true;
+        while let Some((node, next, cursor)) = frames.last_mut() {
+            if *cursor < next.len() {
+                let child = next[*cursor];
+                *cursor += 1;
+                if order[child] == usize::MAX {
+                    order[child] = next_order;
+                    low[child] = next_order;
+                    next_order += 1;
+                    stack.push(child);
+                    on_stack[child] = true;
+                    let child_next = successors(child);
+                    frames.push((child, child_next, 0));
+                } else if on_stack[child] {
+                    let node = *node;
+                    low[node] = low[node].min(order[child]);
+                }
+                continue;
+            }
+            let node = *node;
+            frames.pop();
+            if let Some((parent, _, _)) = frames.last() {
+                let parent = *parent;
+                low[parent] = low[parent].min(low[node]);
+            }
+            if low[node] == order[node] {
+                while let Some(member) = stack.pop() {
+                    on_stack[member] = false;
+                    component[member] = components;
+                    if member == node {
+                        break;
+                    }
+                }
+                components += 1;
+            }
+        }
+    }
+    let mut sizes = vec![0usize; components];
+    for &id in &component {
+        sizes[id] += 1;
+    }
+    // A multi-type cycle through a non-root makes the union depend on which
+    // roots reach it; keep the exact path enumeration for that shape.
+    for (node, name) in nodes.iter().enumerate() {
+        if sizes[component[node]] > 1 && !root_names.contains(name) {
+            return exact();
+        }
+    }
+    let mut boxed = HashSet::new();
+    for (node, owner) in nodes.iter().enumerate() {
+        for (edge, targets) in &adjacency[node] {
+            if targets.iter().any(|target| {
+                target == owner || component[index[target]] == component[node]
+            }) {
+                boxed.insert((owner.clone(), edge.clone()));
+            }
+        }
+    }
+    // Debug builds prove the shortcut against the definition on graphs small
+    // enough to enumerate.
+    #[cfg(debug_assertions)]
+    if count <= 64 {
+        debug_assert_eq!(boxed, exact(), "SCC box edges differ from path enumeration");
+    }
+    boxed
+}
 
 pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
     let mut boxed = HashSet::new();
