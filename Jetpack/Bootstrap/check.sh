@@ -25,6 +25,7 @@ with_tests=0
 areas=""
 own_area=""
 each=0
+deps_from_head=0
 while (( $# > 0 )); do
   case "$1" in
     --tests) with_tests=1 ;;
@@ -33,7 +34,8 @@ while (( $# > 0 )); do
     --area) own_area="${2:?--area needs an area name}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")"; shift ;;
     --area=*) own_area="${1#--area=}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")" ;;
     --each) each=1 ;;
-    *) echo "usage: check.sh [--tests] [--area Area | --areas Area,Area | --each]" >&2; exit 64 ;;
+    --deps-from-head) deps_from_head=1 ;;
+    *) echo "usage: check.sh [--tests] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
   shift
 done
@@ -76,11 +78,17 @@ if [[ ! -x "$jet" ]]; then
   exit 69
 fi
 
-root_tag="$(printf '%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" | sha256sum | cut -c1-10)"
+root_tag="$(printf '%s\0%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" "$deps_from_head" | sha256sum | cut -c1-10)"
 scratch="$HOME/.cache/jet-luna/jetpack-bootstrap/$worker-$root_tag"
 export JETPACK_BOOTSTRAP_SOURCE_ROOT="$source_root" JETPACK_BOOTSTRAP_SCRATCH="$scratch" JETPACK_WORKER="$worker"
 if [[ -n "$sorted_areas" ]]; then export JETPACK_BOOTSTRAP_AREAS="$sorted_areas"; else unset JETPACK_BOOTSTRAP_AREAS; fi
 if [[ -n "$own_area" ]]; then export JETPACK_BOOTSTRAP_OWN_AREA="$own_area"; else unset JETPACK_BOOTSTRAP_OWN_AREA; fi
+if (( deps_from_head == 1 )); then
+  [[ -n "$own_area" ]] || { echo "jetpack-bootstrap: --deps-from-head needs --area" >&2; exit 64; }
+  export JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1
+else
+  unset JETPACK_BOOTSTRAP_DEPS_FROM_HEAD
+fi
 receipt="$scratch/check.receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-luna/jetpack-bootstrap/slots"
 

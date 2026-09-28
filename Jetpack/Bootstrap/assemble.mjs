@@ -9,6 +9,7 @@
 //   run    implementation + the same test bodies as functions, driven by one
 //          generated `fn run()` for the default `jet run` tier (I9)
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -80,10 +81,48 @@ async function jetFilesUnder(directory) {
   return files;
 }
 
+// With JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1 while proving one area, dependency
+// areas come from the last commit (list lines and file bytes), so another
+// writer's unfinished edits in a dependency cannot break this proof. The proved
+// area itself always comes from the working copy.
+const depsFromHead = process.env.JETPACK_BOOTSTRAP_DEPS_FROM_HEAD === "1" && process.env.JETPACK_BOOTSTRAP_OWN_AREA;
+function headFile(path) {
+  try {
+    return execFileSync("git", ["show", `HEAD:${path}`], { cwd: sourceRootDir, maxBuffer: 256 * 1024 * 1024 });
+  } catch (error) {
+    fail(`--deps-from-head: ${path} is not in HEAD (${error.message.split("\n")[0]})`);
+  }
+}
+function mergedManifest(workingText, name) {
+  if (!depsFromHead) return workingText;
+  const own = process.env.JETPACK_BOOTSTRAP_OWN_AREA;
+  const headSections = new Map();
+  let current = null;
+  for (const line of headFile(`Jetpack/Bootstrap/${name}`).toString("utf8").split(/\r?\n/)) {
+    const header = /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(line.trim());
+    if (header) current = header[1];
+    else if (current !== null) headSections.set(current, [...(headSections.get(current) ?? []), line]);
+  }
+  const out = [];
+  current = null;
+  for (const line of workingText.split(/\r?\n/)) {
+    const header = /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(line.trim());
+    if (header) {
+      current = header[1];
+      out.push(line);
+      if (current !== own) out.push(...(headSections.get(current) ?? []));
+    } else if (current === null || current === own) {
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
 async function readManifest(name) {
   const manifestPath = resolve(sourceRootDir, "Jetpack/Bootstrap", name);
   const label = relative(sourceRootDir, manifestPath);
-  const text = await readFile(manifestPath, "utf8").catch((error) => fail(`cannot read ${label}: ${error.message}`));
+  const workingText = await readFile(manifestPath, "utf8").catch((error) => fail(`cannot read ${label}: ${error.message}`));
+  const text = mergedManifest(workingText, name);
   const entries = [];
   // Section headers look like `# == PackageModel ==`; the name is the text before any `(`.
   let section = null;
@@ -105,15 +144,21 @@ async function readManifest(name) {
     if (!allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
-    let canonicalPath;
-    try {
-      canonicalPath = await realpath(absolutePath);
-    } catch (error) {
-      fail(`${where}: missing source ${sourcePath}: ${error.message}`);
+    const fromHead = depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA;
+    let bytes;
+    if (fromHead) {
+      bytes = headFile(sourcePath);
+    } else {
+      let canonicalPath;
+      try {
+        canonicalPath = await realpath(absolutePath);
+      } catch (error) {
+        fail(`${where}: missing source ${sourcePath}: ${error.message}`);
+      }
+      if (!containedPath(sourceRootDir, canonicalPath)) fail(`${sourcePath}: source resolves outside the source root`);
+      if (!(await stat(canonicalPath)).isFile()) fail(`${sourcePath}: source is not a regular file`);
+      bytes = await readFile(canonicalPath);
     }
-    if (!containedPath(sourceRootDir, canonicalPath)) fail(`${sourcePath}: source resolves outside the source root`);
-    if (!(await stat(canonicalPath)).isFile()) fail(`${sourcePath}: source is not a regular file`);
-    const bytes = await readFile(canonicalPath);
     const sourceText = bytes.toString("utf8");
     if (!Buffer.from(sourceText, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
     const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
