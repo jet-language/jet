@@ -74,14 +74,16 @@ fn trust_test_flake_error(text: String) -> TrustError {
 }
 
 #Test("floating or conflicting foreign inputs fail closed") {
-    if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`) == {
-        .MissingRevision(_) -> {}
-        else -> panic("expected MissingRevision")
+    floating :: if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`) == {
+        .MissingRevision(_) -> true
+        else -> false
     }
-    if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=aaaaaaa"; inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=bbbbbbb"; }`) == {
-        .ConflictingInput(_, _) -> {}
-        else -> panic("expected ConflictingInput")
+    assert(floating, "a floating input must fail with MissingRevision")
+    conflicting :: if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=aaaaaaa"; inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=bbbbbbb"; }`) == {
+        .ConflictingInput(_, _) -> true
+        else -> false
     }
+    assert(conflicting, "conflicting urls must fail with ConflictingInput")
 }
 
 #Test("semantic lock requires every flake input record") {
@@ -103,20 +105,22 @@ fn trust_test_flake_error(text: String) -> TrustError {
     graph :: trust_test_flake(source)
     locked :: graph
     current :: FlakeGraph.project("flake.nix", source) ?? panic("unchanged flake should project")
-    if locked.ensure_current(current) == {
-        .Ok(_) -> {}
-        .Err(_) -> panic("an unchanged flake keeps its lock")
+    unchanged_ok :: if locked.ensure_current(current) == {
+        .Ok(_) -> true
+        .Err(_) -> false
     }
+    assert(unchanged_ok, "an unchanged flake keeps its lock")
     changed :: FlakeGraph.project("flake.nix", "{source}\n# changed\n") ?? panic("changed flake should project")
-    if locked.ensure_current(changed) == {
-        .Ok(_) -> panic("expected StaleSemanticLock")
+    stale :: if locked.ensure_current(changed) == {
+        .Ok(_) -> false
         .Err(error) -> {
             if error == {
-                .StaleSemanticLock(_) -> {}
-                else -> panic("expected StaleSemanticLock")
+                .StaleSemanticLock(_) -> true
+                else -> false
             }
         }
     }
+    assert(stale, "a changed flake must reject the lock as StaleSemanticLock")
 }
 
 #Test("flake parts composition is graph data") {
