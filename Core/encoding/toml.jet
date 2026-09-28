@@ -10,7 +10,7 @@
 
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -45,7 +45,7 @@ struct TomlParser {
 }
 
 impl TomlParser {
-    fn eof(self) -> Bool { self.index >= self.bytes.len() }
+    fn eof(self) -> Bool !Never { self.index >= self.bytes.len() }
 
     fn peek(self) -> ?U8 {
         if self.eof() -> return None
@@ -62,7 +62,7 @@ impl TomlParser {
         Val(b)
     }
 
-    fn fail(self, reason: String) -> EncodingError {
+    fn fail(self, reason: String) -> EncodingError !Never {
         return syntax_error(
         EncodingFormat.TOML,
         self.index,
@@ -387,7 +387,7 @@ impl TomlParser {
     }
 }
 
-fn remove_underscores(text: String) -> String {
+fn remove_underscores(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         if b != (U8{95}) -> out.push(b)
@@ -395,7 +395,7 @@ fn remove_underscores(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn looks_toml_datetime(text: String) -> Bool {
+fn looks_toml_datetime(text: String) -> Bool !Never {
     raw :: text.bytes()
     if valid_toml_date(raw, 0, raw.len()) -> return true
     if valid_toml_time(raw, 0, raw.len()) -> return true
@@ -424,7 +424,7 @@ fn looks_toml_datetime(text: String) -> Bool {
     hour <= 23 && minute <= 59
 }
 
-fn valid_toml_date(raw: [U8], start: Int, end: Int) -> Bool {
+fn valid_toml_date(raw: [U8], start: Int, end: Int) -> Bool !Never {
     if start < 0 || end > raw.len() || start + 10 != end -> return false
     if raw[start + 4] != (U8{45}) || raw[start + 7] != (U8{45}) -> return false
     year :: toml_four_digits(raw, start, end) ?? return false
@@ -440,7 +440,7 @@ fn valid_toml_date(raw: [U8], start: Int, end: Int) -> Bool {
     day <= max_day
 }
 
-fn valid_toml_time(raw: [U8], start: Int, end: Int) -> Bool {
+fn valid_toml_time(raw: [U8], start: Int, end: Int) -> Bool !Never {
     if start < 0 || end > raw.len() || start + 8 > end -> return false
     if raw[start + 2] != (U8{58}) || raw[start + 5] != (U8{58}) -> return false
     hour :: toml_two_digits(raw, start, end) ?? return false
@@ -500,7 +500,7 @@ fn parse_radix_int(text: String) -> ?Int {
     Val(sign * n)
 }
 
-fn radix_digit(b: U8, base: Int) -> Int {
+fn radix_digit(b: U8, base: Int) -> Int !Never {
     n :: Int.from_u8(b)
     d := -1
     if n >= 48 && n <= 57 -> d = n - 48
@@ -510,7 +510,7 @@ fn radix_digit(b: U8, base: Int) -> Int {
     d
 }
 
-fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] {
+fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] !Never {
     if i >= path.len() -> return ~entries
     out := ~entries
     key :: path[i]
@@ -555,7 +555,7 @@ fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
     out
 }
 
-fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] {
+fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] !Never {
     if i >= path.len() -> return ~entries
     out := ~entries
     key :: path[i]
@@ -616,7 +616,7 @@ fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
     out
 }
 
-fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool {
+fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool !Never {
     if i >= path.len() -> return false
     key :: path[i]
     if i == path.len() - 1 -> return entries.has_key(key)
@@ -635,7 +635,7 @@ fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool {
     }
 }
 
-fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] {
+fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] !Never {
     out := ~entries
     key :: path[i]
     if i == path.len() - 1 {

@@ -19,7 +19,7 @@
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -32,7 +32,7 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
     }
 }
 
-fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError {
+fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Truncated,
@@ -44,7 +44,7 @@ fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, 
         cause: None,
     }
 }
-fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError {
+fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Limit,
@@ -57,7 +57,7 @@ fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingE
     }
 }
 
-fn safe_limits() -> EncodingLimits {
+fn safe_limits() -> EncodingLimits !Never {
     {
         buffer_bytes: 65536,
         max_depth: 256,
@@ -148,7 +148,7 @@ impl Parser {
         }
     }
 
-    fn eof(self) -> Bool { self.index >= self.bytes.len() }
+    fn eof(self) -> Bool !Never { self.index >= self.bytes.len() }
 
     fn peek(self) -> ?U8 {
         if self.eof() -> return None
@@ -167,7 +167,7 @@ impl Parser {
         Val(b)
     }
 
-    fn err(self, reason: String) -> EncodingError {
+    fn err(self, reason: String) -> EncodingError !Never {
         return syntax_error(
             EncodingFormat.JSON,
             self.index,
@@ -202,7 +202,7 @@ impl Parser {
         true
     }
 
-    fn expect(&self, want: U8) -> Bool {
+    fn expect(&self, want: U8) -> Bool !Never {
         got :: self.bump()
         if got == .None -> return false
         b :: got
@@ -460,7 +460,7 @@ impl Parser {
         }
     }
 
-    fn enter(&self) -> Bool {
+    fn enter(&self) -> Bool !Never {
         self.depth += 1
         self.depth <= safe_limits().max_depth
     }
@@ -517,7 +517,7 @@ fn parse_json(text: String) -> DataTree !EncodingError {
     Ok(value)
 }
 
-fn append_events(value: DataTree) -> [DataEvent] {
+fn append_events(value: DataTree) -> [DataEvent] !Never {
     out := [DataEvent]{}
     if value == {
         .Null -> out.push(DataEvent.Null)
@@ -553,8 +553,8 @@ fn hex_digit(b: U8) -> ?Int {
     if n >= 65 && n <= 70 -> return Val(n - 55)
     None
 }
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
-fn utf8_bytes(cp: Int) -> [U8] {
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
+fn utf8_bytes(cp: Int) -> [U8] !Never {
     out := [U8]{}
     if cp < 128 {
         out.push(U8{cp})

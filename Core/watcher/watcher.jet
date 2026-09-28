@@ -78,7 +78,7 @@ pub fn kind(handle: WatchHandle) -> String {
     summary_kind(handle.summary())
 }
 
-pub fn target(handle: WatchHandle) -> String {
+pub fn target(handle: WatchHandle) -> String !Never {
     summary_target(handle.summary())
 }
 
@@ -148,7 +148,7 @@ fn summary_kind(text: String) -> String {
     "watch"
 }
 
-fn summary_target(text: String) -> String {
+fn summary_target(text: String) -> String !Never {
     if has_prefix(text, "watch file ") -> return suffix(text, 11)
     if has_prefix(text, "watch process ") -> return suffix(text, 14)
     if has_prefix(text, "watch port ") -> return suffix(text, 11)
@@ -169,7 +169,7 @@ fn summary_count(text: String) -> Int {
     n
 }
 
-fn has_prefix(text: String, prefix: String) -> Bool {
+fn has_prefix(text: String, prefix: String) -> Bool !Never {
     raw := text.bytes()
     want := prefix.bytes()
     if want.len() > raw.len() -> return false
@@ -179,7 +179,7 @@ fn has_prefix(text: String, prefix: String) -> Bool {
     true
 }
 
-fn suffix(text: String, start: Int) -> String {
+fn suffix(text: String, start: Int) -> String !Never {
     raw := text.bytes()
     out := [U8]{}
     i := start

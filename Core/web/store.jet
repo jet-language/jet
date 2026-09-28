@@ -230,7 +230,7 @@ pub fn event_json<T>(store: WebStore<T>) -> String {
     "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation}}}"
 }
 
-fn record<T>(store: &WebStore<T>) {
+fn record<T>(store: &WebStore<T>) !Never {
     store.generation = store.generation + 1
     if !store.history_enabled -> return
     if store.cursor + 1 < store.history.len() {
@@ -243,7 +243,7 @@ fn record<T>(store: &WebStore<T>) {
     store.cursor = store.history.len() - 1
 }
 
-fn tail<T>(values: [T], count: Int) -> [T] {
+fn tail<T>(values: [T], count: Int) -> [T] !Never {
     start := values.len() - count
     if start < 0 -> start = 0
     out := [T]{ }

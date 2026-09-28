@@ -39,7 +39,7 @@ pub fn upgrade(request: HTTPRequest) -[Net]> WsConn !WsError {
     core.net.ws.upgrade(request)
 }
 
-fn header_has_token(value: String, wanted: String) -> Bool {
+fn header_has_token(value: String, wanted: String) -> Bool !Never {
     raw :: ascii_lower(value).bytes()
     target :: ascii_lower(wanted)
     start := 0
@@ -55,7 +55,7 @@ fn header_has_token(value: String, wanted: String) -> Bool {
     false
 }
 
-fn trim_ascii(text: String) -> String {
+fn trim_ascii(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -71,7 +71,7 @@ fn trim_ascii(text: String) -> String {
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -80,7 +80,7 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     out := [U8]{}
     i := start
     loop {

@@ -1,7 +1,7 @@
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -14,7 +14,7 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
     }
 }
 
-fn safe_limits() -> EncodingLimits {
+fn safe_limits() -> EncodingLimits !Never {
     {
         buffer_bytes: 65536,
         max_depth: 256,
@@ -109,7 +109,7 @@ fn decode_cbor(data: [U8]) -> DataTree !EncodingError {
 }
 
 impl CBORReader {
-    fn fail(self, kind: EncodingErrorKind, reason: String) -> EncodingError {
+    fn fail(self, kind: EncodingErrorKind, reason: String) -> EncodingError !Never {
         {
             format: EncodingFormat.CBOR,
             kind: kind,

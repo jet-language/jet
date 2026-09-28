@@ -127,7 +127,7 @@ pub fn which(name: String) -[FS, Env]> ?String {
     }
     None
 }
-fn path_is_absolute(path: String) -> Bool {
+fn path_is_absolute(path: String) -> Bool !Never {
     raw :: path.bytes()
     if raw.len() == 0 -> return false
     if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
@@ -138,12 +138,12 @@ fn path_is_absolute(path: String) -> Bool {
         (raw[2] == (U8{47}) || raw[2] == (U8{92}))
 }
 
-fn path_is_file(path: String) -[FS]> Bool {
+fn path_is_file(path: String) -[FS]> Bool !Never {
     stat :: core.files.stat(path) ?? return false
     stat.is_file
 }
 
-fn path_join(base: String, name: String) -> String {
+fn path_join(base: String, name: String) -> String !Never {
     if name.len() == 0 -> return ~base
     if path_is_absolute(name) || base.len() == 0 -> return ~name
     last :: base.bytes()[base.bytes().len() - 1]
@@ -151,7 +151,7 @@ fn path_join(base: String, name: String) -> String {
     "{base}/{name}"
 }
 
-fn path_separator_for_platform(family: String) -> U8 {
+fn path_separator_for_platform(family: String) -> U8 !Never {
     if family == "windows" -> return U8{59}
     U8{58}
 }
@@ -178,7 +178,7 @@ pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
 }
 
 
-pub fn combined_output(receipt: ProcessReceipt) -> String {
+pub fn combined_output(receipt: ProcessReceipt) -> String !Never {
     if receipt.output.len() == 0 -> return receipt.errors
     if receipt.errors.len() == 0 -> return receipt.output
     "{receipt.output}\n{receipt.errors}"
@@ -237,7 +237,7 @@ pub fn stdout_lines(receipt: ProcessReceipt) -> [String] {
 pub fn exited(receipt: ProcessReceipt) -> Bool {
     receipt.signal == None && !receipt.timed_out
 }
-fn contains_path_separator(value: String) -> Bool {
+fn contains_path_separator(value: String) -> Bool !Never {
     loop byte in value.bytes() {
         if byte == (U8{47}) || byte == (U8{92}) -> return true
     }
@@ -250,7 +250,7 @@ fn path_separator(value: String) -> U8 {
     U8{58}
 }
 
-fn path_parts(value: String, separator: U8) -> [String] {
+fn path_parts(value: String, separator: U8) -> [String] !Never {
     raw :: value.bytes()
     out := [String]{}
     start := 0
@@ -337,7 +337,7 @@ fn quote_arg(value: String) -> String {
     String.from_bytes(out) ?? ~value
 }
 
-fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop i < end {

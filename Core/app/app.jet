@@ -80,7 +80,7 @@ pub fn auth_show(auth: Auth) -> String {
     "Auth(users={table}, providers=[{providers.join(",")}])"
 }
 fn canonical_table(value: String) -> String {
-    if valid_identifier(value) -> value
+    if valid_identifier(value) -> return ~value
     ""
 }
 
@@ -180,7 +180,7 @@ fn valid_identifier(value: String) -> Bool {
     true
 }
 
-fn has_control(value: String) -> Bool {
+fn has_control(value: String) -> Bool !Never {
     loop byte in value.bytes() {
         n :: Int.from_u8(byte)
         if n < 32 || n == 127 -> return true
@@ -188,7 +188,7 @@ fn has_control(value: String) -> Bool {
     false
 }
 
-fn footprint_atoms(value: String) -> [String] {
+fn footprint_atoms(value: String) -> [String] !Never {
     atoms := [String]{}
     loop comma_group in value.split(",") {
         loop semi_group in comma_group.split(";") {
@@ -236,7 +236,7 @@ fn valid_live_query(q: LiveQuery) -> Bool {
 }
 
 
-fn valid_footprint(value: String) -> Bool {
+fn valid_footprint(value: String) -> Bool !Never {
     if value.trim() == "" || value.len() > 512 -> return false
     atoms := footprint_atoms(value)
     if atoms.len() == 0 -> return false
@@ -246,7 +246,7 @@ fn valid_footprint(value: String) -> Bool {
     true
 }
 
-fn valid_footprint_atom(value: String) -> Bool {
+fn valid_footprint_atom(value: String) -> Bool !Never {
     loop byte in value.bytes() {
         n :: Int.from_u8(byte)
         allowed ::
@@ -260,7 +260,7 @@ fn valid_footprint_atom(value: String) -> Bool {
     true
 }
 
-fn canonical_document(value: String) -> Bool {
+fn canonical_document(value: String) -> Bool !Never {
     if value.len() == 0 || value.len() > LIVE_MAX_PAYLOAD || value != value.trim() || has_control(value) || !value.ends_with(")") -> return false
     if value.starts_with("SyncText(") -> return true
     if value.starts_with("SyncMap(") -> return true

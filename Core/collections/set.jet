@@ -11,7 +11,7 @@ fn copy_strings(xs: [String]) -> [String] {
     out
 }
 
-fn has_string(xs: [String], item: String) -> Bool {
+fn has_string(xs: [String], item: String) -> Bool !Never {
     loop x in xs {
         if x == item -> return true
     }
@@ -35,7 +35,7 @@ pub fn add(s: StringSet, item: String) -> StringSet {
     StringSet{items: items}
 }
 
-pub fn discard(s: StringSet, item: String) -> StringSet {
+pub fn discard(s: StringSet, item: String) -> StringSet !Never {
     items := [String]{}
     loop x in s.items {
         if x != item -> items.push(~x)
@@ -48,7 +48,7 @@ pub fn remove(s: StringSet, item: String) -> ?StringSet {
     Val(discard(s, item))
 }
 
-pub fn contains(s: StringSet, item: String) -> Bool {
+pub fn contains(s: StringSet, item: String) -> Bool !Never {
     has_string(s.items, item)
 }
 

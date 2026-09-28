@@ -48,7 +48,7 @@ pub fn parse_ipv4(text: String) -> IPv4 !IOError {
 
 pub fn ipv4_to_string(addr: IPv4) -> String { "{addr.a}.{addr.b}.{addr.c}.{addr.d}" }
 
-pub fn ipv4_int(addr: IPv4) -> Int { ((addr.a * 256 + addr.b) * 256 + addr.c) * 256 + addr.d }
+pub fn ipv4_int(addr: IPv4) -> Int !Never { ((addr.a * 256 + addr.b) * 256 + addr.c) * 256 + addr.d }
 
 pub fn ipv4_from_int(n: Int) -> IPv4 !IOError {
     if n < 0 || n > 4294967295 -> return Err(net_err("IPv4 integer out of range"))
@@ -192,13 +192,13 @@ pub fn ipv6_is_link_local(addr: IPv6) -> Bool {
     addr.words.len() == 8 && addr.words[0] & 65472 == 65152
 }
 
-fn prefix_mask(prefix: Int) -> Int {
+fn prefix_mask(prefix: Int) -> Int !Never {
     if prefix <= 0 -> return 0
     if prefix >= 32 -> return 4294967295
     (int_pow2(prefix) - 1) * int_pow2(32 - prefix)
 }
 
-fn int_pow2(n: Int) -> Int {
+fn int_pow2(n: Int) -> Int !Never {
     acc := 1
     i := 0
     loop i < n {
@@ -208,14 +208,14 @@ fn int_pow2(n: Int) -> Int {
     acc
 }
 
-fn split_dot(text: String) -> [String] { split_byte(text, 46) }
+fn split_dot(text: String) -> [String] !Never { split_byte(text, 46) }
 
-fn split_colon(text: String) -> [String] {
+fn split_colon(text: String) -> [String] !Never {
     raw :: text.bytes()
     if raw.len() == 0 -> return [String]{}
     split_byte(String.from_bytes(raw) ?? "", 58)
 }
-fn split_byte(text: String, code: Int) -> [String] {
+fn split_byte(text: String, code: Int) -> [String] !Never {
     raw :: text.bytes()
     out := [String]{}
     start := 0
@@ -254,7 +254,7 @@ fn parse_int(text: String) -> ?Int {
         d :: Int.from_u8(b)
         if d < 48 || d > 57 -> return None
         digit :: d - 48
-        if n > (9223372036854775807 - digit) / 10 -> return None
+        if n > (9223372036854775807 - digit) /% 10 -> return None
         n = n * 10 + digit
     }
     Val(n)
@@ -272,12 +272,12 @@ fn parse_hex4(text: String) -> ?Int {
     Val(n)
 }
 
-fn hex_val(b: U8) -> Int {
+fn hex_val(b: U8) -> Int !Never {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
-    -1
+    return -1
 }
 
 fn hex4(n: Int) -> String {
@@ -293,7 +293,7 @@ fn hex4(n: Int) -> String {
     String.from_bytes(out) ?? "0000"
 }
 
-fn find_dcolon(text: String) -> Int {
+fn find_dcolon(text: String) -> Int !Never {
     raw :: text.bytes()
     if raw.len() < 2 -> return -1
     i := 0
@@ -304,7 +304,7 @@ fn find_dcolon(text: String) -> Int {
     -1
 }
 
-fn slice_u(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     limit := if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out
@@ -312,11 +312,11 @@ fn slice_u(raw: [U8], start: Int, end: Int) -> [U8] {
     out
 }
 
-fn slice_str(text: String, start: Int, end: Int) -> String {
+fn slice_str(text: String, start: Int, end: Int) -> String !Never {
     String.from_bytes(slice_u(text.bytes(), start, end)) ?? ""
 }
 
-fn net_err(message: String) -> IOError {
+fn net_err(message: String) -> IOError !Never {
     IOError.InvalidInput(IOContext{
         operation: .Resolve,
         resource: None,

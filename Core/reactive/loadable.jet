@@ -58,6 +58,6 @@ pub fn reason<T, E>(state: Loadable<T, E>) -> ?E {
 // Retry starts a fresh attempt only from an idle or failed state.  A loaded
 // result is stable, and retrying an in-flight request must not discard it.
 pub fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> {
-    if is_failed(state) || is_idle(state) -> return Loadable.Loading
+    if is_failed<T, E>(state) || is_idle<T, E>(state) -> return Loadable.Loading
     ~state
 }

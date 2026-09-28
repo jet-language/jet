@@ -1,7 +1,7 @@
 use core as core
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -14,7 +14,7 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
     }
 }
 
-fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError {
+fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError !Never {
     {
         format: format,
         kind: EncodingErrorKind.Unsupported,
@@ -118,7 +118,7 @@ pub fn query(path: String, sql: String) -[FS]> DataTree !EncodingError {
     Ok(DataTree.Array(items))
 }
 
-fn trim_ascii(text: String) -> String {
+fn trim_ascii(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -142,7 +142,7 @@ fn trim_ascii(text: String) -> String {
     String.from_bytes(raw[start..end - 1]) ?? ""
 }
 
-fn ascii_fold(text: String) -> String {
+fn ascii_fold(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b

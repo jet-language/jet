@@ -148,7 +148,7 @@ pub struct SendReport {
     pub accepted_at: String
 }
 
-pub fn limits() -> Limits {
+pub fn limits() -> Limits !Never {
     Limits{
         max_reply_line_bytes: C_MAX_REPLY_LINE_BYTES,
         max_reply_lines: C_MAX_REPLY_LINES,
@@ -296,7 +296,7 @@ pub fn smtp(config: SMTPConfig) -[Net]> Mailer !EmailError {
     core.email.smtp(config)
 }
 
-fn no_smtp_auth() -> SMTPAuth { .None }
+fn no_smtp_auth() -> SMTPAuth !Never { .None }
 
 fn no_dkim() -> ?DkimConfig { None }
 
@@ -445,7 +445,7 @@ fn parse_smtp_integer(text: String) -> ?Int {
     Val(value)
 }
 
-fn split_signed_headers(text: String) -> [String] {
+fn split_signed_headers(text: String) -> [String] !Never {
     raw := text.bytes()
     headers := [String]{}
     start := 0
@@ -613,12 +613,12 @@ fn validate_ca_pem(pem: [U8]) -> ?String {
     None
 }
 
-fn is_ascii_space(byte: U8) -> Bool {
+fn is_ascii_space(byte: U8) -> Bool !Never {
     n :: Int.from_u8(byte)
     n == 32 || (n >= 9 && n <= 13)
 }
 
-fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool {
+fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool !Never {
     if start < 0 || start + value.len() > raw.len() -> return false
     loop i in 0..<value.len() {
         if raw[start + i] != value[i] -> return false
@@ -675,7 +675,7 @@ fn validate_dkim_config(dkim: DkimConfig) -> ?EmailError {
     None
 }
 
-fn valid_dns_name(text: String) -> Bool {
+fn valid_dns_name(text: String) -> Bool !Never {
     raw := text.bytes()
     if raw.len() == 0 || raw.len() > 253 || !is_ascii(text) -> return false
     start := 0
@@ -738,14 +738,14 @@ fn ends_with_byte(text: String, needle: Int) -> Bool {
     raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == needle
 }
 
-fn slice_text(text: String, start: Int, end: Int) -> String {
+fn slice_text(text: String, start: Int, end: Int) -> String !Never {
     raw := text.bytes()
     out := [U8]{}
     loop i in start..<end -> out.push(raw[i])
     String.from_bytes(out) ?? ""
 }
 
-fn has_control(text: String) -> Bool {
+fn has_control(text: String) -> Bool !Never {
     raw := text.bytes()
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])
@@ -799,7 +799,7 @@ fn parse_display(text: String) -> String !EmailError {
     Ok(String.from_bytes(out) ?? return Err(invalid_address("quoted display name is not valid UTF-8")))
 }
 
-fn is_atext(byte: U8) -> Bool {
+fn is_atext(byte: U8) -> Bool !Never {
     n :: Int.from_u8(byte)
     (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 47 || n == 61 || n == 63 || n == 94 || n == 95 || n == 96 || n == 123 || n == 124 || n == 125 || n == 126 || n == 46
 }
@@ -929,7 +929,7 @@ fn validate_attachment_parts(name: String, mime: String, bytes: [U8]) -> Bool !E
     Ok(true)
 }
 
-fn valid_mime(text: String) -> Bool {
+fn valid_mime(text: String) -> Bool !Never {
     raw := text.bytes()
     slash := -1
     loop i in 0..<raw.len() {
@@ -945,11 +945,11 @@ fn valid_mime(text: String) -> Bool {
     slash > 0 && slash + 1 < raw.len()
 }
 
-fn physical_header_fits(name: String, value_bytes: Int) -> Bool {
+fn physical_header_fits(name: String, value_bytes: Int) -> Bool !Never {
     name.bytes().len() + 2 + value_bytes + 2 <= C_MAX_HEADER_BYTES
 }
 
-fn percent_encoded_len(text: String) -> Int {
+fn percent_encoded_len(text: String) -> Int !Never {
     total := 0
     loop byte in text.bytes() {
         n :: Int.from_u8(byte)
@@ -959,7 +959,7 @@ fn percent_encoded_len(text: String) -> Int {
     total
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop byte in text.bytes() {
         n :: Int.from_u8(byte)
@@ -1031,7 +1031,7 @@ subject: String,
 text: String,
 html: String,
 attachments: [Attachment],
-) -> Int {
+) -> Int !Never {
     total := 4096 + rendered_address_len(from)
     loop visible_recipient in to -> total += rendered_address_len(visible_recipient) + 4
     total += encoded_header_len(~subject) + 32
@@ -1145,7 +1145,7 @@ fn validate_message_record(message: Message) -> Bool !EmailError {
     Ok(true)
 }
 
-fn prospective_message_wire_upper(message: Message) -> Int {
+fn prospective_message_wire_upper(message: Message) -> Int !Never {
     sender := ~message.from
     total := 4096 + rendered_address_len(sender)
     loop visible_recipient in message.to -> total += rendered_address_len(visible_recipient) + 4
@@ -1168,9 +1168,9 @@ fn validate_message_headers(message: Message) -> Bool !EmailError {
     validate_rendered_headers(sender, visible, subject)
 }
 
-fn rendered_address_len(address: Address) -> Int { render_address(address).bytes().len() }
+fn rendered_address_len(address: Address) -> Int !Never { render_address(address).bytes().len() }
 
-fn boundary(message: Message, label: String) -> String {
+fn boundary(message: Message, label: String) -> String !Never {
     state := boundary_digest(label.bytes())
     index := 1
     index = absorb_boundary(&state, index, message.subject.bytes())
@@ -1186,7 +1186,7 @@ fn boundary(message: Message, label: String) -> String {
     "jet-{label}-{hex.encode(suffix)}"
 }
 
-fn absorb_boundary(state: &[U8], index: Int, bytes: [U8]) -> Int {
+fn absorb_boundary(state: &[U8], index: Int, bytes: [U8]) -> Int !Never {
     digest :: boundary_digest(bytes)
     loop slot in 0..<32 {
         sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])) %% 256
@@ -1198,12 +1198,12 @@ fn absorb_boundary(state: &[U8], index: Int, bytes: [U8]) -> Int {
     index + 1
 }
 
-fn boundary_digest(bytes: [U8]) -> [U8] {
+fn boundary_digest(bytes: [U8]) -> [U8] !Never {
     digest_hex :: sha256(bytes).hex()
     hex.decode(digest_hex) ?? panic("SHA-256 returned invalid hexadecimal")
 }
 
-fn render_address(address: Address) -> String {
+fn render_address(address: Address) -> String !Never {
     if address.display == {
         .None -> return address.mailbox
         .Val(display) -> {
@@ -1214,7 +1214,7 @@ fn render_address(address: Address) -> String {
     address.mailbox
 }
 
-fn render_ascii_display(display: String) -> String {
+fn render_ascii_display(display: String) -> String !Never {
     raw := display.bytes()
     phrase_safe := raw.len() > 0
     start := 0
@@ -1235,14 +1235,14 @@ fn render_ascii_display(display: String) -> String {
     String.from_bytes(out) ?? display
 }
 
-fn is_ascii(text: String) -> Bool {
+fn is_ascii(text: String) -> Bool !Never {
     loop byte in text.bytes() {
         if Int.from_u8(byte) >= 128 -> return false
     }
     true
 }
 
-fn encode_header(text: String) -> String {
+fn encode_header(text: String) -> String !Never {
     if is_ascii(text) -> return ~text
     raw := text.bytes()
     out := [U8]{}
@@ -1274,7 +1274,7 @@ fn encode_header(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn utf8_width(byte: U8) -> Int {
+fn utf8_width(byte: U8) -> Int !Never {
     n :: Int.from_u8(byte)
     if n < 128 -> return 1
     if n < 224 -> return 2
@@ -1282,7 +1282,7 @@ fn utf8_width(byte: U8) -> Int {
     4
 }
 
-fn render_addresses(addresses: [Address], name: String) -> String {
+fn render_addresses(addresses: [Address], name: String) -> String !Never {
     out := [U8]{}
     physical := name.bytes().len() + 2
     item_index := 0
@@ -1309,7 +1309,7 @@ fn render_addresses(addresses: [Address], name: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn first_line_len(text: String) -> Int {
+fn first_line_len(text: String) -> Int !Never {
     raw := text.bytes()
     i := 0
     loop i + 1 < raw.len() {
@@ -1319,7 +1319,7 @@ fn first_line_len(text: String) -> Int {
     raw.len()
 }
 
-fn contains_crlf(text: String) -> Bool {
+fn contains_crlf(text: String) -> Bool !Never {
     raw := text.bytes()
     loop i in 0..<(raw.len() - 1) {
         if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) -> return true
@@ -1327,7 +1327,7 @@ fn contains_crlf(text: String) -> Bool {
     false
 }
 
-fn last_line_len(text: String) -> Int {
+fn last_line_len(text: String) -> Int !Never {
     raw := text.bytes()
     i := raw.len()
     loop i >= 2 {
@@ -1337,17 +1337,17 @@ fn last_line_len(text: String) -> Int {
     raw.len()
 }
 
-fn encoded_header_len(text: String) -> Int { encode_header(text).bytes().len() }
+fn encoded_header_len(text: String) -> Int !Never { encode_header(text).bytes().len() }
 
-fn base64_lines_len(byte_count: Int) -> Int {
+fn base64_lines_len(byte_count: Int) -> Int !Never {
     encoded :: base64_len(byte_count)
     if encoded == 0 -> return 0
     encoded + (((encoded + 75) /% 76) - 1) * 2
 }
 
-fn base64_len(byte_count: Int) -> Int { ((byte_count + 2) /% 3) * 4 }
+fn base64_len(byte_count: Int) -> Int !Never { ((byte_count + 2) /% 3) * 4 }
 
-fn base64_lines(bytes: [U8]) -> String {
+fn base64_lines(bytes: [U8]) -> String !Never {
     encoded :: base64.encode(bytes)
     raw :: encoded.bytes()
     out := [U8]{}
@@ -1376,12 +1376,12 @@ fn percent_encode(text: String) -> String !EmailError {
     Ok(String.from_bytes(out) ?? return Err(invalid_attachment("filename encoding is not valid UTF-8")))
 }
 
-fn hex_digit(value: Int) -> U8 {
+fn hex_digit(value: Int) -> U8 !Never {
     if value < 10 -> return U8{48 + value}
     U8{55 + value}
 }
 
-fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     loop i in start..<end -> out.push(raw[i])
     out
@@ -1396,7 +1396,7 @@ fn add_header(out: &[U8], name: String, value: String) -> Bool !EmailError {
     Ok(true)
 }
 
-fn validate_folded_header(name: String, value: String) -> Bool {
+fn validate_folded_header(name: String, value: String) -> Bool !Never {
     raw := value.bytes()
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])

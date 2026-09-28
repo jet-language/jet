@@ -63,7 +63,7 @@ pub struct Digest256 {
 
     pub fn as_bytes(self) -> [U8] { self.bytes }
 
-    pub fn hex(self) -> String { hex_encode(self.bytes) }
+    pub fn hex(self) -> String !Never { hex_encode(self.bytes) }
 }
 
 pub struct Digest512 {
@@ -71,7 +71,7 @@ pub struct Digest512 {
 
     pub fn as_bytes(self) -> [U8] { self.bytes }
 
-    pub fn hex(self) -> String { hex_encode(self.bytes) }
+    pub fn hex(self) -> String !Never { hex_encode(self.bytes) }
 }
 
 pub struct Hasher {
@@ -125,7 +125,7 @@ pub struct Sealed {
     pub bytes: [U8]
 }
 
-pub fn sealed_bytes(value: Sealed) -> [U8] { value.bytes }
+pub fn sealed_bytes(value: Sealed) -> [U8] !Never { value.bytes }
 
 pub struct WrappedKey {
     pub bytes: [U8]
@@ -149,7 +149,7 @@ pub struct KeyWrapError {
 }
 
 /// SHA-256. Pure Jet, RFC 6234. Allocates a 32-byte digest.
-pub fn sha256(bytes: [U8]) -> Digest256 { {bytes: sha256_raw(bytes)} }
+pub fn sha256(bytes: [U8]) -> Digest256 !Never { {bytes: sha256_raw(bytes)} }
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
 pub fn sha224(bytes: [U8]) -> String { hex_encode(sha2_256(bytes, C_SHA224_IV)[0..27]) }
@@ -174,7 +174,7 @@ pub fn sha3_512(bytes: [U8]) -> String { hex_encode(keccak(bytes, 72, 64, 0x06))
 pub fn blake3(bytes: [U8]) -> Digest256 { {bytes: blake3_raw(bytes)} }
 
 /// HMAC-SHA256 (RFC 4231).
-pub fn hmac_sha256(key: [U8], data: [U8]) -> [U8] { hmac_sha256_raw(key, data) }
+pub fn hmac_sha256(key: [U8], data: [U8]) -> [U8] !Never { hmac_sha256_raw(key, data) }
 
 /// HKDF-SHA256 expand. `len` is 0..=8160. The output is a `Secret` so callers
 /// cannot print it by accident.
@@ -226,7 +226,7 @@ pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) ->
     Ok(out)
 }
 
-pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool {
+pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool !Never {
     diff := 0
     if a.len() != b.len() -> diff = 1
     n :: a.len()
@@ -380,7 +380,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] !Crypt
     Ok(opened)
 }
 
-fn canonical_recipients(items: [X25519PublicKey]) -> [X25519PublicKey] {
+fn canonical_recipients(items: [X25519PublicKey]) -> [X25519PublicKey] !Never {
     out := [X25519PublicKey]{}
     loop item in items -> out.push(X25519PublicKey{bytes: copy_bytes(item.bytes)})
     i := 1
@@ -397,7 +397,7 @@ fn canonical_recipients(items: [X25519PublicKey]) -> [X25519PublicKey] {
     out
 }
 
-fn key_order(a: [U8], b: [U8]) -> Int {
+fn key_order(a: [U8], b: [U8]) -> Int !Never {
     if a.len() != b.len() {
         if a.len() < b.len() -> return -1
         return 1
@@ -466,7 +466,7 @@ pub fn x25519_public(secret_key: X25519SecretKey) -> X25519PublicKey !CryptoErro
     Ok(X25519PublicKey{bytes: x25519_scalarmult(secret_key.bytes, base)})
 }
 
-fn all_zero(bytes: [U8]) -> Bool {
+fn all_zero(bytes: [U8]) -> Bool !Never {
     diff := 0
     loop b in bytes -> diff = diff | Int.from_u8(b)
     diff == 0
@@ -628,7 +628,7 @@ fn parse_prefixed_int(text: String, prefix: String) -> ?Int {
     parse_int(value)
 }
 
-fn split_comma(text: String) -> [String] {
+fn split_comma(text: String) -> [String] !Never {
     out := [String]{}
     current := [U8]{}
     loop b in text.bytes() {
@@ -641,7 +641,7 @@ fn split_comma(text: String) -> [String] {
     out
 }
 
-fn phc_b64_encode(bytes: [U8]) -> String {
+fn phc_b64_encode(bytes: [U8]) -> String !Never {
     alphabet :: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     raw :: alphabet.bytes()
     out := [U8]{}
@@ -801,37 +801,37 @@ C_SHA384_IV :: [Int]{
     0x47b5481dbefa4fa4,
 }
 
-fn wrap32(n: Int) -> Int { n & C_MASK32 }
+fn wrap32(n: Int) -> Int !Never { n & C_MASK32 }
 
-fn wrap64(n: Int) -> Int { n & C_MASK64 }
+fn wrap64(n: Int) -> Int !Never { n & C_MASK64 }
 
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-fn read_be32(data: [U8], offset: Int) -> Int {
+fn read_be32(data: [U8], offset: Int) -> Int !Never {
     if offset < 0 || offset + 4 > data.len() -> return 0
     (Int.from_u8(data[offset]) << 24) | (Int.from_u8(data[offset + 1]) << 16) | (Int.from_u8(data[offset + 2]) << 8) | Int.from_u8(data[offset + 3])
 }
 
 /// Low 8 bits as `U8`. Mask in `Int` first so the constructor never sees a
 /// value outside `0..=255`.
-fn to_u8(n: Int) -> U8 {
+fn to_u8(n: Int) -> U8 !Never {
     v :: n & 255
     (U8{v})
 }
 
 /// Big-endian 32-bit word from four bytes at `i`.
-fn be32_word(bytes: [U8], i: Int) -> Int {
+fn be32_word(bytes: [U8], i: Int) -> Int !Never {
     (u8_int(bytes[i]) << 24) | (u8_int(bytes[i + 1]) << 16) | (u8_int(bytes[i + 2]) << 8) | u8_int(bytes[i + 3])
 }
 
-fn rotr32(x: Int, n: Int) -> Int {
+fn rotr32(x: Int, n: Int) -> Int !Never {
     v :: wrap32(x)
     wrap32((v >> n) | (v << (32 - n)))
 }
 
-fn sha256_raw(data: [U8]) -> [U8] { sha2_256(data, C_SHA256_IV) }
+fn sha256_raw(data: [U8]) -> [U8] !Never { sha2_256(data, C_SHA256_IV) }
 
-fn sha2_256(data: [U8], iv: [Int]) -> [U8] {
+fn sha2_256(data: [U8], iv: [Int]) -> [U8] !Never {
     msg := copy_bytes(~data)
     bit_len :: data.len() * 8
     msg.push(U8{0x80})
@@ -945,7 +945,7 @@ fn sha1_raw(data: [U8]) -> [U8] {
     words_to_bytes([Int]{h0, h1, h2, h3, h4}, 4)
 }
 
-fn sha512_raw(data: [U8], iv: [Int]) -> [U8] { sha2_512(data, iv) }
+fn sha512_raw(data: [U8], iv: [Int]) -> [U8] !Never { sha2_512(data, iv) }
 
 C_SHA512_K :: [Int]{
     0x428a2f98d728ae22,
@@ -1030,14 +1030,14 @@ C_SHA512_K :: [Int]{
     0x6c44198c4a475817,
 }
 
-fn rotr64(x: Int, n: Int) -> Int {
+fn rotr64(x: Int, n: Int) -> Int !Never {
     v :: wrap64(x)
     r :: n & 63
     if r == 0 -> return v
     wrap64((v >> r) | (v << (64 - r)))
 }
 
-fn sha2_512(data: [U8], iv: [Int]) -> [U8] {
+fn sha2_512(data: [U8], iv: [Int]) -> [U8] !Never {
     msg := copy_bytes(~data)
     bit_len :: data.len() * 8
     msg.push(U8{0x80})
@@ -1094,7 +1094,7 @@ fn sha2_512(data: [U8], iv: [Int]) -> [U8] {
     words_to_bytes(state, 8)
 }
 
-fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] {
+fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] !Never {
     k := [U8]{}
     loop _ in 0..<64 -> k.push(U8{0})
     if key.len() > 64 {
@@ -1113,12 +1113,12 @@ fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] {
     sha256_raw(outer)
 }
 
-fn rotl32(x: Int, n: Int) -> Int {
+fn rotl32(x: Int, n: Int) -> Int !Never {
     v :: wrap32(x)
     wrap32((v << n) | (v >> (32 - n)))
 }
 
-fn be64(n: Int) -> [U8] {
+fn be64(n: Int) -> [U8] !Never {
     [U8]{
         to_u8((n >> 56)),
         to_u8((n >> 48)),
@@ -1131,7 +1131,7 @@ fn be64(n: Int) -> [U8] {
     }
 }
 
-fn words_to_bytes(words: [Int], width: Int) -> [U8] {
+fn words_to_bytes(words: [Int], width: Int) -> [U8] !Never {
     out := [U8]{}
     loop w in words {
         shift := (width - 1) * 8
@@ -1143,19 +1143,19 @@ fn words_to_bytes(words: [Int], width: Int) -> [U8] {
     out
 }
 
-fn copy_bytes(bytes: [U8]) -> [U8] {
+fn copy_bytes(bytes: [U8]) -> [U8] !Never {
     out := [U8]{}
     loop b in bytes -> out.push(b)
     out
 }
 
-fn copy_ints(xs: [Int]) -> [Int] {
+fn copy_ints(xs: [Int]) -> [Int] !Never {
     out := [Int]{}
     loop n in xs -> out.push(n)
     out
 }
 
-fn hex_encode(bytes: [U8]) -> String {
+fn hex_encode(bytes: [U8]) -> String !Never {
     out := [U8]{}
     loop b in bytes {
         n :: u8_int(b)
@@ -1165,12 +1165,12 @@ fn hex_encode(bytes: [U8]) -> String {
     String.from_bytes(out) ?? panic("invalid UTF-8 in hexadecimal encoding")
 }
 
-fn hex_nibble(n: Int) -> U8 {
+fn hex_nibble(n: Int) -> U8 !Never {
     if n < 10 -> return to_u8(48 + n)
     to_u8(87 + n)
 }
 
-fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop {
@@ -1180,7 +1180,7 @@ fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] {
     }
 }
 
-fn split_dollar(text: String) -> [String] {
+fn split_dollar(text: String) -> [String] !Never {
     out := [String]{}
     cur := [U8]{}
     loop b in text.bytes() {
@@ -1376,7 +1376,7 @@ fn keccak_f(st: &[Int]) {
 }
 
 /// RFC 8439 ChaCha20. `counter` is the 32-bit block counter.
-fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] {
+fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] !Never {
     st := [Int]{
         0x61707865,
         0x3320646e,
@@ -1420,7 +1420,7 @@ fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] {
     out
 }
 
-fn qr(s: &[Int], a: Int, b: Int, c: Int, d: Int) {
+fn qr(s: &[Int], a: Int, b: Int, c: Int, d: Int) !Never {
     s[a] = wrap32(s[a] + s[b])
     s[d] = rotl32(s[d] ~| s[a], 16)
     s[c] = wrap32(s[c] + s[d])
@@ -1431,12 +1431,12 @@ fn qr(s: &[Int], a: Int, b: Int, c: Int, d: Int) {
     s[b] = rotl32(s[b] ~| s[c], 7)
 }
 
-fn u32le(bytes: [U8], off: Int) -> Int {
+fn u32le(bytes: [U8], off: Int) -> Int !Never {
     if off + 3 >= bytes.len() -> return 0
     (u8_int(bytes[off]) | (u8_int(bytes[off + 1]) << 8) | (u8_int(bytes[off + 2]) << 16) | (u8_int(bytes[off + 3]) << 24)) & C_MASK32
 }
 
-fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] {
+fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] !Never {
     out := [U8]{}
     i := 0
     ctr := counter
@@ -1452,7 +1452,7 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] {
     }
 }
 
-fn poly1305(key: [U8], data: [U8]) -> [U8] {
+fn poly1305(key: [U8], data: [U8]) -> [U8] !Never {
     r := le_int(slice_u8(~key, 0, 16))
     r = r & 0x0ffffffc0ffffffc0ffffffc0fffffff
     s := le_int(slice_u8(~key, 16, 32))
@@ -1471,13 +1471,13 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] {
     le_bytes(acc, 16)
 }
 
-fn le_int(bytes: [U8]) -> Int {
+fn le_int(bytes: [U8]) -> Int !Never {
     n := 0
     loop i in 0..<bytes.len() -> n = n | (u8_int(bytes[i]) << (8 * i))
     n
 }
 
-fn le_bytes(n: Int, width: Int) -> [U8] {
+fn le_bytes(n: Int, width: Int) -> [U8] !Never {
     out := [U8]{}
     v := n
     loop i in 0..<width {
@@ -1487,14 +1487,14 @@ fn le_bytes(n: Int, width: Int) -> [U8] {
     out
 }
 
-fn pad16(n: Int) -> [U8] {
+fn pad16(n: Int) -> [U8] !Never {
     out := [U8]{}
     rem :: (16 - (n % 16)) % 16
     loop i in 0..<rem -> out.push(U8{0})
     out
 }
 
-fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] {
+fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] !Never {
     otk :: chacha20_block(~key, ~nonce, 0)
     ct :: chacha20_xor(~key, ~nonce, 1, plain)
     mac_data := [U8]{}
@@ -1528,7 +1528,7 @@ fn chacha_poly_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> ?[U8] {
     Val(chacha20_xor(key, nonce, 1, ct))
 }
 
-fn hchacha20(key: [U8], nonce16: [U8]) -> [U8] {
+fn hchacha20(key: [U8], nonce16: [U8]) -> [U8] !Never {
     st := [Int]{
         0x61707865,
         0x3320646e,
@@ -1563,14 +1563,14 @@ fn hchacha20(key: [U8], nonce16: [U8]) -> [U8] {
     out
 }
 
-fn hchacha_word(out: &[U8], v: Int) {
+fn hchacha_word(out: &[U8], v: Int) !Never {
     out.push(to_u8(v))
     out.push(to_u8((v >> 8)))
     out.push(to_u8((v >> 16)))
     out.push(to_u8((v >> 24)))
 }
 
-fn xchacha_seal(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] {
+fn xchacha_seal(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] !Never {
     sub :: hchacha20(key, slice_u8(~nonce24, 0, 16))
     n := [U8]{0, 0, 0, 0}
     loop b in slice_u8(~nonce24, 16, 24) -> n.push(b)
@@ -1586,7 +1586,7 @@ fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> ?[U8] {
 
 C_P25519 :: 57896044618658097711785492504343953926634992332820282019728792003956564819949
 
-fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] {
+fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] !Never {
     k := copy_bytes(sk)
     if k.len() != 32 || u.len() != 32 -> panic("invalid X25519 input")
     k[0] = to_u8(u8_int(k[0]) & 248)
@@ -1643,7 +1643,7 @@ fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] {
     le_bytes(out, 32)
 }
 
-fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int !Never {
     r := 1
     b := base % m
     e := exp
@@ -1666,7 +1666,7 @@ C_ED_BX :: 151122213495354007725011514095885315114540126930418572060461132839498
 
 C_ED_BY :: 46316835694926478169428394003475163141307993866256225615783033603165251855960
 
-fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] {
+fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] !Never {
     h :: sha512_raw(seed, C_SHA512_IV)
     a := clamp_scalar(le_int(slice_u8(~h, 0, 32)))
     prefix :: slice_u8(~h, 32, 64)
@@ -1690,7 +1690,7 @@ fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] {
     out
 }
 
-fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool {
+fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool !Never {
     if pk.len() != 32 || sig.len() != 64 -> return false
     point_a :: ed_decode(~pk) ?? return false
     encoded_r :: slice_u8(~sig, 0, 32)
@@ -1713,7 +1713,7 @@ pub struct EdPoint {
     pub y: Int
 }
 
-fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint {
+fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint !Never {
     rx := 0
     ry := 1
     bit := s
@@ -1733,7 +1733,7 @@ fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint {
     }
 }
 
-fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint {
+fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint !Never {
     p :: C_ED_P
     x1x2 :: (x1 * x2) % p
     y1y2 :: (y1 * y2) % p
@@ -1747,7 +1747,7 @@ fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint {
     {x: x3, y: y3}
 }
 
-fn ed_encode(x: Int, y: Int) -> [U8] {
+fn ed_encode(x: Int, y: Int) -> [U8] !Never {
     out := le_bytes(y, 32)
     if (x & 1) == 1 -> out[31] = to_u8(u8_int(out[31]) | 128)
     out
@@ -1772,7 +1772,7 @@ fn ed_decode(bytes: [U8]) -> ?EdPoint {
     Val(EdPoint{x: x, y: y})
 }
 
-fn clamp_scalar(n: Int) -> Int {
+fn clamp_scalar(n: Int) -> Int !Never {
     b := le_bytes(n, 32)
     b[0] = to_u8(u8_int(b[0]) & 248)
     b[31] = to_u8((u8_int(b[31]) & 63) | 64)

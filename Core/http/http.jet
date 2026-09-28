@@ -93,7 +93,7 @@ pub enum Body {
 
 
 
-pub fn method_parse(token: String) -> Method {
+pub fn method_parse(token: String) -> Method !Never {
     u :: ascii_upper(token)
     if u == {
         "GET" -> Method.Get
@@ -109,7 +109,7 @@ pub fn method_parse(token: String) -> Method {
     }
 }
 
-pub fn method_text(method: Method) -> String {
+pub fn method_text(method: Method) -> String !Never {
     if method == {
         Method.Get -> "GET"
         Method.Head -> "HEAD"
@@ -125,7 +125,7 @@ pub fn method_text(method: Method) -> String {
     }
 }
 
-pub fn version_text(v: Version) -> String {
+pub fn version_text(v: Version) -> String !Never {
     if v == {
         Version.Http10 -> "HTTP/1.0"
         Version.Http11 -> "HTTP/1.1"
@@ -135,7 +135,7 @@ pub fn version_text(v: Version) -> String {
     }
 }
 
-pub fn version_parse(token: String) -> Version {
+pub fn version_parse(token: String) -> Version !Never {
     if token == {
         "HTTP/1.0" -> Version.Http10
         "HTTP/2" -> Version.Http2
@@ -202,7 +202,7 @@ pub fn is_redirect(s: Status) -> Bool { s.code >= 300 && s.code < 400 }
 pub fn is_client_error(s: Status) -> Bool { s.code >= 400 && s.code < 500 }
 pub fn is_server_error(s: Status) -> Bool { s.code >= 500 && s.code < 600 }
 
-pub fn headers() -> Headers { Headers{fields: [Header]{}} }
+pub fn headers() -> Headers !Never { Headers{fields: [Header]{}} }
 
 pub fn headers_get(h: Headers, name: String) -> ?String {
     want :: ascii_lower(name)
@@ -212,7 +212,7 @@ pub fn headers_get(h: Headers, name: String) -> ?String {
     None
 }
 
-pub fn headers_all(h: Headers, name: String) -> [String] {
+pub fn headers_all(h: Headers, name: String) -> [String] !Never {
     want :: ascii_lower(name)
     out := [String]{}
     loop f in h.fields {
@@ -240,7 +240,7 @@ pub fn headers_set(h: Headers, name: String, value: String) -> Headers {
     Headers{fields: fields}
 }
 
-pub fn headers_append(h: Headers, name: String, value: String) -> Headers {
+pub fn headers_append(h: Headers, name: String, value: String) -> Headers !Never {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~h
     fields := [Header]{}
     loop f in h.fields -> fields.push(f)
@@ -263,7 +263,7 @@ pub fn headers_encode(h: Headers) -> [String] {
     out
 }
 
-pub fn headers_parse(lines: [String]) -> Headers {
+pub fn headers_parse(lines: [String]) -> Headers !Never {
     h := headers()
     if !headers_lines_bounded(lines) -> return h
     loop line in lines {
@@ -279,7 +279,7 @@ pub fn headers_parse(lines: [String]) -> Headers {
 }
 
 pub fn body_empty() -> Body { Body.Empty }
-pub fn body_text(text: String) -> Body {
+pub fn body_text(text: String) -> Body !Never {
     if text.bytes().len() == 0 -> return Body.Empty
     Body.Text(text)
 }
@@ -288,7 +288,7 @@ pub fn body_bytes(bytes: [U8]) -> Body {
     Body.Bytes(bytes)
 }
 
-pub fn body_as_text(body: Body) -> String {
+pub fn body_as_text(body: Body) -> String !Never {
     if body == Body.Empty -> return ""
     if body == {
         .Text(s) -> return s
@@ -309,7 +309,7 @@ pub fn body_as_bytes(body: Body) -> [U8] {
 }
 pub fn body_len(body: Body) -> Int { body_as_bytes(body).len() }
 
-pub fn reason_phrase(code: Int) -> String {
+pub fn reason_phrase(code: Int) -> String !Never {
     if code == {
         100 -> return "Continue"
         101 -> return "Switching Protocols"
@@ -381,7 +381,7 @@ pub fn reason_phrase(code: Int) -> String {
     return "OK"
 }
 
-fn ascii_upper(text: String) -> String {
+fn ascii_upper(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -390,7 +390,7 @@ fn ascii_upper(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -399,7 +399,7 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn trim(text: String) -> String {
+fn trim(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -588,7 +588,7 @@ fn parse_status_line(line: String) -> ?StatusLine {
     Val(StatusLine{version: parsed_version, status: Status{code: code, reason: reason}})
 }
 
-fn split_space_line(text: String) -> [String] {
+fn split_space_line(text: String) -> [String] !Never {
     raw :: text.bytes()
     out := [String]{}
     if raw.len() == 0 -> return out
@@ -638,7 +638,7 @@ fn strict_crlf(raw: [U8], end: Int) -> Bool !Never {
     true
 }
 
-fn split_lines(text: String) -> [String] {
+fn split_lines(text: String) -> [String] !Never {
     raw :: text.bytes()
     out := [String]{}
     start := 0
@@ -818,7 +818,7 @@ pub fn cookies_parse(header: String) -> [Cookie] {
     out
 }
 
-pub fn basic_auth(user: String, password: String) -> String {
+pub fn basic_auth(user: String, password: String) -> String !Never {
     credentials := "{user}:{password}"
     "Basic {base64_encode(credentials.bytes())}"
 }
@@ -829,7 +829,7 @@ pub fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest
     req.header(name, value)
 }
 
-pub fn with_body(req: HTTPRequest, body: Body) -> HTTPRequest {
+pub fn with_body(req: HTTPRequest, body: Body) -> HTTPRequest !Never {
     req.body(body_as_text(body))
 }
 
@@ -853,7 +853,7 @@ pub fn status_class(s: Status) -> String {
     "unknown"
 }
 
-pub fn request_with(method: Method, url: String, h: Headers, body: Body) -> HTTPRequest {
+pub fn request_with(method: Method, url: String, h: Headers, body: Body) -> HTTPRequest !Never {
     req := core.http.client.request(method_text(method), url)
     loop f in h.fields -> req = req.header(f.name, f.value)
     with_body(req, body)
@@ -865,9 +865,9 @@ pub fn response_ok(body: Body) -> HTTPResponse {
 
 pub fn response_json_headers() -> Headers { headers_set(headers(), "content-type", "application/json; charset=utf-8") }
 pub fn response_text_headers() -> Headers { headers_set(headers(), "content-type", "text/plain; charset=utf-8") }
-pub fn has_header(h: Headers, name: String) -> Bool { headers_get(h, name) != None }
+pub fn has_header(h: Headers, name: String) -> Bool !Never { headers_get(h, name) != None }
 
-pub fn content_length(h: Headers) -> Int {
+pub fn content_length(h: Headers) -> Int !Never {
     values :: headers_all(h, "content-length")
     if values.len() == 0 -> return -1
     first := -1
@@ -879,7 +879,7 @@ pub fn content_length(h: Headers) -> Int {
     first
 }
 
-fn valid_url(url: String) -> Bool {
+fn valid_url(url: String) -> Bool !Never {
     raw :: url.bytes()
     if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
@@ -919,7 +919,7 @@ fn parse_content_length_value(text: String) -> ?Int {
     Val(first)
 }
 
-fn has_url_ctl(bytes: [U8]) -> Bool {
+fn has_url_ctl(bytes: [U8]) -> Bool !Never {
     loop b in bytes {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true
@@ -927,7 +927,7 @@ fn has_url_ctl(bytes: [U8]) -> Bool {
     false
 }
 
-fn has_line_ctl(bytes: [U8]) -> Bool {
+fn has_line_ctl(bytes: [U8]) -> Bool !Never {
     loop b in bytes {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true
@@ -935,16 +935,16 @@ fn has_line_ctl(bytes: [U8]) -> Bool {
     false
 }
 
-fn response_forbids_body(code: Int) -> Bool {
+fn response_forbids_body(code: Int) -> Bool !Never {
     (code >= 100 && code < 200) || code == 204 || code == 205 || code == 304
 }
-fn response_forbids_content_length(code: Int) -> Bool {
+fn response_forbids_content_length(code: Int) -> Bool !Never {
     (code >= 100 && code < 200) || code == 204
 }
 
-fn valid_method_token(method: String) -> Bool { valid_method(method) }
+fn valid_method_token(method: String) -> Bool !Never { valid_method(method) }
 
-fn valid_method(method: String) -> Bool {
+fn valid_method(method: String) -> Bool !Never {
     raw :: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -953,7 +953,7 @@ fn valid_method(method: String) -> Bool {
     true
 }
 
-fn valid_target(target: String) -> Bool {
+fn valid_target(target: String) -> Bool !Never {
     raw :: target.bytes()
     if raw.len() == 0 -> return false
     if target != "*" && raw[0] != (U8{47}) -> return false
@@ -964,7 +964,7 @@ fn valid_target(target: String) -> Bool {
     true
 }
 
-fn valid_connect_target(target: String) -> Bool {
+fn valid_connect_target(target: String) -> Bool !Never {
     raw :: target.bytes()
     if raw.len() == 0 || has_url_ctl(raw) || index_byte(raw, 58) <= 0 -> return false
     loop b in raw {
@@ -975,7 +975,7 @@ fn valid_connect_target(target: String) -> Bool {
     parsed.host.bytes().len() > 0 && parsed.user.bytes().len() == 0 && parsed.password.bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
 }
 
-fn valid_host_value(value: String) -> Bool {
+fn valid_host_value(value: String) -> Bool !Never {
     raw :: trim(value)
     if raw.bytes().len() == 0 || has_url_ctl(raw.bytes()) -> return false
     loop b in raw.bytes() {
@@ -985,11 +985,11 @@ fn valid_host_value(value: String) -> Bool {
     parsed :: http_url.parse("http://{raw}") ?? return false
     parsed.host.bytes().len() > 0 && parsed.user.bytes().len() == 0 && parsed.password.bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
 }
-fn token_char(n: Int) -> Bool {
+fn token_char(n: Int) -> Bool !Never {
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
 }
 
-fn has_ambiguous_framing(h: Headers) -> Bool {
+fn has_ambiguous_framing(h: Headers) -> Bool !Never {
     first := -1
     loop value in headers_all(h, "content-length") {
         n :: parse_content_length_value(value) ?? return true
@@ -999,7 +999,7 @@ fn has_ambiguous_framing(h: Headers) -> Bool {
     has_header(h, "content-length") && has_header(h, "transfer-encoding")
 }
 
-fn has_unsupported_encoding(h: Headers) -> Bool {
+fn has_unsupported_encoding(h: Headers) -> Bool !Never {
     if has_header(h, "transfer-encoding") -> return true
     loop value in headers_all(h, "content-encoding") {
         encoding := ascii_lower(trim(value))
@@ -1011,7 +1011,7 @@ fn has_unsupported_encoding(h: Headers) -> Bool {
 
 
 
-fn valid_header_line(line: String) -> Bool {
+fn valid_header_line(line: String) -> Bool !Never {
     raw :: line.bytes()
     col := index_byte(raw, 58)
     if col <= 0 -> return false
@@ -1020,7 +1020,7 @@ fn valid_header_line(line: String) -> Bool {
     valid_header_name(name) && !has_ctl(value)
 }
 
-fn headers_lines_bounded(lines: [String]) -> Bool {
+fn headers_lines_bounded(lines: [String]) -> Bool !Never {
     if lines.len() > C_MAX_HEADER_COUNT -> return false
     total := 0
     loop line in lines {
@@ -1032,7 +1032,7 @@ fn headers_lines_bounded(lines: [String]) -> Bool {
     true
 }
 
-fn headers_lines_valid(lines: [String]) -> Bool {
+fn headers_lines_valid(lines: [String]) -> Bool !Never {
     if !headers_lines_bounded(lines) -> return false
     loop line in lines {
         if !valid_header_line(line) -> return false
@@ -1040,7 +1040,7 @@ fn headers_lines_valid(lines: [String]) -> Bool {
     true
 }
 
-fn valid_header_name(name: String) -> Bool {
+fn valid_header_name(name: String) -> Bool !Never {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -1048,7 +1048,7 @@ fn valid_header_name(name: String) -> Bool {
     }
     true
 }
-fn has_ctl(bytes: [U8]) -> Bool {
+fn has_ctl(bytes: [U8]) -> Bool !Never {
     loop b in bytes {
         n :: Int.from_u8(b)
         if n < 32 && n != 9 -> return true
@@ -1135,7 +1135,7 @@ fn percent_decode(text: String) -> String {
     }
     String.from_bytes(out) ?? text
 }
-fn base64_encode(bytes: [U8]) -> String {
+fn base64_encode(bytes: [U8]) -> String !Never {
     alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
     out := [U8]{}
     i := 0
@@ -1167,10 +1167,10 @@ fn from_hex(b: U8) -> Int {
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
-    -1
+    return -1
 }
 
-fn index_byte(text: [U8], code: Int) -> Int {
+fn index_byte(text: [U8], code: Int) -> Int !Never {
     loop i in 0..<text.len() {
         if Int.from_u8(text[i]) == code -> return i
     }
@@ -1215,7 +1215,7 @@ fn slice_str(text: String, start: Int, end: Int) -> String {
     String.from_bytes(slice_b(text.bytes(), start, end)) ?? ""
 }
 
-fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop {

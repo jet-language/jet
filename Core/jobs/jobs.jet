@@ -64,7 +64,7 @@ pub struct JobQueue {
     pub records: [JobQueueRecord]
 }
 
-pub fn queue() -> JobQueue {
+pub fn queue() -> JobQueue !Never {
     JobQueue{name: "default", next_id: 1, max_attempts: 8, policy: JobQueueDeliveryPolicy.AtLeastOnce, records: [JobQueueRecord]{}}
 }
 
@@ -256,7 +256,7 @@ pub fn is_cancelled(state: JobQueueState) -> Bool {
     state == JobQueueState.Cancelled
 }
 
-fn state_name(state: JobQueueState) -> String {
+fn state_name(state: JobQueueState) -> String !Never {
     if state == JobQueueState.Queued -> return "queued"
     if state == JobQueueState.Running -> return "running"
     if state == JobQueueState.Retrying -> return "retrying"
@@ -266,21 +266,21 @@ fn state_name(state: JobQueueState) -> String {
     "cancelled"
 }
 
-fn copy_recs(xs: [JobQueueRecord]) -> [JobQueueRecord] {
+fn copy_recs(xs: [JobQueueRecord]) -> [JobQueueRecord] !Never {
     out := [JobQueueRecord]{}
     loop x in xs -> out.push(x)
     out
 }
-fn valid_queue_name(value: String) -> Bool {
+fn valid_queue_name(value: String) -> Bool !Never {
     trimmed :: value.trim()
     trimmed != "" && trimmed.len() <= 256 && value == trimmed && !has_control(value)
 }
 
-fn valid_job_payload(value: String) -> Bool {
+fn valid_job_payload(value: String) -> Bool !Never {
     value.len() > 0 && value.len() <= 1048576
 }
 
-fn valid_job_id(value: String) -> Bool {
+fn valid_job_id(value: String) -> Bool !Never {
     if value.len() == 0 -> return false
     loop byte in value.bytes() {
         n :: Int.from_u8(byte)
@@ -289,7 +289,7 @@ fn valid_job_id(value: String) -> Bool {
     true
 }
 
-fn has_control(value: String) -> Bool {
+fn has_control(value: String) -> Bool !Never {
     loop byte in value.bytes() {
         n :: Int.from_u8(byte)
         if n < 32 || n == 127 -> return true

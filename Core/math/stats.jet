@@ -36,36 +36,36 @@ struct CentralTerms {
     s4: Float
 }
 
-fn nonfinite(value: Float) -> Bool {
+fn nonfinite(value: Float) -> Bool !Never {
     if math.is_finite(value) -> return false
     true
 }
-fn abs_value(value: Float) -> Float {
+fn abs_value(value: Float) -> Float !Never {
     if value < (Float{0.0}) -> return Float{0.0} - value
     value
 }
-fn sqrt_value(value: Float) -> Float {
+fn sqrt_value(value: Float) -> Float !Never {
     math.sqrt(value)
 }
-fn ln_value(value: Float) -> Float {
+fn ln_value(value: Float) -> Float !Never {
     math.ln(value)
 }
-fn exp_value(value: Float) -> Float {
+fn exp_value(value: Float) -> Float !Never {
     math.exp(value)
 }
 
-fn valid_sample(xs: [Float]) -> Bool {
+fn valid_sample(xs: [Float]) -> Bool !Never {
     loop x in xs {
         if nonfinite(x) -> return false
     }
     true
 }
-fn invalid_sample(xs: [Float]) -> Bool {
+fn invalid_sample(xs: [Float]) -> Bool !Never {
     if valid_sample(xs) -> return false
     true
 }
 
-fn copy_floats(xs: [Float]) -> [Float] {
+fn copy_floats(xs: [Float]) -> [Float] !Never {
     out := [Float]{}
     loop x in xs -> out.push(x)
     out
@@ -110,7 +110,7 @@ fn compensated_sum(xs: [Float]) -> Float {
     acc + correction
 }
 
-fn sift_down(xs: &[Float], start: Int, end: Int) {
+fn sift_down(xs: &[Float], start: Int, end: Int) !Never {
     root := start
     loop {
         child :: root * 2 + 1
@@ -127,7 +127,7 @@ fn sift_down(xs: &[Float], start: Int, end: Int) {
     }
 }
 
-fn sorted(xs: [Float]) -> [Float] {
+fn sorted(xs: [Float]) -> [Float] !Never {
     out := copy_floats(xs)
     n :: out.len()
     if n < 2 -> return out
@@ -148,7 +148,7 @@ fn sorted(xs: [Float]) -> [Float] {
     out
 }
 
-fn interpolate(a: Float, b: Float, fraction: Float) -> Float {
+fn interpolate(a: Float, b: Float, fraction: Float) -> Float !Never {
     if (a >= (Float{0.0}) && b >= (Float{0.0})) || (a <= (Float{0.0}) && b <= (Float{0.0})) {
         return a + (b - a) * fraction
     }
@@ -167,7 +167,7 @@ fn quantile_sorted(s: [Float], p: Float) -> ?Float {
     Val(interpolate(s[lower], s[upper], fraction))
 }
 
-fn compensated_sum_scaled(xs: [Float], scale: Float) -> Float {
+fn compensated_sum_scaled(xs: [Float], scale: Float) -> Float !Never {
     acc := Float{0.0}
     correction := Float{0.0}
     loop x in xs {
@@ -752,7 +752,7 @@ pub fn diff(xs: [Float]) -> [Float] {
     out
 }
 
-pub fn rank(xs: [Float]) -> [Float] {
+pub fn rank(xs: [Float]) -> [Float] !Never {
     out := [Float]{}
     if invalid_sample(xs) -> return out
     n :: xs.len()

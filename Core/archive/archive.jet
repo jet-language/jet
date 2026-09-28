@@ -59,7 +59,7 @@ C_DIST_EXTRA :: [Int]{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8
 C_CL_ORDER :: [Int]{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
 
 /// ISO 3309 CRC-32, reflected polynomial `0xEDB88320`.
-pub fn crc32(data: [U8]) -> Int {
+pub fn crc32(data: [U8]) -> Int !Never {
     crc := C_MASK32
     loop b in data {
         crc = (crc ~| u8_int(b)) & C_MASK32
@@ -73,7 +73,7 @@ pub fn crc32(data: [U8]) -> Int {
 }
 
 /// Adler-32 (RFC 1950). Empty input is 1.
-pub fn adler32(data: [U8]) -> Int {
+pub fn adler32(data: [U8]) -> Int !Never {
     a := 1
     b := 0
     loop byte in data {
@@ -86,7 +86,7 @@ pub fn adler32(data: [U8]) -> Int {
 
 /// RFC 1951 deflate. Stored blocks keep the codec small while remaining
 /// interoperable with every conforming inflater.
-pub fn deflate(data: [U8]) -> [U8] {
+pub fn deflate(data: [U8]) -> [U8] !Never {
     if data.len() > C_MAX_OUTPUT -> return [U8]{}
     out := [U8]{}
     i := 0
@@ -200,7 +200,7 @@ pub fn decompress(data: [U8]) -> [U8] !ArchiveError {
     Ok(body)
 }
 
-fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop i < end {
@@ -457,7 +457,7 @@ fn zip_one(name: String, data: [U8]) -> [U8] {
     zip_from_files([ZipFile]{ZipFile{name: name, data: data}})
 }
 
-fn zip_from_files(files: [ZipFile]) -> [U8] {
+fn zip_from_files(files: [ZipFile]) -> [U8] !Never {
     if files.len() > C_MAX_ENTRIES -> return [U8]{}
     materialized := 0
     encoded_size := 22
@@ -636,7 +636,7 @@ fn zip_parse_writer(writer: [U8]) -> [ZipFile] !ArchiveError {
     zip_files(writer)
 }
 
-fn zip_central_valid(data: [U8], start: Int, files: [ZipFile], offsets: [Int], flags_list: [Int], methods: [Int], crcs: [Int], compressed_sizes: [Int], uncompressed_sizes: [Int]) -> Bool {
+fn zip_central_valid(data: [U8], start: Int, files: [ZipFile], offsets: [Int], flags_list: [Int], methods: [Int], crcs: [Int], compressed_sizes: [Int], uncompressed_sizes: [Int]) -> Bool !Never {
     i := start
     index := 0
     loop {
@@ -683,25 +683,25 @@ fn zip_central_valid(data: [U8], start: Int, files: [ZipFile], offsets: [Int], f
     }
 }
 
-fn put16(out: &[U8], n: Int) {
+fn put16(out: &[U8], n: Int) !Never {
     out.push(to_u8(n))
     out.push(to_u8(n >> 8))
 }
 
-fn put32(out: &[U8], n: Int) {
+fn put32(out: &[U8], n: Int) !Never {
     out.push(to_u8(n))
     out.push(to_u8(n >> 8))
     out.push(to_u8(n >> 16))
     out.push(to_u8(n >> 24))
 }
 
-fn u16(data: [U8], i: Int) -> Int { u8_int(data[i]) | (u8_int(data[i + 1]) << 8) }
+fn u16(data: [U8], i: Int) -> Int !Never { u8_int(data[i]) | (u8_int(data[i + 1]) << 8) }
 
-fn u32(data: [U8], i: Int) -> Int {
+fn u32(data: [U8], i: Int) -> Int !Never {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
 }
 
-fn cut(data: [U8], a: Int, b: Int) -> [U8] {
+fn cut(data: [U8], a: Int, b: Int) -> [U8] !Never {
     out := [U8]{}
     i := a
     loop {
@@ -771,7 +771,7 @@ fn write_octal(hdr: &[U8], off: Int, width: Int, value: Int) {
     }
 }
 
-fn archive_name_valid(name: String) -> Bool {
+fn archive_name_valid(name: String) -> Bool !Never {
     raw :: name.bytes()
     if raw.len() == 0 || raw[0] == (U8{47}) -> return false
     loop b in raw {
@@ -788,7 +788,7 @@ fn archive_name_valid(name: String) -> Bool {
     }
     true
 }
-fn zip_name_valid(name: String) -> Bool {
+fn zip_name_valid(name: String) -> Bool !Never {
     if !archive_name_valid(name) -> return false
     loop b in name.bytes() {
         if b == (U8{92}) -> return false
@@ -904,7 +904,7 @@ fn parse_octal(hdr: [U8], off: Int, width: Int, limit: Int) -> ?Int {
     Val(n)
 }
 
-fn tar_checksum_valid(hdr: [U8]) -> Bool {
+fn tar_checksum_valid(hdr: [U8]) -> Bool !Never {
     stored :: parse_octal(hdr, 148, 8, C_MAX_OUTPUT)
     if stored == {
         .None -> return false
@@ -919,21 +919,21 @@ fn tar_checksum_valid(hdr: [U8]) -> Bool {
     false
 }
 
-fn tar_empty(hdr: [U8]) -> Bool {
+fn tar_empty(hdr: [U8]) -> Bool !Never {
     loop b in hdr {
         if b != (U8{0}) -> return false
     }
     true
 }
 
-fn tar_end_valid(archive: [U8], start: Int) -> Bool {
+fn tar_end_valid(archive: [U8], start: Int) -> Bool !Never {
     if start > archive.len() || archive.len() - start < 1024 -> return false
     loop i in start..<archive.len() {
         if archive[i] != (U8{0}) -> return false
     }
     true
 }
-fn json_escape(value: String) -> String {
+fn json_escape(value: String) -> String !Never {
     raw :: value.bytes()
     out := [U8]{}
     loop b in raw {
@@ -973,18 +973,18 @@ fn json_escape(value: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn hex_digit(n: Int) -> U8 {
+fn hex_digit(n: Int) -> U8 !Never {
     if n < 10 -> return to_u8(48 + n)
     to_u8(87 + n)
 }
 
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-fn to_u8(n: Int) -> U8 {
+fn to_u8(n: Int) -> U8 !Never {
     v :: n & 255
     (U8{v})
 }
-fn read_u32be(data: [U8], i: Int) -> Int {
+fn read_u32be(data: [U8], i: Int) -> Int !Never {
     (u8_int(data[i]) << 24) | (u8_int(data[i + 1]) << 16) | (u8_int(data[i + 2]) << 8) | u8_int(data[i + 3])
 }
 
@@ -1029,7 +1029,7 @@ fn put_huff(w: &BitWriter, code: Int, n: Int) {
     }
 }
 
-fn read_bit(r: &BitReader) -> Int {
+fn read_bit(r: &BitReader) -> Int !Never {
     if r.i >= r.data.len() {
         r.bad = true
         return 0
@@ -1043,7 +1043,7 @@ fn read_bit(r: &BitReader) -> Int {
     out
 }
 
-fn get_bits_lsb(r: &BitReader, n: Int) -> Int {
+fn get_bits_lsb(r: &BitReader, n: Int) -> Int !Never {
     v := 0
     k := 0
     loop k < n {
@@ -1053,14 +1053,14 @@ fn get_bits_lsb(r: &BitReader, n: Int) -> Int {
     v
 }
 
-fn align_byte(r: &BitReader) {
+fn align_byte(r: &BitReader) !Never {
     if r.bit != 0 {
         r.bit = 0
         r.i = r.i + 1
     }
 }
 
-fn take_u8(r: &BitReader) -> U8 {
+fn take_u8(r: &BitReader) -> U8 !Never {
     if r.i >= r.data.len() {
         r.bad = true
         return (U8{0})
@@ -1070,7 +1070,7 @@ fn take_u8(r: &BitReader) -> U8 {
     b
 }
 
-fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int {
+fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int !Never {
     loop {
         code := 0
         n := 0
@@ -1141,7 +1141,7 @@ fn inflate_fixed(r: &BitReader, out: &[U8]) -> Int {
     }
 }
 
-fn huff_codes(lengths: [Int]) -> [Int] {
+fn huff_codes(lengths: [Int]) -> [Int] !Never {
     bl := [Int]{}
     loop _ in 0..<16 -> bl.push(0)
     i := 0
@@ -1177,7 +1177,7 @@ fn huff_codes(lengths: [Int]) -> [Int] {
     codes
 }
 
-fn huff_tree_left(lengths: [Int]) -> Int {
+fn huff_tree_left(lengths: [Int]) -> Int !Never {
     counts := [Int]{}
     loop _ in 0..<16 -> counts.push(0)
     loop len in lengths {
@@ -1194,15 +1194,15 @@ fn huff_tree_left(lengths: [Int]) -> Int {
     left
 }
 
-fn huff_lengths_valid(lengths: [Int]) -> Bool {
+fn huff_lengths_valid(lengths: [Int]) -> Bool !Never {
     huff_tree_left(lengths) >= 0
 }
 
-fn huff_lengths_complete(lengths: [Int]) -> Bool {
+fn huff_lengths_complete(lengths: [Int]) -> Bool !Never {
     huff_tree_left(lengths) == 0
 }
 
-fn huff_sym(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int {
+fn huff_sym(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int !Never {
     i := 0
     loop i < lengths.len() {
         if lengths[i] == len && codes[i] == acc -> return i
@@ -1211,7 +1211,7 @@ fn huff_sym(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int {
     -1
 }
 
-fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int {
+fn inflate_dynamic(r: &BitReader, out: &[U8]) -> Int !Never {
     tmp := BitReader{data: r.data, i: r.i, bit: r.bit, bad: false}
     hlit :: get_bits_lsb(&tmp, 5) + 257
     hdist :: get_bits_lsb(&tmp, 5) + 1

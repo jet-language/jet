@@ -101,7 +101,7 @@ pub fn session() -> Session {
     }
 }
 
-pub fn session_header(s: Session, name: String, value: String) -> Session {
+pub fn session_header(s: Session, name: String, value: String) -> Session !Never {
     Session{
         headers: set_header_line(~s.headers, name, value),
         cookies: ~s.cookies,
@@ -160,7 +160,7 @@ pub fn session_cookie(s: Session, cookie: String) -> Session {
     Session{headers: ~s.headers, cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
-pub fn cookie_header(cookies: [String]) -> String {
+pub fn cookie_header(cookies: [String]) -> String !Never {
     s := ""
     first := true
     loop c in cookies {
@@ -229,12 +229,12 @@ fn request_with_retries(s: Session, method: String, url: String, body: String, h
     }
 }
 
-fn retryable_method(method: String) -> Bool {
+fn retryable_method(method: String) -> Bool !Never {
     u :: ascii_upper(method)
     u == "GET" || u == "HEAD" || u == "OPTIONS" || u == "TRACE" || u == "PUT" || u == "DELETE"
 }
 
-fn retryable_error(error: HTTPError) -> Bool {
+fn retryable_error(error: HTTPError) -> Bool !Never {
     if error == {
         .IO(_) -> true
         else -> false
@@ -290,7 +290,7 @@ pub fn accept(client: Client, mime: String) -> Client { set_header(client, "Acce
 pub fn content_type(client: Client, mime: String) -> Client { set_header(client, "Content-Type", mime) }
 
 
-fn session_headers(s: Session) -> [String] {
+fn session_headers(s: Session) -> [String] !Never {
     h := ~s.headers
     if s.user.bytes().len() > 0 -> h = set_header_line(h, "Authorization", http.basic_auth(s.user, s.password))
     jar :: cookie_header(~s.cookies)
@@ -322,7 +322,7 @@ fn append_header(headers: [String], line: String) -> [String] {
     out
 }
 
-fn set_header_line(headers: [String], name: String, value: String) -> [String] {
+fn set_header_line(headers: [String], name: String, value: String) -> [String] !Never {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~headers
     out := [String]{}
     want :: ascii_lower(name)
@@ -342,7 +342,7 @@ fn set_header_line(headers: [String], name: String, value: String) -> [String] {
     out
 }
 
-fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] {
+fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] !Never {
     out := [String]{}
     loop line in headers {
         name :: header_name(line) ?? next
@@ -354,7 +354,7 @@ fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] {
     out
 }
 
-fn valid_cookie_pair(cookie: String) -> Bool {
+fn valid_cookie_pair(cookie: String) -> Bool !Never {
     eq := index_byte(cookie.bytes(), 61)
     if eq <= 0 -> return false
     name :: slice_text(cookie, 0, eq)
@@ -368,7 +368,7 @@ fn cookie_name(cookie: String) -> ?String {
     Val(slice_text(cookie, 0, eq))
 }
 
-fn valid_cookie_token(name: String) -> Bool {
+fn valid_cookie_token(name: String) -> Bool !Never {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -378,7 +378,7 @@ fn valid_cookie_token(name: String) -> Bool {
     true
 }
 
-fn valid_cookie_value(value: String) -> Bool {
+fn valid_cookie_value(value: String) -> Bool !Never {
     loop b in value.bytes() {
         n :: Int.from_u8(b)
         if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
@@ -395,19 +395,19 @@ fn resolve_location(base: String, location: String) -> ?String {
     Val(clean)
 }
 
-fn is_https_downgrade(base: String, next: String) -> Bool {
+fn is_https_downgrade(base: String, next: String) -> Bool !Never {
     from :: http_url.parse(base) ?? return false
     to :: http_url.parse(next) ?? return false
     from.scheme == "https" && to.scheme == "http"
 }
 
-fn same_origin(left: String, right: String) -> Bool {
+fn same_origin(left: String, right: String) -> Bool !Never {
     a :: http_url.parse(left) ?? return false
     b :: http_url.parse(right) ?? return false
     a.scheme == b.scheme && a.host == b.host && a.port == b.port
 }
 
-fn slice_text(text: String, start: Int, end: Int) -> String {
+fn slice_text(text: String, start: Int, end: Int) -> String !Never {
     raw :: text.bytes()
     out := [U8]{}
     i := start
@@ -419,7 +419,7 @@ fn slice_text(text: String, start: Int, end: Int) -> String {
 }
 
 
-fn ascii_upper(text: String) -> String {
+fn ascii_upper(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -427,7 +427,7 @@ fn ascii_upper(text: String) -> String {
     }
     String.from_bytes(out) ?? text
 }
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -436,7 +436,7 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn trim(text: String) -> String {
+fn trim(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -452,14 +452,14 @@ fn trim(text: String) -> String {
     slice_text(text, start, end)
 }
 
-fn index_byte(raw: [U8], target: Int) -> Int {
+fn index_byte(raw: [U8], target: Int) -> Int !Never {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == target -> return i
     }
     -1
 }
 
-fn valid_header_name(name: String) -> Bool {
+fn valid_header_name(name: String) -> Bool !Never {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -468,11 +468,11 @@ fn valid_header_name(name: String) -> Bool {
     true
 }
 
-fn token_char(n: Int) -> Bool {
+fn token_char(n: Int) -> Bool !Never {
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
 }
 
-fn valid_method(method: String) -> Bool {
+fn valid_method(method: String) -> Bool !Never {
     raw :: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -481,7 +481,7 @@ fn valid_method(method: String) -> Bool {
     true
 }
 
-fn has_ctl(raw: [U8]) -> Bool {
+fn has_ctl(raw: [U8]) -> Bool !Never {
     loop b in raw {
         n :: Int.from_u8(b)
         if n < 32 && n != 9 || n == 127 -> return true
@@ -489,7 +489,7 @@ fn has_ctl(raw: [U8]) -> Bool {
     false
 }
 
-fn valid_url(url: String) -> Bool {
+fn valid_url(url: String) -> Bool !Never {
     raw :: url.bytes()
     if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
@@ -509,7 +509,7 @@ fn valid_url(url: String) -> Bool {
     end > start
 }
 
-fn has_url_ctl(raw: [U8]) -> Bool {
+fn has_url_ctl(raw: [U8]) -> Bool !Never {
     loop b in raw {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true

@@ -22,7 +22,7 @@ fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 C_ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 C_URL_ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
-pub fn encode(data: [U8]) -> String { encode_with(data, C_ALPHABET, true) }
+pub fn encode(data: [U8]) -> String !Never { encode_with(data, C_ALPHABET, true) }
 
 pub fn encode_url(data: [U8]) -> String { encode_with(data, C_URL_ALPHABET, false) }
 
@@ -104,7 +104,7 @@ fn decode_base32hex(text: String) -> [U8] !Base64Error {
     }
 }
 
-fn encode_with(data: [U8], alphabet: String, pad: Bool) -> String {
+fn encode_with(data: [U8], alphabet: String, pad: Bool) -> String !Never {
     ab :: alphabet.bytes()
     out := [U8]{}
     i := 0

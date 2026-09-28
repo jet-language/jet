@@ -134,8 +134,8 @@ fn digest_shape_ok(td: TDigest) -> Bool {
         sum = sum + td.weights[i]
     }
     if !math.is_finite(sum) || sum <= (Float{0.0}) -> return false
-    difference :: math.abs(sum - td.total)
-    scale := math.abs(td.total)
+    difference :: math.fabs(sum - td.total)
+    scale := math.fabs(td.total)
     if scale < (Float{1.0}) -> scale = Float{1.0}
     difference <= Float{0.000000001} * scale
 }

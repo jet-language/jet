@@ -23,7 +23,7 @@ C_XXH_P3 :: 1609587929392839161
 C_XXH_P4 :: 9650029242287828579
 C_XXH_P5 :: 2870177450012600261
 
-pub fn compress(data: [U8]) -> [U8] {
+pub fn compress(data: [U8]) -> [U8] !Never {
     if data.len() > 67108864 -> return [U8]{}
     out := [U8]{}
     put32(&out, C_MAGIC)
@@ -136,47 +136,47 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     Ok(out)
 }
 
-fn put32(out: &[U8], n: Int) {
+fn put32(out: &[U8], n: Int) !Never {
     out.push(to_u8(n))
     out.push(to_u8(n >> 8))
     out.push(to_u8(n >> 16))
     out.push(to_u8(n >> 24))
 }
 
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-fn to_u8(n: Int) -> U8 {
+fn to_u8(n: Int) -> U8 !Never {
     v :: n & 255
     (U8{v})
 }
 
-fn read_u32le(data: [U8], i: Int) -> Int {
+fn read_u32le(data: [U8], i: Int) -> Int !Never {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
 }
 
-fn read_u64le(data: [U8], i: Int) -> Int {
+fn read_u64le(data: [U8], i: Int) -> Int !Never {
     n := 0
     loop k in 0..<8 -> n = n | (u8_int(data[i + k]) << (k * 8))
     n
 }
 
-fn rotl64(x: Int, n: Int) -> Int {
+fn rotl64(x: Int, n: Int) -> Int !Never {
     v :: x & C_MASK64
     r :: n & 63
     if r == 0 -> return v
     ((v << r) | (v >> (64 - r))) & C_MASK64
 }
 
-fn xxh_round(acc: Int, input: Int) -> Int {
+fn xxh_round(acc: Int, input: Int) -> Int !Never {
     mixed :: (acc + ((input & C_MASK64) * C_XXH_P2)) & C_MASK64
     (rotl64(mixed, 31) * C_XXH_P1) & C_MASK64
 }
-fn xxh_merge_round(acc: Int, value: Int) -> Int {
+fn xxh_merge_round(acc: Int, value: Int) -> Int !Never {
     mixed :: acc ~| xxh_round(0, value)
     (mixed * C_XXH_P1 + C_XXH_P4) & C_MASK64
 }
 
-fn xxh64(data: [U8]) -> Int {
+fn xxh64(data: [U8]) -> Int !Never {
     n :: data.len()
     i := 0
     h := 0

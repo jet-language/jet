@@ -114,7 +114,7 @@ pub fn extension(mime: String) -> ?String {
     }
 }
 
-fn trim_dot(ext: String) -> String {
+fn trim_dot(ext: String) -> String !Never {
     raw :: (~ext).bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
@@ -122,7 +122,7 @@ fn trim_dot(ext: String) -> String {
     return ~ext
 }
 
-fn trim_params(mime: String) -> String {
+fn trim_params(mime: String) -> String !Never {
     raw :: (~mime).bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
@@ -130,7 +130,7 @@ fn trim_params(mime: String) -> String {
     trim_ascii(mime)
 }
 
-fn trim_ascii(text: String) -> String {
+fn trim_ascii(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -147,7 +147,7 @@ fn trim_ascii(text: String) -> String {
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -156,7 +156,7 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn mime_token(text: String) -> Bool {
+fn mime_token(text: String) -> Bool !Never {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -172,14 +172,14 @@ fn mime_token(text: String) -> Bool {
     true
 }
 
-fn index_of(raw: [U8], needle: Int) -> Int {
+fn index_of(raw: [U8], needle: Int) -> Int !Never {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == needle -> return i
     }
     -1
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     out := [U8]{}
     i := start
     loop {

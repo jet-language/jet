@@ -64,7 +64,7 @@ pub struct Node {
     pub neg: Bool
 }
 
-pub fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags {
+pub fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags !Never {
     RegexFlags{
     ignore_case: ignore_case,
     multiline: multiline,
@@ -443,7 +443,7 @@ impl Parser {
         Ok(self.emit("class", String.from_bytes(body) ?? "", 0, 0, -1, -1, neg))
     }
 
-    fn emit(&self, kind: String, s: String, a: Int, b: Int, left: Int, right: Int, neg: Bool) -> Int {
+    fn emit(&self, kind: String, s: String, a: Int, b: Int, left: Int, right: Int, neg: Bool) -> Int !Never {
         self.nodes.push(Node{kind: kind, s: s, a: a, b: b, left: left, right: right, neg: neg})
         self.nodes.len() - 1
     }
@@ -485,7 +485,7 @@ struct MatchBudget {
     remaining: Int
 }
 
-fn budget_limit(re: Regex, text: [U8]) -> Int {
+fn budget_limit(re: Regex, text: [U8]) -> Int !Never {
     nodes := re.nodes.len()
     bytes := text.len()
     n := nodes
@@ -498,7 +498,7 @@ fn budget_limit(re: Regex, text: [U8]) -> Int {
     limit
 }
 
-fn scalar_width(raw: [U8], i: Int) -> Int {
+fn scalar_width(raw: [U8], i: Int) -> Int !Never {
     if i < 0 || i >= raw.len() -> return 1
     n :: raw[i]
     if n < 128 -> return 1
@@ -520,16 +520,16 @@ fn scalar_width(raw: [U8], i: Int) -> Int {
     need + 1
 }
 
-fn trim_caps(caps: &[CaptureSpan], keep: Int) {
+fn trim_caps(caps: &[CaptureSpan], keep: Int) !Never {
     loop caps.len() > keep -> _ :: caps.pop()
 }
 
-fn run_exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan]) -> Int {
+fn run_exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan]) -> Int !Never {
     budget := MatchBudget{remaining: budget_limit(re, text)}
     exec(re, text, i, node, &caps, &budget)
 }
 
-fn flatten_seq(re: Regex, node: Int, parts: &[Int]) {
+fn flatten_seq(re: Regex, node: Int, parts: &[Int]) !Never {
     if node < 0 || node >= re.nodes.len() -> return
     n :: re.nodes[node]
     if n.kind == "seq" {
@@ -540,13 +540,13 @@ fn flatten_seq(re: Regex, node: Int, parts: &[Int]) {
     parts.push(node)
 }
 
-fn exec_sequence(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+fn exec_sequence(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int !Never {
     parts := [Int]{}
     flatten_seq(re, node, &parts)
     exec_parts(re, text, i, parts, 0, &caps, budget)
 }
 
-fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int !Never {
     if index >= parts.len() -> return pos
     n :: re.nodes[parts[index]]
     if n.kind == "rep" -> return exec_rep_tail(re, text, pos, n, parts, index + 1, &caps, budget, 0)
@@ -556,7 +556,7 @@ fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &
     exec_parts(re, text, end, parts, index + 1, &caps, budget)
 }
 
-fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int !Never {
     saved := caps.len()
     left :: exec(re, text, pos, n.left, &caps, budget)
     if left >= 0 {
@@ -569,7 +569,7 @@ fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: I
     exec_parts(re, text, right, parts, next, &caps, budget)
 }
 
-fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget, count: Int) -> Int {
+fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget, count: Int) -> Int !Never {
     if n.b >= 0 && count >= n.b -> return exec_parts(re, text, pos, parts, next, &caps, budget)
     if count >= n.a {
         saved := caps.len()
@@ -594,7 +594,7 @@ fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: I
     end
 }
 
-fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int !Never {
     saved := caps.len()
     if budget.remaining <= 0 -> return -1
     budget.remaining = budget.remaining - 1
@@ -669,7 +669,7 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: 
     -1
 }
 
-fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int {
+fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int !Never {
     if n.b >= 0 && count == n.b -> return i
     if count >= n.a {
         rest :: exec_rep_more(re, text, i, n, &caps, count, budget)
@@ -687,7 +687,7 @@ fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count:
     end
 }
 
-fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int {
+fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int !Never {
     if n.b >= 0 && count >= n.b -> return -1
     saved := caps.len()
     nxt :: exec(re, text, i, n.left, &caps, budget)
@@ -702,7 +702,7 @@ fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], c
     nxt
 }
 
-fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool {
+fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool !Never {
     ch :: fold(b, fold_case)
     raw :: spec.bytes()
     i := 0
@@ -745,7 +745,7 @@ fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool {
     false
 }
 
-fn fold(b: U8, on: Bool) -> Int {
+fn fold(b: U8, on: Bool) -> Int !Never {
     n :: b
     if on && n >= 65 && n <= 90 -> return n + 32
     n
@@ -765,7 +765,7 @@ fn find_match(pattern: Regex, text: String) -> ?Match {
     None
 }
 
-fn make_match(raw: [U8], start: Int, end: Int, caps: [CaptureSpan]) -> Match {
+fn make_match(raw: [U8], start: Int, end: Int, caps: [CaptureSpan]) -> Match !Never {
     groups := [String]{}
     loop g in caps -> groups.push(slice(raw, g.start, g.end))
     Match{start: start, end: end, text: slice(raw, start, end), groups: groups}
@@ -773,7 +773,7 @@ fn make_match(raw: [U8], start: Int, end: Int, caps: [CaptureSpan]) -> Match {
 
 fn empty_ok(pattern: Regex) -> Bool { true }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     out := [U8]{}
     i := start
     loop {
@@ -783,7 +783,7 @@ fn slice(raw: [U8], start: Int, end: Int) -> String {
     }
 }
 
-fn is_group_name_char(b: U8) -> Bool {
+fn is_group_name_char(b: U8) -> Bool !Never {
     n :: b
     n == 95 ||
         (n >= 48 && n <= 57) ||

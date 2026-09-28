@@ -65,7 +65,7 @@ pub fn parse(text: String) -> String !UUIDError {
     Ok(value)
 }
 
-fn copy_bytes(bytes: [U8]) -> [U8] {
+fn copy_bytes(bytes: [U8]) -> [U8] !Never {
     out := [U8]{}
     loop b in bytes -> out.push(b)
     out
@@ -111,7 +111,7 @@ fn format_uuid(bytes: [U8]) -> ?String {
     Val(String.from_bytes(out) ?? "")
 }
 
-fn hex_digit(n: Int) -> U8 {
+fn hex_digit(n: Int) -> U8 !Never {
     if n < 10 -> return U8{48 + n}
     U8{87 + n}
 }

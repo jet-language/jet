@@ -206,7 +206,7 @@ pub fn close(buf: StringBuf) -> StringBuf {
     StringBuf{text: buf.text, pos: -1}
 }
 
-fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop {
@@ -216,14 +216,14 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     }
 }
 
-fn utf8_boundary(raw: [U8], pos: Int) -> Bool {
+fn utf8_boundary(raw: [U8], pos: Int) -> Bool !Never {
     if pos < 0 || pos > raw.len() -> return false
     if pos == 0 || pos == raw.len() -> return true
     value :: Int.from_u8(raw[pos])
     value & 192 != 128
 }
 
-fn io_err(operation: String, message: String) -> IOError {
+fn io_err(operation: String, message: String) -> IOError !Never {
     if operation == "write" ||
         operation == "bytes_write" ||
         operation == "truncate" ||

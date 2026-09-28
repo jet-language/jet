@@ -213,7 +213,7 @@ pub fn report_json(report: BrowserReport) -> String {
     "{out}]}}"
 }
 
-pub fn report_text(report: BrowserReport) -> String {
+pub fn report_text(report: BrowserReport) -> String !Never {
     out := "{report.title}\n"
     loop c in report.cases {
         mark := "ok"
@@ -258,7 +258,7 @@ pub fn server_logs(server: BrowserServer) -> String { server.logs }
 
 
 
-fn passed(report: BrowserReport) -> Int {
+fn passed(report: BrowserReport) -> Int !Never {
     n := 0
     loop c in report.cases {
         if c.ok -> n = n + 1
@@ -266,7 +266,7 @@ fn passed(report: BrowserReport) -> Int {
     n
 }
 
-fn failed(report: BrowserReport) -> Int { report.cases.len() - passed(report) }
+fn failed(report: BrowserReport) -> Int !Never { report.cases.len() - passed(report) }
 
 fn esc(text: String) -> String {
     raw :: text.bytes()
@@ -317,10 +317,10 @@ fn esc_json(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn push_str(out: &[U8], s: String) {
+fn push_str(out: &[U8], s: String) !Never {
     loop b in s.bytes() -> out.push(b)
 }
-fn source_name(text: String) -> String {
+fn source_name(text: String) -> String !Never {
     raw :: text.bytes()
     out := [U8]{}
     loop i in 0..<raw.len() {
@@ -337,7 +337,7 @@ fn source_name(text: String) -> String {
     String.from_bytes(out) ?? "generated_browser_test"
 }
 
-fn esc_source(text: String) -> String {
+fn esc_source(text: String) -> String !Never {
     raw :: text.bytes()
     out := [U8]{}
     loop b in raw {

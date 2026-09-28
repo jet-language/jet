@@ -399,7 +399,7 @@ fn projected_rows<T>(table: WebTable<T>) -> [WebTableRow<T>] {
     rows
 }
 
-fn column_index<T>(columns: [WebTableColumn<T>], name: String) -> Int {
+fn column_index<T>(columns: [WebTableColumn<T>], name: String) -> Int !Never {
     if name.len() == 0 -> return -1
     loop i in 0..<columns.len() {
         if columns[i].name == name -> return i
@@ -407,7 +407,7 @@ fn column_index<T>(columns: [WebTableColumn<T>], name: String) -> Int {
     -1
 }
 
-fn contains_text(text: String, needle: String) -> Bool {
+fn contains_text(text: String, needle: String) -> Bool !Never {
     if needle.len() == 0 -> return true
     a := text.bytes()
     b := needle.bytes()
@@ -421,7 +421,7 @@ fn contains_text(text: String, needle: String) -> Bool {
     }
     false
 }
-fn contains_key(items: [String], key: String) -> Bool {
+fn contains_key(items: [String], key: String) -> Bool !Never {
     loop item in items {
         if item == key -> return true
     }
@@ -489,7 +489,7 @@ fn trim(text: String) -> String {
     }
     slice_text(text, start, end)
 }
-fn has_key<T>(rows: [WebTableRow<T>], key: String) -> Bool {
+fn has_key<T>(rows: [WebTableRow<T>], key: String) -> Bool !Never {
     loop row in rows {
         if row.key == key -> return true
     }

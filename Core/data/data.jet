@@ -101,7 +101,7 @@ fn data_error_at(kind: DataErrorKind, message: String, operation: String, index:
     }
 }
 
-fn nonfinite(value: Float) -> Bool {
+fn nonfinite(value: Float) -> Bool !Never {
     if math.is_finite(value) -> return false
     true
 }
@@ -1002,13 +1002,13 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     })
 }
 
-fn public_parameters(values: [String]) -> [String] {
+fn public_parameters(values: [String]) -> [String] !Never {
     out := [String]{}
     loop value in values -> out.push(public_parameter(~value))
     out
 }
 
-fn public_parameter(value: String) -> String {
+fn public_parameter(value: String) -> String !Never {
     normalized := trim(value)
     if normalized.len() == 0 -> return ""
     parts :: normalized.split("=").to_list()
@@ -1024,7 +1024,7 @@ fn public_parameter(value: String) -> String {
     normalized
 }
 
-fn public_locator(kind: DataLoaderKind, locator: String) -> String {
+fn public_locator(kind: DataLoaderKind, locator: String) -> String !Never {
     if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
     if kind != DataLoaderKind.URL -> return ~locator
     fragment_parts :: locator.split("#").to_list()
@@ -1093,7 +1093,7 @@ fn parse_format(name: String) -> ?DataFormat !Never {
 }
 
 
-fn normalize_zero(value: Float) -> Float {
+fn normalize_zero(value: Float) -> Float !Never {
     if value == (Float{0.0}) -> return Float{0.0}
     value
 }
@@ -1125,7 +1125,7 @@ fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: Strin
     if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
     Ok(normalize_zero(result))
 }
-fn sort_pivot_cells(cells: &[DataPivotCell]) {
+fn sort_pivot_cells(cells: &[DataPivotCell]) !Never {
     loop i in 1..<cells.len() {
         j := i
         loop j > 0 {
@@ -1138,14 +1138,14 @@ fn sort_pivot_cells(cells: &[DataPivotCell]) {
     }
 }
 
-fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool {
+fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool !Never {
     row_order := text_compare(left.row_key, right.row_key)
     if row_order < 0 -> return true
     if row_order > 0 -> return false
     text_compare(left.column_key, right.column_key) < 0
 }
 
-fn text_compare(left: String, right: String) -> Int {
+fn text_compare(left: String, right: String) -> Int !Never {
     a :: left.bytes()
     b :: right.bytes()
     n := a.len()
@@ -1160,7 +1160,7 @@ fn text_compare(left: String, right: String) -> Int {
 }
 
 
-fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> {
+fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> !Never {
     source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
     authority := DataAuthority{scope: "local", revision: ""}
     return DataSnapshot<[T]>{
@@ -1173,7 +1173,7 @@ fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> {
     }
 }
 
-fn sort_floats(values: [Float]) -> [Float] {
+fn sort_floats(values: [Float]) -> [Float] !Never {
     out := [Float]{}
     loop value in values -> out.push(value)
     loop i in 0..<out.len() {
@@ -1187,7 +1187,7 @@ fn sort_floats(values: [Float]) -> [Float] {
     }
     out
 }
-fn render_bar_text(labels: [String], values: [Float]) -> String {
+fn render_bar_text(labels: [String], values: [Float]) -> String !Never {
     bounds :: value_bounds(values)
     minimum :: bounds.min
     maximum :: bounds.max
@@ -1211,7 +1211,7 @@ fn render_bar_text(labels: [String], values: [Float]) -> String {
     out
 }
 
-fn render_bar_svg(labels: [String], values: [Float]) -> String {
+fn render_bar_svg(labels: [String], values: [Float]) -> String !Never {
     bounds :: value_bounds(values)
     minimum :: bounds.min
     maximum :: bounds.max
@@ -1237,7 +1237,7 @@ fn render_bar_svg(labels: [String], values: [Float]) -> String {
     "{out}<line x1=\"{80 + baseline}\" y1=\"0\" x2=\"{80 + baseline}\" y2=\"{h}\" stroke=\"#777\" stroke-width=\"1\"/></svg>"
 }
 
-fn render_line_text(labels: [String], values: [Float]) -> String {
+fn render_line_text(labels: [String], values: [Float]) -> String !Never {
     out := ""
     loop i in 0..<labels.len() {
         out = "{out}{labels[i]}={values[i]}\n"
@@ -1245,7 +1245,7 @@ fn render_line_text(labels: [String], values: [Float]) -> String {
     out
 }
 
-fn render_line_svg(labels: [String], values: [Float]) -> String {
+fn render_line_svg(labels: [String], values: [Float]) -> String !Never {
     n :: labels.len()
     w := 320
     h := 120
@@ -1261,7 +1261,7 @@ fn render_line_svg(labels: [String], values: [Float]) -> String {
     "{out}\"/></svg>"
 }
 
-fn render_point_svg(labels: [String], values: [Float]) -> String {
+fn render_point_svg(labels: [String], values: [Float]) -> String !Never {
     n :: labels.len()
     w := 320
     h := 120
@@ -1277,7 +1277,7 @@ fn render_point_svg(labels: [String], values: [Float]) -> String {
     "{out}</svg>"
 }
 
-fn value_bounds(values: [Float]) -> (min: Float, max: Float) {
+fn value_bounds(values: [Float]) -> (min: Float, max: Float) !Never {
     minimum := Float{0.0}
     maximum := Float{0.0}
     loop value in values {
@@ -1291,7 +1291,7 @@ fn value_bounds(values: [Float]) -> (min: Float, max: Float) {
     (min: minimum, max: maximum)
 }
 
-fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int {
+fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int !Never {
     if extent <= 0 || maximum <= minimum -> return 0
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
@@ -1335,21 +1335,21 @@ fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan !DataError {
     })
 }
 
-fn plot_mark_name(mark: JetDataPlotMark) -> String {
+fn plot_mark_name(mark: JetDataPlotMark) -> String !Never {
     if mark == JetDataPlotMark.Line -> return "line"
     if mark == JetDataPlotMark.Point -> return "point"
     "bar"
 }
 
-fn plot_plan_json(plan: JetDataPlotPlan) -> String {
+fn plot_plan_json(plan: JetDataPlotPlan) -> String !Never {
     "{{\"mark\":\"{plot_mark_name(plan.mark)}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
 }
 
-fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String {
+fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String !Never {
     "plot mark={plot_mark_name(plan.mark)} rows={rows} labels={plan.labels.len()} width={plan.layout.width} height={plan.layout.height}"
 }
 
-fn render_plot_text(plan: JetDataPlotPlan) -> String {
+fn render_plot_text(plan: JetDataPlotPlan) -> String !Never {
     if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point {
         out := ""
@@ -1359,13 +1359,13 @@ fn render_plot_text(plan: JetDataPlotPlan) -> String {
     render_bar_text(plan.labels, plan.values)
 }
 
-fn render_plot_svg(plan: JetDataPlotPlan) -> String {
+fn render_plot_svg(plan: JetDataPlotPlan) -> String !Never {
     if plan.mark == JetDataPlotMark.Line -> return render_line_svg(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point -> return render_point_svg(plan.labels, plan.values)
     render_bar_svg(plan.labels, plan.values)
 }
 
-fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String {
+fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String !Never {
     points := ""
     loop i in 0..<values.len() {
         if i > 0 -> points = "{points} -> "
@@ -1390,7 +1390,7 @@ fn render_line_options_text(labels: [String], values: [Float], options: DataLine
     out
 }
 
-fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String {
+fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String !Never {
     n := labels.len()
     w := 640
     h := 360
@@ -1453,7 +1453,7 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
     "{out}</svg>"
 }
 
-fn xml_escape(text: String) -> String {
+fn xml_escape(text: String) -> String !Never {
     out := ""
     chunk := [U8]{}
     loop byte in text.bytes() {
@@ -1476,7 +1476,7 @@ fn xml_escape(text: String) -> String {
     out
 }
 
-fn trim(text: String) -> String {
+fn trim(text: String) -> String !Never {
     raw :: text.bytes()
     s := 0
     e := raw.len()
@@ -1493,7 +1493,7 @@ fn trim(text: String) -> String {
     String.from_bytes(raw[s..(e - 1)]) ?? ""
 }
 
-fn upper(text: String) -> String {
+fn upper(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b

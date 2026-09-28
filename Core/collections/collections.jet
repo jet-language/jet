@@ -285,13 +285,13 @@ pub fn merge_add(a: Counter, b: Counter) -> Counter {
 
 pub fn clear_counter(_c: Counter) -> Counter { counter() }
 
-fn deque_start(d: Deque) -> Int {
+fn deque_start(d: Deque) -> Int !Never {
     if d.head <= 0 -> return 0
     if d.head >= d.items.len() -> return d.items.len()
     d.head
 }
 
-fn deque_live_len(d: Deque) -> Int { d.items.len() - deque_start(d) }
+fn deque_live_len(d: Deque) -> Int !Never { d.items.len() - deque_start(d) }
 
 pub fn deque() -> Deque { Deque{items: [String]{}, head: 0} }
 
@@ -717,7 +717,7 @@ pub fn insort_right(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-fn map_entries(m: OrderedMap) -> Int {
+fn map_entries(m: OrderedMap) -> Int !Never {
     n := m.keys.len()
     if m.values.len() < n -> n = m.values.len()
     n

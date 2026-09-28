@@ -13,7 +13,7 @@ pub enum GzipFileError {
     Checksum
 }
 
-pub fn compress(data: [U8]) -> [U8] {
+pub fn compress(data: [U8]) -> [U8] !Never {
     if data.len() > 67108864 -> return [U8]{}
     out := [U8]{}
     out.push(U8{31})
@@ -86,8 +86,7 @@ pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
     if expected_size > 67108864 -> return Err(GzipFileError.Unsupported)
     payload := [U8]{}
     loop k in i..<trailer -> payload.push(data[k])
-    inflated :: core.archive.inflate(payload)
-    body := if inflated == {
+    body := if core.archive.inflate(payload) == {
         .Ok(value) -> value
         .Err(error) -> {
             if error == ArchiveError.Unsupported -> return Err(GzipFileError.Unsupported)
@@ -151,22 +150,22 @@ pub fn decompress_file(src: String, dst: String) -> Bool !GzipFileError {
     host_write_bytes(dst, body)
 }
 
-fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] {
+fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     loop i in start..<end -> out.push(data[i])
     out
 }
 
-fn read_u16le(data: [U8], i: Int) -> Int {
+fn read_u16le(data: [U8], i: Int) -> Int !Never {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8)
 }
 
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-fn to_u8(n: Int) -> U8 {
+fn to_u8(n: Int) -> U8 !Never {
     v :: n & 255
     (U8{v})
 }
-fn read_u32le(data: [U8], i: Int) -> Int {
+fn read_u32le(data: [U8], i: Int) -> Int !Never {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
 }

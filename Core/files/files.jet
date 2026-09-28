@@ -325,7 +325,7 @@ fn join_impl(a: String, b: String) -> String !Never {
     "{a}/{clean_b}"
 }
 
-pub fn join(a: String, b: String) -> String { join_impl(a, b) }
+pub fn join(a: String, b: String) -> String !Never { join_impl(a, b) }
 
 
 pub fn absolute(path: String) -[FS, Env]> String !IOError {
@@ -759,7 +759,7 @@ pub fn temp_file(prefix: String) -[FS]> TempFile !IOError { core.files.temp_file
 pub fn lock(path: String) -[FS]> FileLock !IOError { core.files.lock(path) }
 
 
-pub fn basename(path: String) -> String {
+pub fn basename(path: String) -> String !Never {
     raw :: (~path).bytes()
     i := raw.len() - 1
     loop i >= 0 {

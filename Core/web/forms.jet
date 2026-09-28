@@ -211,7 +211,7 @@ pub fn submit(form: &WebForm) -> String !WebFormError {
 }
 
 pub fn no_script(form: WebForm) -> String !WebFormError { html(form) }
-pub fn html(form: WebForm) -> String { render_html(form) }
+pub fn html(form: WebForm) -> String !Never { render_html(form) }
 pub fn show(form: WebForm) -> String { render_html(form) }
 
 pub fn input(name: String, fields: [WebFormFieldSpec]) -> WebFormInput !WebFormError {
@@ -396,7 +396,7 @@ pub fn typed_decode_post(form: WebFormTyped, body: String) -> WebFormDecodedInpu
     decode_typed_input(form.input, ~body) ?? return Err(WebFormError.Invalid)
 }
 
-pub fn typed_html(form: WebFormTyped) -> String { render_typed_html(form) }
+pub fn typed_html(form: WebFormTyped) -> String !Never { render_typed_html(form) }
 pub fn typed_show(form: WebFormTyped) -> String { render_typed_html(form) }
 
 pub fn typed_state(form: WebFormTyped) -> String { status_name(form.form.status) }
@@ -456,7 +456,7 @@ pub fn typed_submission_cancel(submission: &WebFormTypedSubmission) {
     submission.pending = false
     submission.form.form.status = WebFormStatus.Idle
 }
-fn render_typed_html(form: WebFormTyped) -> String {
+fn render_typed_html(form: WebFormTyped) -> String !Never {
     out := "<form action=\"{esc(form.form.action)}\" method=\"{esc(form.form.method)}\">"
     loop spec in form.input.fields {
         value := ""
@@ -491,7 +491,7 @@ fn render_typed_html(form: WebFormTyped) -> String {
 
 
 
-fn render_html(form: WebForm) -> String {
+fn render_html(form: WebForm) -> String !Never {
     out := "<form action=\"{esc(form.action)}\" method=\"{esc(form.method)}\">"
     loop field in form.fields {
         typ := "text"
@@ -508,18 +508,18 @@ fn render_html(form: WebForm) -> String {
     "{out}<button type=\"submit\">Submit</button></form>"
 }
 
-fn valid_kind(kind: String) -> Bool {
+fn valid_kind(kind: String) -> Bool !Never {
     kind == "string" || kind == "int" || kind == "bool" || kind == "float"
 }
 
-fn parse_kind(kind: String) -> WebFormValueType {
+fn parse_kind(kind: String) -> WebFormValueType !Never {
     if kind == "int" -> return WebFormValueType.Int
     if kind == "bool" -> return WebFormValueType.Bool
     if kind == "float" -> return WebFormValueType.Float
     WebFormValueType.String
 }
 
-fn validation_error(field: WebFormFieldState) -> String {
+fn validation_error(field: WebFormFieldState) -> String !Never {
     if field.required && field.value.len() == 0 -> return "required"
     if field.value.len() == 0 -> return ""
     if field.value_type == WebFormValueType.Int && !is_int(field.value) -> return "int"
@@ -528,7 +528,7 @@ fn validation_error(field: WebFormFieldState) -> String {
     ""
 }
 
-fn apply_validation(form: &WebForm) -> Bool {
+fn apply_validation(form: &WebForm) -> Bool !Never {
     ok := true
     loop i in 0..<form.fields.len() {
         err := validation_error(form.fields[i])
@@ -544,7 +544,7 @@ fn apply_validation(form: &WebForm) -> Bool {
     ok
 }
 
-fn validate_field_form(form: &WebForm, name: String) -> Bool {
+fn validate_field_form(form: &WebForm, name: String) -> Bool !Never {
     loop i in 0..<form.fields.len() {
         if form.fields[i].name == name {
             err := validation_error(form.fields[i])
@@ -579,13 +579,13 @@ fn status_name(status: WebFormStatus) -> String {
     }
 }
 
-fn copy_fields(fields: [WebFormFieldSpec]) -> [WebFormFieldSpec] {
+fn copy_fields(fields: [WebFormFieldSpec]) -> [WebFormFieldSpec] !Never {
     out := [WebFormFieldSpec]{ }
     loop field in fields -> out.push(field)
     out
 }
 
-fn states_from_specs(fields: [WebFormFieldSpec]) -> [WebFormFieldState] {
+fn states_from_specs(fields: [WebFormFieldSpec]) -> [WebFormFieldState] !Never {
     out := [WebFormFieldState]{}
     loop field in fields {
         value := ""
@@ -613,7 +613,7 @@ fn decoded_from_input(form: WebFormTyped) -> WebFormDecodedInput {
     WebFormDecodedInput{type_name: form.input.type_name, values: values, wire_values: wire_values}
 }
 
-fn encode_typed_input(input: WebFormInput, decoded: WebFormDecodedInput) -> String {
+fn encode_typed_input(input: WebFormInput, decoded: WebFormDecodedInput) -> String !Never {
     out := ""
     loop i in 0..<input.fields.len() {
         if i > 0 -> out = "{out}&"
@@ -659,14 +659,14 @@ fn decode_typed_input(input: WebFormInput, body: String) -> ?WebFormDecodedInput
     Val(WebFormDecodedInput{type_name: input.type_name, values: values, wire_values: wire_values})
 }
 
-fn wire_index(fields: [WebFormFieldSpec], wire_name: String) -> Int {
+fn wire_index(fields: [WebFormFieldSpec], wire_name: String) -> Int !Never {
     loop i in 0..<fields.len() {
         if fields[i].wire_name == wire_name -> return i
     }
     -1
 }
 
-fn find_byte(text: String, wanted: Int) -> Int {
+fn find_byte(text: String, wanted: Int) -> Int !Never {
     raw := text.bytes()
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == wanted -> return i
@@ -674,7 +674,7 @@ fn find_byte(text: String, wanted: Int) -> Int {
     -1
 }
 
-fn split_amp(text: String) -> [String] {
+fn split_amp(text: String) -> [String] !Never {
     out := [String]{ }
     start := 0
     raw := text.bytes()
@@ -688,7 +688,7 @@ fn split_amp(text: String) -> [String] {
     out
 }
 
-fn url_encode(text: String) -> String {
+fn url_encode(text: String) -> String !Never {
     out := ""
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -704,7 +704,7 @@ fn url_encode(text: String) -> String {
     out
 }
 
-fn url_decode(text: String) -> String {
+fn url_decode(text: String) -> String !Never {
     out := [U8]{}
     raw := text.bytes()
     i := 0
@@ -729,7 +729,7 @@ fn url_decode(text: String) -> String {
         i = i + 1
     }
 }
-fn valid_encoding(text: String) -> Bool {
+fn valid_encoding(text: String) -> Bool !Never {
     raw := text.bytes()
     i := 0
     loop i < raw.len() {
@@ -742,7 +742,7 @@ fn valid_encoding(text: String) -> Bool {
     }
     true
 }
-fn fields_valid(fields: [WebFormFieldSpec]) -> Bool {
+fn fields_valid(fields: [WebFormFieldSpec]) -> Bool !Never {
     if fields.len() == 0 || fields.len() > C_MAX_FORM_FIELDS -> return false
     names := [String]{}
     wires := [String]{}
@@ -760,7 +760,7 @@ fn fields_valid(fields: [WebFormFieldSpec]) -> Bool {
     true
 }
 
-fn valid_name(text: String) -> Bool {
+fn valid_name(text: String) -> Bool !Never {
     raw := text.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return false
     loop b in raw {
@@ -770,14 +770,14 @@ fn valid_name(text: String) -> Bool {
     true
 }
 
-fn contains_name(names: [String], value: String) -> Bool {
+fn contains_name(names: [String], value: String) -> Bool !Never {
     loop name in names {
         if name == value -> return true
     }
     false
 }
 
-fn has_control_text(text: String) -> Bool {
+fn has_control_text(text: String) -> Bool !Never {
     loop b in text.bytes() {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true
@@ -785,20 +785,20 @@ fn has_control_text(text: String) -> Bool {
     false
 }
 
-fn hex(n: Int) -> String {
+fn hex(n: Int) -> String !Never {
     digits := "0123456789ABCDEF"
     slice_text(digits, n, n + 1)
 }
 
-fn hex_value(b: U8) -> Int {
+fn hex_value(b: U8) -> Int !Never {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
-    -1
+    return -1
 }
 
-fn is_int(text: String) -> Bool {
+fn is_int(text: String) -> Bool !Never {
     raw := text.bytes()
     if raw.len() == 0 -> return false
     i := 0
@@ -811,7 +811,7 @@ fn is_int(text: String) -> Bool {
     true
 }
 
-fn is_float(text: String) -> Bool {
+fn is_float(text: String) -> Bool !Never {
     raw := text.bytes()
     if raw.len() == 0 -> return false
     dots := 0
@@ -822,9 +822,9 @@ fn is_float(text: String) -> Bool {
     dots <= 1 && digits > 0
 }
 
-fn is_bool(text: String) -> Bool { text == "true" || text == "false" || text == "1" || text == "0" }
+fn is_bool(text: String) -> Bool !Never { text == "true" || text == "false" || text == "1" || text == "0" }
 
-fn esc(text: String) -> String {
+fn esc(text: String) -> String !Never {
     raw := text.bytes()
     out := [U8]{ }
     loop b in raw {
@@ -833,9 +833,9 @@ fn esc(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn push_str(out: &[U8], value: String) { loop b in value.bytes() -> out.push(b) }
+fn push_str(out: &[U8], value: String) !Never { loop b in value.bytes() -> out.push(b) }
 
-fn slice_text(text: String, start: Int, end: Int) -> String {
+fn slice_text(text: String, start: Int, end: Int) -> String !Never {
     raw := text.bytes()
     out := [U8]{ }
     i := start

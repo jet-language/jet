@@ -146,7 +146,7 @@ pub fn data(mime: MIME, payload: String) -> URL {
     encoded :: percent_encode(payload)
     URL{scheme: "data", user: "", password: "", host: "", port: -1, path: "{mime.top}/{mime.sub},{encoded}", query: "", fragment: "", raw: ""}
 }
-fn default_port(scheme: String) -> Int {
+fn default_port(scheme: String) -> Int !Never {
     if scheme == {
         "http" | "ws" -> 80
         "https" | "wss" -> 443
@@ -161,7 +161,7 @@ fn default_port(scheme: String) -> Int {
 
 pub fn query(pairs: [[String]]) -> String { encode_query(pairs) }
 
-fn encode_query(pairs: [[String]]) -> String {
+fn encode_query(pairs: [[String]]) -> String !Never {
     out := ""
     first := true
     loop row in pairs {
@@ -180,7 +180,7 @@ fn encode_query(pairs: [[String]]) -> String {
     out
 }
 
-pub fn percent_encode(text: String) -> String {
+pub fn percent_encode(text: String) -> String !Never {
     encode_component(text, false, false)
 }
 
@@ -206,7 +206,7 @@ pub fn percent_decode(text: String) -> String !URLError {
 
 pub fn geturl(url: URL) -> String { unparse(url) }
 
-pub fn unparse(url: URL) -> String {
+pub fn unparse(url: URL) -> String !Never {
     scheme :: ascii_lower(url.scheme)
     authority := ""
     if url.host.bytes().len() > 0 {
@@ -373,7 +373,7 @@ pub fn urldefrag(text: String) -> (url: String, fragment: String) {
 
 pub fn parse_qs(query: String) -> [[String]] !URLError { parse_qsl(query) }
 
-fn encode_component(text: String, allow_slash: Bool, plus_space: Bool) -> String {
+fn encode_component(text: String, allow_slash: Bool, plus_space: Bool) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -388,7 +388,7 @@ fn encode_component(text: String, allow_slash: Bool, plus_space: Bool) -> String
     String.from_bytes(out) ?? ""
 }
 
-fn form_to_percent(text: String) -> String {
+fn form_to_percent(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         if b == (U8{43}) {
@@ -406,7 +406,7 @@ fn form_percent_decode(text: String) -> String !URLError {
     percent_decode(form_to_percent(text))
 }
 
-fn unreserved(b: U8) -> Bool {
+fn unreserved(b: U8) -> Bool !Never {
     n :: Int.from_u8(b)
     if n >= 65 && n <= 90 -> return true
     if n >= 97 && n <= 122 -> return true
@@ -414,7 +414,7 @@ fn unreserved(b: U8) -> Bool {
     n == 45 || n == 46 || n == 95 || n == 126
 }
 
-fn hex_nibble(n: Int) -> U8 {
+fn hex_nibble(n: Int) -> U8 !Never {
     if n < 10 -> return U8{48 + n}
     return U8{65 + n - 10}
 }
@@ -427,7 +427,7 @@ fn hex_value(b: U8) -> ?Int {
     None
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -436,7 +436,7 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn valid_scheme(text: String) -> Bool {
+fn valid_scheme(text: String) -> Bool !Never {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     first :: Int.from_u8(raw[0])
@@ -450,7 +450,7 @@ fn valid_scheme(text: String) -> Bool {
     true
 }
 
-fn scheme_colon(raw: [U8]) -> Int {
+fn scheme_colon(raw: [U8]) -> Int !Never {
     i := 0
     loop i < raw.len() {
         n :: Int.from_u8(raw[i])
@@ -461,7 +461,7 @@ fn scheme_colon(raw: [U8]) -> Int {
     -1
 }
 
-fn has_scheme(text: String) -> Bool { scheme_colon(text.bytes()) > 0 }
+fn has_scheme(text: String) -> Bool !Never { scheme_colon(text.bytes()) > 0 }
 
 fn parse_port(text: String) -> ?Int {
     raw :: text.bytes()
@@ -476,7 +476,7 @@ fn parse_port(text: String) -> ?Int {
     Val(n)
 }
 
-fn trim_ascii(text: String) -> String {
+fn trim_ascii(text: String) -> String !Never {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -492,7 +492,7 @@ fn trim_ascii(text: String) -> String {
     slice(raw, start, end)
 }
 
-fn valid_percent(text: String) -> Bool {
+fn valid_percent(text: String) -> Bool !Never {
     raw :: text.bytes()
     i := 0
     loop i < raw.len() {
@@ -506,7 +506,7 @@ fn valid_percent(text: String) -> Bool {
     true
 }
 
-fn valid_url_host(host: String) -> Bool {
+fn valid_url_host(host: String) -> Bool !Never {
     raw :: host.bytes()
     if raw.len() == 0 -> return false
     label := 0
@@ -530,12 +530,12 @@ fn valid_url_host(host: String) -> Bool {
     true
 }
 
-fn is_hex_byte(b: U8) -> Bool {
+fn is_hex_byte(b: U8) -> Bool !Never {
     n :: Int.from_u8(b)
     (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102)
 }
 
-fn normalize_path(path: String, absolute: Bool) -> String {
+fn normalize_path(path: String, absolute: Bool) -> String !Never {
     raw :: path.bytes()
     segments := [String]{}
     start := 0
@@ -567,7 +567,7 @@ fn normalize_path(path: String, absolute: Bool) -> String {
     out
 }
 
-fn dirname_url(path: String) -> String {
+fn dirname_url(path: String) -> String !Never {
     raw :: path.bytes()
     if raw.len() == 0 -> return "/"
     i := raw.len()
@@ -578,14 +578,14 @@ fn dirname_url(path: String) -> String {
     "/"
 }
 
-fn contains_byte(text: String, needle: Int) -> Bool {
+fn contains_byte(text: String, needle: Int) -> Bool !Never {
     loop b in text.bytes() {
         if Int.from_u8(b) == needle -> return true
     }
     false
 }
 
-fn starts(text: String, prefix: String) -> Bool {
+fn starts(text: String, prefix: String) -> Bool !Never {
     a :: text.bytes()
     b :: prefix.bytes()
     if b.len() > a.len() -> return false
@@ -595,14 +595,14 @@ fn starts(text: String, prefix: String) -> Bool {
     true
 }
 
-fn index_of(raw: [U8], b: Int) -> Int {
+fn index_of(raw: [U8], b: Int) -> Int !Never {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == b -> return i
     }
     -1
 }
 
-fn last_index(raw: [U8], b: Int) -> Int {
+fn last_index(raw: [U8], b: Int) -> Int !Never {
     i := raw.len() - 1
     loop i >= 0 {
         if Int.from_u8(raw[i]) == b -> return i
@@ -611,11 +611,11 @@ fn last_index(raw: [U8], b: Int) -> Int {
     -1
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     String.from_bytes(slice_bytes(raw, start, end)) ?? ""
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     limit := if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out

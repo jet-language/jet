@@ -9,7 +9,7 @@
 // the stream.
 use core.math as math
 use core as core
-fn nonfinite(value: Float) -> Bool {
+fn nonfinite(value: Float) -> Bool !Never {
     if math.is_finite(value) -> return false
     true
 }
@@ -24,9 +24,9 @@ C_BASE63_FLOAT :: 9223372036854775808.0
 // Draw one non-negative 63-bit word from the shared deterministic provider.
 // The provider's getrandbits(63) is the only host boundary; all composition,
 // rejection, and distribution logic below is Jet-owned.
-fn next_bits63() -[Rand]> Int { core.math.random.getrandbits(63) }
+fn next_bits63() -[Rand]> Int !Never { core.math.random.getrandbits(63) }
 
-fn unit() -[Rand]> Float {
+fn unit() -[Rand]> Float !Never {
     Float{next_bits63()} / C_BASE63_FLOAT
 }
 
@@ -36,7 +36,7 @@ fn unit_open() -[Rand]> Float {
     u
 }
 
-fn full_word64() -[Rand]> Int {
+fn full_word64() -[Rand]> Int !Never {
     hi :: next_bits63() & C_MASK32
     lo :: next_bits63() & C_MASK32
     (hi * C_BASE32) + lo
@@ -44,7 +44,7 @@ fn full_word64() -[Rand]> Int {
 
 // Unbiased offset in 0..<span. Rejection over base-2^63 digits covers every
 // representable range without modulo bias.
-fn bounded(span: Int) -[Rand]> Int {
+fn bounded(span: Int) -[Rand]> Int !Never {
     if span <= 1 -> return 0
     if span <= C_BASE63 {
         limit :: C_BASE63 - (C_BASE63 %% span)
@@ -92,7 +92,7 @@ pub fn split(seed_value: Int) -[Rand]> Rng {
 
 /// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does
 /// not consume the stream.
-pub fn int(lo: Int, hi: Int) -[Rand]> Int {
+pub fn int(lo: Int, hi: Int) -[Rand]> Int !Never {
     if lo >= hi -> return lo
     span :: hi - lo + 1
     if span <= 0 {
@@ -219,7 +219,7 @@ pub fn normal(mean: Float, stddev: Float) -[Rand]> Float {
 
 pub fn exponential(lambda: Float) -[Rand]> Float {
     if nonfinite(lambda) || lambda <= (Float{0.0}) -> return (Float{0.0})
-    -math.ln(unit_open()) / lambda
+    return -math.ln(unit_open()) / lambda
 }
 
 /// Python `random` spellings over the same deterministic stream.
