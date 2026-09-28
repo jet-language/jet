@@ -159,7 +159,13 @@ unit_record() {
 }
 
 {
-  if [[ -n "$own_area" ]]; then selection=" --area $own_area$([[ $deps_from_head == 1 ]] && echo ' --deps-from-head')"; elif [[ -n "$sorted_areas" ]]; then selection=" --areas $sorted_areas"; else selection=""; fi
+  selection=""
+  if [[ -n "$own_area" ]]; then
+    selection=" --area $own_area"
+    if (( deps_from_head == 1 )); then selection="$selection --deps-from-head"; fi
+  elif [[ -n "$sorted_areas" ]]; then
+    selection=" --areas $sorted_areas"
+  fi
   printf 'entry-command: JETPACK_WORKER=%s Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s\n' "$worker" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$selection"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
