@@ -1,0 +1,133 @@
+// Jetpack's private bridge to the native Nix evaluator (Jetpack/NixEval): the
+// bounded devShell projection and the private derivation materializer, both
+// behind the pinned, product-ready oracle manifest. Evaluator failures are
+// reported as `NixEvalError.Evaluation` with the evaluator's own text.
+
+// A derivation materialized to Nix-compatible store paths. `outputs` holds
+// each output's store path with its fixed-output method and hash.
+pub struct NixNativeDerivation {
+    pub name: String
+    pub drv_path: String
+    pub outputs: [String: NixDerivationOutput]
+    pub builder: String
+    pub args: [String]
+    pub env: [String: String]
+    // Sorted and unique.
+    pub input_sources: [String]
+
+    fn output_path(self, name: String) -> ?String !Never {
+        output :: self.outputs.get(name) ?? return None
+        Val(output.path)
+    }
+
+    // Output name -> store path, key-ordered.
+    fn output_paths(self) -> [String: String] !Never {
+        paths := [String: String]{}
+        loop name in nixeval_sorted(self.outputs.keys().to_list()) -> paths[name] = self.outputs[name].path
+        paths
+    }
+}
+
+pub struct NixNativeBoundary {
+    manifest: NixEvalOracleManifest
+
+    // The committed oracle manifest; evaluation is refused unless it is
+    // product-ready.
+    fn embedded() -> NixNativeBoundary !NixEvalError {
+        manifest :: NixEvalOracleManifest.embedded()
+        if !manifest.product_ready() -> return Err(NixEvalError.Manifest("pinned Nix oracle is not product-ready"))
+        Ok(NixNativeBoundary{manifest})
+    }
+
+    fn product_ready(self) -> Bool !Never {
+        self.manifest.product_ready()
+    }
+
+    fn pinned_inventory(self) -> [NixEvalInventoryEntry] !Never {
+        nixeval_pinned_inventory()
+    }
+
+    fn evaluator_identity(self, system: String) -> String !NixEvalError {
+        self.manifest.evaluator_identity(system)
+    }
+
+    fn evaluate_devshell(self, source: String, system: String) -> NixEvalDevShell !NixEvalError {
+        self.evaluate_devshell_output(source, system, "default")
+    }
+
+    fn evaluate_devshell_output(self, source: String, system: String, output: String) -> NixEvalDevShell !NixEvalError {
+        self.evaluate_devshell_output_with_import_authority(source, system, output, None)
+    }
+
+    fn evaluate_devshell_with_import_authority(self, source: String, system: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+        self.evaluate_devshell_output_with_import_authority(source, system, "default", ^authority)
+    }
+
+    fn evaluate_devshell_output_with_import_authority(self, source: String, system: String, output: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+        if nixeval_evaluate_devshell_output_with_import_authority(source, system, output, ^authority) == {
+            .Ok(shell) -> return Ok(shell)
+            .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
+        }
+    }
+
+    fn evaluate_derivation(self, source: String, system: String) -> NixNativeDerivation !NixEvalError {
+        self.evaluate_derivation_with_import_authority(source, system, None)
+    }
+
+    fn evaluate_derivation_with_import_authority(self, source: String, system: String, authority: ^?NixEvalAuthority) -> NixNativeDerivation !NixEvalError {
+        if nixeval_evaluate_derivation_with_import_authority(source, system, ^authority) == {
+            .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
+            .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
+        }
+    }
+
+    fn evaluate_derivation_output(self, source: String, system: String, attribute: String) -> NixNativeDerivation !NixEvalError {
+        self.evaluate_derivation_output_with_import_authority(source, system, attribute, None)
+    }
+
+    fn evaluate_derivation_output_with_import_authority(self, source: String, system: String, attribute: String, authority: ^?NixEvalAuthority) -> NixNativeDerivation !NixEvalError {
+        if nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, ^authority) == {
+            .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
+            .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
+        }
+    }
+}
+
+fn nix_materialize_evaluated(evaluation: NixEvalDerivation) -> NixNativeDerivation !NixEvalError {
+    if nix_materialize_derivation(evaluation) == {
+        .Ok(derivation) -> return Ok(derivation)
+        .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
+    }
+}
+
+// Assign Nix store paths to an evaluated derivation: modulo-hash the
+// output-masked derivation, derive every output path, write them into the
+// environment, then name the `.drv` by its text-method path. Both paths are
+// re-verified before the result is returned.
+fn nix_materialize_derivation(evaluation: NixEvalDerivation) -> NixNativeDerivation !NixError {
+    store_dir :: @NIX_DEFAULT_STORE_DIR
+    declared := [String: NixDerivationOutput]{}
+    loop output in evaluation.outputs {
+        declared[output.name] = NixDerivationOutput{name: output.name, path: "", method_algo: output.method_algo, hash_hex: output.hash_hex}
+    }
+    input_srcs :: nixeval_sorted_unique(evaluation.input_sources)
+    unresolved :: NixDerivation{outputs: declared, input_drvs: [NixInputDrv]{}, input_srcs, platform: evaluation.system, builder: evaluation.builder, args: evaluation.args, env: evaluation.env}
+
+    store := nix_derivation_store([String: NixDerivation]{})
+    modulo :: store.hash_modulo("{store_dir}/jet-native-evaluator.drv", unresolved, true)
+    outputs := [String: NixDerivationOutput]{}
+    env := evaluation.env
+    loop name in unresolved.output_names() {
+        output :: unresolved.outputs[name]
+        path :: if output.is_fixed() -> nix_make_fixed_output_path(store_dir, nix_output_path_name(evaluation.name, name), output.method_algo, output.hash_hex) else -> nix_make_output_path(store_dir, name, modulo.get(name) ?? return Err(NixError.DrvPath("missing derivation modulo hash for output {name}")), evaluation.name)
+        outputs[name] = NixDerivationOutput{name: ~name, path: ~path, method_algo: output.method_algo, hash_hex: output.hash_hex}
+        env[name] = path
+    }
+    drv :: NixDerivation{outputs, input_drvs: [NixInputDrv]{}, input_srcs, platform: evaluation.system, builder: evaluation.builder, args: evaluation.args, env: nixeval_key_ordered(env)}
+
+    aterm :: drv.unparse(false, None)
+    drv_path :: nix_make_text_path(store_dir, "{evaluation.name}.drv", aterm.bytes(), drv.references_for_drv_path())
+    nix_verify_drv_path(store_dir, drv_path, aterm.bytes(), drv)
+    store.verify_output_paths(store_dir, drv_path, drv)
+    Ok(NixNativeDerivation{name: evaluation.name, drv_path, outputs: drv.outputs, builder: evaluation.builder, args: evaluation.args, env: drv.env, input_sources: input_srcs})
+}

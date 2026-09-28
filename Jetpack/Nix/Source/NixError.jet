@@ -1,0 +1,35 @@
+// The Nix area's one failure carrier. The derivation variants keep the exact
+// `NixDrvError` text of the Rust reference (crates/jetpack/src/NixDrv.rs); the
+// import variants are the project-root import authority's refusals
+// (NixEval/Authority.rs); the fallback variants are the one-shot local-Nix
+// import document's field errors (NixFallback.rs). Evaluator failures stay in
+// the NixEval area's `NixEvalError`.
+
+#Error
+pub enum NixError {
+    DrvParse(String)
+    DrvPath(String)
+    DrvUnsupported(String)
+    Divergence(what: String, expected: String, actual: String)
+    DrvIo(String)
+    ImportPath
+    ImportNotRegularFile
+    ImportTooLarge
+    FallbackFieldConflict(String)
+    FallbackFieldMissing(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .DrvParse(reason) -> "nix drv parse: {reason}"
+            .DrvPath(reason) -> "nix path calculus: {reason}"
+            .DrvUnsupported(reason) -> "nix drv unsupported: {reason}"
+            .Divergence(what, expected, actual) -> "nix compat divergence ({what}): expected `{expected}`, got `{actual}`"
+            .DrvIo(reason) -> "nix drv io: {reason}"
+            .ImportPath -> "import path is not a normalized relative project path"
+            .ImportNotRegularFile -> "project import is not a regular file"
+            .ImportTooLarge -> "project import exceeds the 1 MiB evaluator limit"
+            .FallbackFieldConflict(label) -> "fallback document has more than one {label} field"
+            .FallbackFieldMissing(label) -> "fallback document has no {label} field"
+        }
+    }
+}

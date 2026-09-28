@@ -1,0 +1,53 @@
+// Fallback import field policy and retained facts (Rust
+// `NixFallback::import_record`, exercised by tests/jetpack_criterion8.rs).
+
+fn nix_test_fallback_error(projection: NixFallbackProjection, keys: [String]) -> String {
+    if projection.select(keys) == {
+        .Ok(_) -> panic("projection selection must fail closed")
+        .Err(error) -> error.message()
+    }
+}
+
+#Test("nix fallback projections select exactly one accepted field") {
+    keys :: [String]{"drvPath", "outputs", "closedGraph", "inputDrvs", "sources", "hashes", "losses", "attestation"}
+    assert_eq(NixFallbackProjection.Graph.select(keys) ?? panic("graph"), "closedGraph")
+    assert_eq(NixFallbackProjection.SelectedOutputs.select(keys) ?? panic("outputs"), "outputs")
+    assert_eq(NixFallbackProjection.Dependencies.select(keys) ?? panic("dependencies"), "inputDrvs")
+    assert_eq(NixFallbackProjection.Proof.select(keys) ?? panic("proof"), "attestation")
+    assert_eq(nix_test_fallback_error(.SelectedOutputs, [String]{"selectedOutputs", "outputs"}), "fallback document has more than one selected outputs field")
+    assert_eq(nix_test_fallback_error(.Graph, [String]{"outputs"}), "fallback document has no closed derivation graph field")
+}
+
+#Test("nix fallback detection ignores the plain nix build shape") {
+    plain :: [String]{"drvPath", "outputs"}
+    assert(!nix_fallback_detect(plain, plain))
+    assert_eq(nix_fallback_import_field(plain), None)
+    wrapped :: [String]{"drvPath", "outputs", "jetpackImport", "jetpack"}
+    assert(nix_fallback_detect(wrapped, [String]{"closedGraph"}))
+    assert_eq(nix_fallback_import_field(wrapped), Val("jetpackImport"))
+    assert(nix_fallback_detect(plain, [String]{"outputs", "digests"}))
+    assert(!nix_fallback_detect(plain, [String]{"selectedOutputs"}))
+}
+
+#Test("nix fallback retains canonical projections and digests") {
+    canonical :: NixFallbackCanonical{
+        document: `{"proof":{"source":"criterion-8"}}`,
+        graph: `{"root":{"dependencies":[]}}`,
+        selected_outputs: `{"out":"/store/out"}`,
+        dependencies: "[]",
+        sources: "[]",
+        hashes: `{"out":"output-hash"}`,
+        losses: "[]",
+        proof: `{"source":"criterion-8"}`,
+        recipe: Val(`{"kind":"compatibility"}`),
+        lock: None,
+    }
+    facts :: canonical.imported().facts
+    assert_eq(facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
+    assert_eq(facts.get("nix.fallback.outputs"), Val(`{"out":"/store/out"}`))
+    assert_eq(facts.get("nix.fallback.selected_outputs"), Val(`{"out":"/store/out"}`))
+    assert_eq(facts.get("nix.fallback.proof.sha256"), Val(pkg_sha256_hex(`{"source":"criterion-8"}`.bytes())))
+    assert_eq(facts.get("nix.fallback.recipe"), Val(`{"kind":"compatibility"}`))
+    assert_eq(facts.get("nix.fallback.lock"), None)
+    assert_eq(facts.len(), 13)
+}

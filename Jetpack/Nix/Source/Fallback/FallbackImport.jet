@@ -1,0 +1,146 @@
+// Import of the one-shot local-Nix compatibility document into Jetpack facts
+// (Rust `NixFallback::import_record`). The fallback producer may run Nix once
+// against a locked request; this seam keeps only the result. The complete
+// document and each required projection are retained as canonical JSON, so
+// later phases never need the Nix process or its output formatting.
+//
+// This file owns the field policy and the retained facts. Reading the record
+// and rendering each value as compact, insertion-ordered JSON is
+// core.encoding.json (`parse`, `to_string`) at the Provider boundary.
+
+@NIX_FALLBACK_IMPORT_SCHEMA :: "jetpack.nix-fallback.v1"
+
+// One required projection of a fallback document.
+pub enum NixFallbackProjection {
+    Graph
+    SelectedOutputs
+    Dependencies
+    Sources
+    Hashes
+    Losses
+    Proof
+
+    // Accepted field spellings, in lookup order.
+    fn fields(self) -> [String] !Never {
+        if self == {
+            .Graph -> [String]{"closedGraph", "derivationGraph", "graph", "closure"}
+            .SelectedOutputs -> [String]{"selectedOutputs", "outputs"}
+            .Dependencies -> [String]{"dependencies", "inputDrvs", "inputs"}
+            .Sources -> [String]{"sources", "sourceInputs", "inputSrcs"}
+            .Hashes -> [String]{"hashes", "outputHashes", "digests"}
+            .Losses -> [String]{"losses", "lossReport", "unsupported"}
+            .Proof -> [String]{"proof", "evaluationProof", "attestation"}
+        }
+    }
+
+    fn label(self) -> String !Never {
+        if self == {
+            .Graph -> "closed derivation graph"
+            .SelectedOutputs -> "selected outputs"
+            .Dependencies -> "dependencies"
+            .Sources -> "sources"
+            .Hashes -> "hashes"
+            .Losses -> "losses"
+            .Proof -> "proof"
+        }
+    }
+
+    // Whether a field of this projection marks a document as a fallback
+    // record. `outputs` is also the pinned `nix build --json` shape, so
+    // selected outputs alone do not.
+    fn marks_fallback(self) -> Bool !Never {
+        if self == {
+            .SelectedOutputs -> false
+            else -> true
+        }
+    }
+
+    // The one field of `keys` that holds this projection.
+    fn select(self, keys: [String]) -> String !NixError {
+        found := ""
+        loop field in self.fields() {
+            if !keys.contains(field) -> next
+            if found != "" -> return Err(NixError.FallbackFieldConflict(self.label()))
+            found = field
+        }
+        if found == "" -> return Err(NixError.FallbackFieldMissing(self.label()))
+        Ok(found)
+    }
+}
+
+// Every required projection, in the reference's lookup order.
+pub fn nix_fallback_projections() -> [NixFallbackProjection] !Never {
+    [NixFallbackProjection]{.Graph, .SelectedOutputs, .Dependencies, .Sources, .Hashes, .Losses, .Proof}
+}
+
+// The root field holding the import object (`jetpackImport`, then
+// `jetpack`); None when the root object is the import object itself.
+pub fn nix_fallback_import_field(root_keys: [String]) -> ?String !Never {
+    wrappers :: [String]{"jetpackImport", "jetpack"}
+    loop field in wrappers {
+        if root_keys.contains(field) -> return Val(field)
+    }
+    None
+}
+
+// Whether a record carries fallback projections; a record without any is the
+// old pinned `nix build --json` shape and retains nothing.
+pub fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool !Never {
+    markers :: [String]{"jetpackImport", "jetpack", "fallback"}
+    loop field in markers {
+        if root_keys.contains(field) -> return true
+    }
+    loop projection in nix_fallback_projections() {
+        if !projection.marks_fallback() -> next
+        loop field in projection.fields() {
+            if import_keys.contains(field) -> return true
+        }
+    }
+    false
+}
+
+// The canonical JSON of a fallback record, of each selected projection, and
+// of the optional `recipe` and `lock` fields of the import object.
+pub struct NixFallbackCanonical {
+    pub document: String
+    pub graph: String
+    pub selected_outputs: String
+    pub dependencies: String
+    pub sources: String
+    pub hashes: String
+    pub losses: String
+    pub proof: String
+    pub recipe: ?String
+    pub lock: ?String
+
+    // The facts retained in the producer record, key-ordered.
+    fn imported(self) -> NixImportedState !Never {
+        facts := [String: String]{}
+        facts["nix.fallback.schema"] = @NIX_FALLBACK_IMPORT_SCHEMA
+        facts["nix.fallback.document"] = self.document
+        facts["nix.fallback.document.sha256"] = pkg_sha256_hex(self.document.bytes())
+        facts["nix.fallback.proof.sha256"] = pkg_sha256_hex(self.proof.bytes())
+        facts["nix.fallback.graph"] = self.graph
+        facts["nix.fallback.selected_outputs"] = self.selected_outputs
+        facts["nix.fallback.outputs"] = self.selected_outputs
+        facts["nix.fallback.dependencies"] = self.dependencies
+        facts["nix.fallback.sources"] = self.sources
+        facts["nix.fallback.hashes"] = self.hashes
+        facts["nix.fallback.losses"] = self.losses
+        facts["nix.fallback.proof"] = self.proof
+        if self.recipe == {
+            .Val(recipe) -> facts["nix.fallback.recipe"] = recipe
+            else -> {}
+        }
+        if self.lock == {
+            .Val(lock) -> facts["nix.fallback.lock"] = lock
+            else -> {}
+        }
+        NixImportedState{facts: nixeval_key_ordered(facts)}
+    }
+}
+
+// Jetpack-owned state imported from one fallback record.
+pub struct NixImportedState {
+    pub facts: [String: String]
+}

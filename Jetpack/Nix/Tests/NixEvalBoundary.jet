@@ -1,0 +1,449 @@
+// Private native evaluator boundary claims ported from
+// crates/jetpack/src/NixEval/Tests.rs. The Nix area has no process or
+// environment authority, so every evaluation here already runs without any
+// `nix` executable reachable.
+
+// tests/fixtures/nix-compat/stage-a-derivation.json
+@NIX_TEST_STAGE_A_DERIVATION_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"
+  },
+  "values": [
+    {
+      "name": "input_addressed",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_expression": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_value": {
+        "drvPath": "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv",
+        "out": "/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"
+      },
+      "jet_request": {
+        "name": "hello",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "",
+          "hash_hex": ""
+        }
+      }
+    },
+    {
+      "name": "fixed_output",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_expression": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_value": {
+        "drvPath": "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv",
+        "out": "/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"
+      },
+      "jet_request": {
+        "name": "fixed",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "sha256",
+          "hash_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "name": "multi_output",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_expression": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_value": {
+        "drvPath": "/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv",
+        "out": "/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many",
+        "dev": "/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev",
+        "doc": "/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc"
+      },
+      "jet_request": {
+        "name": "many",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": [],
+        "input_sources": [],
+        "outputs": [
+          { "name": "out", "method_algo": "", "hash_hex": "" },
+          { "name": "dev", "method_algo": "", "hash_hex": "" },
+          { "name": "doc", "method_algo": "", "hash_hex": "" }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "name": "invalid_output_name",
+      "system": "x86_64-linux",
+      "source": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_expression": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_value": ["all", "bad/name", "builder", "drvAttrs", "drvPath", "name", "out", "outPath", "outputName", "outputs", "system", "type"],
+      "jet_error_contains": "invalid derivation output name"
+    }
+  ]
+}
+``
+
+// tests/fixtures/nix-compat/breadth.json
+@NIX_TEST_BREADTH_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "fuzz_seeds": [0, 1, 2, 3, 4, 5, 6],
+  "locks": [
+    {
+      "name": "pinned_nixpkgs",
+      "nix_expression": "builtins.fromJSON \"{\\\"nodes\\\":{\\\"root\\\":{\\\"inputs\\\":{\\\"nixpkgs\\\":\\\"nixpkgs\\\"}},\\\"nixpkgs\\\":{\\\"locked\\\":{\\\"lastModified\\\":1782723713,\\\"narHash\\\":\\\"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\\\",\\\"owner\\\":\\\"NixOS\\\",\\\"repo\\\":\\\"nixpkgs\\\",\\\"rev\\\":\\\"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\\\"},\\\"original\\\":{\\\"id\\\":\\\"nixpkgs\\\"}}},\\\"root\\\":\\\"root\\\",\\\"version\\\":7}\"",
+      "nix_value": {
+        "nodes": {
+          "nixpkgs": {
+            "locked": {
+              "lastModified": 1782723713,
+              "narHash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=",
+              "owner": "NixOS",
+              "repo": "nixpkgs",
+              "rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
+            },
+            "original": {"id": "nixpkgs"}
+          },
+          "root": {"inputs": {"nixpkgs": "nixpkgs"}}
+        },
+        "root": "root",
+        "version": 7
+      }
+    }
+  ],
+  "output_identities": {
+    "aarch64-darwin": {
+      "build_nar_hash": "sha256-rMlwlpqvtf4dmQwKPvcwMuJ0Gq8v8FrvNqcPv4cyKLQ=",
+      "executable_nar_hash": "sha256-OCO79DjPxsXvNMPRj2wAY+KOMT4pJdICbavTQl8Q2rE="
+    },
+    "aarch64-linux": {
+      "build_nar_hash": "sha256-iaMQdHZmdYtYvkkBeu2BuCEcXJHW+VLjLYdmfS/F7Og=",
+      "executable_nar_hash": "sha256-04ryjRswBDp+ymbJOeb4m9zcYHcE/6j1LR/WfOi4/Ms="
+    },
+    "x86_64-darwin": {
+      "build_nar_hash": "sha256-DUQnYzmxZIMU37Aa4Zy+0XNKWpcLP5zg5YsrwsrA1Sk=",
+      "executable_nar_hash": "sha256-K67J6pH92UHhlrFQUm+RofuRvo8y1KrOa/4zhkGImQU="
+    },
+    "x86_64-linux": {
+      "build_nar_hash": "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=",
+      "executable_nar_hash": "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
+    }
+  },
+  "values": [
+    {
+      "name": "attr_values_are_sorted_and_typed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "filtered_package_lists_preserve_literal_values",
+      "system": "x86_64-linux",
+      "source": "let names = [ pkgs.fd pkgs.ripgrep ]; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.filter (name: name != \"fd\") names; }; }",
+      "nix_expression": "let names = [ \"fd\" \"ripgrep\" ]; in { packages = builtins.filter (name: name != \"fd\") names; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "json_attrsets_follow_the_same_depth_limit",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }; }",
+      "nix_expression": "{ packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "conditional_package_values_match_the_oracle",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = if true then [ pkgs.fd ] else [ pkgs.ripgrep ]; }; }",
+      "nix_expression": "{ packages = if true then [ \"fd\" ] else [ \"ripgrep\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "overlay_and_unknown_field_projection",
+      "system": "x86_64-linux",
+      "source": "let overlay = final: prev: { custom = prev.fd; }; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ overlay ]; }).mkShell { packages = [ (import pkgs { overlays = [ overlay ]; }).custom ]; inputsFrom = []; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; }; overlay = final: prev: { custom = prev.fd; }; in { packages = [ (overlay pkgs pkgs).custom ]; inputsFrom = []; }",
+      "nix_value": {"inputsFrom": [], "packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": ["inputsFrom"]
+    },
+    {
+      "name": "named_devshell_projection",
+      "system": "x86_64-linux",
+      "output": "debug",
+      "source": "{ outputs = { devShells.x86_64-linux.debug = pkgs.mkShell { packages = [ pkgs.ripgrep ]; }; }; }",
+      "nix_expression": "let pkgs = { ripgrep = \"ripgrep\"; }; in { packages = [ pkgs.ripgrep ]; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    }
+  ],
+  "authority_values": [
+    {
+      "name": "cross_target_package_identity",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }; }",
+      "nix_expression": "let target = \"aarch64-linux\"; in { packages = []; cross_packages = [ (target + \"/foo\") ]; }",
+      "nix_value": {"packages": [], "cross_packages": ["aarch64-linux/foo"]},
+      "authority": {"@target:aarch64-multiplatform": "aarch64-linux"},
+      "jet_packages": [],
+      "jet_cross_packages": ["aarch64-linux/foo"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "local_external_flake_package",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ (builtins.getFlake \"path:./dep\").packages.x86_64-linux.default ]; }; }",
+      "nix_expression": "{ packages = [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "authority": {"@flake:path:./dep": "{ packages.x86_64-linux.default = pkgs.fd; }"},
+      "jet_packages": ["fd"],
+      "jet_cross_packages": [],
+      "jet_unsupported": []
+    }
+  ],
+  "authority_derivations": [
+    {
+      "name": "fixed_output_fetcher_context",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fetched\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo $src > $out\" ]; src = builtins.fetchurl { url = \"file:./source.txt\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; }",
+      "nix_expression": "let source = builtins.toFile \"source.txt\" \"fixed-output\\n\"; fetched = builtins.fetchurl { url = builtins.unsafeDiscardStringContext \"file://${source}\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; in { fetched = fetched; input_sources = builtins.attrNames (builtins.getContext fetched); }",
+      "nix_value": {"fetched": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt", "input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]},
+      "authority": {"@fetch:fetchurl\nfile:./source.txt\n03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\nsource.txt\n": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"},
+      "jet_input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]
+    }
+  ],
+  "derivations": [
+    {
+      "name": "multi_output_package_identities",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_expression": "let d = builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }; in { drvPath = d.drvPath; out = d.out; dev = d.dev; doc = d.doc; }",
+      "nix_value": {
+        "dev": "/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev",
+        "doc": "/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc",
+        "drvPath": "/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv",
+        "out": "/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"
+      },
+      "jet_input_sources": [],
+      "jet_outputs": [
+        {"name": "out", "method_algo": "", "hash_hex": ""},
+        {"name": "dev", "method_algo": "", "hash_hex": ""},
+        {"name": "doc", "method_algo": "", "hash_hex": ""}
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "name": "dynamic_package_list_stays_unsupported",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+      "nix_expression": "let lib = { optionals = condition: values: if condition then values else []; }; in { packages = lib.optionals true [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "scalar_package_field_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = 1; }; }",
+      "nix_expression": "{ packages = 1; }",
+      "nix_value": {"packages": 1},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "non_package_list_item_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ 1 ]; }; }",
+      "nix_expression": "{ packages = [ 1 ]; }",
+      "nix_value": {"packages": [1]},
+      "jet_error": "unsupported foreign flake expression: package expression has type integer"
+    }
+  ],
+  "budgets": {
+    "input_bytes": 1048576,
+    "tokens": 65536,
+    "expression_steps": 256,
+    "imports": 64,
+    "string_bytes": 1048576,
+    "memory_bytes": 16777216,
+    "latency_micros": 1000000
+  }
+}
+``
+
+fn nix_test_boundary() -> NixNativeBoundary {
+    NixNativeBoundary.embedded() ?? panic("committed manifest must validate")
+}
+
+fn nix_test_json(text: String) -> NixEvalJson {
+    NixEvalJson.parse(text) ?? panic("fixture JSON must parse")
+}
+
+fn nix_test_object(document: NixEvalJson, index: Int) -> [String: Int] {
+    document.object(index) ?? panic("expected a JSON object")
+}
+
+fn nix_test_array(document: NixEvalJson, index: Int) -> [Int] {
+    document.array(index) ?? panic("expected a JSON array")
+}
+
+fn nix_test_string(document: NixEvalJson, index: Int) -> String {
+    document.string(index) ?? panic("expected a JSON string")
+}
+
+fn nix_test_get(fields: [String: Int], key: String) -> Int {
+    fields.get(key) ?? panic("missing fixture field {key}")
+}
+
+fn nix_test_text(document: NixEvalJson, fields: [String: Int], key: String) -> String {
+    nix_test_string(document, nix_test_get(fields, key))
+}
+
+fn nix_test_strings(document: NixEvalJson, index: Int) -> [String] {
+    strings := [String]{}
+    loop item in nix_test_array(document, index) -> strings.push(nix_test_string(document, item))
+    strings
+}
+
+fn nix_test_derivation(source: String) -> NixNativeDerivation {
+    nix_evaluate_derivation(source, "x86_64-linux") ?? panic("private production boundary must materialize a derivation")
+}
+
+#Test("nix private integration has pinned product ready evaluator") {
+    assert(nix_test_boundary().product_ready())
+}
+
+#Test("nix private integration projects lazy flake without external nix") {
+    boundary :: nix_test_boundary()
+    evaluated :: boundary.evaluate_devshell(`let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("private production boundary must evaluate supported lazy syntax")
+    assert_eq(evaluated.packages, [String]{"fd"})
+    if boundary.evaluate_devshell(`{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = /tmp/package; }; }; }`, "x86_64-linux") == {
+        .Ok(_) -> panic("private production boundary must reject ambient path authority")
+        .Err(error) -> assert(error.message().contains("absolute paths require explicit project-root authority"))
+    }
+}
+
+#Test("nix private devshell path is independent of nix on path") {
+    evaluated :: nix_test_boundary().evaluate_devshell(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }`, "x86_64-linux") ?? panic("native devShell evaluator must not need Nix")
+    assert_eq(evaluated.packages, [String]{"fd"})
+}
+
+#Test("nix private integration materializes derivation without external nix") {
+    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "hello"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; }`)
+    assert_eq(evaluated.drv_path, "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv")
+    assert_eq(evaluated.output_path("out"), Val("/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"))
+}
+
+#Test("nix private integration materializes fixed output derivation") {
+    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "fixed"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "echo hi > $out" ]; outputHashAlgo = "sha256"; outputHashMode = "flat"; outputHash = "0000000000000000000000000000000000000000000000000000000000000000"; }`)
+    assert_eq(evaluated.drv_path, "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv")
+    assert_eq(evaluated.output_path("out"), Val("/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"))
+}
+
+#Test("nix private integration materializes all declared non fixed outputs") {
+    evaluated :: nix_test_derivation(`builtins.derivationStrict { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }`)
+    assert_eq(evaluated.outputs.len(), 2)
+    assert((evaluated.output_path("out") ?? "").ends_with("-many"))
+    assert((evaluated.output_path("dev") ?? "").ends_with("-many-dev"))
+}
+
+#Test("nix private derivation materializer matches pinned fixture and errors") {
+    document :: nix_test_json(@NIX_TEST_STAGE_A_DERIVATION_JSON)
+    root :: nix_test_object(document, document.root)
+    loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
+        fixture :: nix_test_object(document, value_index)
+        actual :: nix_evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("native derivation")
+        expected :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        assert_eq(actual.drv_path, nix_test_text(document, expected, "drvPath"))
+        if {
+            expected.get("outputs") != None -> {
+                outputs :: nix_test_object(document, nix_test_get(expected, "outputs"))
+                assert_eq(actual.outputs.len(), outputs.len())
+                loop entry in outputs -> assert_eq(actual.output_path(entry.key), Val(nix_test_string(document, entry.value)))
+            }
+            expected.get("dev") != None || expected.get("doc") != None -> {
+                count := 0
+                loop entry in expected {
+                    if entry.key == "drvPath" -> next
+                    count += 1
+                    assert_eq(actual.output_path(entry.key), Val(nix_test_string(document, entry.value)))
+                }
+                assert_eq(actual.outputs.len(), count)
+            }
+            else -> assert_eq(actual.output_path("out"), Val(nix_test_text(document, expected, "out")))
+        }
+    }
+    loop error_index in nix_test_array(document, nix_test_get(root, "errors")) {
+        fixture :: nix_test_object(document, error_index)
+        if nix_evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) == {
+            .Ok(_) -> panic("native evaluator must reject fixture error")
+            .Err(error) -> assert(error.message().contains(nix_test_text(document, fixture, "jet_error_contains")))
+        }
+    }
+}
+
+#Test("nix private integration matches pinned breadth fixture") {
+    document :: nix_test_json(@NIX_TEST_BREADTH_JSON)
+    root :: nix_test_object(document, document.root)
+    boundary :: nix_test_boundary()
+    loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
+        fixture :: nix_test_object(document, value_index)
+        output := "default"
+        if fixture.get("output") == {
+            .Val(output_index) -> output = document.string(output_index) ?? "default"
+            else -> {}
+        }
+        evaluated :: boundary.evaluate_devshell_output(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system"), output) ?? panic("breadth value must evaluate through Jetpack")
+        expected :: nix_test_strings(document, nix_test_get(fixture, "jet_packages"))
+        nix_value :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        assert_eq(nix_test_strings(document, nix_test_get(nix_value, "packages")), expected)
+        assert_eq(evaluated.packages, expected)
+        assert_eq(evaluated.unsupported, nix_test_strings(document, nix_test_get(fixture, "jet_unsupported")))
+    }
+    loop error_index in nix_test_array(document, nix_test_get(root, "errors")) {
+        fixture :: nix_test_object(document, error_index)
+        expected :: nix_test_text(document, fixture, "jet_error")
+        if boundary.evaluate_devshell(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) == {
+            .Ok(_) -> panic("breadth error must fail through Jetpack")
+            .Err(error) -> assert(error.message().contains(expected))
+        }
+    }
+    loop derivation_index in nix_test_array(document, nix_test_get(root, "derivations")) {
+        fixture :: nix_test_object(document, derivation_index)
+        evaluated :: boundary.evaluate_derivation(nix_test_text(document, fixture, "source"), nix_test_text(document, fixture, "system")) ?? panic("breadth derivation must materialize through Jetpack")
+        nix_value :: nix_test_object(document, nix_test_get(fixture, "nix_value"))
+        assert_eq(evaluated.drv_path, nix_test_text(document, nix_value, "drvPath"))
+        output_names :: [String]{"out", "dev", "doc"}
+        loop name in output_names {
+            assert_eq(evaluated.output_path(name), Val(nix_test_text(document, nix_value, name)))
+        }
+    }
+}
+
+#Test("nix private derivation path is independent of nix on path") {
+    evaluated :: nix_evaluate_derivation(`builtins.derivation { name = "no-path"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux") ?? panic("native derivation evaluator must not need Nix")
+    assert(evaluated.drv_path.ends_with("-no-path.drv"))
+}
