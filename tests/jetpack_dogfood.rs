@@ -165,7 +165,7 @@ printf 'JETPACK_NATIVE_TOOLS_OK\n'
     fs::File::open(&executable).unwrap().read_exact(&mut magic).unwrap();
     assert_eq!(&magic, b"\x7fELF", "compiler proof must execute a real compiled binary, not a shell fixture");
     let smoke = checked(base, &format!("{mode}-compiler-smoke"), enter(base, project, target, offline)
-        .arg(&executable).args(["run", "examples/features/basics/hello.jet"]));
+        .arg(&executable).args(["run", "Examples/features/basics/hello.jet"]));
     assert_eq!(String::from_utf8(smoke.stdout).unwrap().trim(), "hello, world");
 
     let source = fs::read_to_string(project.join("env.jet")).unwrap();

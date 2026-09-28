@@ -102,7 +102,7 @@ fn memory_denial_matches_aot_jit_and_interpreter() {
 fn memory_denial_example_matches_all_hosted_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "memory/effect_denials",
-        include_str!("../examples/features/expected/memory/effect_denials.out"),
+        include_str!("../Examples/features/expected/memory/effect_denials.out"),
     );
 }
 
@@ -207,15 +207,15 @@ fn row(kind: &str, code: &str, repairs: &[&str]) -> String {
 fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "memory/memoize",
-        include_str!("../examples/features/expected/memory/memoize.out"),
+        include_str!("../Examples/features/expected/memory/memoize.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "memory/computed_field",
-        include_str!("../examples/features/expected/memory/computed_field.out"),
+        include_str!("../Examples/features/expected/memory/computed_field.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "memory/copy_verb",
-        include_str!("../examples/features/expected/memory/copy_verb.out"),
+        include_str!("../Examples/features/expected/memory/copy_verb.out"),
     );
     // D-MEM-COPYSEM1=A criterion 2: the IMPLICIT half of the same rule. Every
     // line of this golden is a read window entering an owning slot — an
@@ -224,7 +224,7 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     // byte, not only on the explicit `~` spelling above.
     tir_support::assert_example_cli_tiers_agree(
         "memory/string_view",
-        include_str!("../examples/features/expected/memory/string_view.out"),
+        include_str!("../Examples/features/expected/memory/string_view.out"),
     );
 }
 

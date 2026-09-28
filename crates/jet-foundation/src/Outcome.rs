@@ -1744,7 +1744,7 @@ mod journey_tests {
     // this test's alone.
     /// The example the card's before/after uses, so these cells and the real
     /// runs in `tests/terminal.rs` are the same program.
-    const EXAMPLE: &str = "examples/features/errors/error_context.jet";
+    const EXAMPLE: &str = "Examples/features/errors/error_context.jet";
 
     fn three_real_hops() {
         jet_journey_reset();
@@ -1819,9 +1819,9 @@ mod journey_tests {
             jet_journey_report_styled("Error: file not found", JetReportStyle::PLAIN),
             "Error: file not found\n\
              \x20Trail [E3002] (3 hops via ?, origin first):\n\
-             \x20 1. parse_config (examples/features/errors/error_context.jet:7) — reading raw config\n\
-             \x20 2. load_config (examples/features/errors/error_context.jet:12) — loading config app.toml\n\
-             \x20 3. run (examples/features/errors/error_context.jet:16)\n"
+             \x20 1. parse_config (Examples/features/errors/error_context.jet:7) — reading raw config\n\
+             \x20 2. load_config (Examples/features/errors/error_context.jet:12) — loading config app.toml\n\
+             \x20 3. run (Examples/features/errors/error_context.jet:16)\n"
         );
     }
 

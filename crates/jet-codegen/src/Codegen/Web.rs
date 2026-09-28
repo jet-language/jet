@@ -120,6 +120,7 @@ pub(crate) fn dom_runtime_source() -> &'static str {
 }
 /// Raw canonical Web inputs for the Source Web emitter. This provider supplies
 /// neutral assets only; it does not inspect MIR or select/combine features.
+#[allow(dead_code)]
 pub(crate) struct CanonicalWebRawAssets {
     pub(crate) dom_runtime: &'static str,
     pub(crate) execution_prelude: &'static str,
@@ -138,6 +139,7 @@ pub(crate) struct CanonicalWebRawAssets {
     pub(crate) timezone_data: Vec<(String, Vec<u8>)>,
 }
 
+#[allow(dead_code)]
 pub(crate) fn canonical_web_raw_assets() -> Result<CanonicalWebRawAssets, std::io::Error> {
     Ok(CanonicalWebRawAssets {
         dom_runtime: DOM_RUNTIME,
@@ -215,7 +217,7 @@ pub(crate) fn shared_js_prelude(
 fn canonical_web_harfbuzz_bytes() -> Result<&'static [u8], std::io::Error> {
     const ARTIFACT_PATH: &str = "wasm/jet_harfbuzz.wasm";
     const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
-    const BYTES: &[u8] = include_bytes!("../../../../site/assets/wasm/jet_harfbuzz.wasm");
+    const BYTES: &[u8] = include_bytes!("../../../../Docs/site/assets/wasm/jet_harfbuzz.wasm");
     if BYTES.len() > MAX_ARTIFACT_BYTES
         || BYTES.len() < 8
         || &BYTES[..4] != b"\0asm"
@@ -295,7 +297,7 @@ fn web_tzdb_files() -> Result<Vec<(String, Vec<u8>)>, std::io::Error> {
         Ok(())
     }
 
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corelib/tzdb");
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
     let mut files = Vec::new();
     collect(&root, &root, &mut files)?;
     files.sort_by(|left, right| left.0.cmp(&right.0));

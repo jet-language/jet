@@ -74,6 +74,12 @@ edition = "2021"
 name = "jet"
 path = "Source/lib.rs"
 
+[features]
+# The private self-hosting bootstrap host (Compiler/Bootstrap/Host, Runner.rs)
+# is mid-integration under #218 and does not compile yet. It is mounted only
+# with this feature; make it unconditional once it builds (#3663).
+compiler-bootstrap-host = []
+
 [[bin]]
 name = "jet"
 path = "Source/main.rs"
@@ -122,4 +128,4 @@ rustls-pemfile = "2"
 wat = "1"
 
 [patch.crates-io]
-cranelift-jit = { path = "vendor/cranelift-jit-0.112.3" }
+cranelift-jit = { path = "crates/vendor/cranelift-jit-0.112.3" }

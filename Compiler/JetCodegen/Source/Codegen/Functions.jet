@@ -140,10 +140,13 @@ fn jet_codegen_lower_cli_input(input: TCLIInput, ordinal: Int, modules: [SemaGra
         }
     }
     ty := scalar_type
-    if input.variadic {
-        ty = Type.List(scalar_type)
-    } else if optional {
-        ty = Type.Option(scalar_type)
+    if {
+        input.variadic -> {
+            ty = Type.List(scalar_type)
+        }
+        optional -> {
+            ty = Type.Option(scalar_type)
+        }
     }
     return MirCliInput{
         parameter: ordinal,
@@ -201,8 +204,8 @@ fn jet_codegen_lower_cli_entry(entry: TCLIEntry, functions: [TFunc], modules: [S
     }
 }
 
-fn jet_codegen_lower_c_enum_tag(tag: TCEnumTag) -> MirCEnumTag {
-    return if tag == {
+fn jet_codegen_lower_c_enum_tag(enum_tag: TCEnumTag) -> MirCEnumTag {
+    return if enum_tag == {
         .CInt -> MirCEnumTag.CInt
         .U8 -> MirCEnumTag.U8
         .I8 -> MirCEnumTag.I8
@@ -243,7 +246,13 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: [TFunc], m
                         MirVariantPayload.Named(lowered_fields)
                     }
                 }
-                lowered_variants.push(MirVariant{name: variant.name, wire_name: variant.wire_name, span: variant.span, payload: payload, discriminant: variant.discriminant})
+                lowered_variants.push(MirVariant{
+                    name: variant.name,
+                    wire_name: variant.wire_name,
+                    span: variant.span,
+                    payload: payload,
+                    discriminant: variant.discriminant,
+                })
             }
             MirTypeDefKind.Enum(lowered_variants, jet_codegen_type_method_ids(definition, methods, functions))
         }
@@ -300,7 +309,7 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: [TFunc], m
     }
     c_layout_tag := if definition.c_layout_tag == {
         None -> None
-        Val(tag) -> Val(jet_codegen_lower_c_enum_tag(tag))
+        Val(c_layout_tag_value) -> Val(jet_codegen_lower_c_enum_tag(c_layout_tag_value))
     }
     derives := [MirTraitId]{}
     loop name in definition.derives -> derives.push(jet_codegen_lower_type_derive_trait_id(name, modules, definition.module_identity))
@@ -566,15 +575,34 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
     }
 }
 
+fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolId) -> MirValueId {
+    if jet_codegen_find_function(builder.functions, symbol.key) != None {
+        return jet_codegen_lower_named_function_value(&builder, expression, symbol.key, false)
+    }
+    loop semantic_module in builder.modules {
+        loop definition in semantic_module.declarations.constants {
+            if definition.key != symbol.key -> next
+            if definition.is_comptime || jet_codegen_constant_is_output_type(definition.ty, builder.modules, definition.module_identity) {
+                constant :: jet_codegen_lower_comptime_value(definition.value, builder.modules, definition.module_identity, builder.generic_type_names) ?? panic("checked compile-time constant reference has no MIR value")
+                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant(constant))
+            }
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Global(definition.key))
+        }
+    }
+    panic("checked constant reference has no declaration or function target")
+}
+
 fn jet_codegen_tuple_shape_names(name: String) -> MirShapeFieldNames {
     argument_bytes := [U8]{}
     environment_bytes := [U8]{}
     loop byte in name.bytes() {
         code := Int.from_u8(byte)
         if code == 95 -> argument_bytes.push(U8{45}) else -> argument_bytes.push(byte)
-        if code == 45 -> environment_bytes.push(U8{95})
-        else if code >= 97 && code <= 122 -> environment_bytes.push(U8{code - 32})
-        else -> environment_bytes.push(byte)
+        if {
+            code == 45 -> environment_bytes.push(U8{95})
+            code >= 97 && code <= 122 -> environment_bytes.push(U8{code - 32})
+            else -> environment_bytes.push(byte)
+        }
     }
     return MirShapeFieldNames{
         text: name,
@@ -594,38 +622,40 @@ fn jet_codegen_tuple_shape_names(name: String) -> MirShapeFieldNames {
 fn jet_codegen_append_tuple_field_rows(ty: MirType, rows: &[MirFieldRow], seen: &[MirFieldId]) {
     _ := if ty.kind == {
         .Tuple(fields) -> {
-            if ty.identity != None {
-                owner :: ty.identity ?? panic("tuple MIR type has no identity")
-                loop field in fields {
-                    id := mir_field_id("{mir_type_identity_key(ty)}::{field.name}")
-                    already_seen := false
-                    loop previous in seen {
-                        if previous == id -> already_seen = true
-                    }
-                    if !already_seen {
-                        rows.push(MirFieldRow{
-                            id: id,
-                            owner: owner,
-                            field: MirField{
+            if {
+                ty.identity != None -> {
+                    owner :: ty.identity ?? panic("tuple MIR type has no identity")
+                    loop field in fields {
+                        id := mir_field_id("{mir_type_identity_key(ty)}::{field.name}")
+                        already_seen := false
+                        loop previous in seen {
+                            if previous == id -> already_seen = true
+                        }
+                        if !already_seen {
+                            rows.push(MirFieldRow{
                                 id: id,
-                                name: field.name,
-                                shape_names: jet_codegen_tuple_shape_names(field.name),
-                                skip: false,
-                                ty: field.ty,
-                                span: Span{start: 0, end: 0},
-                                public: true,
-                                package_public: true,
-                                computed: false,
-                                has_default: false,
-                                redact: false,
-                            },
-                        })
-                        seen.push(id)
+                                owner: owner,
+                                field: MirField{
+                                    id: id,
+                                    name: field.name,
+                                    shape_names: jet_codegen_tuple_shape_names(field.name),
+                                    skip: false,
+                                    ty: field.ty,
+                                    span: Span{start: 0, end: 0},
+                                    public: true,
+                                    package_public: true,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                            })
+                            seen.push(id)
+                        }
+                        jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
                     }
-                    jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
+                } else -> {
+                    loop field in fields -> jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
                 }
-            } else {
-                loop field in fields -> jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
             }
             ()
         }
@@ -874,7 +904,7 @@ fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRe
         member: record.member,
         symbol: symbol,
         signature: MirCallSignature{arity: record.signature.arity, max_arity: record.signature.max_arity, borrow_mask: record.signature.borrow_mask},
-        effect: record.effect_kind,
+        effect_kind: record.effect_kind,
         fallibility: jet_codegen_core_call_fallibility(carrier, builder),
         abi: MirPreludeAbi.Value,
         authority: record.authority,
@@ -1140,6 +1170,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
     value := jet_codegen_emit_mir_type(&builder, span, jet_codegen_lower_type_for_function(owner_type, builder), mir_ownership_from_access(access), MirOperation.Parameter(index, "self"))
     local := TLocal{
         name: "self",
+        symbol_id: Val(symbol_id(SymbolKind.Parameter, builder.function.module_identity, builder.function.key, "self")),
         span: span,
         generated: false,
         deref: false,
@@ -1233,11 +1264,21 @@ fn jet_codegen_validate_lambda_metadata(lambda: TLambda) {
         seen_capture_symbols.push(symbol.key)
     }
     facts := jet_codegen_lambda_capture_facts(lambda)
-    loop name in facts.mutable -> if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
-    loop name in facts.cloned -> if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
-    loop name in facts.frozen -> if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
-    loop name in facts.materialized -> if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
-    loop name in facts.moved -> if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    loop name in facts.mutable {
+        if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    }
+    loop name in facts.cloned {
+        if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    }
+    loop name in facts.frozen {
+        if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    }
+    loop name in facts.materialized {
+        if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    }
+    loop name in facts.moved {
+        if !seen_sources.contains(name) -> panic("checked lambda capture facts have no matching capture slot")
+    }
 }
 
 fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda) {
@@ -1247,8 +1288,16 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
     loop capture in lambda.captures {
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
-        access := if moved -> MirAccess.Move else if facts.mutable.contains(capture.source) -> MirAccess.Write else -> MirAccess.Read
-        ownership := if moved -> mir_ownership_from_access(MirAccess.Move) else if cloned -> mir_owned_ownership() else -> mir_ownership_from_access(access)
+        access := if {
+            moved -> MirAccess.Move
+            facts.mutable.contains(capture.source) -> MirAccess.Write
+            else -> MirAccess.Read
+        }
+        ownership := if {
+            moved -> mir_ownership_from_access(MirAccess.Move)
+            cloned -> mir_owned_ownership()
+            else -> mir_ownership_from_access(access)
+        }
         value := jet_codegen_emit_mir_type(&builder, lambda.source_span, jet_codegen_lower_type_for_function(capture.ty, builder), ownership, MirOperation.Capture(slot))
         builder.capture_params.push(MirCaptureParam{
             slot: slot,
@@ -1269,6 +1318,7 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
     }
 }
 
+
 fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MirSourceFile], statements: [TStmt], expression: ?TExpr, lambda: ?TLambda) -> JetCodegenLoweredFunction {
     builder := jet_codegen_new_builder(function, functions, modules, source_files)
     if lambda != None {
@@ -1279,12 +1329,22 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
     parameter_index := if function.kind == {
         .TopLevel -> 0
         .Method(convention, owner_type) -> {
-            jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
-            1
+            if convention == {
+                None -> 0
+                else -> {
+                    jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
+                    1
+                }
+            }
         }
         .TraitMethod(_, convention, owner_type, _, _) -> {
-            jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
-            1
+            if convention == {
+                None -> 0
+                else -> {
+                    jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
+                    1
+                }
+            }
         }
     }
     loop parameter in function.params {
@@ -1292,12 +1352,14 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
         parameter_index += 1
     }
     return_source := function.ret ?? Type.Named("Unit")
-    if expression == None {
-        jet_codegen_lower_statements(&builder, statements)
-    } else {
-        value :: expression ?? panic("checked expression fragment lost its expression")
-        lowered_value := jet_codegen_lower_expr(&builder, value)
-        if jet_codegen_current_is_open(builder) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MirTerminator.Return(Val(lowered_value)), -1)
+    if {
+        expression == None -> {
+            jet_codegen_lower_statements(&builder, statements)
+        } else -> {
+            value :: expression ?? panic("checked expression fragment lost its expression")
+            lowered_value := jet_codegen_lower_expr(&builder, value)
+            if jet_codegen_current_is_open(builder) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MirTerminator.Return(Val(lowered_value)), -1)
+        }
     }
     if jet_codegen_current_is_open(builder) {
         if {
@@ -1486,7 +1548,7 @@ fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCode
         duplicate := false
         loop existing in builder.prelude_calls {
             if existing.id == call.id {
-                if existing.family != call.family || existing.module_name != call.module_name || existing.member != call.member || existing.symbol != call.symbol || existing.signature != call.signature || existing.effect != call.effect || !jet_codegen_authority_decisions_equal(existing.authority, call.authority) || existing.fallibility != call.fallibility || existing.abi != call.abi {
+                if existing.family != call.family || existing.module_name != call.module_name || existing.member != call.member || existing.symbol != call.symbol || existing.signature != call.signature || existing.effect_kind != call.effect_kind || !jet_codegen_authority_decisions_equal(existing.authority, call.authority) || existing.fallibility != call.fallibility || existing.abi != call.abi {
                     panic("conflicting Prelude route identity across nested functions")
                 }
                 duplicate = true
@@ -1504,8 +1566,8 @@ fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCode
         }
         if !duplicate -> builder.core_calls.push(call)
     }
-    loop module in lowered.used_core {
-        if !builder.used_core.contains(module) -> builder.used_core.push(module)
+    loop used_core_module in lowered.used_core {
+        if !builder.used_core.contains(used_core_module) -> builder.used_core.push(used_core_module)
     }
 }
 
@@ -1515,10 +1577,13 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
     occurrence := builder.spawn_occurrences.get(base_key) ?? 0
     builder.spawn_occurrences.add(base_key, occurrence + 1)
     suffix := None
-    if purpose != "" && purpose != "direct" && (purpose != "spawn" || occurrence > 0) {
-        suffix = Val("{purpose}-{occurrence}")
-    } else if occurrence > 0 {
-        suffix = Val("lambda-{occurrence}")
+    if {
+        purpose != "" && purpose != "direct" && (purpose != "spawn" || occurrence > 0) -> {
+            suffix = Val("{purpose}-{occurrence}")
+        }
+        occurrence > 0 -> {
+            suffix = Val("lambda-{occurrence}")
+        }
     }
     key := base_key
     name := "__jet_lambda_{lambda.source_span.start}_{lambda.source_span.end}"
@@ -1607,7 +1672,11 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
     loop capture in lambda.captures {
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
-        access := if moved -> MirAccess.Move else if facts.mutable.contains(capture.source) -> MirAccess.Write else -> MirAccess.Read
+        access := if {
+            moved -> MirAccess.Move
+            facts.mutable.contains(capture.source) -> MirAccess.Write
+            else -> MirAccess.Read
+        }
         borrowed := (access == MirAccess.Read || access == MirAccess.Write) && !cloned
         outer_slot := capture.local.name
         if cloned && capture.local.name != capture.source -> outer_slot = capture.source
@@ -1619,27 +1688,35 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
             captures.push(MirCaptureOperand.Place(place))
             next
         }
-        value := if cloned {
-            read := jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.ReadPlace(place))
-            if facts.mutable.contains(capture.source) && jet_codegen_place_shares_record_handle(builder, place) {
-                read
-            } else {
-                jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MirOperation.Copy(read, facts.materialized.contains(capture.source)))
+        value := if {
+            cloned -> {
+                read := jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.ReadPlace(place))
+                if {
+                    facts.mutable.contains(capture.source) && jet_codegen_place_shares_record_handle(builder, place) -> {
+                        read
+                    } else -> {
+                        jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MirOperation.Copy(read, facts.materialized.contains(capture.source)))
+                    }
+                }
             }
-        } else if access == MirAccess.Move {
-            jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MirOperation.MovePlace(place))
-        } else {
-            jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.ReadPlace(place))
+            access == MirAccess.Move -> {
+                jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MirOperation.MovePlace(place))
+            }
+            else -> {
+                jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MirOperation.ReadPlace(place))
+            }
         }
         captures.push(MirCaptureOperand.Value(value))
     }
     capture_facts := jet_codegen_lambda_capture_facts(lambda)
     operation := MirOperation.Closure(function_id, captures, capture_facts)
     closure_type := jet_codegen_lambda_function_type(lambda)
-    value := if send {
-        jet_codegen_emit_mir_type(&builder, lambda.source_span, jet_codegen_send_function_type(builder, closure_type), mir_owned_ownership(), operation)
-    } else {
-        jet_codegen_emit_value(&builder, lambda.source_span, closure_type, operation)
+    value := if {
+        send -> {
+            jet_codegen_emit_mir_type(&builder, lambda.source_span, jet_codegen_send_function_type(builder, closure_type), mir_owned_ownership(), operation)
+        } else -> {
+            jet_codegen_emit_value(&builder, lambda.source_span, closure_type, operation)
+        }
     }
     JetCodegenLambdaValue{value: value, function: function_id}
 }
@@ -1870,11 +1947,13 @@ fn jet_codegen_union_mir_member_tag(ty: MirType) -> String {
     last_separator := -1
     index := 0
     loop index + 1 < bytes.len() {
-        if bytes[index] == U8{58} && bytes[index + 1] == U8{58} {
-            last_separator = index + 1
-            index += 2
-        } else {
-            index += 1
+        if {
+            bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) -> {
+                last_separator = index + 1
+                index += 2
+            } else -> {
+                index += 1
+            }
         }
     }
     start := if last_separator >= 0 -> last_separator + 1 else -> 0
@@ -1892,20 +1971,20 @@ fn jet_codegen_synthetic_union_definition(ty: MirType, module_id: MirModuleId) -
     }
     variants := [MirVariant]{}
     loop member in members {
-        tag := jet_codegen_union_mir_member_tag(member)
+        member_tag := jet_codegen_union_mir_member_tag(member)
         loop previous in variants {
-            if previous.name == tag -> panic("structural union members lower to duplicate Rust variant tags")
+            if previous.name == member_tag -> panic("structural union members lower to duplicate Rust variant tags")
         }
         variants.push(MirVariant{
-            name: tag,
-            wire_name: tag,
+            name: member_tag,
+            wire_name: member_tag,
             span: Span{start: 0, end: 0},
             payload: MirVariantPayload.Single(member),
             discriminant: None,
         })
     }
     name := "__JetUnion_{identity.value}"
-    MirTypeDef{
+    return MirTypeDef{
         id: identity,
         module_id: module_id,
         key: name,
@@ -2295,13 +2374,13 @@ fn jet_codegen_sort_core_owners(rows: &[MirCoreOwner]) {
     }
 }
 
-fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module: SemaGraphModuleResult) -> MirCoreOwner {
+fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MirCoreOwner {
     if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
     key := owner.symbol.key
     module_id := None
     if owner.module_identity != None {
         identity :: owner.module_identity ?? panic("checked Core builtin owner module disappeared")
-        if identity != module.module_identity -> panic("checked Core builtin owner has a module linkage mismatch")
+        if identity != module_info.module_identity -> panic("checked Core builtin owner has a module linkage mismatch")
         module_id = Val(mir_module_id(identity))
     }
     ownership := jet_codegen_lower_declaration_ownership_mode(owner.ownership)
@@ -2401,6 +2480,7 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.type_defs -> types.push(jet_codegen_lower_type_definition(definition, functions, modules))
         loop definition in semantic_module.declarations.traits -> traits.push(jet_codegen_lower_trait_definition(definition, functions, modules))
+    }
     jet_codegen_register_synthetic_unions(&types, all_function_rows)
     jet_codegen_sort_type_definitions(&types)
     jet_codegen_sort_trait_definitions(&traits)

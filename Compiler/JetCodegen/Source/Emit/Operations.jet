@@ -71,7 +71,7 @@ fn jet_rust_emit_route_call(ctx: &JetRustEmitContext, id: MirPreludeCallId, args
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude call has no registry row", "every route must be registered with its checked ABI before source emission", None)
         return "__jet_missing_prelude()"
     }
-    route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_prelude"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
+    route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_prelude"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if args.len() < route.signature.arity || args.len() > route.signature.max_arity || route.signature.borrow_mask.len() != args.len() {
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude route arity does not match its emitted arguments", "the checked call ABI and operation payload must agree exactly", None)
         return "__jet_invalid_prelude_call()"
@@ -100,7 +100,7 @@ fn jet_rust_emit_call_arg(ctx: &JetRustEmitContext, function: MirFunction, arg: 
 
 fn jet_rust_emit_checked_trait_box_target(ctx: &JetRustEmitContext, id: MirTypeId, span: ?Span) -> ?MirType {
     loop row in ctx.program.type_instances {
-        if row.identity == Val(id) {
+        if row.identity == (Val(id)) {
             if row.kind == {
                 .TraitObject(bounds) -> {
                     if bounds.len() != 1 {
@@ -195,9 +195,12 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MirFun
     value := if {
         borrowed && !has_coercion && arg.access == MirAccess.Read -> {
             already_borrowed = true
-            if arg.place == .Val(place) -> jet_rust_emit_place_reference(ctx, function, place, MirAccess.Read) else -> {
-                partial :: if jet_rust_emit_partial_projection_only(ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(ctx, function, arg.value) else -> None
-                if partial == .Val(reference) -> reference else -> jet_rust_emit_value_reference(arg.value, false)
+            if arg.place == {
+                .Val(place) -> jet_rust_emit_place_reference(ctx, function, place, MirAccess.Read)
+                else -> {
+                    partial :: if jet_rust_emit_partial_projection_only(ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(ctx, function, arg.value) else -> None
+                    if partial == .Val(reference) -> reference else -> jet_rust_emit_value_reference(arg.value, false)
+                }
             }
         }
         arg.access == MirAccess.Write -> {
@@ -401,7 +404,7 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MirFunction, i
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing", "checked Prelude calls require one canonical route row", Val(function.span))
         return "unreachable!(\"missing Prelude route\")"
     }
-    route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_prelude"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
+    route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_prelude"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if args.len() < route.signature.arity || args.len() > route.signature.max_arity || route.signature.borrow_mask.len() != args.len() {
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude call arity does not match its checked ABI", "the checked Prelude route and call arguments must agree exactly", Val(function.span))
         return "unreachable!(\"Prelude call arity\")"
@@ -616,11 +619,11 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                     return Val("{abi_type} {{ {rendered.join(", ")} }}")
                 }
                 .Enum(variants, _) -> {
-                    tag :: row.c_layout_tag ?? {
+                    layout_tag :: row.c_layout_tag ?? {
                         visited.pop()
                         return None
                     }
-                    tag_type :: jet_rust_emit_c_abi_tag_type(tag)
+                    tag_type :: jet_rust_emit_c_abi_tag_type(layout_tag)
                     abi_type := if jet_rust_emit_c_abi_unit_enum(variants) -> tag_type else -> jet_rust_emit_c_abi_nominal_name(row, "enum")
                     arms := [String]{}
                     variant_index := 0
@@ -630,9 +633,11 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                             visited.pop()
                             return None
                         }
-                        if jet_rust_emit_c_abi_unit_enum(variants) {
+                        if {
+                            jet_rust_emit_c_abi_unit_enum(variants) -> {
                             arms.push("{semantic_type}::{variant_name} => {discriminant} as {tag_type}")
-                        } else {
+                            }
+                            else -> {
                             if variant.payload == {
                                 .Unit -> {
                                     physical := "{abi_type} {{ tag: {discriminant} as {tag_type}, payload: {abi_type}_payload {{ __jet_empty: () }} }}"
@@ -676,6 +681,7 @@ fn jet_rust_emit_c_abi_encode(ctx: &JetRustEmitContext, source: String, ty: MirT
                                     arms.push("{pattern} => {physical}")
                                 }
                             }
+                        }
                         }
                         variant_index += 1
                     }
@@ -750,11 +756,11 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                     return Val("{semantic_type} {{ {rendered.join(", ")} }}")
                 }
                 .Enum(variants, _) -> {
-                    tag :: row.c_layout_tag ?? {
+                    layout_tag :: row.c_layout_tag ?? {
                         visited.pop()
                         return None
                     }
-                    tag_type :: jet_rust_emit_c_abi_tag_type(tag)
+                    tag_type :: jet_rust_emit_c_abi_tag_type(layout_tag)
                     arms := [String]{}
                     variant_index := 0
                     loop variant in variants {
@@ -763,9 +769,11 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                             visited.pop()
                             return None
                         }
-                        if jet_rust_emit_c_abi_unit_enum(variants) {
+                        if {
+                            jet_rust_emit_c_abi_unit_enum(variants) -> {
                             arms.push("{discriminant} => {semantic_type}::{variant_name}")
-                        } else {
+                            }
+                            else -> {
                             match_arm :: if variant.payload == {
                                 .Unit -> "{discriminant} => {semantic_type}::{variant_name}"
                                 .Single(value_ty) -> {
@@ -801,6 +809,7 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MirT
                             }
                             arms.push(match_arm)
                         }
+                        }
                         variant_index += 1
                     }
                     visited.pop()
@@ -822,12 +831,15 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MirFunctio
         loop handle in ctx.program.handles {
             if jet_rust_emit_same_handle_type(handle.ty, parameter.ty) {
                 if arg.access == MirAccess.Move -> return "({jet_rust_emit_value_move(arg.value)}).into_raw()"
-                raw :: if arg.place != None -> {
+                raw :: if {
+                    arg.place != None -> {
                     selected := jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, arg.access)
                     selected
-                } else -> {
+                    }
+                    else -> {
                     selected := jet_rust_emit_value_reference(arg.value, arg.access == MirAccess.Write)
                     selected
+                    }
                 }
                 return "({raw}).as_raw()"
             }
@@ -851,7 +863,7 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunctio
     captures := [MirCaptureOperand]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.result == Val(lambda) {
+            if instruction.result == (Val(lambda)) {
                 if instruction.operation == {
                     .Closure(target, operands, _) -> {
                         lambda_function = Val(target)
@@ -1084,7 +1096,8 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C parameter has no checked physical ABI representation", "direct C parameters require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(arg.span))
             return "unreachable!(\"unsupported C parameter\")"
         }
-        if arg.access == MirAccess.Write {
+        if {
+            arg.access == MirAccess.Write -> {
             if arg.place == None {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "C write argument has no checked place", "write-access C arguments require a stable MIR place for post-call writeback", Val(arg.span))
                 return "unreachable!(\"C write argument place\")"
@@ -1106,11 +1119,15 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
                 return "unreachable!(\"C write argument decoding\")"
             }
             writebacks.push("*{place_name} = {decoded ?? ""};")
-        } else {
-            source :: if arg.access == MirAccess.Move {
+            }
+            else -> {
+            source :: if {
+                arg.access == MirAccess.Move -> {
                 if arg.place != None -> jet_rust_emit_place_move(ctx, function, arg.place ?? MirPlaceId{value: 0}) else -> jet_rust_emit_value_move(arg.value)
-            } else {
+                }
+                else -> {
                 if arg.place != None -> jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Read) else -> jet_rust_emit_value_reference(arg.value, false)
+                }
             }
             encoded := jet_rust_emit_c_abi_encode(ctx, source, parameter.ty, arg.access == MirAccess.Read, [MirTypeId]{})
             if encoded == None {
@@ -1119,13 +1136,16 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             }
             rendered_args.push(encoded ?? "")
         }
+        }
         index += 1
     }
     call :: "unsafe {{ {jet_rust_emit_foreign_name(ctx, foreign.id)}({rendered_args.join(", ")}) }}"
     result := "()"
-    if foreign.return_type == .Val(return_type) {
+    if foreign.return_type == {
+        .Val(return_type) -> {
         body.push("let __jet_c_return = {call};")
-        if jet_rust_emit_foreign_handle_type(ctx, foreign, return_type) {
+        if {
+            jet_rust_emit_foreign_handle_type(ctx, foreign, return_type) -> {
             handle_return := None
             loop handle in ctx.program.handles {
                 if jet_rust_emit_same_handle_type(handle.ty, return_type) -> handle_return = Val(handle)
@@ -1135,7 +1155,8 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
                 return "unreachable!(\"C handle return type\")"
             }
             result = "{jet_rust_emit_type(ctx, return_type)}::from_raw(__jet_c_return)"
-        } else {
+            }
+            else -> {
             visited := [MirTypeId]{}
             if !jet_rust_emit_c_abi_type_supported(ctx, return_type, &visited) {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return has no checked physical ABI representation", "direct C returns require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(foreign.span))
@@ -1148,8 +1169,11 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             }
             result = decoded ?? "()"
         }
-    } else {
+        }
+        }
+        else -> {
         body.push("{call};")
+    }
     }
     loop writeback in writebacks -> body.push(writeback)
     body.push(result)
@@ -1505,7 +1529,7 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MirFunction,
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core route is missing from the Prelude registry", "Core calls carry a checked Prelude ABI row for argument marshalling", Val(function.span))
         return "unreachable!(\"missing MIR Core route\")"
     }
-    route_info :: route_row ?? MirPreludeCall{id: route, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_route"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
+    route_info :: route_row ?? MirPreludeCall{id: route, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime("__jet_missing_route"), signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if route_info.fallibility != fallibility {
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core and Prelude route fallibility disagree", "Core operation failure propagation must retain one canonical checked carrier", Val(function.span))
     }
@@ -1650,7 +1674,7 @@ fn jet_rust_emit_is_distinct_type(ctx: &JetRustEmitContext, source: MirType) -> 
     ty := source
     if ty.identity == .Val(identity) {
         loop instance in ctx.program.type_instances {
-            if instance.identity == Val(identity) { ty = instance; break }
+            if instance.identity == (Val(identity)) { ty = instance; break }
         }
     }
     if ty.kind == {
@@ -1689,27 +1713,38 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
             instruction :: jet_rust_emit_find_value_instruction(function, parameter)
             if instruction == .Val(producer) {
                 if producer.operation == {
-                    .Constant(MirConstant.String(text)) -> {
-                        args.push("&{jet_rust_emit_quote(text)}")
-                        next
+                    .Constant(constant) -> {
+                        if constant == {
+                            .String(text) -> {
+                                args.push("&{jet_rust_emit_quote(text)}")
+                                next
+                            }
+                            else -> {}
+                        }
                     }
                     else -> {}
                 }
             }
         }
-        if index == digits_index && jet_rust_emit_value_type(function, parameter).kind == MirTypeKind.Int {
+        if {
+            index == digits_index && jet_rust_emit_value_type(function, parameter).kind == MirTypeKind.Int -> {
             args.push("__jet_unit_digits")
-        } else {
+            }
+            else -> {
             args.push(jet_rust_emit_value_read(parameter))
+            }
         }
     }
     expected := route_row.signature.arity
-    if args.len() + 2 == expected {
+    if {
+        args.len() + 2 == expected -> {
         args.push(jet_rust_emit_source_path(ctx, location.file))
         args.push("{location.line}u32")
-    } else if args.len() != expected {
+        }
+        args.len() != expected -> {
         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact, measured, rounded, and measured-rounded routes use 5/6/7/8 arguments without source-location suffixes", Val(function.span))
         return "unreachable!(\"unit conversion ABI\")"
+        }
     }
     digit_setup := ""
     if rounded && jet_rust_emit_value_type(function, parameters[digits_index]).kind == MirTypeKind.Int {
@@ -1732,10 +1767,10 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
             }
             converted := jet_rust_emit_unit_wrap(ctx, ok, "value")
             if rounded {
-                return "({|| -> {jet_rust_emit_type(ctx, target)} {{ {digit_setup} let __jet_unit_result = {result}; __jet_unit_result.map(|value| {converted}).map_err(|error| error.to_string()) }})()"
+                return "(|| -> {jet_rust_emit_type(ctx, target)} {{ {digit_setup} let __jet_unit_result = {result}; __jet_unit_result.map(|value| {converted}).map_err(|error| error.to_string()) }})()"
             }
             converted_result :: jet_rust_emit_unit_wrap(ctx, ok, "__jet_unit_result")
-            return "({|| -> {jet_rust_emit_type(ctx, target)} {{ let __jet_unit_result = {result}.ok_or_else(|| \"unit conversion is not exactly representable\".to_string())?; Ok({converted_result}) }})()"
+            return "(|| -> {jet_rust_emit_type(ctx, target)} {{ let __jet_unit_result = {result}.ok_or_else(|| \"unit conversion is not exactly representable\".to_string())?; Ok({converted_result}) }})()"
         }
         .Option(inner) -> {
             converted := jet_rust_emit_unit_wrap(ctx, inner, "value")
@@ -1774,11 +1809,14 @@ fn jet_rust_emit_conversion(ctx: &JetRustEmitContext, function: MirFunction, val
             if route == .Val(route_row) {
                 route_arity = route_row.signature.arity
             }
-            if args.len() + 2 == route_arity {
+            if {
+                args.len() + 2 == route_arity -> {
                 args.push(jet_rust_emit_source_path(ctx, location.file))
                 args.push("{location.line}u32")
-            } else if args.len() != route_arity {
+                }
+                args.len() != route_arity -> {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR conversion arguments do not match the checked route", "location arguments are emitted only for routes whose ABI includes them", Val(function.span))
+                }
             }
             result :: jet_rust_emit_route_call(ctx, call, args)
             if jet_rust_emit_failure_needs_try(fallibility, target) -> return "({result})?"
@@ -1892,13 +1930,22 @@ fn jet_rust_emit_scope_enter(ctx: &JetRustEmitContext, function: MirFunction, id
             if file == "" && function.unsafe_gate != None -> file = (function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).file
             line := "0u32"
             line_fact := jet_rust_emit_scope_fact(scope, "sentry_line")
-            if line_fact != None -> line = "{line_fact ?? "0"}u32" else if function.unsafe_gate != None -> line = "{(function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).line}u32"
+            if {
+                line_fact != None -> line = "{line_fact ?? "0"}u32"
+                function.unsafe_gate != None -> line = "{(function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).line}u32"
+            }
             enabled := "true"
             enabled_fact := jet_rust_emit_scope_fact(scope, "sentry_enabled")
-            if enabled_fact != None -> enabled = enabled_fact ?? "true" else if function.unsafe_gate != None && !(function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).enabled -> enabled = "false"
+            if {
+                enabled_fact != None -> enabled = enabled_fact ?? "true"
+                function.unsafe_gate != None && !(function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).enabled -> enabled = "false"
+            }
             fenced := "false"
             fenced_fact := jet_rust_emit_scope_fact(scope, "sentry_fenced")
-            if fenced_fact != None -> fenced = fenced_fact ?? "false" else if function.unsafe_gate != None && (function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).fenced -> fenced = "true"
+            if {
+                fenced_fact != None -> fenced = fenced_fact ?? "false"
+                function.unsafe_gate != None && (function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).fenced -> fenced = "true"
+            }
             reason := scope.name ?? ""
             if reason == "" && function.unsafe_gate != None -> reason = (function.unsafe_gate ?? MirUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}).reason
             constructor :: if fenced == "true" -> "jet_sentry_fenced_scope" else -> "jet_sentry_scope"
@@ -2305,7 +2352,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
                 if target_ty == .Val(target) {
                     source_ty := jet_rust_emit_value_type(function, value)
                     action := jet_rust_emit_trait_box_source_needs_box(ctx, source_ty, target, Val(function.span))
-                    if action == Val(true) -> source = "Box::new({source}) as {jet_rust_emit_type(ctx, target)}"
+                    if action == (Val(true)) -> source = "Box::new({source}) as {jet_rust_emit_type(ctx, target)}"
                 }
                 rendered.push(source)
             }
@@ -2326,8 +2373,14 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
         .EnumPayload(subject, owner, variant, index) -> return jet_rust_emit_enum_payload(ctx, subject, owner, variant, index)
         .OptionIsSome(subject) | .ResultIsOk(subject) | .PatternMatched(subject) -> return "matches!({jet_rust_emit_value_reference(subject, false)}, Ok(_))"
         .Struct(type_id, fields) -> {
-            if jet_rust_emit_compiler_builtin_for_type(ctx, type_id) == {
-                .Some(MirCompilerBuiltin.DefaultErr) -> return jet_rust_emit_default_err_struct(ctx, type_id, fields)
+            builtin :: jet_rust_emit_compiler_builtin_for_type(ctx, type_id)
+            if builtin == {
+                .Val(value) -> {
+                    if value == {
+                        .DefaultErr -> return jet_rust_emit_default_err_struct(ctx, type_id, fields)
+                        else -> {}
+                    }
+                }
                 else -> {}
             }
             rendered := [String]{}
@@ -2376,7 +2429,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
             source_ty := jet_rust_emit_value_type(function, value)
             action := jet_rust_emit_trait_box_source_needs_box(ctx, source_ty, target_ty, Val(function.span))
             if action == None -> return "unreachable!(\"MIR trait boxing source is invalid\")"
-            if action != Val(true) {
+            if action != (Val(true)) {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is already a trait object", "checked TraitBox operations consume concrete values and must not rebox an existing trait object", Val(function.span))
                 return "unreachable!(\"MIR trait boxing source is already dynamic\")"
             }

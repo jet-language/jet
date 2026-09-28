@@ -9,8 +9,8 @@ mod tir_support;
 use std::fs;
 use std::process::Command;
 
-const SOURCE: &str = include_str!("../examples/features/concurrency/select_channel.jet");
-const EXPECTED: &str = include_str!("../examples/features/expected/concurrency/select_channel.out");
+const SOURCE: &str = include_str!("../Examples/features/concurrency/select_channel.jet");
+const EXPECTED: &str = include_str!("../Examples/features/expected/concurrency/select_channel.out");
 
 const COMPTIME_SOURCE: &str = r#"
 fn choose() -> Int {
@@ -99,12 +99,12 @@ const EXPECTED_REPL: &str = "7\n";
 fn web_runs_the_same_channel_readiness_example() {
     let scratch = common::Scratch::new("channel-readiness-web");
     let output =
-        jet::compile_web_with_path(SOURCE, "examples/features/concurrency/select_channel.jet")
+        jet::compile_web_with_path(SOURCE, "Examples/features/concurrency/select_channel.jet")
             .unwrap_or_else(|diagnostics| {
                 panic!(
                     "web target rejected channel/readiness:\n{}",
                     jet::render_diagnostics(
-                        "examples/features/concurrency/select_channel.jet",
+                        "Examples/features/concurrency/select_channel.jet",
                         SOURCE,
                         &diagnostics
                     )

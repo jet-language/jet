@@ -1,4 +1,4 @@
-//! Keep generated build output out of `examples/`.
+//! Keep generated build output out of `Examples/`.
 
 mod common;
 
@@ -48,7 +48,7 @@ fn is_executable(path: &Path) -> bool {
 
 #[test]
 fn examples_contain_no_build_artifacts() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples");
     let mut found = Vec::new();
     artifact_paths(&root, &mut found);
     found.sort();

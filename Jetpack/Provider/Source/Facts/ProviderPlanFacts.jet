@@ -1,0 +1,121 @@
+// Versioned, canonical provider facts carried with a realized producer plan,
+// ported from jetpack::provider_plan_facts. The codec is independent of
+// compiler build-plan internals: one header line, then one
+// `hex(key)\thex(value)` line per fact in key order.
+
+@PROVIDER_PLAN_FACTS_HEADER :: "jet-build-plan-replay-v1"
+
+pub struct ProviderPlanFacts {
+    entries: [String: String]
+
+    // Facts with non-empty keys.
+    fn from_facts(facts: [String: String]) -> ProviderPlanFacts !ProviderPlanFactsError {
+        if facts.has_key("") -> return Err(ProviderPlanFactsError.EmptyKey)
+        Ok(ProviderPlanFacts{entries: facts})
+    }
+
+    fn facts(self) -> [String: String] !Never {
+        self.entries
+    }
+
+    // The replay text (`encode`; the name is taken by the Encode derive).
+    fn render(self) -> String !Never {
+        lines := [String]{@PROVIDER_PLAN_FACTS_HEADER}
+        keys := self.entries.keys().to_list()
+        keys.sort()
+        loop key in keys -> lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
+        "{lines.join("\n")}\n"
+    }
+
+    // Decode the exact rendering (`decode`); any other version, malformed line,
+    // non-lowercase hex, non-UTF-8 field, empty key, or repeated key fails.
+    fn parse(raw: String) -> ProviderPlanFacts !ProviderPlanFactsError {
+        lines :: provider_plan_lines(raw)
+        if lines.len() == 0 || lines[0] != @PROVIDER_PLAN_FACTS_HEADER -> return Err(ProviderPlanFactsError.UnsupportedVersion)
+        facts := [String: String]{}
+        loop index in 1..<lines.len() {
+            fields :: lines[index].split_once("\t") ?? return Err(ProviderPlanFactsError.TruncatedFact)
+            key :: provider_plan_unhex(fields.before)
+            value :: provider_plan_unhex(fields.after)
+            if key == "" -> return Err(ProviderPlanFactsError.EmptyKey)
+            if facts.has_key(key) -> return Err(ProviderPlanFactsError.DuplicateFact(key))
+            facts[key] = value
+        }
+        ProviderPlanFacts.from_facts(facts)
+    }
+}
+
+#Error
+pub enum ProviderPlanFactsError {
+    EmptyKey
+    UnsupportedVersion
+    TruncatedFact
+    TruncatedField
+    NotLowercaseHex
+    NotUtf8
+    DuplicateFact(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .EmptyKey -> "provider plan facts contain an empty fact key"
+            .UnsupportedVersion -> "unsupported provider plan facts version"
+            .TruncatedFact -> "truncated provider plan fact"
+            .TruncatedField -> "truncated provider plan fact field"
+            .NotLowercaseHex -> "provider plan fact field is not lowercase hex"
+            .NotUtf8 -> "provider plan fact field is not UTF-8"
+            .DuplicateFact(key) -> "duplicate provider plan fact `{key}`"
+        }
+    }
+}
+
+// `str::lines`: split at LF, drop a CR before an LF, and a final LF ends the
+// last line.
+fn provider_plan_lines(raw: String) -> [String] !Never {
+    segments :: raw.split("\n").to_list()
+    count :: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
+    lines := [String]{}
+    loop index in 0..<count {
+        segment :: segments[index]
+        bytes :: segment.bytes()
+        before_newline :: index < segments.len() - 1
+        if before_newline && bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
+            lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
+            next
+        }
+        lines.push(segment)
+    }
+    lines
+}
+
+// Lowercase hex of the UTF-8 bytes.
+fn provider_plan_hex(value: String) -> String !Never {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        out.push(digits[code >> 4])
+        out.push(digits[code & 15])
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+fn provider_plan_unhex(value: String) -> String !ProviderPlanFactsError {
+    raw :: value.bytes()
+    if raw.len() % 2 != 0 -> return Err(ProviderPlanFactsError.TruncatedField)
+    bytes := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        high :: provider_plan_nibble(Int.from_u8(raw[index]))
+        low :: provider_plan_nibble(Int.from_u8(raw[index + 1]))
+        bytes.push(U8{high * 16 + low})
+        index += 2
+    }
+    text :: String.from_bytes(bytes) ?? return Err(ProviderPlanFactsError.NotUtf8)
+    Ok(text)
+}
+
+fn provider_plan_nibble(code: Int) -> Int !ProviderPlanFactsError {
+    if code >= 48 && code <= 57 -> return Ok(code - 48)
+    if code >= 97 && code <= 102 -> return Ok(code - 87)
+    Err(ProviderPlanFactsError.NotLowercaseHex)
+}

@@ -169,6 +169,51 @@ pub enum JetEvalNativeCallBinding {
     Interface(binding: JetEvalNativeInterfaceBinding)
 }
 
+pub struct JetEvalHostFixedBackingKey {
+    pub machine_identity: Int
+    pub frame: Int
+    pub function: MirFunctionId
+    pub local: MirLocalId
+    pub place: MirPlaceId
+}
+pub enum JetEvalHostFixedBackingSlot { Uninitialized Initialized(value: Int) }
+pub struct JetEvalHostFixedBackingStorage {
+    pub handle: MirHandleId
+    pub raw: Int
+    // Source registry token for this alias; never a provider storage ID.
+    pub token: Int
+    pub element_type: MirType
+    pub length: Int
+}
+pub struct JetEvalHostFixedBackingRequest {
+    pub key: JetEvalHostFixedBackingKey
+    pub element_type: MirType
+    pub length: Int
+    pub span: Span
+    pub existing: ?JetEvalHostFixedBackingStorage
+    // Present only on first materialization; this transfers initialized U8
+    // slots once while preserving uninitialized slots as such.
+    pub initial_slots: [JetEvalHostFixedBackingSlot]
+}
+// Read checks one bitmap slot. ReadArray/TakeArray mirror JetUninitFixed's
+// canonical full-array view/move operations; writes update provider-owned
+// initialization state, never deriving it from bytes written by Fixed.over.
+pub enum JetEvalHostFixedBackingOperation {
+    Read(index: Int)
+    Write(index: Int, value: Int)
+    ReadArray
+    TakeArray
+}
+// Read/Write may report bounds failure; read operations may report an
+// uninitialized slot. Array operations only return bytes after all slots pass
+// the canonical readiness check.
+pub enum JetEvalHostFixedBackingAccessResult {
+    Byte(value: Int)
+    Bytes(values: [Int])
+    Unit
+    OutOfBounds
+    Uninitialized
+}
 pub enum JetEvalHostValue {
     Data(value: TComptimeValue)
     Handle(handle: MirHandleId, raw: Int, owner: JetEvalHostOwner, payload: JetEvalHostValue)
@@ -180,7 +225,30 @@ pub enum JetEvalHostValue {
     Struct(type_name: String, fields: [JetEvalHostField])
     Enum(type_name: String, variant: String, args: [JetEvalHostEnumArg])
     Closure(function: MirFunctionId, captures: [JetEvalHostValue])
+    SourceCallback(lease: Int)
+    FixedBacking(request: JetEvalHostFixedBackingRequest)
     SharedCarrier(carrier: JetEvalSharedHostCarrier)
+}
+// Canonical static MIR operands cross the existing host-call boundary as
+// typed metadata; they are never fabricated runtime values.
+pub enum JetEvalHostStaticOperand {
+    TextPattern(parts: [MirTextPatternPart])
+    BinaryPattern(parts: [MirBinaryPatternPart])
+    CellGuardProject(paths: [[MirFieldId]], editable: Bool, edit_paths_disjoint: Bool, split_route: ?MirPreludeCall)
+    GcEdit(kind: MirGcEditKind, site: MirGcEditSiteId, edge_count: Int, has_index: Bool, edge_shapes: [JetEvalHostTypeShape])
+    HandleMethodSchedule(frame_schedule: ?MirFrameSchedule, frame_schedule_derivation: ?MirDerivationRef)
+    PluginInvoke(export_name: String, signature: MirComponentSignatureDescriptor)
+    HttpRouterRegister(method: MirHttpMethod, handler_param_names: [String], contract_json: String, location: MirPanicLoc)
+    AllocNew(kind: MirAllocatorKind, inline_size: ?Int, checked_args: [MirCallArg], physical_ranges: [JetEvalHostArgumentRange])
+}
+pub struct JetEvalHostArgumentRange {
+    pub start: Int
+    pub count: Int
+}
+pub enum JetEvalHostCallTarget {
+    Prelude(row: MirPreludeCall)
+    CursorTakePattern(receiver_place: MirPlaceId, parts: [MirTextPatternPart])
+    ReaderTakePattern(receiver_place: MirPlaceId, parts: [MirBinaryPatternPart])
 }
 // One prepared native argument: the Source carrier (borrowed, still owned by
 // the call site), its host projection, and whether the checked call site lets
@@ -208,8 +276,8 @@ pub struct JetEvalHostCoreOwner {
 // identity belongs to JetEvalNativeCallBinding.Interface, not this retained
 // physical owner identity. `handle`/`raw` are the binding scope's real arena
 // capability, never a MIR identity.
-pub enum JetEvalHostOwner { Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) }
-pub enum JetEvalForeignTokenKind { Foreign Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) }
+pub enum JetEvalHostOwner { Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MirType, length: Int) }
+pub enum JetEvalForeignTokenKind { Foreign Cursor Declared(ty: MirType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MirType, length: Int) }
 
 pub struct JetEvalHostWriteback {
     pub argument: Int
@@ -278,6 +346,23 @@ pub struct JetEvalHostTransfer {
     pub handle: MirHandleId
     pub raw: Int
 }
+pub struct JetEvalHostCallbackTransfer {
+    pub argument: Int
+    pub lease: Int
+}
+pub struct JetEvalHostFixedBackingTransfer {
+    pub argument: Int
+    pub backing_handle: MirHandleId
+    pub backing_raw: Int
+    pub backing_owner: JetEvalHostOwner
+    pub lease: Int
+    pub owner_handle: MirHandleId
+    pub owner_raw: Int
+}
+struct JetEvalHostCallbackExchange {
+    result: ?JetEvalRuntimeValue
+    adopted: Bool
+}
 pub struct JetEvalResultHostSharedTransfer {
     pub path: [JetEvalHostProjection]
     pub index: Int
@@ -314,6 +399,8 @@ pub struct JetEvalResultHostTransferReceipt {
 
 pub struct JetEvalHostResult {
     pub transfers: [JetEvalHostTransfer]
+    pub callback_transfers: [JetEvalHostCallbackTransfer]
+    pub fixed_backing_transfers: [JetEvalHostFixedBackingTransfer]
     pub writebacks: [JetEvalHostWriteback]
     pub outcome: JetEvalHostOutcome
 }
@@ -354,9 +441,14 @@ trait JetEvalHostAdapter {
     fn clone_adapter(self) -> JetEvalHostAdapter
     fn poll_callbacks(self, machine: &JetEvalMachine) -> Bool
     fn drain_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn host_call(self, machine: &JetEvalMachine, row: MirPreludeCall, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, arg_shapes: [JetEvalHostTypeShape], span: Span) -> ?JetEvalHostResult
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: ?JetEvalHostStaticOperand, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, arg_shapes: [JetEvalHostTypeShape], span: Span) -> ?JetEvalHostResult
     fn foreign_call(self, machine: &JetEvalMachine, row: MirForeign, args: ^[JetEvalHostArgument], span: Span) -> ?JetEvalHostResult
     fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MirHandleId, raw: Int, span: Span) -> ?JetEvalHostResult
+    // Cleanup-only path for Source backing-root refs and provisional owner
+    // leases. A committed allocator lease is released by the allocator's
+    // normal handle drop instead.
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MirHandleId, raw: Int, lease: ?Int, span: Span) -> ?JetEvalHostResult
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -> ?JetEvalHostFixedBackingAccessResult
     fn physical_binding(self) -> JetEvalHostValue
     fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
     fn channel_select(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirSelectKind, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
@@ -373,9 +465,10 @@ pub struct JetEvalConfig {
     pub host_adapter: ?JetEvalHostAdapter
     pub output_context: ?JetEvalOutputContext
     pub numeric_unit_conversion_exact: ?fn(Float, String, String, String, String) -> ?Float
+    pub typed_boundary_literal_validate: ?fn(MirTypedHeadKind, [String]) -> ?String
 }
 pub fn jet_eval_default_config() -> JetEvalConfig {
-    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, numeric_unit_conversion_exact: None}
+    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
 }
 pub struct JetEvalOwnedRoot {
     pub program: MirProgram
@@ -1323,6 +1416,10 @@ fn jet_eval_retain_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, s
 
 fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if value == {.ForeignHandle(_, _, token) -> {
+        kind :: jet_eval_foreign_token_kind(&machine, token) ?? return None
+        if kind == {.FixedBackingRoot(_, _) -> return jet_eval_fixed_backing_array(&machine, value, false, span)}
+    }}
     if !jet_eval_retain_value(&machine, value, span) -> return None
     Val(value)
 }
@@ -1365,7 +1462,7 @@ fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &Jet
 // Move an SSA value out of its frame slot. The moved value keeps its owned
 // aliases; a failed validation restores the slot so the frame still discharges it.
 fn jet_eval_take_value(frame: &JetEvalFrame, value: MirValueId, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
-    if frame.borrowed_values.get(value.value) == Val(true) {
+    if frame.borrowed_values.get(value.value) == (Val(true)) {
         jet_eval_ownership_fail(&machine, span, "MIR move consumes a borrowed SSA value")
         return None
     }
@@ -1535,11 +1632,14 @@ fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TCom
         updated := [TComptimeField]{}
         found := false
         loop field in fields {
-            if field.name == name {
-                updated.push(TComptimeField{name: name, value: replacement})
-                found = true
-            } else {
-                updated.push(field)
+            if {
+                field.name == name -> {
+                    updated.push(TComptimeField{name: name, value: replacement})
+                    found = true
+                }
+                else -> {
+                    updated.push(field)
+                }
             }
         }
         if found -> return Val(TComptimeValue.Struct(type_name, updated))

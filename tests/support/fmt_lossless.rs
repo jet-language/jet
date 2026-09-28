@@ -1551,7 +1551,7 @@ fn fmt_is_lossless_on_supported_source_corpus() {
 
 fn run_supported_source_corpus() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example_files = collect_jet_files_recursive(&root.join("examples"));
+    let example_files = collect_jet_files_recursive(&root.join("Examples"));
     let ui_files = collect_jet_files_recursive(&root.join("tests/ui"));
     let mut example_programs = 0usize;
     let mut example_configs = 0usize;

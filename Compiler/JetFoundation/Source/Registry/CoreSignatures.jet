@@ -1,0 +1,610 @@
+// Canonical typed source-call contracts shared by source sema and the
+// Core-call registry. These rows mirror the native Core signature authority;
+// an absent row is deliberately uncovered rather than inferred from arity.
+pub enum CoreCallDefault {
+    Bool(value: Bool)
+    Int(value: Int)
+    Float(value: Float)
+    String(value: String)
+    EmptyList
+    Absent
+    StaticCall(type_name: String, method: String)
+    StaticEnum(type_name: String, variant: String)
+}
+
+pub enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable }
+
+pub enum CoreCallResultRule {
+    Declared
+    AbsoluteValue(parameter_index: Int)
+    FloatIfExactElseParameter(parameter_index: Int)
+}
+
+pub struct CoreCallTypedParameter {
+    pub name: String
+    pub label: String
+    pub zone: ParamZone
+    pub access: AccessConvention
+    pub ty: Type
+    pub default: ?CoreCallDefault
+}
+
+pub struct CoreCallTypeParameter {
+    pub name: String
+    pub bounds: [String]
+    pub constraint: CoreCallTypeConstraint
+}
+
+pub struct CoreTypedCallSignature {
+    pub module_name: String
+    pub member: String
+    pub min_arity: Int
+    pub max_arity: Int
+    pub parameters: [CoreCallTypedParameter]
+    pub return_type: ?Type
+    pub type_parameters: [CoreCallTypeParameter]
+    pub result_rule: CoreCallResultRule
+}
+
+pub struct CoreCallSignatureRequest {
+    pub module_name: String
+    pub member: String
+    pub actual_arity: Int
+    pub actual_accesses: [AccessConvention]
+    pub type_args: [Type]
+}
+
+pub struct CoreCallParameterContract {
+    pub label: String
+    pub zone: ParamZone
+    pub default: ?CoreCallDefault
+}
+
+pub struct CoreCallLabelRequirement {
+    pub argument_index: Int
+    pub label: String
+}
+
+fn core_sig_parameter(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: ?CoreCallDefault) -> CoreCallTypedParameter {
+    CoreCallTypedParameter{name: name, label: label, zone: zone, access: access, ty: ty, default: default}
+}
+
+fn core_sig_positional(ty: Type, access: AccessConvention) -> CoreCallTypedParameter {
+    core_sig_parameter("", "", ParamZone.PositionalOnly, access, ty, None)
+}
+
+fn core_sig_param_type(name: String, label: String, zone: ParamZone, ty: Type) -> CoreCallTypedParameter {
+    core_sig_parameter(name, label, zone, AccessConvention.Read, ty, None)
+}
+
+fn core_sig_type_parameter(name: String, constraint: CoreCallTypeConstraint) -> CoreCallTypeParameter {
+    CoreCallTypeParameter{name: name, bounds: [String]{}, constraint: constraint}
+}
+
+fn core_sig(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: ?Type) -> CoreTypedCallSignature {
+    CoreTypedCallSignature{
+        module_name: module_name,
+        member: member,
+        min_arity: parameters.len(),
+        max_arity: parameters.len(),
+        parameters: parameters,
+        return_type: return_type,
+        type_parameters: [CoreCallTypeParameter]{},
+        result_rule: CoreCallResultRule.Declared,
+    }
+}
+
+fn core_sig_result(ok: Type, err: Type) -> Type {
+    Type.Result(ok: ok, err: err)
+}
+
+fn core_sig_named(name: String) -> Type {
+    Type.Named(name)
+}
+fn core_sig_one_of(value: String, choices: [String]) -> Bool {
+    loop choice in choices {
+        if value == choice -> return true
+    }
+    false
+}
+
+
+fn core_sig_apply(name: String, arg: Type) -> Type {
+    Type.Apply(name: name, args: [Type]{arg})
+}
+
+fn core_sig_fn(params: [Type], ret: Type) -> Type {
+    Type.Fn(params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+}
+
+fn core_sig_generic(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: ?Type, type_parameter: CoreCallTypeParameter) -> CoreTypedCallSignature {
+    signature := core_sig(module_name, member, parameters, return_type)
+    signature.type_parameters = [CoreCallTypeParameter]{type_parameter}
+    signature
+}
+
+fn core_sig_generic_with_result_rule(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: ?Type, type_parameter: CoreCallTypeParameter, result_rule: CoreCallResultRule) -> CoreTypedCallSignature {
+    signature := core_sig_generic(module_name, member, parameters, return_type, type_parameter)
+    signature.result_rule = result_rule
+    signature
+}
+
+fn core_param_required(label: String) -> CoreCallParameterContract {
+    CoreCallParameterContract{label: label, zone: ParamZone.PositionalOnly, default: None}
+}
+
+fn core_param_required_label(label: String) -> CoreCallParameterContract {
+    CoreCallParameterContract{label: label, zone: ParamZone.LabelOnly, default: None}
+}
+
+fn core_param_required_either(label: String) -> CoreCallParameterContract {
+    CoreCallParameterContract{label: label, zone: ParamZone.Either, default: None}
+}
+
+fn core_param_optional(label: String, zone: ParamZone, default: CoreCallDefault) -> CoreCallParameterContract {
+    CoreCallParameterContract{label: label, zone: zone, default: Val(default)}
+}
+
+pub fn core_call_parameter_contract(module_name: String, member: String) -> ?[CoreCallParameterContract] {
+    absent :: CoreCallDefault.Absent
+    limits :: CoreCallDefault.StaticCall(type_name: "EncodingLimits", method: "safe")
+    if {
+        module_name == "core.testing" && member == "histories" -> Val([CoreCallParameterContract]{
+            core_param_required_either("seed"), core_param_required_either("cases"),
+            core_param_optional("strategy", ParamZone.LabelOnly, absent),
+            core_param_required_either("model"), core_param_required_either("actual"), core_param_required_either("observe"),
+        })
+        module_name == "core.devtools" && member == "publish" -> Val([CoreCallParameterContract]{
+            core_param_required_label("field"), core_param_required_label("value"),
+        })
+        module_name == "core.ui" && core_sig_one_of(member, [String]{"preview", "playground"}) -> Val([CoreCallParameterContract]{
+            core_param_required("name"), core_param_optional("viewport", ParamZone.LabelOnly, absent), core_param_required("callback"),
+        })
+        module_name == "core.ui" && member == "button" -> Val([CoreCallParameterContract]{
+            core_param_required("display"), core_param_optional("shortcut", ParamZone.LabelOnly, absent),
+            core_param_optional("label", ParamZone.LabelOnly, absent), core_param_optional("on_click", ParamZone.LabelOnly, absent),
+        })
+        module_name == "core.ui" && member == "text_input" -> Val([CoreCallParameterContract]{
+            core_param_required("state"), core_param_required("ime"), core_param_optional("on_drop", ParamZone.LabelOnly, absent),
+        })
+        module_name == "core.rt" && member == "callback" -> Val([CoreCallParameterContract]{
+            core_param_required("rate"), core_param_required("frames"), core_param_required("fn"),
+        })
+        module_name == "core.time" && member == "zoned_local" -> Val([CoreCallParameterContract]{
+            core_param_required("date"), core_param_required("time"), core_param_required("zone"),
+            core_param_optional("disambiguation", ParamZone.Either, CoreCallDefault.String(value: "compatible")),
+        })
+        module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_parallel", "walk_files"}) -> Val([CoreCallParameterContract]{
+            core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent),
+        })
+        module_name == "core.game" && member == "run" -> Val([CoreCallParameterContract]{
+            core_param_required("scene"), core_param_optional("replay", ParamZone.Either, absent),
+            core_param_optional("backend", ParamZone.Either, absent), core_param_optional("frames", ParamZone.Either, absent),
+        })
+        module_name == "core.http.server" && core_sig_one_of(member, [String]{"bind", "serve"}) -> Val([CoreCallParameterContract]{
+            core_param_required("address"), core_param_required("mux"),
+            core_param_optional("tls", ParamZone.LabelOnly, absent), core_param_optional("deadline", ParamZone.LabelOnly, absent),
+        })
+        module_name == "core.http.server" && member == "cors_policy" -> Val([CoreCallParameterContract]{
+            core_param_required_either("origins"), core_param_optional("methods", ParamZone.Either, CoreCallDefault.EmptyList),
+            core_param_optional("headers", ParamZone.Either, CoreCallDefault.EmptyList),
+            core_param_optional("credentials", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+            core_param_optional("max_age", ParamZone.Either, CoreCallDefault.Int(value: 86_400)),
+        })
+        module_name == "core.encoding.csv" && core_sig_one_of(member, [String]{"parse", "rows"}) -> Val([CoreCallParameterContract]{
+            core_param_required("text"), core_param_optional("delimiter", ParamZone.Either, CoreCallDefault.String(value: ",")),
+            core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+            core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+        })
+        module_name == "core.encoding.csv" && member == "reader" -> Val([CoreCallParameterContract]{
+            core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
+            core_param_optional("delimiter", ParamZone.Either, CoreCallDefault.String(value: ",")),
+            core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+            core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+        })
+        core_sig_one_of(module_name, [String]{"core.encoding.json", "core.encoding.jsonl", "core.encoding.cbor"}) && member == "reader" -> Val([CoreCallParameterContract]{
+            core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
+        })
+        module_name == "core.encoding.xml" && member == "reader" -> Val([CoreCallParameterContract]{
+            core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
+            core_param_optional("options", ParamZone.Either, CoreCallDefault.StaticCall(type_name: "XMLParseOptions", method: "safe")),
+        })
+        module_name == "core.encoding.xml" && member == "writer" -> Val([CoreCallParameterContract]{
+            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
+            core_param_optional("options", ParamZone.Either, CoreCallDefault.StaticCall(type_name: "XMLRenderOptions", method: "safe")),
+        })
+        module_name == "core.encoding.json" && member == "writer" -> Val([CoreCallParameterContract]{
+            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
+            core_param_optional("canonical", ParamZone.Either, CoreCallDefault.Bool(value: false)),
+        })
+        core_sig_one_of(module_name, [String]{"core.encoding.jsonl", "core.encoding.csv", "core.encoding.cbor"}) && member == "writer" -> Val([CoreCallParameterContract]{
+            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
+        })
+        module_name == "core.mod" && member == "load" -> Val([CoreCallParameterContract]{
+            core_param_required("path"), core_param_required_label("grant"),
+        })
+        module_name == "core.db" && member == "pool" -> Val([CoreCallParameterContract]{
+            core_param_required("url"), core_param_required_label("max"),
+        })
+        module_name == "core.math" && member == "isclose" -> Val([CoreCallParameterContract]{
+            core_param_required_either("a"), core_param_required_either("b"),
+            core_param_optional("rel_tol", ParamZone.Either, CoreCallDefault.Float(value: 0.000000001)),
+            core_param_optional("abs_tol", ParamZone.Either, CoreCallDefault.Float(value: 0.0)),
+        })
+        else -> None
+    }
+}
+
+fn core_sig_apply_parameter_contract(signature: CoreTypedCallSignature, contracts: [CoreCallParameterContract]) -> ?CoreTypedCallSignature {
+    if signature.parameters.len() != contracts.len() -> return None
+    required_count := 0
+    index := 0
+    loop index < contracts.len() {
+        contract :: contracts[index]
+        signature.parameters[index].name = contract.label
+        signature.parameters[index].label = contract.label
+        signature.parameters[index].zone = contract.zone
+        signature.parameters[index].default = contract.default
+        if contract.default == None -> required_count += 1
+        index += 1
+    }
+    signature.min_arity = required_count
+    signature.max_arity = signature.parameters.len()
+    Val(signature)
+}
+
+fn core_sig_math_fixed(module_name: String, member: String) -> ?CoreTypedCallSignature {
+    read :: AccessConvention.Read
+    integer :: Type.Int
+    float :: Type.Float
+    list_int :: Type.List(element: integer)
+    list_float :: Type.List(element: float)
+    if module_name == "core.math" {
+        if core_sig_one_of(member, [String]{"abs_float", "log1p", "fabs", "expm1"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(float)))
+        }
+        if core_sig_one_of(member, [String]{"min_float", "max_float", "midpoint"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(float)))
+        }
+        if core_sig_one_of(member, [String]{"clamp_float", "hypot3"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(float)))
+        }
+        if core_sig_one_of(member, [String]{"tau_const", "random"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
+        if core_sig_one_of(member, [String]{"gcd_many", "lcm_many", "sum_int", "prod_int"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(integer)))
+        if member == "powmod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+        if core_sig_one_of(member, [String]{"abs_diff", "xor"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
+        if core_sig_one_of(member, [String]{"even", "odd"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Bool)))
+        if member == "in_range" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Bool)))
+        if member == "sumprod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(list_float, read)}, Val(float)))
+        if member == "decimal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("Decimal"))))
+        if member == "fraction" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: core_sig_named("Fraction")))))
+    }
+    if module_name == "core.math.combinatorics" {
+        list_list_int :: Type.List(element: list_int)
+        if core_sig_one_of(member, [String]{"permutations", "combinations", "combinations_with_replacement", "product", "batched", "tee", "windows"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read)}, Val(list_list_int)))
+        }
+        if member == "cartesian" || member == "zip_longest" {
+            parameters := [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(list_int, read)}
+            if member == "zip_longest" -> parameters.push(core_sig_positional(integer, read))
+            return Val(core_sig(module_name, member, parameters, Val(list_list_int)))
+        }
+        if core_sig_one_of(member, [String]{"pairwise", "groupby", "powerset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(list_list_int)))
+        if core_sig_one_of(member, [String]{"flatten", "starmap"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_list_int, read)}, Val(list_int)))
+        if member == "chain" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(list_int, read)}, Val(list_int)))
+        if member == "compress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(Type.List(element: Type.Bool), read)}, Val(list_int)))
+        if core_sig_one_of(member, [String]{"drop", "cycle"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read)}, Val(list_int)))
+        if core_sig_one_of(member, [String]{"takewhile", "dropwhile", "filterfalse"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(Type.Bool, read)}, Val(list_int)))
+        if member == "islice" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
+        if core_sig_one_of(member, [String]{"unique", "accumulate", "reverse"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(list_int)))
+        if member == "repeat" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
+        if core_sig_one_of(member, [String]{"count_from", "count"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
+        if core_sig_one_of(member, [String]{"factorial", "multinomial"}) {
+            params :: if member == "factorial" -> [CoreCallTypedParameter]{core_sig_positional(integer, read)} else -> [CoreCallTypedParameter]{core_sig_positional(list_int, read)}
+            return Val(core_sig(module_name, member, params, Val(Type.Option(inner: integer))))
+        }
+        if core_sig_one_of(member, [String]{"binomial", "permutations_count", "combinations_count", "npr", "ncr", "falling_factorial", "rising_factorial"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+    }
+    if module_name == "core.math.stats" {
+        if core_sig_one_of(member, [String]{"sum", "prod"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(float)))
+        if member == "count" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(integer)))
+        if core_sig_one_of(member, [String]{"cumsum", "cumprod", "diff", "rank", "zscore", "multimode"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(list_float)))
+        if core_sig_one_of(member, [String]{"moving_average", "quantiles", "histogram"}) {
+            second := if member == "moving_average" || member == "histogram" || member == "quantiles" -> integer else -> float
+            result := if member == "histogram" -> Type.List(element: integer) else -> list_float
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(second, read)}, Val(result)))
+        }
+        if member == "ewma" || member == "kde" || member == "winsorize" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(float, read)}, Val(list_float)))
+        if member == "clip" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(list_float)))
+        if core_sig_one_of(member, [String]{"mean", "fmean", "geometric_mean", "harmonic_mean", "median", "median_low", "median_high", "mode", "pvariance", "pstdev", "variance", "stdev", "min", "max", "range", "iqr", "mad", "mean_abs_deviation", "skew", "kurtosis"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(Type.Option(inner: float))))
+        if core_sig_one_of(member, [String]{"median_grouped", "quantile", "percentile"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(float, read)}, Val(Type.Option(inner: float))))
+        if core_sig_one_of(member, [String]{"covariance", "correlation", "sumprod", "weighted_mean", "spearman", "pearson", "covariance_population"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(list_float, read)}, Val(Type.Option(inner: float))))
+        if member == "kde_random" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(float, read), core_sig_positional(integer, read)}, Val(list_float)))
+        if member == "residuals" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read), core_sig_positional(list_float, read)}, Val(list_float)))
+    }
+    None
+}
+
+fn core_sig_numeric_or_default(module_name: String, member: String) -> ?CoreTypedCallSignature {
+    read :: AccessConvention.Read
+    integer :: Type.Int
+    float :: Type.Float
+    boolean :: Type.Bool
+    t :: core_sig_named("T")
+    if module_name != "core.math" -> return None
+    if core_sig_one_of(member, [String]{"min", "max"}) {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
+            core_sig_positional(t, read), core_sig_positional(t, read),
+        }, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Comparable)))
+    }
+    if member == "clamp" {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
+            core_sig_positional(t, read), core_sig_positional(t, read), core_sig_positional(t, read),
+        }, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Comparable)))
+    }
+    if member == "abs" {
+        return Val(core_sig_generic_with_result_rule(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read)}, None,
+            core_sig_type_parameter("T", CoreCallTypeConstraint.Numeric),
+            CoreCallResultRule.AbsoluteValue(parameter_index: 0)))
+    }
+    if member == "sqrt" {
+        return Val(core_sig_generic_with_result_rule(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t),
+            core_sig_type_parameter("T", CoreCallTypeConstraint.SquareRootInput),
+            CoreCallResultRule.FloatIfExactElseParameter(parameter_index: 0)))
+    }
+    if core_sig_one_of(member, [String]{"sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "exp", "ln", "log2", "log10", "acosh", "asinh", "atanh", "cbrt", "exp2", "exp_m1", "ln_1p", "degrees", "radians"}) {
+        return Val(core_sig_generic_with_result_rule(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t),
+            core_sig_type_parameter("T", CoreCallTypeConstraint.FloatingOrExact),
+            CoreCallResultRule.FloatIfExactElseParameter(parameter_index: 0)))
+    }
+    if core_sig_one_of(member, [String]{"floor", "ceil", "trunc", "truncate", "fract", "real", "imag", "conj", "float32", "float64", "signum"}) {
+        return Val(core_sig_generic(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t),
+            core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if member == "sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union(members: [Type]{float, Type.Float32}), read)}, Val(integer)))
+    if member == "to_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union(members: [Type]{float, Type.Float32}), read)}, Val(integer)))
+    if member == "from_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(float)))
+    if member == "pow" {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if member == "cmp" {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if core_sig_one_of(member, [String]{"next_after", "nextafter"}) {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if core_sig_one_of(member, [String]{"ldexp", "scaleb"}) {
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(integer, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if member == "ilogb" -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.Option(inner: integer)), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    if core_sig_one_of(member, [String]{"sin_cos", "modf"}) {
+        fields :: if {
+            member == "sin_cos" -> [TypeTupleField]{TypeTupleField{name: "sin", ty: t}, TypeTupleField{name: "cos", ty: t}}
+            else -> [TypeTupleField]{TypeTupleField{name: "fract", ty: t}, TypeTupleField{name: "whole", ty: t}}
+        }
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.Tuple(fields: fields)), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if member == "frexp" {
+        fields :: [TypeTupleField]{TypeTupleField{name: "frac", ty: t}, TypeTupleField{name: "exp", ty: integer}}
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.Tuple(fields: fields)), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    }
+    if core_sig_one_of(member, [String]{"div_mod", "div_rem"}) {
+        fields :: [TypeTupleField]{TypeTupleField{name: "quot", ty: integer}, TypeTupleField{name: "rem", ty: integer}}
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Tuple(fields: fields))))
+    }
+    if core_sig_one_of(member, [String]{"checked_add", "checked_sub", "checked_mul", "checked_pow", "checked_div", "checked_rem"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+    if core_sig_one_of(member, [String]{"checked_abs", "checked_neg", "isqrt", "factorial"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+    if member == "binomial" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+    if core_sig_one_of(member, [String]{"leading_ones", "trailing_ones", "digits"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(integer)))
+    if member == "radix" -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Numeric)))
+    if core_sig_one_of(member, [String]{"is_normal", "is_subnormal", "is_canonical", "is_signed", "is_zero", "is_integer", "sign_bit"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(boolean), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    if core_sig_one_of(member, [String]{"next_up", "next_down", "copy", "cot", "inv", "erf", "erfc", "gamma", "lgamma", "logb", "significand", "ulp"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    if member == "zero" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
+    if member == "round" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(integer)))
+    if core_sig_one_of(member, [String]{"int_pow", "gcd", "lcm", "saturating_add", "saturating_sub", "saturating_mul"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
+    if core_sig_one_of(member, [String]{"atan2", "hypot", "copysign", "log"}) {
+        return Val(core_sig_generic_with_result_rule(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(t),
+            core_sig_type_parameter("T", CoreCallTypeConstraint.FloatingOrExact),
+            CoreCallResultRule.FloatIfExactElseParameter(parameter_index: 0)))
+    }
+    if core_sig_one_of(member, [String]{"fma", "lerp", "muladd"}) {
+        return Val(core_sig_generic_with_result_rule(module_name, member,
+            [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read), core_sig_positional(t, read)}, Val(t),
+            core_sig_type_parameter("T", CoreCallTypeConstraint.FloatingOrExact),
+            CoreCallResultRule.FloatIfExactElseParameter(parameter_index: 0)))
+    }
+    if core_sig_one_of(member, [String]{"fmod", "remainder"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(float)))
+    if member == "isclose" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(boolean)))
+    if member == "dist" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: float), read), core_sig_positional(Type.List(element: float), read)}, Val(float)))
+    if core_sig_one_of(member, [String]{"comb", "perm"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+    if core_sig_one_of(member, [String]{"pi", "e"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
+    if core_sig_one_of(member, [String]{"is_nan", "is_inf", "is_finite", "isnan", "isinf", "isfinite"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(boolean), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
+    if core_sig_one_of(member, [String]{"is_even", "is_odd"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(boolean)))
+    if member == "fsum" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: float), read)}, Val(float)))
+    if member == "prod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: integer), read)}, Val(integer)))
+    None
+}
+
+fn core_sig_auth(module_name: String, member: String, actual_arity: Int) -> ?CoreTypedCallSignature {
+    if module_name != "core.auth" -> return None
+    if member == "verify_jwt" && actual_arity >= 3 && actual_arity <= 5 {
+        u8_list :: Type.List(element: Type.IntN(signed: false, bits: 8))
+        parameters := [CoreCallTypedParameter]{
+            core_sig_parameter("token", "", ParamZone.PositionalOnly, AccessConvention.Read, Type.String, None),
+            core_sig_param_type("key", "key", ParamZone.LabelOnly, u8_list),
+            core_sig_param_type("audience", "audience", ParamZone.LabelOnly, Type.String),
+            core_sig_param_type("issuer", "issuer", ParamZone.LabelOnly, Type.String),
+            core_sig_param_type("clock_skew", "clock_skew", ParamZone.LabelOnly, core_sig_named("Duration")),
+        }
+        loop parameters.len() > actual_arity -> _ := parameters.pop()
+        signature := core_sig(module_name, member, parameters, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))))
+        signature.min_arity = 3
+        signature.max_arity = 5
+        return Val(signature)
+    }
+    if member == "verify_paseto" && actual_arity >= 3 && actual_arity <= 7 {
+        u8_list :: Type.List(element: Type.IntN(signed: false, bits: 8))
+        parameters := [CoreCallTypedParameter]{
+            core_sig_parameter("token", "", ParamZone.PositionalOnly, AccessConvention.Read, Type.String, None),
+            core_sig_param_type("key", "key", ParamZone.LabelOnly, u8_list),
+            core_sig_param_type("audience", "audience", ParamZone.LabelOnly, Type.String),
+            core_sig_param_type("issuer", "issuer", ParamZone.LabelOnly, Type.String),
+            core_sig_param_type("clock_skew", "clock_skew", ParamZone.LabelOnly, core_sig_named("Duration")),
+            core_sig_param_type("footer", "footer", ParamZone.LabelOnly, u8_list),
+            core_sig_param_type("implicit", "implicit", ParamZone.LabelOnly, u8_list),
+        }
+        loop parameters.len() > actual_arity -> _ := parameters.pop()
+        signature := core_sig(module_name, member, parameters, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))))
+        signature.min_arity = 3
+        signature.max_arity = 7
+        return Val(signature)
+    }
+    None
+}
+
+fn core_sig_network(request: CoreCallSignatureRequest) -> ?CoreTypedCallSignature {
+    read :: AccessConvention.Read
+    if request.module_name == "core.net.tls" && request.member == "client" && request.actual_arity == 2 {
+        if request.actual_accesses.len() > 0 && request.actual_accesses[0] == AccessConvention.Move {
+            return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError")))))
+        }
+        return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{
+            core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+        }, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError")))))
+    }
+    if request.module_name == "core.net" && request.member == "unix_connect" && (request.actual_arity == 1 || request.actual_arity == 2) {
+        parameters := [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
+        if request.actual_arity == 2 -> parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
+        return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("UnixStream"), core_sig_named("NetError")))))
+    }
+    None
+}
+
+fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> ?CoreTypedCallSignature {
+    module_name :: request.module_name
+    member :: request.member
+    read :: AccessConvention.Read
+    if module_name == "core.text" && member == "display_width" {
+        if request.actual_arity == 1 {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_parameter("text", "text", ParamZone.PositionalOnly, read, Type.String, None),
+            }, Val(Type.Int)))
+        }
+        if request.actual_arity == 2 {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_parameter("text", "text", ParamZone.PositionalOnly, read, Type.String, None),
+                core_sig_param_type("policy", "policy", ParamZone.Either, core_sig_named("TextWidth")),
+            }, Val(core_sig_result(Type.Int, core_sig_named("TextError")))))
+        }
+        return None
+    }
+    if module_name == "core.text.fmt" && member == "pretty" {
+        t :: core_sig_named("T")
+        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.String), core_sig_type_parameter("T", CoreCallTypeConstraint.Debuggable)))
+    }
+    if module_name == "core.text.fmt" && core_sig_one_of(member, [String]{"decimal", "grouped"}) {
+        numeric :: Type.Union(members: [Type]{Type.Int, Type.Float})
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(numeric, read), core_sig_positional(Type.Int, read)}, Val(Type.String)))
+    }
+    if module_name == "core.testing" && member == "histories" {
+        t :: core_sig_named("T")
+        data_tree :: core_sig_named("DataTree")
+        strategy :: core_sig_apply("HistoryStrategy", t)
+        command_callback :: core_sig_fn([Type]{Type.List(element: t)}, data_tree)
+        observe_callback :: core_sig_fn([Type]{data_tree}, data_tree)
+        parameters := [CoreCallTypedParameter]{
+            core_sig_param_type("seed", "seed", ParamZone.Either, Type.Int),
+            core_sig_param_type("cases", "cases", ParamZone.Either, Type.Int),
+            core_sig_parameter("strategy", "strategy", ParamZone.LabelOnly, read, Type.Option(inner: strategy), Val(CoreCallDefault.Absent)),
+            core_sig_param_type("model", "model", ParamZone.Either, command_callback),
+            core_sig_param_type("actual", "actual", ParamZone.Either, command_callback),
+            core_sig_param_type("observe", "observe", ParamZone.Either, observe_callback),
+        }
+        signature := core_sig_generic(module_name, member, parameters, Val(core_sig_result(core_sig_named("TestComparison"), Type.String)), core_sig_type_parameter("T", CoreCallTypeConstraint.Any))
+        signature.min_arity = 5
+        return Val(signature)
+    }
+    None
+}
+
+fn core_sig_fixed_nonweb(request: CoreCallSignatureRequest) -> ?CoreTypedCallSignature {
+    auth :: core_sig_auth(request.module_name, request.member, request.actual_arity)
+    if auth != None -> return auth
+    network :: core_sig_network(request)
+    if network != None -> return network
+    surface :: core_sig_text_and_testing(request)
+    if surface != None -> return surface
+    math_fixed :: core_sig_math_fixed(request.module_name, request.member)
+    if math_fixed != None -> return math_fixed
+    numeric :: core_sig_numeric_or_default(request.module_name, request.member)
+    if numeric != None -> return numeric
+    host :: core_host_fixed_signature(request.module_name, request.member)
+    if host != None -> return host
+    value :: core_value_fixed_signature(request.module_name, request.member)
+    if value != None -> return value
+    core_platform_fixed_signature(request.module_name, request.member)
+}
+
+pub fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> ?CoreTypedCallSignature {
+    row :: core_call(request.module_name, request.member) ?? return None
+    if !core_call_coverage_contains(row.coverage, @CORE_CALL_COVERAGE_SEMA) -> return None
+    web_signature :: core_web_fixed_signature(request.module_name, request.member)
+    signature :: if {
+        web_signature != None -> web_signature
+        else -> core_sig_fixed_nonweb(request)
+    }
+    resolved_signature := signature ?? return None
+    if resolved_signature.module_name != request.module_name || resolved_signature.member != request.member -> return None
+    if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() -> return None
+    contracts :: core_call_parameter_contract(request.module_name, request.member)
+    if contracts != None {
+        contract_rows :: contracts ?? return None
+        resolved_signature = core_sig_apply_parameter_contract(resolved_signature, contract_rows) ?? return None
+    }
+    if request.actual_arity < resolved_signature.min_arity || request.actual_arity > resolved_signature.max_arity -> return None
+    Val(resolved_signature)
+}
+
+pub fn core_call_typed_signature(module_name: String, member: String, actual_arity: Int) -> ?CoreTypedCallSignature {
+    core_call_typed_signature_for(CoreCallSignatureRequest{
+        module_name: module_name,
+        member: member,
+        actual_arity: actual_arity,
+        actual_accesses: [AccessConvention]{},
+        type_args: [Type]{},
+    })
+}
+
+pub fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] {
+    if module_name == "core.net.tls" && member == "client" && actual_arity == 3 -> return [CoreCallLabelRequirement]{
+        CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "deadline"},
+    }
+    if module_name == "core.net.tls" && member == "client" && actual_arity == 4 -> return [CoreCallLabelRequirement]{
+        CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "config"}, CoreCallLabelRequirement{argument_index: 3, label: "deadline"},
+    }
+    if module_name == "core.net" && member == "unix_connect" && actual_arity == 2 -> return [CoreCallLabelRequirement]{
+        CoreCallLabelRequirement{argument_index: 1, label: "deadline"},
+    }
+    if module_name == "core.auth" && member == "verify_jwt" && actual_arity >= 3 && actual_arity <= 5 {
+        required := [CoreCallLabelRequirement]{CoreCallLabelRequirement{argument_index: 1, label: "key"}, CoreCallLabelRequirement{argument_index: 2, label: "audience"}}
+        if actual_arity >= 4 -> required.push(CoreCallLabelRequirement{argument_index: 3, label: "issuer"})
+        if actual_arity >= 5 -> required.push(CoreCallLabelRequirement{argument_index: 4, label: "clock_skew"})
+        return required
+    }
+    if module_name == "core.auth" && member == "verify_paseto" && actual_arity >= 3 && actual_arity <= 7 {
+        required := [CoreCallLabelRequirement]{CoreCallLabelRequirement{argument_index: 1, label: "key"}, CoreCallLabelRequirement{argument_index: 2, label: "audience"}}
+        if actual_arity >= 4 -> required.push(CoreCallLabelRequirement{argument_index: 3, label: "issuer"})
+        if actual_arity >= 5 -> required.push(CoreCallLabelRequirement{argument_index: 4, label: "clock_skew"})
+        if actual_arity >= 6 -> required.push(CoreCallLabelRequirement{argument_index: 5, label: "footer"})
+        if actual_arity >= 7 -> required.push(CoreCallLabelRequirement{argument_index: 6, label: "implicit"})
+        return required
+    }
+    [CoreCallLabelRequirement]{}
+}

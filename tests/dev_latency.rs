@@ -9,10 +9,10 @@
 //! latency detector.
 //!
 //! D-DEV3 is a wall-clock promise to the user — "a save gives feedback in well
-//! under 200ms" (`docs/spec/diagnostics.md`) — so the measurement basis stays
+//! under 200ms" (`Docs/spec/diagnostics.md`) — so the measurement basis stays
 //! wall clock and the budget stays 200ms. What changed is where it is
 //! measured. This file is its own cargo test target holding exactly one test,
-//! and both `cargo test` and `tools/ci/test-shards.sh` run one target per
+//! and both `cargo test` and `Tools/ci/test-shards.sh` run one target per
 //! process, one after another. So nothing else in the run is executing while
 //! the number is taken, and the count of tests elsewhere cannot move it.
 //!
@@ -30,7 +30,7 @@
 //! both sides pay it — and fixed per-save cost is exactly what D-DEV3 bounds.
 
 /// The example whose per-save round is measured.
-const EXAMPLE: &str = "examples/features/collections/wordcount.jet";
+const EXAMPLE: &str = "Examples/features/collections/wordcount.jet";
 
 /// The D-DEV3 budget for one check-only save-to-diagnostic round, in
 /// milliseconds. Never widen this to make a run agree: a trip is a latency

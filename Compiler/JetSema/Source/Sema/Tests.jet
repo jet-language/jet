@@ -1,0 +1,66 @@
+pub struct SemaTestFunctionCheckResult {
+    pub function: ?TFunc
+    pub call_facts: [SemaCallSiteFact]
+    pub comptime_requests: [SemaComptimeRequest]
+    pub name_references: [SemaNameReferenceFact]
+    pub diagnostics: [Diagnostic]
+    pub exact_int_reachable: Bool
+    pub copy_events: [SemaCopyEvent]
+    pub complete: Bool
+}
+
+pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable) -> SemaTestFunctionCheckResult {
+    key := tir_test_artifact_key(environment.module_identity, test)
+    owner_id := SymbolId{key: key}
+    scopes := sema_scope_snapshot(module_scopes)
+    temporary_name := "__jet_test_{test.span.start}_{test.span.end}"
+    synthetic := ast_func(temporary_name, test.name_span, test.span)
+    synthetic.params = test.params
+    synthetic.body = test.body
+    synthetic.compiler_generated = true
+    registered := false
+    loop !registered {
+        synthetic.name = temporary_name
+        symbol :: sema_item_symbol(Item.Func(synthetic), environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+            return SemaTestFunctionCheckResult{
+                function: None,
+                call_facts: [SemaCallSiteFact]{},
+                comptime_requests: [SemaComptimeRequest]{},
+                name_references: [SemaNameReferenceFact]{},
+                diagnostics: [Diagnostic]{},
+                exact_int_reachable: false,
+                copy_events: [SemaCopyEvent]{},
+                complete: false,
+            }
+        }
+        symbol.id = owner_id
+        symbol.ty = Val(sema_function_symbol_type(synthetic, owner_id, environment.source_file, environment.source_origin, environment.source_segments))
+        registered = sema_scope_add_module_symbol(&scopes, symbol)
+        if !registered -> temporary_name = "{temporary_name}_"
+    }
+    call_facts := [SemaCallSiteFact]{}
+    comptime_requests := [SemaComptimeRequest]{}
+    name_references := [SemaNameReferenceFact]{}
+    diagnostics := [Diagnostic]{}
+    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    function := None
+    if checked.value == .Val(value) {
+        value.name = key
+        value.module_name = environment.module_name
+        value.module_identity = environment.module_identity
+        value.key = key
+        value.source_span = test.span
+        value.synthetic = true
+        function = Val(value)
+    }
+    SemaTestFunctionCheckResult{
+        function: function,
+        call_facts: call_facts,
+        comptime_requests: comptime_requests,
+        name_references: name_references,
+        diagnostics: diagnostics,
+        exact_int_reachable: checked.exact_int_reachable,
+        copy_events: ~checked.copy_events,
+        complete: checked.complete,
+    }
+}

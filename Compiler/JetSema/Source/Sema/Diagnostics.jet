@@ -29,34 +29,37 @@ pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> ?Se
     if site.end < site.start || segments.len() == 0 -> return None
     candidate := -1
     matches := 0
-    if site.start == site.end {
-        loop (index, segment) in segments {
-            if site.start >= segment.generated.start && site.start < segment.generated.end {
-                candidate = index
-                matches += 1
-            }
-        }
-        if matches == 0 {
-            final_end := segments[0].generated.end
-            loop index in 1..<segments.len() {
-                if segments[index].generated.end > final_end -> final_end = segments[index].generated.end
-            }
-            if site.start != final_end -> return None
+    if {
+        site.start == site.end -> {
             loop (index, segment) in segments {
-                if segment.generated.end == final_end {
+                if site.start >= segment.generated.start && site.start < segment.generated.end {
                     candidate = index
                     matches += 1
                 }
             }
-        }
-    } else {
-        loop (index, segment) in segments {
-            intersects :: segment.generated.start < site.end && segment.generated.end > site.start
-            if intersects {
-                if site.start >= segment.generated.start && site.start < segment.generated.end && site.end <= segment.generated.end {
-                    candidate = index
+            if matches == 0 {
+                final_end := segments[0].generated.end
+                loop index in 1..<segments.len() {
+                    if segments[index].generated.end > final_end -> final_end = segments[index].generated.end
                 }
-                matches += 1
+                if site.start != final_end -> return None
+                loop (index, segment) in segments {
+                    if segment.generated.end == final_end {
+                        candidate = index
+                        matches += 1
+                    }
+                }
+            }
+        }
+        else -> {
+            loop (index, segment) in segments {
+                intersects :: segment.generated.start < site.end && segment.generated.end > site.start
+                if intersects {
+                    if site.start >= segment.generated.start && site.start < segment.generated.end && site.end <= segment.generated.end {
+                        candidate = index
+                    }
+                    matches += 1
+                }
             }
         }
     }
@@ -114,10 +117,13 @@ pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> ?Int {
             high := segment.line_starts.len()
             loop low < high {
                 middle :: (low + high) / 2
-                if segment.line_starts[middle] <= local_offset {
-                    low = middle + 1
-                } else {
-                    high = middle
+                if {
+                    segment.line_starts[middle] <= local_offset -> {
+                        low = middle + 1
+                    }
+                    else -> {
+                        high = middle
+                    }
                 }
             }
             if low == 0 -> return None

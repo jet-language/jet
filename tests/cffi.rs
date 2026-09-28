@@ -32,7 +32,7 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
     let root = std::env::temp_dir().join(format!("jet_octave_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/octave");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/octave");
     for file in ["scale.m", "run.jet", "expected.out"] {
         fs::copy(example.join(file), root.join(file)).unwrap();
     }
@@ -91,7 +91,7 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
     let root = std::env::temp_dir().join(format!("jet_cobol_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/cobol");
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/cobol");
     for file in ["payroll.cob", "payroll.cpy", "main.jet", "expected.out"] {
         fs::copy(repo.join(file), root.join(file)).unwrap();
     }
@@ -3056,9 +3056,9 @@ fn ffi_example_compiles_and_runs() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/features/lowlevel/ffi.jet");
+    let path = root.join("Examples/features/lowlevel/ffi.jet");
     let src = fs::read_to_string(&path).unwrap();
-    let shown = "examples/features/lowlevel/ffi.jet";
+    let shown = "Examples/features/lowlevel/ffi.jet";
 
     // This example's FFI bridge (base64@0.22 / b64encode) shares a cache key
     // with tests/golden.rs's compile of the same fixture. No test-side lock:
@@ -3102,7 +3102,7 @@ fn ffi_example_compiles_and_runs() {
     let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "22_ffi runtime failed");
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/lowlevel/ffi.out")).unwrap();
+        fs::read_to_string(root.join("Examples/features/expected/lowlevel/ffi.out")).unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
 }
 

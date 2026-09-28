@@ -693,6 +693,8 @@ pub fn prepare_for_target(
         needs_crypto,
         needs_compress,
         needs_plugin,
+        &bundle.package_guarantees.authority_needs,
+        needs_secrets,
         &bundle.cffi.handle_facts,
         &record_defs,
         &bundle.cffi.link_closure,
@@ -5185,6 +5187,9 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native
     s
 }
 
+/// Test-only convenience over `emit_wrapper_lib_with_handles` with no handle
+/// or C-record facts; production builds call the full emitter directly.
+#[cfg(test)]
 fn emit_wrapper_lib(
     entries: &[ExternEntry],
     needs_regex: bool,
@@ -5450,6 +5455,10 @@ fn emit_c_wrapper_fn(
         let callback_type = "Option<unsafe extern \"C\" fn(*mut std::os::raw::c_void, i64)>";
         return format!(
             "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void;\n}}\n\n#[no_mangle]\npub unsafe extern \"C\" fn {wrapper}_callback_start(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void {{\n    {native_ident}(callback, ctx)\n}}\n",
+            wrapper = entry.wrapper_name,
+        );
+    }
+
     fn bridge_type(
         ty: &Type,
         user_types: &HashSet<String>,
@@ -6257,6 +6266,11 @@ fn emit_cabi_trampoline(
                     ));
                     format!("p{index}_ptr as {native_ty}")
                 }
+                Type::Float => format!("f64::from_bits(args[{index}].value)"),
+                Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
+                Type::Bool => format!("args[{index}].value != 0"),
+                Type::Char => format!("args[{index}].value as u32"),
+                _ => format!("args[{index}].value as {native_ty}"),
             };
             call_args.push(expr);
         } else {

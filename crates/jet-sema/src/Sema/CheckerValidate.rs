@@ -1,5 +1,5 @@
 //! D-VALIDATE1 (ratified 2026-07-12, card #506): `validate { … }` in-body
-//! block. See docs/spec/syntax-decisions.md for the full ratified law.
+//! block. See Docs/spec/syntax-decisions.md for the full ratified law.
 //!
 //! Runs pre-registration, same timing as
 //! `CheckerFieldPolicy::process_computed_fields` (D-FIELDPOL1): for each

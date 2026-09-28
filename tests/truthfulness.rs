@@ -240,12 +240,12 @@ fn llm_digest_regenerates_byte_identically() {
 // ACKNOWLEDGED gaps (pre-existing doc debt, not regressions)
 // ---------------------------------------------------------------------------
 //
-// GAP-2: `examples/features/expected/test.out` exists with no corresponding
-//        `examples/features/test.jet` or `examples/features/test/main.jet`.
+// GAP-2: `Examples/features/expected/test.out` exists with no corresponding
+//        `Examples/features/test.jet` or `Examples/features/test/main.jet`.
 //        The file appears to be an orphan leftover.
 //
 // ---------------------------------------------------------------------------
-// Check 1: Every example *.jet file referenced in docs/ actually exists
+// Check 1: Every example *.jet file referenced in Docs/ actually exists
 // ---------------------------------------------------------------------------
 // Applies to current guidance. Audits and unresolved proposals may cite
 // point-in-time example names from older repository layouts.
@@ -254,7 +254,7 @@ const PM_HISTORY_DIRS: [&str; 2] = ["audits", "proposals"];
 #[test]
 fn docs_referenced_examples_exist() {
     let root = root();
-    let docs_dir = root.join("docs");
+    let docs_dir = root.join("Docs");
     let readme = root.join("README.md");
 
     let mut doc_content = String::new();
@@ -262,7 +262,7 @@ fn docs_referenced_examples_exist() {
         doc_content.push_str(&s);
     }
     let Ok(entries) = fs::read_dir(&docs_dir) else {
-        panic!("docs/ missing");
+        panic!("Docs/ missing");
     };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.path());
@@ -298,7 +298,7 @@ fn docs_referenced_examples_exist() {
 
 
 fn extract_example_paths(text: &str) -> Vec<String> {
-    let prefix = "examples/features/";
+    let prefix = "Examples/features/";
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(pos) = rest.find(prefix) {
@@ -357,7 +357,7 @@ fn readme_subcommands_exist_in_cli() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 5: Every executable examples/features entry has a matching expected
+// Check 5: Every executable Examples/features entry has a matching expected
 // output or a canonical harness proof. `expected/` mirrors the <topic>/ tree
 // (D-REPO-EXAMPLES1=A). `package.jet` is a manifest, `run.jet` is the nested
 // entry, and service/browser entries use the same proof paths as their real
@@ -365,7 +365,7 @@ fn readme_subcommands_exist_in_cli() {
 // ---------------------------------------------------------------------------
 fn feature_source_stem(path: &Path, ex_dir: &Path) -> String {
     path.strip_prefix(ex_dir)
-        .expect("feature path must be below examples/features")
+        .expect("feature path must be below Examples/features")
         .to_string_lossy()
         .strip_suffix(".jet")
         .expect("feature source must use the Jet extension")
@@ -385,7 +385,7 @@ fn collect_feature_golden_sources(ex_dir: &Path) -> Vec<(PathBuf, String)> {
         if run.is_file() {
             let stem = dir
                 .strip_prefix(ex_dir)
-                .expect("feature project must be below examples/features")
+                .expect("feature project must be below Examples/features")
                 .to_string_lossy()
                 .replace('\\', "/");
             entries.push((run, stem));
@@ -463,7 +463,7 @@ fn example_serves_until_stopped(path: &Path) -> bool {
 fn every_feature_example_has_expected_output() {
     // FEATURE_CLAIM: claim.examples-spec / expected-output-pairs
     let root = root();
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let expected_dir = ex_dir.join("expected");
 
     let mut missing: Vec<String> = Vec::new();
@@ -481,7 +481,7 @@ fn every_feature_example_has_expected_output() {
         let is_web_harness = stem == "web/web_compute_webgpu"
             && source.contains("#Target(JS)")
             && web_build.contains(
-                "include_str!(\"../examples/features/web/web_compute_webgpu.jet\")",
+                "include_str!(\"../Examples/features/web/web_compute_webgpu.jet\")",
             );
         if !out.is_file()
             && !errout.is_file()
@@ -493,9 +493,9 @@ fn every_feature_example_has_expected_output() {
         {
             let source_name = if path.file_name().and_then(|name| name.to_str()) == Some("run.jet")
             {
-                format!("examples/features/{stem}/run.jet")
+                format!("Examples/features/{stem}/run.jet")
             } else {
-                format!("examples/features/{stem}.jet")
+                format!("Examples/features/{stem}.jet")
             };
             missing.push(format!(
                 "{source_name} → missing expected output or canonical harness proof"
@@ -779,7 +779,7 @@ fn ast_capabilities_and_active_markers_have_zero_use_inventories() {
     use jet_foundation::Policy::RuleStatus;
 
     let mut files = Vec::new();
-    collect_feature_jet_files(&root().join("examples/features"), &mut files);
+    collect_feature_jet_files(&root().join("Examples/features"), &mut files);
     files.sort();
     let clean_sources: Vec<String> = files
         .iter()
@@ -943,7 +943,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // Any crate below not named in EXEMPTIONS is a compiler seam and must
     // stay path-dependency-only. Exemptions require an owner-ratified
     // decision ID cited in a comment directly above the dependency line;
-    // each cited ID is cross-checked against docs/spec/syntax-decisions.md's
+    // each cited ID is cross-checked against Docs/spec/syntax-decisions.md's
     // Ratified section so an exemption can never quietly outlive its
     // ratification (or cite an ID that was never ratified).
     const EXEMPTIONS: &[(&str, &[&str])] = &[
@@ -961,14 +961,14 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     ];
 
     let root = root();
-    let decisions_doc = fs::read_to_string(root.join("docs/spec/syntax-decisions.md"))
-        .expect("docs/spec/syntax-decisions.md missing");
+    let decisions_doc = fs::read_to_string(root.join("Docs/spec/syntax-decisions.md"))
+        .expect("Docs/spec/syntax-decisions.md missing");
     // Live board plus history: ratified exemptions may retire into
     // history.json while remaining law (Tower archive / #461).
-    let tower_live = fs::read_to_string(root.join("plugins/tower/.tower/tower.json"))
-        .expect("plugins/tower/.tower/tower.json missing");
+    let tower_live = fs::read_to_string(root.join("Tools/tower/.tower/tower.json"))
+        .expect("Tools/tower/.tower/tower.json missing");
     let tower_history =
-        fs::read_to_string(root.join("plugins/tower/.tower/history.json")).unwrap_or_default();
+        fs::read_to_string(root.join("Tools/tower/.tower/history.json")).unwrap_or_default();
     let tower = format!("{tower_live}\n{tower_history}");
 
     for (crate_name, ids) in EXEMPTIONS {
@@ -976,7 +976,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             assert!(
                 ratified_decision_exists(&decisions_doc, &tower, id),
                 "I6 exemption for `{crate_name}` cites {id}, which is not ratified in \
-                 docs/spec/syntax-decisions.md or Tower (live+history) — revoke the \
+                 Docs/spec/syntax-decisions.md or Tower (live+history) — revoke the \
                  exemption or get {id} ratified"
             );
         }
@@ -1107,7 +1107,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 fn section_between_pub(docs: &str) -> &str {
     let from = docs
         .find("## Ratified")
-        .expect("docs/spec/syntax-decisions.md missing ## Ratified");
+        .expect("Docs/spec/syntax-decisions.md missing ## Ratified");
     let rest = &docs[from + "## Ratified".len()..];
     let to = rest[..].find("\n## ").unwrap_or(rest.len());
     &rest[..to]
@@ -1675,7 +1675,7 @@ fn canonical_shared_include(relative: &str, line: &str) -> bool {
 #[test]
 fn vocabulary_page_has_one_definition_and_no_retired_senses() {
     let root = root();
-    let vocabulary_path = root.join("docs/spec/vocabulary.md");
+    let vocabulary_path = root.join("Docs/spec/vocabulary.md");
 
     let hostile = [
         (
@@ -1695,7 +1695,7 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
         );
     }
 
-    let docs_root = root.join("docs");
+    let docs_root = root.join("Docs");
     let mut markdown = Vec::new();
     collect_markdown_paths(&docs_root, &mut markdown);
     let vocabulary_path = fs::canonicalize(vocabulary_path).expect("vocabulary path canonical");
@@ -1746,7 +1746,7 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
             && !text.contains("vocabulary.md")
         {
             violations.push(format!(
-                "{}: uses Jet vocabulary without linking docs/spec/vocabulary.md",
+                "{}: uses Jet vocabulary without linking Docs/spec/vocabulary.md",
                 target.strip_prefix(&root).unwrap_or(&target).display()
             ));
         }
@@ -1766,7 +1766,7 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
 #[test]
 fn accessibility_audit_findings_have_live_cards() {
     let root = root();
-    let path = root.join("docs/audits/cli-diagnostics-accessibility.md");
+    let path = root.join("Docs/audits/cli-diagnostics-accessibility.md");
     let text = fs::read_to_string(&path).expect("CLI accessibility audit is readable");
     let lines: Vec<&str> = text.lines().collect();
     let expected_header = ["id", "surface", "screen_reader", "state", "card"];
@@ -1853,7 +1853,7 @@ fn accessibility_audit_findings_have_live_cards() {
                 card
             );
             let output = Command::new("node")
-                .args(["plugins/tower/tower.mjs", "card", "show", card, "--json"])
+                .args(["Tools/tower/tower.mjs", "card", "show", card, "--json"])
                 .current_dir(&root)
                 .output()
                 .expect("Tower card lookup must run");

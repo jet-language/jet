@@ -454,9 +454,9 @@ fn b12_c_module_import_keeps_plain_c_return() {
 
 #[test]
 fn b13_c_bridge_call_keeps_declared_return() {
-    let source = include_str!("../examples/features/lowlevel/cbind/run.jet");
+    let source = include_str!("../Examples/features/lowlevel/cbind/run.jet");
     let shown = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/lowlevel/cbind/run.jet");
+        .join("Examples/features/lowlevel/cbind/run.jet");
     let shown = shown.to_string_lossy();
     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
         panic!(

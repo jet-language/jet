@@ -8,7 +8,7 @@ mod tir_support;
 
 #[test]
 fn reader_hot_loop_one_million_reads_matches_all_tiers() {
-    let expected = include_str!("../examples/features/expected/parsing/reader_hot_loop.out");
+    let expected = include_str!("../Examples/features/expected/parsing/reader_hot_loop.out");
     tir_support::assert_example_cli_tiers_agree("parsing/reader_hot_loop", expected);
 }
 

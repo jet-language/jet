@@ -109,7 +109,7 @@
         jetDev = mkJetDevBin "jet";
         jetpackDev = mkJetDevBin "jetpack";
         # D-COMPILER-PROOF-TOOLS1=A: keep Lean development-only. The exact
-        # output path is recorded in proof/compiler/toolchain/manifest.json;
+        # output path is recorded in tests/compiler-proof/toolchain/manifest.json;
         # ordinary compiler/runtime shells must not inherit this closure.
         # Keep this literal while the proof artifacts are assembled in the
         # worktree: Nix flakes expose tracked inputs only. The manifest remains
@@ -205,7 +205,7 @@
             ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
-              "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
+              "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
             # Nix owns this shell; do not stack the global Jet env auto-hook.
@@ -324,7 +324,7 @@
             ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
-              "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
+              "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
             # Nix owns this shell; do not stack the global Jet env auto-hook.
@@ -335,12 +335,12 @@
             {
               echo "Jet dev shell"
               echo "  build:    cargo build"
-              echo "  run:      jet run examples/features/basics/hello.jet"
+              echo "  run:      jet run Examples/features/basics/hello.jet"
               echo "  package:  jetpack help"
-              echo "  search:   rg \"pattern\" docs Source tests"
+              echo "  search:   rg \"pattern\" Docs Source tests"
               echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
-              echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
-              echo "            editors/zed/install.sh        (Zed dev extension)"
+              echo "  editor:   Tools/editors/vscode/install.sh   (Cursor/VS Code)"
+              echo "            Tools/editors/zed/install.sh        (Zed dev extension)"
               echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug.rs)"
               echo "  release:  nix build .#jet"
             } >&2

@@ -9,7 +9,7 @@ fn qualified_variant_heads_round_trip_through_protocol_expansion() {
         jet::format_source(&literal).expect("qualified literal should reformat")
     );
 
-    let source = include_str!("../examples/features/concurrency/protocol.jet");
+    let source = include_str!("../Examples/features/concurrency/protocol.jet");
     let formatted = jet::format_source(source).expect("protocol source should format");
     assert_eq!(
         formatted,
@@ -43,7 +43,7 @@ fn generic_module_template_struct_heads_round_trip() {
 
 #[test]
 fn derive_template_bodies_round_trip_retired_signatures() {
-    let source = include_str!("../examples/features/reflection/derive_loop.jet");
+    let source = include_str!("../Examples/features/reflection/derive_loop.jet");
     let formatted = jet::format_source(source).expect("derive template should format");
     assert!(
         formatted.contains("fn @method(self) -> String -> field.@name"),
@@ -57,7 +57,7 @@ fn derive_template_bodies_round_trip_retired_signatures() {
 
 #[test]
 fn marker_template_bodies_round_trip_retired_signatures() {
-    let source = include_str!("../examples/features/reflection/user_rule_body.jet");
+    let source = include_str!("../Examples/features/reflection/user_rule_body.jet");
     let formatted = jet::format_source(source).expect("marker template should format");
     assert!(
         formatted.contains("fn greeting(self) -> String -> \"hello\""),
@@ -71,7 +71,7 @@ fn marker_template_bodies_round_trip_retired_signatures() {
 
 #[test]
 fn generic_module_and_library_bodies_round_trip_retired_signatures() {
-    let generic = include_str!("../examples/features/modules/generic_modules.jet");
+    let generic = include_str!("../Examples/features/modules/generic_modules.jet");
     let formatted = jet::format_source(generic).expect("generic module should format");
     assert!(
         formatted.contains("pub fn slot(k: K) -> Slot -> Slot.Value(k)"),
@@ -82,7 +82,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
         jet::format_source(&formatted).expect("formatted generic module should reformat")
     );
 
-    let library = include_str!("../examples/features/modules/library.jet");
+    let library = include_str!("../Examples/features/modules/library.jet");
     let formatted = jet::format_source(library).expect("library should format");
     assert!(
         formatted.contains("fn greeting(self) -> String\n"),
@@ -96,7 +96,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
 
 #[test]
 fn callback_view_provenance_round_trips_retired_function_type_arrows() {
-    let source = include_str!("../examples/features/memory/view_from_callback.jet");
+    let source = include_str!("../Examples/features/memory/view_from_callback.jet");
     let formatted = jet::format_source(source).expect("callback view source should format");
     assert!(
         formatted.contains("pick: fn(String, String) -> View<str> from _0"),
@@ -115,7 +115,7 @@ fn callback_view_provenance_round_trips_retired_function_type_arrows() {
 #[test]
 fn generated_source_template_bodies_round_trip_retired_signatures() {
     let source = include_str!(
-        "../examples/features/tooling/build_entry_discovery/packages/foundation/tools/build.jet"
+        "../Examples/features/tooling/build_entry_discovery/packages/foundation/tools/build.jet"
     );
     let formatted = jet::format_source(source).expect("generated source template should format");
     assert!(

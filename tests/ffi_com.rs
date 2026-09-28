@@ -13,7 +13,7 @@ mod common;
 fn com_example_is_rejected_before_binding_on_non_windows() {
     let root = common::unique_tmp("jet_com_example_gate");
     let entry = root.join("run.jet");
-    let source = include_str!("../examples/features/lowlevel/polyglot_com/run.jet");
+    let source = include_str!("../Examples/features/lowlevel/polyglot_com/run.jet");
     fs::write(&entry, source).unwrap();
 
     let diagnostics = jet::compile_with_path(source, entry.to_str().unwrap())

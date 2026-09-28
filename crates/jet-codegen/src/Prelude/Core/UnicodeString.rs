@@ -1,6 +1,6 @@
 // GENERATED FILE — do not hand-edit.
-// Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 17.0.0 UCD.
-// Regenerate: node scripts/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
+// Source: Tools/agent/gen-unicode-tables.mjs against pinned Unicode 17.0.0 UCD.
+// Regenerate: node Tools/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
 // Foundation modules and AOT-prelude copies are emitted from this one run.
 
 pub const UNICODE_STRING_VERSION: &str = "17.0.0";

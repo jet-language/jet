@@ -34,6 +34,7 @@ use jet_pkg_model::{ModelPackageCompiler, Package::ReleaseDevtoolsPolicy};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
@@ -3066,7 +3067,7 @@ impl JetHardwareErasedHost for JitHardwareReplayHost {
 }
 
 pub(crate) struct NativeSharedGuardEntry {
-    pub(crate) permit: Arc<Memory::shared_protocol::JetSharedCanonicalPermit>,
+    pub(crate) permit: Arc<dyn Memory::shared_protocol::JetSharedCanonicalPermit>,
     pub(crate) view: crate::SourceSharedInterop::SourceSharedInteropGuardState,
 }
 pub(crate) struct JitRuntime {
@@ -3153,6 +3154,8 @@ pub(crate) struct JitRuntime {
     /// key and object; the JIT never serializes that key as a raw word.
     pub(crate) native_callable_methods:
         HashMap<u64, crate::SourceInterfaces::NativeCallableSignature>,
+    /// Checked DMA buffer types keyed by canonical type key.
+    pub(crate) dma_types: HashMap<String, MirType>,
     /// Owned contiguous carriers retained by transfer token until wait.
     pub(crate) dma_transfers: HashMap<i64, JitPinnedDma>,
     /// Canonical source-wire iterable hook table for this resident module.
@@ -3328,6 +3331,7 @@ pub(crate) struct JitRuntime {
     pub(crate) jit_callable_env_lifetimes:
         Vec<Option<Memory::JitCallableEnvLifetime>>,
     pub(crate) jit_callable_env_by_handle: std::collections::HashMap<i64, usize>,
+    pub(crate) conditions: Vec<std::sync::Arc<Memory::ConditionState>>,
     pub(crate) shared_guard_states: std::collections::HashMap<
         i64,
         std::sync::Arc<Memory::shared_protocol::JetSharedGuardState>,
@@ -5390,7 +5394,7 @@ fn finish_jit_shared_operation<T>(
         completion,
     } = released;
     Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-        result.and(release_result),
+        result.and_then(|value| release_result.map(|()| value)),
         completion,
     )
 }
@@ -6039,13 +6043,6 @@ fn encode_portable_executable_closure(
             portable.function
         ));
     }
-    if !rt.jit_closure_targets.contains_key(&portable.function.0) {
-        super::resident::resident_resolve_jit_closure_target(
-            rt,
-            portable.function,
-            &portable.execution,
-        )?;
-    }
     let target = rt
         .jit_closure_targets
         .get(&portable.function.0)
@@ -6364,7 +6361,7 @@ fn jet_jit_closure_capture_publish(env: i64, slot: i64, type_id: i64) {
                 if *value == JIT_MOVED_OWNER_VALUE
         );
         let moved = if moved_marker {
-            match runtime_type_needs_owned_drop(runtime, descriptor.id, 0) {
+            match runtime_type_needs_owned_drop(runtime, descriptor.id) {
                 Ok(owns_value) => owns_value,
                 Err(error) => {
                     runtime.set_host_fault(&error);
@@ -6622,7 +6619,7 @@ fn persist_encode_raw(
                         descriptor.name
                     ));
                 }
-                encode_native_interface_carrier(rt, root, descriptor.id)
+                return encode_native_interface_carrier(rt, root, descriptor.id);
             }
             MirRuntimeValue::Closure(closure)
                 if descriptor.kind == RuntimeValueKind::Closure =>
@@ -7906,13 +7903,20 @@ fn runtime_drop_closure(runtime: &mut JitRuntime, handle: i64, depth: usize) -> 
     Ok(())
 }
 
-fn runtime_type_needs_owned_drop(
+fn runtime_type_needs_owned_drop(runtime: &JitRuntime, type_id: u64) -> Result<bool, String> {
+    runtime_type_needs_owned_drop_on_path(runtime, type_id, &mut Vec::new())
+}
+
+/// Recursive descriptors (lists of self, tree variants) are walked once per
+/// path: a type already on the path adds no ownership that its other members
+/// do not already contribute.
+fn runtime_type_needs_owned_drop_on_path(
     runtime: &JitRuntime,
     type_id: u64,
-    depth: usize,
+    path: &mut Vec<u64>,
 ) -> Result<bool, String> {
-    if depth > 64 {
-        return Err("typed drop descriptor recursion limit exceeded".to_string());
+    if path.contains(&type_id) {
+        return Ok(false);
     }
     let descriptor = runtime
         .runtime_type_descriptor(type_id)
@@ -7923,52 +7927,42 @@ fn runtime_type_needs_owned_drop(
     {
         return Ok(true);
     }
-    let child_needs_drop = |child| runtime_type_needs_owned_drop(runtime, child, depth + 1);
-    match descriptor.kind {
-        RuntimeValueKind::List => descriptor.element.map(child_needs_drop).transpose().map(
-            |needs_drop| needs_drop.unwrap_or(false),
-        ),
-        RuntimeValueKind::Map => descriptor.value.map(child_needs_drop).transpose().map(
-            |needs_drop| needs_drop.unwrap_or(false),
-        ),
-        RuntimeValueKind::Option => descriptor.ok.map(child_needs_drop).transpose().map(
-            |needs_drop| needs_drop.unwrap_or(false),
-        ),
-        RuntimeValueKind::Result => {
-            for child in [descriptor.ok, descriptor.err].into_iter().flatten() {
-                if child_needs_drop(child)? {
-                    return Ok(true);
-                }
+    let children: Vec<u64> = match descriptor.kind {
+        RuntimeValueKind::List => descriptor.element.into_iter().collect(),
+        RuntimeValueKind::Map => descriptor.value.into_iter().collect(),
+        RuntimeValueKind::Option => descriptor.ok.into_iter().collect(),
+        RuntimeValueKind::Result => [descriptor.ok, descriptor.err].into_iter().flatten().collect(),
+        RuntimeValueKind::Record | RuntimeValueKind::Named | RuntimeValueKind::Handle => descriptor
+            .fields
+            .iter()
+            .map(|field| field.type_id)
+            .chain(
+                descriptor
+                    .variants
+                    .iter()
+                    .flat_map(|variant| variant.fields.iter().map(|field| field.type_id)),
+            )
+            .collect(),
+        RuntimeValueKind::Enum => descriptor
+            .variants
+            .iter()
+            .flat_map(|variant| variant.fields.iter().map(|field| field.type_id))
+            .collect(),
+        _ => Vec::new(),
+    };
+    path.push(type_id);
+    let mut needs_drop = Ok(false);
+    for child in children {
+        match runtime_type_needs_owned_drop_on_path(runtime, child, path) {
+            Ok(false) => {}
+            other => {
+                needs_drop = other;
+                break;
             }
-            Ok(false)
         }
-        RuntimeValueKind::Record | RuntimeValueKind::Named | RuntimeValueKind::Handle => {
-            for field in &descriptor.fields {
-                if child_needs_drop(field.type_id)? {
-                    return Ok(true);
-                }
-            }
-            for variant in &descriptor.variants {
-                for field in &variant.fields {
-                    if child_needs_drop(field.type_id)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            Ok(false)
-        }
-        RuntimeValueKind::Enum => {
-            for variant in &descriptor.variants {
-                for field in &variant.fields {
-                    if child_needs_drop(field.type_id)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            Ok(false)
-        }
-        _ => Ok(false),
     }
+    path.pop();
+    needs_drop
 }
 
 fn runtime_owned_record_slot(
@@ -7983,7 +7977,7 @@ fn runtime_owned_record_slot(
         .ok_or_else(|| format!("typed drop `{}` field {index} is unavailable", descriptor.name))?;
     match slot {
         jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value) => Ok(Some(*value)),
-        _ if runtime_type_needs_owned_drop(runtime, descriptor.id, 0)? => Err(format!(
+        _ if runtime_type_needs_owned_drop(runtime, descriptor.id)? => Err(format!(
             "typed drop `{}` field {index} has no runtime handle",
             descriptor.name
         )),
@@ -8031,7 +8025,7 @@ fn runtime_owned_list_slot(
         }
         _ => None,
     };
-    if slot.is_none() && runtime_type_needs_owned_drop(runtime, descriptor.id, 0)? {
+    if slot.is_none() && runtime_type_needs_owned_drop(runtime, descriptor.id)? {
         return Err(format!("typed drop `{}` list element has no runtime handle", descriptor.name));
     }
     Ok(slot)
@@ -8219,7 +8213,7 @@ pub(crate) fn runtime_clone_with_descriptor(
         return Ok(value);
     }
     if value == JIT_MOVED_OWNER_VALUE
-        && runtime_type_needs_owned_drop(runtime, descriptor.id, 0)?
+        && runtime_type_needs_owned_drop(runtime, descriptor.id)?
     {
         return Err(format!(
             "cannot copy moved or uninitialized `{}` value",
@@ -8571,13 +8565,12 @@ fn jet_jit_typed_drop(value: i64, type_id: i64) {
 
 fn jet_jit_typed_moved_marker(_value: i64, type_id: i64) -> i64 {
     with_runtime_result(JIT_MOVED_OWNER_VALUE, |runtime| {
-        let type_id = type_id as u64;
-        match runtime_type_needs_owned_drop(runtime, type_id, 0) {
-            Ok(true) => {}
-            Ok(false) => runtime.set_host_fault(
-                "typed move marker requested for a type without an owner lifecycle",
-            ),
-            Err(error) => runtime.set_host_fault(&error),
+        // Compile-time lowering conservatively requests a marker for any
+        // aggregate carrier; the checked descriptor decides whether it owns a
+        // lifecycle. A plain-data carrier has nothing to release, and typed
+        // drop skips the marker, so only an unknown descriptor is a fault.
+        if let Err(error) = runtime_type_needs_owned_drop(runtime, type_id as u64) {
+            runtime.set_host_fault(&error);
         }
         JIT_MOVED_OWNER_VALUE
     })
@@ -10137,7 +10130,7 @@ pub(crate) fn native_shared_interop_for_type(
     handle: i64,
     type_id: u64,
 ) -> Result<crate::SourceSharedInterop::SourceSharedInterop, String> {
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         let descriptor = rt
             .runtime_type_descriptor(type_id)
             .cloned()
@@ -10148,7 +10141,7 @@ pub(crate) fn native_shared_interop_for_type(
 }
 
 pub(crate) fn native_shared_alias_retain(handle: i64, type_id: u64) -> Result<i64, String> {
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         let descriptor = rt
             .runtime_type_descriptor(type_id)
             .cloned()
@@ -10171,7 +10164,7 @@ pub(crate) fn native_shared_alias_retain(handle: i64, type_id: u64) -> Result<i6
 }
 
 pub(crate) fn native_shared_alias_release(handle: i64, type_id: u64) -> Result<(), String> {
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         let state = Memory::shared_state(rt, handle)
             .ok_or_else(|| "JIT Shared alias is invalid or already released".to_string())?;
         if Memory::shared_state_type_id(&state) != Some(type_id) {
@@ -10231,7 +10224,7 @@ pub(crate) fn native_shared_owner_downgrade(
 pub(crate) fn native_shared_export_owner(
     interop: crate::SourceSharedInterop::SourceSharedInterop,
 ) -> Result<i64, String> {
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         encode_native_shared_interop(rt, &interop, interop.type_id())
     })
 }
@@ -10394,6 +10387,7 @@ pub(crate) fn native_shared_read_call(
         Memory::shared_cache_value(handle, raw);
         callback_result = invoke_universal_unary(slot, raw);
         callback_result
+            .map(|_| ())
             .ok_or_else(|| "Shared.read callback is invalid".to_string())
     });
     match result {
@@ -10478,7 +10472,7 @@ pub(crate) fn native_shared_guard_begin(
         Err(error) => return Some(Err(error)),
     };
     Memory::shared_cache_revision(handle, revision);
-    let token = match Concurrency::with_runtime_mut(|rt| {
+    let token = match Concurrency::with_runtime_string(|rt| {
         let token = rt.next_native_shared_guard_token;
         rt.next_native_shared_guard_token = token
             .checked_add(1)
@@ -10508,7 +10502,7 @@ pub(crate) fn native_shared_guard_bind(
     guard_handle: i64,
     token: i64,
 ) -> Result<(), String> {
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         let lease = rt
             .native_shared_guards
             .remove(&token)
@@ -10861,7 +10855,7 @@ fn jet_jit_native_interface_call(
     receiver: i64,
     argument_buffer: i64,
 ) -> i64 {
-    let prepared = match Concurrency::with_runtime_mut(|rt| {
+    let mut prepared = match Concurrency::with_runtime_string(|rt| {
         prepare_native_interface_call(
             rt,
             trait_id,
@@ -10883,7 +10877,7 @@ fn jet_jit_native_interface_call(
         prepared.method.signature.receiver_access,
         prepared.receiver.clone(),
         prepared.carrier.clone(),
-        prepared.arguments,
+        std::mem::take(&mut prepared.arguments),
         jet_foundation::Diagnostics::Span::new(0, 0),
     );
     Concurrency::with_runtime_mut(|rt| finish_native_interface_call(rt, prepared, completion))
@@ -11023,7 +11017,7 @@ fn jet_jit_native_callable_call(
     callable: i64,
     argument_buffer: i64,
 ) -> i64 {
-    let prepared = match Concurrency::with_runtime_mut(|rt| {
+    let mut prepared = match Concurrency::with_runtime_string(|rt| {
         prepare_native_callable_call(rt, callable_type_id, callable, argument_buffer)
     }) {
         Ok(prepared) => prepared,
@@ -11035,7 +11029,7 @@ fn jet_jit_native_callable_call(
     let completion = crate::SourceInterfaces::dispatch_active_callable_for_carrier(
         prepared.signature.clone(),
         prepared.carrier.clone(),
-        prepared.arguments,
+        std::mem::take(&mut prepared.arguments),
         jet_foundation::Diagnostics::Span::new(0, 0),
     );
     Concurrency::with_runtime_mut(|rt| finish_native_callable_call(rt, prepared, completion))
@@ -12173,6 +12167,10 @@ mod service_adapter {
                 rt.set_host_fault("moved runtime value cannot cross the JIT service boundary");
                 return;
             }
+            MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+                rt.set_host_fault("native runtime resource cannot cross the JIT service boundary");
+                return;
+            }
             MirRuntimeValue::Bytes(_)
             | MirRuntimeValue::List(_)
             | MirRuntimeValue::Map(_)
@@ -12209,6 +12207,8 @@ mod service_adapter {
             | MirRuntimeValue::String(_)
             | MirRuntimeValue::Bytes(_)
             | MirRuntimeValue::Absent { .. }
+            | MirRuntimeValue::NativeCursor(_)
+            | MirRuntimeValue::NativeOwned(_)
             | MirRuntimeValue::Unit => false,
         }
     }
@@ -12357,6 +12357,12 @@ mod service_adapter {
                     rt.set_host_fault("moved runtime value cannot cross the JIT service boundary");
                     return 0;
                 }
+                MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+                    rt.set_host_fault(
+                        "native runtime resource cannot cross the JIT service boundary",
+                    );
+                    return 0;
+                }
                 MirRuntimeValue::BigInt(_)
                 | MirRuntimeValue::Bytes(_)
                 | MirRuntimeValue::List(_)
@@ -12408,6 +12414,10 @@ mod service_adapter {
             MirRuntimeValue::Absent { .. } => 0,
             MirRuntimeValue::Unit => 0,
             MirRuntimeValue::Closure(_) => 0,
+            MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+                rt.set_host_fault("native runtime resource cannot cross the JIT service boundary");
+                0
+            }
         }
     }
 
@@ -12442,6 +12452,8 @@ mod service_adapter {
             | MirRuntimeValue::Struct { .. }
             | MirRuntimeValue::Enum { .. }
             | MirRuntimeValue::Unit
+            | MirRuntimeValue::NativeCursor(_)
+            | MirRuntimeValue::NativeOwned(_)
             | MirRuntimeValue::Closure(_) => marshal_scalar(rt, &value),
         }
     }
@@ -12454,6 +12466,10 @@ mod service_adapter {
         match value {
             MirRuntimeValue::Moved => {
                 rt.set_host_fault("moved runtime value cannot cross the JIT service boundary");
+                0
+            }
+            MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+                rt.set_host_fault("native runtime resource cannot cross the JIT service boundary");
                 0
             }
             MirRuntimeValue::Present(value) => marshal_scalar(rt, &value).wrapping_add(1),
@@ -13081,7 +13097,7 @@ mod service_adapter {
                 if matches!(value, MirRuntimeValue::NativeOwned(_)) {
                     let interop =
                         crate::SourceSharedInterop::SourceSharedInterop::from_native_owned(value)?;
-                    encode_native_shared_interop(rt, &interop, descriptor.id)
+                    super::encode_native_shared_interop(rt, &interop, descriptor.id)
                 } else {
                     let child =
                         job_child_descriptor(rt, descriptor, descriptor.element, "element")?;
@@ -14050,13 +14066,6 @@ fn jet_jit_duration_show(value: i64) -> i64 {
 
 fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
-}
-
-fn jit_callable_index(handle: i64) -> Option<usize> {
-    handle
-        .checked_neg()?
-        .checked_sub(1)
-        .and_then(|index| usize::try_from(index).ok())
 }
 
 fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {

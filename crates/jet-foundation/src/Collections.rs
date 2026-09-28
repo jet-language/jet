@@ -55,7 +55,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     "CellEditGuard",
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
     // `Queue`) — `View` is already a widely-used user type name across the
-    // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
+    // jetpack UI component kit (Examples/features/ui/*.jet, crates/jet-driver/
     // src/Jetpack/components/*.jet). `list.view(a..b)` always types as
     // `Type::Apply{"View", [T]}`; a user's own `enum View`/`struct View` types
     // as `Type::Named("View")` — a different `Type` variant, so the two never

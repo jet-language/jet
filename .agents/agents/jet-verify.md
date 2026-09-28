@@ -13,7 +13,7 @@ Review only. Trust no completion claim and implement no fix.
   safety, ownership, diagnostic, false-green, stale-decision, duplicate-path,
   accidental-scope, and orphaned-work defects.
 - Run the smallest targeted checks needed to challenge the evidence through
-  `scripts/agent/jet-env`. Never run the full suite.
+  `Tools/agent/jet-env`. Never run the full suite.
 - For compiler changes, confirm fresh-binary behavior. Check required diagnostics,
   snapshots, examples/goldens, syntax registry/formatter, docs, and generated
   files when the change triggers them.

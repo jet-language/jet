@@ -184,7 +184,7 @@ fn fluent_method_chain_preserves_fuel_order_and_spans() {
 
 #[test]
 fn task_programs_run_in_the_canonical_tir_interpreter() {
-    let file = "examples/features/concurrency/tasks.jet";
+    let file = "Examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {
         RunOutcome::Ran {
             stdout,
@@ -266,7 +266,7 @@ fn task_program_runs_via_jit() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = "examples/features/concurrency/tasks.jet";
+    let file = "Examples/features/concurrency/tasks.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -306,7 +306,7 @@ fn task_program_runs_via_jit() {
 /// D-FAIL-EXIT1=A — fallible entry and one exit law *(ratified 2026-08-06,
 /// card #1533)*: "`fn run()` is fallible by default." Entry `fn run` is
 /// therefore stamped `Unit !Err`, and a `return` inside a `task { … }` body
-/// belongs to the *enclosing* function — `examples/features/net/http_get.jet`
+/// belongs to the *enclosing* function — `Examples/features/net/http_get.jet`
 /// relies on exactly that, where `?? return` inside `task { … }` leaves `run`.
 /// So `task { return "child" }` handed a `String` back from `run`: E0113 from
 /// the moment D-FAIL-EXIT1 landed, and this fixture (added 2026-08-11,
@@ -345,7 +345,7 @@ fn task_program_runs_via_jit() {
 ///
 /// 1. `print(all_result[0], all_result[1])` writes TWO lines, not one.
 ///    D-VERDICT-1321-1 *(ratified 2026-07-30, amends S9 print arity;
-///    `docs/spec/syntax-decisions.md:6147-6150`)*: `print` "accept[s] one or
+///    `Docs/spec/syntax-decisions.md:6147-6150`)*: `print` "accept[s] one or
 ///    more arguments and write[s] each argument on its own line, in order, with
 ///    a trailing newline after the last." The shipped corpus prints a
 ///    `task.all` result in exactly this spelling — `task_all.jet:16` is
@@ -461,10 +461,10 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
         "jet_dev_scheduler_panic_hook_{}",
         std::process::id()
     ));
-    let file = "examples/features/concurrency/all_failfast.jet";
+    let file = "Examples/features/concurrency/all_failfast.jet";
     // I9 / #1685: AOT prints the same typed TaskFailure panic as the golden.
     let expected_stderr =
-        fs::read_to_string("examples/features/expected/concurrency/all_failfast.err.out")
+        fs::read_to_string("Examples/features/expected/concurrency/all_failfast.err.out")
             .expect("all_failfast.err.out");
     let expected = ProgramOutput::ran(String::new(), expected_stderr, 70);
     let first = compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file);
@@ -994,7 +994,7 @@ fn persist_example_survives_hot_reload() {
     use std::io::{BufRead, BufReader};
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/devloop/persist.jet");
+    let source = root.join("Examples/features/devloop/persist.jet");
     let dir = common::unique_tmp("jet_dev_persist_example");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("persist.jet");
@@ -1621,7 +1621,7 @@ fn json_coerce_audit_reports_jit_gap_on_default_dev() {
 #[cfg(unix)]
 #[test]
 fn dev_default_socket_echo_reports_jit_gap() {
-    let file = "examples/features/net/socket_echo.jet";
+    let file = "Examples/features/net/socket_echo.jet";
     assert_default_dev_jit_gap("net/socket_echo", file);
 }
 
@@ -1845,7 +1845,7 @@ fn run() {{
 
 #[test]
 fn dev_default_io_log_reports_jit_gap() {
-    let file = "examples/features/io/log.jet";
+    let file = "Examples/features/io/log.jet";
     assert_default_dev_jit_gap("io/log", file);
 }
 
@@ -1863,7 +1863,7 @@ fn scheduler_spawn_runs_via_jit() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = "examples/features/concurrency/scheduler_spawn.jet";
+    let file = "Examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -1890,7 +1890,7 @@ fn scheduler_spawn_runs_via_jit() {
 
 #[test]
 fn dev_default_interprets_display_debug_interpolation() {
-    let file = "examples/features/types/display_debug.jet";
+    let file = "Examples/features/types/display_debug.jet";
     // Named Display + JetDebug with #[Redact] now lower on the resident JIT.
     jet_jit::reset_jit_trace_for_test();
     match dev_iteration_with_timeout("types/display_debug", file, false) {
@@ -1899,7 +1899,7 @@ fn dev_default_interprets_display_debug_interpolation() {
                 jet_jit::jit_executed_for_test(),
                 "types/display_debug must run native JIT"
             );
-            let gold = fs::read_to_string("examples/features/expected/types/display_debug.out")
+            let gold = fs::read_to_string("Examples/features/expected/types/display_debug.out")
                 .expect("golden");
             assert_eq!(stdout, gold);
         }
@@ -1963,7 +1963,7 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
         std::process::id(),
         stamp
     ));
-    let file = "examples/features/errors/errors.jet";
+    let file = "Examples/features/errors/errors.jet";
     let expected = "42\n84\nBadDigit(\"x\")\n";
 
     for run in 1..=2 {
@@ -1995,7 +1995,7 @@ fn cranelift_backend_matches_hello() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = "examples/features/basics/hello.jet";
+    let file = "Examples/features/basics/hello.jet";
     // Load and check on the canonical compiler worker: doing it inline here is
     // what aborted the whole dev binary, since a 2 MiB libtest worker cannot
     // hold the loader and sema recursion. `checked_bundle_from_path` also
@@ -2345,9 +2345,9 @@ fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/errors/default_err_edge.jet";
+    let file = "Examples/features/errors/default_err_edge.jet";
     let expected_stderr =
-        fs::read_to_string("examples/features/expected/errors/default_err_edge.err.out")
+        fs::read_to_string("Examples/features/expected/errors/default_err_edge.err.out")
             .expect("default_err_edge.err.out");
     let expected = ProgramOutput::ran(String::new(), expected_stderr, 1);
 
@@ -2400,7 +2400,7 @@ fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/text/int_exact.jet";
+    let file = "Examples/features/text/int_exact.jet";
     let expected = ProgramOutput::ran(golden_stdout("text/int_exact"), String::new(), 0);
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -2508,7 +2508,7 @@ fn type_alias_example_matches_golden_on_all_execution_tiers() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/types/type_alias.jet";
+    let file = "Examples/features/types/type_alias.jet";
     let expected = ProgramOutput::ran(golden_stdout("types/type_alias"), String::new(), 0);
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -2554,7 +2554,7 @@ fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/io/archive.jet";
+    let file = "Examples/features/io/archive.jet";
     let expected = ProgramOutput::ran(golden_stdout("io/archive"), String::new(), 0);
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -2607,7 +2607,7 @@ fn progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/io/progress.jet";
+    let file = "Examples/features/io/progress.jet";
     let expected = ProgramOutput::ran(golden_stdout("io/progress"), String::new(), 0);
 
     let interpreted = match dev_iteration_with_timeout("progress_reporter", file, true) {
@@ -2668,7 +2668,7 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/collections/set.jet";
+    let file = "Examples/features/collections/set.jet";
     let expected = ProgramOutput::ran(golden_stdout("collections/set"), String::new(), 0);
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -3612,7 +3612,7 @@ fn solver_state_transitions_match_aot_in_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let source_path = "examples/features/tooling/solve_puzzle.jet";
+    let source_path = "Examples/features/tooling/solve_puzzle.jet";
     let src = fs::read_to_string(source_path).expect("read solve_puzzle example");
     let jit = run_cranelift_without_fallback(&src, "solve_puzzle");
 
@@ -3701,7 +3701,7 @@ fn run() {
     // the process edge prints one full report and exits 1. `jet_render_err`
     // renders `Error: {message}` with no code and `Error [{code}]: {message}`
     // with one. Same shape as the ratified AOT golden
-    // `examples/features/expected/errors/error_context.err.out`.
+    // `Examples/features/expected/errors/error_context.err.out`.
     assert_eq!(
         failure_jit,
         ProgramOutput::ran(
@@ -3835,7 +3835,7 @@ fn run() {
             // reaches the process edge as one full default-error report and exits
             // 1. `jet_render_err` renders `Error: {message}` when the error
             // carries no code — see the ratified golden
-            // `examples/features/expected/errors/default_err_edge.err.out`, which
+            // `Examples/features/expected/errors/default_err_edge.err.out`, which
             // shows the `Error [CODE]: …` form of the same renderer. No journey
             // frame here: D-FAIL-CTX1=A appends a frame per propagation crossing, and this
             // `Err` is returned directly rather than re-raised.
@@ -4598,7 +4598,7 @@ fn generic_modules_full_example_matches_resident_jit_and_aot() {
     let dir = common::unique_tmp("jet_generic_modules_full_example");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("generic_modules.jet");
-    fs::copy("examples/features/modules/generic_modules.jet", &file).unwrap();
+    fs::copy("Examples/features/modules/generic_modules.jet", &file).unwrap();
     assert_cranelift_three_way(file.to_str().unwrap(), "modules/generic_modules");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4608,7 +4608,7 @@ fn array_of_structs_field_mutation_three_way() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = "examples/features/collections/struct_list_mutation.jet";
+    let file = "Examples/features/collections/struct_list_mutation.jet";
     // Tiered/default path (and three-way) cover IndexFieldAssign via Cranelift;
     // pure-interpreter coverage is optional (#779 expands TIR assign arms).
     assert_cranelift_three_way(file, "collections/struct_list_mutation");
@@ -5447,7 +5447,7 @@ fn resident_jit_safety_detail_smoke() {
         "basics/branches",
         "concurrency/task_group",
     ] {
-        let file = format!("examples/features/{stem}.jet");
+        let file = format!("Examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
         jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         let detail = common::cranelift_resident_safe_detail(&bundle);
@@ -5547,7 +5547,7 @@ fn resident_jit_safe_increment_decrement() {
     // whole binary (SIGABRT), which reports every other in-flight test in
     // this file as failed.
     jet::run_compiler_work(|| {
-        let file = "examples/features/basics/increment.jet";
+        let file = "Examples/features/basics/increment.jet";
         let mut bundle = jet::Loader::load_entry(file).expect("load");
         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
@@ -5567,7 +5567,7 @@ fn resident_jit_safe_increment_decrement() {
 fn resident_jit_safe_named_tuples() {
     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
     jet::run_compiler_work(|| {
-        let file = "examples/features/basics/tuples.jet";
+        let file = "Examples/features/basics/tuples.jet";
         let mut bundle = jet::Loader::load_entry(file).expect("load");
         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
@@ -5587,7 +5587,7 @@ fn resident_jit_safe_named_tuples() {
 fn resident_jit_safe_zip_family() {
     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
     jet::run_compiler_work(|| {
-        let file = "examples/features/collections/zip_family.jet";
+        let file = "Examples/features/collections/zip_family.jet";
         let mut bundle = jet::Loader::load_entry(file).expect("zip family example");
         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
@@ -5612,7 +5612,7 @@ fn resident_jit_safe_zip_family() {
 fn resident_jit_safe_chained_comparison() {
     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
     jet::run_compiler_work(|| {
-        let file = "examples/features/operators/chained_comparison.jet";
+        let file = "Examples/features/operators/chained_comparison.jet";
         let mut bundle = jet::Loader::load_entry(file).expect("load");
         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         let errors: Vec<_> = diags
@@ -5633,7 +5633,7 @@ fn resident_jit_safe_chained_comparison() {
 
 #[test]
 fn resident_jit_safe_user_operator_traits() {
-    let file = "examples/features/operators/user_defined.jet";
+    let file = "Examples/features/operators/user_defined.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -5659,7 +5659,7 @@ fn resident_jit_safe_user_operator_traits() {
 
 #[test]
 fn resident_jit_safe_string_method_chain() {
-    let file = "examples/features/basics/method_chain.jet";
+    let file = "Examples/features/basics/method_chain.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -5792,7 +5792,7 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
     // `ch`/`ack_sender` cross into the task as bare captures, so they must be
     // `::` bindings: a `:=` binding is a changeable alias the owner could still
     // write, and D-CONC-FREEZE1=A refuses that crossing with E1101 before the
-    // program ever runs. `::` is what every `examples/features/concurrency`
+    // program ever runs. `::` is what every `Examples/features/concurrency`
     // channel fixture uses; `^`/`freeze` are for values that really are owned
     // away or snapshotted, which is not what this test is about.
     with_jit_test_scope(|| {
@@ -5938,9 +5938,9 @@ fn all_failfast_jit_stderr_matches_aot_golden() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = "examples/features/concurrency/all_failfast.jet";
+    let file = "Examples/features/concurrency/all_failfast.jet";
     let expected =
-        fs::read_to_string("examples/features/expected/concurrency/all_failfast.err.out")
+        fs::read_to_string("Examples/features/expected/concurrency/all_failfast.err.out")
             .expect("all_failfast.err.out");
     // Two invokes: first compiles; second proves reset_run_heap still resolves
     // rich-panic string handles on the same resident module.
@@ -6696,7 +6696,7 @@ fn run() {
 #[test]
 fn schedule_every_dev_loop_consumer() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let file = root.join("examples/features/devloop/schedule_every.jet");
+    let file = root.join("Examples/features/devloop/schedule_every.jet");
     let src = fs::read_to_string(&file).unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
         .unwrap_or_else(|diags| panic!("schedule_every.jet failed to load: {diags:?}"));
@@ -7303,7 +7303,7 @@ fn tower_1754_collection_parity_focus() {
 /// the tests were not in a routine set and nothing said so.
 ///
 /// Naming the target is all it takes to be routine: cargo makes a test binary
-/// out of every `tests/*.rs` file by itself, and `tools/ci/test-shards.sh`
+/// out of every `tests/*.rs` file by itself, and `Tools/ci/test-shards.sh`
 /// enumerates the whole target inventory fresh on every run (D-CI1=A). So the
 /// only thing left to check is that no slice is orphaned.
 #[test]

@@ -6120,12 +6120,18 @@ impl<'a> LowerCtx<'a> {
             else_target: after,
         });
         self.switch_to(drop_block);
-        let ty = self
-            .places
-            .iter()
-            .find(|row| row.id == place)
-            .map(|row| row.ty.clone())
-            .ok_or_else(|| self.error(self.span(), "owned local cleanup has no place"))?;
+        // The cleanup consumes the owned value, so its shared place row must
+        // carry Move access, exactly as an explicit last-use move would.
+        let span = self.span();
+        let ty = {
+            let row = self
+                .places
+                .iter_mut()
+                .find(|row| row.id == place)
+                .ok_or_else(|| LowerError::new(span, "owned local cleanup has no place"))?;
+            retain_place_access(row, MirAccess::Move);
+            row.ty.clone()
+        };
         let value = self.emit_mir_type(
             "owned.local.cleanup.move",
             Some(ty),

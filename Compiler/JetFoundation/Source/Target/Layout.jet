@@ -341,16 +341,16 @@ fn jet_target_layout_support_for_storage(target: JetTargetLayout, kind: JetLayou
 }
 
 fn jet_target_layout_storage_kind_name(kind: JetLayoutStorageKind) -> String {
-    if kind == JetLayoutStorageKind.Stack -> "Stack"
-    if kind == JetLayoutStorageKind.Global -> "Global"
-    if kind == JetLayoutStorageKind.Heap -> "Heap"
+    if kind == JetLayoutStorageKind.Stack -> return "Stack"
+    if kind == JetLayoutStorageKind.Global -> return "Global"
+    if kind == JetLayoutStorageKind.Heap -> return "Heap"
     "ForeignByValue"
 }
 
 pub fn jet_target_layout_storage_kind_name_lower(kind: JetLayoutStorageKind) -> String {
-    if kind == JetLayoutStorageKind.Stack -> "stack"
-    if kind == JetLayoutStorageKind.Global -> "global"
-    if kind == JetLayoutStorageKind.Heap -> "heap"
+    if kind == JetLayoutStorageKind.Stack -> return "stack"
+    if kind == JetLayoutStorageKind.Global -> return "global"
+    if kind == JetLayoutStorageKind.Heap -> return "heap"
     "foreign by-value ABI"
 }
 
@@ -453,8 +453,8 @@ pub fn jet_target_layout_enum_c_tag(definition: EnumDef) -> ?CEnumTag {
         .Ident(name, _) -> if jet_target_layout_ascii_lower(name) != "c" -> return None
         else -> return None
     }
-    tag :: marker.expr_arg(1) ?? return Val(CEnumTag.CInt)
-    if tag == {
+    enum_tag :: marker.expr_arg(1) ?? return Val(CEnumTag.CInt)
+    if enum_tag == {
         .Ident(name, _) -> if name == {
             "U8" -> Val(CEnumTag.U8)
             "I8" -> Val(CEnumTag.I8)
@@ -470,8 +470,8 @@ pub fn jet_target_layout_enum_c_tag(definition: EnumDef) -> ?CEnumTag {
     }
 }
 
-pub fn jet_target_layout_mir_c_tag(tag: CEnumTag) -> MirCEnumTag {
-    if tag == {
+pub fn jet_target_layout_mir_c_tag(enum_tag: CEnumTag) -> MirCEnumTag {
+    if enum_tag == {
         .CInt -> MirCEnumTag.CInt
         .U8 -> MirCEnumTag.U8
         .I8 -> MirCEnumTag.I8
@@ -523,10 +523,10 @@ fn jet_target_layout_struct_facts_inner_named(engine: TargetLayoutEngine, defini
 
 fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definition: EnumDef, identity: String, owner_qualified_name: String, seen: &[String]) -> LayoutFacts {
     variant_names :: loop variant in definition.variants -> variant.name
-    tag :: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_unknown(variant_names)
+    enum_tag :: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_unknown(variant_names)
     if jet_target_layout_seen(&seen, identity) -> return jet_target_layout_unknown(variant_names)
     seen.push(identity)
-    tag_layout :: jet_target_layout_scalar(jet_target_layout_enum_tag_size(tag))
+    tag_layout :: jet_target_layout_scalar(jet_target_layout_enum_tag_size(enum_tag))
     payloads := [?ByteLayout]{}
     payloads_known := [Bool]{}
     loop variant in definition.variants {
@@ -599,11 +599,14 @@ fn jet_target_layout_aggregate(engine: TargetLayoutEngine, names: [String], type
     loop index < names.len() {
         name := names[index]
         layout := jet_target_layout_type_inner(engine, types[index], owner_qualified_name, &seen)
-        offset := if cursor != None && layout != None {
-            current :: cursor ?? 0
-            value :: layout ?? ByteLayout{size: 0, alignment: 1, stride: 0}
-            jet_layout_align_up(current, value.alignment)
-        } else -> None
+        offset := if {
+            cursor != None && layout != None -> {
+                current :: cursor ?? 0
+                value :: layout ?? ByteLayout{size: 0, alignment: 1, stride: 0}
+                jet_layout_align_up(current, value.alignment)
+            }
+            else -> None
+        }
         if layout == {
             Val(value) -> {
                 if offset == {
@@ -624,11 +627,14 @@ fn jet_target_layout_aggregate(engine: TargetLayoutEngine, names: [String], type
         }
         index += 1
     }
-    bytes := if cursor != None && aggregate_alignment != None {
-        current :: cursor ?? 0
-        alignment :: aggregate_alignment ?? 1
-        jet_layout_align_up(current, alignment).map(size -> ByteLayout{size: size, alignment: alignment, stride: size})
-    } else -> None
+    bytes := if {
+        cursor != None && aggregate_alignment != None -> {
+            current :: cursor ?? 0
+            alignment :: aggregate_alignment ?? 1
+            jet_layout_align_up(current, alignment).map(size -> ByteLayout{size: size, alignment: alignment, stride: size})
+        }
+        else -> None
+    }
     LayoutFacts{bytes: bytes, fields: facts}
 }
 
@@ -776,8 +782,8 @@ fn jet_target_layout_scalar_alignment(size: Int) -> Int {
     }
 }
 
-fn jet_target_layout_enum_tag_size(tag: CEnumTag) -> Int {
-    if tag == {
+fn jet_target_layout_enum_tag_size(enum_tag: CEnumTag) -> Int {
+    if enum_tag == {
         .CInt -> 4
         .U8 | .I8 -> 1
         .U16 | .I16 -> 2

@@ -1,0 +1,215 @@
+// A Plugin handle is a statically identified frozen Component interface. These
+// bodies consume the immutable interface facts built at the bundle boundary.
+
+pub fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type {
+    Type.Apply("Plugin", [Type]{Type.Named(interface.identity)})
+}
+
+pub fn sema_plugin_load_type(facts: SemaPluginInterfaceFacts, artifact: String) -> ?Type {
+    interface :: sema_plugin_interface_by_artifact(facts, artifact) ?? return None
+    Val(sema_plugin_loaded_type(interface))
+}
+
+fn sema_plugin_handle_identity(ty: Type, environment: SemaScopeEnvironment) -> ?String {
+    resolved := sema_call_resolved_type(ty, environment)
+    identity := if resolved == {
+        .Apply(name, args) -> if {
+            name == "Plugin" && args.len() == 1 -> {
+                if args[0] == {.Named(value) -> Val(value) else -> None}
+            }
+            else -> None
+        }
+        else -> None
+    }
+    value :: identity ?? return None
+    graph :: environment.registration_graph ?? return None
+    // A source declaration named Plugin is never the compiler-owned loader
+    // handle, even if it happens to use the same type application spelling.
+    if sema_type_resolve_nominal(graph, resolved, environment.module_identity) != None -> return None
+    Val(value)
+}
+
+fn sema_plugin_forbidden_component_name(name: String) -> Bool {
+    name == "DataTree" || name == "JSON" || name == "Authority" || name == "Secret" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration"
+}
+
+fn sema_plugin_checked_type_definition(environment: SemaScopeEnvironment, nominal: SemaRegistrationNominal) -> ?TTypeDef {
+    loop definition in environment.checked_types {
+        if definition.module_identity == nominal.symbol.module_name && definition.name == nominal.symbol.name -> return Val(definition)
+    }
+    None
+}
+
+fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, ty: Type, seen: [String]) -> ?MirComponentTypeDescriptor {
+    if ty == {
+        .Int -> return Val(MirComponentTypeDescriptor.Int)
+        .Float -> return Val(MirComponentTypeDescriptor.Float)
+        .Bool -> return Val(MirComponentTypeDescriptor.Bool)
+        .String -> return Val(MirComponentTypeDescriptor.String)
+        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, inner, seen).map(value -> MirComponentTypeDescriptor.List(value))
+        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, inner, seen).map(value -> MirComponentTypeDescriptor.Option(value))
+        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, inner, seen).map(value -> MirComponentTypeDescriptor.List(value))
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_plugin_component_descriptor(graph, environment, inner, seen)
+        .Result(ok, err) -> {
+            ok_descriptor :: sema_plugin_component_descriptor(graph, environment, ok, seen) ?? return None
+            err_descriptor :: sema_plugin_component_descriptor(graph, environment, err, seen) ?? return None
+            return Val(MirComponentTypeDescriptor.Result(ok_descriptor, err_descriptor))
+        }
+        .Named(name) | .Apply(name, _) -> {
+            if sema_plugin_forbidden_component_name(name) -> return None
+            if sema_type_bound_satisfied(graph, ty, "Encode", environment.module_identity) != (Val(true)) || sema_type_bound_satisfied(graph, ty, "Decode", environment.module_identity) != (Val(true)) -> return None
+            nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? return None
+            definition :: sema_plugin_checked_type_definition(environment, nominal) ?? return None
+            type_args := if ty == {.Apply(_, args) -> args else -> [Type]{}}
+            if type_args.len() != definition.generic_params.len() -> return None
+            key := "{nominal.symbol.id.key}|{type_name(ty)}"
+            loop prior in seen {
+                if prior == key -> return None
+            }
+            next_seen := seen
+            next_seen.push(key)
+            generic_names := (loop parameter in definition.generic_params -> parameter.name)
+            if definition.kind == {
+                .Alias(target) -> {
+                    specialized := sema_inference_substitute_type(target, generic_names, type_args)
+                    return sema_plugin_component_descriptor(graph, environment, specialized, next_seen)
+                }
+                .Struct(fields, _) -> {
+                    component_fields := [MirComponentTypeField]{}
+                    loop index in 0..<fields.len() {
+                        field := fields[index]
+                        if field.skip || field.computed -> next
+                        field_type := sema_inference_substitute_type(field.ty, generic_names, type_args)
+                        descriptor :: sema_plugin_component_descriptor(graph, environment, field_type, next_seen) ?? return None
+                        component_fields.push(MirComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                    }
+                    return Val(MirComponentTypeDescriptor.Record(definition.name, component_fields))
+                }
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
+fn sema_plugin_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_plugin_method_diagnostic(method: String, interface: ?SemaPluginInterface, span: Span, diagnostics: &[Diagnostic]) {
+    if interface == {
+        .Val(value) -> {
+            diagnostics.push(sema_error("E1257", span, "plugin interface `{value.artifact}` has no export `{method}`", "a loaded plugin exposes only the exports in its registered Component interface", "use a registered export name or update the plugin interface snapshot"))
+        }
+        else -> {
+            diagnostics.push(sema_error("E1257", span, "plugin export `{method}` has no registered Component interface", "plugin members are resolved only from a statically known artifact and its frozen interface", "pass a literal registered artifact to `core.plugin.load`, then call one of its exports"))
+        }
+    }
+}
+
+fn sema_plugin_retired_method_diagnostic(method: String, span: Span, diagnostics: &[Diagnostic]) {
+    diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is retired", "plugin handles expose the frozen named exports of their registered Component interface", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
+}
+
+fn sema_plugin_record_exec(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    result := Type.Result(success, Type.String)
+    sema_effect_record_intrinsic_fact(environment, scopes, context, "Plugin.{method}", span, SemaCallFacts{
+        return_type: result,
+        failure_carrier: TFailureCarrier.Result(success, Type.String),
+        effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: "Exec", span: span}}),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }, &diagnostics)
+}
+
+fn sema_plugin_unsupported_component_diagnostic(export_name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
+    diagnostics.push(sema_error("E1260", span, "plugin export `{export_name}` uses unsupported Component value `{type_name(ty)}`", "plugin parameters and results must use recursively closed Component Model shapes", "use Int, Float, Bool, String, or a #Codable record/list/Option/Result shape"))
+}
+
+pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    identity :: sema_plugin_handle_identity(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if method == "call" || method == "call_int" || method == "call_bool" || method == "call_text" {
+        if !sema_plugin_record_exec(method, Type.Named("Unit"), span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        sema_plugin_retired_method_diagnostic(method, span, &diagnostics)
+        sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    interface := sema_plugin_interface_by_identity(facts, identity)
+    interface_value :: interface ?? {
+        if !sema_plugin_record_exec(method, Type.Named("Unit"), span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        sema_plugin_method_diagnostic(method, None, span, &diagnostics)
+        sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    export_value :: loop row in interface_value.exports {
+        if row.name == method -> break row
+    } ?? {
+        if !sema_plugin_record_exec(method, Type.Named("Unit"), span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        sema_plugin_method_diagnostic(method, Val(interface_value), span, &diagnostics)
+        sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    result_type := export_value.return_type.map(value -> sema_call_resolved_type(value, environment)) ?? Type.Named("Unit")
+    if !sema_plugin_record_exec(method, result_type, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != export_value.params.len() {
+        diagnostics.push(sema_call_arity_diagnostic(export_value.name, export_value.params.len(), args.len(), false, span))
+        sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{}
+    loop index in 0..<export_value.params.len() {
+        parameter := export_value.params[index]
+        params.push(SemaCallParam{label: "", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: parameter.convention, ty: Val(parameter.ty), variadic: false})
+    }
+    checked_args := args
+    binding :: sema_call_bind_args("Plugin.{method}", params, &checked_args, span, &diagnostics) ?? {
+        sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    graph :: environment.registration_graph ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    supported := true
+    component_params := [MirComponentTypeDescriptor]{}
+    loop index in 0..<export_value.params.len() {
+        parameter := export_value.params[index]
+        required := sema_type_resolve_declared(graph, parameter.ty, environment.module_identity)
+        descriptor := sema_plugin_component_descriptor(graph, environment, required, [String]{})
+        if {
+            descriptor == None -> {
+                sema_plugin_unsupported_component_diagnostic(export_value.name, required, checked_args[index].span, &diagnostics)
+                supported = false
+            }
+            else -> {
+                component_params.push(descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None})
+            }
+        }
+    }
+    typed :: sema_call_typecheck_bound_arguments("Plugin.{method}", params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_call_arguments(&state, "Plugin.{method}", params, &checked_args, scopes, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    values := [TExpr]{}
+    loop slot in 0..<params.len() {
+        found := false
+        loop index in 0..<typed.values.len() {
+            if typed.slots[index] == slot {
+                value := typed.values[index]
+                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone(value), value.span)
+                values.push(value)
+                found = true
+                break
+            }
+        }
+        if !found -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if export_value.return_type != None -> result_type = sema_type_resolve_declared(graph, export_value.return_type ?? Type.Named("Unit"), environment.module_identity)
+    result_descriptor := sema_plugin_component_descriptor(graph, environment, result_type, [String]{})
+    if result_descriptor == None {
+        sema_plugin_unsupported_component_diagnostic(export_value.name, result_type, span, &diagnostics)
+        supported = false
+    }
+    if !supported -> return SemaMethodSpecialCheck{handled: true, value: None}
+    signature := MirComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
+    result := Type.Result(result_type, Type.String)
+    value := sema_tir_expr(result, TExprKind.HandleMethod(receiver_value, THandleOp.PluginInvoke(export_value.name, signature), values), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}

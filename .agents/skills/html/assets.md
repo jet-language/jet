@@ -67,6 +67,6 @@ Reports: 03, 11, 12, 13–17. Tools: 01, 02, 04–10, 18–24.
 
 | # | Use case | File | Pattern summary |
 |---|---|---|---|
-| 25 | Ballot reading surface | `docs/proposals/prototypes/ballot-surface.html` | One decision, the owner-ruled order: question, lesson, Current and In the wild (side by side only when both fit), every option in one shape with recommended first and full-width highlighted code, recommendation panel, folded long form. Tower Focus Mode renders the same layout. |
+| 25 | Ballot reading surface | `Docs/proposals/prototypes/ballot-surface.html` | One decision, the owner-ruled order: question, lesson, Current and In the wild (side by side only when both fit), every option in one shape with recommended first and full-width highlighted code, recommendation panel, folded long form. Tower Focus Mode renders the same layout. |
 
 `assets/index.html` is the gallery of all 24.

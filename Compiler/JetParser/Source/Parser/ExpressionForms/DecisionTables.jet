@@ -444,15 +444,18 @@ fn parser_expression_form_parse_bare_lambda(state: &JetParserState, depth: Int) 
         }
         else -> {
             value :: parser_parse_expression(&state, 1, depth + 1)
-            if parser_is_assignment_operator(parser_current_kind(&state)) -> {
-                operator :: parser_bump(&state)
-                right :: parser_parse_expression(&state, 1, depth + 1)
-                target :: parser_expression_lvalue(&state, value.expr, value.span)
-                end = right.span
-                LambdaBody.Block(body: [Stmt]{Stmt.Assign(target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr)})
-            } else -> {
-                end = value.span
-                LambdaBody.Expr(value: value.expr)
+            if {
+                parser_is_assignment_operator(parser_current_kind(&state)) -> {
+                    operator :: parser_bump(&state)
+                    right :: parser_parse_expression(&state, 1, depth + 1)
+                    target :: parser_expression_lvalue(&state, value.expr, value.span)
+                    end = right.span
+                    LambdaBody.Block(body: [Stmt]{Stmt.Assign(target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr)})
+                }
+                else -> {
+                    end = value.span
+                    LambdaBody.Expr(value: value.expr)
+                }
             }
         }
     }

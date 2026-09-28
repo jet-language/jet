@@ -1,0 +1,154 @@
+pub enum TTestKind { Unit Property }
+
+pub struct TTestParamFact {
+    pub index: Int
+    pub name: String
+    pub span: Span
+    pub ty: Type
+    pub convention: AccessConvention
+    pub label: String
+    pub zone: ParamZone
+    pub variadic: Bool
+    pub default_present: Bool
+}
+
+pub struct TTestFact {
+    pub key: String
+    pub function: TFunctionRef
+    pub name: String
+    pub span: Span
+    pub kind: TTestKind
+    pub parameters: [TTestParamFact]
+    pub faults: [String]
+    pub expected_failure: Bool
+    pub contract_generated: Bool
+    pub eligibility: ?TFunctionRef
+    pub generation_unavailable_reason: ?String
+}
+
+pub struct TJobArgumentFact {
+    pub name: String
+    pub label: String
+    pub ty: String
+    pub required: Bool
+    pub default: ?String
+    pub variadic: Bool
+    pub zone: ParamZone
+}
+
+pub struct TJobFact {
+    pub key: String
+    pub function: ?TFunctionRef
+    pub name: String
+    pub scope: JobScope
+    pub doc: ?String
+    pub arguments: [TJobArgumentFact]
+    pub schedule: ?EverySchedule
+    pub after: [String]
+    pub parallel: Int
+    pub packages: [String]
+    pub working_directory: ?String
+    pub input_paths: [String]
+    pub output_paths: [String]
+    pub skip: ?JobSkip
+    pub cache: JobCachePolicy
+    pub limits: [StringMapEntry]
+}
+
+pub struct TOutputCheckFact {
+    pub key: String
+    pub name: String
+    pub function: TFunctionRef
+}
+
+pub struct TCoveragePointFact {
+    pub key: String
+    pub function: TFunctionRef
+    pub block: ?String
+    pub span: Span
+}
+
+pub enum THarnessKind { Test Fuzz Coverage }
+
+pub struct THarnessPlanFact {
+    pub key: String
+    pub kind: THarnessKind
+    pub tests: [String]
+    pub output_checks: [TOutputCheckFact]
+    pub selected_test: ?String
+    pub coverage_points: [TCoveragePointFact]
+    pub command_override: Bool
+}
+
+pub fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String {
+    name := test.name ?? "anonymous"
+    local := "test::{name}@{test.span.start}..{test.span.end}"
+    if module_identity == "" -> local else -> "{module_identity}::{local}"
+}
+
+pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef {
+    key := tir_test_artifact_key(module_identity, test)
+    TFunctionRef{
+        key: key,
+        module_identity: module_identity,
+        name: key,
+        span: test.span,
+        visibility: TVisibility.Private,
+    }
+}
+
+pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact {
+    parameters := [TTestParamFact]{}
+    index := 0
+    loop parameter in test.params {
+        parameters.push(TTestParamFact{
+            index: index,
+            name: parameter.name,
+            span: parameter.name_span,
+            ty: parameter.ty,
+            convention: parameter.convention,
+            label: parameter.public_label.map((label) -> label.name) ?? parameter.name,
+            zone: parameter.zone,
+            variadic: parameter.variadic,
+            default_present: parameter.default != None,
+        })
+        index += 1
+    }
+    key := tir_test_artifact_key(module_identity, test)
+    TTestFact{
+        key: key,
+        function: tir_test_artifact_function_ref(module_identity, test),
+        name: test.name ?? key,
+        span: test.span,
+        kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,
+        parameters: parameters,
+        faults: test.faults,
+        expected_failure: test.expected_fail,
+        contract_generated: false,
+        eligibility: None,
+        generation_unavailable_reason: None,
+    }
+}
+
+pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: ?String, arguments: [TJobArgumentFact], schedule: ?EverySchedule, metadata: JobMetadata) -> TJobFact {
+    local := "job::{name}"
+    key := if function.module_identity == "" -> local else -> "{function.module_identity}::{local}"
+    TJobFact{
+        key: key,
+        function: Val(function),
+        name: name,
+        scope: metadata.scope,
+        doc: doc,
+        arguments: arguments,
+        schedule: schedule,
+        after: metadata.after,
+        parallel: metadata.parallel ?? 1,
+        packages: metadata.packages,
+        working_directory: metadata.cwd,
+        input_paths: metadata.inputs,
+        output_paths: metadata.outputs,
+        skip: metadata.skip,
+        cache: metadata.cache,
+        limits: metadata.limits,
+    }
+}

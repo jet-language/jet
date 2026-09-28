@@ -47,7 +47,7 @@ The request defines scope and permissions. A full audit covers its declared corp
 | Beginner explanation, optionally compressed | `eli5` or `eli5-caveman` |
 | Human-facing Jet prose or explicit STE request | `simple` |
 
-Repository skill entrypoints are `.agents/skills/<name>/SKILL.md`; Tower entrypoints are `plugins/tower/skills/<name>/SKILL.md`. The conditional phase-order skill is a managed installation, not an implementation default. Imported Matt Pocock methods retain their own contracts; this index does not rewrite them.
+Repository skill entrypoints are `.agents/skills/<name>/SKILL.md`; Tower entrypoints are `Tools/tower/skills/<name>/SKILL.md`. The conditional phase-order skill is a managed installation, not an implementation default. Imported Matt Pocock methods retain their own contracts; this index does not rewrite them.
 
 ## Shared references
 

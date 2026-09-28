@@ -738,7 +738,7 @@ impl ProgramBundle {
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
-    /// Stable path string for diagnostics/codegen (e.g. `examples/features/21_imports/main.jet`).
+    /// Stable path string for diagnostics/codegen (e.g. `Examples/features/21_imports/main.jet`).
     pub display: String,
     pub source: String,
     /// Namespace when this file is imported (`import … as alias`).

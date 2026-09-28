@@ -139,7 +139,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool, profile: &str) {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
         _ => {
-            crate::cli_error!(@fix "E2104", "`jet inspect dossier` needs an entry file and optional symbol", "jet inspect dossier examples/features/basics/hello.jet run; use `target board.sensor_v1`, `data`, or `ffi` for those dossiers");
+            crate::cli_error!(@fix "E2104", "`jet inspect dossier` needs an entry file and optional symbol", "jet inspect dossier Examples/features/basics/hello.jet run; use `target board.sensor_v1`, `data`, or `ffi` for those dossiers");
             exit(ExitCodes::USER_ERROR);
         }
     };

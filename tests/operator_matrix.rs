@@ -6,9 +6,9 @@ mod tir_support;
 use std::path::PathBuf;
 use std::process::Command;
 
-const SOURCE_PATH: &str = "examples/features/operators/mixed_types.jet";
-const SOURCE: &str = include_str!("../examples/features/operators/mixed_types.jet");
-const EXPECTED: &str = include_str!("../examples/features/expected/operators/mixed_types.out");
+const SOURCE_PATH: &str = "Examples/features/operators/mixed_types.jet";
+const SOURCE: &str = include_str!("../Examples/features/operators/mixed_types.jet");
+const EXPECTED: &str = include_str!("../Examples/features/expected/operators/mixed_types.out");
 
 #[test]
 fn mixed_operator_matrix_agrees_across_execution_tiers() {

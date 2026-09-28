@@ -518,7 +518,7 @@ pub const SYSTEM_LIB_TARGET: &str = "system";
 
 // ──────────────────────────────────────────────
 // Jetpack (Phase 1) — user-typeable surface (I7).
-// All decisions ratified in docs/spec/syntax-decisions.md (D-JPK*).
+// All decisions ratified in Docs/spec/syntax-decisions.md (D-JPK*).
 // These IDs start with `D`, so tests/decisions.rs leaves them alone, but
 // I7 still wants every typeable token to live here with its decision ID.
 // ──────────────────────────────────────────────
@@ -743,7 +743,7 @@ pub const ENV_REPORT_JOBS_KEY: &str = "jobs";
 pub const ENV_REPORT_CHECKS_KEY: &str = "checks";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
-/// Documented in docs/spec/reference/environment.md.
+/// Documented in Docs/spec/reference/environment.md.
 pub const ENV_DISABLE_VAR: &str = "JET_ENV_DISABLE";
 /// D-ENVHOOK1=A: the hook's activation state, exported into the shell so each
 /// per-prompt `export` knows which `env.jet` directory is currently live (empty

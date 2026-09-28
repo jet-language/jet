@@ -39,10 +39,10 @@ retained artifact:
   hand-edit Tower board JSON.
 
 For a standard dated report, use the non-serve Tower CLI form
-`scripts/agent/jet-env node plugins/tower/tower.mjs docs add --section <audits|research> --id <skill>-YYYY-MM-DD --title "…" --file - --by <agent>`. Use `docs update` only for the same day when the method permits it. A method-owned installer, such as a
+`Tools/agent/jet-env node Tools/tower/tower.mjs docs add --section <audits|research> --id <skill>-YYYY-MM-DD --title "…" --file - --by <agent>`. Use `docs update` only for the same day when the method permits it. A method-owned installer, such as a
 checkpointed report installer, remains the source for that method.
-- Add a new dated report only at the method's declared `docs/audits/` or
-  `docs/research/` location. Revise only the same day's report when the method
+- Add a new dated report only at the method's declared `Docs/audits/` or
+  `Docs/research/` location. Revise only the same day's report when the method
   permits it. Never overwrite another day's report or write reports under
   `docs/plans/`.
 - Keep report completion separate from implementation completion. A report can

@@ -3009,7 +3009,7 @@ fn run() {
 /// through safe structural splits. Card #1361 / I2: the owner itself may not
 /// be read beside a live exclusive window (E0220) — only the windows and
 /// values copied before them, exactly as
-/// `examples/features/memory/place_windows.jet` is written.
+/// `Examples/features/memory/place_windows.jet` is written.
 #[test]
 fn indexed_simulation_static_update_lowers_to_safe_splits() {
     let src = r#"
@@ -3119,7 +3119,7 @@ fn indexed_simulation_example_runs_production_pipeline() {
         .args([
             "run",
             "--release",
-            "examples/features/memory/place_windows.jet",
+            "Examples/features/memory/place_windows.jet",
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -3337,7 +3337,7 @@ fn owner_backed_collection_example_runs_production_pipeline() {
         .args([
             "run",
             "--release",
-            "examples/features/memory/owner_backed_views.jet",
+            "Examples/features/memory/owner_backed_views.jet",
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -3955,7 +3955,7 @@ fn run() {
 #[test]
 fn zero_copy_parser_example_covers_production_pipeline() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "examples/features/memory/returned_views.jet"])
+        .args(["run", "Examples/features/memory/returned_views.jet"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("run the returned-views example through the production CLI");

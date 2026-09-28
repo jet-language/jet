@@ -229,7 +229,9 @@ impl BootstrapRunCompletionOwner {
                 (0, 0, false)
             } else {
                 match &self.callback_jobs {
-                    Some(callback_jobs) => match callback_jobs.drain() {
+                    Some(callback_jobs) => {
+                        callback_jobs.close_admission();
+                        match callback_jobs.drain() {
                         jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
                             open_callback_sessions,
                             pending_jobs,
@@ -241,7 +243,8 @@ impl BootstrapRunCompletionOwner {
                             state.failures = failures;
                             (0, 0, false)
                         }
-                    },
+                        }
+                    }
                     None => {
                         state.complete = true;
                         (0, 0, false)
@@ -304,12 +307,7 @@ impl BootstrapRunCompletionOwner {
             }
         };
         for completion in newly_retired {
-            if let Err(completion) = self
-                .scope
-                .with_current(|| jet_jit::SourceExecutionCompletionScope::record_current(completion))
-            {
-                return Err(BootstrapRunCompletionFinishError::Unrouted(completion));
-            }
+            self.scope.record(completion);
         }
         let completions = self.scope.drain();
         if !completions.is_empty() {
@@ -750,7 +748,9 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
         selected_factory_tier,
         actual_factory_tier,
     } = result;
-    completion_owner.set_resources(resources.clone());
+    if let Some(resources) = resources.as_ref() {
+        completion_owner.set_resources(resources.clone());
+    }
     let actual_tier_is_valid = match (factory_tier, actual_factory_tier) {
         (BootstrapFactoryTier::Aot, BootstrapFactoryTier::Aot)
         | (
@@ -1195,11 +1195,7 @@ fn record_source_completions(
     completions: Vec<jet_jit::SourceExecutionCompletion>,
 ) -> Result<(), BootstrapRunError> {
     for completion in completions {
-        if let Err(completion) =
-            scope.with_current(|| jet_jit::SourceExecutionCompletionScope::record_current(completion))
-        {
-            return Err(BootstrapRunError::UnroutedCompletion(completion));
-        }
+        scope.record(completion);
     }
     Ok(())
 }

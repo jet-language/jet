@@ -40,7 +40,7 @@ fn check_generated_view(manifest_dir: &Path, source: &str, generated: &str) {
     let actual = generated_hash(&generated_path);
     if actual != expected {
         panic!(
-            "generated table {} is stale for {}; run `node scripts/agent/gen-core-tables.mjs --write`",
+            "generated table {} is stale for {}; run `node Tools/agent/gen-core-tables.mjs --write`",
             generated_path.display(),
             source_path.display(),
         );

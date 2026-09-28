@@ -155,22 +155,22 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> ?MirPreludeCall
     symbol :: "jet_std::jet_int_{member}"
     mask :: loop index in 0..<arity -> false
     mask_names :: loop item in mask -> if item -> "true" else -> "false"
-    effect :: if arity == 4 -> Val(Effect.Panic) else -> None
+    route_effect :: if arity == 4 -> Val(Effect.Panic) else -> None
     effect_identity :: if arity == 4 -> "Some(Panic)" else -> "None"
     identity :: "Overflow:core.numeric:{member}:{symbol}:{arity}:{arity}:[{mask_names.join(", ")}]:{effect_identity}:Infallible:Value"
-    MirPreludeCall{
+    Val(MirPreludeCall{
         id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
         family: MirPreludeFamily.Overflow,
         module_name: "core.numeric",
         member: member,
         symbol: MirSymbol.Prelude(symbol),
         signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
-        effect: effect,
+        effect_kind: route_effect,
         fallibility: MirCallFallibility.Infallible,
         abi: MirPreludeAbi.Value,
         authority: None,
         db_metadata: None,
-    }
+    })
 }
 
 // Comparison primitives use the checked core.compare BuiltinMethod row even
@@ -183,17 +183,17 @@ pub fn jet_eval_exact_compare_row(member: String) -> ?MirPreludeCall {
     }
     if !supported -> return None
     identity :: "BuiltinMethod:core.compare:{member}:jet_int_compare:2:2:[true, true]:None:Infallible:Value"
-    MirPreludeCall{
+    Val(MirPreludeCall{
         id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
         family: MirPreludeFamily.BuiltinMethod,
         module_name: "core.compare",
         member: member,
         symbol: MirSymbol.Prelude("jet_int_compare"),
         signature: MirCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, true}},
-        effect: None,
+        effect_kind: None,
         fallibility: MirCallFallibility.Infallible,
         abi: MirPreludeAbi.Value,
         authority: None,
         db_metadata: None,
-    }
+    })
 }

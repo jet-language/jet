@@ -7,7 +7,7 @@
 //! is a compatibility provider (D-JPK5).
 //!
 //! Built std-only (I6) and independent from the `jet` binary (D-JPK1). The
-//! consolidated plan lives in `docs/spec/reference/metaprogramming.md`.
+//! consolidated plan lives in `Docs/spec/reference/metaprogramming.md`.
 
 #![allow(non_snake_case)]
 #![deny(warnings)]

@@ -1,0 +1,167 @@
+// Epoch 4 package visibility core (D-WD3), ported from jetpack::PackageGraph.
+//
+// User-facing catalog syntax is still gated. This is the strict graph
+// substrate: a package sees its declared dependencies only, plus catalog
+// edges a caller-owned surface already selected.
+
+pub struct PackageNode {
+    pub name: String
+    pub direct_deps: [String]
+    pub transitive_deps: [String]
+
+    fn new(name: String) -> PackageNode !Never {
+        PackageNode{name: name, direct_deps: [String]{}, transitive_deps: [String]{}}
+    }
+
+    fn with_deps(self, deps: [String]) -> PackageNode !Never {
+        out := self
+        out.direct_deps = deps
+        out
+    }
+
+    fn with_transitives(self, deps: [String]) -> PackageNode !Never {
+        out := self
+        out.transitive_deps = deps
+        out
+    }
+}
+
+pub struct CatalogEntry {
+    pub logical_name: String
+    pub provider_ref: String
+    pub version_rule: String
+    pub allowed_packages: [String]
+    pub owner_workspace: String
+    pub rationale: String
+}
+
+pub enum VisibleEdgeKind {
+    DirectDep
+    Catalog
+}
+
+pub struct VisibleEdge {
+    pub owner_package: String
+    pub dependency: String
+    pub provider_ref: String
+    pub kind: VisibleEdgeKind
+    pub rationale: String
+}
+
+// How a package can make a hidden dependency visible.
+pub enum MissingDependencyFix {
+    DirectAddPath(dep: String, path: String)
+    DirectAddGit(dep: String, url: String, tag_name: String)
+    CatalogData(logical_name: String, packages: [String])
+    DisambiguateMember(candidates: [String])
+}
+
+// A dependency a package asked for but cannot see.
+#Error
+pub struct MissingDependency {
+    pub owner_package: String
+    pub requested: String
+    pub reason: String
+    pub fix: MissingDependencyFix
+
+    // The fix as one teaching sentence.
+    fn fix_text(self) -> String !Never {
+        if self.fix == {
+            .DirectAddPath(dep, path) -> "run `jet add {dep} --path {path}`"
+            .DirectAddGit(dep, url, tag_name) -> "run `jet add {dep} --git {url} --tag {tag_name}`"
+            .CatalogData(logical_name, packages) -> "add catalog data for `{logical_name}` and allow packages: {packages.join(", ")}"
+            .DisambiguateMember(candidates) -> "choose one workspace member: {candidates.join(", ")}"
+        }
+    }
+}
+
+pub struct PackageGraph {
+    packages: [String: PackageNode]
+    catalogs: [CatalogEntry]
+    workspace_members: [String: [String]]
+
+    fn new() -> PackageGraph !Never {
+        PackageGraph{packages: [String: PackageNode]{}, catalogs: [CatalogEntry]{}, workspace_members: [String: [String]]{}}
+    }
+
+    // Add or replace the package with this name.
+    fn add_package(&self, node: PackageNode) !Never {
+        self.packages[node.name] = node
+    }
+
+    fn add_catalog(&self, entry: CatalogEntry) !Never {
+        self.catalogs.push(entry)
+    }
+
+    fn add_workspace_member(&self, name: String, path: String) !Never {
+        paths := self.workspace_members.get(name) ?? [String]{}
+        paths.push(path)
+        self.workspace_members[name] = paths
+    }
+
+    // The package's declared direct dependencies and the catalog entries
+    // that allow it, ordered by dependency name; ties keep that order.
+    fn visible_edges(self, owner_package: String) -> [VisibleEdge] !Never {
+        edges := [VisibleEdge]{}
+        if self.packages.get(owner_package) == {
+            .Val(node) -> {
+                loop dep in node.direct_deps {
+                    edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~dep, provider_ref: ~dep, kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
+                }
+            }
+            .None -> {}
+        }
+        loop catalog in self.catalogs {
+            if catalog.allowed_packages.contains(owner_package) {
+                edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~catalog.logical_name, provider_ref: ~catalog.provider_ref, kind: VisibleEdgeKind.Catalog, rationale: ~catalog.rationale})
+            }
+        }
+        provider_graph_stable_sort_edges(edges)
+    }
+
+    // The edge that makes `requested` visible to the package, or the reason it
+    // is hidden and the fix: pick a member when the name is an ambiguous
+    // workspace member, add catalog data when several packages already use it
+    // transitively, else add it as a direct path dependency.
+    fn check_visible(self, owner_package: String, requested: String) -> VisibleEdge !MissingDependency {
+        loop edge in self.visible_edges(owner_package) {
+            if edge.dependency == requested -> return Ok(edge)
+        }
+        if self.workspace_members.get(requested) == {
+            .Val(candidates) -> {
+                if candidates.len() > 1 {
+                    return Err(MissingDependency{owner_package: ~owner_package, requested: ~requested, reason: "`{owner_package}` asked for `{requested}`, but that name is ambiguous", fix: MissingDependencyFix.DisambiguateMember{candidates: candidates}})
+                }
+            }
+            .None -> {}
+        }
+        packages_using :: self.packages_using_hidden_dep(requested)
+        fix :: if packages_using.len() > 1 -> MissingDependencyFix.CatalogData{logical_name: ~requested, packages: packages_using} else -> MissingDependencyFix.DirectAddPath{dep: ~requested, path: "../{requested}"}
+        Err(MissingDependency{owner_package: ~owner_package, requested: ~requested, reason: "`{owner_package}` can use only direct deps or selected catalog deps; `{requested}` is not visible", fix: fix})
+    }
+
+    // Names of the packages that reach `dep` transitively, sorted.
+    fn packages_using_hidden_dep(self, dep: String) -> [String] !Never {
+        names := [String]{}
+        loop entry in self.packages {
+            if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) -> names.push(entry.key)
+        }
+        names.sort()
+        names
+    }
+}
+
+// Order edges by dependency name, keeping insertion order among equal names.
+fn provider_graph_stable_sort_edges(edges: [VisibleEdge]) -> [VisibleEdge] !Never {
+    sorted := [VisibleEdge]{}
+    loop edge in edges {
+        position := sorted.len()
+        loop position > 0 && (sorted[position - 1].dependency <=> edge.dependency) == Ordering.Greater -> position -= 1
+        shifted := [VisibleEdge]{}
+        loop index in 0..<position -> shifted.push(sorted[index])
+        shifted.push(edge)
+        loop index in position..<sorted.len() -> shifted.push(sorted[index])
+        sorted = shifted
+    }
+    sorted
+}

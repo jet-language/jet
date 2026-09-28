@@ -44,7 +44,7 @@ pub struct IdentityBlock {
 /// Frozen-forward identity pre-parse (T1). Reads only the Package identity
 /// fields, tolerating any other top-level key, any unknown nested block, and
 /// any surrounding syntax. Independent of the full manifest parser on
-/// purpose: this grammar is CONTRACT-FROZEN (documented in `docs/spec/spec.md`)
+/// purpose: this grammar is CONTRACT-FROZEN (documented in `Docs/spec/spec.md`)
 /// and must never be narrowed.
 pub fn identity_preparse(text: &str) -> IdentityBlock {
     let text = strip_line_comments(text);
@@ -682,7 +682,7 @@ pub fn init_manifest(name: &str, channel: &str) -> String {
 }
 
 // ──────────────────────────────────────────────
-// Diagnostics (E1249 / E1250 / E1251) — docs/spec/diagnostics.md
+// Diagnostics (E1249 / E1250 / E1251) — Docs/spec/diagnostics.md
 // ──────────────────────────────────────────────
 
 /// E1249 — a `jet:` pin value is not a valid version/channel ref.

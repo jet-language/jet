@@ -86,9 +86,9 @@ fn knowledge_tier_web_source() -> &'static str {
 // meaning across every compiler-facing and hosted tier. Reuse the ratified
 // range example and its golden output; this matrix adds the missing per-tier
 // proof without creating a second numeric example or spelling.
-const NUMBER_GRID_EXAMPLE: &str = include_str!("../examples/features/types/range_types.jet");
+const NUMBER_GRID_EXAMPLE: &str = include_str!("../Examples/features/types/range_types.jet");
 const NUMBER_GRID_EXPECTED: &str =
-    include_str!("../examples/features/expected/types/range_types.out");
+    include_str!("../Examples/features/expected/types/range_types.out");
 const NUMBER_GRID_WEB_SOURCE: &str = r#"#Target(Web)
 fn set_brightness(level: Int(0..100)) -> Int(0..100) -> level
 
@@ -371,12 +371,12 @@ fn source_gate_kinds_keep_their_written_reasons() {
 #[test]
 fn range_knowledge_gate_has_three_tier_example_parity() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let example = "examples/features/types/range_types.jet";
+    let example = "Examples/features/types/range_types.jet";
     let release = stdout(&run(root, &["run", "--release", example]));
     let default = stdout(&run(root, &["run", example]));
     let interpret = stdout(&run(root, &["run", "--interpret", example]));
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/types/range_types.out"))
+        fs::read_to_string(root.join("Examples/features/expected/types/range_types.out"))
             .expect("range_types golden output");
     assert_eq!(release, expected);
     assert_eq!(default, expected);
@@ -417,7 +417,7 @@ fn ledger_json_and_generated_rust_are_stable_across_two_builds() {
 #[test]
 fn structure_inspection_is_read_only_and_structure_facts_erase_before_runtime() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let example = "examples/features/tooling/structure_plane.jet";
+    let example = "Examples/features/tooling/structure_plane.jet";
 
     let rust_before = stdout(&run(root, &["emit", "--rust", example]));
     let run_before = stdout(&run(root, &["run", example]));
@@ -710,7 +710,7 @@ fn i9_number_grid_aot_keeps_the_golden_behavior() {
         &[
             "run",
             "--release",
-            "examples/features/types/range_types.jet",
+            "Examples/features/types/range_types.jet",
         ],
     ));
     assert_eq!(output, NUMBER_GRID_EXPECTED);

@@ -1,6 +1,6 @@
 //! Diagnostics: every user-facing error in the language flows through here.
 //!
-//! Contract (docs/spec/diagnostics.md): every Diagnostic has a stable code,
+//! Contract (Docs/spec/diagnostics.md): every Diagnostic has a stable code,
 //! a `what` (one line, plain language), a `why` (the rule behind it), and
 //! a `fix` (a concrete next step, copy-pasteable when possible). Typed rows
 //! own those templates and static machine metadata; raise sites supply any
@@ -856,7 +856,7 @@ impl Diagnostic {
         diagnostic
     }
 
-    /// Render in the exact format specified by docs/spec/diagnostics.md, plain
+    /// Render in the exact format specified by Docs/spec/diagnostics.md, plain
     /// (no color). The ui snapshot tests pin this format; change it
     /// deliberately. This is the byte-stable form scripts and CI parse.
     pub fn render(&self, file: &str, src: &str) -> String {

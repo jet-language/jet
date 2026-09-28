@@ -1,7 +1,7 @@
 // The strict JIT<->AOT differential corpus gate (#2020).
 //
 // Own target: it classifies all ~500 stems with an AOT build each, and
-// `tools/ci/jit-aot-parity.sh` already runs it as its own invocation.
+// `Tools/ci/jit-aot-parity.sh` already runs it as its own invocation.
 
 /// #2013: the ledger accounts for the whole corpus — checked with no run at all.
 ///
@@ -9,7 +9,7 @@
 /// host and an AOT build per stem and returns green early where the host is
 /// unsupported, so `tests/jit_corpus_gate.txt` could — and did — drift to 374
 /// rows against a 496-stem corpus without any check firing. This one parses the
-/// ledger and walks `examples/features/<topic>/`; it runs everywhere, in
+/// ledger and walks `Examples/features/<topic>/`; it runs everywhere, in
 /// milliseconds, and says nothing about which tier runs a stem.
 #[test]
 fn corpus_gate_manifest_accounts_for_every_example() {
@@ -166,7 +166,7 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
             .map_or(true, |filter| filter.trim().is_empty())
     {
         let gate = std::process::Command::new("node")
-            .arg("scripts/agent/closeout-gate.mjs")
+            .arg("Tools/agent/closeout-gate.mjs")
             .arg("check")
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
@@ -179,7 +179,7 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
         );
     }
     let denominator = std::process::Command::new("node")
-        .arg("scripts/agent/core-conformance.mjs")
+        .arg("Tools/agent/core-conformance.mjs")
         .arg("--check")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -263,7 +263,7 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
 #[test]
 fn core_conformance_checker_rejects_structural_false_greens() {
     let output = std::process::Command::new("node")
-        .arg("scripts/agent/core-conformance.mjs")
+        .arg("Tools/agent/core-conformance.mjs")
         .arg("--hostile-fixtures")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -306,10 +306,10 @@ fn core_conformance_checker_rejects_structural_false_greens() {
 /// and were dropped from the differential (#2016).
 /// parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
 ///
-/// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
+/// c730: CI runs this via `Tools/ci/jit-aot-parity.sh` on every supported
 /// native x86_64 host (Linux/macOS/Windows). Set the shard index/count to run
 /// one weighted corpus slice; each slice writes its report, and
-/// `tools/ci/compose-corpus-gate.sh` composes the ledger. Set
+/// `Tools/ci/compose-corpus-gate.sh` composes the ledger. Set
 /// `JET_CORPUS_GATE_REPORT_DIR` to write the report bundle.
 #[test]
 fn example_corpus_strict_jit_aot_differential_gate() {
@@ -473,7 +473,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional \
          ratchet move (D-VERDICT-1254-1: run_tier_broken may only shrink). Refresh with \
          JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
-         bash tools/ci/jit-aot-parity.sh"
+         bash Tools/ci/jit-aot-parity.sh"
     );
     let aot_oracle: Vec<_> = records
         .iter()

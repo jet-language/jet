@@ -172,6 +172,15 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the `??` fallback block")?;
         let mut body = Vec::new();
         loop {
+            // S6-R: a nested block statement ends at `}`, so consume the
+            // lexer-inserted zero-width terminator before the next fallback
+            // item. Authored semicolons remain visible to the diagnostics.
+            if matches!(self.peek().kind, TokKind::Semi)
+                && self.peek().span.start == self.peek().span.end
+            {
+                self.bump();
+                continue;
+            }
             match &self.peek().kind {
                 TokKind::RBrace => {
                     let span = self.peek().span;

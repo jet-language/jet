@@ -71,6 +71,142 @@ pub struct SemaNameReferenceFact {
     pub kind: String
 }
 
+pub enum SemaLoopValueKind {
+    Effect
+    Collecting
+    Result
+}
+
+pub struct SemaLoopValueFrame {
+    pub label: ?String
+    pub kind: SemaLoopValueKind
+    pub ty: ?Type
+}
+
+pub struct SemaPendingLoopValue {
+    pub label: ?String
+    pub kind: SemaLoopValueKind
+    pub ty: ?Type
+}
+
+pub struct SemaLoopBreakFlows {
+    pub paths: [SemaOwnershipState]
+}
+
+pub fn sema_loop_value_kind_effect() -> SemaLoopValueKind {
+    SemaLoopValueKind.Effect
+}
+
+pub fn sema_loop_value_kind_collecting() -> SemaLoopValueKind {
+    SemaLoopValueKind.Collecting
+}
+
+pub fn sema_loop_value_kind_result() -> SemaLoopValueKind {
+    SemaLoopValueKind.Result
+}
+
+pub fn sema_loop_value_set_pending(context: &SemaCheckContext, kind: SemaLoopValueKind, label: ?String) {
+    context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: None})
+}
+
+pub fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopValueKind, label: ?String, ty: ?Type) {
+    context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
+}
+
+pub fn sema_loop_value_push_frame(context: &SemaCheckContext, label: ?String) {
+    pending := context.pending_loop_value
+    context.pending_loop_value = None
+    kind := SemaLoopValueKind.Effect
+    resolved_label := label
+    result_type := None
+    if pending == .Val(value) {
+        kind = value.kind
+        if value.label != None -> resolved_label = value.label
+        result_type = value.ty
+    }
+    context.loop_value_frames.push(SemaLoopValueFrame{kind: kind, label: resolved_label, ty: result_type})
+    context.loop_break_flows.push(SemaLoopBreakFlows{paths: [SemaOwnershipState]{}})
+}
+
+pub fn sema_loop_value_pop_frame(context: &SemaCheckContext) {
+    if context.loop_value_frames.len() == 0 -> return
+    frame :: context.loop_value_frames.pop() ?? return
+    if context.loop_break_flows.len() > 0 -> _ := context.loop_break_flows.pop()
+    if frame.kind == SemaLoopValueKind.Result -> context.last_loop_result_type = frame.ty
+}
+
+pub fn sema_loop_value_resolve_frame(context: SemaCheckContext, label: ?String) -> ?Int {
+    index := context.loop_value_frames.len() - 1
+    if label == .Val(name) {
+        loop index >= 0 {
+            if context.loop_value_frames[index].label == .Val(name) -> return Val(index)
+            index -= 1
+        }
+        return None
+    }
+    if index >= 0 -> return Val(index)
+    None
+}
+
+pub fn sema_loop_value_record_break(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) {
+    if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return
+    context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
+}
+
+pub fn sema_loop_value_set_result_type(context: &SemaCheckContext, frame_index: Int, ty: Type) {
+    if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return
+    context.loop_value_frames[frame_index].ty = Val(ty)
+}
+
+pub fn sema_loop_value_result_type(context: SemaCheckContext, frame_index: Int) -> ?Type {
+    if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return None
+    context.loop_value_frames[frame_index].ty
+}
+
+pub fn sema_loop_value_break_flows(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] {
+    if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
+    context.loop_break_flows[frame_index].paths
+}
+
+pub fn sema_loop_value_push_collecting_type(context: &SemaCheckContext) {
+    context.collect_item_types.push(None)
+}
+
+pub fn sema_loop_value_pop_collecting_type(context: &SemaCheckContext) -> ?Type {
+    if context.collect_item_types.len() == 0 -> return None
+    context.collect_item_types.pop() ?? None
+}
+
+pub fn sema_loop_value_collecting_type(context: SemaCheckContext) -> ?Type {
+    if context.collect_item_types.len() == 0 -> return None
+    context.collect_item_types[context.collect_item_types.len() - 1]
+}
+
+pub fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type) {
+    if context.collect_item_types.len() == 0 -> return
+    context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
+}
+
+pub fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    if ty == Type.Named("Unit") {
+        diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
+        return false
+    }
+    existing :: sema_loop_value_collecting_type(context)
+    if existing == None {
+        sema_loop_value_set_collecting_type(context, ty)
+        return true
+    }
+    expected :: existing ?? ty
+    if type_identity_equal(expected, ty) -> return true
+    joined :: sema_expr_numeric_join(expected, ty) ?? {
+        diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is {type_name(ty)} instead of {type_name(expected)}", "convert every item to one type, or split the loops"))
+        return false
+    }
+    sema_loop_value_set_collecting_type(context, joined)
+    true
+}
+
 pub struct SemaScopeLoopLabel {
     pub name: String
 }
@@ -98,11 +234,46 @@ pub fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statem
     body_id
 }
 
+pub struct SemaCheckedTextEvaluation {
+    pub module_identity: String
+    pub key: String
+    pub type_name: String
+    pub source_file: String
+    pub source_expression: Expr
+    pub expression: TExpr
+    pub hardware_use: MirTargetHardwareUse
+    pub reachable_function_keys: [String]
+    pub dependencies: [String]
+    pub span: Span
+}
+
 pub struct SemaComptimeRequest {
     pub callee_key: String
     pub module_identity: String
     pub args: [TComptimeValue]
     pub span: Span
+    pub checked_text: ?SemaCheckedTextEvaluation
+}
+
+pub struct SemaComptimeBodySource {
+    pub module_identity: String
+    pub function_key: String
+    pub source_file: String
+    pub key: String
+    pub destination_key: String
+    pub name: String
+    pub expression: Expr
+    pub expected_type: Type
+    pub span: Span
+    pub site_span: Span
+}
+
+pub struct SemaComptimeBodyValue {
+    pub module_identity: String
+    pub key: String
+    pub destination_key: String
+    pub value: TComptimeValue
+    pub ty: Type
 }
 
 pub struct SemaScopeEnvironment {
@@ -116,17 +287,20 @@ pub struct SemaScopeEnvironment {
     pub checked_types: [TTypeDef]
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
+    pub comptime_body_values: [SemaComptimeBodyValue]
 }
-
+ 
 pub struct SemaCheckContext {
     pub exact_int_reachable: Bool
     pub unsafe_depth: Int
     pub borrow_ctx: Bool
     pub allow_string_view_read: Bool
+    pub allow_fixed_constructor: Bool
     pub generic_params: [TGenericParam]
     pub lambda_escapes: ?Bool
     pub lambda_statement_tails: [SemaStatementTailFrame]
     pub call_facts: [SemaCallSiteFact]
+    pub hardware_use: MirTargetHardwareUse
     pub call_return_views: [SemaCallReturnView]
     pub local_view_provenance: [SemaLocalViewProvenance]
     pub return_view_receiver_key: String
@@ -134,19 +308,43 @@ pub struct SemaCheckContext {
     pub return_view_provenance: ?ViewProvenanceMap
     pub name_references: [SemaNameReferenceFact]
     pub comptime_requests: [SemaComptimeRequest]
+    pub comptime_body_sources: [SemaComptimeBodySource]
+    pub comptime_body_values: [SemaComptimeBodyValue]
+    pub compute_calls: [SemaComputeCallFact]
+    pub autodiff_obligations: [SemaAutodiffObligation]
+    pub autodiff_safe_panic: Bool
+    pub autodiff_unsafe_panic: Bool
+    pub autodiff_safe_panic_context: Bool
     pub copy_events: [SemaCopyEvent]
+    pub loop_value_frames: [SemaLoopValueFrame]
+    pub loop_break_flows: [SemaLoopBreakFlows]
+    pub pending_loop_value: ?SemaPendingLoopValue
+    pub collect_item_types: [?Type]
+    pub last_loop_result_type: ?Type
+    pub arrow_loop_body: Bool
+    pub reactive_upgrades: [String]
+    pub reactive_upgrade_names: [String]
+    pub reactive_local_keys: [String]
+    pub reactive_shared_keys: [String]
+    pub taskgroups: SemaTaskGroupState
 }
+
+ 
 
 pub struct SemaScopeTable {
     pub frames: [SemaScopeFrame]
     pub bindings: [SemaScopeBinding]
     pub loop_labels: [SemaScopeLoopLabel]
+    pub hardware_transfers: [SemaHardwareDmaTransferFact]
+    pub hardware_definite_transfers: [SemaHardwareDmaTransferFact]
+    pub hardware_pending_transfers: [SemaHardwareDmaTransferFact]
     pub current: Int
     pub return_type: ?Type
     pub failure_carrier: ?TFailureCarrier
     pub knowledge_gate: ?SemaKnowledgeGate
     pub loop_depth: Int
     pub ownership_call_depth: Int
+    pub comptime_execution_depth: Int
     pub transaction_depth: Int
     pub transaction_wall_depth: Int
     pub unit_explicit_units: Bool
@@ -164,19 +362,20 @@ pub fn sema_scope_environment_init(graph: ?SemaRegistrationGraph, module_identit
         checked_types: checked_types,
         declarations: declarations,
         generic_params: [TGenericParam]{},
+        comptime_body_values: [SemaComptimeBodyValue]{},
     }
 }
 
 pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolId, edge: String) -> Bool {
     graph :: environment.registration_graph ?? return false
-    loop module in graph.modules {
-        loop nominal in module.nominals {
+    loop module_row in graph.modules {
+        loop nominal in module_row.nominals {
             if nominal.symbol.id.key == owner.key {
                 loop checked in environment.checked_types {
-                    if checked.module_identity == module.module_identity && checked.name == nominal.symbol.name -> return sema_checked_type_has_boxed_edge(checked, edge)
+                    if checked.module_identity == module_row.module_identity && checked.name == nominal.symbol.name -> return sema_checked_type_has_boxed_edge(checked, edge)
                 }
                 definition :: sema_registration_nominal_source_item(nominal.source) ?? return false
-                checked_edges := sema_checked_boxed_edges(graph, module, definition)
+                checked_edges := sema_checked_boxed_edges(graph, module_row, definition)
                 loop checked_edge in checked_edges {
                     if checked_edge == edge -> return true
                 }
@@ -187,15 +386,28 @@ pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owne
     false
 }
 
+pub fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] {
+    result := [SemaLoopBreakFlows]{}
+    loop frame in source {
+        paths := [SemaOwnershipState]{}
+        loop path in frame.paths -> paths.push(sema_ownership_state_snapshot(path))
+        result.push(SemaLoopBreakFlows{paths: paths})
+    }
+    result
+}
+
 pub fn sema_check_context_init() -> SemaCheckContext {
     SemaCheckContext{
         exact_int_reachable: false,
         unsafe_depth: 0,
         borrow_ctx: false,
         allow_string_view_read: false,
+        allow_fixed_constructor: false,
         generic_params: [TGenericParam]{},
         lambda_escapes: Val(true),
+        lambda_statement_tails: [SemaStatementTailFrame]{},
         call_facts: [SemaCallSiteFact]{},
+        hardware_use: sema_hardware_empty_use(),
         call_return_views: [SemaCallReturnView]{},
         local_view_provenance: [SemaLocalViewProvenance]{},
         return_view_receiver_key: "",
@@ -203,10 +415,28 @@ pub fn sema_check_context_init() -> SemaCheckContext {
         return_view_provenance: None,
         name_references: [SemaNameReferenceFact]{},
         comptime_requests: [SemaComptimeRequest]{},
-        lambda_statement_tails: [SemaStatementTailFrame]{},
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        comptime_body_values: [SemaComptimeBodyValue]{},
+        compute_calls: [SemaComputeCallFact]{},
+        autodiff_obligations: [SemaAutodiffObligation]{},
+        autodiff_safe_panic: false,
+        autodiff_unsafe_panic: false,
+        autodiff_safe_panic_context: false,
         copy_events: [SemaCopyEvent]{},
+        loop_value_frames: [SemaLoopValueFrame]{},
+        loop_break_flows: [SemaLoopBreakFlows]{},
+        pending_loop_value: None,
+        collect_item_types: [?Type]{},
+        last_loop_result_type: None,
+        reactive_upgrades: [String]{},
+        reactive_upgrade_names: [String]{},
+        reactive_local_keys: [String]{},
+        reactive_shared_keys: [String]{},
+        taskgroups: sema_taskgroup_state_init(),
+        arrow_loop_body: false,
     }
 }
+ 
 
 pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext {
     SemaCheckContext{
@@ -214,10 +444,11 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         unsafe_depth: source.unsafe_depth,
         borrow_ctx: source.borrow_ctx,
         allow_string_view_read: source.allow_string_view_read,
+        allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: ~source.generic_params,
-        lambda_escapes: source.lambda_escapes,
         lambda_statement_tails: ~source.lambda_statement_tails,
         call_facts: ~source.call_facts,
+        hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: ~source.call_return_views,
         local_view_provenance: ~source.local_view_provenance,
         return_view_receiver_key: source.return_view_receiver_key,
@@ -225,8 +456,32 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         return_view_provenance: ~source.return_view_provenance,
         name_references: ~source.name_references,
         comptime_requests: ~source.comptime_requests,
+        comptime_body_sources: ~source.comptime_body_sources,
+        comptime_body_values: ~source.comptime_body_values,
+        compute_calls: ~source.compute_calls,
+        autodiff_obligations: ~source.autodiff_obligations,
+        autodiff_safe_panic: source.autodiff_safe_panic,
+        autodiff_unsafe_panic: source.autodiff_unsafe_panic,
+        autodiff_safe_panic_context: source.autodiff_safe_panic_context,
         copy_events: ~source.copy_events,
+        loop_value_frames: ~source.loop_value_frames,
+        loop_break_flows: sema_loop_break_flows_snapshot(source.loop_break_flows),
+        pending_loop_value: source.pending_loop_value,
+        collect_item_types: ~source.collect_item_types,
+        last_loop_result_type: source.last_loop_result_type,
+        arrow_loop_body: source.arrow_loop_body,
+        reactive_upgrades: ~source.reactive_upgrades,
+        reactive_upgrade_names: ~source.reactive_upgrade_names,
+        reactive_local_keys: ~source.reactive_local_keys,
+        reactive_shared_keys: ~source.reactive_shared_keys,
+        taskgroups: sema_taskgroup_state_snapshot(source.taskgroups),
     }
+}
+
+fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+    result := [SemaHardwareDmaTransferFact]{}
+    loop fact in source -> result.push(fact)
+    result
 }
 
 pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable {
@@ -234,6 +489,9 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable {
         frames: ~source.frames,
         bindings: ~source.bindings,
         loop_labels: ~source.loop_labels,
+        hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
+        hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
+        hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_pending_transfers),
         current: source.current,
         knowledge_gate: source.knowledge_gate,
         return_type: source.return_type,
@@ -252,6 +510,9 @@ pub fn sema_scope_init(module_name: String) -> SemaScopeTable {
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
         loop_labels: [SemaScopeLoopLabel]{},
+        hardware_transfers: [SemaHardwareDmaTransferFact]{},
+        hardware_definite_transfers: [SemaHardwareDmaTransferFact]{},
+        hardware_pending_transfers: [SemaHardwareDmaTransferFact]{},
         current: 0,
         return_type: None,
         failure_carrier: None,
@@ -296,8 +557,63 @@ pub fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owne
 
 pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) {
     if table.current <= 0 -> return
+    leaving := table.current
+    remaining_transfers := [SemaHardwareDmaTransferFact]{}
+    loop fact in table.hardware_transfers {
+        if fact.buffer_frame != leaving -> remaining_transfers.push(fact)
+    }
+    remaining_definite := [SemaHardwareDmaTransferFact]{}
+    loop fact in table.hardware_definite_transfers {
+        if fact.scope_frame != leaving && fact.buffer_frame != leaving -> remaining_definite.push(fact)
+    }
+    remaining_pending := [SemaHardwareDmaTransferFact]{}
+    loop fact in table.hardware_pending_transfers {
+        if fact.buffer_frame != leaving -> remaining_pending.push(fact)
+    }
+    table.hardware_transfers = remaining_transfers
+    table.hardware_definite_transfers = remaining_definite
+    table.hardware_pending_transfers = remaining_pending
     sema_ownership_leave_scope(&state)
-    table.current = table.frames[table.current].parent
+    table.current = table.frames[leaving].parent
+}
+fn sema_scope_hardware_fact_equal(left: SemaHardwareDmaTransferFact, right: SemaHardwareDmaTransferFact) -> Bool {
+    left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
+}
+fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+    result := [SemaHardwareDmaTransferFact]{}
+    loop candidate in left {
+        loop other in right {
+            if sema_scope_hardware_fact_equal(candidate, other) {
+                result.push(candidate)
+                break
+            }
+        }
+    }
+    result
+}
+fn sema_scope_hardware_union(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+    result := sema_scope_hardware_transfers_snapshot(left)
+    loop candidate in right {
+        found := false
+        loop existing in result {
+            if sema_scope_hardware_fact_equal(candidate, existing) -> found = true
+        }
+        if !found -> result.push(candidate)
+    }
+    result
+}
+pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeTable, then_path: SemaScopeTable, else_path: SemaScopeTable, has_else: Bool) {
+    transfers := sema_scope_hardware_union(before.hardware_transfers, then_path.hardware_transfers)
+    definite := sema_scope_hardware_intersection(before.hardware_definite_transfers, then_path.hardware_definite_transfers)
+    pending := sema_scope_hardware_union(before.hardware_pending_transfers, then_path.hardware_pending_transfers)
+    if has_else {
+        transfers = sema_scope_hardware_union(transfers, else_path.hardware_transfers)
+        definite = sema_scope_hardware_intersection(definite, else_path.hardware_definite_transfers)
+        pending = sema_scope_hardware_union(pending, else_path.hardware_pending_transfers)
+    }
+    table.hardware_transfers = transfers
+    table.hardware_definite_transfers = definite
+    table.hardware_pending_transfers = pending
 }
 
 pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool {
@@ -532,11 +848,11 @@ pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolId) -> ?Symbol {
 
 pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolId) -> ?Item {
     if environment.registration_graph == .Val(graph) {
-        loop module in graph.modules {
-            loop function in module.functions {
+        loop module_row in graph.modules {
+            loop function in module_row.functions {
                 if function.symbol.id.key == id.key -> return Val(Item.Func(function.declaration))
             }
-            loop nominal in module.nominals {
+            loop nominal in module_row.nominals {
                 if nominal.symbol.id.key == id.key -> return sema_registration_nominal_source_item(nominal.source)
             }
         }

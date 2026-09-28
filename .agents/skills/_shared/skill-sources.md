@@ -7,7 +7,7 @@ skill yields to the owner guide.
 Source keys:
 
 - `R` — `.agents/skills/<name>/SKILL.md`.
-- `T` — `plugins/tower/skills/<name>/SKILL.md`.
+- `T` — `Tools/tower/skills/<name>/SKILL.md`.
 - `M` — `/home/nate/.omp/agent/managed-skills/<name>/SKILL.md`.
 - `H` — host plugin or cache copy under `$HOME/.claude` or `$HOME/.codex`.
 - `G` — `/home/nate/.agents/skills/<name>/SKILL.md`.
@@ -97,6 +97,6 @@ Source keys:
 
 ## Project discovery
 
-`.omp/config.yml` selects `.agents/skills` and `plugins/tower/skills` as canonical custom directories and excludes the four disabled logical names. The canonical ELI5 files override same-named managed copies; do not name-ignore ELI5 itself. Leave global settings and managed, installed-plugin, vendor, and cache sources untouched. Canonical in-repository Tower sources are editable when the owner requests their maintenance.
+The canonical custom skill directories are `.agents/skills` and `Tools/tower/skills`; each agent host is configured outside this repository to load them and to exclude the four disabled logical names. The canonical ELI5 files override same-named managed copies; do not name-ignore ELI5 itself. Leave global settings and managed, installed-plugin, vendor, and cache sources untouched. Canonical in-repository Tower sources are editable when the owner requests their maintenance.
 
 Check the effective name-to-file mapping with the installed host's real loader after discovery changes. The source checker only validates the inventory and source constraints; it does not prove routing behavior or enforce write permissions. Unmatched host catalogs have no Jet-specific route.

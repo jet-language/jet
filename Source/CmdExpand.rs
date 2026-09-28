@@ -125,7 +125,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                 "E2104",
                 "`jet inspect expand` needs an entry file",
                 "expand facts come from one checked Jet entry file",
-                "run `jet inspect expand --facts inline examples/features/basics/hello.jet`",
+                "run `jet inspect expand --facts inline Examples/features/basics/hello.jet`",
             );
         }
         if !json {

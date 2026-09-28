@@ -7,13 +7,13 @@ description: >-
 
 # Spec compliance audit
 
-Locate the relevant ratified section by searching `docs/spec/syntax-decisions.md` for the requested feature or decision. Follow only linked or task-triggered sections; do not preload unrelated specs. Compare that law with the parser, sema, tests, examples, and running behavior. Use only these status keys: `shipped`, `partial`, `gap`, `gated`, `declined`, `stale-doc`. Cite paths. Do not invent or reopen syntax.
+Locate the relevant ratified section by searching `Docs/spec/syntax-decisions.md` for the requested feature or decision. Follow only linked or task-triggered sections; do not preload unrelated specs. Compare that law with the parser, sema, tests, examples, and running behavior. Use only these status keys: `shipped`, `partial`, `gap`, `gated`, `declined`, `stale-doc`. Cite paths. Do not invent or reopen syntax.
 
 Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns comparison against ratified law, live probes, status keys, and finite closeout.
 
 ## Evidence
 
-Apply only the standing-lens probe and honesty sections relevant to the selected ratified sections. Skip unrelated questions, quantities, micro-sweep, or competitive work. A spec paragraph, code path, or test name is not proof of executable behavior. Run the real surface through `scripts/agent/jet-env` and read its output, exit code, and emitted paths before assigning `shipped`.
+Apply only the standing-lens probe and honesty sections relevant to the selected ratified sections. Skip unrelated questions, quantities, micro-sweep, or competitive work. A spec paragraph, code path, or test name is not proof of executable behavior. Run the real surface through `Tools/agent/jet-env` and read its output, exit code, and emitted paths before assigning `shipped`.
 
 ## Repeat and counterexample method
 
@@ -25,7 +25,7 @@ execution mode. Source coordinates and mutable line hashes are useful locators,
 but they do not establish cross-revision identity.
 
 For the bounded map-extrema rerun retained by
-[`mine-for-jet`](../../docs/audits/mine-for-jet-2026-09-10.md#f2-production-comptime-map-extrema-return-the-wrong-numeric-answer),
+[`mine-for-jet`](../../Docs/audits/mine-for-jet-2026-09-10.md#f2-production-comptime-map-extrema-return-the-wrong-numeric-answer),
 freeze these two cases across the applicable paths:
 
 - `{ "first": 2, "second": 10 }` requires `min = 2` and `max = 10`.
@@ -70,4 +70,4 @@ Keep these failures visible:
 
 Stop when every task-triggered ratified section has a status plus live evidence or an honest `unknown`, every required path and output is recorded, and the report's disposition marker is complete. `unknown` must name the missing probe or source; it never becomes `shipped` by distance. Report completion does not change a `gap`, `partial`, or `gated` status into implementation completion.
 
-This is a report-only method. Write one report under `docs/audits/` through the project-approved non-serve CLI, cite existing Tower records read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Do not reopen syntax during that authorized change.
+This is a report-only method. Write one report under `Docs/audits/` through the project-approved non-serve CLI, cite existing Tower records read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Do not reopen syntax during that authorized change.

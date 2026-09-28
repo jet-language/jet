@@ -14,10 +14,10 @@ contract. Do not run a suite merely because this skill was loaded.
 | Criterion or artifact | Conditional reference and canonical source |
 |---|---|
 | One card's observable criterion | [`references/criterion-evidence.md`](references/criterion-evidence.md); the card's named command and expected result |
-| Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `crates/jet-codegen/src/Prelude/Diagnostics.jet`, matching `tests/ui/` or `tests/ui_lint/`, `docs/spec/diagnostics.md`, and `examples/features/expected/` |
-| Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `crates/jet-foundation/src/Syntax.rs`, `docs/spec/syntax-decisions.md`, `docs/spec/contributing/examples.md`, and `examples/README.md` |
-| Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `scripts/agent/closeout-gate.mjs` |
-| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `scripts/agent/jet-env` |
+| Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `crates/jet-codegen/src/Prelude/Diagnostics.jet`, matching `tests/ui/` or `tests/ui_lint/`, `Docs/spec/diagnostics.md`, and `Examples/features/expected/` |
+| Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `crates/jet-foundation/src/Syntax.rs`, `Docs/spec/syntax-decisions.md`, `Docs/spec/contributing/examples.md`, and `Examples/README.md` |
+| Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `Tools/agent/closeout-gate.mjs` |
+| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `Tools/agent/jet-env` |
 
 ## Non-negotiable truth
 

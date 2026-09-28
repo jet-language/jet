@@ -1419,7 +1419,7 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_prompts_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let source = include_str!("../../examples/features/io/terminal_parity.jet");
+    let source = include_str!("../../Examples/features/io/terminal_parity.jet");
     // Same answers the checked-in golden was recorded with, from their one
     // home in `tests/common` (I8).
     let answers = common::example_stdin("io/terminal_parity")
@@ -1434,11 +1434,11 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
     assert_eq!(code, 0, "prompt fixture failed: {stderr}");
     assert_eq!(
         stdout,
-        include_str!("../../examples/features/expected/io/terminal_parity.out")
+        include_str!("../../Examples/features/expected/io/terminal_parity.out")
     );
     assert_eq!(
         stderr,
-        include_str!("../../examples/features/expected/io/terminal_parity.stderr.out")
+        include_str!("../../Examples/features/expected/io/terminal_parity.stderr.out")
     );
 
     #[cfg(unix)]

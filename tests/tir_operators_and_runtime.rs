@@ -533,7 +533,7 @@ fn list_bounds_stop_keeps_registered_code_across_tiers() {
 fn murmur3_port_matches_golden_on_default_release_and_interpreter() {
     assert_example_cli_tiers_agree(
         "ports/murmur3_x86_32",
-        include_str!("../examples/features/expected/ports/murmur3_x86_32.out"),
+        include_str!("../Examples/features/expected/ports/murmur3_x86_32.out"),
     );
 }
 

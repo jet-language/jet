@@ -8,8 +8,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
-const EXAMPLE: &str = include_str!("../examples/features/memory/shared_weak_cycle.jet");
-const EXPECTED: &str = include_str!("../examples/features/expected/memory/shared_weak_cycle.out");
+const EXAMPLE: &str = include_str!("../Examples/features/memory/shared_weak_cycle.jet");
+const EXPECTED: &str = include_str!("../Examples/features/expected/memory/shared_weak_cycle.out");
 
 fn fixture(tag: &str, source: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let root = common::unique_tmp(tag);

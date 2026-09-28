@@ -349,7 +349,7 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
 
     let emitted = tir_support::compile(
         "unsafe_sentries_shared_kernel",
-        include_str!("../examples/features/memory/unsafe_sentries_source_off.jet"),
+        include_str!("../Examples/features/memory/unsafe_sentries_source_off.jet"),
     );
     assert!(emitted.contains("mod jet_sentry {"));
     assert!(
@@ -362,7 +362,7 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
 /// execution tier; the sentry policy changes only the runtime witness.
 #[test]
 fn sentry_source_policy_off_is_tier_parity() {
-    let source = include_str!("../examples/features/memory/unsafe_sentries_source_off.jet")
+    let source = include_str!("../Examples/features/memory/unsafe_sentries_source_off.jet")
         .replace("use core.mem", "use core.mem as _mem");
     let (jit_code, jit_out, jit_err) = tir_support::jit_run("unsafe_sentries_source_off", &source);
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
@@ -481,13 +481,13 @@ fn run() {
     let cases = [
         (
             "unsafe_sentries_provenance",
-            include_str!("../examples/features/memory/unsafe_sentries_provenance.jet"),
+            include_str!("../Examples/features/memory/unsafe_sentries_provenance.jet"),
             "R0801",
             "The pointer is outside the allocation provenance",
         ),
         (
             "unsafe_sentries_quarantine",
-            include_str!("../examples/features/memory/unsafe_sentries.jet"),
+            include_str!("../Examples/features/memory/unsafe_sentries.jet"),
             "R0802",
             "storage after its lifetime ended",
         ),

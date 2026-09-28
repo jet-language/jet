@@ -25,7 +25,7 @@ Use the mode stated by the request. Do not ask again when the request says
 - If the mode is not stated and both routes are plausible, ask one focused mode
   question. Do not invent a route from context.
 
-If `gauntlet/matrix.json` is missing, Run cannot execute. Keep the stated mode,
+If `Tools/gauntlet/matrix.json` is missing, Run cannot execute. Keep the stated mode,
 report the missing matrix, and route the next owner decision to Build/update.
 Propose the matrix or its diff first. Do not seed or land a matrix, entry, or
 policy change until the owner approves that proposal. A missing matrix is not

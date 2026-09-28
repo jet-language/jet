@@ -806,7 +806,7 @@ fn build_artifact_receipt_collects_footprint_samples() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
 
     let source =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/performance/receipts/hello");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/performance/receipts/hello");
     let dir = isolated_cwd("build_artifact_receipt");
     copy_dir_all(&source, &dir);
     fs::remove_dir_all(dir.join(".jet")).ok();

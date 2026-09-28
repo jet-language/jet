@@ -10,12 +10,12 @@ use jet_foundation::Facts::BuildStamp;
 use std::fs;
 use std::process::Command;
 
-const FIXTURE: &str = include_str!("../examples/features/reflection/fact_reads.jet");
+const FIXTURE: &str = include_str!("../Examples/features/reflection/fact_reads.jet");
 const FIXTURE_EXPECTED: &str =
-    include_str!("../examples/features/expected/reflection/fact_reads.out");
-const AGGREGATE_FIXTURE: &str = include_str!("../examples/features/reflection/reflect-value.jet");
+    include_str!("../Examples/features/expected/reflection/fact_reads.out");
+const AGGREGATE_FIXTURE: &str = include_str!("../Examples/features/reflection/reflect-value.jet");
 const AGGREGATE_EXPECTED: &str =
-    include_str!("../examples/features/expected/reflection/reflect-value.out");
+    include_str!("../Examples/features/expected/reflection/reflect-value.out");
 
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     jet::compile(source).expect_err("the fixture must be rejected")
@@ -289,7 +289,7 @@ fn nested_reflection_fact_reads_fold_across_all_native_tiers() {
     if let Some(stdout) = web_stdout(
         "reflection-fact-reads-web",
         AGGREGATE_FIXTURE,
-        "examples/features/reflection/reflect-value.jet",
+        "Examples/features/reflection/reflect-value.jet",
     ) {
         assert_eq!(stdout, AGGREGATE_EXPECTED);
     }
@@ -311,7 +311,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
         "REPL fact read failed: {transcript}"
     );
 
-    let web = jet::compile_web_with_path(FIXTURE, "examples/features/reflection/fact_reads.jet")
+    let web = jet::compile_web_with_path(FIXTURE, "Examples/features/reflection/fact_reads.jet")
         .expect("web fact fixture must compile")
         .web
         .expect("web fact fixture must produce artifacts");
@@ -319,7 +319,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
     if let Some(stdout) = web_stdout(
         "fact-reads-web",
         FIXTURE,
-        "examples/features/reflection/fact_reads.jet",
+        "Examples/features/reflection/fact_reads.jet",
     ) {
         assert_eq!(stdout, FIXTURE_EXPECTED);
     }

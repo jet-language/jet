@@ -1,6 +1,6 @@
 # Report contract
 
-Write one Markdown report at `docs/audits/surface-frequency-audit-YYYY-MM-DD.md`. Apply the `simple` skill. Lead with the result.
+Write one Markdown report at `Docs/audits/surface-frequency-audit-YYYY-MM-DD.md`. Apply the `simple` skill. Lead with the result.
 
 Keep the main narrative below 4,000 words. Keep the executive summary below 800 words. Tables, citations, and collapsed appendices do not count toward this limit.
 

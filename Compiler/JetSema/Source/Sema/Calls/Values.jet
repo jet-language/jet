@@ -3,8 +3,8 @@
 
 fn sema_call_value_root_name(callee: Expr) -> ?String {
     if callee == {
-        .Ident(name, _) -> return Val(name)
-        .Paren(value, _) -> return sema_call_value_root_name(value)
+        .Ident(name, _) -> Val(name)
+        .Paren(value, _) -> sema_call_value_root_name(value)
         else -> None
     }
 }
@@ -15,33 +15,30 @@ fn sema_call_local_value_defaults(callee: Expr, binding: SemaCallBinding, enviro
     symbol :: sema_scope_resolve(scopes, name) ?? return None
     if symbol.kind != SymbolKind.Function -> return None
     declaration :: sema_scope_resolve_declaration(environment, symbol.id) ?? return None
-    func_opt := None
-    if declaration == {
-        .Func(value) -> func_opt = Val(value)
-        else -> {}
+    func :: if declaration == {
+        .Func(value) -> value
+        else -> {
+            return None
+        }
     }
-    func :: func_opt ?? return None
 
     defaults := [SemaCallDefaultValue]{}
-    index := 0
-    loop index < binding.default_refs.len() {
-        reference :: binding.default_refs[index]
+    loop reference in binding.default_refs {
         if reference.owner_key != symbol.id.key -> return None
-        parameter_index := reference.parameter_index
+        parameter_index :: reference.parameter_index
         if parameter_index < 0 || parameter_index >= func.params.len() -> return None
         expression :: func.params[parameter_index].default ?? return None
-        expression_span := expr_span(expression)
+        expression_span :: expr_span(expression)
         if expression_span.start != reference.span.start || expression_span.end != reference.span.end -> return None
-        source_file := sema_source_file_at(environment.source_segments, reference.source_file, environment.source_origin, expression_span)
+        source_file :: sema_source_file_at(environment.source_segments, reference.source_file, environment.source_origin, expression_span)
         if source_file != reference.source_file -> return None
         defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
-        index += 1
     }
-    return Val(defaults)
+    Val(defaults)
 }
 
 fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?SemaCallChecked {
-    resolved_signature := sema_call_resolved_type(signature, environment)
+    resolved_signature :: sema_call_resolved_type(signature, environment)
     params :: sema_call_params_from_value_type(resolved_signature) ?? {
         diagnostics.push(sema_call_not_callable("this function value", resolved_signature, span))
         return None
@@ -51,9 +48,8 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     resolved_defaults := defaults
     if binding.default_refs.len() > 0 {
         if resolved_defaults.len() == 0 {
-            if {
-                environment.registration_graph != None -> {
-                    graph :: environment.registration_graph ?? return None
+            if environment.registration_graph == {
+                .Val(graph) -> {
                     registered_defaults :: sema_call_registration_defaults(graph, binding) ?? {
                         diagnostics.push(sema_error("E0906", span, "a default argument for this function value could not be resolved", "registered callable defaults retain their graph identity and source location", "make every bound default available to Registration before checking this call"))
                         return None
@@ -74,46 +70,78 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     }
     lowered := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(resolved_signature) ?? return None
-    result_type := sema_call_resolved_type(result_type_raw, environment)
+    result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
-    root_name := sema_call_value_root_name(callee)
-    if root_name != None {
-        symbol := sema_scope_resolve(scopes, root_name ?? "")
-        if symbol != None {
-            target :: symbol ?? return None
-            declaration := sema_contract_function_for_symbol(environment, target.id)
-            if declaration != None {
-                contract :: declaration ?? return None
-                slots := [Int]{}
-                source_index := 0
-                loop source_index < resolved_binding.sources.len() {
-                    slots.push(sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], lowered[source_index]))
-                    source_index += 1
-                }
+    if sema_call_value_root_name(callee) == .Val(root_name) {
+        if sema_scope_resolve(scopes, root_name) == .Val(target) {
+            if sema_contract_function_for_symbol(environment, target.id) == .Val(contract) {
+                slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], lowered[source_index])
                 checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
             }
         }
     }
-    call_value := sema_tir_expr(result_type, TExprKind.IndirectCall(callee_value, [Type]{}, lowered, resolved_signature), span)
-    value := call_value
-    if contract_nodes.len() > 0 {
-        wrapped := contract_bindings
-        loop contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
-        wrapped.push(TStmt.ExprStmt(call_value, span))
-        value = sema_tir_expr(result_type, TExprKind.InlineBlock(wrapped), span)
+    call_value :: sema_tir_expr(result_type, TExprKind.IndirectCall(callee_value, [Type]{}, lowered, resolved_signature), span)
+    value :: if {
+        contract_nodes.len() > 0 -> {
+            wrapped := contract_bindings
+            loop contract in contract_nodes -> wrapped.push(TStmt.Contract(contract))
+            wrapped.push(TStmt.ExprStmt(call_value, span))
+            sema_tir_expr(result_type, TExprKind.InlineBlock(wrapped), span)
+        }
+        else -> call_value
     }
     checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return None
     facts :: sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
-    return_view_facts := sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, state, span)
+    return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, state, span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
+fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?SemaCallChecked {
+    expected_function := Type.Fn([Type]{}, expected, None, None, None, None)
+    previous_escapes := context.lambda_escapes
+    context.lambda_escapes = Val(false)
+    checked_lambda := sema_expression_lambda(lambda, Val(expected_function), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.lambda_escapes = previous_escapes
+    lambda_value :: checked_lambda ?? return None
+    signature :: lambda_value.ty
+    executable :: if lambda_value.kind == .Lambda(value) -> Val(value.executable) else -> None
+    body := [TStmt]{}
+    if executable == {
+        .Block(statements) -> body = statements
+        .SharedBlock(statements) -> body = statements
+        .Expr(value) -> body.push(TStmt.ExprStmt(value, value.span))
+        else -> {
+            diagnostics.push(sema_error("E0803", span, "an inline loop body is not executable", "the loop expression must retain its checked block as inline control flow", "use a loop expression parsed as a block"))
+            return None
+        }
+    }
+    result_type :: sema_call_signature_return(signature) ?? Type.Named("Unit")
+    inline_value :: sema_tir_expr(result_type, TExprKind.InlineBlock(body), span)
+    checked_value :: sema_expr_expected(inline_value, expected, environment, &diagnostics) ?? return None
+    checked_args := [CallArg]{}
+    binding :: sema_call_bind_value(signature, &checked_args, span, &diagnostics) ?? return None
+    facts :: sema_call_facts(signature, [Type]{}, binding) ?? return None
+    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, state, span)
+    Val(SemaCallChecked{value: checked_value, binding: binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+fn sema_call_value_is_inline_loop(callee: Expr, args: [CallArg]) -> Bool {
+    if args.len() != 0 -> return false
+    if callee == {
+        .Lambda(lambda) -> lambda.params.len() == 0 && (lambda.meta.collecting_loop || lambda.meta.result_loop)
+        else -> false
+    }
+}
+
 pub fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?SemaCallChecked {
+    if sema_call_value_is_inline_loop(callee, args) {
+        if callee == .Lambda(lambda) -> return sema_call_value_inline_loop(lambda, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     callee_value :: sema_check_expression(callee, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    signature := callee_value.ty
+    signature :: callee_value.ty
     if !sema_call_type_is_function(signature) {
         diagnostics.push(sema_call_not_callable("this function value", signature, span))
         return None

@@ -1,0 +1,297 @@
+// Source projection of CheckerCoreLib::web_fixed_sig. Keep this table exact:
+// it is independent from CoreCallRecord's erased arity/access metadata and
+// preserves the concrete argument and result types used by typed Core calls.
+
+fn core_web_type_parameter(name: String) -> CoreCallTypeParameter {
+    CoreCallTypeParameter{name: name, bounds: [String]{}, constraint: CoreCallTypeConstraint.Any}
+}
+
+fn core_web_type_parameters(names: [String]) -> [CoreCallTypeParameter] {
+    result := [CoreCallTypeParameter]{}
+    loop name in names -> result.push(core_web_type_parameter(name))
+    result
+}
+
+fn core_web_parameter(access: AccessConvention, ty: Type) -> CoreCallTypedParameter {
+    CoreCallTypedParameter{
+        name: "",
+        label: "",
+        zone: ParamZone.PositionalOnly,
+        access: access,
+        ty: ty,
+        default: None,
+    }
+}
+
+fn core_web_parameters(types: [Type], moved_index: ?Int) -> [CoreCallTypedParameter] {
+    result := [CoreCallTypedParameter]{}
+    loop (index, ty) in types {
+        access := if moved_index == (Val(index)) -> AccessConvention.Move else -> AccessConvention.Read
+        result.push(core_web_parameter(access, ty))
+    }
+    result
+}
+
+fn core_web_typed_signature(module_name: String, member: String, parameter_types: [Type], return_type: Type, type_parameters: [String], moved_index: ?Int) -> CoreTypedCallSignature {
+    parameters := core_web_parameters(parameter_types, moved_index)
+    CoreTypedCallSignature{
+        module_name: module_name,
+        member: member,
+        min_arity: parameters.len(),
+        max_arity: parameters.len(),
+        parameters: parameters,
+        return_type: Val(return_type),
+        type_parameters: core_web_type_parameters(type_parameters),
+        result_rule: CoreCallResultRule.Declared,
+    }
+}
+
+fn core_web_named(name: String) -> Type {
+    Type.Named(name)
+}
+
+fn core_web_list(inner: Type) -> Type {
+    Type.List(inner)
+}
+
+fn core_web_map_string() -> Type {
+    Type.Map(Type.String, None, Type.String)
+}
+
+fn core_web_fn0(result: Type) -> Type {
+    Type.Fn([Type]{}, Val(result), None, None, None, None)
+}
+
+fn core_web_fn1(parameter: Type, result: Type) -> Type {
+    Type.Fn([Type]{parameter}, Val(result), None, None, None, None)
+}
+
+fn core_web_apply(name: String, argument: Type) -> Type {
+    Type.Apply(name, [Type]{argument})
+}
+
+fn core_web_result_error(ok: Type, error: String) -> Type {
+    Type.Result(ok, core_web_named(error))
+}
+
+fn core_web_unit() -> Type {
+    core_web_named("Unit")
+}
+
+// Mirrors every arm in native web_fixed_sig, including the two data.sketch
+// entries that are physically owned by that native table.
+pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTypedCallSignature {
+    if module_name == "core.data.sketch" {
+        if member == "empty" -> return Val(core_web_typed_signature(module_name, member, [Type]{}, Type.String, [String]{}, None))
+        if member == "merge" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Type.String, [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.storage" {
+        if member == "local" || member == "session" -> return Val(core_web_typed_signature(module_name, member, [Type]{}, core_web_named("WebStorage"), [String]{}, None))
+        if member == "kind_local" || member == "kind_session" -> return Val(core_web_typed_signature(module_name, member, [Type]{}, Type.String, [String]{}, None))
+        return None
+    }
+    if module_name == "core.web" {
+        if member == "openapi" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("HTTPRouter")}, Type.String, [String]{}, None))
+        if member == "form" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String}, core_web_named("WebFormTyped"), [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.router" {
+        if member == "route" -> return Val(core_web_typed_signature(module_name, member, [Type]{
+            core_web_named("WebRouter"), Type.String,
+            core_web_list(core_web_named("WebRouterField")),
+            core_web_list(core_web_named("WebRouterField")),
+            core_web_fn1(core_web_named("WebNavigation"), Type.String),
+        }, core_web_result_error(core_web_named("WebRouter"), "WebRouterError"), [String]{}, None))
+        if member == "route_with_search_codec" -> return Val(core_web_typed_signature(module_name, member, [Type]{
+            core_web_named("WebRouter"), Type.String,
+            core_web_list(core_web_named("WebRouterField")),
+            core_web_list(core_web_named("WebRouterField")),
+            core_web_named("WebRouterSearchCodec"),
+            core_web_fn1(core_web_named("WebNavigation"), Type.String),
+        }, core_web_result_error(core_web_named("WebRouter"), "WebRouterError"), [String]{}, None))
+        if member == "not_found" -> return Val(core_web_typed_signature(module_name, member, [Type]{
+            core_web_named("WebRouter"), core_web_fn1(Type.String, Type.String),
+        }, core_web_result_error(core_web_named("WebRouter"), "WebRouterError"), [String]{}, None))
+        if member == "navigate" || member == "preload" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter"), Type.String}, core_web_result_error(core_web_named("WebNavigation"), "WebRouterError"), [String]{}, None))
+        if member == "abort" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter")}, Type.Bool, [String]{}, None))
+        if member == "stale" || member == "invalidate" || member == "collect" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter"), Type.String}, Type.Int, [String]{}, None))
+        if member == "cache_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter"), Type.String}, core_web_named("WebRouterCacheStatus"), [String]{}, None))
+        if member == "cache_show" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter")}, Type.String, [String]{}, None))
+        if member == "current" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter")}, core_web_named("WebNavigationState"), [String]{}, None))
+        if member == "show" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebRouter")}, Type.String, [String]{}, None))
+        if member == "link" -> return Val(core_web_typed_signature(module_name, member, [Type]{
+            core_web_named("WebRouter"), Type.String, core_web_map_string(), core_web_map_string(),
+        }, core_web_result_error(Type.String, "WebRouterError"), [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.query" {
+        if member == "new" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, core_web_named("LiveQuery")}, core_web_named("WebQuery"), [String]{}, None))
+        if member == "live" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, Type.String, Type.String, core_web_fn0(Type.String)}, core_web_named("WebQuery"), [String]{}, None))
+        if member == "mutate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option(Type.String), core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
+        if member == "mutate_with_invalidations" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option(Type.String), core_web_list(Type.String), core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
+        if member == "retry" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), core_web_fn1(Type.String, core_web_unit())}, core_web_result_error(Type.Int, "WebQueryError"), [String]{}, None))
+        if member == "subscribe" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String}, core_web_named("WebQuery"), [String]{}, None))
+        if member == "invalidate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, Type.Int, [String]{}, None))
+        if member == "get" || member == "show" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, Type.String, [String]{}, None))
+        if member == "state" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, core_web_named("WebQueryState"), [String]{}, None))
+        if member == "state_signal" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, core_web_apply("Signal", core_web_named("WebQueryState")), [String]{}, None))
+        if member == "mutation_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, core_web_named("WebMutationState"), [String]{}, None))
+        if member == "mutation_signal" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, core_web_apply("Signal", core_web_named("WebMutationState")), [String]{}, None))
+        if member == "queue" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String}, core_web_result_error(Type.Int, "WebQueryError"), [String]{}, None))
+        if member == "refresh" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, core_web_result_error(core_web_unit(), "WebQueryError"), [String]{}, None))
+        if member == "facts" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, Type.String, [String]{}, None))
+        if member == "cancel" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, Type.Bool, [String]{}, None))
+        if member == "set_online" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.Bool}, core_web_unit(), [String]{}, None))
+        if member == "set_mode" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), core_web_named("WebQueryNetworkMode")}, core_web_unit(), [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.forms" {
+        if member == "new" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String}, core_web_named("WebForm"), [String]{}, None))
+        if member == "field" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm"), Type.String, Type.String, Type.Bool}, core_web_result_error(core_web_named("WebForm"), "WebFormError"), [String]{}, None))
+        if member == "set" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm"), Type.String, Type.String}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "blur" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm"), Type.String}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "validate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm")}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "validate_async" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm")}, core_web_named("WebForm"), [String]{}, None))
+        if member == "submit" || member == "no_script" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm")}, core_web_result_error(Type.String, "WebFormError"), [String]{}, None))
+        if member == "html" || member == "show" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebForm")}, Type.String, [String]{}, None))
+        if member == "input" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, core_web_list(core_web_named("WebFormFieldSpec"))}, core_web_result_error(core_web_named("WebFormInput"), "WebFormError"), [String]{}, None))
+        if member == "input_rename" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String, Type.String}, core_web_result_error(core_web_named("WebFormInput"), "WebFormError"), [String]{}, None))
+        if member == "input_exclude" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String}, core_web_result_error(core_web_named("WebFormInput"), "WebFormError"), [String]{}, None))
+        if member == "input_group" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String, Type.String}, core_web_result_error(core_web_named("WebFormInput"), "WebFormError"), [String]{}, None))
+        if member == "input_replace" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String, core_web_named("WebFormFieldSpec")}, core_web_result_error(core_web_named("WebFormInput"), "WebFormError"), [String]{}, None))
+        if member == "typed" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormInput"), Type.String}, core_web_result_error(core_web_named("WebFormTyped"), "WebFormError"), [String]{}, None))
+        if member == "typed_set" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String, Type.String}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "typed_set_async_validator" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String, core_web_named("WebFormValidationTiming"), Type.Int, core_web_fn1(Type.String, core_web_unit())}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "typed_set_action" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), core_web_fn1(core_web_named("WebFormDecodedInput"), Type.String)}, core_web_unit(), [String]{}, None))
+        if member == "action_error" -> return Val(core_web_typed_signature(module_name, member, [Type]{}, core_web_named("WebFormActionError"), [String]{}, None))
+        if member == "action_field_error" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormActionError"), Type.String, Type.String}, core_web_named("WebFormActionError"), [String]{}, None))
+        if member == "action_form_error" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormActionError"), Type.String}, core_web_named("WebFormActionError"), [String]{}, None))
+        if member == "typed_blur" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "typed_validate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "typed_validate_async" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_named("WebFormValidation"), [String]{}, None))
+        if member == "typed_validate_field" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String, core_web_named("WebFormValidationTiming"), core_web_fn1(Type.String, core_web_unit())}, core_web_named("WebFormValidationChain"), [String]{}, None))
+        if member == "typed_validation_render" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormValidationChain")}, Type.String, [String]{}, None))
+        if member == "typed_submit" || member == "typed_no_script" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_result_error(Type.String, "WebFormError"), [String]{}, None))
+        if member == "typed_submit_async" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_named("WebFormTypedSubmission"), [String]{}, None))
+        if member == "typed_post" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String}, core_web_result_error(Type.String, "WebFormError"), [String]{}, None))
+        if member == "typed_decode_post" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String}, core_web_result_error(core_web_named("WebFormDecodedInput"), "WebFormError"), [String]{}, None))
+        if member == "typed_html" || member == "typed_show" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, Type.String, [String]{}, None))
+        if member == "typed_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, Type.String, [String]{}, None))
+        if member == "typed_lifecycle" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_named("WebFormLifecycle"), [String]{}, None))
+        if member == "typed_errors" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_named("WebFormErrorState"), [String]{}, None))
+        if member == "typed_focus" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, None))
+        if member == "typed_cancel" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped")}, core_web_unit(), [String]{}, None))
+        if member == "typed_select_field" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTyped"), Type.String}, core_web_result_error(core_web_named("WebFormFieldState"), "WebFormError"), [String]{}, None))
+        if member == "typed_validation_wait" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormValidation")}, core_web_result_error(core_web_unit(), "WebFormError"), [String]{}, Val(0)))
+        if member == "typed_validation_cancel" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormValidation")}, core_web_unit(), [String]{}, None))
+        if member == "typed_submission_wait" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTypedSubmission")}, core_web_result_error(Type.String, "WebFormError"), [String]{}, Val(0)))
+        if member == "typed_submission_cancel" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebFormTypedSubmission")}, core_web_unit(), [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.table" {
+        t := core_web_named("T")
+        table := core_web_apply("WebTable", t)
+        row := core_web_apply("WebTableRow", t)
+        page := core_web_apply("WebTablePage", t)
+        column := core_web_apply("WebTableColumn", t)
+        if member == "new" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, core_web_list(t)}, table, [String]{"T"}, None))
+        if member == "new_keyed" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, core_web_list(t), core_web_fn1(t, Type.String)}, table, [String]{"T"}, None))
+        if member == "column" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, Type.String, core_web_fn1(t, Type.String)}, column, [String]{"T"}, None))
+        if member == "with_column" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, column}, table, [String]{"T"}, None))
+        if member == "with_server_page" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, core_web_fn1(core_web_named("WebTableState"), page)}, table, [String]{"T"}, None))
+        if member == "state" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_named("WebTableState"), [String]{"T"}, None))
+        if member == "facts" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, Type.String, [String]{"T"}, None))
+        if member == "keys" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_result_error(core_web_list(Type.String), "WebTableError"), [String]{"T"}, None))
+        if member == "page_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_result_error(page, "WebTableError"), [String]{"T"}, None))
+        if member == "sort" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_list(t), Type.Bool, core_web_fn1(t, Type.String)}, core_web_list(t), [String]{"T"}, None))
+        if member == "filter" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_list(t), core_web_fn1(t, Type.Bool)}, core_web_list(t), [String]{"T"}, None))
+        if member == "page" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_list(t), Type.Int, Type.Int}, page, [String]{"T"}, None))
+        if member == "sort_by" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String, core_web_named("WebTableSortDirection")}, table, [String]{"T"}, None))
+        if member == "filter_by" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String, Type.String}, table, [String]{"T"}, None))
+        if member == "paginate" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.Int, Type.Int}, table, [String]{"T"}, None))
+        if member == "set_rows" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, core_web_list(t)}, core_web_result_error(core_web_unit(), "WebTableError"), [String]{"T"}, None))
+        if member == "set_selected" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String, Type.Bool}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
+        if member == "toggle_selection" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
+        if member == "focus" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
+        if member == "clear_focus" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, table, [String]{"T"}, None))
+        if member == "focused_key" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, Type.Option(Type.String), [String]{"T"}, None))
+        if member == "clear_selection" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, table, [String]{"T"}, None))
+        if member == "selected_keys" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_list(Type.String), [String]{"T"}, None))
+        if member == "selected_rows" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_result_error(core_web_list(row), "WebTableError"), [String]{"T"}, None))
+        if member == "insert_row" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, t}, core_web_result_error(Type.String, "WebTableError"), [String]{"T"}, None))
+        if member == "replace_row" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String, t}, core_web_result_error(core_web_unit(), "WebTableError"), [String]{"T"}, None))
+        if member == "update_row" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String, core_web_fn1(t, t)}, core_web_result_error(core_web_unit(), "WebTableError"), [String]{"T"}, None))
+        if member == "remove_row" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String}, core_web_result_error(t, "WebTableError"), [String]{"T"}, None))
+        if member == "first_page" || member == "next_page" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, table, [String]{"T"}, None))
+        if member == "last_page" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
+        if member == "visible_rows" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, core_web_named("WebVirtualPlan")}, core_web_result_error(core_web_list(row), "WebTableError"), [String]{"T"}, None))
+        return None
+    }
+    if module_name == "core.web.virtual" {
+        t := core_web_named("T")
+        window := core_web_named("WebVirtualWindow")
+        plan := core_web_named("WebVirtualPlan")
+        viewport := core_web_named("WebVirtualPlanViewport")
+        if member == "window" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int}, window, [String]{}, None))
+        if member == "window_measured" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, core_web_list(Type.Int)}, window, [String]{}, None))
+        if member == "slice" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_list(t), window}, core_web_list(t), [String]{"T"}, None))
+        if member == "indices" -> return Val(core_web_typed_signature(module_name, member, [Type]{window}, core_web_list(Type.Int), [String]{}, None))
+        if member == "plan" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int}, plan, [String]{}, None))
+        if member == "plan_measured" -> return Val(core_web_typed_signature(module_name, member, [Type]{
+            Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int,
+            core_web_list(Type.Tuple([TypeTupleField]{
+                TypeTupleField{name: "index", ty: Type.Int},
+                TypeTupleField{name: "size", ty: Type.Int},
+            })),
+        }, plan, [String]{}, None))
+        if member == "plan_from_sizes" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, core_web_list(Type.Int)}, plan, [String]{}, None))
+        if member == "plan_measure" -> return Val(core_web_typed_signature(module_name, member, [Type]{plan, Type.Int, Type.Int}, plan, [String]{}, None))
+        if member == "plan_slice" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_list(t), plan}, core_web_list(t), [String]{"T"}, None))
+        if member == "plan_indices" -> return Val(core_web_typed_signature(module_name, member, [Type]{plan}, core_web_list(Type.Int), [String]{}, None))
+        if member == "plan_viewport" -> return Val(core_web_typed_signature(module_name, member, [Type]{plan}, viewport, [String]{}, None))
+        if member == "plan_viewport_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{viewport}, plan, [String]{}, None))
+        if member == "plan_scroll_to" -> return Val(core_web_typed_signature(module_name, member, [Type]{viewport, Type.Int}, core_web_unit(), [String]{}, None))
+        if member == "plan_resize" -> return Val(core_web_typed_signature(module_name, member, [Type]{viewport, Type.Int, Type.Int}, core_web_unit(), [String]{}, None))
+        if member == "plan_viewport_measure" -> return Val(core_web_typed_signature(module_name, member, [Type]{viewport, Type.Int, Type.Int}, core_web_unit(), [String]{}, None))
+        return None
+    }
+    if module_name == "core.web.store" {
+        t := core_web_named("T")
+        u := core_web_named("U")
+        store := core_web_apply("WebStore", t)
+        transaction := core_web_apply("WebStoreTransaction", t)
+        patch := core_web_apply("WebStorePatch", t)
+        if member == "value" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, t, [String]{"T"}, None))
+        if member == "signal" || member == "state_signal" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.String, [String]{"T"}, None))
+        if member == "new" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, t}, store, [String]{"T"}, None))
+        if member == "with_history" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, t, Type.Int}, store, [String]{"T"}, None))
+        if member == "transaction" || member == "update" || member == "batch" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.String, core_web_list(Type.String), core_web_fn1(t, core_web_unit())}, transaction, [String]{"T"}, None))
+        if member == "set" || member == "set_state" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, t}, transaction, [String]{"T"}, None))
+        if member == "optimistic" || member == "patch" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.String, core_web_list(Type.String), core_web_fn1(t, core_web_unit())}, patch, [String]{"T"}, None))
+        if member == "patch_generation" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Int, [String]{"T"}, None))
+        if member == "patch_transaction" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, transaction, [String]{"T"}, None))
+        if member == "patch_active" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Bool, [String]{"T"}, None))
+        if member == "patch_commit" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, transaction, [String]{"T"}, Val(0)))
+        if member == "patch_rollback" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Option(t), [String]{"T"}, Val(0)))
+        if member == "back" || member == "forward" || member == "restore" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.Option(t), [String]{"T"}, None))
+        if member == "jump" || member == "scrub" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option(t), [String]{"T"}, None))
+        if member == "history" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_list(transaction), [String]{"T"}, None))
+        if member == "history_at" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option(transaction), [String]{"T"}, None))
+        if member == "events" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_list(core_web_named("WebStoreEvent")), [String]{"T"}, None))
+        if member == "events_since" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, core_web_list(core_web_named("WebStoreEvent")), [String]{"T"}, None))
+        if member == "clear_history" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_unit(), [String]{"T"}, None))
+        if member == "set_history_limit" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, core_web_unit(), [String]{"T"}, None))
+        if member == "history_enabled" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.Bool, [String]{"T"}, None))
+        if member == "history_limit" || member == "cursor" || member == "current_generation" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.Int, [String]{"T"}, None))
+        if member == "subscribe" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, core_web_fn1(t, core_web_unit())}, core_web_named("WebStoreSubscription"), [String]{"T"}, None))
+        if member == "subscription_unsubscribe" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebStoreSubscription")}, core_web_unit(), [String]{}, None))
+        if member == "subscription_active" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebStoreSubscription")}, Type.Bool, [String]{}, None))
+        if member == "subscribe_selector" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, core_web_fn1(t, u), core_web_fn1(u, core_web_unit())}, core_web_named("WebStoreSubscription"), [String]{"T", "U"}, None))
+        if member == "derived" || member == "selector" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, core_web_fn1(t, u)}, core_web_apply("Derived", u), [String]{"T", "U"}, None))
+        if member == "inspect" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_named("WebStoreInspection"), [String]{"T"}, None))
+        if member == "facts_json" || member == "event_json" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.String, [String]{"T"}, None))
+        return None
+    }
+    None
+}

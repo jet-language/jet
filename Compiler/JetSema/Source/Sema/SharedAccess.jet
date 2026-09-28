@@ -118,10 +118,12 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
             return sema_shared_access_expr_touches_shared(base, scopes)
         }
         .OptField(base, _, _, _, _) -> return sema_shared_access_expr_touches_shared(base, scopes)
-        .Ident(_, _) -> false
+        .Ident(_, _) -> return false
         .Str(parts, _) -> {
             loop part in parts {
-                if part == {.Interp(inner, _) -> if sema_shared_access_expr_touches_shared(inner, scopes) -> return true}
+                if part == {
+                    .Interp(inner, _) -> if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
+                }
             }
         }
         .ListLit(values, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
@@ -133,9 +135,12 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
         .MemberSpread(base, _, _) -> return sema_shared_access_expr_touches_shared(base, scopes)
         .Spread(inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
         .Index(base, index, _, _) -> return sema_shared_access_expr_touches_shared(base, scopes) || sema_shared_access_expr_touches_shared(index, scopes)
-        .Slice(base, start, end, range, _, _) -> {
+        .Slice(base, start, end, range, _) -> {
             if sema_shared_access_expr_touches_shared(base, scopes) || sema_shared_access_expr_touches_shared(start, scopes) || sema_shared_access_expr_touches_shared(end, scopes) -> return true
-            if range == {.Val(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes) else -> false}
+            if range == {
+                .Val(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
+                else -> {}
+            }
         }
         .Range(start, end, _, _) -> return sema_shared_access_expr_touches_shared(start, scopes) || sema_shared_access_expr_touches_shared(end, scopes)
         .Unary(_, inner, _) | .IncDec(_, inner, _, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
@@ -163,16 +168,29 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
             }
         }
         .PatternTest(subject, _, _) | .Ok(subject, _) | .Err(subject, _) -> return sema_shared_access_expr_touches_shared(subject, scopes)
-        .Try(subject, _, context) -> {
+        .Try(subject, _, _, context) -> {
             if sema_shared_access_expr_touches_shared(subject, scopes) -> return true
-            if context == {.Val(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes) else -> false}
+            if context == {
+                .Val(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
+                else -> {}
+            }
         }
         .OrFallback(subject, fallback, _, _) -> {
             if sema_shared_access_expr_touches_shared(subject, scopes) -> return true
             if fallback == {
                 .Value(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
-                .Return(inner, _) -> if inner == {.Val(value) -> sema_shared_access_expr_touches_shared(value, scopes) else -> false}
-                .Block(_, inner, _) -> if inner == {.Val(value) -> sema_shared_access_expr_touches_shared(value, scopes) else -> false}
+                .Return(inner, _) -> {
+                    if inner == {
+                        .Val(value) -> return sema_shared_access_expr_touches_shared(value, scopes)
+                        else -> {}
+                    }
+                }
+                .Block(_, inner, _) -> {
+                    if inner == {
+                        .Val(value) -> return sema_shared_access_expr_touches_shared(value, scopes)
+                        else -> {}
+                    }
+                }
             }
         }
         .TupleLit(fields, _, _) -> {

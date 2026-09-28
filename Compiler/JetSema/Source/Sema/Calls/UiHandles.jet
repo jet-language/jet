@@ -1,0 +1,491 @@
+// Source producers for retained UI callbacks, UI backend methods, sketches, and
+// Browser handle methods. Operation choices mirror the native TIR producers.
+
+fn sema_ui_handle_unit() -> Type {
+    Type.Named("Unit")
+}
+
+fn sema_ui_handle_result(ok: Type, error: Type) -> Type {
+    Type.Result(ok, error)
+}
+
+fn sema_ui_handle_browser_result(ok: Type) -> Type {
+    sema_ui_handle_result(ok, Type.Named("BrowserError"))
+}
+
+fn sema_ui_handle_positional(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam {
+    SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
+}
+
+fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] {
+    values := [TExpr]{}
+    loop arg in args {
+        if sema_check_expression(arg.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) == .Val(value) -> values.push(value)
+    }
+    values
+}
+
+fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool {
+    effects := [EffectRowEntry]{}
+    if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
+    facts := SemaCallFacts{
+        return_type: result_type,
+        failure_carrier: sema_call_failure_carrier(Val(result_type)),
+        effect_bound: Val(effects),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }
+    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
+}
+
+fn sema_ui_handle_literal_string(expr: Expr) -> ?String {
+    return if expr == {
+        .Str(parts, _) -> {
+            value := ""
+            loop part in parts {
+                if part == {
+                    .Lit(text) -> { value += text }
+                    else -> { return None }
+                }
+            }
+            Val(value)
+        }
+        else -> None
+    }
+}
+
+fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if sema_call_core_import_module(environment, alias) != .Val("core.ui") -> return false
+    visible :: sema_scope_resolve(scopes, alias) ?? return false
+    visible.kind == SymbolKind.Import
+}
+
+fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> ?String {
+    if expr == {
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            if receiver == {
+                .Ident(alias, _) -> {
+                    if !sema_ui_handle_imported_ui_alias(alias, environment, scopes) -> return None
+                    if method == "aria_role_button" -> return Val("button")
+                    if method == "aria_role_text_input" -> return Val("text input")
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+pub fn sema_call_core_ui_node_role_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if args.len() != 4 -> return
+    if sema_ui_handle_literal_string(args[0].expr) != .Val("") -> return
+    role :: sema_ui_handle_interactive_role(args[3].expr, environment, scopes) ?? return
+    diagnostics.push(sema_lint("E2930", span, "This {role} has no accessible label", "Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech.", "Pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`."))
+}
+
+pub fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if args.len() == 0 -> return
+    if args[0].expr == {
+        .ListLit(items, _) -> {
+            labels := [String]{}
+            loop item in items {
+                if item == {
+                    .MethodCall(receiver, method, _, _, _, call_args, _, _, _, _) -> {
+                        if method != "node_role" || call_args.len() != 4 -> next
+                        alias :: if receiver == {.Ident(name, _) -> Val(name) else -> None} ?? next
+                        if !sema_ui_handle_imported_ui_alias(alias, environment, scopes) -> next
+                        if sema_ui_handle_interactive_role(call_args[3].expr, environment, scopes) == None -> next
+                        label :: sema_ui_handle_literal_string(call_args[0].expr) ?? next
+                        if label == "" -> next
+                        duplicate := false
+                        loop existing in labels {
+                            if existing == label {
+                                duplicate = true
+                                break
+                            }
+                        }
+                        if duplicate {
+                            diagnostics.push(sema_lint("E2931", span, "Two interactive nodes both have the label \"{label}\"", "Assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3).", "Give each interactive node a distinct, descriptive label."))
+                            return
+                        }
+                        labels.push(label)
+                    }
+                    else -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+fn sema_ui_handle_callback_source_arity(expr: Expr) -> ?Int {
+    if expr == {
+        .Lambda(lambda) -> Val(lambda.params.len())
+        .Paren(value, _) -> sema_ui_handle_callback_source_arity(value)
+        else -> None
+    }
+}
+
+fn sema_ui_handle_callback_type(params: [Type]) -> Type {
+    Type.Fn(params, Val(sema_ui_handle_unit()), None, None, None, None)
+}
+
+fn sema_ui_handle_stored_callback(kind: String, argument: CallArg, params: [Type], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TLambda {
+    actual_arity :: sema_ui_handle_callback_source_arity(argument.expr) ?? {
+        checked :: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        actual :: if checked == .Val(value) -> type_name(value.ty) else -> "an invalid value"
+        diagnostics.push(sema_error("E2910", argument.span, "`{kind}` needs a lambda, not {actual}", "the callback is retained and invoked later by the UI runtime", "pass a lambda expression as the callback"))
+        return None
+    }
+    if actual_arity != params.len() {
+        _ := sema_expression_lambda_host_callback_stored(argument.expr, None, false, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E2911", argument.span, "`{kind}` needs a {params.len()}-parameter lambda, got {actual_arity}", "the callback parameters must match the UI event", "use a callback with {params.len()} parameter(s)"))
+        return None
+    }
+    checked :: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if checked.kind == {.Lambda(lambda) -> Val(lambda) else -> None}
+}
+
+fn sema_ui_handle_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
+}
+
+fn sema_ui_handle_callback_param(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: ?Expr) -> SemaCallParam {
+    SemaCallParam{label: label, name: name, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
+}
+
+fn sema_ui_handle_bind_callback_args(member: String, args: [CallArg], span: Span, callback_label: String, params: [SemaCallParam], diagnostics: &[Diagnostic]) -> ?[CallArg] {
+    normalized := args
+    loop index in 0..<normalized.len() {
+        if normalized[index].flags.is_trailing_block && normalized[index].label == None {
+            normalized[index].label = Val(CallLabel{name: callback_label, span: normalized[index].span})
+        }
+    }
+    _ := sema_call_bind_args("core.ui.{member}", params, &normalized, span, &diagnostics) ?? return None
+    Val(normalized)
+}
+
+fn sema_ui_handle_typed_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    sema_check_expression(arg.expr, Val(ty), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_ui_handle_optional_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if arg.expr == {
+        .Absent(_) -> { return Val(sema_tir_expr(Type.Option(ty), TExprKind.Absent, arg.span)) }
+        else -> {}
+    }
+    value :: sema_ui_handle_typed_arg(arg, ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    return Val(sema_tir_expr(Type.Option(ty), TExprKind.Present(value), value.span))
+}
+
+fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    record :: sema_call_core_record(module_name, "button", args.len(), span, &diagnostics) ?? {
+        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if args.len() == 1 {
+        label :: sema_ui_handle_typed_arg(args[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        result_type := Type.Named("UiNode")
+        value :: sema_call_core_tir(record, [TExpr]{label}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, &diagnostics)
+        if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+        if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: value}
+    }
+    params := [SemaCallParam]{
+        sema_ui_handle_callback_param("display", "display", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
+        sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option(Type.Named("UiShortcut")), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent(span))),
+        sema_ui_handle_callback_param("label", "label", Type.Option(Type.String), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent(span))),
+        sema_ui_handle_callback_param("on_click", "on_click", sema_ui_handle_callback_type([Type]{}), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent(span))),
+    }
+    bound :: sema_ui_handle_bind_callback_args("button", args, span, "on_click", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if bound.len() != 4 {
+        _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    callback_absent :: if bound[3].expr == {
+        .Absent(_) -> true
+        else -> false
+    }
+    if !bound[3].flags.is_trailing_block || callback_absent {
+        diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") { save() }`"))
+        _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    label :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    shortcut :: sema_ui_handle_optional_arg(bound[1], Type.Named("UiShortcut"), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    accessible_label :: sema_ui_handle_optional_arg(bound[2], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callback :: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    result_type := Type.Named("UiNode")
+    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall(TCoreClosureKind.UiButtonOnClick(label, shortcut, accessible_label, callback, span.start)), span)
+    checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+}
+
+fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    record :: sema_call_core_record(module_name, "text_input", args.len(), span, &diagnostics) ?? {
+        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{
+        sema_ui_handle_callback_param("state", "state", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
+        sema_ui_handle_callback_param("ime", "ime", Type.Named("UiImeMode"), span, AccessConvention.Read, ParamZone.PositionalOnly, None),
+        sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option(sema_ui_handle_callback_type([Type]{Type.Named("UiDropItem")})), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent(span))),
+    }
+    bound :: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if bound.len() != 3 {
+        _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    state_value :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    ime_value :: sema_ui_handle_typed_arg(bound[1], Type.Named("UiImeMode"), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    result_type := Type.Named("UiNode")
+    on_drop_absent :: if bound[2].expr == {
+        .Absent(_) -> true
+        else -> false
+    }
+    if on_drop_absent {
+        value :: sema_call_core_tir(record, [TExpr]{state_value, ime_value}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, &diagnostics)
+        if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+        if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: value}
+    }
+    callback :: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named("UiDropItem")}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall(TCoreClosureKind.UiTextInputOnDrop(state_value, ime_value, callback, span.start)), span)
+    checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+}
+
+pub fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.ui" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if member == "node_role" {
+        sema_call_core_ui_node_role_lint(args, span, environment, &scopes, &diagnostics)
+        return SemaDirectSpecialCheck{handled: false, value: None}
+    }
+    if member == "button" -> return sema_ui_handle_button(module_name, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if member == "text_input" -> return sema_ui_handle_text_input(module_name, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    SemaDirectSpecialCheck{handled: false, value: None}
+}
+
+fn sema_ui_backend_owner(owner: String) -> Bool {
+    owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend"
+}
+
+fn sema_ui_backend_known_method(owner: String, method: String) -> Bool {
+    if (owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
+    if owner == "NullBackend" && method == "commands" -> return true
+    if owner == "TuiBackend" && (method == "frame_lines" || method == "render_count") -> return true
+    if owner == "GtkBackend" && (method == "label" || method == "button" || method == "set_text" || method == "set_size" || method == "set_color" || method == "on_click" || method == "present") -> return true
+    false
+}
+
+fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> ?Type {
+    if owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend" {
+        if method == "measure" && argc == 2 -> return Val(Type.Named("Size"))
+        if method == "layout" && argc == 2 -> return Val(sema_ui_handle_unit())
+        if method == "paint" && argc == 1 -> return Val(sema_ui_handle_unit())
+        if method == "mount" && (argc == 1 || argc == 2) -> return Val(sema_ui_handle_unit())
+        if method == "on_event" && argc == 1 -> return Val(Type.Named("EventResult"))
+        if method == "set_focus_group" && argc == 1 -> return Val(sema_ui_handle_unit())
+        if method == "focused_label" && argc == 0 -> return Val(Type.String)
+    }
+    if owner == "NullBackend" && method == "commands" && argc == 0 -> return Val(Type.List(Type.String))
+    if owner == "TuiBackend" && method == "frame_lines" && argc == 0 -> return Val(Type.List(Type.String))
+    if owner == "TuiBackend" && method == "render_count" && argc == 0 -> return Val(Type.Int)
+    if owner == "GtkBackend" {
+        if (method == "label" || method == "button") && argc == 1 -> return Val(Type.Int)
+        if (method == "set_text" || method == "set_color" || method == "on_click") && argc == 2 -> return Val(sema_ui_handle_unit())
+        if method == "set_size" && argc == 3 -> return Val(sema_ui_handle_unit())
+        if method == "present" && argc == 1 -> return Val(sema_ui_handle_unit())
+    }
+    None
+}
+
+pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    owner :: sema_expr_type_base_name(receiver_value.ty) ?? type_name(receiver_value.ty)
+    if sema_ui_backend_owner(owner) && sema_ui_backend_known_method(owner, method) {
+        result_type :: sema_ui_backend_result(owner, method, args.len()) ?? {
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
+        if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, &scopes, &diagnostics)
+        typed_args :: sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        value := sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, THandleOp.UiBackendMethod(method), typed_args), span)
+        checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+    }
+    if sema_ui_browser_known_owner(owner) -> return sema_ui_browser_method(receiver, receiver_value, owner, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_ui_sketch_owner(owner) -> return sema_ui_sketch_method(receiver, receiver_value, owner, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+fn sema_ui_sketch_owner(owner: String) -> Bool {
+    owner == "HyperLogLog" || owner == "TDigest" || owner == "CountMinSketch" || owner == "ReservoirSampler"
+}
+
+fn sema_ui_sketch_method_known(owner: String, method: String) -> Bool {
+    if owner == "HyperLogLog" || owner == "CountMinSketch" -> return method == "add" || method == "count"
+    if owner == "TDigest" -> return method == "add" || method == "quantile"
+    if owner == "ReservoirSampler" -> return method == "add" || method == "sample"
+    false
+}
+
+fn sema_ui_sketch_args(owner: String, method: String) -> [Type] {
+    if method == "add" -> return [Type]{if owner == "TDigest" -> Type.Float else -> Type.String}
+    if method == "quantile" -> return [Type]{Type.Float}
+    [Type]{}
+}
+
+fn sema_ui_sketch_result(owner: String, method: String) -> Type {
+    if method == "count" -> return Type.Int
+    if method == "quantile" -> return Type.Float
+    if method == "sample" -> return Type.List(Type.String)
+    sema_ui_handle_unit()
+}
+
+fn sema_ui_sketch_method(receiver: Expr, receiver_value: TExpr, owner: String, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if !sema_ui_sketch_method_known(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    record :: sema_call_core_receiver_record(receiver_value.ty, method, args.len(), span, &diagnostics) ?? {
+        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    required_types := sema_ui_sketch_args(owner, method)
+    if args.len() != required_types.len() {
+        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{}
+    loop index in 0..<required_types.len() {
+        access :: sema_call_core_access(record, index) ?? AccessConvention.Move
+        params.push(sema_ui_handle_positional("arg{index}", required_types[index], access))
+    }
+    checked_args := args
+    binding :: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
+        _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type := sema_ui_sketch_result(owner, method)
+    value := sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, THandleOp.SketchMethod(owner, method), typed.values), span)
+    checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}
+
+fn sema_ui_browser_known_owner(owner: String) -> Bool {
+    owner == "Browser" || owner == "BrowserContext" || owner == "BrowserPage" || owner == "BrowserFrame" || owner == "BrowserLocator" || owner == "BrowserIntercept" || owner == "BrowserEvent" || owner == "BrowserAbilities" || owner == "BrowserTrace" || owner == "BrowserReceipt" || owner == "BrowserPrivacy" || owner == "BrowserProtocol" || owner == "BrowserLocked" || owner == "BrowserTestServer" || owner == "BrowserTestReport" || owner == "BrowserTestConfig"
+}
+
+fn sema_ui_browser_arg_types(owner: String, method: String) -> ?[Type] {
+    if (owner == "Browser" && (method == "abilities" || method == "context" || method == "close" || method == "trace" || method == "privacy" || method == "receipt")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close" || method == "isolated" || method == "user_hash")) || (owner == "BrowserPage" && (method == "close" || method == "main_frame" || method == "frames" || method == "screenshot" || method == "pdf" || method == "clear_cookies")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "click" || method == "hover")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserEvent" && (method == "kind" || method == "request_id" || method == "request_method" || method == "url_hash" || method == "is_blocked" || method == "status_code" || method == "download_id" || method == "suggested_filename_hash")) || (owner == "BrowserAbilities" && (method == "bidi" || method == "cdp" || method == "profile")) || (owner == "BrowserTrace" && (method == "entry_count" || method == "redacted" || method == "summary")) || (owner == "BrowserReceipt" && (method == "entry_count" || method == "redacted" || method == "summary" || method == "isolated" || method == "cleaned")) || (owner == "BrowserPrivacy" && (method == "isolated_profiles" || method == "redact_receipts" || method == "shared_profiles")) || (owner == "BrowserLocked" && (method == "engine" || method == "version" || method == "binary" || method == "protocol" || method == "verify")) || (owner == "BrowserTestServer" && (method == "stop" || method == "url" || method == "logs")) || (owner == "BrowserTestReport" && (method == "json" || method == "text" || method == "html" || method == "exit_code")) || (owner == "BrowserTestConfig" && (method == "engines" || method == "retries" || method == "filter" || method == "reporter" || method == "server_url" || method == "artifact_dir" || method == "report_path" || method == "ui" || method == "visual" || method == "watch")) -> return Val([Type]{})
+    if (owner == "Browser" && (method == "subscribe" || method == "protocol" || method == "add_intercept" || method == "continue_request" || method == "fail_request" || method == "allow_downloads")) || (owner == "BrowserPage" && (method == "goto" || method == "get_by_text" || method == "get_by_label" || method == "get_by_placeholder" || method == "get_by_test_id" || method == "get_by_css" || method == "cookie" || method == "storage_clear")) || (owner == "BrowserLocator" && (method == "fill" || method == "press" || method == "set_files")) -> return Val([Type]{Type.String})
+    if (owner == "Browser" && method == "next_event") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone")) -> return Val([Type]{Type.Named("BrowserTimeout")})
+    if (owner == "Browser" && method == "add_intercept_url") || (owner == "BrowserPage" && (method == "get_by_role" || method == "storage_get")) || (owner == "BrowserProtocol" && method == "send") -> return Val([Type]{Type.String, Type.String})
+    if owner == "Browser" && method == "fulfill_request" -> return Val([Type]{Type.String, Type.Int, Type.String})
+    if owner == "BrowserPage" && (method == "set_cookie" || method == "storage_set") -> return Val([Type]{Type.String, Type.String, Type.String})
+    None
+}
+
+fn sema_ui_browser_result(owner: String, method: String) -> ?Type {
+    unit := sema_ui_handle_unit()
+    string := Type.String
+    if owner == "Browser" {
+        if method == "abilities" -> return Val(Type.Named("BrowserAbilities"))
+        if method == "context" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserContext")))
+        if method == "subscribe" || method == "close" -> return Val(sema_ui_handle_browser_result(unit))
+        if method == "next_event" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserEvent")))
+        if method == "add_intercept" || method == "add_intercept_url" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserIntercept")))
+        if method == "continue_request" || method == "fail_request" || method == "fulfill_request" || method == "allow_downloads" -> return Val(sema_ui_handle_browser_result(unit))
+        if method == "protocol" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserProtocol")))
+        if method == "trace" -> return Val(Type.Named("BrowserTrace"))
+        if method == "privacy" -> return Val(Type.Named("BrowserPrivacy"))
+        if method == "receipt" -> return Val(Type.Named("BrowserReceipt"))
+    }
+    if owner == "BrowserContext" {
+        if method == "page" || method == "tab" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserPage")))
+        if method == "close" -> return Val(sema_ui_handle_browser_result(unit))
+        if method == "isolated" -> return Val(Type.Bool)
+        if method == "user_hash" -> return Val(string)
+    }
+    if owner == "BrowserPage" {
+        if method == "goto" || method == "close" || method == "clear_cookies" || method == "set_cookie" || method == "storage_set" || method == "storage_clear" -> return Val(sema_ui_handle_browser_result(unit))
+        if method == "screenshot" || method == "pdf" -> return Val(sema_ui_handle_browser_result(string))
+        if method == "cookie" || method == "storage_get" -> return Val(sema_ui_handle_browser_result(Type.Option(string)))
+        if method == "main_frame" -> return Val(sema_ui_handle_browser_result(Type.Named("BrowserFrame")))
+        if method == "frames" -> return Val(sema_ui_handle_browser_result(Type.List(Type.Named("BrowserFrame"))))
+        if method == "get_by_role" || method == "get_by_text" || method == "get_by_label" || method == "get_by_placeholder" || method == "get_by_test_id" || method == "get_by_css" -> return Val(Type.Named("BrowserLocator"))
+    }
+    if owner == "BrowserFrame" && method == "close" -> return Val(sema_ui_handle_browser_result(unit))
+    if owner == "BrowserLocator" {
+        if method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files" -> return Val(sema_ui_handle_browser_result(unit))
+    }
+    if owner == "BrowserIntercept" && method == "remove" -> return Val(sema_ui_handle_browser_result(unit))
+    if owner == "BrowserEvent" {
+        if method == "kind" || method == "request_id" || method == "request_method" || method == "url_hash" || method == "download_id" || method == "suggested_filename_hash" -> return Val(string)
+        if method == "is_blocked" -> return Val(Type.Bool)
+        if method == "status_code" -> return Val(Type.Int)
+    }
+    if owner == "BrowserAbilities" {
+        if method == "bidi" || method == "cdp" -> return Val(Type.Bool)
+        if method == "profile" -> return Val(string)
+    }
+    if owner == "BrowserTrace" || owner == "BrowserReceipt" {
+        if method == "entry_count" -> return Val(Type.Int)
+        if method == "redacted" -> return Val(Type.Bool)
+        if method == "summary" -> return Val(string)
+        if owner == "BrowserReceipt" && (method == "isolated" || method == "cleaned") -> return Val(Type.Bool)
+    }
+    if owner == "BrowserPrivacy" && (method == "isolated_profiles" || method == "redact_receipts" || method == "shared_profiles") -> return Val(Type.Bool)
+    if owner == "BrowserLocked" {
+        if method == "engine" || method == "version" || method == "binary" || method == "protocol" -> return Val(string)
+        if method == "verify" -> return Val(sema_ui_handle_browser_result(unit))
+    }
+    if owner == "BrowserTestServer" {
+        if method == "stop" -> return Val(unit)
+        if method == "url" || method == "logs" -> return Val(string)
+    }
+    if owner == "BrowserTestReport" {
+        if method == "json" || method == "text" || method == "html" -> return Val(string)
+        if method == "exit_code" -> return Val(Type.Int)
+    }
+    if owner == "BrowserTestConfig" {
+        if method == "engines" -> return Val(Type.List(string))
+        if method == "retries" -> return Val(Type.Int)
+        if method == "ui" || method == "visual" || method == "watch" -> return Val(Type.Bool)
+        if method == "filter" || method == "reporter" || method == "server_url" || method == "artifact_dir" || method == "report_path" -> return Val(string)
+    }
+    if owner == "BrowserProtocol" && method == "send" -> return Val(sema_ui_handle_browser_result(string))
+    None
+}
+
+fn sema_ui_browser_effect(owner: String, method: String) -> String {
+    if (owner == "Browser" && (method == "context" || method == "subscribe" || method == "close" || method == "next_event" || method == "protocol" || method == "add_intercept" || method == "add_intercept_url" || method == "continue_request" || method == "fail_request" || method == "fulfill_request" || method == "allow_downloads")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close")) || (owner == "BrowserPage" && (method == "goto" || method == "close" || method == "frames" || method == "screenshot" || method == "pdf" || method == "set_cookie" || method == "cookie" || method == "clear_cookies" || method == "storage_get" || method == "storage_set" || method == "storage_clear")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserProtocol" && method == "send") -> return "Net"
+    if owner == "BrowserLocked" && method == "verify" -> return "FS"
+    ""
+}
+
+fn sema_ui_browser_route_server(owner: String) -> Bool {
+    owner == "Browser" || owner == "BrowserContext" || owner == "BrowserPage" || owner == "BrowserFrame" || owner == "BrowserLocator" || owner == "BrowserIntercept" || owner == "BrowserEvent" || owner == "BrowserTrace" || owner == "BrowserReceipt" || owner == "BrowserPrivacy" || owner == "BrowserAbilities" || owner == "BrowserProtocol" || owner == "BrowserLocked"
+}
+
+fn sema_ui_browser_method(receiver: Expr, receiver_value: TExpr, owner: String, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    expected_args :: sema_ui_browser_arg_types(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    result_type :: sema_ui_browser_result(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    effect_name := sema_ui_browser_effect(owner, method)
+    effects_ok := sema_ui_handle_call_fact(environment, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics)
+    if args.len() != expected_args.len() -> diagnostics.push(sema_call_arity_diagnostic(method, expected_args.len(), args.len(), false, span))
+    typed_args := [TExpr]{}
+    valid := args.len() == expected_args.len()
+    loop index in 0..<args.len() {
+        required := if index < expected_args.len() -> Val(expected_args[index]) else -> None
+        value :: sema_check_expression(args[index].expr, required, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if value == .Val(checked) -> typed_args.push(checked) else -> valid = false
+    }
+    if !valid || !effects_ok -> return SemaMethodSpecialCheck{handled: true, value: None}
+    operation :: if sema_ui_browser_route_server(owner) -> THandleOp.HTTPServerMethod(owner, method) else -> THandleOp.HTTPClientMethod(owner, method)
+    value := sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, operation, typed_args), span)
+    checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}

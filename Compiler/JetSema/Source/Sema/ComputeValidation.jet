@@ -1,0 +1,181 @@
+// Canonical compute/autodiff facts and the post-effect purity/traceability proof.
+// Compute-call effects live in the ordinary effect graph; these facts retain
+// the separate proof obligations that graph edges cannot express.
+
+pub struct SemaComputeCallFact {
+    pub method: String
+    pub span: Span
+}
+
+pub struct SemaAutodiffObligation {
+    pub method: String
+    pub target: String
+    pub span: Span
+}
+
+pub struct SemaComputeFunctionFacts {
+    pub function_key: String
+    pub compute_calls: [SemaComputeCallFact]
+    pub autodiff_obligations: [SemaAutodiffObligation]
+    pub autodiff_safe_panic: Bool
+    pub autodiff_unsafe_panic: Bool
+}
+
+struct SemaComputePanicMemo {
+    pub function_key: String
+    pub safe: Bool
+}
+
+pub fn sema_compute_record_core_call(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool {
+    if record.module_name != "core.compute" -> return false
+    context.compute_calls.push(SemaComputeCallFact{method: record.member, span: span})
+    true
+}
+
+pub fn sema_compute_record_autodiff_obligation(method: String, target: String, span: Span, context: &SemaCheckContext) {
+    context.autodiff_obligations.push(SemaAutodiffObligation{method: method, target: target, span: span})
+}
+
+// A panic is admissible under autodiff only when every reachable Panic edge is
+// the explicit fallback of a checked Tensor-returning Core compute operation.
+pub fn sema_compute_note_panic(context: &SemaCheckContext, safe_compute_fallback: Bool) {
+    if safe_compute_fallback -> context.autodiff_safe_panic = true else -> context.autodiff_unsafe_panic = true
+}
+
+fn sema_compute_has_panic_edge(function: TFunc) -> Bool {
+    loop edge in function.effects.call_edges {
+        if edge == "__jet_panic__" -> return true
+    }
+    false
+}
+
+fn sema_compute_effects_have_root(effects: [String], root: String) -> Bool {
+    loop effect_name in effects {
+        if sema_effect_root(effect_name) == root -> return true
+    }
+    false
+}
+
+fn sema_compute_function(functions: [TFunc], function_key: String) -> ?TFunc {
+    loop function in functions {
+        if function.key == function_key -> return Val(function)
+    }
+    None
+}
+
+fn sema_compute_function_facts(facts: [SemaComputeFunctionFacts], function_key: String) -> ?SemaComputeFunctionFacts {
+    loop value in facts {
+        if value.function_key == function_key -> return Val(value)
+    }
+    None
+}
+
+fn sema_compute_panic_memo(memo: [SemaComputePanicMemo], function_key: String) -> ?Bool {
+    loop value in memo {
+        if value.function_key == function_key -> return Val(value.safe)
+    }
+    None
+}
+
+fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [SemaComputeFunctionFacts], functions: [TFunc], visiting: &[String], memo: &[SemaComputePanicMemo]) -> Bool {
+    if function_key == "__jet_panic__" -> return false
+    if sema_compute_panic_memo(memo, function_key) == .Val(value) -> return value
+    loop active in visiting {
+        if active == function_key -> return false
+    }
+    function :: sema_compute_function(functions, function_key) ?? {
+        memo.push(SemaComputePanicMemo{function_key: function_key, safe: false})
+        return false
+    }
+    body_facts := sema_compute_function_facts(facts, function_key)
+    local_safe_panic := body_facts.map((value) -> value.autodiff_safe_panic) ?? false
+    local_unsafe_panic := body_facts.map((value) -> value.autodiff_unsafe_panic) ?? false
+    local_panic := local_safe_panic || local_unsafe_panic
+    safe := !local_panic || local_safe_panic && !local_unsafe_panic
+    if sema_compute_has_panic_edge(function) && !local_panic -> safe = false
+    visiting.push(function_key)
+    if safe {
+        loop edge in function.effects.call_edges {
+            if edge == "__jet_panic__" -> next
+            target :: sema_compute_function(functions, edge) ?? next
+            if !sema_compute_effects_have_root(target.effects.solved, "Panic") -> next
+            if !sema_compute_panic_sites_are_compute_failures(edge, facts, functions, &visiting, &memo) {
+                safe = false
+                break
+            }
+        }
+    }
+    _ := visiting.pop()
+    memo.push(SemaComputePanicMemo{function_key: function_key, safe: safe})
+    safe
+}
+
+fn sema_compute_forbidden_effects(effects: [String]) -> [String] {
+    result := [String]{}
+    loop effect_name in effects {
+        if sema_effect_root(effect_name) != "GPU" -> result.push(effect_name)
+    }
+    result
+}
+
+fn sema_compute_panic_only(effects: [String]) -> Bool {
+    if effects.len() == 0 -> return false
+    loop effect_name in effects {
+        if sema_effect_root(effect_name) != "Panic" -> return false
+    }
+    true
+}
+
+fn sema_compute_trace_forbidden(method: String) -> Bool {
+    method == "get" || method == "set" || method == "to_list" || method == "det" || method == "inv" || method == "solve" || method == "fft" || method == "serialize" || method == "to_sparse" || method == "sparse_mv"
+}
+
+fn sema_compute_effect_names(effects: [String]) -> String {
+    effects.join(", ")
+}
+
+// `functions` must be the globally effect-solved TFuncs, since a named target
+// may be imported or may reach another module. Callers source-locate the
+// returned diagnostics with the owning module's source segments.
+pub fn sema_compute_validate_autodiff_purity(facts: [SemaComputeFunctionFacts], functions: [TFunc]) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    panic_memo := [SemaComputePanicMemo]{}
+    loop function_facts in facts {
+        loop obligation in function_facts.autodiff_obligations {
+            target :: sema_compute_function(functions, obligation.target) ?? next
+            forbidden := sema_compute_forbidden_effects(target.effects.solved)
+            panic_only := sema_compute_panic_only(forbidden)
+            if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, facts, functions, [String]{}, &panic_memo) {
+                filtered := [String]{}
+                loop effect_name in forbidden {
+                    if sema_effect_root(effect_name) != "Panic" -> filtered.push(effect_name)
+                }
+                forbidden = filtered
+            }
+            if forbidden.len() == 0 {
+                target_facts := sema_compute_function_facts(facts, obligation.target)
+                if target_facts == .Val(summary) {
+                    loop call in summary.compute_calls {
+                        if !sema_compute_trace_forbidden(call.method) -> next
+                        diagnostics.push(sema_error(
+                            "E0112",
+                            call.span,
+                            "`compute.{obligation.method}` cannot trace `compute.{call.method}`",
+                            "this operation consumes, mutates, serializes, or has no registered Tensor derivative rule",
+                            "keep the differentiated function on pure differentiable Tensor operations",
+                        ))
+                    }
+                }
+                next
+            }
+            diagnostics.push(sema_error(
+                "E0112",
+                obligation.span,
+                "`compute.{obligation.method}` needs a pure Tensor function",
+                "`{obligation.target}` reaches {sema_compute_effect_names(forbidden)}; autodiff records only pure Tensor operations",
+                "remove the effectful operation from `{obligation.target}`, or differentiate a pure Tensor function",
+            ))
+        }
+    }
+    diagnostics
+}

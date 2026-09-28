@@ -1,0 +1,50 @@
+// Claims ported from crates/jetpack/src/MigrationCoverage.rs #[cfg(test)].
+// The report's JSON projection needs core.encoding.json and is not part of
+// this unit.
+
+fn cli_test_coverage_package(name: String) -> CoveragePackage {
+    CoveragePackage.new(name, "1.0.0", "{name}@jetpack")
+}
+
+fn cli_test_coverage_error(input: CoverageInput) -> CoverageError {
+    if CoverageReport.from_input(input) == {
+        .Ok(_) -> panic("expected a coverage error")
+        .Err(error) -> error
+    }
+}
+
+#Test("coverage report separates sources and measures nativeization") {
+    input := CoverageInput.empty()
+    input.inventory = [CoveragePackage]{cli_test_coverage_package("omp"), cli_test_coverage_package("ripgrep"), cli_test_coverage_package("fd"), cli_test_coverage_package("jq")}
+    input.native_recipes = [CoveragePackage]{cli_test_coverage_package("omp")}
+    input.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
+    input.local_imports = [CoveragePackage]{cli_test_coverage_package("fd")}
+    report :: CoverageReport.from_input(input) ?? panic("valid migration coverage")
+    assert_eq(report.native_recipes.len(), 1)
+    assert_eq(report.centrally_imported_recipes.len(), 1)
+    assert_eq(report.local_imports.len(), 1)
+    assert_eq(report.not_yet_imported, [CoveragePackage]{cli_test_coverage_package("jq")})
+    assert_eq(report.nativeization.total, 4)
+    assert_eq(report.nativeization.nativeized, 1)
+    assert_eq(report.nativeization.remaining, 3)
+    assert_eq(report.nativeization.percent, 25)
+    assert_eq(report.to_human(), "native recipes: 1\ncentrally imported recipes: 1\nlocal imports: 1\nnot-yet-imported packages: 1\nnativeization: 1/4 (25%)\n")
+}
+
+#Test("coverage report rejects unknown and overlapping packages") {
+    unknown := CoverageInput.empty()
+    unknown.inventory = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
+    unknown.native_recipes = [CoveragePackage]{cli_test_coverage_package("fd")}
+    if cli_test_coverage_error(unknown) == {
+        .PackageOutsideInventory(_, _) -> {}
+        else -> panic("unknown package must not inflate coverage")
+    }
+    overlap := CoverageInput.empty()
+    overlap.inventory = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
+    overlap.native_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
+    overlap.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
+    if cli_test_coverage_error(overlap) == {
+        .PackageInMultipleBuckets(_, _, _) -> {}
+        else -> panic("one package must have one source bucket")
+    }
+}

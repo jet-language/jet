@@ -11,7 +11,7 @@ fn compiled_workload_gate_self_check() {
     let scratch = std::env::var("TMPDIR")
         .unwrap_or_else(|_| format!("{}/.cache/jet-test-scratch", std::env::var("HOME").unwrap()));
     let output = Command::new("bash")
-        .arg("tools/ci/test-compiled-workload-gate.sh")
+        .arg("Tools/ci/test-compiled-workload-gate.sh")
         .current_dir(root)
         .env("TMPDIR", scratch)
         .output()

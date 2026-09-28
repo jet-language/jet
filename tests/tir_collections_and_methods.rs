@@ -578,7 +578,7 @@ fn run() {
 }
 #[test]
 fn card_2269_wordfreq_source_uses_ascii_whitespace_scan() {
-    let src = include_str!("../gauntlet/entries/wordfreq/jet/run.jet");
+    let src = include_str!("../Tools/gauntlet/entries/wordfreq/jet/run.jet");
     let rust = compile("card_2269_wordfreq_source", src);
     assert!(
         rust.contains("jet_bytes_ascii_whitespace_for_each(&("),
@@ -1585,7 +1585,7 @@ fn run() {
 #[test]
 fn list_surface_forced_interpreter() {
     let path = format!(
-        "{}/examples/features/collections/list_surface.jet",
+        "{}/Examples/features/collections/list_surface.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     match dev_iteration(&path, false, true) {
@@ -1596,7 +1596,7 @@ fn list_surface_forced_interpreter() {
         } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stderr, "");
-            // Matches examples/features/expected/collections/list_surface.out
+            // Matches Examples/features/expected/collections/list_surface.out
             // (the full #1477 List surface — this assertion was stale, left
             // over from a smaller version of the fixture).
             assert_eq!(
@@ -1615,7 +1615,7 @@ fn list_surface_forced_interpreter() {
 #[test]
 fn bare_member_shorthand_forced_interpreter() {
     let path = format!(
-        "{}/examples/features/basics/method_chain.jet",
+        "{}/Examples/features/basics/method_chain.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     match dev_iteration(&path, false, true) {

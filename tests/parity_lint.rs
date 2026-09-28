@@ -8,7 +8,7 @@
 //! The scanner deliberately limits `byte-for-byte` to cross-tier promises.
 //! Other uses in this corpus describe syntax, formatting, cache keys, or
 //! emitted-shape tests; those are not AOT/JIT/interpreter synchronization
-//! claims. Run: `scripts/agent/jet-env cargo test --test parity_lint`.
+//! claims. Run: `Tools/agent/jet-env cargo test --test parity_lint`.
 
 mod common;
 

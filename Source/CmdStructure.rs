@@ -27,7 +27,7 @@ pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet
             @full "E2104",
             "`jet inspect structure` needs an entry file",
             "structure facts come from one checked Jet entry file",
-            "run `jet inspect structure examples/features/basics/hello.jet`"
+            "run `jet inspect structure Examples/features/basics/hello.jet`"
         );
         exit(jet::ExitCodes::USAGE);
     };

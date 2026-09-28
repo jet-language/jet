@@ -1,6 +1,6 @@
 //! The Jet-native shell declarations stay aligned with the checked-in Nix
 //! oracle. The no-Nix manifest comparison lives in
-//! `scripts/agent/verify-jet-shell-parity.js`; this test proves both selected
+//! `Tools/agent/verify-jet-shell-parity.js`; this test proves both selected
 //! environment modules also pass the typed evaluator.
 
 use jet_env_model::ModuleEval;

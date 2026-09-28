@@ -57,15 +57,21 @@ fn mir_pass_simplify_cfg(program: &MirProgram) {
             terminator := block.terminator
             if terminator == {
                 .Branch(condition, then_target, else_target) -> {
-                    if then_target == else_target {
-                        block.terminator = MirTerminator.Jump(then_target)
-                    } else {
-                        constant :: mir_pass_constant_for(constants, condition)
-                        if constant == .Val(constant_value) {
-                            if constant_value == {
-                                .Bool(flag) -> {
-                                    if flag -> block.terminator = MirTerminator.Jump(then_target)
-                                    else -> block.terminator = MirTerminator.Jump(else_target)
+                    if {
+                        then_target == else_target -> {
+                            block.terminator = MirTerminator.Jump(then_target)
+                        }
+                        else -> {
+                            constant :: mir_pass_constant_for(constants, condition)
+                            if constant == {
+                                .Val(constant_value) -> {
+                                    if constant_value == {
+                                        .Bool(flag) -> {
+                                            if flag -> block.terminator = MirTerminator.Jump(then_target)
+                                            else -> block.terminator = MirTerminator.Jump(else_target)
+                                        }
+                                        else -> {}
+                                    }
                                 }
                                 else -> {}
                             }
@@ -357,12 +363,15 @@ fn mir_pass_checked_mul(left: Int, right: Int) -> ?Int {
     if left == 0 || right == 0 -> return Val(0)
     if left == -1 && right == mir_pass_int_min() -> return None
     if right == -1 && left == mir_pass_int_min() -> return None
-    if left > 0 {
-        if right > 0 && left > 9223372036854775807 / right -> return None
-        if right < 0 && right < mir_pass_int_min() / left -> return None
-    } else {
-        if right > 0 && left < mir_pass_int_min() / right -> return None
-        if right < 0 && left < 9223372036854775807 / right -> return None
+    if {
+        left > 0 -> {
+            if right > 0 && left > 9223372036854775807 / right -> return None
+            if right < 0 && right < mir_pass_int_min() / left -> return None
+        }
+        else -> {
+            if right > 0 && left < mir_pass_int_min() / right -> return None
+            if right < 0 && left < 9223372036854775807 / right -> return None
+        }
     }
     Val(left * right)
 }

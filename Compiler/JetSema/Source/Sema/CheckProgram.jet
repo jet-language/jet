@@ -6,8 +6,11 @@ pub struct SemaResult {
     pub module_name: String
     pub functions: [TFunc]
     pub call_facts: [SemaCallSiteFact]
+    pub hardware_use: MirTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
     pub comptime_requests: [SemaComptimeRequest]
+    pub comptime_body_sources: [SemaComptimeBodySource]
+    pub compute_facts: [SemaComputeFunctionFacts]
     pub exact_int_reachable: Bool
     pub copy_events: [SemaCopyEvent]
     pub diagnostics: [Diagnostic]
@@ -30,8 +33,10 @@ pub struct SemaGraphModuleResult {
     pub foreign_functions: [SemaCheckedForeignFunction]
     pub foreign_providers: [SemaCheckedForeignProvider]
     pub call_facts: [SemaCallSiteFact]
+    pub hardware_use: MirTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
-    pub comptime_requests: [SemaComptimeRequest]
+    pub comptime_body_sources: [SemaComptimeBodySource]
+    pub compute_facts: [SemaComputeFunctionFacts]
     pub exact_int_reachable: Bool
     pub copy_events: [SemaCopyEvent]
     pub diagnostics: [Diagnostic]
@@ -43,6 +48,8 @@ pub enum SemaComptimeItemKind {
     MarkerArgument
     FieldDefault
     TypeLevel
+    CheckedText
+    BodyExpression
 }
 
 pub struct SemaComptimeItemSource {
@@ -56,6 +63,7 @@ pub struct SemaComptimeItemSource {
     pub expected_type: ?Type
     pub span: Span
     pub dependencies: [String]
+    pub checked_text: ?SemaCheckedTextEvaluation
 }
 
 pub struct SemaComptimeItemRequest {
@@ -69,6 +77,7 @@ pub struct SemaComptimeItemRequest {
     pub span: Span
     pub dependencies: [String]
     pub calls: [SemaComptimeRequest]
+    pub hardware_use: MirTargetHardwareUse
     pub reachable_function_keys: [String]
 }
 
@@ -79,6 +88,21 @@ pub struct SemaComptimeItemValue {
     pub kind: SemaComptimeItemKind
     pub value: TComptimeValue
     pub ty: Type
+}
+
+pub fn sema_comptime_body_values_from_items(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] {
+    result := [SemaComptimeBodyValue]{}
+    loop value in values {
+        if value.kind != SemaComptimeItemKind.BodyExpression -> next
+        result.push(SemaComptimeBodyValue{
+            module_identity: value.module_identity,
+            key: value.key,
+            destination_key: value.destination_key,
+            value: value.value,
+            ty: value.ty,
+        })
+    }
+    result
 }
 
 pub struct SemaRegistrationPackagePolicy {
@@ -117,8 +141,10 @@ pub struct SemaComptimeFunctionResult {
     pub calls: [SemaComptimeRequest]
     pub reachable_function_keys: [String]
     pub call_facts: [SemaCallSiteFact]
+    pub hardware_use: MirTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
-    pub diagnostics: [Diagnostic]
+    pub comptime_body_sources: [SemaComptimeBodySource]
+    pub compute_facts: SemaComputeFunctionFacts
     pub exact_int_reachable: Bool
     pub copy_events: [SemaCopyEvent]
     pub complete: Bool
@@ -132,7 +158,9 @@ pub struct SemaGraphResult {
     pub package_policies: [SemaRegistrationPackagePolicy]
     pub core_usage: SemaCoreUsageResult
     pub call_facts: [SemaCallSiteFact]
+    pub hardware_use: MirTargetHardwareUse
     pub comptime_requests: [SemaComptimeRequest]
+    pub compute_facts: [SemaComputeFunctionFacts]
     pub names: MirNameFacts
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -143,6 +171,48 @@ struct SemaFunctionResult {
     complete: Bool
     exact_int_reachable: Bool
     copy_events: [SemaCopyEvent]
+    hardware_use: MirTargetHardwareUse
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: SemaComputeFunctionFacts
+}
+fn sema_function_compute_facts(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts {
+    SemaComputeFunctionFacts{
+        function_key: function_key,
+        compute_calls: ~context.compute_calls,
+        autodiff_obligations: ~context.autodiff_obligations,
+        autodiff_safe_panic: context.autodiff_safe_panic,
+        autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+    }
+}
+
+fn sema_function_check_incomplete(function_key: String, context: SemaCheckContext) -> SemaFunctionResult {
+    SemaFunctionResult{
+        value: None,
+        complete: false,
+        exact_int_reachable: context.exact_int_reachable,
+        copy_events: ~context.copy_events,
+        hardware_use: sema_hardware_use_snapshot(context.hardware_use),
+        comptime_body_sources: ~context.comptime_body_sources,
+        compute_facts: sema_function_compute_facts(function_key, context),
+    }
+}
+
+fn sema_function_check_unavailable(function_key: String) -> SemaFunctionResult {
+    SemaFunctionResult{
+        value: None,
+        complete: false,
+        exact_int_reachable: false,
+        copy_events: [SemaCopyEvent]{},
+        hardware_use: sema_hardware_empty_use(),
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        compute_facts: SemaComputeFunctionFacts{
+            function_key: function_key,
+            compute_calls: [SemaComputeCallFact]{},
+            autodiff_obligations: [SemaAutodiffObligation]{},
+            autodiff_safe_panic: false,
+            autodiff_unsafe_panic: false,
+        },
+    }
 }
 
 fn sema_function_view_source_equal(left: ViewSource, right: ViewSource) -> Bool {
@@ -244,10 +314,13 @@ fn sema_function_return_view_provenance(func: Func, inferred: ?ViewProvenanceMap
             }
             merged := [ViewProvenanceEntry]{}
             loop declared_entry in declared.entries {
-                if declared_entry.slot.len() == 0 {
-                    merged.push(ViewProvenanceEntry{slot: declared_entry.slot, value: ViewProvenance{sources: declared_entry.value.sources, mutable: any_write}})
-                } else {
-                    merged.push(declared_entry)
+                if {
+                    declared_entry.slot.len() == 0 -> {
+                        merged.push(ViewProvenanceEntry{slot: declared_entry.slot, value: ViewProvenance{sources: declared_entry.value.sources, mutable: any_write}})
+                    }
+                    else -> {
+                        merged.push(declared_entry)
+                    }
                 }
             }
             return Val(ViewProvenanceMap{entries: merged})
@@ -292,15 +365,16 @@ fn sema_function_publish_return_views(scopes: &[SemaScopeTable], function: TFunc
     loop index < scopes.bindings.len() {
         binding :: scopes.bindings[index]
         if binding.frame == 0 && binding.symbol.id.key == function.key {
-            if binding.symbol.ty == {
-                .Val(Type.Fn(params, ret, effect_bound, param_contract, metadata, existing)) -> {
+            if binding.symbol.ty == .Val(type_value) {
+                if type_value == .Fn(params, ret, effect_bound, param_contract, metadata, existing) {
                     next_map := Val(provenance)
                     if sema_function_view_maps_equal(existing, next_map) -> return false
                     scopes.bindings[index].symbol.ty = Val(Type.Fn(params, ret, effect_bound, param_contract, metadata, next_map))
                     return true
                 }
-                else -> return false
+                return false
             }
+            return false
         }
         index += 1
     }
@@ -365,10 +439,16 @@ fn sema_failure_carrier(return_type: ?Type) -> TFailureCarrier {
     if return_type == None -> return TFailureCarrier.Result(Type.Named("Unit"), Type.Named("Err"))
     ty :: return_type ?? Type.Named("Unit")
     if ty == {
-        .Named(name) -> if name == "Never" -> return TFailureCarrier.Diverges(ty)
+        .Named(name) -> {
+            if name == "Never" -> return TFailureCarrier.Diverges(ty)
+        }
         .Option(value) -> return TFailureCarrier.Optional(value)
         .Result(ok, err) -> {
-            if err == {.Named(name) -> if name == "Never" -> return TFailureCarrier.Infallible}
+            if err == {
+                .Named(name) -> {
+                    if name == "Never" -> return TFailureCarrier.Infallible
+                }
+            }
             return TFailureCarrier.Result(ok, err)
         }
     }
@@ -399,9 +479,7 @@ fn sema_function_generic_params(func: Func, graph_option: ?SemaRegistrationGraph
                 next
             }
             resolved :: sema_type_graph_lookup_symbol(graph, module_identity, bound) ?? {
-                if graph.complete {
-                    diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
-                }
+                if graph.complete -> diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
                 complete = false
                 bound_index += 1
                 next
@@ -432,11 +510,91 @@ fn sema_function_merge_generic_params(enclosing: [TGenericParam], current: [TGen
     loop inner in current -> merged.push(inner)
     merged
 }
+fn sema_function_normalize_owner_type(graph: SemaRegistrationGraph, owner_type: Type, caller_module_identity: String) -> Type {
+    if owner_type == {
+        .Named(name) -> {
+            nominal :: sema_type_resolve_nominal(graph, owner_type, caller_module_identity) ?? return owner_type
+            if nominal.generic_params.len() == 0 -> return owner_type
+            args :: loop parameter in nominal.generic_params -> Type.Named(parameter.name)
+            return Type.Apply(name, args)
+        }
+        else -> return owner_type
+    }
+}
+
+fn sema_function_owner_generic_params(graph: SemaRegistrationGraph, owner_type: Type, caller_module_identity: String, diagnostics: &[Diagnostic], complete: &Bool) -> [TGenericParam] {
+    normalized_owner_type := sema_function_normalize_owner_type(graph, owner_type, caller_module_identity)
+    nominal :: sema_type_resolve_nominal(graph, normalized_owner_type, caller_module_identity) ?? {
+        if normalized_owner_type == .Apply(_, _) -> complete = false
+        return [TGenericParam]{}
+    }
+    owner_args := if normalized_owner_type == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    if nominal.generic_params.len() != owner_args.len() {
+        if nominal.generic_params.len() > 0 || owner_args.len() > 0 -> complete = false
+        return [TGenericParam]{}
+    }
+    owner_module_index :: sema_name_module_index(graph, nominal.symbol.module_name) ?? {
+        if nominal.generic_params.len() > 0 -> complete = false
+        return [TGenericParam]{}
+    }
+    owner_module := graph.modules[owner_module_index]
+    params := [TGenericParam]{}
+    index := 0
+    loop index < nominal.generic_params.len() {
+        parameter := nominal.generic_params[index]
+        if owner_args[index] != Type.Named(parameter.name) {
+            index += 1
+            next
+        }
+        bounds := [SymbolId]{}
+        loop bound in parameter.bounds {
+            resolved := sema_type_graph_lookup_symbol(graph, owner_module.module_identity, bound)
+            if resolved == None {
+                if graph.complete {
+                    diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
+                }
+                complete = false
+                next
+            }
+            symbol :: resolved ?? {
+                complete = false
+                next
+            }
+            if symbol.symbol.kind != SymbolKind.Trait {
+                diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
+                complete = false
+                next
+            }
+            bounds.push(symbol.symbol.id)
+        }
+        params.push(TGenericParam{name: parameter.name, bounds: bounds})
+        index += 1
+    }
+    return params
+}
+
+fn sema_function_explicit_receiver(function_kind: TFuncKind, parameter_index: Int, parameter: Param) -> Bool {
+    if parameter_index != 0 || parameter.name != "self" -> return false
+    if function_kind == {
+        .Method(_, _) | .TraitMethod(_, _, _, _, _) -> true
+        else -> false
+    }
+}
+
+fn sema_function_kind_owner_type(function_kind: TFuncKind) -> ?Type {
+    if function_kind == {
+        .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> Val(owner_type)
+        else -> None
+    }
+}
 
 fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if function_kind == TFuncKind.TopLevel {
-        registered :: sema_scope_resolve(module_scopes, func.name) ?? return SemaFunctionResult{value: None, complete: false, exact_int_reachable: false, copy_events: [SemaCopyEvent]{}}
-        if registered.id.key != owner_id.key || registered.span.start != func.name_span.start -> return SemaFunctionResult{value: None, complete: false, exact_int_reachable: false, copy_events: [SemaCopyEvent]{}}
+        registered :: sema_scope_resolve(module_scopes, func.name) ?? return sema_function_check_unavailable(owner_id.key)
+        if registered.id.key != owner_id.key || registered.span.start != func.name_span.start -> return sema_function_check_unavailable(owner_id.key)
     }
 
     module_identity := environment.module_identity
@@ -449,14 +607,14 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
 
     scopes := sema_scope_snapshot(module_scopes)
     if environment.registration_graph != None {
-        graph :: environment.registration_graph ?? return SemaFunctionResult{value: None, complete: false, exact_int_reachable: false, copy_events: [SemaCopyEvent]{}}
+        graph :: environment.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
         sema_scope_apply_unit_policy_for_function(&scopes, graph, environment.module_identity, func.span)
     }
     state := sema_ownership_state_init()
     tail_store := sema_statement_tail_store_init()
     effective_return := sema_effective_return_type(func.return_type)
     if environment.registration_graph != None {
-        graph :: environment.registration_graph ?? return SemaFunctionResult{value: None, complete: false, exact_int_reachable: false, copy_events: [SemaCopyEvent]{}}
+        graph :: environment.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
         effective_return = sema_type_resolve_declared_with_generics(graph, effective_return, module_identity, generic_params)
     }
     sema_scope_enter(&scopes, &state, owner_id.key)
@@ -468,37 +626,57 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
     if func.is_comptime -> scopes.comptime_execution_depth = 1
     context := sema_check_context_init()
     context.generic_params = generic_params
-    if func.head_pattern != None || func.external_type != None || func.type_params.len() > 0 || func.params.len() > 0 && func.params[0].root -> complete = false
-    if func.inline_foreign != None || func.gc_return || func.gc_scope || func.is_reactive || func.markers.len() > 0 -> complete = false
+    context.comptime_body_values = ~environment.comptime_body_values
+    unsafe_gate_valid := true
+    if func.is_unsafe {
+        unsafe_source :: sema_effect_source_from_function_key(func, module_identity, owner_id.key)
+        unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, &diagnostics)
+        if !unsafe_gate_valid -> complete = false
+    }
+    if func.head_pattern != None || func.external_type != None || func.params.len() > 0 && func.params[0].root -> complete = false
+    if func.inline_foreign != None || func.is_reactive || func.markers.len() > 0 -> complete = false
+    if func.is_reactive {
+        if func.is_pure {
+            diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`"))
+        }
+        if func.return_type == .Val(return_type) && return_type != Type.Named("Unit") {
+            diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
+        }
+    }
 
     params := [TParameter]{}
     param_index := 0
     loop param_index < func.params.len() {
         parameter :: func.params[param_index]
         parameter_ty :: type_with_effective_fn_returns(parameter.ty)
-        if param_index == 0 {
+        if param_index == 0 && parameter.name == "self" {
             if function_kind == {
                 .Method(_, receiver_type) -> parameter_ty = receiver_type
                 .TraitMethod(_, _, receiver_type, _, _) -> parameter_ty = receiver_type
                 else -> {}
-        }
+            }
         }
         if parameter.variadic -> parameter_ty = Type.List(parameter_ty)
         if environment.registration_graph != None {
-            graph :: environment.registration_graph ?? return SemaFunctionResult{value: None, complete: false, exact_int_reachable: false, copy_events: [SemaCopyEvent]{}}
+            graph :: environment.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
             parameter_ty = sema_type_resolve_declared_with_generics(graph, parameter_ty, module_identity, generic_params)
         }
         if parameter.root || parameter.variadic_bound_list != None || parameter.declared_view_from_names != None -> complete = false
         default_expr := None
-        if {
-            parameter.default != None -> {
-                default_context := sema_check_context_init()
-                default_context.unsafe_depth = context.unsafe_depth
-                default_context.generic_params = generic_params
-                default_state := sema_ownership_state_snapshot(state)
-                checked_default :: sema_check_expression(parameter.default ?? Expr.Unit(parameter.name_span), Val(parameter_ty), environment, &scopes, &default_state, &tail_store, &default_context, &diagnostics)
-                if checked_default == None -> complete = false else -> default_expr = checked_default
-            else -> {}
+        if parameter.default != None {
+            default_context := sema_check_context_init()
+            default_context.unsafe_depth = context.unsafe_depth
+            default_context.generic_params = generic_params
+            default_state := sema_ownership_state_snapshot(state)
+            checked_default :: sema_check_expression(parameter.default ?? Expr.Unit(parameter.name_span), Val(parameter_ty), environment, &scopes, &default_state, &tail_store, &default_context, &diagnostics)
+            if {
+                checked_default == None -> {
+                    complete = false
+                }
+                else -> {
+                    default_expr = checked_default
+                }
+            }
         }
         param_mutable := parameter.convention == AccessConvention.Write
         param_symbol := Symbol{
@@ -506,30 +684,36 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
             kind: SymbolKind.Parameter,
             name: parameter.name,
             module_name: module_identity,
-            owner: Val(owner.key),
+            owner: Val(owner_id.key),
             span: parameter.name_span,
             ty: Val(parameter_ty),
             visibility: 0,
         }
-        if !sema_scope_declare_local(&scopes, param_symbol, param_mutable, parameter.convention, None, false) {
-            diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
-            complete = false
-        } else {
-            sema_ownership_declare_binding(&state, param_symbol, true)
-            if function_kind == {
-                .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
-                    if param_index == 0 -> context.return_view_receiver_key = param_symbol.id.key
+        if {
+            !sema_scope_declare_local(&scopes, param_symbol, param_mutable, parameter.convention, None, false) -> {
+                diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
+                complete = false
+            }
+            else -> {
+                sema_ownership_declare_binding(&state, param_symbol, true)
+                if function_kind == {
+                    .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
+                        if param_index == 0 && parameter.name == "self" -> context.return_view_receiver_key = param_symbol.id.key
+                        else -> context.return_view_parameter_keys.push(param_symbol.id.key)
+                    }
                     else -> context.return_view_parameter_keys.push(param_symbol.id.key)
                 }
-                else -> context.return_view_parameter_keys.push(param_symbol.id.key)
             }
         }
         local :: tir_symbol_local(parameter.name, parameter.name_span, param_symbol.id)
         local.mutable = param_mutable
-        public_label :: parameter.public_label.map((label) -> label.name) ?? parameter.name
-        params.push(TParameter{local: local, name: parameter.name, span: parameter.name_span, ty: parameter_ty, convention: parameter.convention, public_label: public_label, zone: parameter.zone, default: default_expr, variadic: parameter.variadic})
+        if !sema_function_explicit_receiver(function_kind, param_index, parameter) {
+            public_label :: parameter.public_label.map((label) -> label.name) ?? parameter.name
+            params.push(TParameter{local: local, name: parameter.name, span: parameter.name_span, ty: parameter_ty, convention: parameter.convention, public_label: public_label, zone: parameter.zone, default: default_expr, variadic: parameter.variadic})
+        }
         param_index += 1
     }
+    if func.is_unsafe && unsafe_gate_valid -> context.unsafe_depth = 1
     contract :: sema_contract_check_function(func, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if !contract.complete -> complete = false
 
@@ -547,6 +731,7 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
         if declared_success != Type.Named("Unit") && !sema_stmt_block_has_no_fallthrough(func.body) -> complete = false
     }
     sema_ownership_finalize_references(&state, &diagnostics)
+    sema_function_reactive_apply_upgrade_flags(&func.body, context.reactive_upgrade_names)
     loop fact in context.call_facts -> call_facts.push(fact)
     loop request in context.comptime_requests -> comptime_requests.push(request)
     loop reference in context.name_references -> name_references.push(reference)
@@ -554,15 +739,15 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
     source_line := sema_source_line_at(environment.source_segments, func.name_span)
     if source_line == None -> complete = false
     return_view_provenance := sema_function_return_view_provenance(func, context.return_view_provenance, &diagnostics, &complete)
-    if !complete -> return SemaFunctionResult{value: None, complete: false, exact_int_reachable: context.exact_int_reachable, copy_events: ~context.copy_events}
-    source_line_value :: source_line ?? return SemaFunctionResult{value: None, complete: false, exact_int_reachable: context.exact_int_reachable, copy_events: ~context.copy_events}
+    if !complete -> return sema_function_check_incomplete(owner_id.key, context)
+    source_line_value :: source_line ?? return sema_function_check_incomplete(owner_id.key, context)
     return_ty :: effective_return
     source_file :: sema_source_file_at(environment.source_segments, fallback_source_file, environment.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
     effects :: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}
     unsafe_gate := None
-    if func.is_unsafe && func.unsafe_reason != None {
+    if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
         reason :: func.unsafe_reason ?? ""
         unsafe_span :: func.unsafe_span ?? func.span
         line :: sema_source_line_at(environment.source_segments, unsafe_span) ?? source_line_value
@@ -600,6 +785,7 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
         memo_bound: None,
         memo_unbounded: false,
         is_reactive: func.is_reactive,
+        reactive_upgrades: context.reactive_upgrades,
         body: body,
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
@@ -609,20 +795,32 @@ fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind,
         uses_stack_sentry: false,
         kind: function_kind,
     }
-    SemaFunctionResult{value: Val(tir), complete: true, exact_int_reachable: context.exact_int_reachable, copy_events: ~context.copy_events}
+    SemaFunctionResult{
+        value: Val(tir),
+        complete: true,
+        exact_int_reachable: context.exact_int_reachable,
+        copy_events: ~context.copy_events,
+        hardware_use: sema_hardware_use_snapshot(context.hardware_use),
+        comptime_body_sources: ~context.comptime_body_sources,
+        compute_facts: sema_function_compute_facts(owner_id.key, context),
+    }
 }
 
 pub fn check_program(program: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
     call_facts := [SemaCallSiteFact]{}
+    hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
     comptime_requests := [SemaComptimeRequest]{}
+    comptime_body_sources := [SemaComptimeBodySource]{}
+    compute_facts := [SemaComputeFunctionFacts]{}
     scopes := sema_scope_init(module_name)
     local_declarations := [SemaScopeDeclaration]{}
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
-    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.fenced_statements.len() == 0 && program.web_target_ceiling == None && !program.pub_file && !program.no_prelude && program.default_target == None && program.html_path == None && program.policy_declarations.len() == 0 && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
+    memory_plan := sema_function_memory_plan_for_program(program, module_name, "")
+    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.fenced_statements.len() == 0 && program.web_target_ceiling == None && !program.pub_file && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
     item_index := 0
     loop item_index < program.items.len() {
         item :: program.items[item_index]
@@ -639,7 +837,22 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
                 function_call_facts := [SemaCallSiteFact]{}
                 function_comptime_requests := [SemaComptimeRequest]{}
                 function_name_references := [SemaNameReferenceFact]{}
-                checked :: sema_function_check(func, symbol_id(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                memory_row := sema_function_memory_find(memory_plan, module_name, func.span)
+                memory_func := func
+                if memory_row == {
+                    .Val(row) -> {
+                        memory_func = row.function
+                        loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
+                        if !row.complete -> complete = false
+                    }
+                    else -> {
+                        complete = false
+                    }
+                }
+                checked :: sema_function_check(memory_func, symbol_id(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
+                loop source in checked.comptime_body_sources -> comptime_body_sources.push(source)
+                compute_facts.push(checked.compute_facts)
                 exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
                 loop event in checked.copy_events -> copy_events.push(event)
                 loop fact in function_call_facts -> call_facts.push(fact)
@@ -650,8 +863,9 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
             else -> {}
         }
         item_index += 1
+    }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_segments)
-    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, comptime_requests: comptime_requests, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
+    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
 }
 
 fn sema_comptime_find_checked_function(functions: [SemaComptimeFunctionResult], module_identity: String, function_key: String) -> ?SemaComptimeFunctionResult {
@@ -678,12 +892,13 @@ struct SemaComptimeFunctionSource {
 
 fn sema_comptime_method_kind(function: Func, owner_type: Type, trait_symbol: ?Symbol) -> TFuncKind {
     self_convention := None
-    if function.params.len() > 0 -> self_convention = Val(function.params[0].convention)
+    if function.params.len() > 0 && function.params[0].name == "self" -> self_convention = Val(function.params[0].convention)
     if trait_symbol == {
         .Val(resolved_trait) -> return TFuncKind.TraitMethod(function.is_unsafe, self_convention, owner_type, resolved_trait.id, None)
         .None -> return TFuncKind.Method(self_convention, owner_type)
     }
 }
+
 
 fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> ?SemaComptimeFunctionSource {
     loop source_module in graph.modules {
@@ -708,7 +923,9 @@ fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_ident
 pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], previously_checked: [SemaComptimeFunctionResult], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
     cached := sema_comptime_find_checked_function(previously_checked, module_identity, function_key)
     if cached == {
-        .Val(result) -> if result.complete -> return result
+        .Val(result) -> {
+            if result.complete -> return result
+        }
         .None -> {}
     }
     unresolved := SemaComptimeFunctionResult{
@@ -720,20 +937,44 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
         calls: [SemaComptimeRequest]{},
         reachable_function_keys: [String]{},
         call_facts: [SemaCallSiteFact]{},
+        hardware_use: sema_hardware_empty_use(),
         name_references: [SemaNameReferenceFact]{},
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        compute_facts: SemaComputeFunctionFacts{
+            function_key: function_key,
+            compute_calls: [SemaComputeCallFact]{},
+            autodiff_obligations: [SemaAutodiffObligation]{},
+            autodiff_safe_panic: false,
+            autodiff_unsafe_panic: false,
+        },
         diagnostics: [Diagnostic]{},
         exact_int_reachable: false,
         copy_events: [SemaCopyEvent]{},
         complete: false,
     }
     source :: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
-    if !source.declaration.is_comptime -> return unresolved
+    if !source.declaration.is_comptime && !source.declaration.is_pure -> return unresolved
     resolved_graph := sema_comptime_graph_with_values(graph, values)
     module_index :: sema_name_module_index(resolved_graph, module_identity) ?? return unresolved
     source_module := resolved_graph.modules[module_index]
     diagnostics := [Diagnostic]{}
+    memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
+    memory_row := sema_function_memory_find(memory_plan, module_identity, source.declaration.span)
+    memory_func := source.declaration
+    memory_complete := true
+    if memory_row == {
+        .Val(row) -> {
+            memory_func = row.function
+            loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
+            memory_complete = row.complete
+        }
+        else -> {
+            memory_complete = false
+        }
+    }
     scopes := sema_scope_init(source_module.module_identity)
     environment := sema_scope_environment_init(Val(resolved_graph), source_module.module_identity, source_module.package_identity, source_module.module_name, source_module.source_file, source_module.source_origin, source_module.source_segments, [TTypeDef]{}, [SemaScopeDeclaration]{})
+    environment.comptime_body_values = sema_comptime_body_values_from_items(values)
     if !sema_registration_apply_graph_module(resolved_graph, source_module.module_identity, &scopes, &diagnostics) {
         sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
         return SemaComptimeFunctionResult{
@@ -745,7 +986,16 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
             calls: [SemaComptimeRequest]{},
             reachable_function_keys: [String]{},
             call_facts: [SemaCallSiteFact]{},
+            hardware_use: sema_hardware_empty_use(),
             name_references: [SemaNameReferenceFact]{},
+            comptime_body_sources: [SemaComptimeBodySource]{},
+            compute_facts: SemaComputeFunctionFacts{
+                function_key: function_key,
+                compute_calls: [SemaComputeCallFact]{},
+                autodiff_obligations: [SemaAutodiffObligation]{},
+                autodiff_safe_panic: false,
+                autodiff_unsafe_panic: false,
+            },
             diagnostics: diagnostics,
             exact_int_reachable: false,
             copy_events: [SemaCopyEvent]{},
@@ -756,7 +1006,20 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
     call_facts := [SemaCallSiteFact]{}
     calls := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check(source.declaration, source.symbol.id, source.kind, environment, scopes, &diagnostics, &call_facts, &calls, &name_references)
+    owner_generic_complete := true
+    function_kind := source.kind
+    owner_type := sema_function_kind_owner_type(source.kind)
+    if owner_type != None {
+        owner :: owner_type ?? Type.Named("Unit")
+        normalized_owner_type := sema_function_normalize_owner_type(resolved_graph, owner, source_module.module_identity)
+        environment.generic_params = sema_function_owner_generic_params(resolved_graph, normalized_owner_type, source_module.module_identity, &diagnostics, &owner_generic_complete)
+        function_kind = if source.kind == {
+            .Method(convention, _) -> TFuncKind.Method(convention, normalized_owner_type)
+            .TraitMethod(is_unsafe, convention, _, trait_symbol, codec) -> TFuncKind.TraitMethod(is_unsafe, convention, normalized_owner_type, trait_symbol, codec)
+            else -> source.kind
+        }
+    }
+    checked := sema_function_check(memory_func, source.symbol.id, function_kind, environment, scopes, &diagnostics, &call_facts, &calls, &name_references)
     dependencies := sema_comptime_dependencies_from_references(resolved_graph, name_references, values)
     waiting := sema_comptime_waiting_dependencies(resolved_graph, dependencies, values)
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
@@ -767,37 +1030,76 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
         dependencies: dependencies,
         waiting_dependencies: waiting,
         calls: calls,
-        reachable_function_keys: sema_comptime_reachable_function_keys(scopes, call_facts),
+        reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, call_facts),
         call_facts: call_facts,
+        hardware_use: sema_hardware_use_snapshot(checked.hardware_use),
         name_references: name_references,
+        comptime_body_sources: checked.comptime_body_sources,
+        compute_facts: checked.compute_facts,
         exact_int_reachable: checked.exact_int_reachable,
         copy_events: ~checked.copy_events,
         diagnostics: diagnostics,
-        complete: checked.complete && diagnostics.len() == 0 && waiting.len() == 0,
+        complete: memory_complete && checked.complete && owner_generic_complete && diagnostics.len() == 0 && waiting.len() == 0,
     }
 }
 
-fn sema_check_registration_method(source_module: SemaRegistrationModule, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: ?Symbol, scopes: SemaScopeTable, environment: SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], exact_int_reachable: &[Bool], copy_events: &[SemaCopyEvent]) -> Bool {
+fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: ?Symbol, scopes: SemaScopeTable, environment: SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MirTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &[Bool], copy_events: &[SemaCopyEvent]) -> Bool {
     cached := sema_comptime_find_checked_function(comptime_functions, source_module.module_identity, registered.symbol.id.key)
     if cached == {
         .Val(checked_function) -> {
             exact_int_reachable = exact_int_reachable || checked_function.exact_int_reachable
+            sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked_function.hardware_use))
             loop event in checked_function.copy_events -> copy_events.push(event)
+            loop source in checked_function.comptime_body_sources -> comptime_body_sources.push(source)
+            compute_facts.push(checked_function.compute_facts)
             return sema_comptime_append_checked_function(checked_function, functions, call_facts, comptime_requests, name_references)
         }
         .None -> {}
     }
+    memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, registered.declaration.span)
+    memory_func := registered.declaration
+    memory_complete := true
+    if memory_row == {
+        .Val(row) -> {
+            memory_func = row.function
+            loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
+            memory_complete = row.complete
+        }
+        else -> {
+            memory_complete = false
+        }
+    }
     function_call_facts := [SemaCallSiteFact]{}
     function_comptime_requests := [SemaComptimeRequest]{}
     function_name_references := [SemaNameReferenceFact]{}
-    function_kind := sema_comptime_method_kind(registered.declaration, owner_type, trait_symbol)
-    checked := sema_function_check(registered.declaration, registered.symbol.id, function_kind, environment, scopes, diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+    method_environment := environment
+    owner_generic_complete := true
+    normalized_owner_type := owner_type
+    if environment.registration_graph == {
+        .Val(graph) -> {
+            normalized_owner_type = sema_function_normalize_owner_type(graph, owner_type, source_module.module_identity)
+            method_environment.generic_params = sema_function_owner_generic_params(graph, normalized_owner_type, source_module.module_identity, diagnostics, &owner_generic_complete)
+        }
+        else -> {
+            if owner_type == {
+                .Apply(_, _) -> {
+                    owner_generic_complete = false
+                }
+                else -> {}
+            }
+        }
+    }
+    function_kind := sema_comptime_method_kind(memory_func, normalized_owner_type, trait_symbol)
+    checked := sema_function_check(memory_func, registered.symbol.id, function_kind, method_environment, scopes, diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
+    sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
     loop event in checked.copy_events -> copy_events.push(event)
     loop fact in function_call_facts -> call_facts.push(fact)
     loop request in function_comptime_requests -> comptime_requests.push(request)
+    loop source in checked.comptime_body_sources -> comptime_body_sources.push(source)
+    compute_facts.push(checked.compute_facts)
     loop reference in function_name_references -> name_references.push(reference)
-    checked.complete && sema_append_function(functions, checked)
+    memory_complete && owner_generic_complete && checked.complete && sema_append_function(functions, checked)
 }
 fn sema_check_registered_tfunc_key(module_row: SemaRegistrationModule, name: String) -> ?String {
     loop function in module_row.functions {
@@ -822,13 +1124,15 @@ fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, pro
     None
 }
 
-fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], check_bodies: Bool, checked_types: [TTypeDef]) -> SemaGraphModuleResult {
+fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], check_bodies: Bool, checked_types: [TTypeDef]) -> SemaGraphModuleResult {
     source_module := graph.modules[module_index]
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
     call_facts := [SemaCallSiteFact]{}
+    hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
-    comptime_requests := [SemaComptimeRequest]{}
+    comptime_body_sources := [SemaComptimeBodySource]{}
+    compute_facts := [SemaComputeFunctionFacts]{}
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     scopes := sema_scope_init(source_module.module_identity)
@@ -838,9 +1142,10 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
     declarations := sema_registration_check_declarations_with_values(graph, module_index, &diagnostics, values)
     if diagnostics.len() > declarations_diagnostic_count -> complete = false
     environment := sema_scope_environment_init(Val(graph), source_module.module_identity, source_module.package_identity, source_module.module_name, source_module.source_file, source_module.source_origin, source_module.source_segments, checked_types, [SemaScopeDeclaration]{})
+    environment.comptime_body_values = sema_comptime_body_values_from_items(values)
 
     program := source_module.program
-    if program.script_body.len() > 0 || program.block_spans.len() > 0 || program.fenced_statements.len() > 0 || program.web_target_ceiling != None || program.pub_file || program.no_prelude || program.default_target != None || program.html_path != None || program.policy_declarations.len() > 0 || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> complete = false
+    if program.script_body.len() > 0 || program.block_spans.len() > 0 || program.fenced_statements.len() > 0 || program.web_target_ceiling != None || program.pub_file || program.no_prelude || program.default_target != None || program.html_path != None || sema_function_memory_has_unsupported_policies(program.policy_declarations) || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> complete = false
     item_index := 0
     loop item_index < program.items.len() {
         if program.items[item_index] == {
@@ -852,7 +1157,9 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
     if check_bodies {
         summary_pass_limit := 0
         loop item in program.items {
-            if item == {.Func(_) -> summary_pass_limit += 1 else -> {}}
+            if item == .Func(_) {
+                summary_pass_limit += 1
+            }
         }
         summary_pass := 0
         loop summary_pass < summary_pass_limit {
@@ -873,7 +1180,10 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
                                 summary_calls := [SemaCallSiteFact]{}
                                 summary_comptime_requests := [SemaComptimeRequest]{}
                                 summary_name_references := [SemaNameReferenceFact]{}
-                                checked := sema_function_check(func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, environment, scopes, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
+                                summary_row := sema_function_memory_find(memory_plan, source_module.module_identity, func.span)
+                                summary_func := func
+                                if summary_row == .Val(row) -> summary_func = row.function
+                                checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, environment, scopes, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                                 if checked.value != None {
                                     function :: checked.value ?? next
                                     if sema_function_publish_return_views(&scopes, function) -> summary_changed = true
@@ -901,14 +1211,32 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
                                 _ := sema_function_publish_return_views(&scopes, function)
                             }
                             exact_int_reachable = exact_int_reachable || checked_function.exact_int_reachable
+                            sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked_function.hardware_use))
                             loop event in checked_function.copy_events -> copy_events.push(event)
                             if !sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references) -> complete = false
+                            loop source in checked_function.comptime_body_sources -> comptime_body_sources.push(source)
+                            compute_facts.push(checked_function.compute_facts)
                         }
                         .None -> {
                             function_call_facts := [SemaCallSiteFact]{}
                             function_comptime_requests := [SemaComptimeRequest]{}
                             function_name_references := [SemaNameReferenceFact]{}
-                            checked :: sema_function_check(func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                            memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, func.span)
+                            memory_func := func
+                            if memory_row == {
+                                .Val(row) -> {
+                                    memory_func = row.function
+                                    loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
+                                    if !row.complete -> complete = false
+                                }
+                                else -> {
+                                    complete = false
+                                }
+                            }
+                            checked :: sema_function_check(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                            sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
+                            loop source in checked.comptime_body_sources -> comptime_body_sources.push(source)
+                            compute_facts.push(checked.compute_facts)
                             if checked.value != None {
                                 function :: checked.value ?? next
                                 _ := sema_function_publish_return_views(&scopes, function)
@@ -928,12 +1256,12 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
         }
         loop nominal in source_module.nominals {
             loop method in nominal.methods {
-                if !sema_check_registration_method(source_module, method, nominal.ty, None, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &comptime_requests, &name_references, &exact_int_reachable, &copy_events) -> complete = false
+                if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events) -> complete = false
             }
         }
         loop implementation in source_module.impls {
             loop method in implementation.methods {
-                if !sema_check_registration_method(source_module, method, implementation.target_type, implementation.trait_symbol, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &comptime_requests, &name_references, &exact_int_reachable, &copy_events) -> complete = false
+                if !sema_check_registration_method(source_module, memory_plan, method, implementation.target_type, implementation.trait_symbol, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events) -> complete = false
             }
         }
     }
@@ -959,11 +1287,14 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
         loop handle_index < provider.handles.len() {
             handle := provider.handles[handle_index]
             adapter_key := sema_check_foreign_handle_adapter_key(source_module, provider, handle)
-            if adapter_key != None {
-                handle.close_function_key = adapter_key
-                handle.close_foreign_key = None
-            } else if handle.close_foreign_key == None {
-                handle.close_foreign_key = sema_check_registered_foreign_key(source_module, handle.close)
+            if {
+                adapter_key != None -> {
+                    handle.close_function_key = adapter_key
+                    handle.close_foreign_key = None
+                }
+                handle.close_foreign_key == None -> {
+                    handle.close_foreign_key = sema_check_registered_foreign_key(source_module, handle.close)
+                }
             }
             provider.handles[handle_index] = handle
             handle_index += 1
@@ -990,8 +1321,10 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, module_index: In
         foreign_providers: foreign_providers,
         foreign_functions: foreign_functions,
         call_facts: call_facts,
+        hardware_use: hardware_use,
         name_references: name_references,
-        comptime_requests: comptime_requests,
+        comptime_body_sources: comptime_body_sources,
+        compute_facts: compute_facts,
         exact_int_reachable: exact_int_reachable,
         copy_events: copy_events,
         diagnostics: diagnostics,
@@ -1051,7 +1384,11 @@ fn sema_name_add_reference(facts: &[MirNameFacts], graph: SemaRegistrationGraph,
 fn sema_name_symbol_from_graph(graph: SemaRegistrationGraph, id: SymbolId) -> ?SemaNameResolvedDeclaration {
     loop graph_module in graph.modules {
         loop symbol in graph_module.symbols {
-            if symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: symbol, kind: if symbol.kind == SymbolKind.Constant -> "const" else if symbol.kind == SymbolKind.Function -> "function" else -> "semantic"})
+            if symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: symbol, kind: if {
+                symbol.kind == SymbolKind.Constant -> "const"
+                symbol.kind == SymbolKind.Function -> "function"
+                else -> "semantic"
+            }})
         }
         loop nominal in graph_module.nominals {
             loop field in nominal.fields {
@@ -1452,12 +1789,31 @@ fn sema_comptime_waiting_dependencies(graph: SemaRegistrationGraph, dependencies
     waiting
 }
 
-fn sema_comptime_reachable_function_keys(scopes: SemaScopeTable, call_facts: [SemaCallSiteFact]) -> [String] {
+fn sema_comptime_find_function_source_by_key(graph: SemaRegistrationGraph, function_key: String) -> ?SemaComptimeFunctionSource {
+    found := None
+    loop graph_module in graph.modules {
+        source := sema_comptime_find_function_source(graph, graph_module.module_identity, function_key)
+        if source != None {
+            value :: source ?? return None
+            if found == {
+                .Val(previous) -> {
+                    if previous.symbol.id.key != value.symbol.id.key || previous.symbol.module_name != value.symbol.module_name -> return None
+                }
+                else -> {
+                    found = Val(value)
+                }
+            }
+        }
+    }
+    found
+}
+
+fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> [String] {
     keys := [String]{}
     loop fact in call_facts {
         callee :: fact.callee ?? next
-        target :: sema_expr_comptime_target(scopes, callee) ?? next
-        if !target.declaration.is_comptime -> next
+        source :: sema_comptime_find_function_source_by_key(graph, callee.key) ?? next
+        if !source.declaration.is_comptime && !source.declaration.is_pure -> next
         already := false
         loop key in keys {
             if key == callee.key -> already = true
@@ -1465,6 +1821,21 @@ fn sema_comptime_reachable_function_keys(scopes: SemaScopeTable, call_facts: [Se
         if !already -> keys.push(callee.key)
     }
     keys
+}
+fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource {
+    SemaComptimeItemSource{
+        module_identity: evaluation.module_identity,
+        key: evaluation.key,
+        destination_key: evaluation.key,
+        name: "{evaluation.type_name} checked text literal",
+        source_file: evaluation.source_file,
+        kind: SemaComptimeItemKind.CheckedText,
+        expression: evaluation.source_expression,
+        expected_type: Val(evaluation.expression.ty),
+        span: evaluation.span,
+        dependencies: evaluation.dependencies,
+        checked_text: Val(evaluation),
+    }
 }
 
 fn sema_comptime_add_source(sources: &[SemaComptimeItemSource], graph: SemaRegistrationGraph, module_identity: String, key: String, destination_key: String, name: String, kind: SemaComptimeItemKind, expression: Expr, expected_type: ?Type) {
@@ -1483,6 +1854,7 @@ fn sema_comptime_add_source(sources: &[SemaComptimeItemSource], graph: SemaRegis
         expected_type: expected_type,
         span: expr_span(expression),
         dependencies: [String]{},
+        checked_text: None,
     }
     source.dependencies = sema_comptime_source_dependencies(graph, source, [SemaComptimeItemValue]{})
     sources.push(source)
@@ -1629,9 +2001,10 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     loop diagnostic in graph.diagnostics -> diagnostics.push(diagnostic)
     modules := [SemaGraphModuleResult]{}
     complete := graph.complete
+    memory_plan := sema_function_memory_plan_from_graph(graph)
     module_index := 0
     loop module_index < graph.modules.len() {
-        checked :: sema_check_registration_module(graph, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{})
+        checked :: sema_check_registration_module(graph, memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{})
         loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
         modules.push(checked)
@@ -1640,6 +2013,17 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     sources := [SemaComptimeItemSource]{}
     loop graph_module in graph.modules {
         loop source in sema_comptime_collect_module_sources(graph, graph_module) -> sources.push(source)
+    }
+    loop checked_module in modules {
+        loop request in checked_module.comptime_requests {
+            evaluation :: request.checked_text ?? next
+            source := sema_comptime_checked_text_source(evaluation)
+            duplicate := false
+            loop existing in sources {
+                if existing.module_identity == source.module_identity && existing.key == source.key -> duplicate = true
+            }
+            if !duplicate -> sources.push(source)
+        }
     }
     SemaComptimeDeclarationStage{
         modules: modules,
@@ -1654,10 +2038,11 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
 
 pub fn sema_comptime_modules_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
     resolved_graph := sema_comptime_graph_with_values(graph, values)
+    memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     modules := [SemaGraphModuleResult]{}
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
-        modules.push(sema_check_registration_module(resolved_graph, module_index, values, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{}))
+        modules.push(sema_check_registration_module(resolved_graph, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{}))
         module_index += 1
     }
     modules
@@ -1665,6 +2050,26 @@ pub fn sema_comptime_modules_with_values(graph: SemaRegistrationGraph, values: [
 
 pub fn sema_check_comptime_item(graph: SemaRegistrationGraph, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     resolved_graph := sema_comptime_graph_with_values(graph, values)
+    if source.checked_text == .Val(evaluation) {
+        dependencies := evaluation.dependencies
+        waiting := sema_comptime_waiting_dependencies(resolved_graph, dependencies, values)
+        if waiting.len() > 0 -> return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
+        request := SemaComptimeItemRequest{
+            module_identity: source.module_identity,
+            key: source.key,
+            destination_key: source.destination_key,
+            source_file: source.source_file,
+            kind: SemaComptimeItemKind.CheckedText,
+            expression: evaluation.expression,
+            expected_type: Val(evaluation.expression.ty),
+            span: evaluation.span,
+            dependencies: dependencies,
+            calls: [SemaComptimeRequest]{},
+            hardware_use: sema_hardware_use_snapshot(evaluation.hardware_use),
+            reachable_function_keys: evaluation.reachable_function_keys,
+        }
+        return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
+    }
     module_index :: sema_name_module_index(resolved_graph, source.module_identity) ?? return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
     source_module := resolved_graph.modules[module_index]
     scopes := sema_scope_init(source_module.module_identity)
@@ -1706,7 +2111,8 @@ pub fn sema_check_comptime_item(graph: SemaRegistrationGraph, source: SemaCompti
         span: source.span,
         dependencies: dependencies,
         calls: context.comptime_requests,
-        reachable_function_keys: sema_comptime_reachable_function_keys(scopes, context.call_facts),
+        hardware_use: sema_hardware_use_snapshot(context.hardware_use),
+        reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, context.call_facts),
     }
     SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: diagnostics.len() == 0}
 }
@@ -1756,8 +2162,21 @@ fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: Mi
     ceiling_name := sema_comptime_layer_name(ceiling)
     sema_error_optional("E1006", span, "package `{package_identity}` reaches runtime layer `{actual_name}` above its `{ceiling_name}` ceiling", "the package's reachable Core closure exceeds `runtime_ceiling`", "raise the package runtime ceiling or remove the higher-layer dependency")
 }
+fn sema_compute_module_owns_site(module_result: SemaGraphModuleResult, span: Span) -> Bool {
+    loop function_facts in module_result.compute_facts {
+        loop call in function_facts.compute_calls {
+            if call.span.start == span.start && call.span.end == span.end -> return true
+        }
+        loop obligation in function_facts.autodiff_obligations {
+            if obligation.span.start == span.start && obligation.span.end == span.end -> return true
+        }
+    }
+    false
+}
+
 pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult]) -> SemaGraphResult {
     resolved_graph := sema_comptime_graph_with_values(graph, values)
+    memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     diagnostics := stage.diagnostics
     modules := [SemaGraphModuleResult]{}
     checked_types := [TTypeDef]{}
@@ -1771,7 +2190,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     }
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
-        checked := sema_check_registration_module(resolved_graph, module_index, values, comptime_functions, true, checked_types)
+        checked := sema_check_registration_module(resolved_graph, memory_plan, module_index, values, comptime_functions, true, checked_types)
         loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
         modules.push(checked)
@@ -1796,6 +2215,52 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     loop effect_module in effects.modules {
         module_index :: sema_name_module_index(resolved_graph, effect_module.module_identity) ?? next
         modules[module_index].functions = effect_module.functions
+    }
+    resolved_compute_facts := [SemaComputeFunctionFacts]{}
+    effect_solved_functions := [TFunc]{}
+    loop module_result in modules {
+        loop function_facts in module_result.compute_facts -> resolved_compute_facts.push(function_facts)
+        loop function in module_result.functions -> effect_solved_functions.push(function)
+    }
+    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
+    loop diagnostic in compute_diagnostics {
+        if diagnostic.span == {
+            .Val(span) -> {
+                owner_index := None
+                ambiguous := false
+                index := 0
+                loop index < modules.len() {
+                    if sema_compute_module_owns_site(modules[index], span) {
+                        if owner_index != None -> ambiguous = true
+                        owner_index = Val(index)
+                    }
+                    index += 1
+                }
+                if {
+                    owner_index == .Val(module_index) && !ambiguous -> {
+                        registration_index :: sema_name_module_index(resolved_graph, modules[module_index].module_identity)
+                        if {
+                            registration_index != None -> {
+                                registration :: resolved_graph.modules[registration_index ?? 0]
+                                located := [Diagnostic]{diagnostic}
+                                sema_attach_diagnostic_source_locations(&located, 0, registration.source_segments)
+                                diagnostics.push(located[0])
+                            }
+                            else -> {
+                                diagnostics.push(diagnostic)
+                            }
+                        }
+                    }
+                    else -> {
+                        diagnostics.push(diagnostic)
+                    }
+                }
+            }
+            else -> {
+                diagnostics.push(diagnostic)
+            }
+        }
+        complete = false
     }
 
     loop module_result in modules {
@@ -1848,10 +2313,16 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     }
 
     call_facts := [SemaCallSiteFact]{}
+    hardware_use := sema_hardware_empty_use()
     comptime_requests := [SemaComptimeRequest]{}
+    comptime_body_sources := [SemaComptimeBodySource]{}
+    compute_facts := [SemaComputeFunctionFacts]{}
     loop module_result in modules {
         loop fact in module_result.call_facts -> call_facts.push(fact)
+        sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(module_result.hardware_use))
         loop request in module_result.comptime_requests -> comptime_requests.push(request)
+        loop source in module_result.comptime_body_sources -> comptime_body_sources.push(source)
+        loop facts in module_result.compute_facts -> compute_facts.push(facts)
     }
     if diagnostics.len() > 0 && stage.diagnostics.len() == 0 -> complete = false
     SemaGraphResult{
@@ -1862,7 +2333,10 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         package_policies: stage.package_policies,
         core_usage: core_usage,
         call_facts: call_facts,
+        hardware_use: hardware_use,
         comptime_requests: comptime_requests,
+        comptime_body_sources: comptime_body_sources,
+        compute_facts: compute_facts,
         names: sema_name_build_facts(resolved_graph, modules),
         diagnostics: diagnostics,
         complete: complete,

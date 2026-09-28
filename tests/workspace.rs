@@ -335,13 +335,13 @@ fn workspace_find_example_evaluates() {
 
 // ──────────────────────────────────────────────
 // I5: the committed monorepo example evaluates and addresses its members
-// (examples/features/packages/monorepo)
+// (Examples/features/packages/monorepo)
 // ──────────────────────────────────────────────
 
 #[test]
 fn committed_monorepo_example_indexes_and_addresses_members() {
     use jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
     let src = std::fs::read_to_string(dir.join("workspace.jet"))
         .expect("committed monorepo example must have a workspace.jet");
 

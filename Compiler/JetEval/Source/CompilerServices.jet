@@ -1,0 +1,450 @@
+// Source-owned front-end facts reusable by the compile-time Core services.
+// The upstream inline-package source preparer must preserve original UTF-8 byte
+// offsets. Missing preparation is not treated as unmodified-source success.
+JET_COMPILER_SERVICES_SCHEMA_VERSION :: 1
+
+pub enum JetCompilerServicesSourcePreparation {
+    Masked(source: String)
+    Rejected(diagnostic: Diagnostic)
+}
+
+pub struct JetCompilerServicesSourceInput {
+    pub source: String
+    pub preparation: ?JetCompilerServicesSourcePreparation
+}
+
+pub struct JetCompilerServicesLexFacts {
+    pub source: String
+    pub compiler_source: String
+    pub lexed: Lexed
+    pub value: TComptimeValue
+}
+
+pub struct JetCompilerServicesParseFacts {
+    pub source: String
+    pub compiler_source: String
+    pub lexed: Lexed
+    pub parsed: ParseResult
+    pub value: TComptimeValue
+}
+
+pub struct JetCompilerServicesCheckedInput {
+    pub parsed: JetCompilerServicesParseFacts
+    pub registration: SemaRegistrationGraph
+    pub graph: SemaGraphResult
+    pub module_sources: [SemaCompilerModuleSource]
+    pub diagnostics: [Diagnostic]
+}
+
+pub struct JetCompilerServicesCheckedFacts {
+    pub value: TComptimeValue
+    pub semantic_index_complete: Bool
+}
+
+fn jet_eval_compiler_services_int(value: Int) -> TComptimeValue {
+    TComptimeValue.Int(value)
+}
+
+fn jet_eval_compiler_services_string(value: String) -> TComptimeValue {
+    TComptimeValue.String(value)
+}
+
+fn jet_eval_compiler_services_span(span: Span) -> TComptimeValue {
+    TComptimeValue.Struct("SourceSpan", [TComptimeField]{
+        TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
+        TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
+    })
+}
+
+fn jet_eval_compiler_services_option_string(value: ?String) -> TComptimeValue {
+    if value == .Val(item) -> return TComptimeValue.Present(jet_eval_compiler_services_string(item))
+    TComptimeValue.Failed(TComptimeReport.Clean(Type.String))
+}
+
+fn jet_eval_compiler_services_option_span(value: ?Span) -> TComptimeValue {
+    if value == .Val(item) -> return TComptimeValue.Present(jet_eval_compiler_services_span(item))
+    TComptimeValue.Failed(TComptimeReport.Clean(Type.Named("SourceSpan")))
+}
+
+fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TComptimeValue {
+    severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
+    TComptimeValue.Struct("CompilerDiagnostic", [TComptimeField]{
+        TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
+        TComptimeField{name: "severity", value: jet_eval_compiler_services_string(severity)},
+        TComptimeField{name: "message", value: jet_eval_compiler_services_string(diagnostic.what)},
+        TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
+        TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span)},
+    })
+}
+
+fn jet_eval_compiler_services_diagnostic_values(diagnostics: [Diagnostic]) -> TComptimeValue {
+    values := [TComptimeValue]{}
+    loop diagnostic in diagnostics -> values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
+    TComptimeValue.List(values)
+}
+
+fn jet_eval_compiler_services_token_kind(kind: Int) -> ?String {
+    if kind == TOKEN_IDENT -> return Val("identifier")
+    if kind == TOKEN_RAW_STRING -> return Val("literal.raw_string")
+    if kind == TOKEN_STRING -> return Val("literal.string")
+    if kind == TOKEN_INT -> return Val("literal.int")
+    if kind == TOKEN_FLOAT -> return Val("literal.float")
+    if kind == TOKEN_UNIT_NUMBER -> return Val("literal.unit_number")
+    if kind == TOKEN_CHAR -> return Val("literal.char")
+    if kind == TOKEN_TRUE -> return Val("literal.true")
+    if kind == TOKEN_FALSE -> return Val("literal.false")
+    if kind == TOKEN_SELF -> return Val("keyword.self")
+    if kind == TOKEN_NULL -> return Val("literal.null")
+    if kind == TOKEN_BREAK -> return Val("keyword.break")
+    if kind == TOKEN_RETURN -> return Val("keyword.return")
+    if kind == TOKEN_RPAREN -> return Val("punctuation.right_paren")
+    if kind == TOKEN_RBRACKET -> return Val("punctuation.right_bracket")
+    if kind == TOKEN_RBRACE -> return Val("punctuation.right_brace")
+    if kind == TOKEN_QUESTION -> return Val("operator.try")
+    if kind == TOKEN_PLUS_PLUS -> return Val("operator.increment")
+    if kind == TOKEN_MINUS_MINUS -> return Val("operator.decrement")
+    if kind == TOKEN_GT -> return Val("operator.greater")
+    if kind == TOKEN_SHR -> return Val("operator.shift_right")
+    if kind == TOKEN_FENCE_CLOSE -> return Val("operator.fence_close")
+    if kind == TOKEN_DOT -> return Val("punctuation.dot")
+    if kind == TOKEN_QUESTION_DOT -> return Val("operator.optional_field")
+    if kind == TOKEN_AND_AND -> return Val("operator.and")
+    if kind == TOKEN_OR_OR -> return Val("operator.or")
+    if kind == TOKEN_PLUS -> return Val("operator.add")
+    if kind == TOKEN_MINUS -> return Val("operator.subtract")
+    if kind == TOKEN_STAR -> return Val("operator.star")
+    if kind == TOKEN_SLASH -> return Val("operator.divide")
+    if kind == TOKEN_SLASH_PERCENT -> return Val("operator.floor_divide")
+    if kind == TOKEN_PERCENT -> return Val("operator.modulo")
+    if kind == TOKEN_PERCENT_PERCENT -> return Val("operator.remainder")
+    if kind == TOKEN_EQ_EQ -> return Val("operator.equal")
+    if kind == TOKEN_NOT_EQ -> return Val("operator.not_equal")
+    if kind == TOKEN_LT -> return Val("operator.less")
+    if kind == TOKEN_LE -> return Val("operator.less_equal")
+    if kind == TOKEN_GE -> return Val("operator.greater_equal")
+    if kind == TOKEN_COMPARE -> return Val("operator.compare")
+    if kind == TOKEN_AMP -> return Val("operator.amp")
+    if kind == TOKEN_PIPE -> return Val("operator.alternative")
+    if kind == TOKEN_CARET -> return Val("operator.caret")
+    if kind == TOKEN_TILDE_PIPE -> return Val("operator.tilde_pipe")
+    if kind == TOKEN_SHL -> return Val("operator.shift_left")
+    if kind == TOKEN_QUESTION_QUESTION -> return Val("operator.fallback")
+    if kind == TOKEN_LBRACE -> return Val("punctuation.left_brace")
+    if kind == TOKEN_LPAREN -> return Val("punctuation.left_paren")
+    if kind == TOKEN_LBRACKET -> return Val("punctuation.left_bracket")
+    if kind == TOKEN_EOF -> return Val("eof")
+    if kind == TOKEN_BANG -> return Val("operator.not")
+    if kind == TOKEN_UNIFIED_ARROW -> return Val("operator.unified_arrow")
+    if kind == TOKEN_ARROW -> return Val("operator.arrow")
+    if kind == TOKEN_LAMBDA_ARROW -> return Val("operator.lambda_arrow")
+    if kind == TOKEN_EQ -> return Val("operator.assign")
+    if kind == TOKEN_LINE_COMMENT -> return Val("comment.line")
+    if kind == TOKEN_BLOCK_COMMENT -> return Val("comment.block")
+    if kind == TOKEN_KW_FN -> return Val("keyword.fn")
+    if kind == TOKEN_KW_PUB -> return Val("keyword.pub")
+    if kind == TOKEN_KW_PRIV -> return Val("keyword.priv")
+    if kind == TOKEN_KW_IF -> return Val("keyword.if")
+    if kind == TOKEN_KW_ELSE -> return Val("keyword.else")
+    if kind == TOKEN_KW_IN -> return Val("keyword.in")
+    if kind == TOKEN_KW_MUTATE -> return Val("keyword.mutate")
+    if kind == TOKEN_KW_MOVE -> return Val("keyword.move")
+    if kind == TOKEN_KW_COPY -> return Val("keyword.copy")
+    if kind == TOKEN_KW_STRUCT -> return Val("keyword.struct")
+    if kind == TOKEN_KW_ENUM -> return Val("keyword.enum")
+    if kind == TOKEN_KW_IMPL -> return Val("keyword.impl")
+    if kind == TOKEN_KW_TRAIT -> return Val("keyword.trait")
+    if kind == TOKEN_KW_TAG -> return Val("keyword.tag")
+    if kind == TOKEN_KW_EFFECT -> return Val("keyword.effect")
+    if kind == TOKEN_KW_DERIVE -> return Val("keyword.derive")
+    if kind == TOKEN_KW_IT -> return Val("keyword.it")
+    if kind == TOKEN_KW_CONST -> return Val("keyword.const")
+    if kind == TOKEN_KW_COMPTIME -> return Val("keyword.comptime")
+    if kind == TOKEN_KW_LOOP -> return Val("keyword.loop")
+    if kind == TOKEN_KW_YIELD -> return Val("keyword.yield")
+    if kind == TOKEN_KW_USE -> return Val("keyword.use")
+    if kind == TOKEN_KW_EXTERN -> return Val("keyword.extern")
+    if kind == TOKEN_KW_MODULE -> return Val("keyword.module")
+    if kind == TOKEN_FENCE_OPEN -> return Val("operator.fence_open")
+    if kind == TOKEN_COLON -> return Val("punctuation.colon")
+    if kind == TOKEN_COLON_COLON -> return Val("operator.bind_immutable")
+    if kind == TOKEN_COLON_EQ -> return Val("operator.bind_mutable")
+    if kind == TOKEN_COMMA -> return Val("punctuation.comma")
+    if kind == TOKEN_SEMI -> return Val("terminator")
+    if kind == TOKEN_DOT_DOT -> return Val("operator.range")
+    if kind == TOKEN_DOT_DOT_LT -> return Val("operator.range_exclusive")
+    if kind == TOKEN_DOT_DOT_DOT -> return Val("operator.spread")
+    if kind == TOKEN_AT -> return Val("punctuation.at")
+    if kind == TOKEN_TILDE -> return Val("operator.tilde")
+    if kind == TOKEN_TILDE_PIPE_EQ -> return Val("operator.tilde_pipe_assign")
+    if kind == TOKEN_TILDE_TILDE -> return Val("operator.trait_attach")
+    if kind == TOKEN_PLUS_EQ -> return Val("operator.add_assign")
+    if kind == TOKEN_MINUS_EQ -> return Val("operator.subtract_assign")
+    if kind == TOKEN_STAR_EQ -> return Val("operator.multiply_assign")
+    if kind == TOKEN_SLASH_EQ -> return Val("operator.divide_assign")
+    if kind == TOKEN_SLASH_PERCENT_EQ -> return Val("operator.floor_divide_assign")
+    if kind == TOKEN_PERCENT_EQ -> return Val("operator.modulo_assign")
+    if kind == TOKEN_PERCENT_PERCENT_EQ -> return Val("operator.remainder_assign")
+    if kind == TOKEN_AMP_EQ -> return Val("operator.amp_assign")
+    if kind == TOKEN_PIPE_EQ -> return Val("operator.bit_or_assign")
+    if kind == TOKEN_CARET_EQ -> return Val("operator.caret_assign")
+    if kind == TOKEN_SHL_EQ -> return Val("operator.shift_left_assign")
+    if kind == TOKEN_SHR_EQ -> return Val("operator.shift_right_assign")
+    if kind == TOKEN_HASH -> return Val("punctuation.hash")
+    if kind == TOKEN_DOLLAR -> return Val("punctuation.dollar")
+    None
+}
+
+pub struct JetCompilerServicesSourceMapFacts {
+    pub value: TComptimeValue
+}
+
+fn jet_eval_compiler_services_string_values(values: [String]) -> TComptimeValue {
+    output := [TComptimeValue]{}
+    loop value in values -> output.push(jet_eval_compiler_services_string(value))
+    TComptimeValue.List(output)
+}
+
+pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServicesSourceMapFacts {
+    sources := [String]{}
+    generated_lines := [TComptimeValue]{}
+    current_source := None
+    source_prefix := "// jet:source-map source="
+    line_prefix := "// jet:line "
+    lines := source.split("\n")
+    loop index in 0..<lines.len() {
+        line := lines[index].trim_start()
+        bytes := line.bytes()
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
+            line = String.from_bytes(bytes[0..bytes.len() - 1]) ?? line
+        }
+        if line.starts_with(source_prefix) {
+            source_name := line.slice(source_prefix.len(), line.len())
+            current_source = Val(source_name)
+            found := false
+            loop existing in sources {
+                if existing == source_name -> found = true
+            }
+            if !found -> sources.push(source_name)
+            next
+        }
+        if !line.starts_with(line_prefix) -> next
+        source_line :: Int.parse(line.slice(line_prefix.len(), line.len()).trim()) ?? next
+        generated_lines.push(TComptimeValue.Struct("CompilerGeneratedLine", [TComptimeField]{
+            TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(index + 1)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(current_source)},
+            TComptimeField{name: "source_line", value: jet_eval_compiler_services_int(source_line)},
+        }))
+    }
+    value := TComptimeValue.Struct("CompilerSourceMap", [TComptimeField]{
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(sources)},
+        TComptimeField{name: "generated_lines", value: TComptimeValue.List(generated_lines)},
+    })
+    JetCompilerServicesSourceMapFacts{value: value}
+}
+
+fn jet_eval_compiler_services_token_value(token: Token) -> ?TComptimeValue {
+    kind :: jet_eval_compiler_services_token_kind(token.kind) ?? return None
+    TComptimeValue.Struct("CompilerToken", [TComptimeField]{
+        TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
+        TComptimeField{name: "text", value: jet_eval_compiler_services_string(token.payload.text)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span)},
+    })
+}
+
+fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> ?TComptimeValue {
+    tokens := [TComptimeValue]{}
+    loop token in lexed.tokens {
+        value :: jet_eval_compiler_services_token_value(token) ?? return None
+        tokens.push(value)
+    }
+    TComptimeValue.Struct("CompilerLexed", [TComptimeField]{
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+        TComptimeField{name: "tokens", value: TComptimeValue.List(tokens)},
+        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
+    })
+}
+
+pub fn jet_eval_compiler_services_lex(input: JetCompilerServicesSourceInput) -> ?JetCompilerServicesLexFacts {
+    preparation :: input.preparation ?? return None
+    compiler_source := ""
+    lexed := Lexed{tokens: [Token]{}, diagnostics: [Diagnostic]{}}
+    if preparation == {
+        .Masked(source) -> {
+            compiler_source = source
+            bytes := source.bytes()
+            lexed = lex(bytes)
+        }
+        .Rejected(diagnostic) -> lexed.diagnostics.push(diagnostic)
+    }
+    value :: jet_eval_compiler_services_lex_value(input.source, lexed) ?? return None
+    Val(JetCompilerServicesLexFacts{source: input.source, compiler_source: compiler_source, lexed: lexed, value: value})
+}
+
+fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue {
+    kind := ""
+    name := None
+    span := Span{start: 0, end: 0}
+    if item == {
+        .Func(value) -> { kind = "function"; name = Val(value.name); span = value.name_span }
+        .Struct(value) -> { kind = "struct"; name = Val(value.name); span = value.name_span }
+        .Enum(value) -> { kind = "enum"; name = Val(value.name); span = value.name_span }
+        .Distinct(value) -> { kind = "distinct"; name = Val(value.name); span = value.name_span }
+        .TypeAlias(value) -> { kind = "type_alias"; name = Val(value.name); span = value.name_span }
+        .UnitFamily(value) -> { kind = "unit_family"; name = Val(value.family); span = value.family_span }
+        .Trait(value) -> { kind = "trait"; name = Val(value.name); span = value.name_span }
+        .Tag(value) -> { kind = "tag"; name = Val(value.name); span = value.name_span }
+        .EffectDecl(value) -> { kind = "effect"; name = Val(value.name); span = value.name_span }
+        .Impl(value) -> { kind = "impl"; name = Val(value.type_name); span = value.type_span }
+        .Const(value) -> { kind = "const"; name = Val(value.name); span = value.name_span }
+        .Test(value) -> { kind = "test"; name = value.name; span = value.name_span }
+        .ExternRust(value) -> { kind = "extern_rust"; name = Val(value.crate_spec); span = value.span }
+        .Module(value) -> { kind = "module"; name = Val(value.name); span = value.name_span }
+        .CModule(value) -> { kind = "c_module"; name = Val(value.lib); span = value.path_span }
+        .CodeModule(value) -> { kind = "code_module"; name = Val(value.name); span = value.name_span }
+        .ErrorConv(value) -> { kind = "error_conversion"; name = Val("{value.from_ty} -> {value.to_ty}"); span = value.from_span }
+        .Migration(value) -> { kind = "migration"; name = Val(value.type_name); span = value.type_span }
+        .ProtocolDecl(value) -> { kind = "protocol"; name = Val(value.name); span = value.name_span }
+        .UserDerive(value) -> { kind = "derive"; name = Val(value.trait_name); span = value.trait_span }
+        .TemplateLoop(value) -> { kind = "template_loop"; span = value.span }
+        .GenericModule(value) -> { kind = "generic_module"; name = Val(value.name); span = value.name_span }
+        .ModuleAlias(value) -> { kind = "module_alias"; name = Val(value.name); span = value.name_span }
+        .MarkerDecl(value) -> { kind = "marker"; name = Val(value.name); span = value.name_span }
+        .FactDecl(value) -> { kind = "fact"; name = Val(value.name); span = value.name_span }
+    }
+    TComptimeValue.Struct("CompilerNode", [TComptimeField]{
+        TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
+        TComptimeField{name: "name", value: jet_eval_compiler_services_option_string(name)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(span)},
+    })
+}
+
+fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) -> TComptimeValue {
+    items := [TComptimeValue]{}
+    has_error := false
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> has_error = true
+    }
+    if !has_error {
+        loop item in parsed.program.items -> items.push(jet_eval_compiler_services_syntax_node(item))
+    }
+    TComptimeValue.Struct("CompilerSyntaxTree", [TComptimeField]{
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+        TComptimeField{name: "items", value: TComptimeValue.List(items)},
+        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
+    })
+}
+
+pub fn jet_eval_compiler_services_parse(input: JetCompilerServicesSourceInput) -> ?JetCompilerServicesParseFacts {
+    lex_facts :: jet_eval_compiler_services_lex(input) ?? return None
+    parsed := if {
+        lex_facts.lexed.diagnostics.len() > 0 -> {
+            ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
+        }
+        else -> parse_lexed(lex_facts.lexed)
+    }
+    value := jet_eval_compiler_services_syntax_value(input.source, parsed)
+    Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})
+}
+
+fn jet_eval_compiler_services_function_info(function: Func, registration_module: SemaRegistrationModule, checked_module: ?SemaGraphModuleResult, function_key: ?String) -> TComptimeValue {
+    solved_effects := [String]{}
+    reaches_panic := false
+    if checked_module == .Val(checked) {
+        if function_key == .Val(key) {
+            loop checked_function in checked.functions {
+                if checked_function.key != key -> next
+                solved_effects = checked_function.effects.solved
+                loop effect_name in solved_effects {
+                    if effect_name == "panic" -> reaches_panic = true
+                }
+            }
+        }
+    }
+    params := [TComptimeValue]{}
+    loop parameter in function.params -> params.push(jet_eval_compiler_services_string(parameter.name))
+    arithmetic := sema_comptime_reflection_arithmetic_facts(function.body)
+    identity := "{registration_module.module_name}::{function.name}"
+    facts := sema_comptime_reflection_declared_function_facts(function, identity)
+    TComptimeValue.Struct("FunctionInfo", [TComptimeField]{
+        TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
+        TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
+        TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
+        TComptimeField{name: "params", value: TComptimeValue.List(params)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
+        TComptimeField{name: "effects", value: TComptimeValue.Struct("EffectInfo", [TComptimeField]{
+            TComptimeField{name: "values", value: jet_eval_compiler_services_string_values(solved_effects)},
+        })},
+        TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool(reaches_panic)},
+        TComptimeField{name: "arithmetic", value: TComptimeValue.List(arithmetic)},
+        TComptimeField{name: "facts", value: TComptimeValue.List(facts)},
+    })
+}
+
+fn jet_eval_compiler_services_error_diagnostic(diagnostic: Diagnostic) -> Bool {
+    diagnostic.severity == DIAGNOSTIC_ERROR
+}
+
+fn jet_eval_compiler_services_function_key(function: Func, registration_module: SemaRegistrationModule) -> ?String {
+    loop registered in registration_module.functions {
+        if registered.declaration.name == function.name && registered.declaration.name_span.start == function.name_span.start && registered.declaration.name_span.end == function.name_span.end {
+            return Val(registered.symbol.id.key)
+        }
+    }
+    None
+}
+
+pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput) -> JetCompilerServicesCheckedFacts {
+    diagnostics := input.diagnostics
+    functions := [TComptimeValue]{}
+    effects := [TComptimeValue]{}
+    loop registration_module in input.registration.modules {
+        checked_module := None
+        loop candidate in input.graph.modules {
+            if candidate.module_identity == registration_module.module_identity -> checked_module = Val(candidate)
+        }
+        loop item in registration_module.program.items {
+            if item == {.Func(function) -> {
+                if function.name == "build" -> next
+                function_key := jet_eval_compiler_services_function_key(function, registration_module)
+                functions.push(jet_eval_compiler_services_function_info(function, registration_module, checked_module, function_key))
+            } else -> {}}
+        }
+        if checked_module == .Val(checked) {
+            loop function in checked.functions {
+                effects.push(TComptimeValue.Struct("EffectInfo", [TComptimeField]{
+                    TComptimeField{name: "values", value: jet_eval_compiler_services_string_values(function.effects.solved)},
+                }))
+            }
+        }
+    }
+    index := sema_compiler_semantic_index_from_checked(input.registration, input.graph, input.parsed.source, input.module_sources)
+    has_errors := false
+    loop diagnostic in diagnostics {
+        if jet_eval_compiler_services_error_diagnostic(diagnostic) -> has_errors = true
+    }
+    semantic_index := TComptimeValue.Failed(TComptimeReport.Clean(Type.Named("CompilerSemanticIndex")))
+    if !has_errors && index.complete -> semantic_index = TComptimeValue.Present(index.value)
+    value := TComptimeValue.Struct("CompilerChecked", [TComptimeField]{
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
+        TComptimeField{name: "syntax", value: input.parsed.value},
+        TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},
+        TComptimeField{name: "functions", value: TComptimeValue.List(functions)},
+        TComptimeField{name: "effects", value: TComptimeValue.List(effects)},
+        TComptimeField{name: "semantic_index", value: semantic_index},
+    })
+    JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
+}
+// Package and build call sites must consume Jetpack's typed host query result;
+// this helper deliberately defines no package view, lock/profile, or graph facts.
+// A package query carrier must preserve the pinned-root authority, checked-read
+// provenance, and per-view success versus typed-error state. A graph query must
+// accept only a BuildPlan handle from the active build session and return the
+// canonical checked BuildGraph projection; receipt_diff stays source-owned by
+// Core/build and must consume those exact typed graph values.
+
+

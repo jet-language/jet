@@ -72,7 +72,8 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunctio
             return "undefined"
         }
         descriptor :: "{{ command_type: {jet_web_js_quote(jet_web_js_type_descriptor(type_args[0]))}, provenance: {{ source: {jet_web_js_quote(ctx.history_source)}, tool: {jet_web_js_quote(ctx.history_tool)}, target: {jet_web_js_quote(ctx.history_target)} }} }}"
-        expression :: "{jet_web_js_core_symbol(ctx, core_row.symbol)}({values.join(\", \")}, {descriptor})"
+        values_text :: values.join(", ")
+        expression :: "{jet_web_js_core_symbol(ctx, core_row.symbol)}({values_text}, {descriptor})"
         return jet_web_js_guard_core(ctx, core_row, expression)
     }
     route_row :: if route == .Val(route_id) -> jet_web_find_prelude(ctx.program, route_id) else -> None
@@ -91,19 +92,26 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunctio
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR data route arity does not match its checked ABI", "checked data routes preserve runtime values before type descriptors", Val(function.span))
                 return "undefined"
             }
-            return "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
+            values_text :: values.join(", ")
+            values_separator :: if values.len() > 0 -> ", " else -> ""
+            descriptors_text :: descriptors.join(", ")
+            return "{symbol}({values_text}{values_separator}[{descriptors_text}])"
         }
     }
     if jet_web_js_core_data_symbol(core_row.symbol) {
         descriptors :: loop ty in type_args -> jet_web_js_quote(jet_web_js_type_descriptor(ty))
         symbol :: jet_web_js_core_symbol(ctx, core_row.symbol)
-        return "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
+        values_text :: values.join(", ")
+        values_separator :: if values.len() > 0 -> ", " else -> ""
+        descriptors_text :: descriptors.join(", ")
+        return "{symbol}({values_text}{values_separator}[{descriptors_text}])"
     }
     if route == {
         .Val(route_id) -> jet_web_js_guard_core(ctx, core_row, jet_web_js_route_call(ctx, route_id, values))
         else -> {
             symbol :: jet_web_js_core_symbol(ctx, core_row.symbol)
-            jet_web_js_guard_core(ctx, core_row, "{symbol}({values.join(\", \")})")
+            values_text :: values.join(", ")
+            jet_web_js_guard_core(ctx, core_row, "{symbol}({values_text})")
         }
     }
 }
@@ -115,11 +123,13 @@ fn jet_web_js_field_object(ctx: &JetWebEmitContext, type_id: MirTypeId, fields: 
     }
     object :: "{{ {rendered.join(", ")} }}"
 
-    "Object.defineProperty({object}, \"__jet_type\", {{ value: {jet_web_js_quote(\"{type_id.value}\")}, enumerable: false }})"
+    type_id_text :: "{type_id.value}"
+    type_id_json :: jet_web_js_quote(type_id_text)
+    "Object.defineProperty({object}, \"__jet_type\", {{ value: {type_id_json}, enumerable: false }})"
 }
 
-fn jet_web_js_effect_name(effect: Effect) -> String {
-    if effect == {
+fn jet_web_js_effect_name(effect_kind: Effect) -> String {
+    if effect_kind == {
         .Net -> "Net"
         .FS -> "FS"
         .IO -> "IO"
@@ -139,13 +149,13 @@ fn jet_web_js_effect_name(effect: Effect) -> String {
 }
 
 fn jet_web_js_guard_core(ctx: &JetWebEmitContext, core: MirCoreCall, expression: String) -> String {
-    effect :: core.effect_kind ?? return expression
-    controlled :: if effect == {
+    effect_kind :: core.effect_kind ?? return expression
+    controlled :: if effect_kind == {
         .Time -> core.module_name == "core.time" && core.member != "start"
         .Rand -> core.module_name != "core.crypto.random"
         else -> false
     }
-    if controlled -> expression else -> "(jet_world_reject_uncontrolled_effect({jet_web_js_quote(jet_web_js_effect_name(effect))}), {expression})"
+    if controlled -> expression else -> "(jet_world_reject_uncontrolled_effect({jet_web_js_quote(jet_web_js_effect_name(effect_kind))}), {expression})"
 }
 
 fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, args: [MirEnumArg]) -> String {
@@ -175,7 +185,9 @@ fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: 
     }
     rendered :: loop arg in args -> jet_web_js_move(arg.value)
     object :: "{{ tag: {jet_web_js_quote(variant)}, values: [{rendered.join(", ")}] }}"
-    "Object.defineProperty({object}, \"__jet_type\", {{ value: {jet_web_js_quote(\"{type_id.value}\")}, enumerable: false }})"
+    type_id_text :: "{type_id.value}"
+    type_id_json :: jet_web_js_quote(type_id_text)
+    "Object.defineProperty({object}, \"__jet_type\", {{ value: {type_id_json}, enumerable: false }})"
 }
 
 fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: ?Int) -> Bool {
@@ -270,9 +282,11 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
         .InitializeUninit(place) -> {
             count := None
             loop row in function.places {
-                if row.id == place && row.ty.kind == {
-                    .FixedList(_, length) -> count = mir_measure_literal_value(length)
-                    else -> {}
+                if row.id == place {
+                    if row.ty.kind == {
+                        .FixedList(_, length) -> count = mir_measure_literal_value(length)
+                        else -> {}
+                    }
                 }
             }
             value :: if count != None -> "Array({count ?? 0}).fill(undefined)" else -> "undefined"
@@ -294,10 +308,11 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait box target type is missing", "checked trait boxes name a canonical target type", Val(function.span))
                 return "undefined"
             }
-            if row.kind != {
+            single_trait_target :: if row.kind == {
                 .TraitObject(bounds) -> bounds.len() == 1
                 else -> false
-            } {
+            }
+            if !single_trait_target {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait box target is not a single-bound trait object", "checked trait boxes name exactly one canonical trait-object bound", Val(function.span))
                 return "undefined"
             }
@@ -342,8 +357,8 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
         .OptionValue(subject) -> "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== \"Ok\") throw new Error(\"missing Option payload\"); return carrier.values[0]; }})()"
         .ResultIsOk(subject) -> "{jet_web_js_value(subject)}?.tag === \"Ok\""
         .ResultValue(subject, ok) -> {
-            tag :: if ok -> "Ok" else -> "Err"
-            "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== {jet_web_js_quote(tag)}) throw new Error(\"missing Result payload\"); return carrier.values[0]; }})()"
+            result_tag :: if ok -> "Ok" else -> "Err"
+            "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== {jet_web_js_quote(result_tag)}) throw new Error(\"missing Result payload\"); return carrier.values[0]; }})()"
         }
         .PatternCapture(matched, index) -> {
             expression :: "{jet_web_js_value(matched)}?.tag === \"Ok\" ? {jet_web_js_value(matched)}?.values?.[0]?.[{index}] : undefined"
@@ -373,7 +388,8 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
         .IndirectCall(callee, args, type_args) -> {
             if !jet_web_js_validate_type_args(ctx, type_args) -> return "undefined"
             rendered :: jet_web_js_call_values(ctx, function, args, true)
-            "({jet_web_js_value(callee)})({rendered.join(\", \")})"
+            rendered_text :: rendered.join(", ")
+            "({jet_web_js_value(callee)})({rendered_text})"
         }
         .Closure(function_id, captures, facts) -> jet_web_js_closure_expression(ctx, function, function_id, captures)
         .PtrFromAddr(address, element) -> jet_web_js_result_copy(ctx, result_ty, jet_web_js_value(address))
@@ -383,7 +399,7 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
             if access == MirAccess.Read -> jet_web_js_read_place(ctx, function, place) else -> jet_web_js_place_cell(ctx, function, place)
         }
         .CoreCall(call, route, args, type_args, fallibility, data_plan) -> jet_web_js_core_call_expression(ctx, function, call, Val(route), args, type_args)
-        .AttachTag(value, tag) -> jet_web_js_move(value)
+        .AttachTag(value, tag_value) -> jet_web_js_move(value)
         .Todo(call, location, expected_type) -> {
             if expected_type == .Val(ty) {
                 if ty.identity != None && !jet_web_js_type_instance_valid(ctx, ty.identity ?? MirTypeId{value: 0}) -> return "undefined"

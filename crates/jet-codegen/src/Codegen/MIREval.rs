@@ -12295,7 +12295,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         transaction: &Rc<MirSharedTransaction>,
         span: Span,
     ) -> Result<Option<Rc<RefCell<MirEvalValue>>>, Diagnostic> {
-        let protocol = storage.protocol.clone();
+        let protocol: Arc<dyn shared_protocol::JetSharedCanonicalOwner> = storage.protocol.clone();
         transaction.with_mut(span, |stm| {
             stm.touch(protocol.clone());
             Ok(stm.staged_value::<MirEvalValue>(&protocol))
@@ -12309,7 +12309,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<Rc<RefCell<MirEvalValue>>, Diagnostic> {
         let initial = storage.capture(span)?.1;
-        let protocol = storage.protocol.clone();
+        let protocol: Arc<dyn shared_protocol::JetSharedCanonicalOwner> = storage.protocol.clone();
         transaction.with_mut(span, |stm| {
             let staged = stm.stage_value(protocol.clone(), move || initial);
             stm.mark_write(protocol);
@@ -12324,7 +12324,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         staged: Rc<RefCell<MirEvalValue>>,
         span: Span,
     ) -> Result<(), Diagnostic> {
-        let protocol = storage.protocol.clone();
+        let protocol: Arc<dyn shared_protocol::JetSharedCanonicalOwner> = storage.protocol.clone();
         let error_sink = transaction.clone();
         transaction.with_mut(span, move |stm| {
             let commit_storage = storage;
@@ -12333,7 +12333,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             stm.record_edit_with_commit(
                 protocol,
                 Box::new(|| {}),
-                Box::new(move || {
+                Box::new(move |_| {
                     let next = match commit_storage.next_revision(span) {
                         Ok(next) => next,
                         Err(error) => {
@@ -12410,7 +12410,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         callback: Option<RuntimeValue>,
         span: Span,
     ) -> Result<Rc<MirSharedSnapshot>, Diagnostic> {
-        let protocol = storage.protocol.clone();
+        let protocol: Arc<dyn shared_protocol::JetSharedCanonicalOwner> = storage.protocol.clone();
         let staged = self.shared_transaction_value(&storage, &transaction, span)?;
         let (revision, value) = if let Some(staged) = staged {
             let revision = transaction.with_mut(span, |stm| {
@@ -25192,7 +25192,7 @@ impl MirSharedTransaction {
 
 struct MirSharedGuardLease {
     storage: Rc<MirSharedStorage>,
-    permit: Arc<shared_protocol::JetSharedPermit>,
+    permit: Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
     editable: bool,
     handles: Cell<usize>,
     released: Cell<bool>,
@@ -25280,9 +25280,16 @@ impl MirSharedGuardLease {
             return Ok(());
         }
         let result = self.publish(span);
-        self.permit.release();
+        let released = self.permit.release();
         self.released.set(true);
-        result
+        result?;
+        if released.completion.is_some() {
+            return Err(mir_error_at(
+                "MIR Shared lease release returned a physical completion with no receiver",
+                span,
+            ));
+        }
+        released.result.map_err(|message| mir_error_at(&message, span))
     }
 }
 
@@ -27188,6 +27195,8 @@ fn take_data_steps(
             | MirEvalValue::String(_)
             | MirEvalValue::Bytes(_)
             | MirEvalValue::Absent { .. }
+            | MirEvalValue::NativeCursor(_)
+            | MirEvalValue::NativeOwned(_)
             | MirEvalValue::Unit
             | MirEvalValue::Closure(_) => Err(mir_error_at(
                 &format!("MIR field `{name}` cannot be moved from this value"),
@@ -27240,6 +27249,8 @@ fn take_data_steps(
             | MirEvalValue::String(_)
             | MirEvalValue::Bytes(_)
             | MirEvalValue::Absent { .. }
+            | MirEvalValue::NativeCursor(_)
+            | MirEvalValue::NativeOwned(_)
             | MirEvalValue::Unit
             | MirEvalValue::Closure(_) => Err(mir_error_at(
                 &format!("MIR {kind:?} index cannot be moved from this value"),
@@ -27437,6 +27448,8 @@ fn replace_data_steps(
             | MirEvalValue::String(_)
             | MirEvalValue::Bytes(_)
             | MirEvalValue::Absent { .. }
+            | MirEvalValue::NativeCursor(_)
+            | MirEvalValue::NativeOwned(_)
             | MirEvalValue::Unit
             | MirEvalValue::Closure(_) => Err(mir_error_at(
                 &format!("MIR field `{name}` cannot be reinitialized in this value"),
@@ -27491,6 +27504,8 @@ fn replace_data_steps(
             | MirEvalValue::String(_)
             | MirEvalValue::Bytes(_)
             | MirEvalValue::Absent { .. }
+            | MirEvalValue::NativeCursor(_)
+            | MirEvalValue::NativeOwned(_)
             | MirEvalValue::Unit
             | MirEvalValue::Closure(_) => Err(mir_error_at(
                 &format!("MIR {kind:?} index cannot be reinitialized in this value"),
@@ -28644,6 +28659,7 @@ fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diag
             Err(mir_error_at("MIR value was moved", span))
         }
         RuntimeValue::Data(value) => Ok(value),
+        RuntimeValue::Absent { element } => Ok(MirEvalValue::Absent { element }),
         RuntimeValue::Ambient(value) => {
             let Some(view) = mir_runtime_owner::<MirAllocatorView>(&value) else {
                 return Err(mir_error_at(
@@ -29813,6 +29829,7 @@ fn mir_show(value: &MirEvalValue) -> String {
         }
         MirEvalValue::Present(value) => format!("Present({})", mir_show(value)),
         MirEvalValue::FailedTold(value) => format!("FailedTold({})", mir_show(value)),
+        MirEvalValue::Absent { .. } => "Absent".to_string(),
         MirEvalValue::Unit => "()".to_string(),
         MirEvalValue::NativeCursor(_) | MirEvalValue::NativeOwned(_) => {
             "<native-runtime-resource>".to_string()

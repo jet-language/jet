@@ -6,7 +6,7 @@ use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 
-const QUEUE: &str = include_str!("../examples/features/memory/shared_guard_queue.jet");
+const QUEUE: &str = include_str!("../Examples/features/memory/shared_guard_queue.jet");
 
 const CANCEL_WAIT: &str = r#"
 fn mark_started(started: Shared<Int>, began: Condition) {

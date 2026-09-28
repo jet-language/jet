@@ -211,6 +211,7 @@ pub(super) struct TirForeignFact {
     pub span: Span,
     pub symbol: String,
     pub path: String,
+    pub params: Vec<TirParamFact>,
     pub bridge_eligible: bool,
     /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
     pub raw_scalar_abi: bool,
@@ -1170,6 +1171,7 @@ fn lower_foreign(
         span: function.span,
         symbol: function_key,
         path: function.rust_path.clone(),
+        params: lower_params(&function.params),
         bridge_eligible: true,
         raw_scalar_abi: false,
         return_type: function.return_type.clone(),
@@ -1233,6 +1235,7 @@ fn lower_c_foreign(
         path: function.rust_path.clone(),
         params: lower_params(&function.params),
         bridge_eligible: function.hidden_c_bridge_compatible_with_handles(handles),
+        raw_scalar_abi: false,
         return_type: function.return_type.clone(),
         abi: function
             .abi
@@ -1283,6 +1286,7 @@ fn lower_inline_c_foreign(
         path: wrapper,
         params: lower_params(&function.params),
         bridge_eligible: true,
+        raw_scalar_abi: true,
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
         language,
@@ -1326,6 +1330,7 @@ fn lower_guest_import_foreign(
         params: lower_params(&function.params),
         raw_scalar_abi: true,
         bridge_eligible,
+        return_type: function.return_type.clone(),
         abi: "C".to_string(),
         language: "c".to_string(),
         applicability: target_applicability_for(target),

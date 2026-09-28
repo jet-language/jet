@@ -92,7 +92,7 @@ fn jet_text_inspect(s: &String) -> Vec<String> {
 
 // ── card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding ──────────
 // Real Unicode 16.0.0 algorithms over the generated tables in
-// `UnicodeTables.rs` (pinned UCD, see scripts/agent/gen-unicode-tables.mjs):
+// `UnicodeTables.rs` (pinned UCD, see Tools/agent/gen-unicode-tables.mjs):
 // canonical/compatibility decomposition, canonical-combining-class ordering,
 // Hangul algorithmic (de)composition, composition exclusions, and full
 // (C+F) case folding. Replaces the old ~18-entry hand-written match table.

@@ -43,25 +43,25 @@ outputs: { app: .Executable{ entry: main } }
 "#;
 
 const CARRIER_FIXTURE_SOURCE: &str =
-    include_str!("../../examples/features/contracts/carrier_binding.jet");
+    include_str!("../../Examples/features/contracts/carrier_binding.jet");
 const CARRIER_FIXTURE_EXPECTED: &str =
-    include_str!("../../examples/features/expected/contracts/carrier_binding.out");
+    include_str!("../../Examples/features/expected/contracts/carrier_binding.out");
 const SOURCE_FIXTURE_MANIFEST: &str = r#"name: "bootstrap_source_fixture"
 version: "0.1.0"
 edition: "2028"
 outputs: { app: .Executable{ entry: run } }
 "#;
 const USER_OPERATOR_FIXTURE_SOURCE: &str =
-    include_str!("../../examples/features/operators/user_defined.jet");
+    include_str!("../../Examples/features/operators/user_defined.jet");
 const USER_OPERATOR_FIXTURE_EXPECTED: &str = "4,6 4,6 true true false\n";
 const SPACESHIP_FIXTURE_SOURCE: &str =
-    include_str!("../../examples/features/operators/spaceship.jet");
+    include_str!("../../Examples/features/operators/spaceship.jet");
 const SPACESHIP_FIXTURE_EXPECTED: &str =
     "int less: true\nstring less: true\nAda:10\nCal:20\nBea:30\n";
 const MIXED_OPERATOR_FIXTURE_SOURCE: &str =
-    include_str!("../../examples/features/operators/mixed_types.jet");
+    include_str!("../../Examples/features/operators/mixed_types.jet");
 const MIXED_OPERATOR_FIXTURE_EXPECTED: &str =
-    include_str!("../../examples/features/expected/operators/mixed_types.out");
+    include_str!("../../Examples/features/expected/operators/mixed_types.out");
 const HANDLE_LIFETIME_FIXTURE_SOURCE: &str = r#"use c.close as c
 
 #Layout(c)
@@ -1646,7 +1646,7 @@ fn bootstrap_private_self_compile_harness() {
 
     let provenance = session.join("bootstrap.provenance");
     let provenance_text = format!(
-        "schema=jet-private-bootstrap/v1\ncompiler_project={}\nstage_zero_id={stage_zero_id}\nstage_zero_source={}\nstage_one_id={stage_one_id}\nstage_one_source={}\nstage_two_id={stage_two_id}\nstage_two_source={}\nstage_two_backend={}\nstage_two_small_backend={}\nsmall_entry={}\nbackend=scripts/agent/jet-env cargo build --manifest-path <cache-project>/Cargo.toml --bin <cache-binary>\n",
+        "schema=jet-private-bootstrap/v1\ncompiler_project={}\nstage_zero_id={stage_zero_id}\nstage_zero_source={}\nstage_one_id={stage_one_id}\nstage_one_source={}\nstage_two_id={stage_two_id}\nstage_two_source={}\nstage_two_backend={}\nstage_two_small_backend={}\nsmall_entry={}\nbackend=Tools/agent/jet-env cargo build --manifest-path <cache-project>/Cargo.toml --bin <cache-binary>\n",
         compiler_project.display(),
         stage_zero_project.join("src/main.rs").display(),
         stage_one_project.join("src/main.rs").display(),
@@ -1680,7 +1680,7 @@ fn bootstrap_session_root() -> PathBuf {
 
 
 fn assemble_compiler_sources(repo: &Path) {
-    let output = Command::new(repo.join("scripts/agent/jet-env"))
+    let output = Command::new(repo.join("Tools/agent/jet-env"))
         .current_dir(repo)
         .args(["node", "Compiler/Bootstrap/assemble.mjs"])
         .output()
@@ -2245,7 +2245,7 @@ fn build_backend_artifact_with_native_library(
     });
 
     let target = repo.join("target");
-    let output = Command::new(repo.join("scripts/agent/jet-env"))
+    let output = Command::new(repo.join("Tools/agent/jet-env"))
         .current_dir(repo)
         .env("CARGO_TARGET_DIR", &target)
         .env("CARGO_INCREMENTAL", "0")

@@ -1,0 +1,97 @@
+fn parser_migration_arrow(state: &JetParserState, context: String) {
+    kind := parser_current_kind(&state)
+    if {
+        kind == TOKEN_ARROW || kind == TOKEN_UNIFIED_ARROW -> {
+            parser_bump(&state)
+        }
+        else -> {
+            parser_expect(&state, TOKEN_UNIFIED_ARROW, context)
+        }
+    }
+}
+
+fn parser_migration_recover_operation(state: &JetParserState) {
+    loop {
+        kind := parser_current_kind(&state)
+        if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF -> break
+        parser_bump(&state)
+    }
+}
+
+fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
+    start :: parser_bump(&state)
+    type_name :: parser_expect_name(&state, "as the migrated type name")
+    parser_expect(&state, TOKEN_LBRACE, "after the migration type name")
+    ops := [MigrationOp]{}
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        if parser_current_kind(&state) == TOKEN_SEMI {
+            parser_bump(&state)
+            next
+        }
+        op_token := parser_bump(&state)
+        if op_token.kind == TOKEN_IDENT {
+            keyword := op_token.payload.decoded
+            if keyword == "rename" {
+                from :: parser_expect_name(&state, "as the field to rename")
+                parser_migration_arrow(&state, "between the old and new field names in `rename`")
+                to :: parser_expect_name(&state, "as the new field name")
+                ops.push(MigrationOp.Rename(from: from.payload.decoded, from_span: from.span, to: to.payload.decoded, to_span: to.span))
+                next
+            }
+            if keyword == "add" {
+                field :: parser_expect_name(&state, "as the field to add")
+                parser_expect(&state, TOKEN_COLON, "after the added field name")
+                ty := parser_parse_type(&state, 0)
+                parser_expect(&state, TOKEN_EQ, "before the default value of an added field")
+                default := parser_parse_expression(&state, 1, 0)
+                ops.push(MigrationOp.Add(field: field.payload.decoded, field_span: field.span, ty: ty.ty, ty_span: ty.span, default: default.expr, default_span: default.span, default_fn: None))
+                next
+            }
+            if keyword == "remove" {
+                field :: parser_expect_name(&state, "as the field to remove")
+                ops.push(MigrationOp.Remove(field: field.payload.decoded, field_span: field.span))
+                next
+            }
+            if keyword == "change" {
+                field :: parser_expect_name(&state, "as the field whose type changes")
+                parser_expect(&state, TOKEN_COLON, "after the changed field name")
+                from_ty := parser_parse_type(&state, 0)
+                parser_migration_arrow(&state, "between the old and new field types in `change`")
+                to_ty := parser_parse_type(&state, 0)
+                converter := None
+                converter_span := None
+                next_token := parser_current(&state)
+                if next_token.kind == TOKEN_IDENT && next_token.payload.decoded == "via" {
+                    via := parser_bump(&state)
+                    parser_expect(&state, TOKEN_LBRACE, "to open the `via {{ … }}` converter body")
+                    parser_skip_semicolons(&state)
+                    body := parser_parse_expression(&state, 1, 0)
+                    parser_skip_semicolons(&state)
+                    close := parser_expect(&state, TOKEN_RBRACE, "to close the `via {{ … }}` converter body")
+                    converter = Val(body.expr)
+                    converter_span = Val(parser_cover(via.span, close.span))
+                }
+                ops.push(MigrationOp.Change(field: field.payload.decoded, field_span: field.span, from_ty: from_ty.ty, from_span: from_ty.span, to_ty: to_ty.ty, to_span: to_ty.span, converter: converter, converter_span: converter_span, conv_fn: None))
+                next
+            }
+            if keyword == "drop" {
+                parser_add_error_code(&state, "E0911", op_token.span, "`drop` isn't a migration verb — use `remove`", "a migration deletes a field with `remove`; `drop` is not a Jet keyword here", "write `remove <field>` to delete a published field")
+                parser_migration_recover_operation(&state)
+                next
+            }
+            if keyword == "reorder" {
+                parser_add_error_code(&state, "E0911", op_token.span, "`reorder` isn't a migration verb — field order isn't a migration", "a `#PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration", "delete the `reorder` line; just write the fields in the order you want")
+                parser_migration_recover_operation(&state)
+                next
+            }
+            parser_add_error_code(&state, "E0911", op_token.span, "`{keyword}` isn't a known migration verb", "a migration block contains `rename`, `add`, `remove`, or `change` operations", "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via {{ … }}`")
+            parser_migration_recover_operation(&state)
+            next
+        }
+        parser_add_error(&state, op_token.span, "expected a migration operation, found `{op_token.payload.text}`", "a migration block contains `rename`, `add`, `remove`, or `change` operations", "write `rename fieldA -> fieldB` (or `add` / `remove` / `change`)")
+        parser_migration_recover_operation(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "to close the migration block")
+    parser_finish_statement(&state)
+    MigrationDecl{type_name: type_name.payload.decoded, type_span: type_name.span, ops: ops, span: parser_cover(start.span, close.span)}
+}

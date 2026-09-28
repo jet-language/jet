@@ -187,7 +187,20 @@ fn extract_shared(raw: &str) -> String {
     let end = raw
         .find("    enum JetPoolSlot<T>")
         .expect("JetPoolSlot marker");
-    unindent(&raw[start..end]).replace("crate::", "super::super::")
+    let mut shared = raw[start..end].to_string();
+    let jit_start = shared
+        .find("    // jet:source-shared-interop-jit-begin\n")
+        .expect("SourceSharedInterop begin marker");
+    let jit_end = shared[jit_start..]
+        .find("    // jet:source-shared-interop-jit-end\n")
+        .map(|offset| jit_start + offset)
+        .expect("SourceSharedInterop end marker");
+    let jit_end = shared[jit_end..]
+        .find('\n')
+        .map(|offset| jit_end + offset + 1)
+        .unwrap_or(shared.len());
+    shared.replace_range(jit_start..jit_end, "");
+    unindent(&shared).replace("crate::", "super::super::")
 }
 
 fn extract_stm(raw: &str) -> String {

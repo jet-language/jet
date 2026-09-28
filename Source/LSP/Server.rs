@@ -5696,7 +5696,7 @@ fn document_links_for(path: &str, workspace_root: Option<&str>, src: &str) -> Ve
 fn resolve_use_target(base: &std::path::Path, import: &str) -> Option<String> {
     if import.starts_with("core.") {
         let doc =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/spec/reference/core-library.md");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/reference/core-library.md");
         return doc.exists().then(|| path_to_uri(&doc.to_string_lossy()));
     }
     let rel = import.replace('.', "/") + ".jet";

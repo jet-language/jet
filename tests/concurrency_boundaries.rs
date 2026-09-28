@@ -10,7 +10,7 @@ fn error_codes(source: &str) -> Vec<String> {
 
 #[test]
 fn architecture_states_datarace1_c_guarantee() {
-    let architecture = include_str!("../docs/spec/architecture.md");
+    let architecture = include_str!("../Docs/spec/architecture.md");
     assert!(
         architecture.contains("D-DATARACE1=C is law"),
         "architecture must state the ratified D-DATARACE1=C guarantee"

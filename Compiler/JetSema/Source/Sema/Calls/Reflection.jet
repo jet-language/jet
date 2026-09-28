@@ -1,0 +1,242 @@
+// Reflection call contracts and the shared displayability gate used by
+// `core.reflect.of`. Runtime reflection may expose only values accepted by the
+// same semantic predicate as display interpolation.
+
+fn sema_call_reflection_leaf_name(name: String) -> String {
+    parts := name.split("::")
+    canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
+    dotted := canonical.split(".")
+    if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
+}
+
+fn sema_call_reflection_secret_leaf(name: String) -> Bool {
+    leaf :: sema_call_reflection_leaf_name(name)
+    leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
+}
+
+fn sema_call_reflection_secret_bearing(ty: Type) -> Bool {
+    if ty == {
+        .Tagged(marker, inner) -> {
+            if marker == TagMarker.Internal(InternalTag.CoreCryptoNominal) {
+                if inner == .Named(name) -> return sema_call_reflection_secret_leaf(name)
+                return false
+            }
+            return sema_call_reflection_secret_bearing(inner)
+        }
+        else -> false
+    }
+}
+
+fn sema_call_reflection_one_pass(ty: Type) -> Bool {
+    if ty == {
+        .Apply(name, _) -> {
+            leaf :: sema_call_reflection_leaf_name(name)
+            leaf == "Iter" || leaf == "ViewIter" || leaf == "Stream"
+        }
+        .Named(name) -> {
+            leaf :: sema_call_reflection_leaf_name(name)
+            leaf == "Body" || leaf == "HTTPBodyChunks"
+        }
+        else -> false
+    }
+}
+
+fn sema_call_reflection_core_shown(name: String) -> Bool {
+    leaf :: sema_call_reflection_leaf_name(name)
+    leaf == "Decimal" || leaf == "Fraction" || leaf == "Mime" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "Url" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DbLease" || leaf == "DbPoolReceipt" || leaf == "BuildError" || leaf == "BrowserError" || leaf == "CBORError" || leaf == "DBError" || leaf == "DataError" || leaf == "EncodingError" || leaf == "EmailError" || leaf == "EnvError" || leaf == "HTTPError" || leaf == "IOError" || leaf == "NetError" || leaf == "RangeError" || leaf == "TextError" || leaf == "UTF8Error" || leaf == "WsError" || leaf == "XMLError"
+}
+
+fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment) -> Bool {
+    graph :: environment.registration_graph ?? return false
+    sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) ?? false
+}
+
+fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    if sema_call_reflection_core_shown(name) -> return true
+    sema_call_reflection_bound(ty, "Display", environment) || sema_call_reflection_bound(ty, "Printable", environment)
+}
+
+pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
+        .Option(inner) -> return sema_call_reflection_is_displayable(inner, environment)
+        .Result(ok, err) -> return sema_call_reflection_is_displayable(ok, environment) && sema_call_reflection_is_displayable(err, environment)
+        .List(inner) -> return sema_call_reflection_is_displayable(inner, environment)
+        .Map(key, _, value) -> return sema_call_reflection_is_displayable(key, environment) && sema_call_reflection_is_displayable(value, environment)
+        .Named(name) -> return sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_named_displayable(name, ty, environment)
+        .Quantity(_, _) -> return true
+        .Apply(name, args) -> {
+            leaf :: sema_call_reflection_leaf_name(name)
+            if leaf == "KeyRef" -> return true
+            native_composite :: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
+            if !native_composite && !sema_call_reflection_named_displayable(name, ty, environment) -> return false
+            loop argument in args {
+                if !sema_call_reflection_is_displayable(argument, environment) -> return false
+            }
+            return true
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_call_reflection_is_displayable(field.ty, environment) -> return false
+            }
+            return true
+        }
+        .TraitObject(bounds) -> return sema_call_reflection_has_name(bounds, "Renderable")
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> return false
+        .FixedList(element, _) | .Tagged(_, element) | .InlineRange(element, _, _) -> return sema_call_reflection_is_displayable(element, environment)
+        .Union(members) -> {
+            loop member in members {
+                if !sema_call_reflection_is_displayable(member, environment) -> return false
+            }
+            return true
+        }
+    }
+}
+
+fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool {
+    loop name in names {
+        if name == wanted || sema_call_reflection_leaf_name(name) == wanted -> return true
+    }
+    false
+}
+
+// Apply the runtime reflection gate after the normal Core argument checker has
+// inferred the value. This keeps argument evaluation and ownership in the
+// ordinary call path while centralizing secret/display diagnostics.
+pub fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_call_reflection_is_displayable(value.ty, environment) -> return true
+    if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
+    if {
+        sema_call_reflection_secret_bearing(value.ty) -> {
+            diagnostics.push(sema_error("E0112", span, "secret-bearing `{type_name(value.ty)}` cannot be reflected", "reflection would expose a cryptographic secret through generic inspection or display", "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata"))
+        }
+        else -> {
+            diagnostics.push(sema_error("E0112", span, "{type_name(value.ty)} can't be reflected yet", "`reflect.of` inspects the same values `\"{{x}}\"` interpolation can show", "implement `Display` for its type, or pass one of its fields instead"))
+        }
+    }
+    false
+}
+
+// Runtime handle method contracts shared by direct method dispatch.
+pub fn sema_call_reflection_method_return(type_name: String, method: String, args: [Type]) -> ?Type {
+    if type_name == "Value" {
+        if args.len() != 0 -> return None
+        if method == "type_name" || method == "path" || method == "display" -> return Val(Type.String)
+        if method == "fields" -> return Val(Type.List(Type.Named("Field")))
+    }
+    if type_name == "Field" && args.len() == 0 {
+        if method == "name" -> return Val(Type.String)
+        if method == "value" -> return Val(Type.Named("Value"))
+    }
+    if type_name == "TypeInfo" && (method == "has_marker" || method == "implements" || method == "has_method") {
+        if args.len() != 1 || args[0] != Type.String -> return None
+        return Val(Type.Bool)
+    }
+    if (type_name == "FieldInfo" || type_name == "MethodInfo") && method == "has_marker" {
+        if args.len() != 1 || args[0] != Type.String -> return None
+        return Val(Type.Bool)
+    }
+    None
+}
+
+fn sema_call_reflection_metadata_owner(ty: Type) -> ?String {
+    if ty == {
+        .Tagged(_, inner) -> return sema_call_reflection_metadata_owner(inner)
+        .Named(name) | .Apply(name, _) -> return Val(sema_call_reflection_leaf_name(name))
+        else -> None
+    }
+}
+
+fn sema_call_reflection_metadata_method(owner: String, method: String) -> Bool {
+    if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
+    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
+    false
+}
+
+pub fn sema_call_try_reflection_metadata_method(
+    receiver: Expr,
+    receiver_value: TExpr,
+    method: String,
+    args: [CallArg],
+    span: Span,
+    expected: ?Type,
+    environment: SemaScopeEnvironment,
+    scopes: &SemaScopeTable,
+    state: &SemaOwnershipState,
+    tail_store: &SemaStatementTailStore,
+    context: &SemaCheckContext,
+    diagnostics: &[Diagnostic],
+) -> SemaMethodSpecialCheck {
+    owner :: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_call_reflection_metadata_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one marker, trait, or method name", "call `.{method}(name)` with one String"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    checked_args := args
+    binding :: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
+        loop argument in checked_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, scopes, context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type :: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(result_type, TExprKind.HostCall(THostCall.Method(receiver_value, method, typed.values)), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+
+
+fn sema_call_reflection_handle_operation(owner: String, method: String) -> ?THandleOp {
+    if owner == "Value" {
+        if method == "type_name" -> return Val(THandleOp.ReflectValueTypeName)
+        if method == "path" -> return Val(THandleOp.ReflectValuePath)
+        if method == "display" -> return Val(THandleOp.ReflectValueDisplay)
+        if method == "fields" -> return Val(THandleOp.ReflectValueFields)
+    }
+    if owner == "Field" {
+        if method == "name" -> return Val(THandleOp.ReflectFieldName)
+        if method == "value" -> return Val(THandleOp.ReflectFieldValue)
+    }
+    None
+}
+
+pub fn sema_call_try_reflection_handle_method(
+    receiver: Expr,
+    receiver_value: TExpr,
+    method: String,
+    args: [CallArg],
+    span: Span,
+    expected: ?Type,
+    environment: SemaScopeEnvironment,
+    scopes: &SemaScopeTable,
+    state: &SemaOwnershipState,
+    tail_store: &SemaStatementTailStore,
+    context: &SemaCheckContext,
+    diagnostics: &[Diagnostic],
+) -> SemaMethodSpecialCheck {
+    metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if metadata.handled -> return metadata
+    owner :: if receiver_value.ty == {
+        .Named(name) -> name
+        else -> ""
+    }
+    operation :: sema_call_reflection_handle_operation(owner, method)
+    if operation == None -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if args.len() != 0 {
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` takes no arguments, got {args.len()}", "reflection handle accessors only inspect their existing value", "call `.{method}()` with no arguments"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    result_type :: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, operation ?? THandleOp.ReflectValueTypeName, [TExpr]{}), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}

@@ -1033,7 +1033,7 @@ fn compiler_sources_reject_retired_jet_ring_keys() {
 
 #[test]
 fn core_reference_lists_every_built_core_module() {
-    let docs = fs::read_to_string("docs/spec/reference/core-library.md")
+    let docs = fs::read_to_string("Docs/spec/reference/core-library.md")
         .expect("core library reference must exist");
     let missing: Vec<&str> = jet::Loader::KNOWN_CORE_MODULES
         .iter()
@@ -1043,7 +1043,7 @@ fn core_reference_lists_every_built_core_module() {
         .collect();
     assert!(
         missing.is_empty(),
-        "docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {:?}",
+        "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {:?}",
         missing
     );
 }

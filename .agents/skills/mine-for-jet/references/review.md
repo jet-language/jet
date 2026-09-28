@@ -64,7 +64,7 @@ Every claim keeps source identity and an exact locator:
     "confidence": "high",
     "stance": "supports",
     "correction": null,
-    "jet_evidence": "docs/spec/reference/compiler-speed.md",
+    "jet_evidence": "Docs/spec/reference/compiler-speed.md",
     "classification": "ratified-in-progress",
     "owner": "#666",
     "action": "Add hostile invalidation cases."
@@ -87,7 +87,7 @@ Parse it as JSON, reject unknown enum values, and make each distinct claim's
 ## Jet cross-check
 
 Cross-check only claims relevant to the named outcome against the smallest
-authoritative Jet slices. Use `scripts/agent/jet-env` for project commands.
+authoritative Jet slices. Use `Tools/agent/jet-env` for project commands.
 Classify each item:
 
 - `already implemented`: cite executable proof or code;
@@ -103,7 +103,7 @@ invent syntax or duplicate an existing card.
 
 Probe a running binary only when the claim concerns executable behavior or the
 selected outcome asks for a live contrast. Build the smallest representative
-input, run it through `scripts/agent/jet-env`, and record output, exit code, and
+input, run it through `Tools/agent/jet-env`, and record output, exit code, and
 emitted paths. If the subject is runnable, run its equivalent probe too. A
 working and a failing case beats a paraphrase.
 

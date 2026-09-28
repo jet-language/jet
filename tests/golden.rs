@@ -224,14 +224,14 @@ fn example_serves_until_stopped(path: &Path) -> bool {
 #[test]
 fn statement_attributes_codegen_shape() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/features/tooling/statement_attributes.jet");
+    let path = root.join("Examples/features/tooling/statement_attributes.jet");
     let src = fs::read_to_string(&path).unwrap();
-    let out = jet::compile_with_path(&src, "examples/features/tooling/statement_attributes.jet")
+    let out = jet::compile_with_path(&src, "Examples/features/tooling/statement_attributes.jet")
         .unwrap_or_else(|diags| {
             panic!(
                 "statement attributes example failed front end:\n{}",
                 jet::render_diagnostics(
-                    "examples/features/tooling/statement_attributes.jet",
+                    "Examples/features/tooling/statement_attributes.jet",
                     &src,
                     &diags
                 )
@@ -260,7 +260,7 @@ fn statement_attributes_codegen_shape() {
 
 fn feature_stem(path: &Path, ex_dir: &Path) -> String {
     path.strip_prefix(ex_dir)
-        .expect("feature path must be below examples/features")
+        .expect("feature path must be below Examples/features")
         .to_string_lossy()
         .replace('\\', "/")
 }
@@ -271,7 +271,7 @@ fn push_feature_source(entries: &mut Vec<GoldenEntry>, path: PathBuf, ex_dir: &P
         .unwrap_or_else(|| panic!("feature source has unexpected extension: {}", path.display()))
         .to_owned();
     entries.push(GoldenEntry {
-        shown: format!("examples/features/{stem}.{ext}"),
+        shown: format!("Examples/features/{stem}.{ext}"),
         path,
         stem,
     });
@@ -283,7 +283,7 @@ fn push_feature_project(entries: &mut Vec<GoldenEntry>, run: PathBuf, ex_dir: &P
         ex_dir,
     );
     entries.push(GoldenEntry {
-        shown: format!("examples/features/{stem}/run.{ext}"),
+        shown: format!("Examples/features/{stem}/run.{ext}"),
         path: run,
         stem,
     });
@@ -365,7 +365,7 @@ fn collect_feature_golden_entries(ex_dir: &Path, ext: &str) -> Vec<GoldenEntry> 
 #[test]
 fn feature_entry_discovery_stops_at_project_roots() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let entries = collect_feature_golden_entries(&root.join("examples/features"), "jet");
+    let entries = collect_feature_golden_entries(&root.join("Examples/features"), "jet");
 
     assert!(
         entries.iter().any(|entry| entry.stem == "basics/onboarding"),
@@ -386,7 +386,7 @@ fn feature_entry_discovery_stops_at_project_roots() {
 #[test]
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let ext = jet::Syntax::FILE_EXT;
     let have_rustc = have_rustc();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
@@ -463,7 +463,7 @@ fn examples_compile_and_run() {
         let jobs = Arc::clone(&jobs);
         let failures = Arc::clone(&failures);
         let checked = Arc::clone(&checked);
-        // Match `scripts/agent/jet-env` / nix RUST_MIN_STACK (~60MiB). Default
+        // Match `Tools/agent/jet-env` / nix RUST_MIN_STACK (~60MiB). Default
         // worker stacks (~2–8MiB) overflow on large `if subject OP { … }` tables
         // (D-IFDIST1 value/statement dispatch) during sema.
         handles.push(
@@ -513,16 +513,16 @@ fn examples_compile_and_run() {
 ///
 /// DERIVED, never hand-typed: the repository already keeps exactly one registry
 /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
-/// `docs/spec/safety.md`, scanned and enforced by
-/// `scripts/agent/check-unsafe-ratchet.mjs` (`tests/unsafe_ratchet.rs`,
-/// `scripts/agent/verify-full.sh`). A new `#Unsafe` gate cannot land without
+/// `Docs/spec/safety.md`, scanned and enforced by
+/// `Tools/agent/check-unsafe-ratchet.mjs` (`tests/unsafe_ratchet.rs`,
+/// `Tools/agent/verify-full.sh`). A new `#Unsafe` gate cannot land without
 /// refreshing that baseline in the same change, so reading it here makes the two
 /// facts one fact.
 ///
 /// A hand copy was a second registry of the same fact, and it rotted twice: the
 /// dev-sentry/gate-ladder rows were red from 2026-08-13 with nothing watching
 /// `golden`, and `a5bea5f25` added an approved gate at
-/// `examples/features/crypto/random_api_split.jet:28` ("compare the typed and
+/// `Examples/features/crypto/random_api_split.jet:28` ("compare the typed and
 /// raw HKDF rungs"), refreshed the baseline as the ratchet demands, and left the
 /// list behind — so `golden` reported an APPROVED region as an I1 violation.
 ///
@@ -536,7 +536,7 @@ fn examples_compile_and_run() {
 /// their own file name, which a plain substring scan could not tell from code.
 static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
     std::sync::LazyLock::new(|| {
-        let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/safety.md");
+        let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/safety.md");
         let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
             panic!(
                 "cannot read the approved unsafe-region baseline {}: {err}",
@@ -553,7 +553,7 @@ static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>
                     baseline_path.display()
                 )
             });
-        let example_prefix = "examples/features/";
+        let example_prefix = "Examples/features/";
         let jet_suffix = format!(".{}", jet::Syntax::FILE_EXT);
         let stems: std::collections::HashSet<String> = data
             .lines()
@@ -568,7 +568,7 @@ static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>
             .collect();
         assert!(
             !stems.is_empty(),
-            "{} records no approved `examples/features` unsafe region; the audited-tier \
+            "{} records no approved `Examples/features` unsafe region; the audited-tier \
              examples (lowlevel/memory/effects/crypto) must appear there",
             baseline_path.display()
         );
@@ -602,7 +602,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     if needs_gtk && !env.have_gtk {
         assert_front_end(entry, &src);
         eprintln!(
-            "note: front end checked; skipping examples/features/{stem}.jet build (need gtk4)"
+            "note: front end checked; skipping Examples/features/{stem}.jet build (need gtk4)"
         );
         return;
     }
@@ -624,7 +624,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     if uses_ffi_bridge && !env.have_cargo {
         assert_front_end(entry, &src);
         eprintln!(
-            "note: front end checked; skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
+            "note: front end checked; skipping Examples/features/{stem}.jet golden (need cargo for FFI bridge)"
         );
         return;
     }
@@ -646,7 +646,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             "example {} failed the front end:\n{}",
             stem,
             jet::render_diagnostics(
-                &format!("examples/features/{}.{}", stem, env.ext),
+                &format!("Examples/features/{}.{}", stem, env.ext),
                 &src,
                 &diags
             )
@@ -711,14 +711,14 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
 
     if needs_gtk && !env.have_rustc {
         eprintln!(
-            "note: front end checked; skipping examples/features/{stem}.jet build (need gtk4 + rustc)"
+            "note: front end checked; skipping Examples/features/{stem}.jet build (need gtk4 + rustc)"
         );
         return;
     }
     let needs_raylib_display = stem == "game/raylib_window";
     if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
         eprintln!(
-            "note: front end checked; skipping examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
+            "note: front end checked; skipping Examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
         );
         return;
     }
@@ -770,7 +770,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // classified instead of discovered as a timeout.
     if example_serves_until_stopped(&entry.path) {
         eprintln!(
-            "note: built examples/features/{stem}.jet; not run (service entry serves until stopped)"
+            "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
         );
         return;
     }
@@ -804,11 +804,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     };
     if needs_gtk && !run.status.success() && gtk_loader_unavailable(&run.stderr) {
         eprintln!(
-            "note: skipping examples/features/{stem}.jet run (gtk4 runtime loader unavailable)"
+            "note: skipping Examples/features/{stem}.jet run (gtk4 runtime loader unavailable)"
         );
         return;
     }
-    // Suffix rule (examples/README.md "Auxiliary golden stream suffix"):
+    // Suffix rule (Examples/README.md "Auxiliary golden stream suffix"):
     // `.err.out` = expected non-zero exit (panic/uncaught Err); `.stderr.out`
     // = expected exit 0 with pinned incidental stderr. Never a third suffix.
     let err_path = env
@@ -830,13 +830,13 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             fs::write(&err_path, actual_err.as_bytes()).unwrap();
         } else {
             let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.err.out", stem));
+                .unwrap_or_else(|_| panic!("missing Examples/features/expected/{}.err.out", stem));
             if actual_err != expected_err {
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
                     unified_diff(
-                        &format!("examples/features/expected/{stem}.err.out"),
-                        &format!("examples/features/{stem} stderr (actual)"),
+                        &format!("Examples/features/expected/{stem}.err.out"),
+                        &format!("Examples/features/{stem} stderr (actual)"),
                         &expected_err,
                         &actual_err,
                     )
@@ -883,7 +883,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         } else {
             assert!(
                 out_path.is_file(),
-                "missing examples/features/expected/{stem}.out; run with JET_UPDATE_GOLDEN=1 and a scoped JET_GOLDEN_FILTER to create it"
+                "missing Examples/features/expected/{stem}.out; run with JET_UPDATE_GOLDEN=1 and a scoped JET_GOLDEN_FILTER to create it"
             );
             let expected = fs::read_to_string(&out_path).unwrap();
             if stem == "tooling/compute_vulkan_webgpu" {
@@ -896,8 +896,8 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 panic!(
                     "output mismatch for example {stem}:\n{}",
                     unified_diff(
-                        &format!("examples/features/expected/{stem}.out"),
-                        &format!("examples/features/{stem} stdout (actual)"),
+                        &format!("Examples/features/expected/{stem}.out"),
+                        &format!("Examples/features/{stem} stdout (actual)"),
                         &expected,
                         &actual,
                     )
@@ -910,14 +910,14 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 fs::write(&success_err_path, actual_err.as_bytes()).unwrap();
             } else {
                 let expected_err = fs::read_to_string(&success_err_path).unwrap_or_else(|_| {
-                    panic!("missing examples/features/expected/{}.stderr.out", stem)
+                    panic!("missing Examples/features/expected/{}.stderr.out", stem)
                 });
                 if actual_err != expected_err {
                     panic!(
                         "stderr mismatch for example {stem}:\n{}",
                         unified_diff(
-                            &format!("examples/features/expected/{stem}.stderr.out"),
-                            &format!("examples/features/{stem} stderr (actual)"),
+                            &format!("Examples/features/expected/{stem}.stderr.out"),
+                            &format!("Examples/features/{stem} stderr (actual)"),
                             &expected_err,
                             &actual_err,
                         )
@@ -1084,7 +1084,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     }
     if !env.have_rustc || !env.have_cargo {
         eprintln!(
-            "note: front end checked; skipping examples/features/{} golden (need provisioned compiler toolchain)",
+            "note: front end checked; skipping Examples/features/{} golden (need provisioned compiler toolchain)",
             entry.stem
         );
         return;
@@ -1112,7 +1112,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .unwrap_or(false);
     if !have_tool {
         eprintln!(
-            "note: front end checked; skipping examples/features/{} golden (need provisioned {})",
+            "note: front end checked; skipping Examples/features/{} golden (need provisioned {})",
             entry.stem, tool
         );
         return;
@@ -1187,7 +1187,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .join(format!("{}.out", entry.stem));
     assert!(
         out_path.is_file(),
-        "missing examples/features/expected/{}.out",
+        "missing Examples/features/expected/{}.out",
         entry.stem
     );
     let mut foreign_inputs = vec![source_dir.join(foreign_source)];
@@ -1216,8 +1216,8 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
                 "output mismatch for example {}:\n{}",
                 entry.stem,
                 unified_diff(
-                    &format!("examples/features/expected/{}.out", entry.stem),
-                    &format!("examples/features/{}/run.jet stdout (actual)", entry.stem),
+                    &format!("Examples/features/expected/{}.out", entry.stem),
+                    &format!("Examples/features/{}/run.jet stdout (actual)", entry.stem),
                     &expected,
                     &actual,
                 )
@@ -1227,7 +1227,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// I5 for `examples/features/devloop/job_runner.jet`: one generated binary
+/// I5 for `Examples/features/devloop/job_runner.jet`: one generated binary
 /// dispatches every named `#Job` entry through argv.
 fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
@@ -1314,8 +1314,8 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
                 panic!(
                     "output mismatch for job_runner subcommand `{job}`:\n{}",
                     unified_diff(
-                        &format!("examples/features/expected/devloop/{expected_name}.out"),
-                        &format!("examples/features/devloop/job_runner subcommand `{job}` stdout"),
+                        &format!("Examples/features/expected/devloop/{expected_name}.out"),
+                        &format!("Examples/features/devloop/job_runner subcommand `{job}` stdout"),
                         &expected,
                         &actual,
                     )

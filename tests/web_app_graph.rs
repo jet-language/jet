@@ -28,7 +28,7 @@ fn codes(entry: &str) -> Vec<String> {
 #[test]
 fn example_app_hello_graph_records_policy_and_modes() {
     let path = format!(
-        "{}/examples/features/web/app_hello.jet",
+        "{}/Examples/features/web/app_hello.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     let facts = check_facts(&path);
@@ -50,7 +50,7 @@ fn example_app_hello_graph_records_policy_and_modes() {
 #[test]
 fn server_function_action_exposes_checked_wire_contract() {
     let path = format!(
-        "{}/examples/features/web/web_app.jet",
+        "{}/Examples/features/web/web_app.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     let graph = check_facts(&path).web_app.expect("fn run() -> App graph");
@@ -76,7 +76,7 @@ fn server_function_action_exposes_checked_wire_contract() {
 #[test]
 fn tanstack_start_graph_keeps_one_typed_reference_application() {
     let path = format!(
-        "{}/examples/features/web/tanstack_start/run.jet",
+        "{}/Examples/features/web/tanstack_start/run.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     let graph = check_facts(&path).web_app.expect("tanstack_start App graph");
@@ -304,7 +304,7 @@ fn run() -> App {
 #[test]
 fn expand_web_lens_and_explain_web_graph_json() {
     let path = format!(
-        "{}/examples/features/web/app_hello.jet",
+        "{}/Examples/features/web/app_hello.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     let jet = env!("CARGO_BIN_EXE_jet");

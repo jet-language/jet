@@ -1,6 +1,6 @@
 //! c46 drift-guard: TextMate grammar keyword patterns must track Syntax::JET_KEYWORD_LIST.
 //!
-//! Reads `editors/vscode/syntaxes/jet.tmLanguage.json`, extracts every word
+//! Reads `Tools/editors/vscode/syntaxes/jet.tmLanguage.json`, extracts every word
 //! from the keyword `"match"` regex alternation groups, and asserts:
 //!   1. Every word in `Syntax::JET_KEYWORD_LIST` is covered (no silent omissions).
 //!   2. No `FOREIGN_*` word from `crates/jet-foundation/src/Syntax.rs` appears in a keyword pattern
@@ -45,10 +45,10 @@ fn generated_section_matches(text: &str, path: &str, expected: &str) -> bool {
 #[test]
 fn editor_grammars_have_generated_sections() {
     for path in [
-        "editors/vscode/syntaxes/jet.tmLanguage.json",
-        "editors/jet.tmGrammar",
-        "editors/tree-sitter/grammar.js",
-        "editors/zed/languages/jet/highlights.scm",
+        "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+        "Tools/editors/jet.tmGrammar",
+        "Tools/editors/tree-sitter/grammar.js",
+        "Tools/editors/zed/languages/jet/highlights.scm",
     ] {
         let section = generated_section(path);
         assert!(section.contains(GENERATED_START), "{path}");
@@ -58,7 +58,7 @@ fn editor_grammars_have_generated_sections() {
 
 #[test]
 fn tree_sitter_map_type_grammar_keeps_colon_adjacent() {
-    let grammar = fs::read_to_string("editors/tree-sitter/grammar.js").unwrap();
+    let grammar = fs::read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap();
     assert!(
         grammar.contains("seq(\"[\", $._type, \":\", $._type, \"]\")"),
         "tree-sitter map types must use the canonical adjacent colon"
@@ -71,7 +71,7 @@ fn tree_sitter_map_type_grammar_keeps_colon_adjacent() {
 
 #[test]
 fn tree_sitter_result_handler_grammar_keeps_the_canonical_shape() {
-    let grammar = fs::read_to_string("editors/tree-sitter/grammar.js").unwrap();
+    let grammar = fs::read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap();
     let start = grammar
         .find("result_handler_expr:")
         .expect("result handler rule");
@@ -96,19 +96,19 @@ fn tree_sitter_result_handler_grammar_keeps_the_canonical_shape() {
 fn editor_grammars_match_generated_sections() {
     let cases = [
         (
-            "editors/vscode/syntaxes/jet.tmLanguage.json",
+            "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
             jet::Syntax::render_vscode_generated_highlights(),
         ),
         (
-            "editors/jet.tmGrammar",
+            "Tools/editors/jet.tmGrammar",
             jet::Syntax::render_vscode_generated_highlights(),
         ),
         (
-            "editors/tree-sitter/grammar.js",
+            "Tools/editors/tree-sitter/grammar.js",
             jet::Syntax::render_tree_sitter_generated_highlights(),
         ),
         (
-            "editors/zed/languages/jet/highlights.scm",
+            "Tools/editors/zed/languages/jet/highlights.scm",
             jet::Syntax::render_zed_generated_highlights(),
         ),
     ];
@@ -124,7 +124,7 @@ fn editor_grammars_match_generated_sections() {
 
 #[test]
 fn seeded_tree_sitter_drift_fails_the_generated_section_guard() {
-    let path = "editors/tree-sitter/grammar.js";
+    let path = "Tools/editors/tree-sitter/grammar.js";
     let source = fs::read_to_string(path).unwrap();
     let seeded = source.replacen(
         GENERATED_END,
@@ -144,8 +144,8 @@ fn seeded_tree_sitter_drift_fails_the_generated_section_guard() {
 #[test]
 fn vscode_strings_do_not_relex_interpolations() {
     for path in [
-        "editors/vscode/syntaxes/jet.tmLanguage.json",
-        "editors/jet.tmGrammar",
+        "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+        "Tools/editors/jet.tmGrammar",
     ] {
         let grammar = fs::read_to_string(path).unwrap();
         assert!(
@@ -166,9 +166,9 @@ fn vscode_strings_do_not_relex_interpolations() {
 #[test]
 fn classic_textmate_grammar_matches_vscode_source() {
     assert_eq!(
-        fs::read_to_string("editors/jet.tmGrammar").unwrap(),
-        fs::read_to_string("editors/vscode/syntaxes/jet.tmLanguage.json").unwrap(),
-        "editors/jet.tmGrammar must mirror the canonical VS Code TextMate grammar"
+        fs::read_to_string("Tools/editors/jet.tmGrammar").unwrap(),
+        fs::read_to_string("Tools/editors/vscode/syntaxes/jet.tmLanguage.json").unwrap(),
+        "Tools/editors/jet.tmGrammar must mirror the canonical VS Code TextMate grammar"
     );
 }
 
@@ -176,12 +176,12 @@ fn classic_textmate_grammar_matches_vscode_source() {
 fn every_highlight_token_is_in_each_generated_section() {
     let sections = [
         (
-            "editors/vscode/syntaxes/jet.tmLanguage.json",
-            generated_section("editors/vscode/syntaxes/jet.tmLanguage.json"),
+            "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+            generated_section("Tools/editors/vscode/syntaxes/jet.tmLanguage.json"),
         ),
         (
-            "editors/tree-sitter/grammar.js",
-            generated_section("editors/tree-sitter/grammar.js"),
+            "Tools/editors/tree-sitter/grammar.js",
+            generated_section("Tools/editors/tree-sitter/grammar.js"),
         ),
     ];
 
@@ -202,8 +202,8 @@ fn every_highlight_token_is_in_each_generated_section() {
 
 #[test]
 fn zed_generated_query_covers_anonymous_highlight_words() {
-    let anonymous = extract_anonymous_node_types("editors/tree-sitter/src/node-types.json");
-    let section = generated_section("editors/zed/languages/jet/highlights.scm");
+    let anonymous = extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json");
+    let section = generated_section("Tools/editors/zed/languages/jet/highlights.scm");
     let actual = extract_zed_query_string_literals(&section)
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -235,8 +235,8 @@ fn syntax_keyword_list_tokens_are_classified_for_highlighting() {
 
 #[test]
 fn zed_highlight_query_mentions_only_grammar_literals() {
-    let anonymous = extract_anonymous_node_types("editors/tree-sitter/src/node-types.json");
-    let query = fs::read_to_string("editors/zed/languages/jet/highlights.scm")
+    let anonymous = extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json");
+    let query = fs::read_to_string("Tools/editors/zed/languages/jet/highlights.scm")
         .expect("read zed highlights query");
     let mut bad = Vec::new();
 
@@ -463,9 +463,9 @@ fn extract_foreign_words_from_syntax(syntax_text: &str) -> BTreeSet<String> {
 
 #[test]
 fn grammar_covers_jet_keyword_list() {
-    let grammar_path = "editors/vscode/syntaxes/jet.tmLanguage.json";
+    let grammar_path = "Tools/editors/vscode/syntaxes/jet.tmLanguage.json";
     let grammar_text =
-        fs::read_to_string(grammar_path).expect("editors/vscode/syntaxes/jet.tmLanguage.json");
+        fs::read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json");
 
     let grammar_words = extract_grammar_keyword_words(&grammar_text);
 
@@ -491,9 +491,9 @@ fn grammar_covers_jet_keyword_list() {
 
 #[test]
 fn grammar_excludes_foreign_words() {
-    let grammar_path = "editors/vscode/syntaxes/jet.tmLanguage.json";
+    let grammar_path = "Tools/editors/vscode/syntaxes/jet.tmLanguage.json";
     let grammar_text =
-        fs::read_to_string(grammar_path).expect("editors/vscode/syntaxes/jet.tmLanguage.json");
+        fs::read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json");
     let syntax_text = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
         .expect("crates/jet-foundation/src/Syntax.rs");
 

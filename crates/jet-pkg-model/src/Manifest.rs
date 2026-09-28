@@ -89,7 +89,7 @@ pub const fn current_release_status() -> ReleaseStatus {
 // ──────────────────────────────────────────────
 
 /// The editions this toolchain understands (D-REL3). An edition opts a project
-/// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
+/// into a specific era of Jet syntax (Docs/spec/release-policy.md). The list is
 /// ordered oldest→newest; the last entry is the newest stable edition, used by
 /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
 const LATEST_EDITION: &str = "2028";
@@ -627,7 +627,7 @@ fn e1206_unknown_field(field: &str) -> Diagnostic {
         format!(
             "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper."
         ),
-        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
+        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see Docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
         None,
     )
 }
@@ -657,7 +657,7 @@ fn e1206(_file: &str, detail: &str) -> Diagnostic {
         format!("`{}` has a shape error", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
-            "check `{}` against docs/spec/syntax-decisions.md (U1)",
+            "check `{}` against Docs/spec/syntax-decisions.md (U1)",
             Syntax::PACKAGE_FILE
         ),
         None,

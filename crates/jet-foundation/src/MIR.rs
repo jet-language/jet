@@ -1774,6 +1774,8 @@ pub struct MirTypeDef {
     pub generic_params: Vec<MirGenericParam>,
     pub derives: Vec<MirTraitId>,
     pub auto_derive_default: bool,
+    pub auto_printable: bool,
+    pub published_schema: bool,
     /// Checked ownership fact for declarations consumed by native and AOT
     /// adapters; never inferred from the lowered kind.
     pub single_use: bool,
@@ -3596,7 +3598,7 @@ pub struct MirScope {
     pub facts: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirParam {
     pub index: usize,
     pub name: String,
@@ -5501,6 +5503,7 @@ pub enum MirOperation {
     /// already used by call/list trait-boxing facts.
     TraitBox { value: MirValueId, target: MirTypeId },
     Move { value: MirValueId },
+    Constant(MirConstant),
     Unary {
         op: MirUnaryOp,
         value: MirValueId,
@@ -7225,6 +7228,8 @@ fn operation_kind(operation: &MirOperation) -> &'static str {
         MirOperation::Move { .. } => "Move",
         MirOperation::TraitBox { .. } => "TraitBox",
         MirOperation::Constant(_) => "Constant",
+        MirOperation::Unary { .. } => "Unary",
+        MirOperation::Binary { .. } => "Binary",
         MirOperation::BuildString { .. } => "BuildString",
         MirOperation::BuildList { .. } => "BuildList",
         MirOperation::BuildMap { .. } => "BuildMap",

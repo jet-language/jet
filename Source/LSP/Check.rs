@@ -264,21 +264,21 @@ pub fn run_doctor() {
 
     // C13: tree-sitter grammar presence.
     let ts_grammar =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/tree-sitter/grammar.js");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Tools/editors/tree-sitter/grammar.js");
     if ts_grammar.exists() {
-        println!("  [ok] editors/tree-sitter/grammar.js present");
+        println!("  [ok] Tools/editors/tree-sitter/grammar.js present");
     } else {
         println!(
-            "  [WARN] editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build"
+            "  [WARN] Tools/editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build"
         );
     }
 
     // C13: TextMate grammar presence.
-    let tm_grammar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/jet.tmGrammar");
+    let tm_grammar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Tools/editors/jet.tmGrammar");
     if tm_grammar.exists() {
-        println!("  [ok] editors/jet.tmGrammar present");
+        println!("  [ok] Tools/editors/jet.tmGrammar present");
     } else {
-        println!("  [WARN] editors/jet.tmGrammar not found");
+        println!("  [WARN] Tools/editors/jet.tmGrammar not found");
     }
 
     println!("all checks passed — the language server is healthy");

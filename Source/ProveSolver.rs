@@ -2,7 +2,7 @@
 //!
 //! Semantics live here as a std-only producer. The CLI only marshals obligations
 //! exported after sema and embeds certificate-checked evidence in ProofReport.
-//! Hard limits and certificate shapes follow `docs/spec/proof-replay-decisions.md`.
+//! Hard limits and certificate shapes follow `Docs/spec/proof-replay-decisions.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 

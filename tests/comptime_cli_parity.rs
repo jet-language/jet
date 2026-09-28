@@ -22,7 +22,7 @@ fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String 
         .next()
         .expect("comptime stem has a file name");
     fs::copy(
-        root.join("examples/features").join(format!("{stem}.jet")),
+        root.join("Examples/features").join(format!("{stem}.jet")),
         destination.join(format!("{file_name}.jet")),
     )
     .unwrap_or_else(|error| panic!("copy `{stem}` fixture: {error}"));
@@ -43,7 +43,7 @@ fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String 
             fs::create_dir_all(parent).expect("create comptime fixture asset directory");
         }
         fs::copy(
-            root.join("examples/features/comptime").join(relative),
+            root.join("Examples/features/comptime").join(relative),
             &target,
         )
         .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
@@ -53,7 +53,7 @@ fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String 
 
 fn copy_build_stamp_fixture(root: &Path, destination: &Path) {
     fs::copy(
-        root.join("examples/features/comptime/build_stamp.jet"),
+        root.join("Examples/features/comptime/build_stamp.jet"),
         destination.join("build_stamp.jet"),
     )
     .expect("copy build stamp example");
@@ -82,7 +82,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
     let case_dir = scratch.join(&stem.replace('/', "_"));
     fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
     let file_name = copy_comptime_fixture(root, &case_dir, stem);
-    let expected_path = root.join(format!("examples/features/expected/{stem}.out"));
+    let expected_path = root.join(format!("Examples/features/expected/{stem}.out"));
     let expected = fs::read(&expected_path)
         .unwrap_or_else(|error| panic!("missing golden for `{stem}`: {error}"));
     let cache = case_dir.join("cache");
@@ -192,7 +192,7 @@ fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
 #[test]
 fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/tooling/build_entry_discovery");
+    let source = root.join("Examples/features/tooling/build_entry_discovery");
     let scratch = common::Scratch::new("build_entry_discovery_parity");
     for relative in [
         "workspace.jet",
@@ -212,7 +212,7 @@ fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
             .unwrap_or_else(|error| panic!("copy build-entry fixture `{relative}`: {error}"));
     }
     let expected =
-        fs::read(root.join("examples/features/expected/tooling/build_entry_discovery.out"))
+        fs::read(root.join("Examples/features/expected/tooling/build_entry_discovery.out"))
             .expect("read build-entry golden");
 
     let named = run_jet(
@@ -285,12 +285,12 @@ fn build_fact_precedence_example_matches_release_default_and_dev() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("build_fact_precedence_parity");
     fs::copy(
-        root.join("examples/features/comptime/build_fact_precedence.jet"),
+        root.join("Examples/features/comptime/build_fact_precedence.jet"),
         scratch.path.join("build_fact_precedence.jet"),
     )
     .expect("copy build fact precedence example");
     let expected =
-        fs::read(root.join("examples/features/expected/comptime/build_fact_precedence.out"))
+        fs::read(root.join("Examples/features/expected/comptime/build_fact_precedence.out"))
             .expect("read build fact precedence golden");
 
     let release = run_jet(
@@ -333,7 +333,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
     let scratch = common::Scratch::new("computed_constants_parity");
     let source = scratch.join("computed_constants.jet");
     fs::copy(
-        root.join("examples/features/comptime/computed_constants.jet"),
+        root.join("Examples/features/comptime/computed_constants.jet"),
         &source,
     )
     .expect("copy computed constants example");
@@ -346,7 +346,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
         compiled.rust
     );
     let expected =
-        fs::read(root.join("examples/features/expected/comptime/computed_constants.out"))
+        fs::read(root.join("Examples/features/expected/comptime/computed_constants.out"))
             .expect("read computed constants golden");
     let cache = scratch.join("cache");
 
@@ -657,11 +657,11 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     )
     .expect("write job runner package manifest");
     fs::copy(
-        root.join("examples/features/devloop/job_runner.jet"),
+        root.join("Examples/features/devloop/job_runner.jet"),
         &source,
     )
     .expect("copy job runner example");
-    let help_expected = fs::read(root.join("examples/features/expected/devloop/job_runner.out"))
+    let help_expected = fs::read(root.join("Examples/features/expected/devloop/job_runner.out"))
         .expect("read job runner help golden");
     let cache = scratch.join("cache");
 
@@ -729,7 +729,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         ("seed_data", "job_runner.seed_data.out"),
     ] {
         let expected = fs::read(
-            root.join("examples/features/expected/devloop")
+            root.join("Examples/features/expected/devloop")
                 .join(golden_name),
         )
         .unwrap_or_else(|error| panic!("read named job golden `{golden_name}`: {error}"));
@@ -774,7 +774,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("cli_docs_parity");
     let source = scratch.join("subcommands.jet");
-    fs::copy(root.join("examples/features/cli/subcommands.jet"), &source)
+    fs::copy(root.join("Examples/features/cli/subcommands.jet"), &source)
         .expect("copy CLI example");
     let cache = scratch.join("cache");
 
@@ -856,7 +856,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         ),
     ] {
         let expected = fs::read(
-            root.join("examples/features/expected/cli")
+            root.join("Examples/features/expected/cli")
                 .join(golden_name),
         )
         .unwrap_or_else(|error| panic!("read CLI command golden `{golden_name}`: {error}"));
@@ -953,9 +953,9 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("canonical_cli_recipe");
     let fixtures = [
-        ("examples/features/cli/typed_entry_args.jet", "typed.jet"),
-        ("examples/features/io/args_spec.jet", "builder.jet"),
-        ("examples/features/cli/positionals.jet", "positionals.jet"),
+        ("Examples/features/cli/typed_entry_args.jet", "typed.jet"),
+        ("Examples/features/io/args_spec.jet", "builder.jet"),
+        ("Examples/features/cli/positionals.jet", "positionals.jet"),
     ];
 
     for (source, name) in fixtures {
@@ -1244,18 +1244,18 @@ fn run() {
 #[test]
 fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/tooling/test_target/run.jet");
-    let golden = fs::read(root.join("examples/features/expected/tooling/test_target.out"))
+    let source = root.join("Examples/features/tooling/test_target/run.jet");
+    let golden = fs::read(root.join("Examples/features/expected/tooling/test_target.out"))
         .expect("read measured test target golden");
     let scratch = common::Scratch::new("test_cli_parity");
     fs::copy(&source, scratch.join("main.jet")).expect("copy measured test target source");
     fs::copy(
-        root.join("examples/features/tooling/test_target/package.jet"),
+        root.join("Examples/features/tooling/test_target/package.jet"),
         scratch.join("package.jet"),
     )
     .expect("copy measured test target package");
     fs::copy(
-        root.join("examples/features/tooling/test_target/test_perf.jet"),
+        root.join("Examples/features/tooling/test_target/test_perf.jet"),
         scratch.join("test_perf.jet"),
     )
     .expect("copy measured test target module");
@@ -1323,7 +1323,7 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args([
             "test",
-            "examples/features/tooling/bench.jet",
+            "Examples/features/tooling/bench.jet",
             "--measure",
             "--json",
         ])
@@ -1377,12 +1377,12 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
 
     for (stem, file_name) in cases {
         fs::copy(
-            root.join("examples/features/devloop").join(file_name),
+            root.join("Examples/features/devloop").join(file_name),
             scratch.join(file_name),
         )
         .unwrap_or_else(|error| panic!("copy command override `{file_name}`: {error}"));
         let expected = fs::read(
-            root.join("examples/features/expected/devloop")
+            root.join("Examples/features/expected/devloop")
                 .join(format!("{stem}.out")),
         )
         .unwrap_or_else(|error| panic!("read command override golden `{stem}`: {error}"));
@@ -1472,10 +1472,10 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
 #[test]
 fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/tooling/build_entry_discovery");
+    let example = root.join("Examples/features/tooling/build_entry_discovery");
     let entry = example.join("run.jet");
     let expected =
-        fs::read(root.join("examples/features/expected/tooling/build_entry_discovery.out"))
+        fs::read(root.join("Examples/features/expected/tooling/build_entry_discovery.out"))
             .expect("read build-entry discovery golden");
     let scratch = common::Scratch::new("package_build_entry_discovery_parity");
 
@@ -1579,7 +1579,7 @@ fn build_stamp_example_matches_release_jit_and_interpreter_tiers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("build_stamp_tier_parity");
     copy_build_stamp_fixture(&root, &scratch.path);
-    let expected = fs::read(root.join("examples/features/expected/comptime/build_stamp.out"))
+    let expected = fs::read(root.join("Examples/features/expected/comptime/build_stamp.out"))
         .expect("read build stamp golden");
 
     let release = run_jet(

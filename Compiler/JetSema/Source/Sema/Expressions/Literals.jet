@@ -110,7 +110,7 @@ fn sema_expression_unit_literal(raw: String, int_value: ?Int, float_value: ?Floa
                 constructed :: sema_tir_expr(constructed_ty, TExprKind.HandleMethod(unit_value, THandleOp.DurationNew("Nanoseconds", is_float), [TExpr]{}), span)
                 message :: sema_tir_expr(Type.String, TExprKind.StrLit([TStrPart]{TStrPart.Literal("time literal is outside Duration's i64 range")}), span)
                 fallback :: TOrFallback.Panic(message, sema_expression_panic_location(environment, suffix_span))
-                checked :: sema_tir_expr(Type.Named("Duration"), TExprKind.OrFallback(constructed, fallback), span)
+                checked :: sema_tir_expr(Type.Named("Duration"), TExprKind.OrFallback(constructed, fallback, None), span)
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
             }
             if int_value == None && float_value == None {
@@ -159,32 +159,234 @@ fn sema_expression_list_trait_coercion(ty: Type) -> ?Type {
     }
 }
 
-fn sema_expression_list_elements(elements: [Expr], expected_element: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?[TExpr] {
-    values := [TExpr]{}
+struct SemaExpressionListCheckedParts {
+    pub parts: [TListSpreadPart]
+    pub element_types: [Type]
+}
+
+fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool {
+    if element == {
+        .StructLit(_, _, _, _, _, inferred, _) -> inferred
+        .TypedLit(head, _, _) -> head == None
+        .Paren(inner, _) -> sema_expression_list_element_needs_expected_type(inner)
+        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expression_list_element_needs_expected_type(inner)
+        else -> false
+    }
+}
+
+fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if value == {
+        .Ident(name, span) -> {
+            binding_index :: sema_scope_resolve_index_at(scopes, name, span) ?? return true
+            binding := scopes.bindings[binding_index]
+            if binding.symbol.kind != SymbolKind.Local -> return true
+            if sema_ownership_report_invalidated_view(&state, value, scopes, span, &diagnostics) -> return false
+            places := sema_ownership_places_from_expr_in_state(value, scopes, &state)
+            if places.len() == 0 -> return true
+            loop place in places {
+                if sema_ownership_place_moved(&state, place) == .Val(origin) {
+                    diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(place), origin.origin, span))
+                    return false
+                }
+                if sema_ownership_active_view_conflict_for_expr(&state, place, AccessConvention.Move, value, scopes) {
+                    diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+                    return false
+                }
+                if sema_ownership_active_loan_conflict(&state, place, AccessConvention.Move) != None {
+                    diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+                    return false
+                }
+            }
+            if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named("Unit")) {
+                loop place in places {
+                    state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "list literal"}})
+                }
+                loop place in places {
+                    if !sema_ownership_note_place_reference(&state, value, place, span, scopes, SemaOwnershipReferenceKind.Move) -> return false
+                }
+            }
+            true
+        }
+        .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> sema_expression_list_mark_owned_value(inner, &state, &scopes, &diagnostics)
+        else -> true
+    }
+}
+
+fn sema_expression_list_check_clone(element: Type, span: Span, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    facts := sema_copy_classify(element, SemaCopyIntent.Clone, environment, context.generic_params, false)
+    effect_name := sema_copy_effect_name(facts)
+    if effect_name != None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
+    if !facts.accepted {
+        diagnostic := sema_copy_diagnostic(facts, span)
+        if diagnostic != None -> diagnostics.push(diagnostic ?? sema_error("E0211", span, "`{type_name(element)}` can't be copied", "list spread clones each element while building the result", "spread values whose elements support `Clone`"))
+        return false
+    }
+    if sema_copy_memory_operation(facts) != None && effect_name == None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
+    true
+}
+
+fn sema_expression_list_inference_error(element: Type, expected: Type, index: Int, span: Span, diagnostics: &[Diagnostic]) {
+    diagnostics.push(sema_error("E0504", span, "this list resolves to `{type_name(expected)}` but item {index + 1} is `{type_name(element)}`", "every item in a list literal must have the same type", "make every element the same type, or build the list in steps"))
+}
+
+fn sema_expression_list_elements(elements: [Expr], expected_element: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?SemaExpressionListCheckedParts {
+    checked_parts := [?TListSpreadPart]{}
+    element_types := [?Type]{}
+    deferred := [Int]{}
+    index := 0
+    loop index < elements.len() {
+        element := elements[index]
+        if expected_element == None && sema_expression_list_element_needs_expected_type(element) {
+            checked_parts.push(None)
+            element_types.push(None)
+            deferred.push(index)
+            index += 1
+            next
+        }
+        if element == {
+            .Spread(value, spread_span) -> {
+                checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                if !sema_expression_list_mark_owned_value(value, &state, &scopes, &diagnostics) -> return None
+                normalized :: sema_expr_expected_type(sema_expr_unwrap_tag(checked.ty), environment)
+                spread_element := if normalized == {
+                    .List(inner) -> inner
+                    else -> {
+                        diagnostics.push(sema_error("E1311", spread_span, "spread needs a list, not `{type_name(normalized)}`", "list spread `[...xs, y]` expands a list's elements in place", "spread a `[T]` value here"))
+                        return None
+                    }
+                }
+                if expected_element == .Val(required) {
+                    compatible :: sema_expr_expected_assignable(required, spread_element, environment) ?? return None
+                    if !compatible {
+                        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment), sema_expr_expected_type(spread_element, environment), spread_span))
+                        return None
+                    }
+                }
+                checked_parts.push(Val(TListSpreadPart.Spread(checked)))
+                element_types.push(Val(spread_element))
+            }
+            else -> {
+                checked :: if expected_element != None -> sema_check_expression(element, expected_element, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                value :: checked ?? return None
+                if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
+                if expected_element == .Val(required) {
+                    compatible :: sema_expr_expected_assignable(required, value.ty, environment) ?? return None
+                    if !compatible {
+                        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment), sema_expr_expected_type(value.ty, environment), expr_span(element)))
+                        return None
+                    }
+                }
+                checked_parts.push(Val(TListSpreadPart.Element(value)))
+                element_types.push(Val(value.ty))
+            }
+        }
+        index += 1
+    }
+    if expected_element == None && elements.len() > 0 {
+        first := None
+        loop item_type in element_types {
+            if item_type == .Val(ty) {
+                first = Val(ty)
+                break
+            }
+        }
+        if first == None {
+            loop deferred_index in deferred {
+                element := elements[deferred_index]
+                checked :: sema_check_expression(element, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                if checked == .Val(value) {
+                    if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
+                    checked_parts[deferred_index] = Val(TListSpreadPart.Element(value))
+                    element_types[deferred_index] = Val(value.ty)
+                    if first == None -> first = Val(value.ty)
+                }
+            }
+        }
+        first_type :: first ?? return None
+        loop deferred_index in deferred {
+            if checked_parts[deferred_index] != None -> next
+            element := elements[deferred_index]
+            value :: sema_check_expression(element, Val(first_type), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
+            checked_parts[deferred_index] = Val(TListSpreadPart.Element(value))
+            element_types[deferred_index] = Val(value.ty)
+        }
+        inferred_element := first_type
+        loop item_type in element_types {
+            if item_type == .Val(candidate) && !type_identity_equal(inferred_element, candidate) {
+                joined :: sema_expr_numeric_join(inferred_element, candidate)
+                if joined == .Val(common) -> inferred_element = common
+            }
+        }
+        inference_failed := false
+        loop part_index in 0..<checked_parts.len() {
+            item_type :: element_types[part_index] ?? next
+            if type_identity_equal(item_type, inferred_element) -> next
+            source_part :: checked_parts[part_index] ?? next
+            if source_part == {
+                .Spread(_) -> {
+                    sema_expression_list_inference_error(item_type, inferred_element, part_index, expr_span(elements[part_index]), &diagnostics)
+                    inference_failed = true
+                }
+                .Element(value) -> {
+                    can_widen :: sema_expr_numeric_widening_to(item_type, inferred_element) ?? false
+                    if {
+                        can_widen -> {
+                            line :: sema_source_line_at(environment.source_segments, expr_span(elements[part_index])) ?? 0
+                            converted :: sema_expr_numeric_literal_conversion(value, inferred_element, expr_span(elements[part_index]), line, &diagnostics) ?? return None
+                            checked_parts[part_index] = Val(TListSpreadPart.Element(converted))
+                            element_types[part_index] = Val(inferred_element)
+                        }
+                        else -> {
+                            sema_expression_list_inference_error(item_type, inferred_element, part_index, expr_span(elements[part_index]), &diagnostics)
+                            inference_failed = true
+                        }
+                    }
+                }
+            }
+        }
+        if inference_failed -> return None
+    }
+    parts := [TListSpreadPart]{}
+    resolved_types := [Type]{}
+    loop index in 0..<checked_parts.len() {
+        part :: checked_parts[index] ?? panic("checked list element inference left an unresolved part")
+        item_type :: element_types[index] ?? panic("checked list element inference lost its element type")
+        parts.push(part)
+        resolved_types.push(item_type)
+    }
+    Val(SemaExpressionListCheckedParts{parts: parts, element_types: resolved_types})
+}
+
+fn sema_expression_member_spread_fields(base: Expr, members: [ExprMember], span: Span) -> [Expr] {
+    fields := [Expr]{}
+    loop member in members {
+        fields.push(Expr.Field(base, member.name, Span{start: span.start, end: member.span.end}))
+    }
+    fields
+}
+
+fn sema_expression_list_member_spreads(elements: [Expr]) -> [Expr] {
+    expanded := [Expr]{}
     loop element in elements {
         if element == {
-            .Spread(value, span) -> {
-                _ := value
-                diagnostics.push(sema_error("E1311", span, "a spread must be expanded before list checking", "the checked list TIR stores each element explicitly", "use a list value without `...`, or expand the list at its source"))
-                return None
+            .MemberSpread(base, members, span) -> {
+                loop field in sema_expression_member_spread_fields(base, members, span) -> expanded.push(field)
             }
-            else -> {}
+            else -> expanded.push(element)
         }
-        checked :: if expected_element != None -> sema_check_expression(element, expected_element, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        value :: checked ?? return None
-        if expected_element == .Val(required) {
-            compatible :: sema_expr_expected_assignable(required, value.ty, environment) ?? return None
-            if !compatible {
-                diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment), sema_expr_expected_type(value.ty, environment), expr_span(element)))
-                return None
-            }
-        }
-        values.push(value)
     }
-    Val(values)
+    expanded
 }
 
 fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    has_spread := false
+    loop element in elements {
+        if element == {
+            .Spread(_, _) -> has_spread = true
+            else -> {}
+        }
+    }
     expected_element := None
     result_ty := None
     if expected == .Val(expected_ty) {
@@ -195,9 +397,15 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: ?Typ
                 result_ty = Val(normalized)
             }
             .FixedList(element, len) -> {
+                if has_spread {
+                    diagnostics.push(sema_error("E1311", span, "list spread can't build a fixed-size `[T#N]` list", "spread expands a growable list — a `[T#N]` has a fixed compile-time length", "use a growable `[T]` binding (`::`/`:=`) instead of `[T#N]`"))
+                    return None
+                }
                 expected_element = Val(element)
-                if measure_literal_value(len) == None || (measure_literal_value(len) ?? 0) != elements.len() {
-                    diagnostics.push(sema_error("E0108", span, "this fixed list has the wrong number of elements", "a fixed list's length is part of its type", "provide exactly {measure_expression(len)} elements"))
+                if measure_literal_value(len) == .Val(expected_len) && expected_len != elements.len() {
+                    element_suffix := if elements.len() == 1 -> "" else -> "s"
+                    expected_suffix := if expected_len == 1 -> "" else -> "s"
+                    diagnostics.push(sema_error("E0963", span, "this list has {elements.len()} element{element_suffix}, but `[T#{measure_expression(len)}]` expects exactly {expected_len}", "a fixed-size list `[T#N]` requires exactly N elements", "provide exactly {expected_len} element{expected_suffix}"))
                     return None
                 }
                 result_ty = Val(normalized)
@@ -205,23 +413,30 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: ?Typ
             else -> {}
         }
     }
-    values :: sema_expression_list_elements(elements, expected_element, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked :: sema_expression_list_elements(elements, expected_element, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if result_ty == None {
-        if values.len() == 0 {
+        if checked.parts.len() == 0 {
             diagnostics.push(sema_error("E0119", span, "an empty list needs an expected element type", "there is no element from which to infer `[]`", "annotate the list as `[T]` or bind it to a typed value"))
             return None
         }
-        first :: values[0].ty
-        loop index in 1..<values.len() {
-            compatible :: sema_expr_expected_assignable(first, values[index].ty, environment) ?? return None
-            if !compatible {
-                diagnostics.push(sema_type_mismatch(sema_expr_expected_type(first, environment), sema_expr_expected_type(values[index].ty, environment), expr_span(elements[index])))
-                return None
-            }
-        }
-        result_ty = Val(Type.List(first))
+        result_ty = Val(Type.List(checked.element_types[0]))
     }
     ty :: result_ty ?? Type.List(Type.Named("Unit"))
+    if has_spread {
+        element_type :: if ty == {
+            .List(element) -> element
+            else -> panic("checked list spread result is not a growable list")
+        }
+        if !sema_expression_list_check_clone(element_type, span, environment, &context, &diagnostics) -> return None
+        return sema_expr_expected(sema_tir_expr(ty, TExprKind.ListSpread(checked.parts), span), expected, environment, &diagnostics)
+    }
+    values := [TExpr]{}
+    loop part in checked.parts {
+        if part == {
+            .Element(value) -> values.push(value)
+            else -> panic("list without spread contains a spread part")
+        }
+    }
     trait_coercion :: sema_expression_list_trait_coercion(ty)
     sema_expr_expected(sema_tir_expr(ty, TExprKind.List(values, trait_coercion), span), expected, environment, &diagnostics)
 }
@@ -391,12 +606,15 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     resolved_kind := ast_kind
     if base_ty == {
         .List(element) -> {
-            if checked_index.ty == Type.Named("Range") {
-                resolved_kind = IndexKind.Range
-                result_ty = Val(Type.List(element))
-            } else {
-                if !sema_expression_integer_index(checked_index, expr_span(index), &diagnostics) -> return None
-                result_ty = Val(element)
+            if {
+                checked_index.ty == Type.Named("Range") -> {
+                    resolved_kind = IndexKind.Range
+                    result_ty = Val(Type.List(element))
+                }
+                else -> {
+                    if !sema_expression_integer_index(checked_index, expr_span(index), &diagnostics) -> return None
+                    result_ty = Val(element)
+                }
             }
         }
         .FixedList(element, len) -> {
@@ -405,14 +623,17 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                 diagnostics.push(sema_error("E0965", expr_span(index), "a fixed-list length is not a checked integer measure", "fixed indexing needs a concrete list length", "use a literal fixed-list length"))
                 return None
             }
-            if checked_index.integer_bounds == .Val(bounds) {
-                if bounds.lo < 0 || bounds.hi >= length {
-                    diagnostics.push(sema_error("E0965", expr_span(index), "the index is outside this fixed-size list", "valid indexes run from 0 through {length - 1}", "use an index inside the fixed-list bounds"))
-                    return None
+            if checked_index.integer_bounds == {
+                .Val(bounds) -> {
+                    if bounds.lo < 0 || bounds.hi >= length {
+                        diagnostics.push(sema_error("E0965", expr_span(index), "the index is outside this fixed-size list", "valid indexes run from 0 through {length - 1}", "use an index inside the fixed-list bounds"))
+                        return None
+                    }
+                    resolved_kind = IndexKind.FixedListProof
                 }
-                resolved_kind = IndexKind.FixedListProof
-            } else {
-                resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
+                else -> {
+                    resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
+                }
             }
             result_ty = Val(element)
         }
@@ -448,27 +669,30 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: ?Expr, span:
     range_value := None
     checked_start := None
     checked_end := None
-    if range == .Val(range_expr) {
-        range_checked :: sema_check_expression(range_expr, Val(Type.Named("Range")), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if range_checked.ty != Type.Named("Range") -> return None
-        range_value = Val(range_checked)
-        if sema_expr_unwrap_tag(checked_base.ty) == {
-            .List(element) -> result_ty = Val(Type.List(element))
-            .FixedList(element, _) -> result_ty = Val(Type.List(element))
-            .String -> result_ty = Val(Type.String)
-            else -> {}
+    if range == {
+        .Val(range_expr) -> {
+            range_checked :: sema_check_expression(range_expr, Val(Type.Named("Range")), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if range_checked.ty != Type.Named("Range") -> return None
+            range_value = Val(range_checked)
+            if sema_expr_unwrap_tag(checked_base.ty) == {
+                .List(element) -> result_ty = Val(Type.List(element))
+                .FixedList(element, _) -> result_ty = Val(Type.List(element))
+                .String -> result_ty = Val(Type.String)
+                else -> {}
+            }
         }
-    } else {
-        start_checked :: sema_check_expression(start, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        end_checked :: sema_check_expression(end, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if !sema_expr_is_integer(start_checked.ty) || !sema_expr_is_integer(end_checked.ty) -> return None
-        checked_start = Val(start_checked)
-        checked_end = Val(end_checked)
-        if sema_expr_unwrap_tag(checked_base.ty) == {
-            .List(element) -> result_ty = Val(Type.List(element))
-            .FixedList(element, _) -> result_ty = Val(Type.List(element))
-            .String -> result_ty = Val(Type.String)
-            else -> {}
+        else -> {
+            start_checked :: sema_check_expression(start, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            end_checked :: sema_check_expression(end, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if !sema_expr_is_integer(start_checked.ty) || !sema_expr_is_integer(end_checked.ty) -> return None
+            checked_start = Val(start_checked)
+            checked_end = Val(end_checked)
+            if sema_expr_unwrap_tag(checked_base.ty) == {
+                .List(element) -> result_ty = Val(Type.List(element))
+                .FixedList(element, _) -> result_ty = Val(Type.List(element))
+                .String -> result_ty = Val(Type.String)
+                else -> {}
+            }
         }
     }
     if result_ty == None {

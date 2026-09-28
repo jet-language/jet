@@ -35,7 +35,7 @@ fn jet_bin() -> PathBuf {
 fn expected_output() -> String {
     fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/features/expected/packages/library_loadable.out"),
+            .join("Examples/features/expected/packages/library_loadable.out"),
     )
     .unwrap()
 }
@@ -43,7 +43,7 @@ fn expected_output() -> String {
 fn expected_cpp_output() -> String {
     fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/features/expected/packages/library_loadable_cpp.out"),
+            .join("Examples/features/expected/packages/library_loadable_cpp.out"),
     )
     .unwrap()
 }
@@ -114,7 +114,7 @@ fn cxx() -> Option<&'static str> {
 #[test]
 fn native_and_component_exports_share_one_typed_surface() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/library_loadable");
+        .join("Examples/features/packages/library_loadable");
     let scratch = Scratch::new("embedding-parity");
     copy_tree(&fixture, &scratch.path);
     let source = scratch.path.join("library.jet");
@@ -245,7 +245,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     let cc = cc().expect("Library end-to-end proof requires a C compiler");
 
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/library_loadable");
+        .join("Examples/features/packages/library_loadable");
     let scratch = Scratch::new("library-loadable");
     copy_tree(&fixture, &scratch.path);
     let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
@@ -541,7 +541,7 @@ fn guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic() {
     let cxx = cxx().expect("guest embedding proof requires a C++ compiler");
 
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/interop/guest_library");
+        .join("Examples/interop/guest_library");
     let scratch = Scratch::new("guest-embedding-contract");
     copy_tree(&fixture, &scratch.path);
     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
@@ -628,7 +628,7 @@ fn component_build_load_and_foreign_call_are_one_surface() {
     }
 
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/library_loadable");
+        .join("Examples/features/packages/library_loadable");
     let scratch = Scratch::new("component-loadable");
     copy_tree(&fixture, &scratch.path);
     let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
@@ -671,7 +671,7 @@ fn component_build_load_and_foreign_call_are_one_surface() {
 #[test]
 fn library_rejects_colliding_c_symbols_before_codegen() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/library_loadable");
+        .join("Examples/features/packages/library_loadable");
     let scratch = Scratch::new("library-symbol-collision");
     copy_tree(&fixture, &scratch.path);
     fs::write(
@@ -933,7 +933,7 @@ fn locked_named_library_build_selects_the_requested_output() {
 fn default_library_rejects_cross_target_before_publication() {
     assert!(have_rustc(), "Library target diagnostic proof requires rustc");
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/library_loadable");
+        .join("Examples/features/packages/library_loadable");
     let scratch = Scratch::new("library-target");
     copy_tree(&fixture, &scratch.path);
     let target = format!("--target={}", env!("JET_BUILD_TARGET"));

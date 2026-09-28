@@ -2,11 +2,11 @@
 //!
 //! Every keyword, sigil, and built-in name a user can type lives in this
 //! file and nowhere else (invariant I7). Each constant maps to a decision
-//! ID in docs/spec/syntax-decisions.md. Changing a provisional choice means:
-//! change it here, update docs/spec/syntax-decisions.md, re-bless the ui snapshots. Done.
+//! ID in Docs/spec/syntax-decisions.md. Changing a provisional choice means:
+//! change it here, update Docs/spec/syntax-decisions.md, re-bless the ui snapshots. Done.
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
-//! owner in docs/spec/syntax-decisions.md.
+//! owner in Docs/spec/syntax-decisions.md.
 /// One machine-readable row for the owner-controlled lexical ledger (I7).
 /// Surface audits and future front ends consume this table instead of
 /// maintaining a second spelling/decision inventory.

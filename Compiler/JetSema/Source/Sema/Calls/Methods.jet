@@ -55,7 +55,7 @@ pub fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, met
     }
     if args[0].expr == .Lambda(lambda) {
         if lambda.params.len() != 0 {
-            diagnostics.push(sema_error("E0104", args[0].span, "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> \"\" else -> \"s\"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
+            diagnostics.push(sema_error("E0104", args[0].span, "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
@@ -401,15 +401,23 @@ pub fn sema_call_resolve_method_with_inference(receiver_type: Type, method: Stri
 }
 
 fn sema_call_host_callback_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Bool {
-    if required == .Fn(required_params, None, _, _, _, _) {
-        if offered == .Fn(offered_params, _, _, _, _, _) {
-            if required_params.len() != offered_params.len() -> return Val(false)
-            loop index in 0..<required_params.len() {
-                compatible :: sema_call_type_assignable(required_params[index], offered_params[index], environment) ?? return None
-                if !compatible -> return Val(false)
+    if required == {
+        .Fn(required_params, required_return, _, _, _, _) -> {
+            if required_return == None {
+                if offered == {
+                    .Fn(offered_params, _, _, _, _, _) -> {
+                        if required_params.len() != offered_params.len() -> return Val(false)
+                        loop index in 0..<required_params.len() {
+                            compatible :: sema_call_type_assignable(required_params[index], offered_params[index], environment) ?? return None
+                            if !compatible -> return Val(false)
+                        }
+                        return Val(true)
+                    }
+                    else -> {}
+                }
             }
-            return Val(true)
         }
+        else -> {}
     }
     sema_call_type_assignable(required, offered, environment)
 }

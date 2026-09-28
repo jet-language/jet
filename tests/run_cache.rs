@@ -179,7 +179,7 @@ fn warm_hit_skips_front_end_and_matches_stdout() {
 fn named_job_warm_hit_preserves_selection_and_arguments() {
     let _guard = lock_run_cache_tests();
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_project = repo.join("examples/features/devloop");
+    let source_project = repo.join("Examples/features/devloop");
     assert!(
         !source_project.join(".jet").exists(),
         "checked-in job example already has generated `.jet` state"
@@ -187,7 +187,7 @@ fn named_job_warm_hit_preserves_selection_and_arguments() {
     let staged = common::ProjectScratch::for_project(&source_project, "run-cache-job");
     let file = staged.path.join("job_runner.jet");
     let expected =
-        std::fs::read(repo.join("examples/features/expected/devloop/job_runner.greet.out"))
+        std::fs::read(repo.join("Examples/features/expected/devloop/job_runner.greet.out"))
             .unwrap();
     let cache = common::test_scratch_root("run_cache")
         .join(format!("jet_run_job_cache_{}", unique()));
@@ -461,7 +461,7 @@ fn example_stems_replay_identically_on_a_second_run() {
     let _ = std::fs::remove_dir_all(&cache);
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let entry = repo.join("examples/features/streams/generators.jet");
+    let entry = repo.join("Examples/features/streams/generators.jet");
     // Precondition, not inheritance. Ask the product where its entry-scoped
     // cache root is and prove the explicit redirect is in force.
     std::env::set_var("JET_RUN_CACHE_DIR", &cache);
@@ -476,13 +476,13 @@ fn example_stems_replay_identically_on_a_second_run() {
     let rows: [(&str, bool, bool); 3] = [
         // A generator: the second run was exit 101, an ICE out of
         // `get_function_decl`, while every cold run stayed correct.
-        ("examples/features/streams/generators.jet", false, false),
+        ("Examples/features/streams/generators.jet", false, false),
         // A `#CLI` typed entry, so the run arrives through a CLI adapter.
-        ("examples/features/cli/typed_entry_args.jet", false, false),
+        ("Examples/features/cli/typed_entry_args.jet", false, false),
         // The #2011 row: an unhandled default `Err` at the edge exits 1 cold and
         // exited 0 warm. A replay that drops the error rail prints the same
         // stderr and succeeds, so only the exit code catches it.
-        ("examples/features/errors/default_err_edge.jet", true, true),
+        ("Examples/features/errors/default_err_edge.jet", true, true),
     ];
 
     for (stem, must_warm_hit, must_exit_nonzero) in rows {

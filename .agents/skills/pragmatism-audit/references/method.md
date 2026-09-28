@@ -2,7 +2,7 @@
 
 ## Evidence obligations
 
-Freeze the domain/workload rows before probing. For each row, name one concrete job, what done means, and the Jet surfaces it touches. Walk the happy path with real examples or a minimal repro under `scripts/agent/jet-env`. Record every token the user writes even though the compiler or stdlib already knows the answer.
+Freeze the domain/workload rows before probing. For each row, name one concrete job, what done means, and the Jet surfaces it touches. Walk the happy path with real examples or a minimal repro under `Tools/agent/jet-env`. Record every token the user writes even though the compiler or stdlib already knows the answer.
 
 Classify each friction with the taxonomy below. Propose the smallest complete fix as default magic → optional reject → optional override. Kill a slice that breaks invariants, duplicates a mechanism, or hides expert control. New syntax, a new external stdlib dependency, an invariant carve-out, or a taste choice becomes a ballot title only unless the owner changes the report-only boundary.
 
@@ -25,7 +25,7 @@ For a broad run, the root's six-workload default is mandatory. A named narrower 
 Re-verify these against the tree. They are pressure points, not settled law:
 
 1. **Auto derives (S55 family).** Ask whether every useful trait derives by default, whether a user can reject derivation for a type or package, and whether a user can override it selectively.
-2. **Dimensional or unit printing** (`examples/features/types/dimensional_quantities.jet`). Algebra and dimension checks exist, but `print(recovered)` may still omit useful units such as `12 meter`, `4 meter/second`, or `766 px`. Ask whether the last mile finishes the scientist's or UI author's job.
+2. **Dimensional or unit printing** (`Examples/features/types/dimensional_quantities.jet`). Algebra and dimension checks exist, but `print(recovered)` may still omit useful units such as `12 meter`, `4 meter/second`, or `766 px`. Ask whether the last mile finishes the scientist's or UI author's job.
 
 ## Required report sections
 

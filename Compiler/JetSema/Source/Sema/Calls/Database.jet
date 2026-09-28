@@ -1,0 +1,181 @@
+struct SemaDatabaseMethodContract {
+    result_type: Type
+    operation: THandleOp
+    argument_types: [Type]
+    effect_name: String
+    deadline_label: Bool
+}
+
+fn sema_database_error_type() -> Type { Type.Named("DBError") }
+
+fn sema_database_result(ok: Type) -> Type { Type.Result(ok, sema_database_error_type()) }
+
+fn sema_database_row_type() -> Type { Type.Map(Type.String, None, Type.Named("DBValue")) }
+
+fn sema_database_contract(receiver: Type, method: String, argument_count: Int) -> ?SemaDatabaseMethodContract {
+    if receiver == Type.Named("DBConnection") {
+        if method == "with_policy" {
+            return Val(SemaDatabaseMethodContract{result_type: Type.Named("DBScope"), operation: THandleOp.DBWithPolicy, argument_types: [Type]{Type.Named("RowPolicy"), Type.String}, effect_name: "DB", deadline_label: false})
+        }
+        if method == "begin" || method == "commit" || method == "rollback" || method == "close" {
+            operation := if {
+                method == "begin" -> THandleOp.DBBegin
+                method == "commit" -> THandleOp.DBCommit
+                method == "rollback" -> THandleOp.DBRollback
+                else -> THandleOp.DBClose
+            }
+            return Val(SemaDatabaseMethodContract{result_type: Type.Bool, operation: operation, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+    }
+    if receiver == Type.Named("DBScope") {
+        if method == "query" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.List(sema_database_row_type())), operation: THandleOp.DBQuery(None), argument_types: [Type]{Type.Named("SQL")}, effect_name: "DB.Read", deadline_label: false})
+        }
+        if method == "query_one" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Option(sema_database_row_type())), operation: THandleOp.DBQueryOne(None), argument_types: [Type]{Type.Named("SQL")}, effect_name: "DB.Read", deadline_label: false})
+        }
+        if method == "execute" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Int), operation: THandleOp.DBExecute(None), argument_types: [Type]{Type.Named("SQL")}, effect_name: "DB.Write", deadline_label: false})
+        }
+        if method == "live" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named("LiveQuery")), operation: THandleOp.DBLive, argument_types: [Type]{Type.Named("SQL")}, effect_name: "DB.Read", deadline_label: false})
+        }
+        if method == "begin" || method == "commit" || method == "rollback" || method == "close" {
+            operation := if {
+                method == "begin" -> THandleOp.DBBegin
+                method == "commit" -> THandleOp.DBCommit
+                method == "rollback" -> THandleOp.DBRollback
+                else -> THandleOp.DBClose
+            }
+            return Val(SemaDatabaseMethodContract{result_type: Type.Bool, operation: operation, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+    }
+    if receiver == Type.Named("DbPool") {
+        if method == "acquire" {
+            if argument_count == 1 {
+                return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named("DbLease")), operation: THandleOp.DBPoolAcquireDeadline, argument_types: [Type]{Type.Named("Duration")}, effect_name: "DB", deadline_label: true})
+            }
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named("DbLease")), operation: THandleOp.DBPoolAcquire, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+        if method == "ready" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Bool), operation: THandleOp.DBPoolReady, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+        if method == "drain" {
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named("DbPoolReceipt")), operation: THandleOp.DBPoolDrain, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+        if method == "receipt" {
+            return Val(SemaDatabaseMethodContract{result_type: Type.Named("DbPoolReceipt"), operation: THandleOp.DBPoolReceipt, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+        }
+    }
+    if receiver == Type.Named("DbLease") && method == "close" {
+        return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named("Unit")), operation: THandleOp.DBLeaseClose, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+    }
+    None
+}
+
+fn sema_database_record_effect(effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, result_type: Type, diagnostics: &[Diagnostic]) -> Bool {
+    row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
+    sema_effect_record_intrinsic_fact(environment, scopes, context, api, span, SemaCallFacts{
+        return_type: result_type,
+        failure_carrier: sema_call_failure_carrier(Val(result_type)),
+        effect_bound: Val(row),
+        type_args: [Type]{},
+        default_refs: [FunctionDefaultRef]{},
+    }, diagnostics)
+}
+
+fn sema_database_check_argument(method: String, index: Int, argument: CallArg, expected: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if argument.label != None {
+        diagnostics.push(sema_error("E0104", argument.span, "`{method}` arguments are positional", "database handle operations use a fixed Core argument order", "remove the argument label"))
+    }
+    if argument.convention == AccessConvention.Move -> diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "database handle arguments are read-only", "remove the move marker `^` here"))
+    sema_check_expression(argument.expr, Val(expected), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_database_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_database_check_deadline_label(argument: CallArg, diagnostics: &[Diagnostic]) {
+    is_deadline := if argument.label == {
+        .Val(label) -> label.name == "deadline"
+        else -> false
+    }
+    if is_deadline {
+        return
+    }
+    diagnostics.push(sema_error("E0104", argument.span, "`DbPool.acquire` expects the deadline argument to be labeled `deadline`", "an optional pool deadline is explicit at the call site", "write `pool.acquire(deadline: duration)`"))
+}
+
+pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    receiver_type := sema_call_resolved_type(receiver_value.ty, environment)
+    contract :: sema_database_contract(receiver_type, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if type_args.len() != 0 {
+        sema_data_check_explicit_type_args("DB.{method}", type_args, 0, span, &diagnostics)
+        sema_database_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    api := "{type_name(receiver_type)}.{method}"
+    if args.len() != contract.argument_types.len() {
+        diagnostics.push(sema_error("E0104", span, "`{method}` expects {contract.argument_types.len()} argument{if contract.argument_types.len() == 1 -> "" else -> "s"}, got {args.len()}", "database handle operations have fixed arity except for the optional labeled pool deadline", "pass the documented argument shape"))
+        sema_database_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        sema_database_record_effect(contract.effect_name, api, span, environment, scopes, context, contract.result_type, diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if contract.deadline_label && args.len() == 1 -> sema_database_check_deadline_label(args[0], &diagnostics)
+    typed := [TExpr]{}
+    loop (index, argument) in args {
+        value :: sema_database_check_argument(method, index, argument, contract.argument_types[index], environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        typed.push(value)
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_database_record_effect(contract.effect_name, api, span, environment, scopes, context, contract.result_type, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(contract.result_type, TExprKind.HandleMethod(receiver_value, contract.operation, typed), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+
+fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if receiver == {
+        .Ident(name, _) -> {
+            if name != "SQL" -> return false
+            index :: sema_scope_resolve_index(scopes, name)
+            if index == .Val(binding_index) {
+                if scopes.bindings[binding_index].symbol.kind != SymbolKind.Type {
+                    return false
+                }
+            }
+            graph :: environment.registration_graph ?? return true
+            resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return false
+            loop module_row in graph.modules {
+                if module_row.module_identity == resolved.target_module_identity {
+                    return module_row.module_name == "core.db"
+                }
+            }
+            return false
+        }
+        .Field(base, member, _) -> {
+            if member != "SQL" -> return false
+            if base == {
+                .Ident(alias, _) -> { return sema_call_core_import_module(environment, alias) == (Val("core.db")) }
+                else -> { return false }
+            }
+        }
+        else -> false
+    }
+}
+
+pub fn sema_call_try_sql_raw(receiver: Expr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "raw" || !sema_database_sql_receiver_is_core(receiver, environment, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        diagnostics.push(sema_error("E0103", span, "`SQL.raw()` takes exactly one argument", "`.raw()` wraps one already-audited String as the escape hatch", "write `SQL.raw(text)`"))
+        sema_database_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    argument := args[0]
+    if argument.label != None -> diagnostics.push(sema_error("E0104", argument.span, "`SQL.raw` takes a positional String", "the raw SQL escape has one fixed input", "remove the argument label"))
+    if argument.convention == AccessConvention.Move -> diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "SQL.raw reads its String input", "remove the move marker `^` here"))
+    text :: sema_check_expression(argument.expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(Type.Named("SQL"), TExprKind.HostCall(THostCall.TypedText(TTypedTextForm.SQLRaw, text)), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}

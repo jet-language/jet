@@ -1,0 +1,542 @@
+{
+  "version": 1,
+  "contract": {
+    "loc": "nonblank_noncomment_lines",
+    "token_metric": "source_tokens",
+    "token_definition": "nonempty_runs_split_by_unicode_whitespace",
+    "eligible_pair": "jet_and_python_sources"
+  },
+  "corpus": {
+    "entry_count": 24,
+    "python_pair_count": 22,
+    "matrix_cell_count": 27,
+    "allowed_uncovered_cells": [],
+    "entry_names": [
+      "binparse",
+      "bulkrename",
+      "concurrency-service",
+      "csvtransform",
+      "datasummary",
+      "embedded-data",
+      "embedded-sensor-ring",
+      "fft-4096",
+      "http-client",
+      "http-service",
+      "logreport",
+      "nbody",
+      "parallel-grep",
+      "procpipe",
+      "regex-find-all-4mb",
+      "regex-logscan",
+      "sieve",
+      "taskfile-cli",
+      "tensor-map-4k",
+      "text-script",
+      "tzreport",
+      "web-app",
+      "web-widget",
+      "wordfreq"
+    ]
+  },
+  "report_contract": {
+    "id": "gauntlet-report-v1",
+    "scope": "full_matrix",
+    "required_jet_tiers": ["aot", "run"],
+    "optional_jet_tiers": ["dev"],
+    "tier_policy_by_mode": {
+      "batch": ["aot", "run", "dev"],
+      "batch-steps": ["aot", "run", "dev"],
+      "service": ["aot", "run", "dev"],
+      "web": ["aot", "run", "dev"],
+      "web-app": ["aot"]
+    },
+    "primary_metric_by_mode": {
+      "batch": "runtime_wall_seconds",
+      "batch-steps": "runtime_wall_seconds",
+      "service": "service_latency_ms_p50",
+      "web": "runtime_first_stdout_seconds",
+      "web-app": "runtime_first_stdout_seconds"
+    },
+    "ratio_verdicts": {
+      "rust": {"win": "<1", "parity": "<=1.05", "loss": ">1.05"},
+      "non_rust": {"win": "<1", "parity": null, "loss": ">=1"}
+    },
+    "missing_metric_verdict": "unmeasured",
+    "output_verification": "byte_exact_utf8_or_declared_probe_sequence",
+    "loss_owner_required_for": "any_comparable_metric_loss",
+    "axis_schemas": {
+      "live_reload": "gauntlet-axis-live-reload-v1",
+      "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1"
+    },
+    "axis_publication": "required_axes_complete_and_unblocked",
+    "metric_applicability": {
+      "default": "required",
+      "not_applicable": "explicit_structural_reason",
+      "missing": "unmeasured_and_publication_blocked"
+    },
+    "aot_only_metrics": ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"],
+    "peer_measurement": {
+      "ratio_tiers": ["aot", "run"],
+      "trace_only_tiers": [],
+      "sample_binding": "immutable_peer_row_reused_per_declared_jet_tier"
+    }
+  },
+  "integrated_gate": {
+    "schema": "jet.gauntlet.integrated-gate.v1",
+    "version": 1,
+    "inputs": {
+      "matrix": "Tools/gauntlet/matrix.json",
+      "status": "Tools/gauntlet/status.json",
+      "conformance_inventory": ".jet/core-conformance-inventory.json",
+      "conformance_summary": ".jet/core-conformance-check.txt",
+      "tier_census": "Docs/audits/tier-census-2026-09-03.json",
+      "compiler_speed": "Tools/perf/baseline.json",
+      "entries_dir": "Tools/gauntlet/entries"
+    },
+    "freshness": {
+      "max_age_seconds": 86400,
+      "future_skew_seconds": 300
+    },
+    "tier_census": {
+      "backends": ["aot_rust", "interpreter", "cranelift", "web"]
+    },
+    "compiler_speed": {
+      "schema": "jet.compiler-speed",
+      "version": 4,
+      "required_fields": [
+        "generator_version",
+        "corpus_sha256",
+        "manifest_sha256",
+        "stage",
+        "machine",
+        "target",
+        "rustc",
+        "cargo",
+        "llvm",
+        "rustc_vv_sha256",
+        "rustc_sha256",
+        "compiler_sha256",
+        "jet_commit",
+        "jet_env_sha256",
+        "libc_sha256",
+        "allocator_source_sha256",
+        "allocator_environment_sha256",
+        "hardware_sha256",
+        "topology_sha256",
+        "toolchain_sha256",
+        "kernel",
+        "governor",
+        "cpu_model",
+        "cpu_cores_per_socket",
+        "memory_bytes",
+        "profiles",
+        "backends",
+        "warmups",
+        "samples",
+        "peer_contract_sha256",
+        "peer_run_id",
+        "peer_keys",
+        "peer_metrics",
+        "peer_count",
+        "peer_rows"
+      ]
+    },
+    "required_metrics_by_mode": {
+      "batch": [
+        "runtime_wall_seconds",
+        "runtime_peak_rss_kb",
+        "runtime_first_stdout_seconds",
+        "cold_build_seconds",
+        "warm_build_seconds",
+        "binary_bytes",
+        "loc",
+        "source_bytes",
+        "tokens",
+        "source_tokens"
+      ],
+      "batch-steps": [
+        "runtime_wall_seconds",
+        "runtime_peak_rss_kb",
+        "runtime_first_stdout_seconds",
+        "cold_build_seconds",
+        "warm_build_seconds",
+        "binary_bytes",
+        "loc",
+        "source_bytes",
+        "tokens",
+        "source_tokens"
+      ],
+      "service": [
+        "service_latency_ms_p50",
+        "service_latency_ms_p99",
+        "service_startup_seconds",
+        "runtime_peak_rss_kb",
+        "cold_build_seconds",
+        "warm_build_seconds",
+        "binary_bytes",
+        "loc",
+        "source_bytes",
+        "tokens",
+        "source_tokens"
+      ],
+      "web": [
+        "runtime_first_stdout_seconds",
+        "runtime_wall_seconds",
+        "runtime_peak_rss_kb",
+        "cold_build_seconds",
+        "warm_build_seconds",
+        "binary_bytes",
+        "artifact_bytes",
+        "wasm_bytes",
+        "loc",
+        "source_bytes",
+        "tokens",
+        "source_tokens"
+      ],
+      "web-app": [
+        "runtime_first_stdout_seconds",
+        "runtime_wall_seconds",
+        "runtime_peak_rss_kb",
+        "cold_build_seconds",
+        "warm_build_seconds",
+        "binary_bytes",
+        "artifact_bytes",
+        "wasm_bytes",
+        "loc",
+        "source_bytes",
+        "tokens",
+        "source_tokens"
+      ]
+    }
+  },
+  "performance_surface_pairs": {
+    "schema": "jet.gauntlet.performance-surface-pairs.v1",
+    "version": 1,
+    "decision": "D-PERF-SURFACE-WIN1=A",
+    "evidence": {
+      "file": "Tools/gauntlet/performance-surface-evidence.json",
+      "path": "pairs",
+      "tier": "interpreter",
+      "metric": "wall_time_ms",
+      "target": "jet run --interpret",
+      "input": "100000-element integer reduction: total starts at 0 and consumes range 0..<100000",
+      "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
+      "warmups": 10,
+      "trials": 100,
+      "output_oracle": "performance-surface:compound_assign_vs_binary_assign:4999950000"
+    },
+    "pair_measurement": {
+      "inputs": {
+        "iterations": 100000,
+        "range": "0..<100000",
+        "expected_sum": 4999950000
+      },
+      "tier": "interpreter",
+      "target": "jet run --interpret",
+      "artifact_binding": "one_artifact_sha256",
+      "environment_binding": "one_host_toolchain_affinity_identity",
+      "sampling": "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+      "output_validation": "exact_utf8_stdout_bytes"
+    },
+    "comparator": {
+      "direction": "lower_is_better",
+      "surface_over_plain": "<1",
+      "equality": "loss",
+      "missing": "failure",
+      "confidence": {
+        "method": "paired_index_bootstrap",
+        "confidence": 0.95,
+        "resamples": 10000,
+        "seed": 2977,
+        "quantile": "nearest_rank_one_based",
+        "lower_rank": 250,
+        "upper_rank": 9750
+      }
+    },
+    "pairs": [
+      {
+        "id": "compound_assign_vs_binary_assign",
+        "surface": "compound assignment",
+        "plain": "binary expression followed by assignment",
+        "workload": "100000-element integer reduction with identical final stdout",
+        "surface_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:surface",
+        "plain_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:plain",
+        "evidence_key": "compound_assign_vs_binary_assign",
+        "surface_field": "surface_wall_time_ms",
+        "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "input_range": "0..<100000",
+        "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
+        "measured": {
+          "surface_wall_time_ms": 2251.736,
+          "plain_wall_time_ms": 2232.34,
+          "ratio": 1.0086886406192603
+        },
+        "verdict": "inconclusive",
+        "verdict_reason": "Measurements across four unrelated clean binaries straddle 1.00; this workload is noise-dominated and does not prove a surface benefit.",
+        "bug_card": "#2977"
+      }
+    ]
+  },
+  "axes": {
+    "live_reload": {
+      "status": "required",
+      "schema": "gauntlet-axis-live-reload-v1",
+      "metric": "reload_latency_ms",
+      "workload": "web-app",
+      "signal": {
+        "kind": "monotonic_http_counter",
+        "definition": "GET readiness path returns a numeric value greater than the value observed before the edit"
+      },
+      "budget": {
+        "sample_count": 3,
+        "startup_timeout_ms": 30000,
+        "reload_timeout_ms": 30000,
+        "poll_interval_ms": 20
+      },
+      "edit": {"from": "reload-before", "to": "reload-after"},
+      "phases": {
+        "cold": "first measured edit after a fresh process reaches readiness",
+        "warm": "measured edit after two unmeasured edits in the same fresh process"
+      },
+      "runners": [
+        {
+          "id": "jet-dev",
+          "tools": ["jet"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/live-reload/jet/run.jet", "target": "run.jet"},
+            {"source": "Tools/gauntlet/axes/live-reload/jet/package.jet", "target": "package.jet"},
+            {"source": "Tools/gauntlet/axes/live-reload/jet/index.html", "target": "index.html"}
+          ],
+          "edit_file": "run.jet",
+          "command": ["jet", "dev", "--watch=on", "--target=web", "--port={port}", "run.jet"],
+          "readiness": {"path": "/__jet_dev_version", "status": 200},
+          "output": {"path": "/app.js", "status": 200}
+        },
+        {
+          "id": "vite",
+          "tools": ["vite", "node"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/live-reload/js/index.html", "target": "index.html"},
+            {"source": "Tools/gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "Tools/gauntlet/axes/live-reload/js/vite.config.mjs", "target": "vite.config.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["vite", "--host", "127.0.0.1", "--port", "{port}", "--strictPort"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "bun",
+          "tools": ["bun"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "Tools/gauntlet/axes/live-reload/js/server.mjs", "target": "server.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["bun", "--watch", "server.mjs", "--port", "{port}"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "nodemon",
+          "tools": ["nodemon", "node"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/live-reload/js/client.mjs", "target": "client.mjs"},
+            {"source": "Tools/gauntlet/axes/live-reload/js/server.mjs", "target": "server.mjs"}
+          ],
+          "edit_file": "client.mjs",
+          "command": ["nodemon", "--quiet", "--watch", "client.mjs", "--exec", "node server.mjs --port {port}"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        },
+        {
+          "id": "entr+cc",
+          "tools": ["entr", "gcc"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/live-reload/c/main.c", "target": "main.c"}
+          ],
+          "edit_file": "main.c",
+          "command": ["sh", "-c", "printf '%s\\n' main.c | entr -nr sh -c 'gcc -O2 main.c -o main-c && exec ./main-c {port}'"],
+          "readiness": {"path": "/__axis_ready", "status": 200},
+          "output": {"path": "/__axis_output", "status": 200}
+        }
+      ],
+      "fairness": ["same source edit", "same observable readiness signal", "fresh process per sample", "median cold and warm reload samples"]
+    },
+    "memory_safety_fuzz": {
+      "status": "required",
+      "schema": "gauntlet-axis-memory-safety-fuzz-v1",
+      "metric": "memory_safety_findings",
+      "corpus": {
+        "path": "fuzz-input.bin",
+        "generator": "xorshift32-v1",
+        "seed": 2272,
+        "case_count": 128,
+        "bytes_per_case": 64
+      },
+      "budget": {
+        "wall_timeout_ms": 30000,
+        "cpu_seconds": 10,
+        "memory_mb": 512
+      },
+      "oracle": {
+        "algorithm": "memory-safety-case-summary-v1",
+        "output": "cases {case_count} valid {valid} boundary {boundary} oob {oob} use_after_free {use_after_free} wrong_output {wrong_output} bytes {byte_count} checksum {u32_sum} semantic {semantic}\n"
+      },
+      "runners": [
+        {
+          "id": "jet-default",
+          "language": "jet",
+          "tools": ["jet"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/memory-safety-fuzz/jet/run.jet", "target": "run.jet"},
+            {"source": "Tools/gauntlet/axes/memory-safety-fuzz/jet/package.jet", "target": "package.jet"}
+          ],
+          "run": ["jet", "run", "run.jet"],
+          "evidence": {"kind": "jet-runtime-diagnostic", "patterns": ["panic:", "runtime error:"]}
+        },
+        {
+          "id": "c",
+          "language": "c",
+          "tools": ["gcc"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/memory-safety-fuzz/c/main.c", "target": "main.c"}
+          ],
+          "compile": ["gcc", "-O1", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "main.c", "-o", "main-c"],
+          "run": ["./main-c"],
+          "evidence": {"kind": "address-and-undefined-sanitizer", "patterns": ["ERROR: AddressSanitizer:", "UndefinedBehaviorSanitizer", "runtime error:"]}
+        },
+        {
+          "id": "zig",
+          "language": "zig",
+          "tools": ["zig"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/memory-safety-fuzz/zig/main.zig", "target": "main.zig"}
+          ],
+          "compile": ["zig", "build-exe", "-O", "Debug", "main.zig", "-femit-bin=main-zig"],
+          "run": ["./main-zig"],
+          "evidence": {"kind": "zig-safety-runtime", "patterns": ["panic:", "integer overflow", "index out of bounds", "unreachable"]}
+        },
+        {
+          "id": "rust",
+          "language": "rust",
+          "tools": ["rustc"],
+          "files": [
+            {"source": "Tools/gauntlet/axes/memory-safety-fuzz/rust/main.rs", "target": "main.rs"}
+          ],
+          "compile": ["rustc", "-C", "debuginfo=1", "-C", "overflow-checks=yes", "main.rs", "-o", "main-rust"],
+          "run": ["./main-rust"],
+          "evidence": {"kind": "rust-checked-runtime", "patterns": ["panicked at", "index out of bounds", "attempt to"]}
+        }
+      ],
+      "fairness": ["same generated input file", "same timeout and resource budget", "sanitizer or equivalent finding evidence", "deduplicate each finding before close"]
+    }
+  },
+  "loss_owners": {
+    "binparse": {
+      "runtime": 2253,
+      "build": 2253,
+      "binary": 2253,
+      "rss": 2253,
+      "source": 2265
+    },
+    "bulkrename": {"source": 2265},
+    "concurrency-service": {"source": 2265},
+    "csvtransform": {"source": 2265},
+    "datasummary": {"source": 2265},
+    "embedded-data": {"source": 2265},
+    "embedded-sensor-ring": {"source": 2265},
+    "fft-4096": {"source": 2265},
+    "http-client": {"source": 2265},
+    "http-service": {
+      "runtime": 2255,
+      "latency": 2255,
+      "rss": 2255,
+      "build": 2255,
+      "binary": 2255,
+      "source": 2265
+    },
+    "logreport": {"source": 2265},
+    "nbody": {
+      "runtime": 2261,
+      "build": 2261,
+      "binary": 2261,
+      "rss": 2261,
+      "source": 2265
+    },
+    "parallel-grep": {
+      "runtime": 2057,
+      "build": 2057,
+      "binary": 2057,
+      "rss": 2057,
+      "source": 2265
+    },
+    "procpipe": {"source": 2265},
+    "regex-find-all-4mb": {
+      "runtime": 2256,
+      "rss": 2256,
+      "build": 2256,
+      "binary": 2256,
+      "source": 2265
+    },
+    "regex-logscan": {
+      "runtime": 2256,
+      "build": 2256,
+      "binary": 2256,
+      "rss": 2256,
+      "source": 2265
+    },
+    "sieve": {
+      "runtime": 2254,
+      "build": 2254,
+      "binary": 2254,
+      "rss": 2254,
+      "source": 2265
+    },
+    "taskfile-cli": {
+      "runtime": 2270,
+      "build": 2530,
+      "source": 2265
+    },
+    "tensor-map-4k": {"runtime": 2778, "source": 2265},
+    "text-script": {"source": 2265},
+    "tzreport": {"source": 2265},
+    "web-app": {"source": 2265},
+    "web-widget": {"source": 2265},
+    "wordfreq": {
+      "runtime": 2254,
+      "build": 2254,
+      "binary": 2254,
+      "rss": 2254,
+      "source": 2265
+    }
+  },
+  "entries": [
+    { "name": "binparse", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "bulkrename", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "concurrency-service", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "csvtransform", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "datasummary", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "embedded-data", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "embedded-sensor-ring", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "fft-4096", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "http-client", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "http-service", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "logreport", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "nbody", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "parallel-grep", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "procpipe", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "regex-find-all-4mb", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "regex-logscan", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "sieve", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "taskfile-cli", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "tensor-map-4k", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "text-script", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "tzreport", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "web-app", "jet": "jet/run.jet", "python": null },
+    { "name": "web-widget", "jet": "jet/run.jet", "python": null },
+    { "name": "wordfreq", "jet": "jet/run.jet", "python": "python/main.py" }
+  ]
+}

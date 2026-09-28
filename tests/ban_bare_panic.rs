@@ -19,9 +19,9 @@
 //! panic site AND a seeded extra panic on an already-allowlisted file trip
 //! this test, per card #453's exit criteria.
 //!
-//! CI and `scripts/agent/verify-full.sh` pick this root integration target up
+//! CI and `Tools/agent/verify-full.sh` pick this root integration target up
 //! through the complete Cargo test-target inventory. Run:
-//! `scripts/agent/jet-env cargo test --test ban_bare_panic`
+//! `Tools/agent/jet-env cargo test --test ban_bare_panic`
 
 mod common;
 
@@ -352,7 +352,7 @@ fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
         let reason = fields.next().unwrap_or_default().trim().to_owned();
 
         assert!(
-            path.starts_with("examples/features/"),
+            path.starts_with("Examples/features/"),
             "panic budget path must be a feature-corpus source: {path}"
         );
         assert!(baseline > 0, "panic budget count must be positive: {path}");
@@ -400,7 +400,7 @@ fn collect_feature_example_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// The panic ratchet scans every non-manifest `.jet` source under the feature
 /// corpus. Expected output and package manifests are data, not example source.
 fn collect_feature_example_sources(root: &Path) -> Vec<PathBuf> {
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let mut files = Vec::new();
     collect_feature_example_files(&ex_dir, &mut files);
     files.sort();

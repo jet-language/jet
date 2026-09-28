@@ -1,0 +1,173 @@
+pub enum SemaSerdeDirection {
+    Encode
+    Decode
+}
+
+fn sema_serde_codec_name(direction: SemaSerdeDirection) -> String {
+    if direction == SemaSerdeDirection.Encode -> "Encode" else -> "Decode"
+}
+
+fn sema_serde_named_leaf(name: String) -> String {
+    path := name.split("::")
+    leaf :: if path.len() > 0 -> path[path.len() - 1] else -> name
+    parts := leaf.split(".")
+    if parts.len() > 0 -> parts[parts.len() - 1] else -> leaf
+}
+
+fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -> ?TTypeDef {
+    if environment.registration_graph == .Val(graph) {
+        resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
+        loop definition in environment.checked_types {
+            if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name -> return Val(definition)
+        }
+        return None
+    }
+    leaf := sema_serde_named_leaf(name)
+    loop definition in environment.checked_types {
+        if definition.key == name || definition.name == leaf && (name == leaf || name == "{definition.module_identity}::{leaf}") -> return Val(definition)
+    }
+    None
+}
+
+fn sema_serde_has_name(values: [String], name: String) -> Bool {
+    loop value in values {
+        if value == name -> return true
+    }
+    false
+}
+
+fn sema_serde_implementation(environment: SemaScopeEnvironment, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool {
+    if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
+    graph :: environment.registration_graph ?? return false
+    wanted := if direction == SemaSerdeDirection.Encode -> TSerdeCodec.Encode else -> TSerdeCodec.Decode
+    loop module_row in graph.modules {
+        loop implementation in module_row.impls {
+            if implementation.serde != (Val(wanted)) -> next
+            target_module := implementation.target_module_identity ?? implementation.source_module_identity
+            if target_module == definition.module_identity && implementation.target_type_name == definition.name -> return true
+        }
+    }
+    false
+}
+
+fn sema_serde_generic_bound(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool {
+    loop parameter in environment.generic_params {
+        if parameter.name != name -> next
+        codec := sema_serde_codec_name(direction)
+        if parameter.bounds.len() > 0 {
+            loop bound in parameter.bounds {
+                if bound.key.ends_with(":{codec}") -> return true
+            }
+        }
+    }
+    false
+}
+
+fn sema_serde_mentions_parameter(ty: Type, name: String) -> Bool {
+    if ty == {
+        .Named(candidate) -> candidate == name
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_serde_mentions_parameter(inner, name)
+        .Map(key, _, value) | .Result(key, value) -> sema_serde_mentions_parameter(key, name) || sema_serde_mentions_parameter(value, name)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_serde_mentions_parameter(field.ty, name) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_serde_mentions_parameter(member, name) -> return true
+            }
+            false
+        }
+        .Apply(_, args) -> {
+            loop arg in args {
+                if sema_serde_mentions_parameter(arg, name) -> return true
+            }
+            false
+        }
+        .Quantity(base, _) -> sema_serde_mentions_parameter(base, name)
+        else -> false
+    }
+}
+
+fn sema_serde_field_reaches_wire(field: TField, param: String) -> Bool {
+    !field.skip && sema_serde_mentions_parameter(field.ty, param)
+}
+
+fn sema_serde_definition_reaches_parameter(definition: TTypeDef, param: String) -> Bool {
+    if definition.kind == {
+        .Struct(fields, _) -> {
+            loop field in fields {
+                if sema_serde_field_reaches_wire(field, param) -> return true
+            }
+        }
+        .Enum(variants, _) -> {
+            loop variant in variants {
+                if variant.payload == {
+                    .Single(ty) -> {
+                        if sema_serde_mentions_parameter(ty, param) -> return true
+                    }
+                    .Named(fields) -> {
+                        loop field in fields {
+                            if sema_serde_field_reaches_wire(field, param) -> return true
+                        }
+                    }
+                    .Unit -> {}
+                }
+            }
+        }
+        .Distinct(base, _) | .Alias(base) -> return sema_serde_mentions_parameter(base, param)
+        else -> {}
+    }
+    false
+}
+
+fn sema_serde_apply_head(environment: SemaScopeEnvironment, name: String, args: [Type], direction: SemaSerdeDirection) -> Bool {
+    definition :: sema_serde_type_definition(environment, name) ?? return false
+    if !sema_serde_implementation(environment, definition, direction) -> return false
+    if definition.generic_params.len() == 0 -> return args.len() == 0
+    if args.len() != definition.generic_params.len() -> return false
+    loop (index, parameter) in definition.generic_params {
+        if sema_serde_definition_reaches_parameter(definition, parameter.name) && !sema_serde_type_is_admissible(environment, args[index], direction) -> return false
+    }
+    true
+}
+
+fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool {
+    if name != "DataTree" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
+    if direction == SemaSerdeDirection.Decode && name != "DataTree" -> return false
+    definition :: sema_serde_type_definition(environment, name) ?? return true
+    graph :: environment.registration_graph ?? return true
+    loop module_row in graph.modules {
+        if module_row.module_identity == definition.module_identity -> return module_row.module_name == "core.data" || module_row.module_name == "core.encoding"
+    }
+    false
+}
+
+pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool {
+    resolved := ty
+    if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    return if resolved == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_type_is_admissible(environment, inner, direction)
+        .Map(key, _, value) -> key == Type.String && sema_serde_type_is_admissible(environment, value, direction)
+        .Union(members) -> {
+            loop member in members {
+                if !sema_serde_type_is_admissible(environment, member, direction) -> return false
+            }
+            true
+        }
+        .Tagged(marker, inner) -> if marker == .Internal(_) -> direction == SemaSerdeDirection.Decode && inner == Type.Named("Secret") else -> false
+        .Named(name) -> {
+            if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
+            if sema_serde_core_data_name(environment, name, direction) -> return true
+            if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
+            if sema_serde_generic_bound(environment, name, direction) -> return true
+            definition :: sema_serde_type_definition(environment, name) ?? return false
+            sema_serde_implementation(environment, definition, direction)
+        }
+        .Apply(name, args) -> sema_serde_apply_head(environment, name, args, direction)
+        else -> false
+    }
+}

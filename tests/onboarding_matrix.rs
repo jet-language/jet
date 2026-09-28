@@ -38,7 +38,7 @@ fn stderr(output: &Output) -> String {
 #[test]
 fn terminal_editor_state_matrix() {
     // FEATURE_CLAIM: claim.tooling-cli / cli-terminal-matrix
-    let guide = read("docs/spec/guides/first-hour.md");
+    let guide = read("Docs/spec/guides/first-hour.md");
     for state in [
         "## Terminal and editor state matrix",
         "| Install ready |",
@@ -58,19 +58,19 @@ fn terminal_editor_state_matrix() {
     }
     assert!(guide.contains("jet ?") && guide.contains("jet ? run"));
     assert!(guide.contains("jet check run.jet") && guide.contains("jet test run.jet"));
-    let example = read("examples/features/basics/first_hour.jet");
+    let example = read("Examples/features/basics/first_hour.jet");
     assert!(example.contains("First-hour tour"));
     assert!(root()
-        .join("examples/features/expected/basics/first_hour.out")
+        .join("Examples/features/expected/basics/first_hour.out")
         .is_file());
-    assert!(read("tests/golden.rs").contains("examples/features"));
+    assert!(read("tests/golden.rs").contains("Examples/features"));
 
-    let vscode = read("editors/vscode/extension.js");
+    let vscode = read("Tools/editors/vscode/extension.js");
     assert!(
         vscode.contains("[\"run\", file]") && vscode.contains("[\"test\", file]"),
         "VS Code code lenses must invoke the production jet binary"
     );
-    for docs in ["editors/vscode/README.md", "editors/zed/README.md"] {
+    for docs in ["Tools/editors/vscode/README.md", "Tools/editors/zed/README.md"] {
         let editor_docs = read(docs);
         assert!(
             editor_docs.contains("run/test code lenses")

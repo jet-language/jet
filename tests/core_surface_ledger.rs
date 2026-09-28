@@ -23,7 +23,7 @@ fn root() -> PathBuf {
 
 fn run(flag: &str) -> (bool, String, String) {
     let output = Command::new("node")
-        .arg("scripts/agent/check-core-surface-ledger.mjs")
+        .arg("Tools/agent/check-core-surface-ledger.mjs")
         .arg(flag)
         .current_dir(root())
         .output()
@@ -62,7 +62,7 @@ fn assert_layering_contract_is_taught() {
         "core.mem must state both gates at its module gate"
     );
 
-    let laws = source("docs/spec/stdlib-api-laws.md");
+    let laws = source("Docs/spec/stdlib-api-laws.md");
     assert!(
         laws.contains("D-ONCE-LAYER1=B")
             && laws.contains("core.crypto.expert")
@@ -70,7 +70,7 @@ fn assert_layering_contract_is_taught() {
         "the ratified layering split must be in the API laws"
     );
 
-    let crypto_example = source("examples/features/crypto/random_api_split.jet");
+    let crypto_example = source("Examples/features/crypto/random_api_split.jet");
     assert!(
         crypto_example.contains("D-ONCE-LAYER1=B")
             && crypto_example.contains("use core.crypto as crypto")
@@ -79,7 +79,7 @@ fn assert_layering_contract_is_taught() {
         "the crypto example must teach both ratified rungs"
     );
 
-    let http_example = source("examples/features/net/http_client.jet");
+    let http_example = source("Examples/features/net/http_client.jet");
     assert!(
         http_example.contains("D-ONCE-LAYER1=B")
             && http_example.contains("use core.http as http")
@@ -171,7 +171,7 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
 
 #[test]
 fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces() {
-    let syntax = source("docs/spec/reference/syntax-surface.jet");
+    let syntax = source("Docs/spec/reference/syntax-surface.jet");
     for marker in [
         "values: ...String",
         "[...tags",

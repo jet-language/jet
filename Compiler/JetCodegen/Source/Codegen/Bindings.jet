@@ -1,0 +1,56 @@
+// Lower checked destructuring bindings without re-evaluating the initializer.
+
+fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
+    subject := if {
+        move_fields -> {
+            source_place := jet_codegen_lower_expression_place(&builder, init, MirAccess.Move)
+            if source_place == {
+                .Val(place) -> jet_codegen_emit_value(&builder, span, init.ty, MirOperation.MovePlace(place))
+                .None -> jet_codegen_lower_expr(&builder, init)
+            }
+        }
+        else -> jet_codegen_lower_expr(&builder, init)
+    }
+    temporary := None
+    if move_fields {
+        place := jet_codegen_bind_local(&builder, temp, init.ty, true, None, None, false)
+        move_place := jet_codegen_place_access(&builder, place, MirAccess.Move)
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(move_place, subject))
+        temporary = Val(move_place)
+    }
+    loop binding in binds {
+        field_type := jet_codegen_checked_host_field_type(builder, init.ty, binding.field)
+        field_id := jet_codegen_host_field_id(builder, init.ty, binding.field)
+        value := if temporary == {
+            .Val(place) -> {
+                field_place := jet_codegen_project_field_place(&builder, place, span, field_type, field_id)
+                jet_codegen_emit_value(&builder, span, field_type, MirOperation.MovePlace(field_place))
+            }
+            .None -> {
+                projected := jet_codegen_emit_value(&builder, span, field_type, MirOperation.Field(subject, field_id))
+                jet_codegen_emit_value(&builder, span, field_type, MirOperation.Copy(projected, false))
+            }
+        }
+        destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(destination, value))
+    }
+}
+
+fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, init: TExpr, count: Int, elements: [TLocal], span: Span) {
+    subject := jet_codegen_lower_expr(&builder, init)
+    element_type := if init.ty == {
+        .List(element) | .FixedList(element, _) -> element
+        else -> init.ty
+    }
+    checked_location := jet_codegen_assignment_panic_location(&builder, span, false)
+    location := MirPanicLoc{file: mir_source_file_id(checked_location.file), line: checked_location.line, column: checked_location.column}
+    context := MirPanicContext{function: checked_location.function, source_line: checked_location.source_line, caret: checked_location.caret, locals: [MirPanicLocal]{}}
+    call := jet_codegen_index_route(&builder, MirIndexKind.List, MirAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
+    loop (index, local) in elements {
+        if index >= count -> break
+        index_value := jet_codegen_emit_value(&builder, span, Type.Int, MirOperation.Constant(MirConstant.Int(index, None, None)))
+        projected := jet_codegen_emit_value(&builder, span, element_type, MirOperation.Index(call, subject, index_value, MirIndexKind.List, MirAccess.Read, location, context))
+        destination := jet_codegen_bind_local(&builder, local, element_type, local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(destination, projected))
+    }
+}

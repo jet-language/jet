@@ -6,7 +6,7 @@ fn jet() -> Command {
 
 fn effects_example() -> String {
     format!(
-        "{}/examples/features/effects/effects.jet",
+        "{}/Examples/features/effects/effects.jet",
         env!("CARGO_MANIFEST_DIR")
     )
 }

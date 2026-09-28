@@ -35,7 +35,7 @@ fn maintained_lines(path: &Path) -> usize {
 
 #[test]
 fn adapters_use_one_jet_library_runner_and_fail_closed_outputs() {
-    let root = repo_root().join("tools/foreign-build-hosts");
+    let root = repo_root().join("Tools/foreign-build-hosts");
     let runner = read(&root.join("jet-library.sh"));
     let powershell = read(&root.join("jet-library.ps1"));
     for text in [&runner, &powershell] {
@@ -127,7 +127,7 @@ fn host_descriptors_are_small_and_route_to_native_library_targets() {
     assert!(!cmake.contains("CMAKE_MODULE_PATH"));
     assert!(cmake.contains("jet_library"));
     assert!(cmake.contains("target_link_libraries"));
-    let cmake_adapter = read(&repo_root().join("tools/foreign-build-hosts/cmake/Jet.cmake"));
+    let cmake_adapter = read(&repo_root().join("Tools/foreign-build-hosts/cmake/Jet.cmake"));
     assert!(cmake_adapter.contains("set(_kind static)"));
     assert!(cmake_adapter.contains("CMAKE_CXX_COMPILER"));
     assert!(cmake_adapter.contains("add_custom_target(\"${TARGET}_jet\" DEPENDS ${_outputs})"));
@@ -142,7 +142,7 @@ fn host_descriptors_are_small_and_route_to_native_library_targets() {
     assert!(bazel.contains("jet_library"));
     assert!(bazel.contains("cc_binary"));
     assert!(bazel.contains("linkopts"));
-    let bazel_adapter = read(&repo_root().join("tools/foreign-build-hosts/bazel/jet_library.bzl"));
+    let bazel_adapter = read(&repo_root().join("Tools/foreign-build-hosts/bazel/jet_library.bzl"));
     assert!(bazel_adapter.contains("ctx.actions.run"));
     assert!(bazel_adapter.contains("args.add"));
     assert!(bazel_adapter.contains("short_path"));
@@ -154,7 +154,7 @@ fn host_descriptors_are_small_and_route_to_native_library_targets() {
     assert!(msbuild.contains("JetLibraryStatic"));
     assert!(msbuild.contains("Inputs=\"$(MSBuildProjectDirectory)\\host.cpp"));
     assert!(msbuild.contains("Outputs=\"$(IntermediateOutputPath)host.exe"));
-    let msbuild_adapter = read(&repo_root().join("tools/foreign-build-hosts/msbuild/Jet.Library.targets"));
+    let msbuild_adapter = read(&repo_root().join("Tools/foreign-build-hosts/msbuild/Jet.Library.targets"));
     assert!(msbuild_adapter.contains("$(MSBuildProjectDirectory)\\"));
     assert!(msbuild_adapter.contains(".jet\\lock"));
     assert!(msbuild_adapter.contains("$(MSBuildThisFileDirectory)..\\jet-library.ps1"));
@@ -167,7 +167,7 @@ fn host_descriptors_are_small_and_route_to_native_library_targets() {
     assert!(lifecycle_text.contains("LoadLibraryA"));
     assert!(lifecycle_text.contains("std::thread"));
 
-    let docs = read(&repo_root().join("docs/spec/reference/foreign-build-hosts.md"));
+    let docs = read(&repo_root().join("Docs/spec/reference/foreign-build-hosts.md"));
     for term in [
         "CMake",
         "Gradle",
@@ -207,7 +207,7 @@ fn shared_runner_publishes_only_after_a_successful_jet_export() {
     fs::set_permissions(&fake_jet, fs::Permissions::from_mode(0o755)).unwrap();
 
     let destination = scratch.path.join("host-build");
-    let runner = repo_root().join("tools/foreign-build-hosts/jet-library.sh");
+    let runner = repo_root().join("Tools/foreign-build-hosts/jet-library.sh");
     let args = [
         "--jet",
         fake_jet.to_str().unwrap(),

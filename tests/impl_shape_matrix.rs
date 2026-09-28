@@ -6,10 +6,10 @@ mod tir_support;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-const SOURCE_PATH: &str = "examples/features/traits/impl_shape_matrix.jet";
-const SOURCE: &str = include_str!("../examples/features/traits/impl_shape_matrix.jet");
+const SOURCE_PATH: &str = "Examples/features/traits/impl_shape_matrix.jet";
+const SOURCE: &str = include_str!("../Examples/features/traits/impl_shape_matrix.jet");
 const EXPECTED: &str =
-    include_str!("../examples/features/expected/traits/impl_shape_matrix.out");
+    include_str!("../Examples/features/expected/traits/impl_shape_matrix.out");
 
 const DISPLAY: &str = "Display";
 const DEBUG: &str = "Debug";
@@ -374,7 +374,7 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
 #[test]
 fn impl_shape_matrix_retains_typed_operator_rhs() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/operators/mixed_types.jet");
+        .join("Examples/features/operators/mixed_types.jet");
     let bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("operator example loads");
     let rhs = bundle.modules[bundle.entry]
         .items

@@ -20,7 +20,7 @@ use jetpack::SHA256;
 #[test]
 fn trust_publication_contract_is_owned_pending_and_has_no_fake_root() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let publication = repo.join("site/dist/keys");
+    let publication = repo.join("Docs/site/dist/keys");
     let manifest = fs::read_to_string(publication.join("trust-manifest.json")).unwrap();
     assert_eq!(
         manifest.trim(),
@@ -29,7 +29,7 @@ fn trust_publication_contract_is_owned_pending_and_has_no_fake_root() {
     assert!(!publication.join("nix-index-v1.ed25519.pub").exists());
 
     let readme = fs::read_to_string(publication.join("README.md")).unwrap();
-    let docs = fs::read_to_string(repo.join("docs/spec/packaging/trust-root.md")).unwrap();
+    let docs = fs::read_to_string(repo.join("Docs/spec/packaging/trust-root.md")).unwrap();
     for text in [
         "https://keys.jet-lang.dev/nix-index-v1.ed25519.pub",
         "key-id:base64-public-key",

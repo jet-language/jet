@@ -23,24 +23,24 @@ use crate::backend::{SourceExecutionCompletion, SourceExecutionCompletionScope};
 
 /// The checked handle identity emitted for the private Prelude cursor carrier.
 pub fn loop_cursor_handle_id() -> MirHandleId {
-    stable_id("mir-handle", "core.prelude::loop_iter_cursor")
+    MirHandleId(stable_id("mir-handle", "core.prelude::loop_iter_cursor"))
 }
 
 /// Checked Prelude handle identity shared by physical native interface and
 /// callable value roots. It is a capability namespace, never a function ID.
 pub fn native_binding_handle_id() -> MirHandleId {
-    stable_id("mir-handle", "core.prelude::native_binding")
+    MirHandleId(stable_id("mir-handle", "core.prelude::native_binding"))
 }
 /// Checked handle identity for a private physical Source Shared root.
 pub fn shared_interop_root_handle_id() -> MirHandleId {
-    stable_id("mir-handle", "jet.internal::source_shared_interop_root")
+    MirHandleId(stable_id("mir-handle", "jet.internal::source_shared_interop_root"))
 }
 /// Checked handle identity for a private physical Source Shared weak root.
 pub fn shared_interop_weak_root_handle_id() -> MirHandleId {
-    stable_id(
+    MirHandleId(stable_id(
         "mir-handle",
         "jet.internal::source_shared_interop_weak_root",
-    )
+    ))
 }
 
 
@@ -107,6 +107,10 @@ impl SourceResourceKind {
             Self::LinesStdin => Ok(MirLoopSourceKind::LinesStdin),
             Self::LinesProcessStream => Ok(MirLoopSourceKind::LinesProcessStream),
             Self::ChannelReceiver => Ok(MirLoopSourceKind::ChannelReceiver),
+            Self::ChannelSender => Err("channel sender is not a loop producer kind".to_string()),
+            Self::EncodingReader { reader_type } => Ok(MirLoopSourceKind::EncodingReader {
+                reader_type: reader_type.clone(),
+            }),
             Self::EncodingWriter { .. } => {
                 Err("encoding writer is not a loop producer kind".to_string())
             }
@@ -778,14 +782,14 @@ impl SourceFileWriter {
 /// A process stdout/stderr owner whose reader lease is safe to move into a
 /// native cursor task.  Construction from a checked ProcessChild stays in the
 /// ProcessPrelude owner module.
-pub struct SourceProcessStream(crate::ProcessPrelude::SourceProcessReader);
+pub struct SourceProcessStream(crate::ProcessPrelude::process_prelude::SourceProcessReader);
 
 impl SourceProcessStream {
     pub(crate) fn from_child(
-        child: &crate::ProcessPrelude::ProcessChild,
-        stream: crate::ProcessPrelude::SourceProcessStreamKind,
+        child: &crate::ProcessPrelude::process_prelude::ProcessChild,
+        stream: crate::ProcessPrelude::process_prelude::SourceProcessStreamKind,
     ) -> Result<Self, String> {
-        crate::ProcessPrelude::source_take_process_stream(child, stream).map(Self)
+        crate::ProcessPrelude::process_prelude::source_take_process_stream(child, stream).map(Self)
     }
 }
 /// Public projection of the canonical encoding limits used when an owner is
@@ -2056,7 +2060,7 @@ impl SourceResourceArena {
             .map_err(|error| (error.error, error.values, error.completions))
         };
         let _activation = activate_source_resource_arena(self);
-        match self.process_values(values, &mut process) {
+        match Self::process_values(values, &mut process) {
             Ok(processed) => completions.extend(processed),
             Err((error, values, processed)) => {
                 completions.extend(processed);
@@ -2108,7 +2112,7 @@ impl SourceResourceArena {
                 })
         };
         let _activation = activate_source_resource_arena(self);
-        match self.process_values(values, &mut process) {
+        match Self::process_values(values, &mut process) {
             Ok(processed) => completions.extend(processed),
             Err((error, values, processed)) => {
                 completions.extend(processed);
@@ -2926,9 +2930,9 @@ impl SourceResourceArena {
         stdout: bool,
     ) -> Result<SourceResourceHandle, String> {
         let stream = if stdout {
-            crate::ProcessPrelude::SourceProcessStreamKind::Stdout
+            crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stdout
         } else {
-            crate::ProcessPrelude::SourceProcessStreamKind::Stderr
+            crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stderr
         };
         let reader = crate::Process::source_take_process_stream(child_raw, stream)?;
         self.register_process_stream(handle, SourceProcessStream(reader))
@@ -3329,8 +3333,8 @@ impl SourceResourceArena {
             let mut state = self.lock()?;
             Self::validate_shared_interop_root_locked(&state, capability)?;
             match state.shared_interop_aliases.get_mut(&key) {
-                Some(Some(alias)) => alias.take().expect("alias entry is present"),
-                Some(None) => {
+                Some(entry) if entry.is_some() => entry.take().expect("alias entry is present"),
+                Some(_) => {
                     return Err("Shared interop owner alias release is already in progress".to_string())
                 }
                 None => return Err("Unknown Shared interop owner alias token".to_string()),
@@ -4403,10 +4407,10 @@ impl SourceResourceArena {
         expected_kind: &SourceResourceKind,
         value: MirRuntimeValue,
     ) -> Result<(SourceResourceHandle, SourceOwnedValue), SourceOwnedTakeError> {
-        let (consumed, lease) = self.take_owned(handle, raw, expected_kind).map_err(|error| {
-            SourceOwnedTakeError { error, value }
-        })?;
-        Ok((consumed, lease.with_value(value)))
+        match self.take_owned(handle, raw, expected_kind) {
+            Ok((consumed, lease)) => Ok((consumed, lease.with_value(value))),
+            Err(error) => Err(SourceOwnedTakeError { error, value }),
+        }
     }
 
     /// Consume a checked Core owner after deriving its Source kind from the
@@ -4421,9 +4425,16 @@ impl SourceResourceArena {
         owner_type: &MirType,
         value: MirRuntimeValue,
     ) -> Result<(SourceResourceHandle, SourceOwnedValue), SourceOwnedTakeError> {
-        let expected_kind = SourceResourceKind::from_core_owner_type(registration, owner_type)
-            .map_err(MirNativeCursorError::internal)
-            .map_err(|error| SourceOwnedTakeError { error, value })?;
+        let expected_kind = match SourceResourceKind::from_core_owner_type(registration, owner_type)
+        {
+            Ok(kind) => kind,
+            Err(error) => {
+                return Err(SourceOwnedTakeError {
+                    error: MirNativeCursorError::internal(error),
+                    value,
+                })
+            }
+        };
         self.take_owned_with_value(handle, raw, &expected_kind, value)
     }
     /// Commit one physical lease into a fresh destination slot. The source
@@ -5372,13 +5383,13 @@ fn resource_iterator(
 ) -> Result<NativeIter, MirNativeCursorError> {
     let valid = owner
         .lock()
-        .map_err(|_| cursor_error("Source resource owner lock is poisoned"))?
+        .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?
         .kind()
         .as_loop_source()
         .ok()
         .is_some_and(|kind| &kind == source);
     if !valid {
-        return Err(cursor_error(
+        return Err(MirNativeCursorError::internal(
             "Source resource owner does not match checked loop source",
         ));
     }
@@ -5389,7 +5400,7 @@ fn resource_iterator(
         MirLoopSourceKind::LinesProcessStream => Ok(Box::new(ProcessIter { owner })),
         MirLoopSourceKind::ChannelReceiver => Ok(Box::new(ChannelIter { owner })),
         MirLoopSourceKind::EncodingReader { .. } => Ok(Box::new(EncodingIter { owner })),
-        MirLoopSourceKind::Chars | MirLoopSourceKind::Iterable { .. } => Err(cursor_error(
+        MirLoopSourceKind::Chars | MirLoopSourceKind::Iterable { .. } => Err(MirNativeCursorError::internal(
             "Source resource owner does not match checked loop source",
         )),
     }
@@ -5519,7 +5530,7 @@ fn owner_lock(
 ) -> Result<MutexGuard<'_, BackendOwner>, MirNativeCursorError> {
     owner
         .lock()
-        .map_err(|_| cursor_error("Source resource owner lock is poisoned"))
+        .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))
 }
 
 struct PlainIter {
@@ -5536,7 +5547,7 @@ impl Iterator for PlainIter {
         };
         match &mut *owner {
             BackendOwner::PlainStream(stream) => stream.pull_checked().map(Ok),
-            _ => Some(Err(cursor_error("plain stream owner payload mismatch"))),
+            _ => Some(Err(MirNativeCursorError::internal("plain stream owner payload mismatch"))),
         }
     }
 }
@@ -5554,7 +5565,7 @@ impl Iterator for FileIter {
             Err(error) => return Some(Err(error)),
         };
         let BackendOwner::File(reader) = &mut *owner else {
-            return Some(Err(cursor_error("file owner payload mismatch")));
+            return Some(Err(MirNativeCursorError::internal("file owner payload mismatch")));
         };
         match crate::enc_stream::source_file_next_line(&mut reader.0) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
@@ -5577,7 +5588,7 @@ impl Iterator for StdinIter {
             Err(error) => return Some(Err(error)),
         };
         let BackendOwner::Stdin(reader) = &mut *owner else {
-            return Some(Err(cursor_error("stdin owner payload mismatch")));
+            return Some(Err(MirNativeCursorError::internal("stdin owner payload mismatch")));
         };
         match crate::enc_stream::source_stdin_next_line(reader) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
@@ -5600,9 +5611,9 @@ impl Iterator for ProcessIter {
             Err(error) => return Some(Err(error)),
         };
         let BackendOwner::Process(reader) = &mut *owner else {
-            return Some(Err(cursor_error("process stream owner payload mismatch")));
+            return Some(Err(MirNativeCursorError::internal("process stream owner payload mismatch")));
         };
-        match crate::ProcessPrelude::source_process_stream_next_line(&reader.0) {
+        match crate::ProcessPrelude::process_prelude::source_process_stream_next_line(&reader.0) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
             Ok(None) => None,
             Err(error) => Some(Err(process_error(error))),
@@ -5623,7 +5634,7 @@ impl Iterator for ChannelIter {
             Err(error) => return Some(Err(error)),
         };
         let BackendOwner::ChannelReceiver(receiver) = &mut *owner else {
-            return Some(Err(cursor_error("channel owner payload mismatch")));
+            return Some(Err(MirNativeCursorError::internal("channel owner payload mismatch")));
         };
         receiver.receive().map(Ok)
     }
@@ -5642,7 +5653,7 @@ impl Iterator for EncodingIter {
             Err(error) => return Some(Err(error)),
         };
         let BackendOwner::Encoding(reader) = &mut *owner else {
-            return Some(Err(cursor_error("encoding owner payload mismatch")));
+            return Some(Err(MirNativeCursorError::internal("encoding owner payload mismatch")));
         };
         match encoding_next(&mut reader.0) {
             Ok(Some(value)) => Some(Ok(value)),

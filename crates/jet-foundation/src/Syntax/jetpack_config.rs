@@ -97,7 +97,7 @@ pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 
 // ──────────────────────────────────────────────
 // Unified ecosystem (jet + jetpack + jetos) — user-typeable surface (I7).
-// Owner-ratified design-of-record: docs/spec/syntax-decisions.md
+// Owner-ratified design-of-record: Docs/spec/syntax-decisions.md
 // (U1–U7, ratified 2026-06-16). These IDs start with `U`, enforced by
 // tests/decisions.rs alongside the S/N decisions. Tokens are recorded here;
 // behavior lands in the Jetpack/Jetos implementation chunks (no syntax beyond
@@ -153,7 +153,7 @@ pub const NS_WORKSPACE: &str = "workspace";
 /// D-PERFBUDGET-GRAMMAR1=A: reserved performance-policy role namespace.
 /// `module perf.<role> { budgets: [Budget{ ... }] }` is sole declaration
 /// surface. Names are reserved before parser/runtime implementation. Full law:
-/// docs/spec/performance-budget-decisions.md.
+/// Docs/spec/performance-budget-decisions.md.
 pub const NS_PERF: &str = "perf";
 pub const PERF_FIELD_BUDGETS: &str = "budgets";
 /// D-PERFBUDGET-COMPILE1=C (ratified 2026-07-16): typed compile workloads.
@@ -758,7 +758,7 @@ pub const TARGET_FIELD_EXPORT: &str = "export";
 /// `take` rode the S10 ownership keywords, since superseded by D-CAP7's
 /// capability sigils (memory model v5: bare/`&`/`^`). `edit` and `share`
 /// never left reserved-spelling status under that word law and are not wired
-/// into the parser; check docs/spec/syntax-decisions.md's Authority
+/// into the parser; check Docs/spec/syntax-decisions.md's Authority
 /// section for current sigil-based capability law before reusing these.
 pub const CAPABILITY_EDIT: &str = "edit";
 pub const CAPABILITY_SHARE: &str = "share";

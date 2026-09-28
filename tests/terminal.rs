@@ -13,7 +13,7 @@ mod common;
 
 const EXAMPLE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/examples/features/io/terminal_parity.jet"
+    "/Examples/features/io/terminal_parity.jet"
 );
 
 /// The answers this example needs, from their one home in `tests/common`.
@@ -252,9 +252,9 @@ fn terminal_parity_uses_tty_prompt_and_progress_order() {
 fn terminal_parity_matches_non_tty_golden_and_stream_order() {
     assert_resident_tier_compiles_run();
     assert_default_run_traces_native_tier();
-    let expected_stdout = include_str!("../examples/features/expected/io/terminal_parity.out");
+    let expected_stdout = include_str!("../Examples/features/expected/io/terminal_parity.out");
     let expected_stderr =
-        include_str!("../examples/features/expected/io/terminal_parity.stderr.out");
+        include_str!("../Examples/features/expected/io/terminal_parity.stderr.out");
     let mut expected_merged = expected_stdout.to_string();
     expected_merged.push_str(expected_stderr);
 
@@ -451,7 +451,7 @@ fn run_without_input(mode: &str) -> ClosedInputRun {
 /// differences: nothing rejects an answer, so both retry lines are gone, and the
 /// documented default answers the stop, so the choice is `staging`.
 fn expected_closed_input_stdout() -> String {
-    let golden = include_str!("../examples/features/expected/io/terminal_parity.out");
+    let golden = include_str!("../Examples/features/expected/io/terminal_parity.out");
     let retry = "> Enter a number from 1 to 2.\n";
     assert_eq!(
         golden.matches(retry).count(),
@@ -518,7 +518,7 @@ fn terminal_parity_ends_on_closed_input_on_every_tier() {
 
 /// Relative on purpose: the trail prints the source path a frame recorded, so a
 /// relative invocation keeps these fixtures free of this machine's checkout.
-const FAILING_EXAMPLE: &str = "examples/features/errors/error_context.jet";
+const FAILING_EXAMPLE: &str = "Examples/features/errors/error_context.jet";
 
 fn repo_root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
@@ -652,7 +652,7 @@ fn error_report_matrix_tty_pipe_no_color_and_narrow_widths() {
     );
     assert!(
         pipe.text
-            .contains("examples/features/errors/error_context.jet:7"),
+            .contains("Examples/features/errors/error_context.jet:7"),
         "a pipe must keep whole paths: {:?}",
         pipe.text
     );

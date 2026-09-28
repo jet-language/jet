@@ -418,7 +418,7 @@ fn expand_inline_golden() {
 #[test]
 fn expand_callable_signature_uses_one_checked_fact_document() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/callable/callable_policies.jet");
+        .join("Examples/features/callable/callable_policies.jet");
     let human = Command::new(jet())
         .args(["inspect", "expand", "--facts", "callable-signature"])
         .arg(&fixture)
@@ -516,7 +516,7 @@ fn run() {}
 #[test]
 fn expand_origin_projects_the_folded_origin_info_fact() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/tooling/provenance_track.jet");
+        .join("Examples/features/tooling/provenance_track.jet");
     let out = Command::new(jet())
         .args(["inspect", "expand", "--facts", "origin"])
         .arg(&fixture)
@@ -558,7 +558,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
 #[test]
 fn expand_derive_lens_projects_derived_capabilities() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/types/auto_derive_policy/run.jet");
+        .join("Examples/features/types/auto_derive_policy/run.jet");
     let human = Command::new(jet())
         .args(["inspect", "expand", "--facts", "derive"])
         .arg(&fixture)
@@ -596,7 +596,7 @@ fn expand_derive_lens_projects_derived_capabilities() {
 #[test]
 fn expand_templates_projects_checked_marker_impl_and_test_items() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/reflection/derive_loop.jet");
+        .join("Examples/features/reflection/derive_loop.jet");
     let human = Command::new(jet())
         .args(["inspect", "expand", "--facts", "templates"])
         .arg(&fixture)
@@ -878,7 +878,7 @@ fn expand_json_selected_empty_and_positions_are_proved() {
         .args(["inspect", "expand", "--facts", "memory", "--json"])
         .arg(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/features/memory/effect_denials.jet"),
+                .join("Examples/features/memory/effect_denials.jet"),
         )
         .env("NO_COLOR", "1")
         .output()
@@ -894,7 +894,7 @@ fn expand_json_selected_empty_and_positions_are_proved() {
 
     let web = Command::new(jet())
         .args(["inspect", "expand", "--facts", "web", "--json"])
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/web/web_app.jet"))
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/web/web_app.jet"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -1273,7 +1273,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
 #[test]
 fn monorepo_bare_entry_honors_d_ile1_search_order() {
     let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
     let root = isolated_cwd("monorepo_d_ile1");
     fs::remove_dir_all(&root).ok();
     copy_dir_all(&fixture, &root);
@@ -1335,7 +1335,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     // single-entry files in `tests/golden.rs`'s example scan.
     assert_eq!(
         golden,
-        include_str!("../../examples/features/expected/packages/monorepo.out"),
+        include_str!("../../Examples/features/expected/packages/monorepo.out"),
         "monorepo output differs from its golden artifact"
     );
 
@@ -1373,7 +1373,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
 #[test]
 fn explicit_workspace_directory_uses_shared_entry_resolver() {
     let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
     let root = isolated_cwd("monorepo_explicit_directory");
     fs::remove_dir_all(&root).ok();
     copy_dir_all(&fixture, &root);

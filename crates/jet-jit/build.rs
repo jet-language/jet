@@ -45,9 +45,12 @@ fn write_web_kernel_std(manifest: &PathBuf) {
         .expect("JetPoolSlot marker");
     let mut body = unindent(&raw[task_start..task_end]);
     body.push('\n');
+    // The Source Shared interop section names `::jet_jit::` for generated
+    // programs; inside this crate that root is `crate::`.
     body.push_str(
         &unindent(&raw[shared_start..shared_end])
-            .replace("crate::", "crate::Memory::shared_protocol::"),
+            .replace("crate::", "crate::Memory::shared_protocol::")
+            .replace("::jet_jit::", "crate::"),
     );
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_std.rs");
     std::fs::write(&out, body).expect("write web_kernel_std.rs");

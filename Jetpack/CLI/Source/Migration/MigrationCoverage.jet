@@ -1,0 +1,167 @@
+// Jetpack migration coverage reports, ported from jetpack::MigrationCoverage.
+//
+// The inventory is explicit. A report never treats an observed package as
+// coverage without a denominator, so nativeization progress cannot become a
+// false green from counting only realized objects.
+
+// One package identity in the migration inventory.
+pub struct CoveragePackage {
+    pub name: String
+    pub version: String
+    pub reference: String
+
+    fn new(name: String, version: String, reference: String) -> CoveragePackage !Never {
+        CoveragePackage{name: name, version: version, reference: reference}
+    }
+
+    // Name and reference must not be blank.
+    fn validate(self) !CoverageError {
+        if self.name.trim() == "" -> return Err(CoverageError.EmptyField{field: "name", package: self.name})
+        if self.reference.trim() == "" -> return Err(CoverageError.EmptyField{field: "reference", package: self.name})
+    }
+}
+
+// The four package buckets. `NotYetImported` is computed from the explicit
+// inventory; a caller cannot put a package there by assertion alone.
+pub enum CoverageBucket {
+    NativeRecipe
+    CentrallyImportedRecipe
+    LocalImport
+    NotYetImported
+
+    fn label(self) -> String !Never {
+        if self == {
+            .NativeRecipe -> "native recipe"
+            .CentrallyImportedRecipe -> "centrally imported recipe"
+            .LocalImport -> "local import"
+            .NotYetImported -> "not-yet-imported"
+        }
+    }
+}
+
+// Inputs from a catalog producer, a local importer, and the native recipe
+// registry. Every listed package must also occur in `inventory`.
+pub struct CoverageInput {
+    pub inventory: [CoveragePackage]
+    pub native_recipes: [CoveragePackage]
+    pub centrally_imported_recipes: [CoveragePackage]
+    pub local_imports: [CoveragePackage]
+
+    fn empty() -> CoverageInput !Never {
+        CoverageInput{inventory: [CoveragePackage]{}, native_recipes: [CoveragePackage]{}, centrally_imported_recipes: [CoveragePackage]{}, local_imports: [CoveragePackage]{}}
+    }
+}
+
+// Nativeization counts over the complete inventory.
+pub struct NativeizationProgress {
+    pub total: Int
+    pub nativeized: Int
+    pub remaining: Int
+    // Whole percentage, rounded down for deterministic CI output.
+    pub percent: Int
+}
+
+// A deterministic, disjoint migration coverage report.
+pub struct CoverageReport {
+    pub native_recipes: [CoveragePackage]
+    pub centrally_imported_recipes: [CoveragePackage]
+    pub local_imports: [CoveragePackage]
+    pub not_yet_imported: [CoveragePackage]
+    pub nativeization: NativeizationProgress
+
+    // Assign every listed package to exactly one inventory bucket; whatever
+    // no bucket claims is not yet imported. Each bucket is in identity order.
+    fn from_input(input: CoverageInput) -> CoverageReport !CoverageError {
+        inventory :: cli_coverage_unique(input.inventory, None)
+        assigned := [(package: CoveragePackage, bucket: CoverageBucket)]{}
+        native_recipes :: cli_coverage_assign(input.native_recipes, CoverageBucket.NativeRecipe, inventory, &assigned)
+        centrally_imported_recipes :: cli_coverage_assign(input.centrally_imported_recipes, CoverageBucket.CentrallyImportedRecipe, inventory, &assigned)
+        local_imports :: cli_coverage_assign(input.local_imports, CoverageBucket.LocalImport, inventory, &assigned)
+        not_yet_imported := [CoveragePackage]{}
+        loop package in inventory {
+            if cli_coverage_bucket_of(assigned, package) == None -> not_yet_imported.push(package)
+        }
+        total :: native_recipes.len() + centrally_imported_recipes.len() + local_imports.len() + not_yet_imported.len()
+        nativeized :: native_recipes.len()
+        percent :: if total == 0 -> 0 else -> nativeized * 100 /% total
+        Ok(CoverageReport{
+            native_recipes: native_recipes,
+            centrally_imported_recipes: centrally_imported_recipes,
+            local_imports: local_imports,
+            not_yet_imported: not_yet_imported,
+            nativeization: NativeizationProgress{total: total, nativeized: nativeized, remaining: total - nativeized, percent: percent}
+        })
+    }
+
+    // Compact human-readable projection of the report.
+    fn to_human(self) -> String !Never {
+        lines :: [String]{
+            "native recipes: {self.native_recipes.len()}",
+            "centrally imported recipes: {self.centrally_imported_recipes.len()}",
+            "local imports: {self.local_imports.len()}",
+            "not-yet-imported packages: {self.not_yet_imported.len()}",
+            "nativeization: {self.nativeization.nativeized}/{self.nativeization.total} ({self.nativeization.percent}%)"
+        }
+        "{lines.join("\n")}\n"
+    }
+}
+
+#Error
+pub enum CoverageError {
+    EmptyField(field: String, package: String)
+    DuplicateInventory(String)
+    DuplicateBucket(bucket: CoverageBucket, package: String)
+    PackageOutsideInventory(bucket: CoverageBucket, package: String)
+    PackageInMultipleBuckets(package: String, first: CoverageBucket, second: CoverageBucket)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .EmptyField(field, package) -> "coverage package `{package}` has empty `{field}`"
+            .DuplicateInventory(package) -> "coverage inventory repeats `{package}`"
+            .DuplicateBucket(bucket, package) -> "{bucket.label()} bucket repeats `{package}`"
+            .PackageOutsideInventory(bucket, package) -> "{bucket.label()} bucket contains package outside inventory `{package}`"
+            .PackageInMultipleBuckets(package, first, second) -> "package `{package}` occurs in both {first.label()} and {second.label()} buckets"
+        }
+    }
+}
+
+// Valid packages without repeats, in identity order. `bucket` names the
+// list for the repeat error; None is the inventory.
+fn cli_coverage_unique(packages: [CoveragePackage], bucket: ?CoverageBucket) -> [CoveragePackage] !CoverageError {
+    unique := [CoveragePackage]{}
+    loop package in packages {
+        package.validate()
+        if unique.contains(package) {
+            if bucket == {
+                .Val(owner) -> return Err(CoverageError.DuplicateBucket{bucket: owner, package: package.name})
+                .None -> return Err(CoverageError.DuplicateInventory(package.name))
+            }
+        }
+        unique.push(package)
+    }
+    // Identity order: name, then version, then reference.
+    unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
+    Ok(unique)
+}
+
+// The bucket's packages in identity order, each recorded in `assigned`. A
+// package outside the inventory or already in another bucket is an error.
+fn cli_coverage_assign(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: &[(package: CoveragePackage, bucket: CoverageBucket)]) -> [CoveragePackage] !CoverageError {
+    unique :: cli_coverage_unique(packages, Val(bucket))
+    loop package in unique {
+        if !inventory.contains(package) -> return Err(CoverageError.PackageOutsideInventory{bucket: bucket, package: package.name})
+        if cli_coverage_bucket_of(assigned, package) == {
+            .Val(first) -> return Err(CoverageError.PackageInMultipleBuckets{package: package.name, first: first, second: bucket})
+            .None -> {}
+        }
+        assigned.push((package: package, bucket: bucket))
+    }
+    Ok(unique)
+}
+
+fn cli_coverage_bucket_of(assigned: [(package: CoveragePackage, bucket: CoverageBucket)], package: CoveragePackage) -> ?CoverageBucket !Never {
+    loop entry in assigned {
+        if entry.package == package -> return Val(entry.bucket)
+    }
+    None
+}

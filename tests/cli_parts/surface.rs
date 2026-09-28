@@ -2152,7 +2152,7 @@ fn explain_build_fact_golden() {
 #[test]
 fn explain_typed_build_setting_golden() {
     let dir =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/typed_settings");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/typed_settings");
     let out = Command::new(jet())
         .args([
             "explain",

@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let left = self.parse_declared_measure(kind)?;
                 // D-META-CONST1: `(@lanes * 2)` is shipped in
-                // examples/features/comptime/computed_constants.jet, so the
+                // Examples/features/comptime/computed_constants.jet, so the
                 // declared rules are addition and scaling, not addition alone.
                 let rule = match self.peek().kind {
                     TokKind::Star => {

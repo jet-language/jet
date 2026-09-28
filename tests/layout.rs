@@ -5,7 +5,7 @@
 //! values don't support `*`/`/`, only `+`/`-`/comparisons, matching every
 //! ratified example), axis-mismatch/not-a-constraint compile errors,
 //! redundant-constraint lint, and infeasibility (a runtime query + panic,
-//! not a static diagnostic — see docs/spec/diagnostics.md).
+//! not a static diagnostic — see Docs/spec/diagnostics.md).
 
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};

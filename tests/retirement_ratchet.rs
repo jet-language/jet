@@ -113,7 +113,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("jet-time-format", 0),
 ];
 
-const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
+const CONTENT_ROOTS: &[&str] = &["crates", "Examples", "tests", "Source"];
 
 /// Repository content never lives in a dot directory, a build directory, or a
 /// vendored package tree. Skipping all three keeps the count stable whatever a
@@ -189,13 +189,12 @@ fn content_files() -> Vec<PathBuf> {
 
 const FAILURE_SURFACE_ROOTS: &[&str] = &[
     "crates",
-    "examples",
+    "Examples",
     "tests",
     "Source",
     "corelib",
-    "docs",
-    "editors",
-    "tools",
+    "Docs",
+    "Tools",
 ];
 
 const FAILURE_SURFACE_EXTENSIONS: &[&str] = &[
@@ -436,7 +435,7 @@ fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragmen
         }];
     }
 
-    if relative_path(path).starts_with("editors/tree-sitter/test/corpus/") {
+    if relative_path(path).starts_with("Tools/editors/tree-sitter/test/corpus/") {
         let source = text.split_once("\n---").map_or(text, |(source, _)| source);
         return vec![FailureSourceFragment {
             first_line: 1,
@@ -754,20 +753,20 @@ fn relative_path(path: &Path) -> String {
 }
 
 fn is_authority_history(path: &str) -> bool {
-    path == "docs/spec/syntax-decisions.md"
-        || path == "docs/spec/contributing/agent-engineering.md"
-        || path == "docs/spec/reference/prior-art.md"
-        || path.starts_with("docs/audits/")
-        || path.starts_with("docs/proposals/")
-        || path.starts_with("docs/research/")
-        || path.starts_with("tools/agent-eval/domain-foundations/")
+    path == "Docs/spec/syntax-decisions.md"
+        || path == "Docs/spec/contributing/agent-engineering.md"
+        || path == "Docs/spec/reference/prior-art.md"
+        || path.starts_with("Docs/audits/")
+        || path.starts_with("Docs/proposals/")
+        || path.starts_with("Docs/research/")
+        || path.starts_with("Tools/agent-eval/domain-foundations/")
 }
 
 fn is_authority_diagnostic_fixture(path: &str) -> bool {
     path.starts_with("tests/ui/")
         || path.starts_with("tests/fuzz/")
         || path == "tests/syntax_reconciliation.rs"
-        || path == "scripts/notebook-test/acceptance.mjs"
+        || path == "Tools/notebook-test/acceptance.mjs"
 }
 
 fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
@@ -804,7 +803,7 @@ fn is_unrelated_authority_word(path: &str, line: &str) -> bool {
     ) {
         return true;
     }
-    if path.starts_with("docs/spec/reference/surfaces/") {
+    if path.starts_with("Docs/spec/reference/surfaces/") {
         return true;
     }
     matches!(
@@ -841,21 +840,21 @@ fn is_unrelated_authority_word(path: &str, line: &str) -> bool {
             if line.contains(concat!("Capabil", "ity-limited"))
     ) || matches!(
         (path, line),
-        ("examples/features/io/app_config.jet", line)
+        ("Examples/features/io/app_config.jet", line)
             if line
                 .trim_start()
                 .starts_with(concat!("// ", "Abil", "ity"))
     ) || matches!(
         (path, line),
-        ("examples/features/net/browser_cdp.jet", line)
+        ("Examples/features/net/browser_cdp.jet", line)
             if line.contains(concat!("Abil", "ity-gated protocol"))
     ) || matches!(
         (path, line),
-        ("scripts/canvas-test/scenario.mjs", line)
+        ("Tools/canvas-test/scenario.mjs", line)
             if line.contains(concat!("Capabil", "ity mismatch"))
     ) || matches!(
         (path, line),
-        ("docs/spec/spec.md", line)
+        ("Docs/spec/spec.md", line)
             if line.contains(concat!("Capabil", "ity parameters"))
     )
 }
@@ -889,7 +888,7 @@ fn retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visi
     assert!(is_skipped_dir(Path::new(
         ".agent-worktrees/worker/examples"
     )));
-    assert!(!is_skipped_dir(Path::new("examples")));
+    assert!(!is_skipped_dir(Path::new("Examples")));
     let live_type = concat!("De", "que");
     let live_source = format!("let queue: {live_type}<Int> = {live_type}.new()");
     assert!(contains_word(&live_source, live_type));
@@ -1289,15 +1288,15 @@ fn tally(row: &Retirement) -> (usize, usize) {
             (retired, canonical)
         }
         "set-take" => {
-            tally_collection_example("examples/features/collections/set.jet", ".take(", ".pop(")
+            tally_collection_example("Examples/features/collections/set.jet", ".take(", ".pop(")
         }
         "map-replace" => tally_collection_example(
-            "examples/features/collections/map_surface.jet",
+            "Examples/features/collections/map_surface.jet",
             ".replace(",
             ".add(",
         ),
         "set-replace" => tally_collection_example(
-            "examples/features/collections/set.jet",
+            "Examples/features/collections/set.jet",
             ".replace(",
             ".add(",
         ),
@@ -1566,7 +1565,7 @@ fn retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english()
     let mut offenders = Vec::new();
     for path in all_files() {
         let relative = relative_path(&path);
-        if relative.starts_with("plugins/tower/") {
+        if relative.starts_with("Tools/tower/") {
             continue;
         }
         let Ok(text) = fs::read_to_string(&path) else {

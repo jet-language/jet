@@ -567,7 +567,7 @@ fn run() {
     assert_group_close_success("taskgroup_wait_panic", source, "settled\ncaller\n");
 }
 
-/// D-CONC-SPAWN1=D (`docs/spec/spec.md:2545`, `docs/spec/syntax-decisions.md:2264`,
+/// D-CONC-SPAWN1=D (`Docs/spec/spec.md:2545`, `Docs/spec/syntax-decisions.md:2264`,
 /// `Syntax::KW_CONC_TASK`): `task` is the ONE reserved concurrency word, so a
 /// name position holding it is refused where it is written. That is a stronger
 /// form of this test's property than "it binds a list": the word can never be

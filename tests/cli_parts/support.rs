@@ -597,7 +597,7 @@ pub fn expand_effects_layout_fixture() -> PathBuf {
 // `resolve_bare_entry` (Source/main.rs) delegated to a `find_project_entry`
 // that only ever checked `main.jet`/`.jet/main.jet`, never the package-named
 // D-ILE1 fallback (`<package>.jet`, using `package.jet`'s `payload.name`). The shipped
-// `examples/features/packages/monorepo` fixture (members `hello.jet` /
+// `Examples/features/packages/monorepo` fixture (members `hello.jet` /
 // `ranker.jet`, neither named `main.jet`) exposed it end to end: bare `jet
 // run` at the workspace root couldn't see either member as runnable, `-p
 // hello` said "no workspace member named `hello`", and `cd`-ing into a

@@ -1110,7 +1110,7 @@ macro_rules! jet_lane_show {
         revision: u64,
         valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
         consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        value: U,
+        value: Option<U>,
     }
 
     // JET_VETTED_UNSAFE_BEGIN: jet_shared_cell
@@ -1646,7 +1646,7 @@ macro_rules! jet_lane_show {
                 revision,
                 valid,
                 consumed,
-                value,
+                value: Some(value),
             }
         }
 
@@ -1662,7 +1662,7 @@ macro_rules! jet_lane_show {
         where
             F: FnOnce(&T) -> U,
         {
-            let protocol = self.0.protocol.clone();
+            let protocol: std::sync::Arc<dyn crate::JetSharedCanonicalOwner> = self.0.protocol.clone();
             stm.touch(protocol.clone());
             let snapshot = if let Some(staged) = stm.staged_value::<T>(&protocol) {
                 let owner = self.0.clone();
@@ -1681,7 +1681,7 @@ macro_rules! jet_lane_show {
                     revision,
                     valid,
                     consumed,
-                    value,
+                    value: Some(value),
                 }
             } else {
                 self.capture_with(project)
@@ -1746,7 +1746,7 @@ macro_rules! jet_lane_show {
         where
             F: FnOnce(&T) -> R,
         {
-            let protocol = self.0.protocol.clone();
+            let protocol: std::sync::Arc<dyn crate::JetSharedCanonicalOwner> = self.0.protocol.clone();
             stm.touch(protocol.clone());
             if let Some(staged) = stm.staged_value::<T>(&protocol) {
                 f(&staged.borrow())
@@ -1896,7 +1896,7 @@ macro_rules! jet_lane_show {
             let commit_staged = staged.clone();
             stm.record_edit_with_commit(
                 protocol,
-                Box::new(|_| {}),
+                Box::new(|| {}),
                 Box::new(move |_| {
                     let value = commit_staged.borrow().clone();
                     let next = commit_cell
@@ -1922,10 +1922,10 @@ macro_rules! jet_lane_show {
         /// Return a fresh ordinary copy of the captured projection. This
         /// exposes no owner or revision authority.
         pub fn value(&self) -> U {
-            self.value.clone()
+            self.value.as_ref().expect("snapshot projection was consumed").clone()
         }
-        pub(crate) fn into_value_and_revision(self) -> (U, u64) {
-            (self.value, self.revision)
+        pub(crate) fn into_value_and_revision(mut self) -> (U, u64) {
+            (self.value.take().expect("snapshot projection was consumed"), self.revision)
         }
         /// Return the captured canonical revision for an internal atomic
         /// publication handoff.
@@ -1942,7 +1942,7 @@ macro_rules! jet_lane_show {
 
     impl<T: 'static, U: super::JetShow> super::JetShow for JetSharedSnapshot<T, U> {
         fn jet_show(&self) -> String {
-            format!("SharedSnapshot({})", self.value.jet_show())
+            format!("SharedSnapshot({})", self.value.as_ref().expect("snapshot projection was consumed").jet_show())
         }
     }
     impl<T: 'static, U: super::JetShow> super::JetDisplay for JetSharedSnapshot<T, U> {
@@ -2091,6 +2091,7 @@ macro_rules! jet_lane_show {
         }
     }
 
+    // jet:source-shared-interop-jit-begin
     type JetSharedSourceInteropRootBuilder = std::sync::Arc<
         dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String>
             + Send
@@ -2199,6 +2200,7 @@ macro_rules! jet_lane_show {
                 .with_typed_owner(owner))
         }
     }
+    // jet:source-shared-interop-jit-end
     pub(crate) struct JetSharedPhysicalOwnerAlias<T: Send + Sync + 'static> {
         cell: std::sync::Arc<JetSharedCell<T>>,
         token_id: i64,
@@ -2559,7 +2561,7 @@ macro_rules! jet_lane_show {
             unsafe {
                 (&mut *self.cell.value.get())
                     .as_mut()
-                    .expect("Shared payload was retired") as *mut T
+                    .expect("Shared payload was retired") as *mut T as *mut ()
             }
         }
 

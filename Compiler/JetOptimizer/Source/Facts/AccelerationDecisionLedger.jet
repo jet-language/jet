@@ -101,7 +101,11 @@ fn mir_pass_decision_row(
 }
 
 fn mir_pass_decision_insert(rows: &[MirDecisionRow], fact: MirDecisionRow) {
-    loop row in rows { if row.id == fact.id -> return }
+    loop row in rows {
+        if row.id == fact.id {
+            return
+        }
+    }
     rows.push(fact)
 }
 
@@ -227,7 +231,9 @@ fn mir_pass_count_calls_to_function(program: MirProgram, target: MirFunctionId) 
                 if instruction.operation == {
                     .Call(callee, _, _) -> {
                         if callee == {
-                            .User(id) | .Associated(id, _) | .Method(id, _) -> if id == target -> count += 1
+                            .User(id) | .Associated(id, _) | .Method(id, _) -> {
+                                if id == target -> count += 1
+                            }
                             else -> {}
                         }
                     }

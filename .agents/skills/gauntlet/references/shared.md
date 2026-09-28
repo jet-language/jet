@@ -23,11 +23,11 @@ established expert implementation exists, such as a benchmarks-game or real OSS
 implementation, check it in as a labeled sourced reference row. Pair it with a
 Jet expert variant authored by Sol high. Compare expert with expert, never Luna
 with expert. The orchestrator does not author corpus code. Workers do not run
-the harness; they type-check with `scripts/agent/lane-check.sh` only.
+the harness; they type-check with `Tools/agent/lane-check.sh` only.
 
 ## Environment
 
-Run everything through `scripts/agent/jet-env`. Follow `AGENTS.md` target-dir
+Run everything through `Tools/agent/jet-env`. Follow `AGENTS.md` target-dir
 laws: never use `/tmp` targets, use the shared main `target/`, and respect cap
 checks. A missing competitor toolchain is an owner-visible flake change, not a
 silent skip.

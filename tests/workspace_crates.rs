@@ -316,7 +316,7 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
 
 /// Card #2019: `cargo test` without `-p` only builds default-members, so
 /// `jet-codegen`'s lib tests can fail to compile for months. `verify-full`
-/// already compiles every workspace lib via `tools/ci/test-shards.sh`; this
+/// already compiles every workspace lib via `Tools/ci/test-shards.sh`; this
 /// pin keeps the compile gate in the default root suite so two `#[cfg(test)]`
 /// errors cannot hide again.
 #[test]

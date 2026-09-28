@@ -45,8 +45,8 @@ const EXPECTED: &str = "\
 5
 ";
 
-const STREAM_SOURCE: &str = include_str!("../examples/features/streams/generators.jet");
-const STREAM_EXPECTED: &str = include_str!("../examples/features/expected/streams/generators.out");
+const STREAM_SOURCE: &str = include_str!("../Examples/features/streams/generators.jet");
+const STREAM_EXPECTED: &str = include_str!("../Examples/features/expected/streams/generators.out");
 
 const NESTED_SOURCE: &str = r#"
 use core.time as time

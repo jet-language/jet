@@ -57,10 +57,10 @@ fn null_backend_measure_layout_paint_roundtrip() {
     let (code, stdout, stderr) = build_and_run(
         &dir,
         "ui_null_backend",
-        include_str!("../examples/features/ui/ui_null_backend.jet"),
+        include_str!("../Examples/features/ui/ui_null_backend.jet"),
     );
     assert_eq!(code, 0, "ui backend roundtrip failed: {stderr}");
-    let expected = include_str!("../examples/features/expected/ui/ui_null_backend.out");
+    let expected = include_str!("../Examples/features/expected/ui/ui_null_backend.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -70,7 +70,7 @@ fn tui_backend_reactive_render_loop() {
     tir_support::assert_example_cli_tiers_agree_with_package(
         "ui/ui_tui_reactive",
         Some(tir_support::TIR_TEST_PACKAGE),
-        |actual| assert_eq!(actual, include_str!("../examples/features/expected/ui/ui_tui_reactive.out")),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/ui_tui_reactive.out")),
     );
 }
 

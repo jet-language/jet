@@ -10,7 +10,7 @@ license is the Unicode Data Files and Software License downloaded from
 verifies its required UCD inputs again before emitting either table copy:
 
 ```sh
-node scripts/agent/gen-unicode-tables.mjs --check tests/data/unicode/ucd
+node Tools/agent/gen-unicode-tables.mjs --check tests/data/unicode/ucd
 ```
 
 Generated Rust is checked in. Jet programs never read these files or use the

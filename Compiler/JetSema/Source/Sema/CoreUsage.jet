@@ -179,7 +179,7 @@ fn sema_core_generated_register_core_name(markers: &[String], source_name: Strin
 
 fn sema_core_generated_register_core_alias(markers: &[String], alias: String, module_name: String) {
     if !sema_core_generated_core_module(module_name) -> return
-    loop type_name in [String]{"Pool", "Cell", "Id", "Vec", "Matrix"} {
+    loop type_name in ([String]{"Pool", "Cell", "Id", "Vec", "Matrix"}) {
         if sema_core_generated_core_type(module_name, type_name) {
             sema_core_generated_register_core_name(&markers, "{alias}.{type_name}", module_name, type_name)
             sema_core_generated_register_core_name(&markers, "{alias}::{type_name}", module_name, type_name)
@@ -202,10 +202,13 @@ fn sema_core_generated_register_unqualified(graph: SemaRegistrationGraph, regist
             sema_core_generated_register_core_name(&markers, type_name, module_name, type_name)
             return
         }
-        if row.target_module_identity == module_name && sema_core_generated_core_type(module_name, type_name) {
-            sema_core_generated_register_core_name(&markers, type_name, module_name, type_name)
-        } else {
-            sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(type_name))
+        if {
+            row.target_module_identity == module_name && sema_core_generated_core_type(module_name, type_name) -> {
+                sema_core_generated_register_core_name(&markers, type_name, module_name, type_name)
+            }
+            else -> {
+                sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(type_name))
+            }
         }
         return
     }
@@ -222,23 +225,29 @@ fn sema_core_generated_register_import(markers: &[String], row: SemaRegistration
             else -> {}
         }
     }
-    if sema_core_generated_core_module(target) {
-        if row.declaration.kind == {
-            .Module(name, _) -> {
-                alias := if row.declaration.alias != "" -> row.declaration.alias else -> name
-                sema_core_generated_register_core_alias(&markers, alias, target)
+    if {
+        sema_core_generated_core_module(target) -> {
+            if row.declaration.kind == {
+                .Module(name, _) -> {
+                    alias := if row.declaration.alias != "" -> row.declaration.alias else -> name
+                    sema_core_generated_register_core_alias(&markers, alias, target)
+                }
+                else -> {}
             }
-            else -> {}
-        }
-        loop binding in row.bindings {
-            if sema_core_generated_core_type(target, binding.original) {
-                sema_core_generated_register_core_name(&markers, binding.local, target, binding.original)
-            } else {
-                sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(binding.local))
+            loop binding in row.bindings {
+                if {
+                    sema_core_generated_core_type(target, binding.original) -> {
+                        sema_core_generated_register_core_name(&markers, binding.local, target, binding.original)
+                    }
+                    else -> {
+                        sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(binding.local))
+                    }
+                }
             }
         }
-    } else {
-        loop binding in row.bindings -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(binding.local))
+        else -> {
+            loop binding in row.bindings -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(binding.local))
+        }
     }
 }
 
@@ -247,10 +256,10 @@ fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registratio
     sema_core_generated_marker_add(&markers, sema_core_generated_context_marker("shared"))
     loop nominal in registration_module.nominals -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(nominal.symbol.name))
     if !sema_core_generated_shadowed(markers, "Shared") -> sema_core_generated_marker_add(&markers, sema_core_generated_constructor_marker("Shared"))
-    loop type_name in [String]{"Pool", "Cell", "Id"} -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.mem", type_name)
-    loop type_name in [String]{"Vec", "Matrix"} -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.compute", type_name)
-    loop type_name in [String]{"Pool", "Cell", "Id"} -> sema_core_generated_register_core_qualified(&markers, "core.mem", type_name)
-    loop type_name in [String]{"Vec", "Matrix"} -> sema_core_generated_register_core_qualified(&markers, "core.compute", type_name)
+    loop type_name in ([String]{"Pool", "Cell", "Id"}) -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.mem", type_name)
+    loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.compute", type_name)
+    loop type_name in ([String]{"Pool", "Cell", "Id"}) -> sema_core_generated_register_core_qualified(&markers, "core.mem", type_name)
+    loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_core_qualified(&markers, "core.compute", type_name)
     loop row in registration_module.imports -> sema_core_generated_register_import(&markers, row)
 }
 
@@ -274,23 +283,29 @@ fn sema_core_generated_scope_import_markers(declarations: [ImportDecl], markers:
         if declaration.kind == {
             .Module(name, _) -> {
                 alias := if declaration.alias != "" -> declaration.alias else -> name
-                if sema_core_generated_core_module(name) {
-                    sema_core_generated_register_core_alias(&markers, alias, name)
-                } else {
-                    loop type_name in [String]{"Pool", "Cell", "Id", "Vec", "Matrix"} -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker("{alias}.{type_name}"))
+                if {
+                    sema_core_generated_core_module(name) -> {
+                        sema_core_generated_register_core_alias(&markers, alias, name)
+                    }
+                    else -> {
+                        loop type_name in ([String]{"Pool", "Cell", "Id", "Vec", "Matrix"}) -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker("{alias}.{type_name}"))
+                    }
                 }
             }
             .Unqualified(module_alias, _, items, _, _) -> {
-                if sema_core_generated_core_module(module_alias) {
-                    loop item in items {
-                        local := item.alias ?? item.original
-                        sema_core_generated_register_core_name(&markers, local, module_alias, item.original)
+                if {
+                    sema_core_generated_core_module(module_alias) -> {
+                        loop item in items {
+                            local := item.alias ?? item.original
+                            sema_core_generated_register_core_name(&markers, local, module_alias, item.original)
+                        }
                     }
-                } else {
-                    loop item in items {
-                        local := item.alias ?? item.original
+                    else -> {
+                        loop item in items {
+                            local := item.alias ?? item.original
 
-                        sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(local))
+                            sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(local))
+                        }
                     }
                 }
             }
@@ -315,8 +330,8 @@ fn sema_core_generated_marker_copy(markers: [String]) -> [String] {
 
 
 fn sema_core_generated_struct_has_cli(definition: StructDef) -> Bool {
-    loop derive in definition.derives {
-        if derive.name == "CLI" -> return true
+    loop derive_item in definition.derives {
+        if derive_item.name == "CLI" -> return true
     }
     false
 }
@@ -775,13 +790,16 @@ pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -
 }
 
 fn sema_core_collect_typed_literal_body(body: TypedLitBody, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
-    loop field in body.fields -> sema_core_collect_expr(field.value, imports, registered, &used, &spans, &callbacks)
-    loop element in body.elements -> sema_core_collect_expr(element, imports, registered, &used, &spans, &callbacks)
-    loop entry in body.entries {
-        sema_core_collect_expr(entry.key, imports, registered, &used, &spans, &callbacks)
-        sema_core_collect_expr(entry.value, imports, registered, &used, &spans, &callbacks)
+    if body == {
+        .Fields(fields) -> loop field in fields -> sema_core_collect_expr(field.value, imports, registered, &used, &spans, &callbacks)
+        .Elements(elements) -> loop element in elements -> sema_core_collect_expr(element, imports, registered, &used, &spans, &callbacks)
+        .Entries(entries) -> loop entry in entries {
+            sema_core_collect_expr(entry.key, imports, registered, &used, &spans, &callbacks)
+            sema_core_collect_expr(entry.value, imports, registered, &used, &spans, &callbacks)
+        }
+        .Value(value) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+        .ByteText(_) | .Empty -> {}
     }
-    if body.value != None -> sema_core_collect_expr(body.value ?? Expr.Unit(Span{start: 0, end: 0}), imports, registered, &used, &spans, &callbacks)
 }
 
 fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
@@ -801,10 +819,15 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
             }
             if call.name == "print" {
-                lone_string := if call.args.len() == 1 -> if call.args[0].expr == {
-                    .Str(_, _) -> true
+                lone_string := if {
+                    call.args.len() == 1 -> {
+                        if call.args[0].expr == {
+                            .Str(_, _) -> true
+                            else -> false
+                        }
+                    }
                     else -> false
-                } else -> false
+                }
                 if !lone_string -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
             }
             row :: sema_core_import_find(imports, call.name)
@@ -858,14 +881,17 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             if method == "cmd" && (recv_name == "" || recv_name == "UiShortcut") -> sema_core_note_usage(&used, &spans, "core.ui.host::shortcut", Val(method_span))
             if recv_name != "" {
                 row :: sema_core_import_find(imports, "{recv_name}.{method}")
-                if row != None {
-                    imported := row ?? SemaCoreImport{alias: "", module_name: "", item: None, span: method_span}
-                    if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported, method), Val(method_span))
-                } else {
-                    row2 :: sema_core_import_find(imports, recv_name)
-                    if row2 != None {
-                        imported2 := row2 ?? SemaCoreImport{alias: "", module_name: "", item: None, span: method_span}
-                        if sema_core_import_is_core(imported2.module_name) && sema_core_import_usage_is_known(imported2, method) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported2, method), Val(method_span))
+                if {
+                    row != None -> {
+                        imported := row ?? SemaCoreImport{alias: "", module_name: "", item: None, span: method_span}
+                        if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported, method), Val(method_span))
+                    }
+                    else -> {
+                        row2 :: sema_core_import_find(imports, recv_name)
+                        if row2 != None {
+                            imported2 := row2 ?? SemaCoreImport{alias: "", module_name: "", item: None, span: method_span}
+                            if sema_core_import_is_core(imported2.module_name) && sema_core_import_usage_is_known(imported2, method) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported2, method), Val(method_span))
+                        }
                     }
                 }
             }
@@ -928,11 +954,14 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
         .CompareChain(operands, _, _, _) -> loop value in operands -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
         .Slice(base, start, end, range, _) -> {
             sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
-            if range != None {
-                sema_core_collect_expr(range ?? Expr.Unit(Span{start: 0, end: 0}), imports, registered, &used, &spans, &callbacks)
-            } else {
-                sema_core_collect_expr(start, imports, registered, &used, &spans, &callbacks)
-                sema_core_collect_expr(end, imports, registered, &used, &spans, &callbacks)
+            if {
+                range != None -> {
+                    sema_core_collect_expr(range ?? Expr.Unit(Span{start: 0, end: 0}), imports, registered, &used, &spans, &callbacks)
+                }
+                else -> {
+                    sema_core_collect_expr(start, imports, registered, &used, &spans, &callbacks)
+                    sema_core_collect_expr(end, imports, registered, &used, &spans, &callbacks)
+                }
             }
         }
         .Range(start, end, _, _) -> {

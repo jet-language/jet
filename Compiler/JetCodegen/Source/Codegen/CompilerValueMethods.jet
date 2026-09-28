@@ -1,0 +1,70 @@
+// Source-owned lowering for compiler query value projections.
+// Every accepted method is lowered to the same static core.host route used by
+// the evaluator; no native compiler callback is emitted.
+
+fn jet_codegen_compiler_value_owner(ty: Type) -> ?String {
+    if ty == {
+        .Tagged(_, inner) -> return jet_codegen_compiler_value_owner(inner)
+        .Named(name) | .Apply(name, _) -> {
+            parts := name.split("::")
+            canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
+            dotted := canonical.split(".")
+            leaf := if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
+            if leaf == "" -> return None
+            return Val(leaf)
+        }
+        else -> None
+    }
+}
+
+fn jet_codegen_compiler_value_record_method(owner: String, method: String) -> Bool {
+    if owner == "CompilerLexed" -> return method == "source" || method == "tokens" || method == "diagnostics"
+    if owner == "CompilerSyntaxTree" -> return method == "source" || method == "items" || method == "diagnostics"
+    if owner == "CompilerChecked" -> return method == "source" || method == "syntax" || method == "diagnostics" || method == "functions" || method == "effects" || method == "semantic_index"
+    if owner == "CompilerSourceMap" -> return method == "sources" || method == "generated_lines"
+    if owner == "CompilerPackageError" -> return method == "code" || method == "message" || method == "file" || method == "cause"
+    if owner == "CompilerDependency" -> return method == "name" || method == "source"
+    if owner == "CompilerPackageTarget" -> return method == "name" || method == "targets"
+    if owner == "CompilerPackageOutput" -> return method == "name" || method == "kind" || method == "entry"
+    if owner == "CompilerBuildProfile" -> return method == "name" || method == "optimize" || method == "debug_info" || method == "small" || method == "panic"
+    if owner == "CompilerManifest" || owner == "CompilerPackage" -> return method == "schema_version" || method == "file" || method == "jet" || method == "edition" || method == "description" || method == "license" || method == "repository" || method == "layer" || method == "target" || method == "dependencies" || method == "packages" || method == "outputs" || method == "build_profiles"
+    if owner == "CompilerLockedPackage" -> return method == "name" || method == "version" || method == "source_kind" || method == "fingerprint" || method == "source" || method == "revision" || method == "content_hash" || method == "layer" || method == "inferred_layer" || method == "dependencies"
+    if owner == "CompilerLock" -> return method == "schema_version" || method == "version" || method == "file" || method == "root_dependencies" || method == "packages"
+    if owner == "CompilerKeyValue" -> return method == "key" || method == "value"
+    if owner == "CompilerProfile" -> return method == "name" || method == "extends" || method == "packages" || method == "sources" || method == "collisions"
+    if owner == "CompilerProfileSet" -> return method == "schema_version" || method == "file" || method == "profiles"
+    false
+}
+
+fn jet_codegen_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool {
+    if owner == "ProgramInfo" && arg_count == 0 -> return method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes"
+    if owner == "FunctionInfo" && arg_count == 0 -> return method == "reaches_panic"
+    if owner == "EffectInfo" && arg_count == 1 -> return method == "has"
+    if arg_count == 0 -> return jet_codegen_compiler_value_record_method(owner, method)
+    false
+}
+
+fn jet_codegen_compiler_value_host_method(receiver: Type, method: String, arg_count: Int) -> Bool {
+    owner :: jet_codegen_compiler_value_owner(receiver) ?? return false
+    jet_codegen_compiler_value_method_supported(owner, method, arg_count)
+}
+
+fn jet_codegen_compiler_value_borrow_mask(arg_count: Int) -> [Bool] {
+    mask := [Bool]{true}
+    loop _ in 1..<arg_count -> mask.push(false)
+    mask
+}
+
+fn jet_codegen_lower_compiler_value_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MirValueId {
+    owner :: jet_codegen_compiler_value_owner(receiver.ty) ?? panic("checked compiler value host method has no nominal receiver")
+    if !jet_codegen_compiler_value_method_supported(owner, method, args.len()) -> panic("checked compiler value host method has no canonical route")
+    receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Read)
+    lowered := [MirCallArg]{receiver_arg}
+    loop argument in args {
+        value := jet_codegen_lower_expr(&builder, argument)
+        lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+    }
+    member := "{owner}.{method}"
+    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), jet_codegen_compiler_value_borrow_mask(lowered.len()), None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(MirCallee.Prelude(route), lowered, [MirType]{}))
+}

@@ -52,7 +52,7 @@ a competitive win when the peer can copy the idea in its next release.
 
 ## Output
 
-Write one Markdown report under `docs/research/` through the
+Write one Markdown report under `Docs/research/` through the
 project-approved non-serve CLI. Read `.agents/skills/_shared/audit-dispositions.md`
 and include its required finding-disposition table. Do not create Tower work,
 ballots, or implementation edits unless the owner explicitly asks. Report

@@ -320,7 +320,7 @@ fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
     }
     let dir = isolated_cwd("ruby_bind_round_trip");
     let script = dir.join("ops.rb");
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/ruby");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/ruby");
     fs::copy(example.join("ops.rb"), &script).unwrap();
     let bind = Command::new(jet())
         .args(["inspect", "bind", "ruby"])
@@ -425,7 +425,7 @@ fn php_bind_runs_a_persistent_bounded_worker_pool() {
     }
     let dir = isolated_cwd("php_bind_pool");
     let script = dir.join("ops.php");
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/php");
     fs::copy(example.join("ops.php"), &script).unwrap();
     let bind = Command::new(jet())
         .args(["inspect", "bind", "php"])
@@ -536,7 +536,7 @@ fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
     }
     let dir = isolated_cwd("r_bind_round_trip");
     let script = dir.join("ops.R");
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/r");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/r");
     fs::copy(example.join("ops.R"), &script).unwrap();
     fs::OpenOptions::new().append(true).open(&script).unwrap().write_all(br#"
 replace_plot <- function(value) {
@@ -1019,7 +1019,7 @@ fn man_page_golden() {
 #[test]
 fn retired_emit_rust_flag_teaches_canonical_command() {
     let out = Command::new(jet())
-        .args(["run", "examples/features/basics/hello.jet", "--emit-rust"])
+        .args(["run", "Examples/features/basics/hello.jet", "--emit-rust"])
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

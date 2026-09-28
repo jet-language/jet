@@ -9,14 +9,17 @@ fn jet_rust_emit_store_result(result: ?MirValueId, expression: String) -> String
 
 fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> MirPanicLoc {
     line := 0
-    if instruction.source_line == .Val(source_line) {
+    if instruction.source_line == {
+        .Val(source_line) -> {
         line = source_line
-    } else {
+        }
+        else -> {
         source := None
         loop row in ctx.program.source_files {
             if row.id == function.source_file -> source = Val(row)
         }
-        if source == .Val(source_row) {
+        if source == {
+            .Val(source_row) -> {
             text :: source_row.source
             line = 1
             offset := 0
@@ -25,9 +28,12 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFun
                 if byte == (U8{10}) -> line += 1
                 offset += 1
             }
-        } else {
+            }
+            else -> {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR source file row is missing", "checked panic locations must resolve through the function source-file identity", Val(function.span))
+            }
         }
+    }
     }
     MirPanicLoc{file: function.source_file, line: line, column: 0}
 }
@@ -59,15 +65,20 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: Mir
             if mir_operation_value_uses(instruction.operation).contains(value) {
                 allowed := false
                 if instruction.operation == {
-                    .Convert(_, parameters, _, MirConversion.Prelude(call, _, _)) -> {
-                        route_member := ""
-                        loop route in ctx.program.prelude_calls {
-                            if route.id == call -> route_member = route.member
-                        }
-                        if route_member.starts_with("conversion_") {
-                            loop index in 0..parameters.len() {
-                                if index < 4 && parameters[index] == value -> allowed = true
+                    .Convert(_, parameters, _, conversion) -> {
+                        if conversion == {
+                            .Prelude(call, _, _) -> {
+                                route_member := ""
+                                loop route in ctx.program.prelude_calls {
+                                    if route.id == call -> route_member = route.member
+                                }
+                                if route_member.starts_with("conversion_") {
+                                    loop index in 0..parameters.len() {
+                                        if index < 4 && parameters[index] == value -> allowed = true
+                                    }
+                                }
                             }
+                            else -> {}
                         }
                     }
                     else -> {}
@@ -87,9 +98,14 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, in
         if jet_rust_emit_partial_projection_only(ctx, function, value) -> return lines
     }
     if instruction.operation == {
-        .Constant(MirConstant.String(_)) -> {
-            if instruction.result == .Val(value) {
-                if jet_rust_emit_is_unit_ratio_parameter(ctx, function, value) -> return lines
+        .Constant(constant) -> {
+            if constant == {
+                .String(_) -> {
+                    if instruction.result == .Val(value) {
+                        if jet_rust_emit_is_unit_ratio_parameter(ctx, function, value) -> return lines
+                    }
+                }
+                else -> {}
             }
         }
         else -> {}
@@ -108,10 +124,13 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, in
                 if row.id == place && row.projections.len() == 0 {
                     if row.base == {
                         .Local(local) -> {
-                            if jet_rust_emit_local_uninit_fixed_type(function, local) != None {
+                            if {
+                                jet_rust_emit_local_uninit_fixed_type(function, local) != None -> {
                                 lines.push("{jet_rust_emit_local_slot(local)} = Some({ctx.config.root_prefix}jet_mem::JetUninitFixed::new());")
-                            } else {
+                                }
+                                else -> {
                                 lines.push("{jet_rust_emit_local_slot(local)} = None;")
+                                }
                             }
                         }
                         .Temporary(value) -> lines.push("{jet_rust_emit_value_slot(value)} = None;")
@@ -134,9 +153,11 @@ fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFuncti
     if value == .Val(operand) -> return jet_rust_emit_value_move(operand)
     if mir_type_is_unit(function.return_type) -> return "()"
     if function.failure == {
-        .Result(success, _) -> mir_type_is_unit(success)
-        else -> false
-    } -> return "Ok(())"
+        .Result(success, _) -> {
+            if mir_type_is_unit(success) -> return "Ok(())"
+        }
+        else -> {}
+    }
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR non-unit Return has no value", "checked Return terminators need an operand unless the full return is Unit or the Result success type is Unit", Val(function.span))
     "unreachable!(\"missing MIR Return value\")"
 }
@@ -245,22 +266,28 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, blo
         }
         .Return(value) -> {
             loop line in jet_rust_emit_drops(ctx, function, MirDropEdge.Return) -> lines.push(line)
-            if function.generator != None {
+            if {
+                function.generator != None -> {
                 if value != None -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR generator return carries a value", "generator returns must terminate the stream without a value", Val(function.span))
                 lines.push("return;")
-            } else {
+                }
+                else -> {
                 lines.push("return {jet_rust_emit_return_expression(ctx, function, value)};")
+                }
             }
         }
         .Yield(value, resume) -> {
             loop line in jet_rust_emit_drops(ctx, function, MirDropEdge.Normal) -> lines.push(line)
-            if function.generator == None {
+            if {
+                function.generator == None -> {
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR yield appears in a non-generator function", "the checked generator facts must accompany every Yield terminator", Val(function.span))
                 lines.push("unreachable!(\"invalid MIR yield\");")
-            } else {
+                }
+                else -> {
                 lines.push("let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(value)});")
                 lines.push(jet_rust_emit_target_assignment(resume))
                 lines.push("continue 'jet_mir_dispatch;")
+                }
             }
         }
         .Break(target, value) -> {
@@ -352,13 +379,16 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MirFunction, block: M
         }
         if skip -> next
         instruction_lines :: jet_rust_emit_instruction(ctx, function, instruction)
-        if active && instruction_lines.len() > 0 {
+        if {
+            active && instruction_lines.len() > 0 -> {
             lines.push("    #[cfg(not(jet_release))]")
             lines.push("    {{")
             loop line in instruction_lines -> lines.push("        {line}")
             lines.push("    }}")
-        } else {
+            }
+            else -> {
             loop line in instruction_lines -> lines.push("    {line}")
+            }
         }
     }
     terminator_lines :: jet_rust_emit_terminator(ctx, function, block.id, block.terminator)

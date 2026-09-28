@@ -12,9 +12,9 @@ lane, salvage only a coherent owned patch, and rebrief a smaller slice. Use
 `hub jobs` or `hub wait` with pid-aware status; a log is not a process and a
 missing completion marker is not failure by itself.
 
-OMP `task` is the first dispatch path. If it cannot run the required role,
-record the exact harness failure in `JET_OMP_FALLBACK_REASON` before a bounded
-fallback. Prompts do not select a model; role selection remains in `AGENTS.md`.
+Use the host's task tool as the first dispatch path. If it cannot run the
+required role, record the exact harness failure in the handoff before a bounded
+fallback. Prompts do not select a model.
 
 ## Disk and memory
 
@@ -24,12 +24,12 @@ Keep scratch at `~/.cache/jet-test-scratch` and logs/briefs at
 large logs, or test scratch. Monitor available RAM, swap, disk, and target size.
 Respect `JET_TARGET_CAP_GB` (120 GiB by default).
 
-Run repository commands through `scripts/agent/jet-env`. For source checks,
+Run repository commands through `Tools/agent/jet-env`. For source checks,
 use the checkout-aware commands in the brief, for example:
 
 ```sh
-scripts/agent/jet-env jet check path/to/file.jet
-scripts/agent/jet-env jet fmt --check path/to/file.jet
+Tools/agent/jet-env jet check path/to/file.jet
+Tools/agent/jet-env jet fmt --check path/to/file.jet
 ```
 
 Before any runtime claim, build a fresh binary through the wrapper and exercise

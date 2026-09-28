@@ -1,0 +1,664 @@
+use core.files as fs
+// FEATURE_CLAIMS:BEGIN
+// FEATURE_CLAIM: claim.syntax-law | Site examples use the documented Jet surface and source corpus.
+// FEATURE_CLAIM: claim.examples-spec | Site examples point to executable golden-tested corpus files.
+// FEATURE_CLAIM: claim.native-language | The site describes Jet's compiled, memory-safe source model.
+// FEATURE_CLAIM: claim.tier-parity | The site names measured execution tiers and the checked web subset.
+// FEATURE_CLAIM: claim.static-guarantees | Safety and typed-failure claims use the shared facts evidence.
+// FEATURE_CLAIM: claim.discard-control | Failure handling is explicit in the documented examples.
+// FEATURE_CLAIM: claim.tooling-cli | Install, check, run, test, fix, and explain commands are documented.
+// FEATURE_CLAIM: claim.package-build | Build, package, and environment workflows have canonical owners.
+// FEATURE_CLAIM: claim.core-foundation | Core examples expose reachable filesystem and diagnostic APIs.
+// FEATURE_CLAIM: claim.core-concurrency | The site labels concurrency as a checked, structured example.
+// FEATURE_CLAIM: claim.core-files-data | File examples show explicit success and failure paths.
+// FEATURE_CLAIM: claim.core-ui-web | The site presents a web-widget example while browser/UI parity remains open.
+// FEATURE_CLAIM: claim.product-boundaries | Jetpack is documented as a separate environment product.
+// FEATURE_CLAIMS:END
+
+fn current_attr(link: String, current: String) -> HTML {
+    if link == current -> return HTML{" aria-current=\"page\""}
+    HTML{""}
+}
+
+fn error_href(prefix: String) -> String { "{prefix}e/index.html" }
+
+fn code_card(file: String, code: HTML) -> HTML { HTML{""" }
+    <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div></div>
+    """}
+
+fn code_card_out(file: String, code: HTML, command: String, output: HTML) -> HTML { HTML{""" }
+    <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div><div class="code-out"><span class="ps">$ jet run {command}</span><br>{output}</div></div>
+    """}
+
+fn cta_buttons(prefix: String) -> HTML { HTML{""" }
+    <div class="hero-ctas"><a class="btn btn-primary" href="{prefix}install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a><a class="btn btn-ghost" href="https://github.com/jet-language/jet">GitHub</a></div>
+    """}
+
+fn page_shell(title: String, description: String, body: HTML, prefix: String, current: String) -> HTML {
+    tour_attr :: current_attr("tour", current)
+    install_attr :: current_attr("install", current)
+    error_attr :: current_attr("error", current)
+    error_link :: error_href(prefix)
+    HTML{"""
+    <!doctype html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{title}</title>
+    <meta name="description" content="{description}">
+    <meta property="og:title" content="Jet: safe at any speed">
+    <meta property="og:description" content="A memory-safe compiled language. No ceremony to start, full control when you want it.">
+    <meta property="og:image" content="https://jet-lang.dev/assets/jet-logo.png">
+    <meta property="og:url" content="https://jet-lang.dev/">
+    <link rel="icon" type="image/svg+xml" href="{prefix}assets/favicon.svg">
+    <link rel="stylesheet" href="{prefix}assets/site.css">
+    </head>
+    <body>
+    <header class="wrap nav">
+      <a class="nav-brand" href="{prefix}index.html" aria-label="Jet home">
+        <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+        <span class="word">jet</span>
+      </a>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="{prefix}tour.html"{tour_attr}>Tour</a></li>
+          <li><a href="{prefix}install.html"{install_attr}>Install</a></li>
+          <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+    {body}
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-grid">
+        <a class="nav-brand" href="{prefix}index.html" aria-label="Jet home">
+          <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+          <span class="word">jet</span>
+        </a>
+        <ul class="footer-links">
+          <li><a href="{prefix}tour.html"{tour_attr}>Tour</a></li>
+          <li><a href="{prefix}install.html"{install_attr}>Install</a></li>
+          <li><a href="{error_link}"{error_attr}>Error codes</a></li>
+          <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+        </ul>
+        <p class="made">This page was generated by Docs/site/generate.jet, a Jet program.</p>
+      </div>
+    </footer>
+    <script src="{prefix}assets/site.js"></script>
+    </body>
+    </html>
+    """}
+}
+
+fn hello_code() -> HTML { HTML{""" }
+    <span class="c">// Your first program. `fn run` is where running starts.</span>
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        <span class="f">print</span>(<span class="s">"hello, world"</span>)
+        <span class="k">return</span>
+    }}
+    """}
+
+fn values_code() -> HTML { HTML{""" }
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        name <span class="g">::</span> <span class="s">"Jet"</span>
+        year <span class="g">::</span> <span class="n">2026</span>
+        <span class="f">print</span>(<span class="s">"values: {{name}} {{year}}"</span>)
+        count <span class="g">:=</span> <span class="n">0</span>
+        count += <span class="n">3</span>
+        <span class="f">print</span>(<span class="s">"count: {{count}}"</span>)
+    }}
+    """}
+
+fn signature_code() -> HTML { HTML{""" }
+    <span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
+    <span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
+
+    <span class="k">fn</span> <span class="f">bump</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {{
+        <span class="f">print</span>(n)
+        n + <span class="n">1</span>
+    }}
+
+    <span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> {{ <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }}
+    """}
+
+fn pattern_code() -> HTML { HTML{""" }
+    <span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {{
+        <span class="k">if</span> c == {{
+            .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{
+                <span class="c">// D-PATO: or-pattern — Active and Reconnecting share the same body.</span>
+                <span class="k">return</span> <span class="s">"live:{{id}}"</span>
+            }}
+            .Idle(_) <span class="g">-&gt;</span> {{
+                <span class="c">// D-PATW: wildcard slot — Idle's payload doesn't matter here.</span>
+                <span class="k">return</span> <span class="s">"idle"</span>
+            }}
+            .Closed <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"closed"</span>
+            <span class="k">else</span> <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"unknown"</span>
+        }}
+    }}
+    """}
+
+fn failure_code() -> HTML { HTML{""" }
+    <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+        <span class="f">print</span>(<span class="s">"port {{port}}"</span>)
+    }}
+    """}
+
+fn defaults_code() -> HTML { HTML{""" }
+    <span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
+    <span class="c">// `height: Int{{width}}` fills height with whatever width was given.</span>
+    <span class="k">struct</span> <span class="t">Rect</span> {{
+        width: <span class="t">Int</span>
+        height: <span class="t">Int</span>
+
+        <span class="k">fn</span> <span class="f">square</span>(width: <span class="t">Int</span>, height: <span class="t">Int</span>{{width}}) <span class="t">Rect</span> <span class="g">-&gt;</span> {{width: width, height: height}}
+    }}
+
+    <span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
+
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        s <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>)
+        <span class="f">print</span>(<span class="s">"{{s.width}}x{{s.height}}"</span>)
+        r <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>, <span class="n">3</span>)
+        <span class="f">print</span>(<span class="s">"{{r.width}}x{{r.height}}"</span>)
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
+    }}
+    """}
+
+fn loops_code() -> HTML { HTML{""" }
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        values <span class="g">::</span> [<span class="t">Int</span>]{{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}}
+        doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
+        even <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
+        prefix <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> {{
+            <span class="k">if</span> value &gt; <span class="n">3</span> <span class="g">-&gt;</span> <span class="k">break</span>
+            value
+        }}
+        nested <span class="g">::</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
+
+        by_value <span class="g">:=</span> [<span class="t">Int</span>:<span class="t">Int</span>]{{}}
+        <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> by_value.<span class="f">add</span>(value, value * <span class="n">10</span>).<span class="f">drop</span>(<span class="s">"keys are unique"</span>)
+        unique <span class="g">::</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
+        lazy <span class="g">::</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
+    """}
+
+fn concurrency_code() -> HTML { HTML{""" }
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        <span class="c">// Join discharges the duty and yields the value.</span>
+        joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+        <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
+
+        <span class="c">// `all` consumes every handle in the list.</span>
+        results <span class="g">::</span> <span class="k">task</span>.<span class="f">all</span> {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+        <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])
+
+        <span class="k">task</span>.<span class="f">group</span> race_group {{
+            <span class="c">// `race` consumes both handles; the loser is cancelled.</span>
+            <span class="f">print</span>(<span class="k">task</span>.<span class="f">race</span> {{<span class="f">slow_one</span>(), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"race failed"</span>))
+        }}
+
+        <span class="k">task</span>.<span class="f">group</span> any_group {{
+            <span class="c">// `any` consumes both handles and takes the first success.</span>
+            <span class="f">print</span>(<span class="k">task</span>.<span class="f">any</span> {{<span class="f">slow_one</span>(), <span class="f">work</span>(<span class="n">4</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"any failed"</span>))
+        }}
+
+        <span class="c">// `detach` discharges the duty for fire-and-forget work.</span>
+        background <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">6</span>)
+        background.<span class="f">detach</span>()
+        <span class="f">print</span>(<span class="s">"detached"</span>)
+    }}
+    """}
+
+fn files_code() -> HTML { HTML{""" }
+    <span class="k">use</span> core.files <span class="k">as</span> fs
+
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        path <span class="g">::</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
+        wrote <span class="g">::</span> fs.<span class="f">write</span>(path, <span class="s">"hello\\njet"</span>) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"write failed"</span>)
+        text <span class="g">::</span> fs.<span class="f">read</span>(path) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"read failed"</span>)
+        <span class="f">print</span>(text.<span class="f">to_upper</span>())
+        <span class="f">print</span>(fs.<span class="f">exists</span>(path))
+    }}
+    """}
+
+fn diag_block() -> HTML { HTML{""" }
+    <div class="diag"><span class="e">Error [E0112]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
+      <span class="loc">--&gt; broken.jet:4:26</span>
+        |
+      4 |     print(plan("Lisbon", "three"))
+        |                          <span class="pointer">^^^^^^^</span>
+     <span class="why">Why: every argument must match its parameter's type</span>
+     <span class="fix">Fix: use Int (a whole number) here</span>
+    <span class="more">More: jet-lang.dev/e/E0112</span></div>
+    """}
+
+fn index_body() -> HTML { HTML{""" }
+      <section class="wrap hero">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">// pre-release, built in the open</p>
+            <h1>Safe at any <span class="hot">speed.</span></h1>
+            <p class="hero-sub">Jet is a <strong>memory-safe compiled language</strong> with a beginner-first surface and explicit expert controls. The compiler checks source before producing native code. Examples show the language's current supported path without promising production readiness.</p>
+            <div class="hero-ctas">
+              <a class="btn btn-primary" href="install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a>
+              <a class="btn btn-ghost" href="tour.html">Read the tour</a>
+            </div>
+            <p class="hero-note">The example gives two readings of one program; the source and current checks define what is supported.</p>
+          </div>
+          <div class="lens" id="hero-lens">
+            <div class="lens-bar">
+              <span class="lens-file">hero.jet</span>
+              <div class="lens-toggle" role="group" aria-label="Choose a reading of this program">
+                <button type="button" data-facet="beginner" aria-pressed="true">Beginner</button>
+                <button type="button" data-facet="expert" aria-pressed="false">Expert</button>
+              </div>
+            </div>
+            <div class="lens-code"><pre><code><span class="c">// hero.jet is a complete program. Run it: jet run hero.jet</span>
+    <span class="k">fn</span> <span class="f">plan</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{{<span class="n">2</span>}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{dest}}, party of {{seats}}"</span>
+    <span class="xr">          &#9492; default rides the type: plan("Lisbon") seats 2</span>
+    <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+    <span class="xr">             &#9492; the whole failure contract, in the signature</span>
+    <span class="k">fn</span> <span class="f">run</span>() {{
+    <span class="xr">      &#9492; inferred effect row -[IO]&gt;: this program prints</span>
+        port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+    <span class="xr">                        &#9492; ?? discharges the failure or it propagates</span>
+        <span class="f">print</span>(<span class="f">plan</span>(<span class="s">"Lisbon"</span>, <span class="n">3</span>))
+        <span class="f">print</span>(<span class="s">"listening on {{port}}"</span>)
+    }}</code></pre></div>
+            <ul class="lens-notes" data-facet="beginner">
+              <li>The example fits in one file, with no project setup shown.</li>
+              <li><code>::</code> binds a value. Strings fill in <code>{{name}}</code> slots themselves.</li>
+              <li>If <code>load_port</code> fails with no fallback, the program reports the error and exits 1.</li>
+            </ul>
+            <ul class="lens-notes" data-facet="expert" hidden>
+              <li>Effects are typed. <code>run()</code> infers <code>-[IO]&gt;</code>; declare a row to cap what a function may touch.</li>
+              <li>Failure is part of the signature. <code>!IOError</code> is the entire contract; unchecked exceptions do not exist.</li>
+              <li>Safety facts are explicit at the sites where expert controls are used.</li>
+            </ul>
+            <div class="lens-run"><span class="ps">$ jet run hero.jet</span><br><span class="out">Lisbon, party of 3<br>listening on 8080</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="safety">
+        <p class="eyebrow">// the deal</p>
+        <h2>No footguns. Not hidden. Gone.</h2>
+        <p class="section-lead">Memory safety and type safety are <strong>never configurable</strong>. Undefined behavior is not a beginner mistake you learn to avoid; in Jet it is structurally out of reach until an expert asks for it in writing.</p>
+        <div class="pillars">
+          <div class="pillar">
+            <h3>Footguns are opt-in</h3>
+            <p>When you need raw memory or exact layout, the escape hatch exists, and it signs its name. Every unsafe region carries a written reason, at the site, on the record.</p>
+            <div class="code"><div class="code-body"><pre><code><span class="g">#Unsafe</span>(<span class="s">"read a device register"</span>) {{
+        <span class="c">// audited, on the record</span>
+    }}</code></pre></div></div>
+          </div>
+          <div class="pillar">
+            <h3>A documented form for each operation</h3>
+            <p>The examples use one documented form for each operation, so the syntax stays visible.</p>
+            <div class="code"><div class="code-head"><span>Examples/features/basics/pattern_matching.jet</span></div><div class="code-body"><pre><code><span class="k">if</span> c == {{
+        .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{ <span class="k">return</span> <span class="s">"live:{{id}}"</span> }}
+        .Idle(_) <span class="g">-&gt;</span> {{ <span class="k">return</span> <span class="s">"idle"</span> }}
+        .Closed <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"closed"</span>
+        <span class="k">else</span> <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"unknown"</span>
+    }}</code></pre></div></div>
+          </div>
+          <div class="pillar">
+            <h3>Errors are part of the product</h3>
+            <p>Every diagnostic has a registered code, a what, a why, and a fix, and its text is snapshot-tested like any feature. This one is real:</p>
+            <div class="diag"><span class="e">Error [E0112]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
+      <span class="loc">--&gt; broken.jet:4:26</span>
+        |
+      4 |     print(plan("Lisbon", "three"))
+        |                          <span class="pointer">^^^^^^^</span>
+     <span class="why">Why: every argument must match its parameter's type</span>
+     <span class="fix">Fix: use Int (a whole number) here</span>
+    <span class="more">More: jet-lang.dev/e/E0112</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="spec">
+        <p class="eyebrow">// proof over promises</p>
+        <h2>The examples are the spec.</h2>
+        <p class="section-lead">Feature examples are runnable corpus files with golden-tested output. This page names the source files and labels the outputs shown here; the golden harness catches drift in those examples.</p>
+        <div class="duo">
+          <div class="duo-item">
+            <h3>Defaults ride the type</h3>
+            <p>A default value lives on the type, and it may name an earlier parameter. Call <code>box_dims(4)</code> and get a cube.</p>
+            <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
+
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
+        <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
+    }}</code></pre></div><div class="code-out"><span class="ps">$ jet run cube.jet</span><br>4x4x4<br>4x2x2<br>4x2x1</div></div>
+          </div>
+          <div class="duo-item">
+            <h3>Explicit task lifetimes</h3>
+            <p>The example shows explicit join, <code>all</code>, <code>race</code>, <code>any</code>, and detach handling for spawned tasks.</p>
+            <div class="code"><div class="code-head"><span>Examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+    <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
+
+    results <span class="g">::</span> <span class="k">task</span>.all {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+    <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])</code></pre></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="live">
+        <p class="eyebrow">// web target example</p>
+        <h2>A web target, still a checked subset.</h2>
+        <p>The site presents a web-widget example for the early <code>jet build --target web</code> target; broader browser/UI parity remains open.</p>
+        <div class="live">
+          <div class="live-frame">
+            <iframe src="widget/index.html" title="A Jet web-widget example" loading="lazy"></iframe>
+            <div class="live-tag">widget/counter.jet, web-target example</div>
+          </div>
+          <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.ui <span class="k">as</span> ui
+    <span class="k">use</span> core.reactive <span class="k">as</span> reactive
+    <span class="g">#[Target(Web), HTML("shell.html")]</span>
+
+    <span class="k">fn</span> <span class="f">run</span>() {{
+        count <span class="g">::</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
+        ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {{
+            n <span class="g">:=</span> count.<span class="f">get</span>()
+            color <span class="g">:=</span> <span class="s">"#2E2E33"</span>
+            <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = <span class="s">"#E8232A"</span>
+            backend <span class="g">::</span> ui.<span class="f">null_backend</span>()
+            tree <span class="g">::</span> ui.<span class="f">box</span>([
+                ui.<span class="f">node_color</span>(<span class="s">"count: {{n}}"</span>, <span class="n">160.0</span>, <span class="n">40.0</span>, color),
+                ui.<span class="f">button</span>(<span class="s">"Add one"</span>, on_click: () <span class="g">-&gt;</span> {{
+                    count.<span class="f">set</span>(count.<span class="f">get</span>() + <span class="n">1</span>)
+                }})
+            ])
+            ui.<span class="f">mount</span>(backend, tree, ui.<span class="f">constraint</span>(<span class="n">0.0</span>, <span class="n">0.0</span>, <span class="n">300.0</span>, <span class="n">120.0</span>))
+        }})
+    }}</code></pre></div></div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="jetpack">
+        <p class="eyebrow">// jetpack</p>
+        <h2>The environment is part of the program.</h2>
+        <div class="split">
+          <div class="prose">
+            <p><strong>jetpack is Jet's environment engine.</strong> Projects declare tools in <code>env.jet</code>; <code>jetpack env</code> realizes the declared environment as a project shell.</p>
+            <p><strong>Try a named tool.</strong> <code>jetpack use</code> can build an ephemeral shell for the packages you name; support remains subject to the current environment backend.</p>
+            <p><strong>Builds record their inputs.</strong> <code>jet build</code> writes a receipt keyed by the sources, imports, and toolchain that went in, so unchanged work can be replayed.</p>
+          </div>
+          <div class="term"><span class="ps">$</span> <span class="cmd">jetpack env</span> <span class="dim"># enter the project's declared shell</span>
+    <span class="ps">$</span> <span class="cmd">jetpack use ripgrep@nixpkgs -- rg --version</span> <span class="dim"># borrow a tool</span>
+    <span class="ps">$</span> <span class="cmd">jetpack add ripgrep@nixpkgs</span> <span class="dim"># adopt it into env.jet</span>
+    <span class="ps">$</span> <span class="cmd">jetpack hangar du</span> <span class="dim"># see what the store holds</span>
+    <span class="ps">$</span> <span class="cmd">jet build</span> <span class="dim"># receipted; unchanged inputs replay</span></div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="start">
+        <p class="eyebrow">// start now</p>
+        <h2>Start with a short command sequence.</h2>
+        <div class="start">
+          <div class="term"><span class="dim"># install (x86_64 Linux and macOS, via Nix)</span>
+    <span class="ps">$</span> <span class="cmd">nix profile install github:jet-language/jet</span>
+    <span class="ps">$</span> <span class="cmd">jet version</span></div>
+          <div class="term"><span class="dim"># first program</span>
+    <span class="ps">$</span> <span class="cmd">jet new hello</span>
+    <span class="ps">$</span> <span class="cmd">cd hello</span>
+    <span class="ps">$</span> <span class="cmd">jet run</span>
+    <span class="out">hello, world</span></div>
+        </div>
+        <p class="fineprint">Jet is pre-release and changes weekly. Package workflows, Windows support, and stability guarantees remain under active development. If this site ever disagrees with the compiler, the compiler is right; <code>jet explain</code> knows more than any web page.</p>
+      </section>
+    """}
+
+fn tour_body() -> HTML {
+    hello :: code_card_out("Examples/features/basics/hello.jet", hello_code(), "Examples/features/basics/hello.jet", HTML{"hello, world"})
+    values :: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
+    signature :: code_card_out("Examples/features/basics/signature_shape.jet", signature_code(), "Examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
+    matching :: code_card("Examples/features/basics/pattern_matching.jet", pattern_code())
+    failure :: code_card_out("run it", failure_code(), "failure.jet", HTML{"port 8080"})
+    defaults :: code_card_out("Examples/features/basics/default_refs.jet", defaults_code(), "Examples/features/basics/default_refs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
+    loops :: code_card("Examples/features/basics/loop_values.jet", loops_code())
+    concurrency :: code_card("Examples/features/concurrency/tasks_join_all.jet", concurrency_code())
+    files :: code_card("Examples/features/io/files.jet", files_code())
+    HTML{"""
+    <section class="wrap page">
+      <div class="page-header">
+        <p class="eyebrow">// the tour</p>
+        <h1>A tour in runnable programs.</h1>
+        <p>The examples shown here point at repository corpus files; the golden harness covers the linked examples. This page is a teaching surface, not a release guarantee.</p>
+      </div>
+      <ul class="toc">
+        <li><a href="#hello">Hello</a></li>
+        <li><a href="#values">Values</a></li>
+        <li><a href="#functions">Functions</a></li>
+        <li><a href="#matching">Matching</a></li>
+        <li><a href="#failure">Failure</a></li>
+        <li><a href="#defaults">Defaults</a></li>
+        <li><a href="#loops">Loops</a></li>
+        <li><a href="#concurrency">Concurrency</a></li>
+        <li><a href="#files">Files</a></li>
+        <li><a href="#web">Web</a></li>
+      </ul>
+    </section>
+    <article class="wrap article">
+      <section>
+        <h2 id="hello">Hello, and the whole toolchain</h2>
+        <p>This example runs from one file; no project setup is shown. fn run is where running starts.</p>
+        {hello}
+        <div class="term"><span class="ps">$</span> <span class="cmd">jet run hello.jet</span> <span class="dim"># run it</span>
+    <span class="ps">$</span> <span class="cmd">jet check hello.jet</span> <span class="dim"># check without running</span>
+    <span class="ps">$</span> <span class="cmd">jet test hello.jet</span> <span class="dim"># run the #Test blocks</span>
+    <span class="ps">$</span> <span class="cmd">jet fix hello.jet</span> <span class="dim"># apply the compiler's own fixes</span></div>
+      </section>
+
+      <section>
+        <h2 id="values">Values</h2>
+        <p>:: binds a value and it stays put. := binds a place you can reassign. Types mostly stay out of the way: they ride signatures and struct fields, and values carry them everywhere else.</p>
+        {values}
+      </section>
+
+      <section>
+        <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/features/basics/signature_shape.jet</span></h2>
+        <p>A result type sits bare after the parameters; -&gt; starts the body. Effects split the arrow: -[IO]&gt; says this function touches the outside world, and the compiler checks it. Omit the row and Jet infers it; write it and Jet enforces it.</p>
+        {signature}
+      </section>
+
+      <section>
+        <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/features/basics/pattern_matching.jet</span></h2>
+        <p>An arm table reads like the decision it makes. Or-patterns share a body, wildcards skip what does not matter, and else catches the rest.</p>
+        {matching}
+      </section>
+
+      <section>
+        <h2 id="failure">Failure is in the signature</h2>
+        <p>A function that can fail says so: Int !IOError returns a whole number or that error, and nothing else. Callers discharge the failure with ?? or let it propagate; ignoring it is a compile error. There are no exceptions and no error codes to forget.</p>
+        {failure}
+      </section>
+
+      <section>
+        <h2 id="defaults">Defaults ride the type<span class="sec-file">Examples/features/basics/default_refs.jet</span></h2>
+        <p>A default value lives on the parameter's type, and it may name an earlier parameter.</p>
+        {defaults}
+      </section>
+
+      <section>
+        <h2 id="loops">Loops produce values<span class="sec-file">Examples/features/basics/loop_values.jet</span></h2>
+        <p>This example uses the collection loop form to produce values, filter with a guard, and stop at a prefix.</p>
+        {loops}
+      </section>
+
+      <section>
+        <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/features/concurrency/tasks_join_all.jet</span></h2>
+        <p>This example shows explicit task joins, collection, racing, and detachment. Each operation is visible at its use site.</p>
+        {concurrency}
+      </section>
+
+      <section>
+        <h2 id="files">Files, honestly<span class="sec-file">Examples/features/io/files.jet</span></h2>
+        <p>File operations return real errors and carry the FS effect. The happy path stays short; the failure path is visible.</p>
+        {files}
+      </section>
+
+      <section>
+        <h2 id="web">Web target, under active checks</h2>
+        <p>The site presents a web-widget example. Browser/UI parity remains an open checked subset; the command below is the intended target entry point.</p>
+        <div class="term"><span class="ps">$</span> <span class="cmd">jet build --target web counter.jet</span> <span class="dim"># try the web target</span></div>
+      </section>
+
+      <p>The corpus these samples come from lives in Examples/features in the repository, next to the golden outputs that keep them honest.</p>
+      {cta_buttons("")}
+    </article>
+    """}
+}
+
+fn install_body() -> HTML {
+    nix_term :: HTML{"""
+    <div class="term"><span class="ps">$</span> <span class="cmd">nix --extra-experimental-features "nix-command flakes" \\</span>
+        <span class="cmd">profile install github:jet-language/jet</span>
+    <span class="ps">$</span> <span class="cmd">jet version</span></div>
+    """}
+    source_term :: HTML{"""
+    <div class="term"><span class="ps">$</span> <span class="cmd">git clone https://github.com/jet-language/jet</span>
+    <span class="ps">$</span> <span class="cmd">cd jet</span>
+    <span class="ps">$</span> <span class="cmd">nix build</span>
+    <span class="ps">$</span> <span class="cmd">export PATH="$PWD/result/bin:$PATH"</span>
+    <span class="ps">$</span> <span class="cmd">jet version</span></div>
+    """}
+    first_term :: HTML{"""
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet new hello</span>
+    <span class="ps">$</span> <span class="cmd">cd hello</span>
+    <span class="ps">$</span> <span class="cmd">jet run</span>
+    <span class="out">hello, world</span></div>
+    """}
+    breaks_term :: HTML{"""
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span>
+    <span class="ps">$</span> <span class="cmd">jet fix run.jet</span></div>
+    """}
+    HTML{"""
+    <section class="wrap page">
+      <div class="page-header">
+        <p class="eyebrow">// install</p>
+        <h1>From zero to a first run.</h1>
+        <p>Jet is pre-release. Today the supported install path is Nix on x86_64 Linux and macOS; everything else means building from source.</p>
+      </div>
+    </section>
+    <article class="wrap article">
+      <section>
+        <h2>Install with Nix</h2>
+        {nix_term}
+        <p>Install Nix first from <a href="https://nixos.org/">nixos.org</a>, then run the command above.</p>
+      </section>
+
+      <section>
+        <h2>Or build from source</h2>
+        {source_term}
+      </section>
+
+      <section>
+        <h2>Your first program</h2>
+        {first_term}
+        <p>jet new writes a small project: run.jet with a passing #Test block, a package.jet manifest, and typed command entries. jet run compiles and runs it with the fast profile; jet run --release uses the optimized native build.</p>
+      </section>
+
+      <section>
+        <h2>When something breaks</h2>
+        <p>Every Jet error has a registered code, a what, a why, and a fix. jet explain takes any code you see and gives the full story offline; jet fix applies the compiler's own suggested repairs to your file.</p>
+        {breaks_term}
+      </section>
+
+      <section>
+        <h2>What works today</h2>
+        <ul>
+          <li>The compiler, checker, test runner, and formatter are available for the repository's example corpus.</li>
+          <li>Native builds expose both the default fast profile and the optimized release profile.</li>
+          <li>A web-target example is part of the current site corpus; broader browser/UI support remains open.</li>
+          <li>jetpack, the environment engine: declared, reproducible project shells.</li>
+        </ul>
+        <p>What remains under development: Windows support, stability guarantees, and some package-workflow corners. The language is changing weekly, and the diagnostics are the most reliable map of what is true right now.</p>
+      </section>
+    </article>
+    """}
+}
+
+fn error_body() -> HTML {
+    diag :: diag_block()
+    HTML{"""
+    <section class="wrap page">
+      <div class="page-header">
+        <p class="eyebrow">// error codes</p>
+        <h1>You followed a link the compiler printed.</h1>
+        <p>Every Jet diagnostic carries a code and links here. Each code has a generated page with the registered What, Why, Fix, and its first UI snapshot example. <a href="E0112/">See the E0112 page</a>. The same explanation is available offline, instantly, from the toolchain you already have.</p>
+      </div>
+    </section>
+    <article class="wrap article">
+      <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span></div>
+      <p>Explanations look like this one, which is real:</p>
+      {diag}
+      <p>If an explanation is wrong or unhelpful, that is a bug in Jet, and reporting it is a contribution.</p>
+    </article>
+    """}
+}
+
+fn run() !Err {
+    fs.create_dir_all("dist") ?? return
+    // tests/diagnostic_pages.rs owns dist/e/<CODE>/index.html; this SSG owns the landing page.
+    fs.create_dir_all("dist/e") ?? return
+    fs.copy_dir("assets", "dist/assets") ?? return
+
+    assets :: [String]{
+        "favicon.svg",
+        "fonts/atkinson-400-italic.woff2",
+        "fonts/atkinson-400.woff2",
+        "fonts/atkinson-700.woff2",
+        "fonts/exo2-700-italic.woff2",
+        "fonts/exo2-700.woff2",
+        "fonts/exo2-800-italic.woff2",
+        "fonts/exo2-800.woff2",
+        "fonts/jetbrains-mono-400-italic.woff2",
+        "fonts/jetbrains-mono-400.woff2",
+        "fonts/jetbrains-mono-500.woff2",
+        "jet-logo.png",
+        "mark.svg",
+        "site.css",
+        "site.js"
+    }
+    loop asset in assets {
+        print("wrote dist/assets/{asset}")
+    }
+
+    index_body_html :: index_body()
+    index_page :: page_shell("Jet, a memory-safe compiled language", "Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.", index_body_html, "", "")
+    fs.write("dist/index.html", index_page.text()) ?? return
+    print("wrote dist/index.html")
+
+    tour_body_html :: tour_body()
+    tour_page :: page_shell("The Jet tour", "A tour of Jet in runnable programs: values, functions, effects, pattern matching, failure, defaults, loops, concurrency, and files.", tour_body_html, "", "tour")
+    fs.write("dist/tour.html", tour_page.text()) ?? return
+    print("wrote dist/tour.html")
+
+    install_body_html :: install_body()
+    install_page :: page_shell("Install Jet", "Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.", install_body_html, "", "install")
+    fs.write("dist/install.html", install_page.text()) ?? return
+    print("wrote dist/install.html")
+
+    error_body_html :: error_body()
+    error_page :: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
+    fs.write("dist/e/index.html", error_page.text()) ?? return
+    print("wrote dist/e/index.html")
+
+    if fs.exists("widget/build") {
+        fs.copy_dir("widget/build", "dist/widget") ?? return
+        print("wrote dist/widget/")
+    }
+    print("site generated")
+}

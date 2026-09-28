@@ -19,12 +19,16 @@ fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MirFo
         loop block in function.blocks {
             loop instruction in block.instructions {
                 if instruction.operation == {
-                    .Call(callee, _, _) -> if callee == {
-                        .Foreign(id) -> id == foreign.id
-                        else -> false
+                    .Call(callee, _, _) -> {
+                        if callee == {
+                            .Foreign(id) -> {
+                                if id == foreign.id -> return true
+                            }
+                            else -> {}
+                        }
                     }
-                    else -> false
-                } -> return true
+                    else -> {}
+                }
             }
         }
     }

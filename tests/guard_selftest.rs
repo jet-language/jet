@@ -3,10 +3,10 @@
 //! actually trip. The two failure-mode tests are `#[ignore]`d and must be run
 //! individually with a tiny cap/deadline, e.g.:
 //!
-//!   JET_TEST_ALLOC_CAP_GB=1 timeout 120 scripts/agent/jet-env \
+//!   JET_TEST_ALLOC_CAP_GB=1 timeout 120 Tools/agent/jet-env \
 //!     cargo test --test guard_selftest -- --ignored alloc_cap --test-threads=1
 //!
-//!   JET_TEST_DEADLINE_SECS=3 timeout 60 scripts/agent/jet-env \
+//!   JET_TEST_DEADLINE_SECS=3 timeout 60 Tools/agent/jet-env \
 //!     cargo test --test guard_selftest -- --ignored deadline --test-threads=1
 //!
 //! Both are expected to abort the whole process (SIGABRT / non-zero exit)

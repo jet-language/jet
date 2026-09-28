@@ -1,0 +1,299 @@
+pub struct SemaScopeMembersMarkerRule {
+    pub name: String
+    pub sites: [String]
+    pub first_parameter_is_type: Bool
+    pub repeatable: Bool
+    pub params: [MarkerDeclParam]
+}
+
+pub struct SemaScopeMembersMarkerRegistry {
+    pub applied_rules: [TAppliedRule]
+    pub argument_menus: [TAppliedRuleArgumentMenu]
+    pub marker_rules: [SemaScopeMembersMarkerRule]
+    pub known_marker_names: [String]
+    pub function_allowed_markers: [String]
+    pub block_allowed_markers: [String]
+    pub derive_provider_names: [String]
+}
+
+pub struct SemaScopeMembersDeclaredTypeArgument {
+    pub name: String
+    pub ty: Type
+    pub span: Span
+}
+
+pub struct SemaScopeMembersDslHeaderResult {
+    pub known: Bool
+    pub block_allowed: Bool
+    pub args_valid: Bool
+    pub declared_type_argument: ?SemaScopeMembersDeclaredTypeArgument
+    pub diagnostics: [Diagnostic]
+}
+
+fn sema_scope_members_append_name(values: &[String], name: String) {
+    loop existing in values {
+        if existing == name -> return
+    }
+    values.push(name)
+}
+
+fn sema_scope_members_site_name(value: Expr) -> ?String {
+    if value == {
+        .Ident(name, _) -> {
+            if name.starts_with(".") -> return Val(name.slice(1, name.len()))
+            return Val(name)
+        }
+        .Field(_, name, _) -> return Val(name)
+        .EnumLit(_, name, _, _, _, _) -> return Val(name)
+        else -> return None
+    }
+}
+
+fn sema_scope_members_site_is_known(name: String) -> Bool {
+    name == "Package" || name == "File" || name == "Module" || name == "Function" || name == "Method" || name == "Block" || name == "Statement" || name == "Expression" || name == "Type" || name == "Impl" || name == "Declaration" || name == "Constant" || name == "Field" || name == "Variant" || name == "Parameter" || name == "Test" || name == "Operation" || name == "Text"
+}
+
+fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> ?[String] {
+    found := false
+    loop parameter in declaration.params {
+        if parameter.name != "@sites" -> next
+        found = true
+        value :: parameter.value ?? return None
+        if value == {
+            .ListLit(values, _) -> {
+                sites := [String]{}
+                loop item in values {
+                    site :: sema_scope_members_site_name(item) ?? return None
+                    if !sema_scope_members_site_is_known(site) -> return None
+                    sema_scope_members_append_name(&sites, site)
+                }
+                return Val(sites)
+            }
+            else -> return None
+        }
+    }
+    if found -> return None
+    None
+}
+
+fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> ?Bool {
+    loop parameter in declaration.params {
+        if parameter.name != "@repeatable" -> next
+        value :: parameter.value ?? return None
+        if value == {
+            .Bool(repeatable, _) -> return Val(repeatable)
+            else -> return None
+        }
+    }
+    Val(false)
+}
+
+fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool {
+    loop parameter in declaration.params {
+        if parameter.name.starts_with("@") -> next
+        return parameter.ty == (Val(Type.Named("Type")))
+    }
+    false
+}
+
+fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool {
+    loop existing in registry.marker_rules {
+        if existing.name == declaration.name -> return false
+    }
+    sites :: sema_scope_members_declared_sites(declaration) ?? return false
+    repeatable :: sema_scope_members_declared_repeatable(declaration) ?? return false
+    registry.marker_rules.push(SemaScopeMembersMarkerRule{
+        name: declaration.name,
+        sites: sites,
+        first_parameter_is_type: sema_scope_members_first_parameter_is_type(declaration),
+        repeatable: repeatable,
+        params: declaration.params,
+    })
+    sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
+    loop site in sites {
+        if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, declaration.name)
+        if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, declaration.name)
+    }
+    true
+}
+
+fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegistry, items: [Item]) -> Bool {
+    loop item in items {
+        if item == {
+            .MarkerDecl(declaration) -> {
+                if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return false
+            }
+            .UserDerive(derive_definition) -> {
+                sema_scope_members_append_name(&registry.derive_provider_names, derive_definition.trait_name)
+                sema_scope_members_append_name(&registry.known_marker_names, derive_definition.trait_name)
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body != None {
+                    body :: code_module.body ?? return false
+                    if !sema_scope_members_registry_add_items(&registry, body) -> return false
+                }
+            }
+            else -> {}
+        }
+    }
+    true
+}
+
+fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool {
+    sema_scope_members_registry_add_items(&registry, program.items)
+}
+
+
+fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool {
+    if rule.status == {.Active -> true else -> false}
+}
+
+fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool {
+    seen := [String]{}
+    loop rule in catalog.rows {
+        if seen.contains(rule.name) -> return false
+        seen.push(rule.name)
+        if !sema_scope_members_rule_is_active(rule) -> next
+        sema_scope_members_append_name(&registry.known_marker_names, rule.name)
+        loop site in rule.sites {
+            if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, rule.name)
+            if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, rule.name)
+        }
+    }
+    true
+}
+
+// `catalog` must be built from the complete embedded Prelude/Markers.jet
+// source. The graph must be complete because source-declared marker and derive
+// names are package-wide. Occurrence facts never authorize marker sites.
+pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> ?SemaScopeMembersMarkerRegistry {
+    if !graph.complete -> return None
+    registry := SemaScopeMembersMarkerRegistry{
+        applied_rules: catalog.rows,
+        argument_menus: catalog.argument_menus,
+        marker_rules: [SemaScopeMembersMarkerRule]{},
+        known_marker_names: [String]{},
+        function_allowed_markers: [String]{},
+        block_allowed_markers: [String]{},
+        derive_provider_names: [String]{},
+    }
+    if !sema_scope_members_registry_add_applied_catalog(&registry, catalog) -> return None
+    current_module_found := false
+    loop module_row in graph.modules {
+        module_program := module_row.program
+        if module_row.module_identity == module_identity {
+            module_program = program
+            current_module_found = true
+        }
+        if !sema_scope_members_registry_add_program(&registry, module_program) -> return None
+    }
+    if !current_module_found -> return None
+    Val(registry)
+}
+
+fn sema_scope_members_rule_index(registry: SemaScopeMembersMarkerRegistry, name: String) -> ?Int {
+    index := 0
+    loop index < registry.marker_rules.len() {
+        if registry.marker_rules[index].name == name -> return Val(index)
+        index += 1
+    }
+    None
+}
+
+fn sema_scope_members_applied_rule_index(registry: SemaScopeMembersMarkerRegistry, name: String) -> ?Int {
+    index := 0
+    loop index < registry.applied_rules.len() {
+        if registry.applied_rules[index].name == name -> return Val(index)
+        index += 1
+    }
+    None
+}
+
+fn sema_scope_members_has_name(values: [String], name: String) -> Bool {
+    loop existing in values {
+        if existing == name -> return true
+    }
+    false
+}
+
+fn sema_scope_members_rule_fact_at(program: Program, name: String, name_span: Span) -> ?AppliedRuleApplication {
+    loop fact in program.rule_facts {
+        if fact.marker.name == name && fact.marker.name_span.start == name_span.start && fact.marker.name_span.end == name_span.end -> return Val(fact)
+    }
+    None
+}
+
+fn sema_scope_members_is_applied_rule_at(program: Program, name: String, name_span: Span) -> Bool {
+    loop application in program.applied_rules {
+        if application.marker.name == name && application.marker.name_span.start == name_span.start && application.marker.name_span.end == name_span.end -> return true
+    }
+    sema_scope_members_rule_fact_at(program, name, name_span) != None
+}
+
+fn sema_scope_members_dsl_args_valid(name: String, args: [Expr]) -> Bool {
+    if name == "HTML" -> return args.len() == 0
+    if args.len() == 0 -> return true
+    if args.len() != 1 -> return false
+    return if args[0] == {
+        .Ident(_, _) -> true
+        else -> false
+    }
+}
+
+fn sema_scope_members_dsl_argument_shape_diagnostic(name: String, args_span: ?Span, span: Span) -> Diagnostic {
+    at := args_span ?? span
+    expected := if {
+        name == "SQL" -> "`#SQL {{ … }}` or `#SQL<Row> {{ … }}`"
+        name == "HTML" -> "`#HTML {{ … }}`"
+        else -> "the declared checked text-block header"
+    }
+    sema_error("E0617", at, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}")
+}
+
+pub fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: ?Span, span: Span) -> SemaScopeMembersDslHeaderResult {
+    result := SemaScopeMembersDslHeaderResult{
+        known: sema_scope_members_has_name(registry.known_marker_names, name),
+        block_allowed: sema_scope_members_has_name(registry.block_allowed_markers, name),
+        args_valid: false,
+        declared_type_argument: None,
+        diagnostics: [Diagnostic]{},
+    }
+    if !result.known {
+        result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `marker {name}(…)` with `@sites: [.Block]` before using `#{name} {{ … }}"))
+        return result
+    }
+    if !result.block_allowed {
+        result.diagnostics.push(sema_error("E0355", args_span ?? span, "`#{name}` cannot open a checked text block", "a checked text block must declare `.Block` as a legal site", "add `.Block` to the rule declaration or use the rule at its declared site"))
+        return result
+    }
+    result.args_valid = sema_scope_members_dsl_args_valid(name, args)
+    if !result.args_valid {
+        result.diagnostics.push(sema_scope_members_dsl_argument_shape_diagnostic(name, args_span, span))
+        return result
+    }
+    if sema_scope_members_is_applied_rule_at(program, name, name_span) && args.len() == 1 {
+        if args[0] == {
+            .Ident(type_name, type_span) -> {
+                has_type_parameter := false
+                if sema_scope_members_applied_rule_index(registry, name) == {
+                    .Val(index) -> {
+                        has_type_parameter = registry.applied_rules[index].signature.params.len() > 0 && registry.applied_rules[index].signature.params[0].source_type == "Type"
+                    }
+                    else -> {
+                        if sema_scope_members_rule_index(registry, name) == {
+                            .Val(index) -> {
+                                has_type_parameter = registry.marker_rules[index].first_parameter_is_type
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+                if has_type_parameter {
+                    result.declared_type_argument = Val(SemaScopeMembersDeclaredTypeArgument{name: type_name, ty: Type.Named(type_name), span: type_span})
+                }
+            }
+            else -> {}
+        }
+    }
+    result
+}

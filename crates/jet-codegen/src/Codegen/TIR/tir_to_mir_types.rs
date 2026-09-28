@@ -20,8 +20,9 @@ use jet_foundation::CanonicalPass;
 use jet_foundation::Layout::{LayoutAlignmentFact, LayoutFacts, TargetLayout, TargetLayoutEngine};
 use jet_foundation::MIR::{
     MirAccess, MirCallContractRow, MirCallMetadata, MirCallablePolicy, MirCallablePolicyChain,
-    MirCliBinding, MirCliCommand, MirCliEntry, MirCompilerBuiltin, MirCoreOwner, MirDimension,
-    MirErasureReason, MirField, MirFieldId, MirFunctionId, MirFunctionSignature, MirGenericParam,
+    MirCEnumTag, MirCliBinding, MirCliCommand, MirCliEntry, MirCompilerBuiltin, MirCoreOwner,
+    MirDimension, MirDropKind, MirErasureReason, MirField, MirFieldId, MirFunctionId,
+    MirFunctionSignature, MirGenericParam,
     MirInternalTag, MirMeasure, MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership,
     MirOwnershipMode,
     MirParam, MirParamZone, MirSerdeAttribute, MirSerdeAttributeKind, MirStructLayout,
@@ -499,6 +500,7 @@ fn lower_type_kind(ty: &Type) -> jet_foundation::MIR::MirTypeKind {
         }),
         Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => lower_type_kind(
             &crate::AST::numeric_type_from_name(name).expect("numeric type name was checked"),
+        ),
         Type::Named(name) => MirTypeKind::Apply {
             name: lower_nominal_ref(name),
             args: Vec::new(),
@@ -1590,6 +1592,7 @@ fn lower_struct(
         must_use: definition.is_must_use,
         layout: definition.layout.clone(),
         layout_alignment,
+        serde: lower_serde_markers(&definition.serde_markers),
         c_layout_tag: None,
         enum_layout: None,
         cli_bindings: lower_cli_bindings(&definition.cli_bindings, module),

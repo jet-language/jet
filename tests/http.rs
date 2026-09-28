@@ -42,7 +42,7 @@ fn run_dev(path: &Path, use_interpreter: bool) -> Output {
 }
 
 fn example_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("examples/features/net/{name}.jet"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("Examples/features/net/{name}.jet"))
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn assert_http_example_matches_all_tiers(name: &str) {
     let source = fs::read_to_string(&path).unwrap();
     let expected = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("examples/features/expected/net/{name}.out")),
+            .join(format!("Examples/features/expected/net/{name}.out")),
     )
     .unwrap();
 

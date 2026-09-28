@@ -50,7 +50,7 @@ fn full_verification_uses_clean_short_external_tmpdir() {
         let mut command = Command::new("bash");
         command
             .current_dir(&repo)
-            .arg("scripts/agent/verify-full.sh")
+            .arg("Tools/agent/verify-full.sh")
             .arg(mode)
             .env("JET_NIX_TMP_CLEANED", "1")
             .env_remove("JET_VERIFY_TMPDIR");
@@ -154,7 +154,7 @@ fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
     ] {
         let output = Command::new("bash")
             .current_dir(&repo)
-            .arg("scripts/agent/verify-full.sh")
+            .arg("Tools/agent/verify-full.sh")
             .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
             .env("JET_VERIFY_TEMP_PROBE_ONLY", "1")
             .env("JET_NIX_TMP_CLEANED", "1")
@@ -167,7 +167,7 @@ fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
         assert!(!output.status.success(), "missing {missing} must fail");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let expected = format!(
-            "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: {missing}. Run scripts/agent/jet-env full scripts/agent/verify-full.sh."
+            "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: {missing}. Run Tools/agent/jet-env full Tools/agent/verify-full.sh."
         );
         assert_eq!(stderr.matches(&expected).count(), 1, "{stderr}");
         assert!(!stderr.contains("ignored:"), "{stderr}");
@@ -180,7 +180,7 @@ fn strict_full_verification_rejects_executable_impostors() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("bash")
         .current_dir(&repo)
-        .arg("scripts/agent/verify-full.sh")
+        .arg("Tools/agent/verify-full.sh")
         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
         .env("JET_NIX_TMP_CLEANED", "1")
         .env("JET_CANVAS_CHROMIUM", "true")
@@ -214,7 +214,7 @@ fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
     let node = resolve_executable("node").expect("dev-shell node path");
     let output = Command::new("bash")
         .current_dir(&repo)
-        .arg("scripts/agent/verify-full.sh")
+        .arg("Tools/agent/verify-full.sh")
         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
         .env("JET_NIX_TMP_CLEANED", "1")
         .env("JET_CANVAS_CHROMIUM", &chromium)
@@ -250,7 +250,7 @@ fn cdp_driver_owns_parallel_browsers_under_long_tmpdir() {
         .current_dir(&repo)
         .env("CHROMIUM", &tools.chromium)
         .env("TMPDIR", &long_tmp)
-        .arg("scripts/canvas-test/driver-lifecycle.mjs")
+        .arg("Tools/canvas-test/driver-lifecycle.mjs")
         .arg(MAX_CANVAS_BROWSERS.to_string())
         .output()
         .expect("run Canvas CDP lifecycle regression");
@@ -536,7 +536,7 @@ fn resident_session_ide_state_matrix() {
 fn canvas_workbench_e2e() {
     assert!(
         canvas_tools().is_some(),
-        "Canvas workbench E2E needs dev-shell Chromium and Node; run scripts/agent/jet-env full"
+        "Canvas workbench E2E needs dev-shell Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario(WORKBENCH_E2E_SCENARIO);
 }
@@ -574,7 +574,7 @@ fn node_drag_persists_without_source_change() {
 fn selection_marquee_modifiers_local_move() {
     assert!(
         canvas_tools().is_some(),
-        "selection/marquee/local-move proof requires Chromium and Node; run scripts/agent/jet-env full"
+        "selection/marquee/local-move proof requires Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario("selection-marquee-modifiers-local-move");
 }
@@ -848,7 +848,7 @@ fn rename_variable_sidebar() {
 fn project_rename_preview_commit() {
     assert!(
         canvas_tools().is_some(),
-        "checked cross-file edit proof requires Chromium and Node; run scripts/agent/jet-env full"
+        "checked cross-file edit proof requires Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario("project-rename-preview-commit");
 }
@@ -927,7 +927,7 @@ fn run_button_output_visible() {
 fn debug_live_session() {
     assert!(
         canvas_tools().is_some(),
-        "debug live-session proof requires Chromium and Node; run scripts/agent/jet-env full"
+        "debug live-session proof requires Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario("debug-live-session");
 }
@@ -936,7 +936,7 @@ fn debug_live_session() {
 fn debug_runtime_values_staleness_liveness() {
     assert!(
         canvas_tools().is_some(),
-        "debug staleness/liveness proof requires Chromium and Node; run scripts/agent/jet-env full"
+        "debug staleness/liveness proof requires Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario("debug-runtime-values-staleness-liveness");
 }
@@ -955,7 +955,7 @@ fn graph_source_toggle_preserves_selection() {
 fn canvas_rad_two_way_round_trip() {
     assert!(
         canvas_tools().is_some(),
-        "Canvas RAD round-trip proof requires Chromium and Node; run scripts/agent/jet-env full"
+        "Canvas RAD round-trip proof requires Chromium and Node; run Tools/agent/jet-env full"
     );
     run_canvas_scenario("canvas-rad-two-way-round-trip");
 }
@@ -1022,7 +1022,7 @@ fn run_gecko_cleanup_probe(tools: &GeckoTools) {
         .current_dir(&repo)
         .env("FIREFOX", &tools.firefox)
         .env("GECKODRIVER", &tools.geckodriver)
-        .arg("scripts/canvas-test/gecko-lifecycle.mjs")
+        .arg("Tools/canvas-test/gecko-lifecycle.mjs")
         .output()
         .expect("run Gecko cleanup lifecycle probe");
     assert!(
@@ -1124,7 +1124,7 @@ fn run_browser_scenario_with_server(
         .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
         .env("JET_BIN", cargo_target_dir(&repo).join("debug/jet"))
         .env("JETPACK_BIN", cargo_target_dir(&repo).join("debug/jetpack"))
-        .arg("scripts/canvas-test/run.mjs")
+        .arg("Tools/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
         .arg("--browser")
@@ -1293,13 +1293,13 @@ impl CanvasCase {
             Some(write_big_fixture(&dir))
         } else if name == "canvas-onboarding-tour" {
             fs::copy(
-                repo.join("examples/features/tooling/canvas_blueprint_demo.jet"),
+                repo.join("Examples/features/tooling/canvas_blueprint_demo.jet"),
                 &entry,
             )
             .expect("copy Canvas onboarding example source");
             None
         } else if name == DEVSERVER_REAL_CLIENT_SCENARIO {
-            fs::copy(repo.join("examples/features/web/ui_showcase.jet"), &entry)
+            fs::copy(repo.join("Examples/features/web/ui_showcase.jet"), &entry)
                 .expect("copy Canvas devserver regression source");
             None
         } else if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
@@ -1333,7 +1333,7 @@ impl CanvasCase {
                 .expect("write Canvas library package fixture");
             }
             if name == "library-panel-events" {
-                fs::copy(repo.join("examples/features/ui/events.jet"), &entry)
+                fs::copy(repo.join("Examples/features/ui/events.jet"), &entry)
                     .expect("copy Canvas library events source");
             } else {
                 let source = if matches!(

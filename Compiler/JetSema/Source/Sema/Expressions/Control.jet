@@ -83,40 +83,48 @@ fn sema_expression_default_err_call(value: Expr, span: Span, expected: Type, env
 fn sema_expression_result_payload(value: Expr, success: Bool, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
     expected_ok := None
     expected_err := None
-    if expected == .Val(expected_ty) {
-        normalized :: sema_expr_unwrap_tag(expected_ty)
-        if normalized == {
-            .Result(ok, err) -> {
-                expected_ok = Val(ok)
-                expected_err = Val(err)
+    if expected == {
+        .Val(expected_ty) -> {
+            normalized :: sema_expr_unwrap_tag(expected_ty)
+            if normalized == {
+                .Result(ok, err) -> {
+                    expected_ok = Val(ok)
+                    expected_err = Val(err)
+                }
+                else -> {
+                    if {
+                        success -> {
+                            diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+                        }
+                        else -> {
+                            diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
+                        }
+                    }
+                    return None
+                }
             }
-            else -> {
-                if success {
+        }
+        else -> {
+            if {
+                success -> {
                     diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-                } else {
+                }
+                else -> {
                     diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
                 }
-                return None
             }
+            return None
         }
-    } else {
-        if success {
-            diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-        } else {
-            diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-        }
-        return None
     }
-    if !success && expected_err == Val(Type.Named("Err")) && expected != None && !sema_expression_default_err_struct(value) {
+    if !success && expected_err == (Val(Type.Named("Err"))) && expected != None && !sema_expression_default_err_struct(value) {
         result_type :: Type.Result(expected_ok ?? Type.Named("Unit"), expected_err ?? Type.Named("Err"))
         checked_default :: sema_expression_default_err_call(value, span, result_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         return Val(checked_default)
     }
-    payload_expected := if success -> expected_ok else -> {
-        if expected_err == Val(Type.Named("Err")) {
-            if sema_expression_default_err_struct(value) -> expected_err
-            else -> Val(Type.String)
-        } else -> expected_err
+    payload_expected := if {
+        success -> expected_ok
+        expected_err == (Val(Type.Named("Err"))) && !sema_expression_default_err_struct(value) -> Val(Type.String)
+        else -> expected_err
     }
     payload :: sema_check_expression(value, payload_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     ok_ty := expected_ok ?? Type.Named("Unit")
@@ -329,7 +337,143 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     sema_expr_expected(value_tir, expected, environment, &diagnostics)
 }
 
+fn sema_control_value_loop_requires_route(value: Expr) -> Bool {
+    if value == {
+        .CallValue(callee, args, _) -> {
+            if args.len() != 0 -> return false
+            if callee == {
+                .Lambda(lambda) -> return lambda.meta.result_loop && lambda.meta.requires_exhaustion_route && !lambda.meta.exhaustion_route_attached
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+}
+
+fn sema_control_value_loop_root_label(lambda: Lambda) -> ?NamedSpan {
+    if lambda.meta.loop_label != None -> return lambda.meta.loop_label
+    if lambda.body == {
+        .Block(statements) -> {
+            if statements.len() == 0 -> return None
+            if statements[0] == {
+                .Loop(_, _, _, label) | .While(_, _, _, _, label) | .For(_, _, _, _, _, _, _, label, _) | .CountedLoop(_, _, _, _, _, _, label) -> return label
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
+fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: ?NamedSpan, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> ?Stmt {
+    if fallback == {
+        .Value(value) -> {
+            root :: loop_label ?? {
+                diagnostics.push(sema_error("E0078", expr_span(value), "this finite value loop has no exhaustion label", "its fallback must become a result exit on the loop root", "use a finite value loop expression"))
+                return None
+            }
+            return Val(Stmt.BreakLabelValue(root.name, root.span, value, expr_span(value)))
+        }
+        .Return(value, span) -> return Val(Stmt.Return(value, span))
+        .Panic(name_span, args) -> {
+            call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+            return Val(Stmt.Expr(Expr.Call(call)))
+        }
+        .BreakLabel(name, span) -> {
+            if scopes.loop_depth <= 0 {
+                diagnostics.push(sema_error("E0115", span, "`break` only works inside a loop", "`?? break(label)` must name an enclosing loop", "move this expression inside a loop"))
+                return None
+            }
+            if !sema_scope_has_loop_label(scopes, name) {
+                diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                return None
+            }
+            return Val(Stmt.BreakLabel(name, span))
+        }
+        .ContinueLabel(name, span) -> {
+            if scopes.loop_depth <= 0 {
+                diagnostics.push(sema_error("E0115", span, "`next` only works inside a loop", "`?? next(label)` must name an enclosing loop", "move this expression inside a loop"))
+                return None
+            }
+            if !sema_scope_has_loop_label(scopes, name) {
+                diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                return None
+            }
+            return Val(Stmt.ContinueLabel(name, span))
+        }
+        .Break(span) | .Continue(span) -> {
+            diagnostics.push(sema_error("E0078", span, "this finite value loop can't use an unlabeled exhaustion control route", "the route would control the loop that just closed", "write a labeled route to an enclosing loop"))
+            return None
+        }
+        .Block(_, _, span) -> {
+            diagnostics.push(sema_error("E0405", span, "a finite value loop can't use a multi-step exhaustion block", "its exhaustion route carries one value or control action", "use one fallback value or a single control route"))
+            return None
+        }
+    }
+}
+
+fn sema_control_value_loop_append_route(statements: &[Stmt], route: Stmt) -> Bool {
+    if statements.len() == 0 -> return false
+    root := statements[0]
+    if root == {
+        .Loop(body, span, arrow_body, label) -> {
+            body.push(route)
+            statements[0] = Stmt.Loop(body, span, arrow_body, label)
+            return true
+        }
+        .While(condition, body, span, arrow_body, label) -> {
+            body.push(route)
+            statements[0] = Stmt.While(condition, body, span, arrow_body, label)
+            return true
+        }
+        .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
+            body.push(route)
+            statements[0] = Stmt.For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization)
+            return true
+        }
+        .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
+            body.push(route)
+            statements[0] = Stmt.CountedLoop(init, condition, step, body, span, arrow_body, label)
+            return true
+        }
+        else -> return false
+    }
+}
+
+fn sema_control_value_loop_attach_fallback(value: Expr, fallback: OrFallback, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> ?Expr {
+    if value == {
+        .CallValue(callee, args, span) -> {
+            if args.len() != 0 -> return None
+            if callee == {
+                .Lambda(lambda) -> {
+                    if !lambda.meta.result_loop || !lambda.meta.requires_exhaustion_route -> return None
+                    route :: sema_control_value_loop_fallback_stmt(fallback, sema_control_value_loop_root_label(lambda), scopes, &diagnostics) ?? return None
+                    if lambda.body == {
+                        .Block(statements) -> {
+                            if !sema_control_value_loop_append_route(&statements, route) {
+                                diagnostics.push(sema_error("E0078", lambda.span, "this finite value loop has no root loop for its exhaustion route", "the route must be attached to the expression loop itself", "use the finite loop-expression form"))
+                                return None
+                            }
+                        }
+                        else -> {
+                            diagnostics.push(sema_error("E0078", lambda.span, "this finite value loop has no block body for its exhaustion route", "the route must be attached to the expression loop itself", "use the finite loop-expression form"))
+                            return None
+                        }
+                    }
+                    lambda.meta.exhaustion_route_attached = true
+                    return Val(Expr.CallValue(Expr.Lambda(lambda), args, span))
+                }
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
 fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if sema_control_value_loop_requires_route(value) {
+        routed :: sema_control_value_loop_attach_fallback(value, fallback, scopes, &diagnostics) ?? return None
+        return sema_check_expression(routed, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     subject :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     payload_ty :: if subject.ty == {
         .Result(ok, _) -> if ok == {
@@ -347,11 +491,19 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     fallback_tir := None
     before := sema_ownership_state_snapshot(state)
     fallback_state := sema_ownership_state_snapshot(before)
+    fallback_scopes := sema_scope_snapshot(scopes)
+    sema_scope_enter(&fallback_scopes, &fallback_state, "or.fallback@{span.start}")
+    ambient_err := None
+    if subject.ty == .Result(_, error_type) {
+        error_name := BindName{name: "err", span: span, rename: None}
+        ambient_err = sema_stmt_destructure_local(error_name, error_type, false, environment, &fallback_scopes, &fallback_state, &diagnostics)
+        if ambient_err == None -> return None
+    }
     fallback_reaches_merge := false
     if fallback == {
         .Value(other) -> {
             fallback_expected :: if payload == Type.Named("Never") -> None else -> Val(payload)
-            checked :: sema_check_expression(other, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            checked :: sema_check_expression(other, fallback_expected, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
             if {
                 payload == Type.Named("Never") -> fallback_payload = checked.ty
                 !sema_type_assignable(payload, checked.ty) -> {
@@ -363,7 +515,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             fallback_reaches_merge = checked.ty != Type.Named("Never")
         }
         .Block(body, tail, block_span) -> {
-            block_scopes := sema_scope_snapshot(scopes)
+            block_scopes := sema_scope_snapshot(fallback_scopes)
             sema_scope_enter(&block_scopes, &fallback_state, "or.fallback@{block_span.start}")
             checked_block :: sema_check_statements(body, scopes.return_type, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
             if !checked_block.complete {
@@ -388,15 +540,18 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                 }
             }
             sema_scope_leave(&block_scopes, &fallback_state)
-            if checked_block.value.len() == 0 && tail_value != None {
-                fallback_tir = Val(TOrFallback.Value(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)))
-            } else {
-                block_values := checked_block.value
-                if tail_value != None -> block_values.push(TStmt.ExprStmt(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span), expr_span(tail ?? Expr.Unit(block_span))))
-                fallback_expr :: sema_tir_expr(fallback_payload, TExprKind.InlineBlock(block_values), block_span)
-                fallback_tir = Val(TOrFallback.Value(fallback_expr))
-            fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body)
-            if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named("Never"), TExprKind.Never("missing fallback value"), block_span)).ty == Type.Named("Never") -> fallback_reaches_merge = false
+            if {
+                checked_block.value.len() == 0 && tail_value != None -> {
+                    fallback_tir = Val(TOrFallback.Value(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)))
+                }
+                else -> {
+                    block_values := checked_block.value
+                    if tail_value != None -> block_values.push(TStmt.ExprStmt(tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span), expr_span(tail ?? Expr.Unit(block_span))))
+                    fallback_expr :: sema_tir_expr(fallback_payload, TExprKind.InlineBlock(block_values), block_span)
+                    fallback_tir = Val(TOrFallback.Value(fallback_expr))
+                    fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body)
+                    if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named("Never"), TExprKind.Never("missing fallback value"), block_span)).ty == Type.Named("Never") -> fallback_reaches_merge = false
+                }
             }
         }
         .Return(return_value, return_span) -> {
@@ -414,9 +569,9 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                         diagnostics.push(sema_error("E0405", return_span, "`or return value` cannot return a value from a Unit function", "the enclosing function has no return payload", "use bare `or return` or declare a return type"))
                         return None
                     }
-                    checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
-                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, &fallback_state, &context, &diagnostics) -> return None
-                    if !sema_stmt_move_direct(returned_expr, &fallback_state, scopes, "or return", &diagnostics) -> return None
+                    checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, fallback_scopes, &fallback_state, &context, &diagnostics) -> return None
+                    if !sema_stmt_move_direct(returned_expr, &fallback_state, fallback_scopes, "or return", &diagnostics) -> return None
                     fallback_tir = Val(TOrFallback.Return(Val(checked_return)))
                 }
             }
@@ -426,7 +581,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                 diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `or panic(\"message\")`"))
                 return None
             }
-            message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
             fallback_tir = Val(TOrFallback.Panic(message, sema_expression_panic_location(environment, name_span)))
         }
         .Break(route_span) -> {
@@ -457,8 +612,9 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             fallback_tir = Val(TOrFallback.ContinueLabel(label))
         }
     }
+    sema_scope_leave(&fallback_scopes, &fallback_state)
     if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
-    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback(subject, fallback_tir ?? TOrFallback.Value(sema_tir_expr(fallback_payload, TExprKind.Unit, span))), span)
+    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback(subject, fallback_tir ?? TOrFallback.Value(sema_tir_expr(fallback_payload, TExprKind.Unit, span)), ambient_err), span)
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
 

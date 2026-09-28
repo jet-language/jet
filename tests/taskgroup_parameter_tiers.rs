@@ -6,9 +6,9 @@ mod common;
 mod tir_support;
 
 
-const SOURCE: &str = include_str!("../examples/features/concurrency/task_group_parameter.jet");
+const SOURCE: &str = include_str!("../Examples/features/concurrency/task_group_parameter.jet");
 const EXPECTED: &str =
-    include_str!("../examples/features/expected/concurrency/task_group_parameter.out");
+    include_str!("../Examples/features/expected/concurrency/task_group_parameter.out");
 
 
 fn assert_runtime_output(name: &str, result: (i32, String, String)) {

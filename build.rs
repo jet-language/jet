@@ -10,12 +10,12 @@ mod SHA256;
 mod BuildIdentity;
 
 const STDLIB_SOURCES: &[&str] = &[
-    "corelib",
+    "Core/time/tzdb",
     "crates/jet-foundation",
     "crates/jet-codegen/src/Prelude",
 ];
 const RUNNER_SOURCES: &[&str] = &[
-    "corelib",
+    "Core/time/tzdb",
     "crates/jet-foundation",
     "crates/jet-net",
     "crates/jet-codegen",

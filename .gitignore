@@ -1,81 +1,76 @@
+# --- Build output ----------------------------------------------------------
 /target
 /target-*
 /result
-/.tmp
-/.tmp-*
 __pycache__/
-/__snapshots__/
-/build_wait.log
-scratchpad_difftest.sh
-plugins/tower/.tower/server.log
-.claude/*.log
-.claude/**/*.log
-/jit-aot-parity-report/
 
-# Compiler output: `jet build/run/test` emits the canonical `.jet/build/`
-# tree under the selected project root.
+# Stray `jet build` output beside sources. Source directories that happen to
+# be named `build` stay visible.
+build/
+!/Core/build/
+!/crates/jet-foundation/build/
+!/tests/conformance/corpus/core/build/
+
+# `jet build/run/test` emits its canonical tree under `.jet/build/`.
 **/.jet/build/
 
-# c121: timing reports (only written under JET_TIMING=1).
+# Timing reports, written only under JET_TIMING=1.
 jet-timing.json
 jet-lsp-timing.json
-.claude/worktrees/
-.claude/recovery/
-.agent-worktrees/
-.agent-scratch-*/
 
-# Agent probe/scratch droppings at the repository root. These are throwaway
-# reproductions from debugging sessions; 40 of them were committed by accident
-# before these patterns existed. Scratch belongs in a temp dir, never here.
-/scratch-*
-/.codex-*
-/.card*.jet
-
-# Native C-dep link cache: per-machine `/nix/store` paths resolved by `c@…`
-# auto-provision. Machine-specific and self-healing (stale paths re-realize),
-# so never commit it.
+# --- Machine-local Jet state -----------------------------------------------
+# Native C-dependency link cache: per-machine `/nix/store` paths.
 **/.jet/clinks/
-
-# Polyglot binder output (`jet inspect bind`). The generated `*.jet` binding
-# source is deterministic, so it stays tracked and the example checks without
-# the foreign toolchain installed. Native archives, class files, worker
-# scripts, provenance, and resolved host paths are machine-specific.
-**/.jet/bindings/*/*
-!**/.jet/bindings/*/*.jet
-
-# `b.generate` output (D-BUILDGEN1=A: "generated source lands under
-# `.jet/generated/`, never committed"). The build materializes it on every run
-# and locks its digest over the formatter's exact bytes, so a committed copy
-# goes stale the moment the renderer changes and then shadows itself (E3510).
-# The two example locks below go with it: their only content is that digest.
-# (`examples/features/comptime/.jet/lock` stays tracked — it is a `[build.stamp]`
-# fixture, not build output.)
-**/.jet/generated/
-**/.jet/receipts/
-# `jet build` production receipts. One directory per build key, holding the
-# machine's own toolchain and hardware identity, so a committed copy is stale
-# for every other machine and grows without bound on this one.
-**/.jet/reports/
-examples/features/tooling/.jet/lock
-examples/features/tooling/programmable_build/.jet/lock
-# Exception: this fixture needs a real hand-written module *at* the generated
-# path — it is E3510's input, not build output (see its `use` of the path).
-!tests/ui/build_generated_collision/.jet/generated/
-
-# Generated Zed grammar build artifact (editors/zed/install.sh output)
-editors/zed/grammar-repo/
-
-# Machine-local compiler state: discovery index and its lock, ICE bug-report
-# bundles (`jet self devtools ice-report`), and the peer launcher binary built
-# from tools/ci/compiled-workload-peer-launcher.rs.
+# Discovery index and lock, ICE bug-report bundles, and the peer launcher
+# built from Tools/ci/compiled-workload-peer-launcher.rs.
 **/.jet/discovery/
 **/.jet/ice-report/
 **/.jet/.locks/
 **/.jet/rustc
 **/.jet/rustc-args
 /.jet/compiled-workload-peer-launcher
+# Production receipts carry this machine's toolchain and hardware identity.
+**/.jet/receipts/
+**/.jet/reports/
 
-# Stray rustc dumps and an unexpanded `~` dir dropped by debugging sessions.
+# Polyglot binder output (`jet inspect bind`). The generated `*.jet` binding
+# source is deterministic and stays tracked; native archives, class files,
+# worker scripts, and resolved host paths are machine-specific.
+**/.jet/bindings/*/*
+!**/.jet/bindings/*/*.jet
+
+# `b.generate` output (D-BUILDGEN1=A) is materialized on every build and never
+# committed. The two example locks below only hold that output's digest.
+# (`Examples/features/comptime/.jet/lock` stays tracked: it is a fixture.)
+**/.jet/generated/
+Examples/features/tooling/.jet/lock
+Examples/features/tooling/programmable_build/.jet/lock
+# Exception: E3510's input is a hand-written module at the generated path.
+!tests/ui/build_generated_collision/.jet/generated/
+
+# --- Tools -------------------------------------------------------------------
+Tools/editors/zed/grammar-repo/
+Tools/tower/.tower/server.log
+Tools/tower/.tower/.tower.json.tmp-*
+Tools/tower/.tower/*.pre-restore
+
+# --- Agent and debugging scratch ---------------------------------------------
+# Scratch belongs in ~/.cache, never in the repository.
+/.tmp
+/.tmp-*
+/__snapshots__/
+/build_wait.log
+/jit-aot-parity-report/
+/scratch-*
+/.codex-*
+/.card*.jet
+/~/
+scratchpad_difftest.sh
 rustc-args
 rustc-stderr
-/~/
+.claude/*.log
+.claude/**/*.log
+.claude/worktrees/
+.claude/recovery/
+.agent-worktrees/
+.agent-scratch-*/

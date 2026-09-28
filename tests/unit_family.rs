@@ -6,7 +6,7 @@
 //! machinery: convert with `Usd.from_float(value)`, scalar scaling stays in the
 //! unit, `.raw()` strips it, and nominal cross-unit/unit×unit mixing is E0127
 //! (the distinct same-type arithmetic rule). The family erases in codegen (I3).
-//! D-TYPE2-DEFAULT1=A (docs/spec/syntax-decisions.md:768): bare decimal
+//! D-TYPE2-DEFAULT1=A (Docs/spec/syntax-decisions.md:768): bare decimal
 //! literals are exact; these fixtures use the registered `Float{...}` literal
 //! when `from_float` needs an approximate input.
 
@@ -1497,7 +1497,7 @@ fn dimensional_quantities_example_stays_in_native_jit() {
     }
     use jet::JitBackend::RunOutcome;
 
-    let path = "examples/features/types/dimensional_quantities.jet";
+    let path = "Examples/features/types/dimensional_quantities.jet";
     let mut bundle = jet::Loader::load_entry(path).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -1522,7 +1522,7 @@ fn dimensional_quantities_example_stays_in_native_jit() {
             // adding a line to the example cannot leave this test asserting a
             // stale string (it did, when `week` landed).
             let golden = std::fs::read_to_string(
-                "examples/features/expected/types/dimensional_quantities.out",
+                "Examples/features/expected/types/dimensional_quantities.out",
             )
             .expect("dimensional quantities golden");
             assert_eq!(stdout, golden);

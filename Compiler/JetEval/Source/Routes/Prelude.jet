@@ -293,6 +293,11 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args
     }
     symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
     data :: jet_eval_route_args(args, &machine, span) ?? return None
+    if row.family == MirPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" {
+        parts :: jet_eval_compiler_value_method_owner(row.member) ?? return jet_eval_route_not_supported(&machine, span, "invalid compiler host method member")
+        if jet_eval_reflection_metadata_supported(parts[0], parts[1]) -> return jet_eval_route_reflection_host(row, data, &machine, span)
+        if jet_eval_compiler_value_method_supported(parts[0], parts[1], data.len() - 1) -> return jet_eval_route_compiler_value_host(row, data, &machine, span)
+    }
     if row.family == MirPreludeFamily.Overflow && row.module_name == "core.numeric" && jet_eval_route_is_exact_integer_member(row.member) && jet_eval_route_exact_integer_symbol(row.member, symbol) -> return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
     if row.family == MirPreludeFamily.Overflow {
         fixed :: jet_eval_route_fixed_member(row.member)

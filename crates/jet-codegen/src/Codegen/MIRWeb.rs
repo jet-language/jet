@@ -566,6 +566,7 @@ fn check_operation_types(
         | MirOperation::ReplacePlace { .. }
         | MirOperation::InitializeUninit { .. }
         | MirOperation::Copy { .. }
+        | MirOperation::Move { .. }
         | MirOperation::TraitBox { .. }
         | MirOperation::Constant(_)
         | MirOperation::Unary { .. }

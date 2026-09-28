@@ -8,11 +8,11 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-const EXAMPLE: &str = include_str!("../examples/features/types/range_types.jet");
-const EXPECTED: &str = include_str!("../examples/features/expected/types/range_types.out");
-const NAMED_RANGE_EXAMPLE: &str = include_str!("../examples/features/types/refinements.jet");
+const EXAMPLE: &str = include_str!("../Examples/features/types/range_types.jet");
+const EXPECTED: &str = include_str!("../Examples/features/expected/types/range_types.out");
+const NAMED_RANGE_EXAMPLE: &str = include_str!("../Examples/features/types/refinements.jet");
 const NAMED_RANGE_EXPECTED: &str =
-    include_str!("../examples/features/expected/types/refinements.out");
+    include_str!("../Examples/features/expected/types/refinements.out");
 
 fn have_tool(name: &str) -> bool {
     Command::new(name)
@@ -37,7 +37,7 @@ fn have_wasm_target() -> bool {
 
 #[test]
 fn inline_range_comptime_and_repl_accept_legal_inputs() {
-    let compiled = jet::compile_with_path(EXAMPLE, "examples/features/types/range_types.jet")
+    let compiled = jet::compile_with_path(EXAMPLE, "Examples/features/types/range_types.jet")
         .expect("inline range example must compile through the shared front end");
     assert!(
         compiled.rust.contains("42"),
@@ -177,7 +177,7 @@ fn named_range_parser_records_one_interval_fact() {
 #[test]
 fn named_range_sema_accepts_the_interval_proof() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/types/refinements.jet");
+        .join("Examples/features/types/refinements.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("load range example");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
     assert!(
@@ -190,7 +190,7 @@ fn named_range_sema_accepts_the_interval_proof() {
 fn named_range_tir_keeps_the_fixed_list_read_direct() {
     let compiled = jet::compile_with_path(
         NAMED_RANGE_EXAMPLE,
-        "examples/features/types/refinements.jet",
+        "Examples/features/types/refinements.jet",
     )
     .expect("named range example must reach TIR");
     let start = compiled
@@ -271,7 +271,7 @@ fn named_range_repl_uses_the_same_spelling() {
 fn named_range_web_backend_keeps_the_shared_interval_kernel() {
     let output = jet::compile_web_with_path(
         NAMED_RANGE_EXAMPLE,
-        "examples/features/types/refinements.jet",
+        "Examples/features/types/refinements.jet",
     )
     .expect("named range example must compile for web");
     let web = output.web.expect("web target must produce artifacts");

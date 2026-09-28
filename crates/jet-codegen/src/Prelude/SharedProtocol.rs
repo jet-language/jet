@@ -360,7 +360,7 @@ pub fn jet_shared_acquire(
 /// Duplicate aliases share the same lease while each row preserves its
 /// original participant index and requested editable capability.
 pub fn jet_shared_acquire_ordered_owners(
-    mut participants: Vec<(
+    participants: Vec<(
         usize,
         std::sync::Arc<dyn JetSharedCanonicalOwner>,
         bool,
@@ -373,6 +373,17 @@ pub fn jet_shared_acquire_ordered_owners(
     )>,
     String,
 > {
+    jet_shared_acquire_ordered_by(participants, |owner, editable| owner.acquire_permit(editable))
+}
+
+fn jet_shared_acquire_ordered_by<O, P>(
+    mut participants: Vec<(usize, std::sync::Arc<O>, bool)>,
+    mut acquire: impl FnMut(std::sync::Arc<O>, bool) -> Result<std::sync::Arc<P>, String>,
+) -> Result<Vec<(usize, bool, std::sync::Arc<P>)>, String>
+where
+    O: JetSharedCanonicalOwner + ?Sized,
+    P: JetSharedCanonicalPermit + ?Sized,
+{
     let mut ordered = participants
         .drain(..)
         .map(|(index, owner, editable)| {
@@ -405,7 +416,7 @@ pub fn jet_shared_acquire_ordered_owners(
             editable |= ordered[end].3;
             end += 1;
         }
-        let permit = owner.clone().acquire_permit(editable)?;
+        let permit = acquire(owner.clone(), editable)?;
         for (index, _, _, requested_editable, _) in &ordered[start..end] {
             acquired.push((*index, *requested_editable, std::sync::Arc::clone(&permit)));
         }
@@ -423,15 +434,17 @@ pub fn jet_shared_acquire_ordered(
         .map(|(index, protocol)| {
             (
                 index,
-                protocol as std::sync::Arc<dyn JetSharedCanonicalOwner>,
+                protocol,
                 true,
             )
         })
         .collect();
-    let rows = jet_shared_acquire_ordered_owners(participants)
-        .expect("uncancelled transaction lock acquisition succeeds");
-    let mut acquired: Vec<std::sync::Arc<dyn JetSharedCanonicalPermit>> =
-        Vec::with_capacity(rows.len());
+    let rows = jet_shared_acquire_ordered_by(participants, |owner, editable| {
+        owner.acquire(editable, || false)
+            .ok_or_else(|| "canonical Shared permit acquisition was cancelled".to_string())
+    })
+    .expect("uncancelled transaction lock acquisition succeeds");
+    let mut acquired: Vec<std::sync::Arc<JetSharedPermit>> = Vec::with_capacity(rows.len());
     let mut permits = Vec::new();
     for (_, _, permit) in rows {
         if acquired
@@ -440,11 +453,6 @@ pub fn jet_shared_acquire_ordered(
         {
             continue;
         }
-        let erased = permit.clone().into_any();
-        let permit = match std::sync::Arc::downcast::<JetSharedPermit>(erased) {
-            Ok(permit) => permit,
-            Err(_) => panic!("local Shared protocol returned a foreign canonical permit"),
-        };
         acquired.push(permit.clone());
         permits.push(permit);
     }
@@ -1845,11 +1853,12 @@ mod shared_protocol_tests {
             (first_owner, first.state.clone(), false),
             (second_owner, second.state.clone(), true),
         ] {
+            let staged_state = state.clone();
             transaction.record_edit_with_staged_commit(
                 owner,
                 Box::new(|| {}),
                 Box::new(move |_| {
-                    state.lock().unwrap().staged = true;
+                    staged_state.lock().unwrap().staged = true;
                     if fail {
                         Err("participant staging rejected".to_string())
                     } else {
@@ -1871,7 +1880,7 @@ mod shared_protocol_tests {
             apply_flag.store(true, std::sync::atomic::Ordering::Release);
         });
 
-        assert_eq!(result.as_deref(), Err("participant staging rejected"));
+        assert_eq!(result, Err("participant staging rejected".to_string()));
         assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
         assert!(rolled_back.load(std::sync::atomic::Ordering::Acquire));
         for owner in [first, second] {
@@ -2003,7 +2012,7 @@ mod shared_protocol_tests {
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = jet_shared_condition_wait(
-                &permit,
+                permit.as_ref(),
                 &condition,
                 || Ok::<bool, ()>(false),
                 || std::sync::Arc::new(PanicWaiter),
@@ -2025,7 +2034,7 @@ mod shared_protocol_tests {
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             jet_shared_condition_wait_once(
-                &permit,
+                permit.as_ref(),
                 &condition,
                 std::sync::Arc::new(PanicWaiter),
             )
@@ -2052,7 +2061,7 @@ mod shared_protocol_tests {
                 let permit = protocol.acquire(true, || false).unwrap();
                 let mut checks = 0usize;
                 let result = jet_shared_condition_wait(
-                    &permit,
+                    permit.as_ref(),
                     &worker_condition,
                     || {
                         checks += 1;
@@ -2134,7 +2143,7 @@ mod shared_protocol_tests {
 
         assert_eq!(
             jet_shared_condition_wait_once_with_handoff(
-                &permit,
+                permit.as_ref(),
                 &condition,
                 waiter,
                 Some(&mut handoff),
@@ -2147,8 +2156,8 @@ mod shared_protocol_tests {
 
     #[test]
     fn ordered_guard_acquisition_preserves_indices_and_shares_duplicate_permits() {
-        let first = std::sync::Arc::new(JetSharedProtocol::new());
-        let second = std::sync::Arc::new(JetSharedProtocol::new());
+        let first = JetSharedProtocol::new();
+        let second = JetSharedProtocol::new();
         let guards = jet_shared_guard_acquire_ordered(vec![
             (11, second.clone(), false),
             (7, first.clone(), true),
@@ -2165,7 +2174,12 @@ mod shared_protocol_tests {
             .collect::<Vec<_>>();
         editability.sort_unstable_by_key(|(index, _)| *index);
         assert_eq!(editability, vec![(7, true), (11, false), (12, false)]);
-        assert!(guards.iter().all(|(_, guard)| guard.permit().editable()));
+        let mut permit_editability = guards
+            .iter()
+            .map(|(index, guard)| (*index, guard.permit().editable()))
+            .collect::<Vec<_>>();
+        permit_editability.sort_unstable_by_key(|(index, _)| *index);
+        assert_eq!(permit_editability, vec![(7, true), (11, false), (12, true)]);
         let first_guard = guards.iter().find(|(index, _)| *index == 7).unwrap();
         let duplicate_guard = guards.iter().find(|(index, _)| *index == 12).unwrap();
         assert!(std::sync::Arc::ptr_eq(

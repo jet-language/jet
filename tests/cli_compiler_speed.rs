@@ -261,10 +261,10 @@ mod production_path {
 
     fn run_checker_fixture(name: &str, baseline: &str, report: &str) -> std::process::Output {
         let scratch = Scratch::new(name);
-        let fixture_perf = scratch.join("tools/perf");
+        let fixture_perf = scratch.join("Tools/perf");
         fs::create_dir_all(&fixture_perf).unwrap();
         let checker = fixture_perf.join("ci-perf-check.sh");
-        fs::copy(repository_file("tools/perf/ci-perf-check.sh"), &checker).unwrap();
+        fs::copy(repository_file("Tools/perf/ci-perf-check.sh"), &checker).unwrap();
         fs::set_permissions(&checker, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(fixture_perf.join("baseline.json"), baseline).unwrap();
         let report_path = scratch.join("current.report");
@@ -481,12 +481,12 @@ mod production_path {
     fn compiler_speed_named_job_dev_matches_run_and_interpreter() {
         let scratch = Scratch::new("compiler-speed-named-job-dev");
         fs::copy(
-            repository_file("examples/features/devloop/job_runner.jet"),
+            repository_file("Examples/features/devloop/job_runner.jet"),
             scratch.join("run.jet"),
         )
         .unwrap();
         fs::copy(
-            repository_file("tools/perf/package.jet"),
+            repository_file("Tools/perf/package.jet"),
             scratch.join("package.jet"),
         )
         .unwrap();

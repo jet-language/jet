@@ -1,4 +1,4 @@
-//! Generate and check one `site/dist/e/<CODE>/index.html` page for every
+//! Generate and check one `Docs/site/dist/e/<CODE>/index.html` page for every
 //! diagnostic row.
 //!
 //! The normal check compares committed pages with the typed registry. The
@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const GENERATED_DIR: &str = "site/dist/e";
+const GENERATED_DIR: &str = "Docs/site/dist/e";
 const SNAPSHOT_DIRS: &[&str] = &["tests/ui", "tests/ui_lint"];
 
 struct Snapshot {

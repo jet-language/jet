@@ -239,8 +239,8 @@ fn claude_hooks_follow_project_dir_for_hostile_paths() {
     let scratch = Scratch::new("claude-hostile-project-path");
     let project = scratch.join(r#"project with spaces;$(touch "$HOOK_INJECTION_MARKER")"#);
     let attacker = scratch.join("attacker cwd");
-    let project_scripts = project.join("scripts/agent");
-    let attacker_scripts = attacker.join("scripts/agent");
+    let project_scripts = project.join("Tools/agent");
+    let attacker_scripts = attacker.join("Tools/agent");
     fs::create_dir_all(&project_scripts).expect("create project hook directory");
     fs::create_dir_all(&attacker_scripts).expect("create attacker hook directory");
     let marker = scratch.join("claude-hook-origin");

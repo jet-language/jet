@@ -909,7 +909,7 @@ pub(super) fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Resul
             "\"impact\":null,\"diff\":null,\"catalog_schema_version\":{},\"authority\":[{}],\"writes\":\"none\",\"source\":{},\"modules\":[{}]",
             CORE_CATALOG_SCHEMA_VERSION,
             json_str("canvas.catalog:core.read"),
-            json_str("docs/spec/reference/core-library.md"),
+            json_str("Docs/spec/reference/core-library.md"),
             modules
         ),
     ))
@@ -998,7 +998,7 @@ struct CoreCatalogMember {
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
     let needle = query.trim();
     let mut modules =
-        parse_core_catalog_markdown(include_str!("../../../../docs/spec/reference/core-library.md"));
+        parse_core_catalog_markdown(include_str!("../../../../Docs/spec/reference/core-library.md"));
     let exports = parse_sema_core_module_items(include_str!(
         "../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"
     ));
@@ -1482,7 +1482,7 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         name,
         signature: signature.to_string(),
         summary,
-        source: "docs/spec/reference/core-library.md".to_string(),
+        source: "Docs/spec/reference/core-library.md".to_string(),
         pure: core_member_pure_for_signature(signature),
         available: true,
         stageable: false,
@@ -1678,7 +1678,7 @@ fn core_module_json(src: &str, module: &CoreCatalogModule) -> String {
         json_str(&module.path),
         json_str(&module.title),
         json_str(&module.summary),
-        json_str("docs/spec/reference/core-library.md"),
+        json_str("Docs/spec/reference/core-library.md"),
         members
     )
 }

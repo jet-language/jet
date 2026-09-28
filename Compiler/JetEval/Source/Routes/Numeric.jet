@@ -146,13 +146,11 @@ fn jet_eval_route_exact_order(left: TComptimeValue, right: TComptimeValue, machi
     result_ty :: Val(mir_type_from_kind(MirTypeKind.Bool))
     less :: jet_eval_route_exact_compare_member_host("lt", args, &machine, result_ty, span) ?? return None
     less_data :: jet_eval_data(less, &machine, span) ?? return None
-    if less_data == {.Bool(true) -> return Val(-1)}
+    if less_data == (TComptimeValue.Bool(true)) -> return Val(-1)
     greater :: jet_eval_route_exact_compare_member_host("gt", args, &machine, result_ty, span) ?? return None
     greater_data :: jet_eval_data(greater, &machine, span) ?? return None
-    if greater_data == {.Bool(true) -> return Val(1)}
-    if less_data == {.Bool(false) -> {
-        if greater_data == {.Bool(false) -> return Val(0)}
-    }}
+    if greater_data == (TComptimeValue.Bool(true)) -> return Val(1)
+    if less_data == (TComptimeValue.Bool(false)) && greater_data == (TComptimeValue.Bool(false)) -> return Val(0)
     jet_eval_compiler_fail(&machine, span, "exact integer comparison produced a non-Boolean carrier")
     None
 }
@@ -165,8 +163,8 @@ fn jet_eval_route_fixed_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], m
     jet_eval_host_row(&machine, row, args, result_ty, span)
 }
 
-fn jet_eval_route_precise_operator(module: String, member: String) -> Bool {
-    if module == {
+fn jet_eval_route_precise_operator(module_name: String, member: String) -> Bool {
+    if module_name == {
         "Decimal" -> if member == {
             "from_str" | "add" | "sub" | "mul" -> true
             else -> false
@@ -179,8 +177,8 @@ fn jet_eval_route_precise_operator(module: String, member: String) -> Bool {
     }
 }
 
-fn jet_eval_route_precise_symbol(module: String, member: String, symbol: String) -> Bool {
-    if module == {
+fn jet_eval_route_precise_symbol(module_name: String, member: String, symbol: String) -> Bool {
+    if module_name == {
         "Decimal" -> {
             expected :: if member == {
                 "from_str" -> "jet_decimal_from_str"
@@ -207,9 +205,9 @@ fn jet_eval_route_precise_symbol(module: String, member: String, symbol: String)
     }
 }
 
-fn jet_eval_route_precise_member_host(module: String, member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_precise_member_host(module_name: String, member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
     loop row in machine.program.prelude_calls {
-        if row.family == MirPreludeFamily.PreciseBuiltin && row.module_name == module && row.member == member && row.signature.arity == args.len() && jet_eval_route_precise_symbol(module, member, mir_symbol_name(row.symbol)) {
+        if row.family == MirPreludeFamily.PreciseBuiltin && row.module_name == module_name && row.member == member && row.signature.arity == args.len() && jet_eval_route_precise_symbol(module_name, member, mir_symbol_name(row.symbol)) {
             return jet_eval_host_row(&machine, row, args, result_ty, span)
         }
     }

@@ -1,0 +1,20 @@
+// c81 / D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A: `--target=sandbox`
+// builds this package's entry file to a sandboxed WASM Component Model
+// module instead of a native binary. No `export:` override here — the `.wit`
+// world name defaults to the package name (`mathkit`, D-PLUGIN-EXPORT1=A);
+// see `tests/ui/plugin_e1257_version_mismatch` and
+// `jet_pkg_model::Package::Blocks` for the `export:` field itself. The host
+// at `../run.jet` loads the *compiled* `../mathkit.wasm` this package
+// produces (rebuild it with the command below; the compiled artifact is
+// committed so the golden test never needs a wasm32 toolchain to just RUN
+// the example).
+//
+// Rebuild after editing run.jet:
+//   nix develop -c ./target/debug/jet build \
+//     Examples/features/packages/sandbox_mathkit/sandbox_src/run.jet \
+//     --target=sandbox
+//   cp build/main.wasm Examples/features/packages/sandbox_mathkit/mathkit.wasm
+name: "mathkit"
+version: "0.1.0"
+description: "Demonstrates target: sandbox (c81) — an isolated WASM Component Model math library."
+license: "MIT OR Apache-2.0"

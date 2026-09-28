@@ -55,10 +55,13 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         segment :: parser_expect_name(&state, "after `.` in a C module path")
         path_end = segment.span
         has_suffix = true
-        if segment.payload.decoded == "__bindgen__" {
-            has_bindgen_segment = true
-        } else {
-            parser_add_error(&state, segment.span, "a C module path may only end in `.__bindgen__` after its library name", "the generated-cache segment is reserved and C library overlays use the root `c.<lib>` path", "use `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`")
+        if {
+            segment.payload.decoded == "__bindgen__" -> {
+                has_bindgen_segment = true
+            }
+            else -> {
+                parser_add_error(&state, segment.span, "a C module path may only end in `.__bindgen__` after its library name", "the generated-cache segment is reserved and C library overlays use the root `c.<lib>` path", "use `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`")
+            }
         }
     }
     path_span :: parser_cover(root.span, path_end)
@@ -95,9 +98,11 @@ fn parser_c_module_callback_metadata(function: ExternFn, lib: String) -> ExternF
         }
     }
     is_task_return :: if function.return_type == {
-        .Val(ty) -> ty == {
-            .Apply(name, _) -> name == "Task"
-            else -> false
+        .Val(ty) -> {
+            if ty == {
+                .Apply(name, _) -> name == "Task"
+                else -> false
+            }
         }
         else -> false
     }

@@ -32,9 +32,9 @@ pub const COMPILER_SOURCES: &[&str] = &[
     "crates/jet-cli",
     "crates/jet-canvas",
     "crates/jet-devserver",
-    "docs/spec/reference/core-library.md",
-    "docs/spec/diagnostics.md",
-    "examples/features/collections/wordcount.jet",
+    "Docs/spec/reference/core-library.md",
+    "Docs/spec/diagnostics.md",
+    "Examples/features/collections/wordcount.jet",
     "tests/fixtures/nix-compat/oracle.json",
 ];
 

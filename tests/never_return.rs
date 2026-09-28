@@ -23,7 +23,7 @@ fn declared_never_example_is_byte_identical_on_aot_jit_and_interpreter() {
 #[test]
 fn declared_never_example_is_byte_identical_through_eval() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/functions/never_return.jet");
+    let source = root.join("Examples/features/functions/never_return.jet");
     assert!(source.is_file(), "missing Never return example: {}", source.display());
 
     let scratch = common::test_scratch_root("never_return").join(format!("eval-{}", std::process::id()));

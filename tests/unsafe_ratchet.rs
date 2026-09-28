@@ -45,7 +45,7 @@ impl Drop for Fixture {
 
 fn ratchet(fixture: &Fixture, update: bool) -> Output {
     let script =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/agent/check-unsafe-ratchet.mjs");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/agent/check-unsafe-ratchet.mjs");
     let mut command = Command::new("node");
     command
         .arg(script)

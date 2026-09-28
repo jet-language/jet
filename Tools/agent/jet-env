@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Run one command in Jet's core shell, reusing nix-direnv's cache when present.
+# `jet-env full <cmd>` selects FFI/browser/VM integration tooling.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+profile="core"
+if [ "${1:-}" = "full" ]; then
+  profile="full"
+  shift
+elif [ "${1:-}" = "proof" ]; then
+  profile="proof"
+  shift
+fi
+if [ "$#" -eq 0 ]; then
+  echo "usage: Tools/agent/jet-env [full] <command> [args...]" >&2
+  exit 64
+fi
+# The development command means this checkout's compiler, not the prebuilt Jet
+# package that the Nix shell also puts on PATH. Keep the package as bootstrap
+# fallback for a clean tree with no local binary yet.
+if [ "$1" = "jet" ] && [ -x "$repo/target/debug/jet" ]; then
+  shift
+  set -- "$repo/target/debug/jet" "$@"
+fi
+
+# Check after every environment boundary. direnv and nix can add a shared
+# target dir after the outer process starts, so checking only the caller's
+# environment leaves the same cross-worktree corruption door open.
+check_target_dir() {
+  local checkout="$1"
+
+  # /tmp is RAM-backed tmpfs on this machine; cargo artifacts or test scratch
+  # there fill swap and trigger kernel OOM kills. Use a disk path instead.
+  reject_tmpfs_path() {
+    local name="$1"
+    local value="$2"
+    local resolved
+    resolved="$(realpath -m -- "$value")"
+    case "$resolved" in
+      /tmp|/tmp/*)
+        echo "jet-env: $name=$value is on tmpfs /tmp (RAM-backed)." >&2
+        echo "jet-env: artifacts there cause OOM crashes; use a disk path under the checkout." >&2
+        exit 64
+        ;;
+    esac
+  }
+
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    reject_tmpfs_path CARGO_TARGET_DIR "$CARGO_TARGET_DIR"
+  fi
+  for scratch_var in JET_TEST_SCRATCH_DIR JET_DEV_ORACLE_CACHE_DIR; do
+    scratch_value="${!scratch_var:-}"
+    if [ -n "$scratch_value" ]; then
+      reject_tmpfs_path "$scratch_var" "$scratch_value"
+    fi
+  done
+
+  # A target dir outside this checkout can be shared by another same-name
+  # checkout; cargo then reports "Finished" while target/debug/<bin> still holds
+  # the other checkout's binary with its embedded assets. Per-checkout caches
+  # only (card 1640).
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    case "$(realpath -m -- "$CARGO_TARGET_DIR")" in
+      "$checkout"/*) ;;
+      *)
+        echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR lies outside this checkout." >&2
+        echo "jet-env: shared caches serve stale cross-checkout binaries; use $checkout/target-<name>." >&2
+        exit 64
+        ;;
+    esac
+  fi
+}
+
+set_default_target_dir() {
+  if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+    export CARGO_TARGET_DIR="$1/target"
+  fi
+}
+
+set_default_target_dir "$repo"
+check_target_dir "$repo"
+
+# Select sccache for a cold tree after the shell has made it available.
+# Agent commands keep incremental compilation disabled in either cache mode.
+# JET_NO_SCCACHE=1 opts out.
+ensure_command_resources() {
+  # Apply after direnv/nix as well: shell imports may replace the caller's
+  # environment. A machine-wide Cargo/test fan-out can exhaust shared RAM.
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+  export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+  export CARGO_INCREMENTAL=0
+  # Recursive formatter/parser walks overflow the 2 MiB test-thread default.
+  if [ -z "${RUST_MIN_STACK:-}" ]; then
+    export RUST_MIN_STACK=8388608
+  fi
+}
+
+cache_mode_env() {
+  # $1 = checkout root (baked in by the caller — the nix-develop transplant
+  # below has no access to this script's variables at runtime).
+  if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ]; then
+    tgt="${CARGO_TARGET_DIR:-$1/target}"
+    if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
+      export RUSTC_WRAPPER=sccache
+    fi
+  fi
+}
+
+# `direnv export` returns cached environment assignments when `.envrc` has
+# been allowed. Execute the requested command once; never fall back after its
+# own failure, which would duplicate writes/tests.
+if command -v direnv >/dev/null 2>&1; then
+  if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
+    eval "$env_dump"
+    set_default_target_dir "$repo"
+    check_target_dir "$repo"
+    cache_mode_env "$repo"
+    ensure_command_resources
+    exec "$@"
+  fi
+fi
+
+# Inside `nix develop`, re-enter this script's cache selection via bash -c so
+# the check sees the shell's PATH.
+joined="$(printf '%q ' "$@")"
+if [ "$profile" = "full" ] || [ "$profile" = "proof" ]; then
+  flake_shell="$profile"
+else
+  flake_shell="default"
+fi
+
+# The shell depends on flake.nix/flake.lock, not ordinary source edits. A
+# dirty checkout otherwise creates another whole-repository store snapshot
+# for every command. Native profiles retain the shell's toolchain across GC.
+# sha256sum includes the absolute input paths, keeping checkouts independent.
+cache_key="$(sha256sum "$repo/flake.nix" "$repo/flake.lock" | sha256sum)"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/jet/dev-shells"
+cached_shell="$cache_dir/${cache_key%% *}-$flake_shell"
+if [ -e "$cached_shell" ]; then
+  shell_args=("$cached_shell")
+else
+  mkdir -p "$cache_dir"
+  shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
+fi
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"

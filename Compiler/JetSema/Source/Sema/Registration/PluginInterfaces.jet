@@ -1,0 +1,784 @@
+// Frozen Component interfaces are immutable semantic facts. Snapshot decoding
+// belongs to the bundle boundary; callers pass its complete typed result here.
+pub struct SemaPluginInterfaceExport {
+    pub name: String
+    pub signature: String
+    pub params: [SemaPluginExportParam]
+    pub return_type: ?Type
+}
+
+pub struct SemaPluginExportParam {
+    pub convention: AccessConvention
+    pub ty: Type
+}
+
+pub struct SemaPluginInterface {
+    pub artifact: String
+    pub identity: String
+    pub digest: String
+    pub exports: [SemaPluginInterfaceExport]
+}
+
+pub struct SemaPluginArtifactAlias {
+    pub artifact: String
+    pub identity: String
+}
+
+pub struct SemaPluginFrozenExportInput {
+    pub name: String
+    pub signature: String
+}
+
+// Canonical ApiFreeze snapshot contract input; its capability digest is
+// recomputed from the stored signatures.
+pub struct SemaPluginFrozenSnapshotInput {
+    pub package: String
+    pub funcs: [SemaPluginFrozenExportInput]
+}
+
+pub struct SemaPluginInterfaceFacts {
+    pub interfaces: [SemaPluginInterface]
+    pub artifacts: [SemaPluginArtifactAlias]
+    pub digest: String
+    pub complete: Bool
+}
+
+pub struct SemaPluginUnitDimension {
+    pub name: String
+    pub identity: String
+}
+
+pub struct SemaPluginInterfaceBuildInput {
+    pub package_name: String
+    pub entry_artifact: String
+    pub entry_aliases: [String]
+    pub frozen_snapshots: [SemaPluginFrozenSnapshotInput]
+}
+
+struct SemaPluginResolvedUnitDimension {
+    pub family: String
+    pub dimension: Dimension
+}
+fn sema_plugin_put_export(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) {
+    loop index in 0..<exports.len() {
+        if exports[index].name == export.name {
+            exports[index] = export
+            return
+        }
+    }
+    exports.push(export)
+}
+
+fn sema_plugin_export_after(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool {
+    left.name > right.name
+}
+
+fn sema_plugin_sort_exports(exports: &[SemaPluginInterfaceExport]) {
+    loop index in 1..<exports.len() {
+        item := exports[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_export_after(exports[cursor - 1], item) {
+            exports[cursor] = exports[cursor - 1]
+            cursor -= 1
+        }
+        exports[cursor] = item
+    }
+}
+
+fn sema_plugin_interface_after(left: SemaPluginInterface, right: SemaPluginInterface) -> Bool {
+    left.identity > right.identity
+}
+
+fn sema_plugin_sort_interfaces(interfaces: &[SemaPluginInterface]) {
+    loop index in 1..<interfaces.len() {
+        item := interfaces[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_interface_after(interfaces[cursor - 1], item) {
+            interfaces[cursor] = interfaces[cursor - 1]
+            cursor -= 1
+        }
+        interfaces[cursor] = item
+    }
+}
+
+fn sema_plugin_put_interface(interfaces: &[SemaPluginInterface], interface: SemaPluginInterface) {
+    loop index in 0..<interfaces.len() {
+        if interfaces[index].identity == interface.identity {
+            interfaces[index] = interface
+            return
+        }
+    }
+    interfaces.push(interface)
+}
+
+fn sema_plugin_normalize_artifact(raw: String) -> ?String {
+    bytes := raw.trim().bytes()
+    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := bytes.pop()
+    if bytes.len() == 0 -> return None
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{47}) -> start = index + 1
+    }
+    name :: String.from_bytes(bytes.slice(start, bytes.len())) ?? return None
+    name_bytes := name.bytes()
+    dot := -1
+    loop index in 0..<name_bytes.len() {
+        if name_bytes[index] == (U8{46}) -> dot = index
+    }
+    stem :: if dot > 0 -> String.from_bytes(name_bytes.slice(0, dot)) ?? name else -> name
+    if stem == "" -> return None
+    Val(stem)
+}
+
+fn sema_plugin_put_alias(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) {
+    normalized :: sema_plugin_normalize_artifact(artifact) ?? return
+    loop alias in aliases {
+        if alias.artifact == normalized {
+            return
+        }
+    }
+    aliases.push(SemaPluginArtifactAlias{artifact: normalized, identity: identity})
+}
+
+fn sema_plugin_identity(artifact: String, digest: String) -> String {
+    bytes := artifact.bytes()
+    output := ""
+    index := 0
+    loop index < bytes.len() {
+        first :: Int.from_u8(bytes[index])
+        width :: if {
+            first < 128 -> 1
+            first < 224 -> 2
+            first < 240 -> 3
+            else -> 4
+        }
+        if {
+            width == 1 && ((first >= 48 && first <= 57) || (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> {
+                output = "{output}{String.from_bytes([bytes[index]]) ?? "_"}"
+            }
+            else -> {
+                output = "{output}_"
+            }
+        }
+        index += width
+    }
+    "PluginInterface__{output}__{digest}"
+}
+fn sema_plugin_unit_ratio(value: UnitRatio) -> String {
+    if value.denominator == 1 {
+        return "{value.numerator}"
+    }
+    return "{value.numerator}/{value.denominator}"
+}
+
+fn sema_plugin_unit_scale_provenance(value: UnitScaleProvenance) -> String {
+    if value == {
+        .Rational -> "Rational"
+        .SymbolicPi(numerator, denominator) -> "SymbolicPi({sema_plugin_unit_ratio(numerator)}/{sema_plugin_unit_ratio(denominator)})"
+        .Conventional(text, source) -> "Conventional({text};{source})"
+        .Measured(central, uncertainty, source) -> "Measured({central};{uncertainty};{source})"
+    }
+}
+
+fn sema_plugin_put_unit_dimension(output: &[SemaPluginUnitDimension], row: SemaPluginUnitDimension) {
+    loop index in 0..<output.len() {
+        if output[index].name == row.name {
+            output[index] = row
+            return
+        }
+    }
+    output.push(row)
+}
+
+fn sema_plugin_put_resolved_unit_dimension(dimensions: &[SemaPluginResolvedUnitDimension], family: String, dimension: Dimension) {
+    loop index in 0..<dimensions.len() {
+        if dimensions[index].family == family {
+            dimensions[index] = SemaPluginResolvedUnitDimension{family: family, dimension: dimension}
+            return
+        }
+    }
+    dimensions.push(SemaPluginResolvedUnitDimension{family: family, dimension: dimension})
+}
+
+fn sema_plugin_resolved_unit_dimension(dimensions: [SemaPluginResolvedUnitDimension], family: String) -> ?Dimension {
+    loop row in dimensions {
+        if row.family == family {
+            return Val(row.dimension)
+        }
+    }
+    None
+}
+
+fn sema_plugin_resolve_unit_dimension_expression(expression: Expr, dimensions: [SemaPluginResolvedUnitDimension]) -> ?Dimension {
+    if expression == {
+        .Ident(name, _) -> {
+            loop row in dimensions {
+                if row.family == name {
+                    return Val(row.dimension)
+                }
+            }
+            return None
+        }
+        .Binary(op, left, right, _) -> {
+            if op != BinOp.Mul && op != BinOp.Div -> return None
+            left_dimension :: sema_plugin_resolve_unit_dimension_expression(left, dimensions) ?? return None
+            right_dimension :: sema_plugin_resolve_unit_dimension_expression(right, dimensions) ?? return None
+            return sema_plugin_combine_unit_dimensions(left_dimension, right_dimension, op == BinOp.Mul)
+        }
+        else -> return None
+    }
+}
+
+fn sema_plugin_add_dimension_axis(axes: &[DimensionAxis], name: String, exponent: Int) -> Bool {
+    loop index in 0..<axes.len() {
+        if axes[index].name == name {
+            current :: measure_signed_value(axes[index].exponent) ?? return false
+            next := current + exponent
+            if {
+                next == 0 -> {
+                    _ := axes.remove(index)
+                }
+                else -> {
+                    axes[index].exponent = Measure.SignedLiteral("dimension", next)
+                }
+            }
+            return true
+        }
+    }
+    if exponent != 0 -> axes.push(DimensionAxis{name: name, exponent: Measure.SignedLiteral("dimension", exponent)})
+    true
+}
+
+fn sema_plugin_sort_dimension_axes(axes: &[DimensionAxis]) {
+    loop index in 1..<axes.len() {
+        item := axes[index]
+        cursor := index
+        loop cursor > 0 && axes[cursor - 1].name > item.name {
+            axes[cursor] = axes[cursor - 1]
+            cursor -= 1
+        }
+        axes[cursor] = item
+    }
+}
+
+fn sema_plugin_combine_unit_dimensions(left: Dimension, right: Dimension, multiply: Bool) -> ?Dimension {
+    axes := [DimensionAxis]{}
+    loop axis in left.axes {
+        exponent :: measure_signed_value(axis.exponent) ?? return None
+        if !sema_plugin_add_dimension_axis(&axes, axis.name, exponent) -> return None
+    }
+    loop axis in right.axes {
+        exponent :: measure_signed_value(axis.exponent) ?? return None
+        if !multiply -> exponent = -exponent
+        if !sema_plugin_add_dimension_axis(&axes, axis.name, exponent) -> return None
+    }
+    sema_plugin_sort_dimension_axes(&axes)
+    Val(Dimension{axes: axes})
+}
+
+fn sema_plugin_unit_dimensions_in_items(items: [Item], package_name: String, output: &[SemaPluginUnitDimension]) {
+    resolved := [SemaPluginResolvedUnitDimension]{}
+    loop item in items {
+        if item == {
+            .UnitFamily(definition) -> {
+                if definition.resolved_dimension == {
+                    .Val(dimension) -> {
+                        sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
+                    }
+                    else -> {
+                        is_base_dimension :: if definition.dimension == {
+                            .Base(_) -> true
+                            else -> false
+                        }
+                        if is_base_dimension {
+                            dimension := Dimension{axes: [DimensionAxis]{DimensionAxis{name: "{package_name}::{definition.family}", exponent: Measure.SignedLiteral("dimension", 1)}}}
+                            sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
+                        }
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    progress := true
+    loop progress {
+        progress = false
+        loop item in items {
+            if item == {
+                .UnitFamily(definition) -> {
+                    if sema_plugin_resolved_unit_dimension(resolved, definition.family) == None {
+                        if definition.dimension == .Val(dimension) {
+                            if dimension == .Derived(expression) {
+                                dimension :: sema_plugin_resolve_unit_dimension_expression(expression, resolved) ?? next
+                                sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
+                                progress = true
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    loop item in items {
+        if item == {
+            .UnitFamily(definition) -> {
+                dimension := sema_plugin_resolved_unit_dimension(resolved, definition.family)
+                dimension_identity := dimension.map(value -> dimension_identity(value))
+                owner := package_name
+                if definition.resolved_owner == .Val(resolved_owner) && resolved_owner == "core.units" {
+                    owner = "core.units"
+                }
+                base := definition.base.map(value -> sema_registration_unit_type_name(value.name))
+                affine := base != None && loop member in definition.members {
+                    if member.offset.numerator != 0 -> break true
+                } ?? false
+                loop member in definition.members {
+                    names :: if affine -> [String]{"{sema_registration_unit_type_name(member.name)}Point", "{sema_registration_unit_type_name(member.name)}Delta"} else -> [String]{sema_registration_unit_type_name(member.name)}
+                    offsets :: if affine -> [String]{sema_plugin_unit_ratio(member.offset), "0"} else -> [String]{sema_plugin_unit_ratio(member.offset)}
+                    loop index in 0..<names.len() {
+                        identity := None
+                        if {
+                            base == None && dimension_identity != None -> {
+                                identity = Val("{{family={definition.family}; base=Float; dimension={dimension_identity ?? ""}}}")
+                            }
+                            base != None && dimension_identity != None -> {
+                                identity = Val("{{package={owner}; family={definition.family}; base={base ?? ""}; dimension={dimension_identity ?? ""}; scale={sema_plugin_unit_ratio(member.scale)}; provenance={sema_plugin_unit_scale_provenance(member.scale_provenance)}; offset={offsets[index]}}}")
+                            }
+                            base != None -> {
+                                identity = Val("{{package={owner}; family={definition.family}; base={base ?? ""}; scale={sema_plugin_unit_ratio(member.scale)}; provenance={sema_plugin_unit_scale_provenance(member.scale_provenance)}; offset={offsets[index]}}}")
+                            }
+                        }
+                        if identity != None -> sema_plugin_put_unit_dimension(&output, SemaPluginUnitDimension{name: names[index], identity: identity ?? ""})
+                    }
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    sema_plugin_unit_dimensions_in_items(body, package_name, &output)
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_plugin_unit_dimension(dimensions: [SemaPluginUnitDimension], name: String) -> ?String {
+    loop row in dimensions {
+        if row.name == name {
+            return Val(row.identity)
+        }
+    }
+    None
+}
+
+fn sema_plugin_internal_tag_name(internal_tag: InternalTag) -> String {
+    if internal_tag == {
+        .CoreCryptoNominal -> "core.crypto"
+        .DeterministicClock -> "clock.deterministic"
+        .SystemClock -> "clock.system"
+        .ExpiringSecretLoan -> "expiring_secret.loan"
+        .SharedGuardRead -> "shared_guard.read"
+        .SharedGuardEdit -> "shared_guard.edit"
+        .TerminalFactSet -> "terminal.fact_set"
+        .CppCallbackAbi -> "cpp.callback_abi"
+        .AllocatorView -> "allocator.view"
+    }
+}
+fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String {
+    if ty == {
+        .Named(name) -> return sema_plugin_unit_dimension(dimensions, name).map(identity -> "{name}{identity}") ?? type_name(ty)
+        .List(inner) -> return "[{sema_plugin_api_type_name(inner, dimensions)}]"
+        .Map(key, _, value) -> return "[{sema_plugin_api_type_name(key, dimensions)}:{sema_plugin_api_type_name(value, dimensions)}]"
+        .Shared(inner) -> return "Shared<{sema_plugin_api_type_name(inner, dimensions)}>"
+        .Option(inner) -> return "?{sema_plugin_api_type_name(inner, dimensions)}"
+        .Result(ok, err) -> {
+            ok_name := sema_plugin_api_type_name(ok, dimensions)
+            default_error := err == Type.Named("Err")
+            err_name := sema_plugin_api_type_name(err, dimensions)
+            if err == {
+                .Union(members) -> err_name = "({(loop member in members -> sema_plugin_api_type_name(member, dimensions)).join(" | ")})"
+                else -> {}
+            }
+            if ok == Type.Named("Unit") -> return if default_error -> "!Err" else -> "!{err_name}"
+            if default_error -> return ok_name
+            return "{ok_name} !{err_name}"
+        }
+        .Fn(params, ret, effect_bound, _, _, _) -> {
+            param_names := (loop param in params -> sema_plugin_api_type_name(param, dimensions))
+            output := "fn({param_names.join(", ")})"
+            if ret != None -> output = "{output} {sema_plugin_api_type_name(ret ?? Type.Named("Unit"), dimensions)}"
+            if effect_bound != None -> output = "{output} -[{(effect_bound ?? [EffectRowEntry]{}).map(row -> row.name).join(", ")}]>"
+            return output
+        }
+        .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 -> return "*{sema_plugin_api_type_name(args[0], dimensions)}"
+            return "{name}<{(loop arg in args -> sema_plugin_api_type_name(arg, dimensions)).join(", ")}>"
+        }
+        .Tuple(fields) -> return "({(loop field in fields -> "{field.name}: {sema_plugin_api_type_name(field.ty, dimensions)}").join(", ")})"
+        .FixedList(element, length) -> return "[{sema_plugin_api_type_name(element, dimensions)}#{measure_expression(length)}]"
+        .Tagged(marker, inner) -> {
+            if marker == .Internal(internal_tag) {
+                if internal_tag == InternalTag.CoreCryptoNominal || internal_tag == InternalTag.TerminalFactSet {
+                    return sema_plugin_api_type_name(inner, dimensions)
+                }
+            }
+            marker_name :: if marker == {
+                .User(name) -> name
+                .Internal(internal_tag) -> sema_plugin_internal_tag_name(internal_tag)
+            }
+            return "#{marker_name} {sema_plugin_api_type_name(inner, dimensions)}"
+        }
+        .Union(members) -> return (loop member in members -> sema_plugin_api_type_name(member, dimensions)).join(" | ")
+        else -> return type_name(ty)
+    }
+}
+
+fn sema_plugin_view_projection_rank(value: ViewSourceProjection) -> Int {
+    if value == {
+        .Field(_) -> 0
+        .Index -> 1
+        .Range -> 2
+    }
+}
+
+fn sema_plugin_view_source_rank(value: ViewSource) -> Int {
+    if value == {
+        .Receiver -> 0
+        .Parameter(_) -> 1
+        .Static(_, _) -> 2
+    }
+}
+
+fn sema_plugin_view_source_after(left: ViewSourcePath, right: ViewSourcePath) -> Bool {
+    left_rank :: sema_plugin_view_source_rank(left.source)
+    right_rank :: sema_plugin_view_source_rank(right.source)
+    if left_rank != right_rank -> return left_rank > right_rank
+    if left.source == {
+        .Parameter(index) -> {
+            if right.source == .Parameter(other) {
+                if index != other {
+                    return index > other
+                }
+            }
+        }
+        .Static(module_name, name) -> {
+            if right.source == .Static(other_module_name, other_name) {
+                if module_name != other_module_name {
+                    return module_name > other_module_name
+                }
+                if name != other_name {
+                    return name > other_name
+                }
+            }
+        }
+        else -> {}
+    }
+    count := if left.projections.len() < right.projections.len() -> left.projections.len() else -> right.projections.len()
+    loop index in 0..<count {
+        left_projection := left.projections[index]
+        right_projection := right.projections[index]
+        if left_projection == right_projection -> next
+        left_projection_rank :: sema_plugin_view_projection_rank(left_projection)
+        right_projection_rank :: sema_plugin_view_projection_rank(right_projection)
+        if left_projection_rank != right_projection_rank -> return left_projection_rank > right_projection_rank
+        if left_projection == .Field(name) {
+            if right_projection == .Field(other) && name > other {
+                return true
+            }
+        }
+        return false
+    }
+    left.projections.len() > right.projections.len()
+}
+
+fn sema_plugin_view_slot_after(left: [String], right: [String]) -> Bool {
+    count := if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<count {
+        if left[index] != right[index] -> return left[index] > right[index]
+    }
+    left.len() > right.len()
+}
+
+fn sema_plugin_view_source_path(source: ViewSourcePath) -> String {
+    owner := if source.source == {
+        .Receiver -> "receiver"
+        .Parameter(index) -> "parameter:{index}"
+        .Static(module_path, name) -> "static:{module_path}::{name}"
+    }
+    path := (loop projection in source.projections -> if projection == {
+        .Field(name) -> "field:{name}"
+        .Index -> "index"
+        .Range -> "range"
+    })
+    "{owner};path:{path.join("/")}"
+}
+
+fn sema_plugin_view_provenance(value: ViewProvenance) -> String {
+    access :: if value.mutable -> "write" else -> "read"
+    if value.sources.len() == 1 {
+        source :: sema_plugin_view_source_path(value.sources[0])
+        parts :: source.split(";path:")
+        return "{parts[0]};access:{access};path:{if parts.len() > 1 -> parts[1] else -> ""}"
+    }
+    sources := value.sources
+    loop index in 1..<sources.len() {
+        item := sources[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_view_source_after(sources[cursor - 1], item) {
+            sources[cursor] = sources[cursor - 1]
+            cursor -= 1
+        }
+        sources[cursor] = item
+    }
+    canonical := (loop source in sources -> sema_plugin_view_source_path(source))
+    "one_of({canonical.join(",")});access:{access}"
+}
+
+fn sema_plugin_view_provenance_map(value: ViewProvenanceMap) -> String {
+    entries := value.entries
+    loop index in 1..<entries.len() {
+        item := entries[index]
+        cursor := index
+        loop cursor > 0 && sema_plugin_view_slot_after(entries[cursor - 1].slot, item.slot) {
+            entries[cursor] = entries[cursor - 1]
+            cursor -= 1
+        }
+        entries[cursor] = item
+    }
+    parts := [String]{}
+    loop entry in entries {
+        slot :: if entry.slot.len() == 0 -> "$" else -> entry.slot.join(".")
+        parts.push("{slot}={sema_plugin_view_provenance(entry.value)}")
+    }
+    parts.join("|")
+}
+
+fn sema_plugin_type_param_signature(params: [TypeParam]) -> String {
+    if params.len() == 0 -> return ""
+    names := [String]{}
+    loop param in params {
+        bounds := if {
+            param.bounds.len() == 1 -> ": {param.bounds[0]}"
+            param.bounds.len() > 1 -> ": [{param.bounds.join(", ")}]"
+            else -> ""
+        }
+        names.push("{param.name}{bounds}")
+    }
+    "<{names.join(", ")}>"
+}
+
+fn sema_plugin_type_has_never_success(ty: Type) -> Bool {
+    if ty == {
+        .Named(name) -> name == "Never"
+        .Result(ok, _) -> ok == Type.Named("Never")
+        else -> false
+    }
+}
+
+fn sema_plugin_canonical_fn_signature(function: Func, dimensions: [SemaPluginUnitDimension]) -> String {
+    params := [String]{}
+    loop param in function.params -> params.push("{param.name}: {access_sigil(param.convention)}{sema_plugin_api_type_name(param.ty, dimensions)}")
+    signature := "fn {function.name}{sema_plugin_type_param_signature(function.type_params)}({params.join(", ")})"
+    if function.return_type != None -> signature = "{signature} {sema_plugin_api_type_name(function.return_type ?? Type.Named("Unit"), dimensions)}"
+    if function.return_view_provenance == .Val(provenance) {
+        if {
+            provenance.entries.len() == 1 && provenance.entries[0].slot.len() == 0 && provenance.entries[0].value.sources.len() == 1 -> {
+                signature = "{signature} ; view_source = {sema_plugin_view_provenance(provenance.entries[0].value)}"
+            }
+            else -> {
+                signature = "{signature} ; view_sources = {sema_plugin_view_provenance_map(provenance)}"
+            }
+        }
+    }
+    declared_never :: function.return_type.map(ty -> sema_plugin_type_has_never_success(ty)) ?? false
+    if declared_never || function.diverges -> signature = "{signature} ; never_declared = {declared_never} ; never_inferred = {function.diverges}"
+    signature
+}
+
+fn sema_plugin_export_from_function(function: Func, dimensions: [SemaPluginUnitDimension]) -> SemaPluginInterfaceExport {
+    params := (loop param in function.params -> SemaPluginExportParam{convention: param.convention, ty: param.ty})
+    SemaPluginInterfaceExport{
+        name: function.name,
+        signature: sema_plugin_canonical_fn_signature(function, dimensions),
+        params: params,
+        return_type: function.return_type,
+    }
+}
+
+fn sema_plugin_sha256(text: String) -> String {
+    mir_sha256_hex_bytes(text.bytes())
+}
+
+fn sema_plugin_active_interface(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput, complete: &[Bool]) -> ?SemaPluginInterface {
+    artifact := if input.package_name != "" -> "plugin__{input.package_name}" else -> input.entry_artifact
+    if artifact == "" {
+        complete = false
+        return None
+    }
+    module_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? {
+        complete = false
+        return None
+    }
+    entry_module := graph.modules[module_index]
+    dimensions := [SemaPluginUnitDimension]{}
+    sema_plugin_unit_dimensions_in_items(entry_module.program.items, input.package_name, &dimensions)
+    exports := [SemaPluginInterfaceExport]{}
+    loop item in entry_module.program.items {
+        if item == {
+            .Func(function) -> {
+                if function.is_pub && !function.is_package_pub {
+                    sema_plugin_put_export(&exports, sema_plugin_export_from_function(function, dimensions))
+                }
+            }
+            else -> {}
+        }
+    }
+    sema_plugin_sort_exports(&exports)
+    signatures := (loop export in exports -> export.signature)
+    digest := sema_plugin_sha256(signatures.join("\n"))
+    Val(SemaPluginInterface{artifact: artifact, identity: sema_plugin_identity(artifact, digest), digest: digest, exports: exports})
+}
+
+fn sema_plugin_snapshot_signature_source(signature: String) -> ?String {
+    effect_parts := signature.split(" -[")
+    before_effects :: effect_parts[0]
+    metadata_parts := before_effects.split(" ;")
+    canonical := metadata_parts[0].trim()
+    bytes := canonical.bytes()
+    open := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{40}) {
+            open = index
+            break
+        }
+    }
+    if open < 0 -> return None
+    depth := 0
+    close := -1
+    loop index in open..<bytes.len() {
+        if bytes[index] == (U8{40}) -> depth += 1
+        if bytes[index] == (U8{41}) {
+            depth -= 1
+            if depth == 0 {
+                close = index
+                break
+            }
+        }
+    }
+    if close < 0 -> return None
+    prefix :: String.from_bytes(bytes.slice(0, close + 1)) ?? return None
+    result :: String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? return None
+    if result.trim() == "" -> return Val("{prefix} {{}}")
+    Val("{prefix} -> {result.trim()} {{}}")
+}
+
+fn sema_plugin_parse_frozen_export(frozen: SemaPluginFrozenExportInput) -> ?SemaPluginInterfaceExport {
+    signature_parts := frozen.signature.split(" -[")
+    before_effects :: signature_parts[0]
+    metadata_parts := before_effects.split(" ;")
+    signature := metadata_parts[0].trim()
+    source :: sema_plugin_snapshot_signature_source(signature) ?? return None
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> return None
+    function := None
+    loop item in parsed.program.items {
+        if item == {
+            .Func(value) -> {
+                function = Val(value)
+                break
+            }
+            else -> {}
+        }
+    }
+    declaration :: function ?? return None
+    if declaration.type_params.len() != 0 -> return None
+    params := (loop param in declaration.params -> SemaPluginExportParam{convention: param.convention, ty: param.ty})
+    Val(SemaPluginInterfaceExport{name: declaration.name, signature: signature, params: params, return_type: declaration.return_type})
+}
+
+fn sema_plugin_snapshot_capability_digest(snapshot: SemaPluginFrozenSnapshotInput) -> String {
+    signatures := (loop frozen in snapshot.funcs -> frozen.signature)
+    loop index in 1..<signatures.len() {
+        item := signatures[index]
+        cursor := index
+        loop cursor > 0 && signatures[cursor - 1] > item {
+            signatures[cursor] = signatures[cursor - 1]
+            cursor -= 1
+        }
+        signatures[cursor] = item
+    }
+    signatures.join("\n")
+}
+
+fn sema_plugin_frozen_interface(snapshot: SemaPluginFrozenSnapshotInput, complete: &[Bool]) -> ?SemaPluginInterface {
+    exports := [SemaPluginInterfaceExport]{}
+    loop frozen in snapshot.funcs {
+        export :: sema_plugin_parse_frozen_export(frozen) ?? {
+            complete = false
+            return None
+        }
+        sema_plugin_put_export(&exports, export)
+    }
+    sema_plugin_sort_exports(&exports)
+    digest := sema_plugin_sha256(sema_plugin_snapshot_capability_digest(snapshot))
+    Val(SemaPluginInterface{artifact: snapshot.package, identity: sema_plugin_identity(snapshot.package, digest), digest: digest, exports: exports})
+}
+
+pub fn sema_plugin_interface_facts(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput) -> SemaPluginInterfaceFacts {
+    interfaces := [SemaPluginInterface]{}
+    artifacts := [SemaPluginArtifactAlias]{}
+    complete := true
+    active := sema_plugin_active_interface(graph, input, &complete)
+    if active == .Val(interface) {
+        sema_plugin_put_interface(&interfaces, interface)
+        sema_plugin_put_alias(&artifacts, interface.artifact, interface.identity)
+        loop alias in input.entry_aliases -> sema_plugin_put_alias(&artifacts, alias, interface.identity)
+    }
+    loop snapshot in input.frozen_snapshots {
+        if !snapshot.package.starts_with("plugin__") -> next
+        interface :: sema_plugin_frozen_interface(snapshot, &complete) ?? next
+        sema_plugin_put_interface(&interfaces, interface)
+        sema_plugin_put_alias(&artifacts, interface.artifact, interface.identity)
+        if interface.artifact.starts_with("plugin__") -> sema_plugin_put_alias(&artifacts, sema_plugin_strip_prefix(interface.artifact, "plugin__"), interface.identity)
+}
+    sema_plugin_sort_interfaces(&interfaces)
+    contract := ""
+    loop interface in interfaces {
+        contract = "{contract}{interface.identity}\n{interface.digest}\n"
+        loop export in interface.exports -> contract = "{contract}{export.signature}\n"
+    }
+    SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: artifacts, digest: sema_plugin_sha256(contract), complete: complete}
+}
+
+fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
+    bytes := value.bytes()
+    prefix_bytes := prefix.bytes()
+    if bytes.len() < prefix_bytes.len() -> return value
+    if String.from_bytes(bytes.slice(0, prefix_bytes.len())) != prefix -> return value
+    String.from_bytes(bytes.slice(prefix_bytes.len(), bytes.len())) ?? value
+}
+
+pub fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifact: String) -> ?SemaPluginInterface {
+    normalized :: sema_plugin_normalize_artifact(artifact) ?? return None
+    found :: loop alias in facts.artifacts {
+        if alias.artifact == normalized {
+            break alias.identity
+        }
+    } ?? return None
+    loop interface in facts.interfaces {
+        if interface.identity == found {
+            return Val(interface)
+        }
+    }
+    None
+}
+
+pub fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: String) -> ?SemaPluginInterface {
+    loop interface in facts.interfaces {
+        if interface.identity == identity {
+            return Val(interface)
+        }
+    }
+    None
+}

@@ -129,17 +129,21 @@ fn mir_pass_inline_plan(
     }
     loop place in callee.places {
         argument_place := mir_pass_inline_parameter_place(place, parameter_values, args)
-        if argument_place != None && place.projections.len() == 0 {
-            maps.places.push(MirInlinePlaceMap{source: place.id, target: (argument_place ?? MirPlaceId{value: 0}), materialize: false})
-        } else {
-            mapped :: MirPlaceId{value: mir_pass_inline_fresh_id(&used_places, "mir-inline-place", "{identity}:place:{place.id.value}")}
-            maps.places.push(MirInlinePlaceMap{source: place.id, target: mapped, materialize: true})
+        if {
+            argument_place != None && place.projections.len() == 0 -> {
+                maps.places.push(MirInlinePlaceMap{source: place.id, target: (argument_place ?? MirPlaceId{value: 0}), materialize: false})
+            }
+            else -> {
+                mapped :: MirPlaceId{value: mir_pass_inline_fresh_id(&used_places, "mir-inline-place", "{identity}:place:{place.id.value}")}
+                maps.places.push(MirInlinePlaceMap{source: place.id, target: mapped, materialize: true})
+            }
         }
-    }
 
+    }
     loop block in callee.blocks {
         loop instruction in block.instructions {
-            if instruction.operation == { .Parameter(_, _) -> next else -> {} }
+            is_parameter :: if instruction.operation == { .Parameter(_, _) -> true else -> false }
+            if is_parameter -> next
             operation_id :: MirOpId{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:op:{instruction.id.value}")}
             maps.operations.push(MirInlineIdMap{source: instruction.id.value, target: operation_id.value})
         }
@@ -202,7 +206,8 @@ fn mir_pass_inline_plan(
     loop block in callee.blocks {
         instructions := [MirInstruction]{}
         loop instruction in block.instructions {
-            if instruction.operation == { .Parameter(_, _) -> next else -> {} }
+            is_parameter :: if instruction.operation == { .Parameter(_, _) -> true else -> false }
+            if is_parameter -> next
             mapped_operation :: mir_pass_inline_operation(instruction.operation, maps, substitutions) ?? return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "#Inline(Always) operation payload contains an unremappable identity"))}
             mapped_result :: instruction.result.map(value -> mir_pass_inline_value(maps, value))
             operation_id :: MirOpId{value: mir_pass_inline_id_target(maps.operations, instruction.id.value)}
@@ -274,7 +279,8 @@ fn mir_pass_inline_call_site_can_expand(
 
 fn mir_pass_inline_has_return_drop(callee: MirFunction) -> Bool {
     loop drop in callee.drops {
-        if drop.edge == { .Return -> return true else -> {} }
+        has_return_drop :: if drop.edge == { .Return -> true else -> false }
+        if has_return_drop -> return true
     }
     false
 }
@@ -643,7 +649,7 @@ fn mir_pass_inline_data_plan(plan: ?MirDataPlan, substitutions: [MirInlineTypeSu
 }
 
 fn mir_pass_inline_operation(operation: MirOperation, maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> ?MirOperation {
-    if operation == {
+    return if operation == {
         .Parameter(_, _) | .Capture(_) -> None
         .Global(name) -> Val(MirOperation.Global(name))
         .Phi(incoming) -> {
@@ -723,7 +729,7 @@ fn mir_pass_inline_operation(operation: MirOperation, maps: MirInlineMaps, subst
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
             Val(MirOperation.CoreCall(call, route, mapped_args, mapped_types, mir_pass_inline_fallibility(fallibility, substitutions), mir_pass_inline_data_plan(plan, substitutions)))
         }
-        .AttachTag(value, tag) -> Val(MirOperation.AttachTag(mir_pass_inline_value(maps, value), tag))
+        .AttachTag(value, tag_name) -> Val(MirOperation.AttachTag(mir_pass_inline_value(maps, value), tag_name))
         .Todo(call, location, expected_type) -> Val(MirOperation.Todo(call, location, expected_type.map(value -> mir_pass_inline_type(value, substitutions))))
         .Never(reason) -> Val(MirOperation.Never(reason))
         .Semantic(semantic) -> Val(MirOperation.Semantic(mir_pass_inline_semantic(semantic, maps, substitutions)))

@@ -72,7 +72,7 @@ fn run_interpret_rejects_release_profile() {
             "run",
             "--interpret",
             "--release",
-            "examples/features/errors/result_handler.jet",
+            "Examples/features/errors/result_handler.jet",
         ])
         .current_dir(root)
         .env("NO_COLOR", "1")
@@ -291,7 +291,7 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
 #[test]
 fn c_extern_calls_match_aot_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let project = root.join("examples/features/lowlevel/cbind");
+    let project = root.join("Examples/features/lowlevel/cbind");
     let cache = std::env::temp_dir().join(format!("jet_c_extern_parity_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);
 
@@ -357,7 +357,7 @@ fn sieve_scales_linearly() {
     const MEASURED_SAMPLES: usize = 3;
     const RUN_TIMEOUT: Duration = Duration::from_secs(30);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let fixture = root.join("gauntlet/entries/sieve/jet");
+    let fixture = root.join("Tools/gauntlet/entries/sieve/jet");
     let scratch = common::Scratch::new("sieve-scales-linearly");
     for file in ["package.jet", "run.jet"] {
         fs::copy(fixture.join(file), scratch.path.join(file))
@@ -537,8 +537,8 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
 fn scoped_borrow_bands_agrees_on_every_tier() {
     assert_example_tier_parity(
         "scoped_borrow_bands",
-        "examples/features/concurrency/scoped_borrow_bands.jet",
-        "examples/features/expected/concurrency/scoped_borrow_bands.out",
+        "Examples/features/concurrency/scoped_borrow_bands.jet",
+        "Examples/features/expected/concurrency/scoped_borrow_bands.out",
     );
 }
 
@@ -548,8 +548,8 @@ fn scoped_borrow_bands_agrees_on_every_tier() {
 fn data_json_agrees_on_every_tier() {
     assert_example_tier_parity(
         "data_json",
-        "examples/features/tooling/data_json.jet",
-        "examples/features/expected/tooling/data_json.out",
+        "Examples/features/tooling/data_json.jet",
+        "Examples/features/expected/tooling/data_json.out",
     );
 }
 

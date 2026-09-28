@@ -21,11 +21,14 @@ fn mir_pass_eliminate_dead_pure(program: &MirProgram) -> Int {
                             }
                         }
                     }
-                    if removable {
-                        changed = true
-                        removed_total += 1
-                    } else {
-                        kept_instructions.push(instruction)
+                    if {
+                        removable -> {
+                            changed = true
+                            removed_total += 1
+                        }
+                        else -> {
+                            kept_instructions.push(instruction)
+                        }
                     }
                 }
                 block.instructions = kept_instructions
@@ -88,7 +91,7 @@ fn mir_pass_removable_dead(operation: MirOperation, ty: ?MirType, ownership: Mir
 
 fn mir_pass_prelude_is_pure(rows: [MirPreludeCall], id: MirPreludeCallId) -> Bool {
     loop row in &rows {
-        if row.id == id -> return row.effect == None && row.fallibility == .Infallible
+        if row.id == id -> return row.effect_kind == None && row.fallibility == .Infallible
     }
     false
 }

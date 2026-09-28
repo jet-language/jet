@@ -1186,7 +1186,7 @@ pub(crate) fn render_page(state: &BrowserWebState, placement: BrowserPlacement) 
     let state_word = devtools_state_as_str(&frame.status.state);
     html.push_str(state_word);
     html.push_str("\"><header class=\"bar\"><span class=\"mark\">");
-    html.push_str(include_str!("../../../site/assets/mark.svg"));
+    html.push_str(include_str!("../../../Docs/site/assets/mark.svg"));
     html.push_str("</span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>");
     html.push_str(state_word);
     html.push_str(

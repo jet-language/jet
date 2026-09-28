@@ -5529,7 +5529,7 @@ fn c44_prelude_idents_canonical() {
 
 #[test]
 fn lsp_bench_reports_deterministic_cache_and_memory() {
-    let src = include_str!("../examples/features/collections/wordcount.jet");
+    let src = include_str!("../Examples/features/collections/wordcount.jet");
     let report = jet::LSP::measure_bench(src, 10);
     assert_eq!(report.hits, 1, "unchanged warm request must hit once");
     assert_eq!(

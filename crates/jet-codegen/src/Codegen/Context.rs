@@ -3021,7 +3021,7 @@ impl Cx {
             }
             // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s Value/Field handles. `Value`
             // and `Field` are common enough words that a user struct sharing the name
-            // is likely (`examples/features/memory/zerocopy.jet` already declares its
+            // is likely (`Examples/features/memory/zerocopy.jet` already declares its
             // own `Field`) — same guard as the layout/core-rust-type-name arms below:
             // a user type of that name always wins.
             Type::Named(name)

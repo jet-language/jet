@@ -33,7 +33,7 @@ fn inventory_is_manifest_scoped() {
     assert!(inventory
         .files
         .iter()
-        .any(|entry| entry.path == "docs/spec/guides/first-hour.md"));
+        .any(|entry| entry.path == "Docs/spec/guides/first-hour.md"));
     assert_eq!(
         inventory.provenance.len(),
         inventory.artifacts.len(),
@@ -61,11 +61,11 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
             .unwrap_or_else(|| panic!("missing CLI recipe source row: {selector}"))
     };
     for selector in [
-        "file:adoption/fixtures/clean-project/run.jet",
-        "file:examples/features/basics/first_hour.jet",
-        "file:examples/features/basics/onboarding/run.jet",
-        "file:docs/spec/guides/first-hour.md",
-        "root:gauntlet/entries",
+        "file:Tools/adoption/fixtures/clean-project/run.jet",
+        "file:Examples/features/basics/first_hour.jet",
+        "file:Examples/features/basics/onboarding/run.jet",
+        "file:Docs/spec/guides/first-hour.md",
+        "root:Tools/gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
         "file:dogfood/jetpack/src/cli/main.jet",
@@ -76,15 +76,15 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         );
     }
     for selector in [
-        "file:examples/features/io/args_spec.jet",
-        "file:examples/features/io/args_audit.jet",
+        "file:Examples/features/io/args_spec.jet",
+        "file:Examples/features/io/args_audit.jet",
     ] {
         assert_eq!(source_profile(selector), "builder-cli", "builder boundary drifted: {selector}");
     }
     for selector in [
-        "file:examples/features/io/cli_args.jet",
-        "file:examples/features/io/watcher.jet",
-        "file:gauntlet/entries/taskfile-cli/jet/run.jet",
+        "file:Examples/features/io/cli_args.jet",
+        "file:Examples/features/io/watcher.jet",
+        "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet",
     ] {
         assert_eq!(source_profile(selector), "raw-cli", "raw boundary drifted: {selector}");
     }
@@ -146,7 +146,7 @@ fn inventory_rejects_new_source_or_producer_without_a_row() {
     assert!(error.contains("replacement="));
 
     let error = policy
-        .audit_inventory(&["examples/features/basics/hello.jet"], &["producer:new.rs#render"])
+        .audit_inventory(&["Examples/features/basics/hello.jet"], &["producer:new.rs#render"])
         .expect_err("a synthetic producer without provenance must fail");
     assert!(error.contains("unclassified generated-source producer"));
 }
@@ -250,18 +250,18 @@ fn semantic_rules_use_ast_shapes_not_source_text() {
     let policy = CorpusPolicy::load().unwrap();
     let positive = policy
         .evaluate_source(
-            "examples/features/basics/first_hour.jet",
+            "Examples/features/basics/first_hour.jet",
             "fn run() { args :: process.argv() }",
         )
         .unwrap();
     assert!(positive.iter().any(|violation| violation.rule == "raw-cli-fixed-shape"));
     assert!(positive
         .iter()
-        .all(|violation| violation.file == "examples/features/basics/first_hour.jet"));
+        .all(|violation| violation.file == "Examples/features/basics/first_hour.jet"));
 
     let literal = policy
         .evaluate_source(
-            "examples/features/basics/first_hour.jet",
+            "Examples/features/basics/first_hour.jet",
             "fn run() { print(\"process.argv()\") }",
         )
         .unwrap();
@@ -273,7 +273,7 @@ fn cli_boundary_rules_cover_builder_views_and_repeated_process_reads() {
     let policy = CorpusPolicy::load().unwrap();
     let builder_view = policy
         .evaluate_source(
-            "examples/features/basics/first_hour.jet",
+            "Examples/features/basics/first_hour.jet",
             "fn run() { args :: process.argv().skip(1) }",
         )
         .unwrap();
@@ -283,7 +283,7 @@ fn cli_boundary_rules_cover_builder_views_and_repeated_process_reads() {
 
     let repeated = policy
         .evaluate_source(
-            "examples/features/basics/first_hour.jet",
+            "Examples/features/basics/first_hour.jet",
             "fn run() {
     first :: process.argv()
     second :: process.argv()
@@ -296,7 +296,7 @@ fn cli_boundary_rules_cover_builder_views_and_repeated_process_reads() {
 
     let single = policy
         .evaluate_source(
-            "examples/features/basics/first_hour.jet",
+            "Examples/features/basics/first_hour.jet",
             "fn run() { args :: process.argv() }",
         )
         .unwrap();
@@ -310,7 +310,7 @@ fn maintained_guidance_allow_requires_an_occurrence_manifest_row() {
     let policy = CorpusPolicy::load().unwrap();
     let error = policy
         .evaluate_source(
-            "examples/features/text/unreviewed_allow.jet",
+            "Examples/features/text/unreviewed_allow.jet",
             "fn run() { #allow(unit_scalar_rewrap) print(\"kept\") }",
         )
         .expect_err("maintained guidance allowance must be recorded");
@@ -322,22 +322,22 @@ fn card_2375_rules_reject_each_reintroduced_ceremony() {
     let policy = CorpusPolicy::load().unwrap();
     let cases = [
         (
-            "examples/features/basics/hello.jet",
+            "Examples/features/basics/hello.jet",
             r#"fn run() { print("hello") }"#,
             "entry-implicit",
         ),
         (
-            "docs/spec/guides/first-hour.md",
-            "jet build examples/features/basics/first_hour.jet",
+            "Docs/spec/guides/first-hour.md",
+            "jet build Examples/features/basics/first_hour.jet",
             "first-hour-doc-recipe",
         ),
         (
-            "examples/features/types/typed_literal_forms.jet",
-            r#"fn run() { print("jet build examples/features/types/typed_literal_forms.jet") }"#,
+            "Examples/features/types/typed_literal_forms.jet",
+            r#"fn run() { print("jet build Examples/features/types/typed_literal_forms.jet") }"#,
             "first-hour-doc-recipe",
         ),
         (
-            "examples/features/serde/reintroduced.jet",
+            "Examples/features/serde/reintroduced.jet",
             r#"#Codable
 struct Sample {
     value: Int
@@ -346,14 +346,14 @@ fn run() {}"#,
             "codable-structural",
         ),
         (
-            "examples/features/memory/reintroduced.jet",
+            "Examples/features/memory/reintroduced.jet",
             r#"fn run() {
     delay :: Duration.hours(2) ?? return Err("duration")
 }"#,
             "duration-constant-safe",
         ),
         (
-            "examples/features/basics/reintroduced_effect.jet",
+            "Examples/features/basics/reintroduced_effect.jet",
             r#"use core.files as fs
 fn run() -[FS, IO]> {
     path :: "input.txt"
@@ -363,7 +363,7 @@ fn run() -[FS, IO]> {
             "effect-row-inference",
         ),
         (
-            "examples/features/concurrency/parallel_scan.jet",
+            "Examples/features/concurrency/parallel_scan.jet",
             r#"use core.files as fs
 fn run() {
     path :: "input.txt"
@@ -372,7 +372,7 @@ fn run() {
             "readonly-copy",
         ),
         (
-            "examples/features/io/reintroduced.jet",
+            "Examples/features/io/reintroduced.jet",
             r#"use core.files as fs
 fn run() {
     path :: "input.txt"
@@ -381,7 +381,7 @@ fn run() {
             "error-identity",
         ),
         (
-            "examples/features/concurrency/reintroduced.jet",
+            "Examples/features/concurrency/reintroduced.jet",
             r#"fn run() {
     task.group g {
         task.race {1, 2}
@@ -390,7 +390,7 @@ fn run() {
             "task-one-child",
         ),
         (
-            "examples/features/concurrency/reintroduced.jet",
+            "Examples/features/concurrency/reintroduced.jet",
             r#"fn run() {
     task.group g {
         task.any {1, 2}
@@ -410,7 +410,7 @@ fn run() {
             "indexed-sequence",
         ),
         (
-            "gauntlet/entries/bulkrename/jet/run.jet",
+            "Tools/gauntlet/entries/bulkrename/jet/run.jet",
             r#"fn run() {
     value :: Regex{"IMG"}
 }"#,
@@ -540,7 +540,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let duration = policy
         .evaluate_source(
-            "examples/features/memory/reintroduced.jet",
+            "Examples/features/memory/reintroduced.jet",
             "fn run() { delay :: Duration.seconds(1.5) }",
         )
         .unwrap();
@@ -549,7 +549,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "duration-constant-safe"));
     let runtime_duration = policy
         .evaluate_source(
-            "examples/features/memory/reintroduced.jet",
+            "Examples/features/memory/reintroduced.jet",
             "fn run(seconds: Float) { delay :: Duration.seconds(seconds) }",
         )
         .unwrap();
@@ -559,7 +559,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let unit = policy
         .evaluate_source(
-            "examples/features/text/reintroduced.jet",
+            "Examples/features/text/reintroduced.jet",
             "fn run() { value :: Meter.from_float(source.raw() * 2) }",
         )
         .unwrap();
@@ -568,7 +568,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "unit-scalar-rewrap"));
     let converted_unit = policy
         .evaluate_source(
-            "examples/features/types/unit_family.jet",
+            "Examples/features/types/unit_family.jet",
             "fn subtotal(price: Usd, qty: Int) -> Usd { Usd.from_float(price.raw() * Float.from_int(qty)) }",
         )
         .unwrap();
@@ -577,7 +577,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "unit-scalar-rewrap"));
     let helper_unit = policy
         .evaluate_source(
-            "examples/features/text/reintroduced.jet",
+            "Examples/features/text/reintroduced.jet",
             "fn run() { value :: Meter.from_float(source.raw() * calibrate(2.0)) }",
         )
         .unwrap();
@@ -587,7 +587,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let format = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/run.jet",
+            "Tools/gauntlet/entries/bulkrename/jet/run.jet",
             "fn run() { print(\"{value:Fixed(2)}\".replace(\",\", \"\")) }",
         )
         .unwrap();
@@ -596,7 +596,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "plain-format-fact"));
     let grouped = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/run.jet",
+            "Tools/gauntlet/entries/bulkrename/jet/run.jet",
             "fn run() { print(\"{value:Grouped(2)}\".replace(\",\", \"\")) }",
         )
         .unwrap();
@@ -606,7 +606,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let directory = policy
         .evaluate_source(
-            "site/generate.jet",
+            "Docs/site/generate.jet",
             "fn run() { files.create_dir(\"dist\") }",
         )
         .unwrap();
@@ -615,7 +615,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "dogfood-directory-setup"));
     let idempotent = policy
         .evaluate_source(
-            "site/generate.jet",
+            "Docs/site/generate.jet",
             "fn run() { files.create_dir_all(\"dist\") }",
         )
         .unwrap();
@@ -667,7 +667,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let unrelated_regex_recipe = policy
         .evaluate_source(
-            "gauntlet/entries/bulkrename/jet/run.jet",
+            "Tools/gauntlet/entries/bulkrename/jet/run.jet",
             "fn pattern() { value :: Regex{\"^x$\"} }
 fn run(value: String) {
     matched :: re.match(Regex{\"x\"}, value)
@@ -681,7 +681,7 @@ fn run(value: String) {
 
     let docs_without_runner = policy
         .evaluate_source(
-            "docs/spec/guides/first-hour.md",
+            "Docs/spec/guides/first-hour.md",
             "```jet\n#CLI\nstruct Args { name: String }\n```\n```bash\njet build\n```",
         )
         .unwrap();
@@ -695,7 +695,7 @@ fn crypto_digest_rule_uses_the_resolved_core_module() {
     let policy = CorpusPolicy::load().unwrap();
     let legacy = policy
         .evaluate_source(
-            "examples/features/crypto/reintroduced.jet",
+            "Examples/features/crypto/reintroduced.jet",
             "use core.crypto as crypto
 fn run() { crypto.sha256_bytes(\"abc\".bytes()) }",
         )
@@ -706,7 +706,7 @@ fn run() { crypto.sha256_bytes(\"abc\".bytes()) }",
 
     let canonical = policy
         .evaluate_source(
-            "examples/features/crypto/reintroduced.jet",
+            "Examples/features/crypto/reintroduced.jet",
             "use core.crypto as crypto
 fn run() { crypto.sha256(\"abc\".bytes()).hex() }",
         )
@@ -717,7 +717,7 @@ fn run() { crypto.sha256(\"abc\".bytes()).hex() }",
 
     let unrelated = policy
         .evaluate_source(
-            "examples/features/crypto/reintroduced.jet",
+            "Examples/features/crypto/reintroduced.jet",
             "fn run() { sha256_bytes(\"abc\".bytes()) }",
         )
         .unwrap();

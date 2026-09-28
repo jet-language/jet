@@ -31,14 +31,20 @@ fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String,
             canonical_module_identity :: "{semantic_module.module_identity}::{definition.name}"
             if name != definition.key && name != definition.name && name != canonical && name != canonical_module_name && name != canonical_module_identity -> next
             candidate :: mir_trait_ref(canonical)
-            if semantic_module.module_identity == preferred_module_identity {
-                if preferred != None && (preferred ?? candidate).id != candidate.id -> return None
-                preferred = Val(candidate)
-            } else {
-                if other != None && (other ?? candidate).id != candidate.id {
-                    ambiguous_other = true
-                } else {
-                    other = Val(candidate)
+            if {
+                semantic_module.module_identity == preferred_module_identity -> {
+                    if preferred != None && (preferred ?? candidate).id != candidate.id -> return None
+                    preferred = Val(candidate)
+                }
+                else -> {
+                    if {
+                        other != None && (other ?? candidate).id != candidate.id -> {
+                            ambiguous_other = true
+                        }
+                        else -> {
+                            other = Val(candidate)
+                        }
+                    }
                 }
             }
         }

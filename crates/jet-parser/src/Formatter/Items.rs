@@ -889,7 +889,7 @@ impl<'a> Fmt<'a> {
             // and then the other moves a signature the author wrote before a
             // row. The rows were dropped outright until they were printed here
             // at all — a real token-dropping bug, caught reformatting
-            // examples/features/types/associated_types.jet.
+            // Examples/features/types/associated_types.jet.
             let mut members: Vec<TraitBodyMember<'_>> =
                 Vec::with_capacity(t.assoc_types.len() + t.methods.len());
             members.extend(t.assoc_types.iter().map(TraitBodyMember::AssocType));

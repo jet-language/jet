@@ -28,7 +28,7 @@ fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
 
     let clippy = fs::read_to_string(root.join("clippy.toml")).expect("workspace Clippy policy");
     assert!(clippy.contains("std::process::Command"));
-    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
+    let verify = fs::read_to_string(root.join("Tools/agent/verify-full.sh"))
         .expect("full verification entry point");
     assert!(verify.contains("verify-nix-eval-stopline.sh"));
     let escape = fs::read_to_string(root.join("tests/fixtures/nix-compat/authority-escape/lib.rs"))
@@ -75,7 +75,7 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert!(breadth.contains("\"output_identities\""));
     assert!(breadth.contains("\"memory_bytes\": 16777216"));
     assert!(breadth.contains("\"latency_micros\": 1000000"));
-    let stopline = fs::read_to_string(root.join("scripts/agent/verify-nix-eval-stopline.sh"))
+    let stopline = fs::read_to_string(root.join("Tools/agent/verify-nix-eval-stopline.sh"))
         .expect("native evaluator stop-line");
     assert!(stopline.contains("breadth.json"));
 }

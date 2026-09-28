@@ -1,0 +1,210 @@
+// Whole-program multi-head normalization. Variant names are collected across
+// every input Program; function heads are grouped only within their Program.
+
+pub struct SemaHeadPatternDesugarResult {
+    pub programs: [Program]
+    pub complete: Bool
+}
+
+struct SemaHeadPatternVariant {
+    name: String
+    enum_name: String
+    payload: VariantPayload
+}
+
+struct SemaHeadPatternGroup {
+    name: String
+    heads: [Func]
+}
+
+enum SemaHeadPatternOrderedItem {
+    Item(item: Item)
+    Heads(group_index: Int)
+}
+
+fn sema_head_pattern_pattern_span(pattern: Pattern) -> Span {
+    if pattern == {
+        .Variant(_, _, _, span) | .Present(_, _, span) | .Absent(span) | .Ok(_, _, span) | .Err(_, _, span) | .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span) | .StrMatch(_, span) | .BinMatch(_, span) -> span
+    }
+}
+
+fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] {
+    types := [Type]{}
+    if payload == {
+        .Unit -> {}
+        .Single(ty, _) -> types.push(ty)
+        .Named(fields) -> loop field in fields -> types.push(field.ty)
+    }
+    types
+}
+
+fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic], complete: &Bool) -> Func {
+    folded := heads[0]
+    enum_name := None
+    invalid := false
+    arms := [SwitchArm]{}
+
+    loop head in heads {
+        pattern :: head.head_pattern ?? {
+            invalid = true
+            next
+        }
+        pattern_span := sema_head_pattern_pattern_span(pattern)
+        variant_name := None
+        if pattern == {
+            .Variant(name, _, _, _) -> variant_name = Val(name)
+            else -> {}
+        }
+        if variant_name == None {
+            diagnostics.push(sema_error("E0305", pattern_span, "a multi-head declaration needs an enum variant head", "multi-head coverage is proved by the enum pattern table", "write a variant head such as `Circle(radius: Float)`"))
+            invalid = true
+            next
+        }
+        variant :: variant_name ?? ""
+
+        candidate := None
+        candidate_enum := ""
+        candidate_payload := VariantPayload.Unit
+        ambiguous := false
+        loop row in variants {
+            if row.name == variant {
+                if {
+                    candidate == None -> {
+                        candidate = Val(row)
+                        candidate_enum = row.enum_name
+                        candidate_payload = row.payload
+                    }
+                    row.enum_name != candidate_enum -> {
+                        ambiguous = true
+                    }
+                }
+            }
+        }
+        if candidate == None {
+            diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is not an enum variant", "a multi-head table can only cover variants declared by an enum", "check the variant spelling or declare the enum first"))
+            invalid = true
+            next
+        }
+        if ambiguous {
+            diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is ambiguous", "a bare head must identify one enum so one table subject can be typed", "use one enum's variants for this function name"))
+            invalid = true
+        }
+        if {
+            enum_name == None -> {
+                enum_name = Val(candidate_enum)
+            }
+            else -> {
+                previous :: enum_name ?? candidate_enum
+                if previous != candidate_enum {
+                    diagnostics.push(sema_error("E0305", pattern_span, "multi-head variants `{previous}` and `{variant}` belong to different enums", "one function has one argument type and one coverage table", "put heads for one enum under one function name"))
+                    invalid = true
+                }
+            }
+        }
+
+        expected := sema_head_pattern_payload_types(candidate_payload)
+        payload_index := 0
+        loop payload_index < head.params.len() && payload_index < expected.len() {
+            parameter := head.params[payload_index]
+            expected_type := expected[payload_index]
+            if parameter.ty != expected_type {
+                diagnostics.push(sema_error("E0305", parameter.ty_span, "multi-head binding `{parameter.name}` has type `{type_name(parameter.ty)}` but variant `{variant}` carries `{type_name(expected_type)}`", "head bindings must use the variant payload types", "write `{type_name(expected_type)}` for this binding"))
+                invalid = true
+            }
+            payload_index += 1
+        }
+
+        subject := Expr.Ident("__jet_multi_head_subject", folded.name_span)
+        arms.push(SwitchArm{
+            cond: Expr.PatternTest(subject, pattern, pattern_span),
+            body: head.body,
+            span: pattern_span,
+        })
+    }
+
+    if invalid || enum_name == None {
+        folded.head_pattern = None
+        complete = false
+        return folded
+    }
+    enum_name_value :: enum_name ?? ""
+    last_head := heads[heads.len() - 1]
+    full_span := Span{start: folded.span.start, end: last_head.span.end}
+    subject_name := "__jet_multi_head_subject"
+    subject := Expr.Ident(subject_name, folded.name_span)
+    folded.params = [Param]{Param{
+        convention: AccessConvention.Read,
+        root: false,
+        name: subject_name,
+        name_span: folded.name_span,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: Type.Named(enum_name_value),
+        ty_span: folded.name_span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+    }}
+    folded.body = [Stmt]{Stmt.Switch(subject, arms, None, folded.name_span)}
+    folded.span = full_span
+    folded.return_view_provenance = None
+    folded.declared_return_view_provenance = None
+    folded.head_pattern = None
+    folded
+}
+
+pub fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Diagnostic]) -> SemaHeadPatternDesugarResult {
+    variants := [SemaHeadPatternVariant]{}
+    loop program in programs {
+        loop item in program.items {
+            if item == {
+                .Enum(definition) -> loop variant in definition.variants -> variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
+                else -> {}
+            }
+        }
+    }
+
+    rebuilt_programs := [Program]{}
+    complete := true
+    loop program in programs {
+        module_program := program
+        groups := [SemaHeadPatternGroup]{}
+        ordered := [SemaHeadPatternOrderedItem]{}
+        loop item in module_program.items {
+            if item == {
+                .Func(function) -> {
+                    if {
+                        function.head_pattern != None -> {
+                            group_index := 0
+                            loop group_index < groups.len() {
+                                if groups[group_index].name == function.name -> break
+                                group_index += 1
+                            }
+                            if group_index == groups.len() {
+                                groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
+                                ordered.push(SemaHeadPatternOrderedItem.Heads(group_index))
+                            }
+                            groups[group_index].heads.push(function)
+                        }
+                        else -> {
+                            ordered.push(SemaHeadPatternOrderedItem.Item(item))
+                        }
+                    }
+                }
+                else -> ordered.push(SemaHeadPatternOrderedItem.Item(item))
+            }
+        }
+
+        items := [Item]{}
+        loop entry in ordered {
+            if entry == {
+                .Item(item) -> items.push(item)
+                .Heads(group_index) -> items.push(Item.Func(sema_head_pattern_fold_function(groups[group_index].heads, variants, &diagnostics, &complete)))
+            }
+        }
+        module_program.items = items
+        rebuilt_programs.push(module_program)
+    }
+    SemaHeadPatternDesugarResult{programs: rebuilt_programs, complete: complete}
+}

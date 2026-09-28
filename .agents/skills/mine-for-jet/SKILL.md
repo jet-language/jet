@@ -32,11 +32,11 @@ needs them; a broad comparison expands the relevant sweep.
 
 Use `AGENTS.md` task-triggered lookup. Read only relevant authoritative slices:
 
-- semantics or syntax: `docs/spec/philosophy.md`,
-  `docs/spec/syntax-decisions.md`, `docs/spec/architecture.md`;
-- diagnostics: `docs/spec/diagnostics.md` and matching snapshots;
+- semantics or syntax: `Docs/spec/philosophy.md`,
+  `Docs/spec/syntax-decisions.md`, `Docs/spec/architecture.md`;
+- diagnostics: `Docs/spec/diagnostics.md` and matching snapshots;
 - Tower mechanics or an owner-gated choice:
-  `plugins/tower/skills/tower/SKILL.md`, plus tower-ballot only for that choice.
+  `Tools/tower/skills/tower/SKILL.md`, plus tower-ballot only for that choice.
 
 ## Check the source registry
 
@@ -44,9 +44,9 @@ From the repository root, run the checker with an explicit repository-root
 script and registry path:
 
 ```sh
-scripts/agent/jet-env python3 \
+Tools/agent/jet-env python3 \
   .agents/skills/mine-for-jet/scripts/check_sources.py \
-  --registry docs/spec/reference/prior-art.md \
+  --registry Docs/spec/reference/prior-art.md \
   'SOURCE_URL'
 ```
 

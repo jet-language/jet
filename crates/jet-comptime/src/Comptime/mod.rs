@@ -1,6 +1,6 @@
 //! M9.5 — Comptime v1 (CTFE). A tree-walking interpreter over the typed
 //! AST that evaluates a pure, deterministic Jet subset at compile time and
-//! bakes the answer into the binary. See the comptime section of docs/spec/spec.md.
+//! bakes the answer into the binary. See the comptime section of Docs/spec/spec.md.
 //!
 //! One law (S26): comptime computes *values* only — it never creates,
 //! parameterizes, or selects a type, and never affects dispatch.

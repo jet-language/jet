@@ -74,7 +74,7 @@ fn jet_web_release_inspect_json(value: ?JetReleaseInspect) -> String {
     if inspect == {
         .Local -> jet_web_json_quote("Local")
         .ReadOnly -> jet_web_json_quote("ReadOnly")
-        else -> jet_web_json_quote("None")
+        .Disabled -> jet_web_json_quote("None")
     }
 }
 
@@ -90,7 +90,8 @@ fn jet_web_release_publication_json(value: JetReleaseDevtoolsPublication) -> Str
 
 fn jet_web_release_policy_json(policy: JetReleaseDevtoolsPolicy) -> String {
     networks :: loop network in policy.deployment.allowlist -> "{{ address: {jet_web_json_quote(network.address)}, prefix: {network.prefix} }}"
-    "{{ inspect: {jet_web_release_inspect_json(policy.inspect)}, endpoint: {jet_web_release_endpoint_json(policy.endpoint)}, authentication: {jet_web_release_auth_json(policy.authentication)}, authority: {jet_web_release_authority_json(policy.authority)}, publication: {jet_web_release_publication_json(policy.publication)}, local_rail: {jet_web_bool_json(policy.local_rail)}, panel_code: {jet_web_bool_json(policy.panel_code)}, stream_code: {jet_web_bool_json(policy.stream_code)}, deployment: {{ enabled: {jet_web_bool_json(policy.deployment.enabled)}, token_present: {jet_web_bool_json(policy.deployment.token != None)}, allowlist: [{networks.join(\", \")}] }} }}"
+    networks_text :: networks.join(", ")
+    "{{ inspect: {jet_web_release_inspect_json(policy.inspect)}, endpoint: {jet_web_release_endpoint_json(policy.endpoint)}, authentication: {jet_web_release_auth_json(policy.authentication)}, authority: {jet_web_release_authority_json(policy.authority)}, publication: {jet_web_release_publication_json(policy.publication)}, local_rail: {jet_web_bool_json(policy.local_rail)}, panel_code: {jet_web_bool_json(policy.panel_code)}, stream_code: {jet_web_bool_json(policy.stream_code)}, deployment: {{ enabled: {jet_web_bool_json(policy.deployment.enabled)}, token_present: {jet_web_bool_json(policy.deployment.token != None)}, allowlist: [{networks_text}] }} }}"
 }
 
 fn jet_web_release_policy_identity(policy: JetReleaseDevtoolsPolicy) -> String {
@@ -124,27 +125,31 @@ fn jet_web_function_json(function: MirFunction) -> String {
     }
     reconstructions :: loop row in function.web_param_reconstructions -> {
         fields :: loop field in row.fields -> "{{ field: {jet_web_json_quote(field.field)}, parameter: {jet_web_json_quote(field.parameter)}, type: {jet_web_json_quote(mir_type_display_name(field.ty))} }}"
-        "{{ local: {jet_web_json_quote(row.local)}, type: {jet_web_json_quote(mir_type_display_name(row.ty))}, fields: [{fields.join(\", \")}] }}"
+        fields_text :: fields.join(", ")
+        "{{ local: {jet_web_json_quote(row.local)}, type: {jet_web_json_quote(mir_type_display_name(row.ty))}, fields: [{fields_text}] }}"
     }
-    effects :: loop effect in function.effects.solved -> jet_web_json_quote(effect)
+    effects :: loop effect_name in function.effects.solved -> jet_web_json_quote(effect_name)
     visibility :: if function.visibility == {
         .Private -> "Private"
         .Package -> "Package"
         else -> "Public"
     }
-    "{{ id: {function.id.value}, key: {jet_web_json_quote(function.key)}, module_id: {function.module_id.value}, module: {jet_web_json_quote(function.module_name)}, name: {jet_web_json_quote(function.name)}, source_file: {function.source_file.value}, bucket: {jet_web_bucket_json(function.web_bucket)}, marker: {jet_web_marker_json(function.web_marker)}, visibility: {jet_web_json_quote(visibility)}, parameters: [{params.join(\", \")}], parameter_reconstructions: [{reconstructions.join(\", \")}], return_type: {jet_web_json_quote(mir_type_display_name(function.return_type))}, generator: {jet_web_bool_json(function.generator != None)}, effects: [{effects.join(\", \")}] }}"
+    params_text :: params.join(", ")
+    reconstructions_text :: reconstructions.join(", ")
+    effects_text :: effects.join(", ")
+    "{{ id: {function.id.value}, key: {jet_web_json_quote(function.key)}, module_id: {function.module_id.value}, module: {jet_web_json_quote(function.module_name)}, name: {jet_web_json_quote(function.name)}, source_file: {function.source_file.value}, bucket: {jet_web_bucket_json(function.web_bucket)}, marker: {jet_web_marker_json(function.web_marker)}, visibility: {jet_web_json_quote(visibility)}, parameters: [{params_text}], parameter_reconstructions: [{reconstructions_text}], return_type: {jet_web_json_quote(mir_type_display_name(function.return_type))}, generator: {jet_web_bool_json(function.generator != None)}, effects: [{effects_text}] }}"
 }
 
-fn jet_web_module_json(module: MirModule) -> String {
-    imports :: loop import_id in module.imports -> "{import_id.value}"
-    "{{ id: {module.id.value}, key: {jet_web_json_quote(module.key)}, name: {jet_web_json_quote(module.name)}, path: {jet_web_json_quote(module.path)}, source_file: {module.source_file.value}, imports: [{imports.join(", ")}] }}"
+fn jet_web_module_json(module_row: MirModule) -> String {
+    imports :: loop import_id in module_row.imports -> "{import_id.value}"
+    "{{ id: {module_row.id.value}, key: {jet_web_json_quote(module_row.key)}, name: {jet_web_json_quote(module_row.name)}, path: {jet_web_json_quote(module_row.path)}, source_file: {module_row.source_file.value}, imports: [{imports.join(", ")}] }}"
 }
 
 fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String {
     functions :: loop function in ctx.functions -> jet_web_function_json(function)
     modules := [String]{}
     loop module_id in ctx.artifact.modules {
-        loop module in ctx.program.modules { if module.id == module_id -> modules.push(jet_web_module_json(module)) }
+        loop module_row in ctx.program.modules { if module_row.id == module_id -> modules.push(jet_web_module_json(module_row)) }
     }
     exports :: loop export in ctx.artifact.exports -> "{{ symbol: {jet_web_json_quote(export.symbol)}, function: {export.function.value}, abi: {jet_web_json_quote(jet_web_abi_name(export.abi))} }}"
     runtime_parts :: loop part in ctx.artifact.runtime_parts -> jet_web_json_quote(jet_web_runtime_part_name(part))
@@ -152,7 +157,11 @@ fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String 
     entry_function :: entry.function
     artifact_modules_json :: jet_web_module_ids_json(ctx.artifact.modules)
     entry_function_json :: jet_web_optional_function_id(entry_function)
-    "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)}, target: {{ triple: {jet_web_json_quote(ctx.config.layout.triple)}, pointer_size: {ctx.config.layout.pointer_size}, pointer_alignment: {ctx.config.layout.pointer_alignment} }}, artifact: {{ id: {ctx.artifact.id.value}, kind: \"WebApplication\", name: {jet_web_json_quote(ctx.artifact.name)}, target: \"Web\", identity: {jet_web_json_quote(ctx.artifact_identity)}, provider_identity: {jet_web_json_quote(ctx.artifact.provider_identity)}, closure_identity: {jet_web_json_quote(ctx.artifact.closure_identity)}, modules: [{artifact_modules_json}] }}, provenance: {{ source: {jet_web_json_quote(ctx.history_source)}, tool: {jet_web_json_quote(ctx.history_tool)}, target: {jet_web_json_quote(ctx.history_target)} }}, entry: {{ kind: {jet_web_json_quote(jet_web_entry_kind_name(entry.kind))}, function: {entry_function_json}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, initialize_environment: {jet_web_bool_json(entry.initialize_environment)}, initialize_gc: {jet_web_bool_json(entry.initialize_gc)}, serves_until_stopped: {jet_web_bool_json(entry.serves_until_stopped)}, package_version: {jet_web_json_quote(entry.package_version)} }}, exports: [{exports.join(\", \")}], runtime_parts: [{runtime_parts.join(\", \")}], modules: [{modules.join(\", \")}], functions: [{functions.join(\", \")}], source_map: {source_map}, devtools: {jet_web_release_policy_json(ctx.config.release_devtools_policy)} }}"
+    exports_text :: exports.join(", ")
+    runtime_parts_text :: runtime_parts.join(", ")
+    modules_text :: modules.join(", ")
+    functions_text :: functions.join(", ")
+    "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)}, target: {{ triple: {jet_web_json_quote(ctx.config.layout.triple)}, pointer_size: {ctx.config.layout.pointer_size}, pointer_alignment: {ctx.config.layout.pointer_alignment} }}, artifact: {{ id: {ctx.artifact.id.value}, kind: \"WebApplication\", name: {jet_web_json_quote(ctx.artifact.name)}, target: \"Web\", identity: {jet_web_json_quote(ctx.artifact_identity)}, provider_identity: {jet_web_json_quote(ctx.artifact.provider_identity)}, closure_identity: {jet_web_json_quote(ctx.artifact.closure_identity)}, modules: [{artifact_modules_json}] }}, provenance: {{ source: {jet_web_json_quote(ctx.history_source)}, tool: {jet_web_json_quote(ctx.history_tool)}, target: {jet_web_json_quote(ctx.history_target)} }}, entry: {{ kind: {jet_web_json_quote(jet_web_entry_kind_name(entry.kind))}, function: {entry_function_json}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, initialize_environment: {jet_web_bool_json(entry.initialize_environment)}, initialize_gc: {jet_web_bool_json(entry.initialize_gc)}, serves_until_stopped: {jet_web_bool_json(entry.serves_until_stopped)}, package_version: {jet_web_json_quote(entry.package_version)} }}, exports: [{exports_text}], runtime_parts: [{runtime_parts_text}], modules: [{modules_text}], functions: [{functions_text}], source_map: {source_map}, devtools: {jet_web_release_policy_json(ctx.config.release_devtools_policy)} }}"
 }
 
 fn jet_web_command_record(ctx: &JetWebEmitContext) -> String {
@@ -162,7 +171,8 @@ fn jet_web_command_record(ctx: &JetWebEmitContext) -> String {
 
 fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String {
     policy_identity :: jet_web_release_policy_identity(ctx.config.release_devtools_policy)
-    seed :: "jet-web-rustc-v2\u0000{ctx.program.package_identity}\u0000{ctx.config.semantic_digest}\u0000{ctx.artifact_identity}\u0000{ctx.config.layout.triple}\u0000{policy_identity}"
+    nul :: String.from_bytes([U8]{0}) ?? ""
+    seed :: "jet-web-rustc-v2{nul}{ctx.program.package_identity}{nul}{ctx.config.semantic_digest}{nul}{ctx.artifact_identity}{nul}{ctx.config.layout.triple}{nul}{policy_identity}"
     "jet-web-rustc-v2:{mir_sha256_hex(seed)}"
 }
 

@@ -447,6 +447,7 @@ fn copy_needs_typed_clone(ty: &MirType) -> bool {
             .any(|(_, field)| copy_needs_typed_clone(field)),
         MirTypeKind::Union(variants) => variants.iter().any(copy_needs_typed_clone),
         _ => false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1109,6 +1110,7 @@ fn direct_function_call(operation: &MirOperation) -> Option<MirFunctionId> {
         | MirOperation::WritePlace { .. }
         | MirOperation::ReplacePlace { .. }
         | MirOperation::Copy { .. }
+        | MirOperation::Move { .. }
         | MirOperation::TraitBox { .. }
         | MirOperation::Constant(_)
         | MirOperation::Unary { .. }
@@ -1418,7 +1420,7 @@ fn private_helper_function_ids(
         })
         .collect::<BTreeSet<_>>();
     let mut pending = selected_ids.iter().copied().collect::<VecDeque<_>>();
-    while let Some(function_id) = pending.pop() {
+    while let Some(function_id) = pending.pop_front() {
         let function = program
             .functions
             .iter()
@@ -1444,7 +1446,7 @@ fn private_helper_function_ids(
                 ));
             }
             if selected_ids.insert(callee) {
-                pending.push(callee);
+                pending.push_back(callee);
             }
         }
     }
@@ -5127,7 +5129,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     let moved = builder.ins().iconst(types::I64, i64::MIN);
                     builder.ins().stack_store(moved, slot, 0);
                 }
-                }
+                None
+            }
             MirOperation::ReplacePlace { place, value } => {
                 let ty = self
                     .function
@@ -15128,14 +15131,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "native interface call returned no typed carrier".to_string())?;
-        expected.map_or_else(
-            || {
-                result_type
-                    .and_then(clif_ty_from_mir)
-                    .map_or(Ok(result), |ty| thunk_decode_raw(builder, result, ty))
+        match expected {
+            Some(ty) => thunk_decode_raw(builder, result, ty),
+            None => match result_type.and_then(clif_ty_from_mir) {
+                Some(ty) => thunk_decode_raw(builder, result, ty),
+                None => Ok(result),
             },
-            |ty| thunk_decode_raw(builder, result, ty),
-        )
+        }
     }
 
     fn call_trait_method(

@@ -123,15 +123,15 @@ fn web_graph_facts_json() -> String {
         "explain",
         "--web-graph",
         "--json",
-        "examples/features/web/web_app.jet",
+        "Examples/features/web/web_app.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     stdout.replace(
         &repo_root()
-            .join("examples/features/web/web_app.jet")
+            .join("Examples/features/web/web_app.jet")
             .display()
             .to_string(),
-        "examples/features/web/web_app.jet",
+        "Examples/features/web/web_app.jet",
     )
 }
 
@@ -154,7 +154,7 @@ fn web_app_expand_facts_web() {
         "expand",
         "--facts",
         "web",
-        "examples/features/web/web_app.jet",
+        "Examples/features/web/web_app.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     assert!(
@@ -200,14 +200,14 @@ fn run() -> App {
 #[test]
 fn web_app_run_serves_pages_actions_and_assets() {
     let port = free_port();
-    let mut _server = spawn_server(&["run", "examples/features/web/web_app.jet"], port);
+    let mut _server = spawn_server(&["run", "Examples/features/web/web_app.jet"], port);
 
     let page = request(port, "GET", "/", Some(&mut _server));
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("<title>Home</title>"), "{page}");
     assert!(page.contains("hello from csr"), "{page}");
     assert!(!page.contains("jet-dev-server-functions"), "{page}");
-    let expected = include_str!("../examples/features/expected/web/web_app.harness.out");
+    let expected = include_str!("../Examples/features/expected/web/web_app.harness.out");
     let (expected_page, expected_facts) = expected
         .split_once("\n\n--- facts_json ---\n")
         .expect("web app golden sections");
@@ -232,7 +232,7 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
     let mut _server = spawn_server(
         &[
             "run",
-            "examples/features/web/app_typed_args.jet",
+            "Examples/features/web/app_typed_args.jet",
             "--",
             "--port=9000",
         ],
@@ -245,7 +245,7 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
     );
     drop(_server);
 
-    let (code, stdout, stderr) = run_jet(&["build", "examples/features/web/app_typed_args.jet"]);
+    let (code, stdout, stderr) = run_jet(&["build", "Examples/features/web/app_typed_args.jet"]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     let port = free_port();
     let mut _server = spawn_server_with_program(
@@ -265,21 +265,21 @@ fn typed_app_args_report_invalid_port_with_shared_fix() {
     for args in [
         &[
             "run",
-            "examples/features/web/app_typed_args.jet",
+            "Examples/features/web/app_typed_args.jet",
             "--",
             "--port=nine",
         ][..],
         &[
             "run",
             "--interpret",
-            "examples/features/web/app_typed_args.jet",
+            "Examples/features/web/app_typed_args.jet",
             "--",
             "--port=nine",
         ][..],
         &[
             "run",
             "--release",
-            "examples/features/web/app_typed_args.jet",
+            "Examples/features/web/app_typed_args.jet",
             "--",
             "--port=nine",
         ][..],
@@ -304,7 +304,7 @@ fn web_app_dev_forced_interpreter_serves_callbacks() {
     let mut _server = spawn_server(
         &[
             "dev",
-            "examples/features/web/web_app.jet",
+            "Examples/features/web/web_app.jet",
             "--interpret",
             &format!("--port={port}"),
         ],
@@ -326,11 +326,11 @@ fn web_app_dev_forced_interpreter_serves_callbacks() {
 fn web_app_dev_auto_serves_with_reload_without_dev_function() {
     let scratch = Scratch::new("webapp-reload");
     let tmp = scratch.path.clone();
-    let source = fs::read_to_string(repo_root().join("examples/features/web/web_app.jet")).unwrap();
+    let source = fs::read_to_string(repo_root().join("Examples/features/web/web_app.jet")).unwrap();
     let app = tmp.join("app.jet");
     fs::write(&app, source).unwrap();
     fs::copy(
-        repo_root().join("examples/features/web/package.jet"),
+        repo_root().join("Examples/features/web/package.jet"),
         tmp.join("package.jet"),
     )
     .unwrap();
@@ -364,7 +364,7 @@ fn app_hello_graph() {
         "explain",
         "--web-graph",
         "--json",
-        "examples/features/web/app_hello.jet",
+        "Examples/features/web/app_hello.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();

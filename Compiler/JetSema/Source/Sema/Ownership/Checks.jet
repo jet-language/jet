@@ -232,7 +232,7 @@ pub fn sema_ownership_type_is_copy(ty: Type) -> Bool {
         .Char -> true
         .Measure(_) -> true
         .Quantity(base, _) -> sema_ownership_type_is_copy(base)
-        .Tagged(_, inner) -> sema_ownership_type_is_copy(inner)
+        .Tagged(marker, inner) -> if marker == TagMarker.Internal(InternalTag.AllocatorView) -> false else -> sema_ownership_type_is_copy(inner)
         .Option(inner) -> sema_ownership_type_is_copy(inner)
         .Result(ok, err) -> sema_ownership_type_is_copy(ok) && sema_ownership_type_is_copy(err)
         .Tuple(fields) -> sema_ownership_type_tuple_is_copy(fields)
@@ -706,7 +706,7 @@ fn sema_ownership_arena_view_source(binding: Binding) -> ?Expr {
     if !binding.arena_view -> return None
     if binding.init == {
         .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
-            if method != "alloc" -> return None
+            if method != "alloc" && method != "try_alloc" -> return None
             Val(receiver)
         }
         else -> None
@@ -1512,8 +1512,12 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             else -> {}
         }
 
+        plain_name :: if arg.expr == {
+            .Ident(_, _) -> true
+            else -> false
+        }
         write_name_ok := true
-        if arg.convention == AccessConvention.Write && arg.expr != {.Ident(_, _) } {
+        if arg.convention == AccessConvention.Write && !plain_name {
             accepted = false
             write_name_ok = false
             diagnostics.push(sema_ownership_call_diag_plain_name(arg.span))
@@ -1535,11 +1539,14 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
 
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named("Unit")) -> next
-            if sema_ownership_type_cloneable(param.ty ?? Type.Named("Unit")) ?? false {
-                args[index].flags.implicit_clone = true
-                diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
-            } else {
-                complete = false
+            if {
+                sema_ownership_type_cloneable(param.ty ?? Type.Named("Unit")) ?? false -> {
+                    args[index].flags.implicit_clone = true
+                    diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
+                }
+                else -> {
+                    complete = false
+                }
             }
         }
         if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move {
@@ -1985,6 +1992,33 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     sema_ownership_recompute_reference_counts(state)
 }
 
+fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int) -> SemaOwnershipState {
+    normalized := sema_ownership_state_snapshot(path)
+    loop normalized.scope_depth > target_depth -> sema_ownership_leave_scope(&normalized)
+    normalized
+}
+
+pub fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, before: SemaOwnershipState, after_body: SemaOwnershipState, body_falls_through: Bool, may_skip: Bool) -> Bool {
+    paths := [SemaOwnershipState]{}
+    if may_skip -> paths.push(sema_ownership_state_snapshot(before))
+    if may_skip && body_falls_through -> paths.push(sema_ownership_loop_path_to_depth(after_body, before.scope_depth))
+    loop exit in sema_loop_value_break_flows(context, frame_index) -> paths.push(sema_ownership_loop_path_to_depth(exit, before.scope_depth))
+    if paths.len() == 0 {
+        sema_ownership_join_paths(&state, before, before, before, false)
+        return false
+    }
+    joined := paths[0]
+    index := 1
+    loop index < paths.len() {
+        next := sema_ownership_state_snapshot(joined)
+        sema_ownership_join_paths(&next, before, joined, paths[index], true)
+        joined = next
+        index += 1
+    }
+    sema_ownership_join_paths(&state, before, joined, joined, true)
+    may_skip || sema_loop_value_break_flows(context, frame_index).len() > 0
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Statement walk used by the parent integration hook
 
@@ -2013,7 +2047,7 @@ pub fn sema_ownership_record_assignment_view(state: &SemaOwnershipState, target:
     output_path := [String]{}
     carrier_name :: sema_ownership_named_view_root(target_expr, &output_path) ?? return false
     carrier_key :: sema_ownership_carrier_key(scopes, carrier_name, expr_span(target_expr)) ?? return false
-    if target != {
+    if target == {
         .Local(_, _) -> {}
         else -> return false
     }
@@ -2077,6 +2111,15 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
         .Return(value, _) -> {
             valid :: if value == .Val(returned) -> sema_ownership_consume_expression(state, returned, scopes, "return", &diagnostics) else -> true
             SemaOwnershipFlowResult{complete: valid, falls_through: false}
+        }
+        .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> {
+            valid :: sema_ownership_consume_expression(state, value, scopes, "loop break", &diagnostics)
+            SemaOwnershipFlowResult{complete: valid, falls_through: false}
+        }
+        .Break(_) | .BreakLabel(_, _) | .Continue(_) | .ContinueLabel(_, _) -> SemaOwnershipFlowResult{complete: true, falls_through: false}
+        .Yield(value, _) -> {
+            valid :: sema_ownership_consume_expression(state, value, scopes, "yield", &diagnostics)
+            SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
         .While(condition, body, _, _, _) -> {
             valid := sema_ownership_check_expression(state, condition, scopes, &diagnostics)

@@ -14,7 +14,7 @@ mod tir_support;
 fn inline_package_example_matches_release_default_and_interpreter() {
     tir_support::assert_example_cli_tiers_agree(
         "packages/inline_package",
-        include_str!("../examples/features/expected/packages/inline_package.out"),
+        include_str!("../Examples/features/expected/packages/inline_package.out"),
     );
 }
 
@@ -296,20 +296,20 @@ fn inline_package_canonical_surface_has_one_generated_shape() {
     let package_files = include_str!("../crates/jet-foundation/src/Syntax/package_files.rs");
     assert!(package_files.contains("pub const INLINE_PACKAGE_DECL: &str = \"package\";"));
 
-    let decision = include_str!("../docs/spec/syntax-decisions.md");
+    let decision = include_str!("../Docs/spec/syntax-decisions.md");
     assert!(decision.contains("D-ECO-INLINEPACKAGE1=A — one optional leading inline"));
 
-    let tree_sitter = include_str!("../editors/tree-sitter/grammar.js");
+    let tree_sitter = include_str!("../Tools/editors/tree-sitter/grammar.js");
     assert!(tree_sitter.contains(
         "source_file: ($) => seq(optional($.inline_package), repeat($._item))"
     ));
     assert!(tree_sitter.contains("inline_package: ($) => seq(\"package\", $.record_literal)"));
 
-    let vscode = include_str!("../editors/vscode/syntaxes/jet.tmLanguage.json");
+    let vscode = include_str!("../Tools/editors/vscode/syntaxes/jet.tmLanguage.json");
     assert!(vscode.contains("D-ECO-INLINEPACKAGE1=A"));
-    let textmate = include_str!("../editors/jet.tmGrammar");
+    let textmate = include_str!("../Tools/editors/jet.tmGrammar");
     assert!(textmate.contains("D-ECO-INLINEPACKAGE1=A"));
-    let zed = include_str!("../editors/zed/languages/jet/highlights.scm");
+    let zed = include_str!("../Tools/editors/zed/languages/jet/highlights.scm");
     assert!(zed.contains("(inline_package \"package\" @keyword)"));
 }
 
@@ -564,8 +564,8 @@ fn inline_package_rejects_duplicate_carriers_before_state_change() {
 
 #[test]
 fn inline_package_extraction_matches_extracted_entry_across_build_and_run_tiers() {
-    let source = include_str!("../examples/features/packages/inline_package.jet");
-    let expected = include_str!("../examples/features/expected/packages/inline_package.out");
+    let source = include_str!("../Examples/features/packages/inline_package.jet");
+    let expected = include_str!("../Examples/features/expected/packages/inline_package.out");
     let block = jet::Package::extract_inline_package(source)
         .unwrap()
         .expect("the shipped example must carry an inline Package");

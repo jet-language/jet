@@ -114,7 +114,7 @@ fn run() {
 
 // ── E3301 UI snapshot ────────────────────────────────────────────────────────
 
-/// Pin the exact rendered output for E3301 so it matches docs/spec/diagnostics.md.
+/// Pin the exact rendered output for E3301 so it matches Docs/spec/diagnostics.md.
 #[test]
 fn e3301_snapshot() {
     let src_path =
@@ -155,7 +155,7 @@ fn e3301_snapshot() {
 /// bare substring count of the type name.
 fn os_target_gating_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/lowlevel/os_target_gating.jet")
+        .join("Examples/features/lowlevel/os_target_gating.jet")
         .to_string_lossy()
         .into_owned()
 }
@@ -273,7 +273,7 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
 
 fn ui_native_linux_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/ui/ui_native_linux.jet")
+        .join("Examples/features/ui/ui_native_linux.jet")
         .to_string_lossy()
         .into_owned()
 }

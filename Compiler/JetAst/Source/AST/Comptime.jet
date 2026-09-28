@@ -78,3 +78,45 @@ pub enum FailureContract {
     Converted(success: Type, source: Type, target: Type)
     ProvenUnreachable(success: Type)
 }
+
+pub fn ast_comptime_key_type(key: CtKey) -> Type {
+    if key == {
+        .Int(_) -> Type.Int
+        .Str(_) -> Type.String
+        .Bool(_) -> Type.Bool
+        .Char(_) -> Type.Char
+        .Tuple(fields) -> {
+            types := [TypeTupleField]{}
+            loop field in fields -> types.push(TypeTupleField{name: field.name, ty: ast_comptime_key_type(field.value)})
+            Type.Tuple(types)
+        }
+        .Struct(name, _) | .Enum(name, _) -> Type.Named(name)
+    }
+}
+
+pub fn ast_comptime_value_type(value: CtValue) -> Type {
+    if value == {
+        .Int(_) | .BigInt(_) -> Type.Int
+        .Float(number) -> if number == {
+            .F32(_) -> Type.Float32
+            .F64(_) -> Type.Float
+        }
+        .Bool(_) -> Type.Bool
+        .Char(_) -> Type.Char
+        .Str(_) -> Type.String
+        .Bytes(_) -> Type.List(Type.IntN(false, 8))
+        .List(values) -> Type.List(if values.len() == 0 -> Type.Int else -> ast_comptime_value_type(values[0]))
+        .Map(entries) -> {
+            if entries.len() == 0 -> Type.Map(Type.String, None, Type.Int)
+            else -> Type.Map(ast_comptime_key_type(entries[0].key), None, ast_comptime_value_type(entries[0].value))
+        }
+        .Struct(name, _) | .Enum(name, _, _) -> Type.Named(name)
+        .Present(inner) -> Type.Option(ast_comptime_value_type(inner))
+        .Failed(report) -> if report == {
+            .Clean(ty) -> Type.Option(ty)
+            .Told(error) -> Type.Result(Type.Int, ast_comptime_value_type(error))
+        }
+        .Unit -> Type.Named("Unit")
+        .Closure(_) -> Type.Fn([Type]{}, None, None, None, None, None)
+    }
+}

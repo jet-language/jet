@@ -61,10 +61,10 @@ fn assert_example_matches_golden(stem: &str) {
         return;
     }
     let root = repo_root();
-    let src = fs::read_to_string(root.join(format!("examples/features/tooling/{stem}.jet")))
+    let src = fs::read_to_string(root.join(format!("Examples/features/tooling/{stem}.jet")))
         .unwrap_or_else(|e| panic!("read {stem}.jet: {e}"));
     let expected =
-        fs::read_to_string(root.join(format!("examples/features/expected/tooling/{stem}.out")))
+        fs::read_to_string(root.join(format!("Examples/features/expected/tooling/{stem}.out")))
             .unwrap_or_else(|e| panic!("read {stem}.out: {e}"));
     let dir = std::env::temp_dir().join(format!("jet_data_hostile_{stem}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -98,7 +98,7 @@ fn hostile_data_corpus_matches_golden_aot() {
 #[test]
 fn hostile_corpus_covers_required_failure_classes() {
     let root = repo_root();
-    let out = fs::read_to_string(root.join("examples/features/expected/tooling/data_hostile.out"))
+    let out = fs::read_to_string(root.join("Examples/features/expected/tooling/data_hostile.out"))
         .expect("data_hostile.out");
     for needle in [
         "empty_mean: Empty mean:",
@@ -132,7 +132,7 @@ fn hostile_corpus_covers_required_failure_classes() {
 #[test]
 fn flagship_example_covers_analysis_pipeline() {
     let root = repo_root();
-    let out = fs::read_to_string(root.join("examples/features/expected/tooling/data_analysis.out"))
+    let out = fs::read_to_string(root.join("Examples/features/expected/tooling/data_analysis.out"))
         .expect("data_analysis.out");
     for needle in [
         "tickets: 5",

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn todo_example() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/tooling/todo_hole.jet")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/tooling/todo_hole.jet")
 }
 
 #[test]

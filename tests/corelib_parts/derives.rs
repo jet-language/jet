@@ -1063,7 +1063,7 @@ fn structure_once_example_runs_aot_with_generated_meaning() {
     let dir = std::env::temp_dir().join(format!("jet_structure_once_aot_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let source = include_str!("../../examples/features/reflection/derive_loop.jet");
+    let source = include_str!("../../Examples/features/reflection/derive_loop.jet");
     let (code, stdout, stderr) = build_and_run(
         &dir,
         "structure_once_aot",

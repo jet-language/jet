@@ -183,6 +183,7 @@ pub(crate) fn init_from_resource(
 
 /// Resource-backed source kinds use `init_from_resource`; their host owner
 /// retains the checked lease and borrow/move meaning without serialization.
+#[allow(dead_code)]
 pub(crate) fn init_from_value(
     collection: MirRuntimeValue,
     step_value: i64,
@@ -284,6 +285,7 @@ fn const_key_value(key: MirConstKey) -> MirRuntimeValue {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn has_next(
     value: &MirRuntimeValue,
 ) -> Result<bool, MirNativeCursorError> {
@@ -295,6 +297,7 @@ pub(crate) fn has_next(
     cursor.has_next()
 }
 
+#[allow(dead_code)]
 pub(crate) fn value(
     value: &MirRuntimeValue,
 ) -> Result<MirRuntimeValue, MirNativeCursorError> {
@@ -306,6 +309,7 @@ pub(crate) fn value(
     cursor.value()
 }
 
+#[allow(dead_code)]
 pub(crate) fn advance(
     value: &MirRuntimeValue,
 ) -> Result<(), MirNativeCursorError> {

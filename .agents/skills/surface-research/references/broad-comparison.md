@@ -36,4 +36,4 @@ research, not ratification.
 Stop when every named peer and surface category has evidence, a Jet use or
 rejection, a failure to avoid, and an uncertainty record. A source gap is a
 reported limit, not permission to expand the source set. Write one report under
-`docs/research/` and do not create Tower work, ballots, or implementation edits.
+`Docs/research/` and do not create Tower work, ballots, or implementation edits.

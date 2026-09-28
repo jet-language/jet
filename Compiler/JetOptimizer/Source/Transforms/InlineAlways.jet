@@ -165,14 +165,17 @@ fn mir_pass_inline_one_call(
     loop row in plan.places -> program.functions[caller_index].places.push(row)
     loop row in plan.scopes -> program.functions[caller_index].scopes.push(row)
     loop row in plan.drops -> program.functions[caller_index].drops.push(row)
-    blocks_removed :: if plan.returns -> 0 else -> {
-        before_blocks :: mir_pass_block_count(program)
-        mir_pass_eliminate_unreachable(program)
-        removed :: before_blocks - mir_pass_block_count(program)
-        mir_pass_inline_prune_dead_places(&program.functions[caller_index])
-        mir_pass_inline_clear_dead_scope_deadlines(&program.functions[caller_index])
-        mir_pass_eliminate_unreachable(program)
-        removed
+    blocks_removed :: if {
+        plan.returns -> 0
+        else -> {
+            before_blocks :: mir_pass_block_count(program)
+            mir_pass_eliminate_unreachable(program)
+            removed :: before_blocks - mir_pass_block_count(program)
+            mir_pass_inline_prune_dead_places(&program.functions[caller_index])
+            mir_pass_inline_clear_dead_scope_deadlines(&program.functions[caller_index])
+            mir_pass_eliminate_unreachable(program)
+            removed
+        }
     }
     MirInlineOneCallResult{blocks_removed: blocks_removed, error: None}
 }

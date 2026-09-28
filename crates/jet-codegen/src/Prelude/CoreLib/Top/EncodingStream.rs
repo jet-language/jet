@@ -60,32 +60,46 @@ enum JetJSONReadState {
     ObjectCommaOrEnd,
 }
 
+/// Codec heap budget shared by a reader/writer and its clones. The counter is
+/// atomic so Source-owned encoding streams can move between scheduler threads.
 #[derive(Clone)]
 struct JetEncodingAllocationBudget {
-    inner: std::rc::Rc<std::cell::RefCell<JetEncodingAllocationState>>,
+    inner: std::sync::Arc<JetEncodingAllocationState>,
 }
 
 struct JetEncodingAllocationState {
-    used: usize,
+    used: std::sync::atomic::AtomicUsize,
     limit: usize,
 }
 
 impl JetEncodingAllocationBudget {
     fn new(limit: usize) -> Self {
-        Self { inner: std::rc::Rc::new(std::cell::RefCell::new(JetEncodingAllocationState { used: 0, limit })) }
+        Self {
+            inner: std::sync::Arc::new(JetEncodingAllocationState {
+                used: std::sync::atomic::AtomicUsize::new(0),
+                limit,
+            }),
+        }
     }
 
     fn charge(&self, bytes: usize) -> bool {
-        let mut state = self.inner.borrow_mut();
-        let Some(next) = state.used.checked_add(bytes) else { return false };
-        if next > state.limit { return false; }
-        state.used = next;
-        true
+        let limit = self.inner.limit;
+        self.inner
+            .used
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |used| used.checked_add(bytes).filter(|next| *next <= limit),
+            )
+            .is_ok()
     }
 
     fn release(&self, bytes: usize) {
-        let mut state = self.inner.borrow_mut();
-        state.used = state.used.saturating_sub(bytes);
+        let _ = self.inner.used.fetch_update(
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+            |used| Some(used.saturating_sub(bytes)),
+        );
     }
 }
 

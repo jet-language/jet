@@ -4133,7 +4133,7 @@ mod tests {
     fn shipped_jet_domains_use_owned_domain() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut files = Vec::new();
-        for relative in ["crates", "Source", "docs"] {
+        for relative in ["crates", "Source", "Docs"] {
             collect_text_files(&repo.join(relative), &mut files);
         }
         let mut violations = Vec::new();

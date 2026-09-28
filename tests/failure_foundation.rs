@@ -129,7 +129,7 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
 fn direct_struct_error_match_agrees_across_execution_tiers() {
     tir_support::assert_tiers_agree(
         "direct_struct_error_match",
-        include_str!("../examples/features/errors/direct_struct_error_match.jet"),
+        include_str!("../Examples/features/errors/direct_struct_error_match.jet"),
         "ok: 7\nerr: empty input\n",
     );
 }

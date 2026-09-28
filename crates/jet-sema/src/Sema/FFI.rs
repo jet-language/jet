@@ -368,7 +368,7 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
 /// (an all-`Lit` `Expr::Str`, no interpolation) because the value — and the
 /// bug — are already fully known at compile time; a value built at runtime
 /// panics instead (see `Codegen/CModule.rs`'s `NUL_PANIC`, documented in
-/// docs/spec/diagnostics.md).
+/// Docs/spec/diagnostics.md).
 pub(crate) fn e3211(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3211",

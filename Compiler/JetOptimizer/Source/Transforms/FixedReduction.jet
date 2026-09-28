@@ -24,16 +24,19 @@ fn mir_pass_fixed_reduction_normalize(program: &MirProgram) -> MirPassFixedReduc
             if vector.rule == .Reduction && vector.decision == .Eligible && vector.fixed_reduction != None && vector.body_blocks.len() > 0 {
                 function := program.functions[function_index]
                 normalized :: mir_pass_fixed_reduction_attempt(program, function_index, function, vector)
-                if normalized == .Val(rewritten) {
-                    vectors[vector_index] = rewritten
-                    total += 1
-                    changed = true
-                } else {
-                    vector.decision = .Rejected(.UnsupportedOperation)
-                    vector.packed = false
-                    vector.no_cross_iteration_dependencies = false
-                    vector.fixed_reduction = None
-                    vectors[vector_index] = vector
+                if {
+                    normalized == .Val(rewritten) -> {
+                        vectors[vector_index] = rewritten
+                        total += 1
+                        changed = true
+                    }
+                    else -> {
+                        vector.decision = .Rejected(.UnsupportedOperation)
+                        vector.packed = false
+                        vector.no_cross_iteration_dependencies = false
+                        vector.fixed_reduction = None
+                        vectors[vector_index] = vector
+                    }
                 }
             }
             vector_index += 1
@@ -92,19 +95,24 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
     writes := 0
     loop instruction in operations {
         if instruction.operation == {
-            .Constant(MirConstant.Int(constant_value, _, _)) -> {
-                lane :: index_values.len()
-                expected_operation :: stable_id("mir-fixed-reduction-op", "function={function.id.value}:loop={vector.loop_header.value}:fixed-index:{lane}:{constant_value}:0")
-                if lane >= lanes || instruction.id.value != expected_operation -> return false
-                value :: instruction.result ?? return false
-                index_values.push(value)
+            .Constant(constant) -> {
+                if constant == {
+                    .Int(constant_value, _, _) -> {
+                        lane :: index_values.len()
+                        expected_operation :: stable_id("mir-fixed-reduction-op", "function={function.id.value}:loop={vector.loop_header.value}:fixed-index:{lane}:{constant_value}:0")
+                        if lane >= lanes || instruction.id.value != expected_operation -> return false
+                        value :: instruction.result ?? return false
+                        index_values.push(value)
+                    }
+                    else -> return false
+                }
             }
             .ReadPlace(place) -> {
                 value :: instruction.result ?? return false
                 read_places.push(place)
                 read_values.push(value)
             }
-            .Binary(.Add, .Primitive, _, _, _) -> additions.push(instruction)
+            .Binary(op, dispatch, _, _, _) && op == .Add && dispatch == .Primitive -> additions.push(instruction)
             .WritePlace(place, value) -> {
                 if place != fixed.accumulator || accumulator_write != None -> return false
                 accumulator_write = Val(value)
@@ -139,11 +147,14 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
                 lane_place_ids.push(place_id)
                 place :: mir_pass_find_place(function.places, place_id) ?? return false
                 if !mir_type_same_checked_type(place.ty, element_type) -> return false
-                if lane == 0 {
-                    first_lane_place = Val(place)
-                } else {
-                    first :: first_lane_place ?? return false
-                    if !mir_pass_fixed_reduction_lane_place_matches(first, place, index_values[0], index_values[lane], index_values) -> return false
+                if {
+                    lane == 0 -> {
+                        first_lane_place = Val(place)
+                    }
+                    else -> {
+                        first :: first_lane_place ?? return false
+                        if !mir_pass_fixed_reduction_lane_place_matches(first, place, index_values[0], index_values[lane], index_values) -> return false
+                    }
                 }
                 lane_index :: mir_pass_fixed_reduction_lane_index(place, index_values, prelude_calls) ?? return false
                 if lane_index != index_values[lane] -> return false
@@ -171,7 +182,9 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
     first_add :: additions[0]
     first_result :: first_add.result ?? return false
     if first_add.operation == {
-        .Binary(.Add, .Primitive, _, left, right) -> if left != fixed.seed || right != lane_values[0] -> return false
+        .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> {
+            if left != fixed.seed || right != lane_values[0] -> return false
+        }
         else -> return false
     }
     partials := [MirValueId]{first_result}
@@ -184,7 +197,9 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
             if tree_index >= additions.len() -> return false
             addition :: additions[tree_index]
             if addition.operation == {
-                .Binary(.Add, .Primitive, _, left, right) -> if left != partials[cursor] || right != partials[cursor + 1] -> return false
+                .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> {
+                    if left != partials[cursor] || right != partials[cursor + 1] -> return false
+                }
                 else -> return false
             }
             value :: addition.result ?? return false
@@ -305,8 +320,8 @@ fn mir_pass_fixed_reduction_rewrite(
     header_kept := [MirInstruction]{}
     loop instruction in header.instructions {
         if instruction.operation == {
-            .LoopRangeHasNext(_, value) -> if value == cursor -> next
-            .LoopRangeInit(_, _, _, _, _) -> if instruction.result == Val(cursor) -> next
+            .LoopRangeHasNext(_, value) && value == cursor -> next
+            .LoopRangeInit(_, _, _, _, _) && instruction.result == Val(cursor) -> next
             else -> {}
         }
         header_kept.push(instruction)
@@ -319,10 +334,13 @@ fn mir_pass_fixed_reduction_rewrite(
     if body_index < 0 || advance_index < 0 -> return None
     body :: function.blocks[body_index]
     advance :: function.blocks[advance_index]
-    if body_id == advance_id {
-        if body.terminator != MirTerminator.Jump(shape.header) -> return None
-    } else {
-        if shape.body_blocks.len() != 2 || body.terminator != MirTerminator.Jump(advance_id) || advance.terminator != MirTerminator.Jump(shape.header) -> return None
+    if {
+        body_id == advance_id -> {
+            if body.terminator != MirTerminator.Jump(shape.header) -> return None
+        }
+        else -> {
+            if shape.body_blocks.len() != 2 || body.terminator != MirTerminator.Jump(advance_id) || advance.terminator != MirTerminator.Jump(shape.header) -> return None
+        }
     }
 
     accumulator :: mir_pass_find_place(function.places, reduction.accumulator) ?? return None
@@ -348,14 +366,14 @@ fn mir_pass_fixed_reduction_rewrite(
                             if !mir_pass_value_id_seen(induction_model.values, result) -> return None
                         }
                         place_id == reduction.accumulator -> accumulator_read = Val(instruction)
-                        instruction.result == Val(reduction.addend) -> {
+                        instruction.result == (Val(reduction.addend)) -> {
                             input_place = mir_pass_find_place(function.places, place_id)
                             input_read = Val(instruction)
                         }
                         else -> return None
                     }
                 }
-                .Binary(.Add, .Primitive, _, left, right) -> {
+                .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> {
                     result :: instruction.result ?? return None
                     if left != reduction.seed && right != reduction.seed -> return None
                     other :: if left == reduction.seed -> right else -> left
@@ -443,8 +461,8 @@ fn mir_pass_fixed_reduction_rewrite(
     }
 
     overflow :: if addition_instruction.operation == {
-        .Binary(.Add, .Primitive, value, _, _) -> value
-        else -> return None
+        .Binary(op, dispatch, overflow_value, _, _) && op == .Add && dispatch == .Primitive -> overflow_value
+        else -> { return None }
     }
     partials := [MirValueId]{}
     seeded_first :: mir_pass_fixed_reduction_add(&used_values, &used_operations, &new_values, &new_instructions, &source_operations, identity, "seeded-lane", seed_value, lane_addends[0], accumulator.ty, sum_fact.ownership, addition_instruction.span, overflow)
@@ -583,10 +601,10 @@ fn mir_pass_fixed_reduction_body_supported(
             }
         }
     }
-    induction_count == 1 && advance_count == 1 && (induction_model.places.len() == 0 || induction_write_count > 0) && addend_read_count == 1 && binary_count == 1 && accumulator_read_count == 1 && accumulator_write_count == 1 && addition.operation == {
-        .Binary(.Add, .Primitive, _, left, right) -> left == reduction.seed && right == reduction.addend || right == reduction.seed && left == reduction.addend
+    induction_count == 1 && advance_count == 1 && (induction_model.places.len() == 0 || induction_write_count > 0) && addend_read_count == 1 && binary_count == 1 && accumulator_read_count == 1 && accumulator_write_count == 1 && (if addition.operation == {
+        .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> left == reduction.seed && right == reduction.addend || right == reduction.seed && left == reduction.addend
         else -> false
-    }
+    })
 }
 
 fn mir_pass_fixed_reduction_input_place(place: MirPlace, induction_values: [MirValueId], prelude_calls: [MirPreludeCall]) -> Bool {
@@ -615,19 +633,19 @@ fn mir_pass_fixed_reduction_range(function: MirFunction, shape: MirPassLoopShape
             start_fact :: mir_pass_constant_for(constants, start) ?? return None
             first :: if start_fact == {
                 .Int(value, _, _) -> value
-                else -> return None
+                else -> { return None }
             }
             end_fact :: mir_pass_constant_for(constants, end) ?? return None
             last :: if end_fact == {
                 .Int(value, _, _) -> value
-                else -> return None
+                else -> { return None }
             }
             step_value :: if step == {
                 .Val(step_id) -> {
                     step_fact :: mir_pass_constant_for(constants, step_id) ?? return None
                     if step_fact == {
                         .Int(value, _, _) -> value
-                        else -> return None
+                        else -> { return None }
                     }
                 }
                 else -> 1

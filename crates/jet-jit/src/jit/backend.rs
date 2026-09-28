@@ -17,6 +17,7 @@ use super::api_debug::{
 };
 use super::tiers::{record_trace, MirTierPlan};
 use super::trace::note_deopt_invoked_for_test;
+use super::types_meta::clif_ty_from_mir;
 
 /// Failure in the Source entry handoff itself. These are compiler/host
 /// invariant failures, not Source program diagnostics.
@@ -24,6 +25,7 @@ use super::trace::note_deopt_invoked_for_test;
 pub enum SourceDeoptError {
     InvalidRequest(String),
     Callback(String),
+    CallbackJob(jet_foundation::Outcome::JetTaskFailure),
     Backend(String),
     Resource(String),
     NativeInterface(crate::SourceInterfaces::NativeInterfaceError),
@@ -37,6 +39,7 @@ impl std::fmt::Display for SourceDeoptError {
         match self {
             Self::InvalidRequest(message) => write!(formatter, "invalid Source entry request: {message}"),
             Self::Callback(message) => write!(formatter, "Source entry callback failed: {message}"),
+            Self::CallbackJob(failure) => write!(formatter, "Source callback owner job failed: {failure:?}"),
             Self::Backend(message) => write!(formatter, "Source native backend failed: {message}"),
             Self::NativeInterface(error) => {
                 write!(formatter, "Source native interface scope failed: {error}")
@@ -64,6 +67,41 @@ pub struct SourceExecutionCompletion {
     /// Counted physical root retained until the owned completion is consumed.
     pub lease: Option<SourceResourceLease>,
     pub disposition: SourceExecutionCompletionDisposition,
+}
+
+impl SourceExecutionCompletion {
+    /// Return a projected result to its original linear completion after the
+    /// consumer has inspected it. A conflicting owner is returned unchanged.
+    pub fn restore_projected_value(
+        &mut self,
+        value: MirRuntimeValue,
+    ) -> Result<(), MirRuntimeValue> {
+        let SourceExecutionCompletionDisposition::Invoked { retirement, .. } =
+            &mut self.disposition
+        else {
+            return Err(value);
+        };
+        let result = match retirement.get_or_insert_with(|| {
+            SourceExecutionCompletionRetirement::Completed(
+                super::deopt::SourceExecutionRetirement {
+                    outcome: None,
+                    value: None,
+                    soft_stop: false,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    completions: Vec::new(),
+                },
+            )
+        }) {
+            SourceExecutionCompletionRetirement::Completed(result) => result,
+            SourceExecutionCompletionRetirement::Failed(error) => &mut error.retirement,
+        };
+        if result.value.is_some() {
+            return Err(value);
+        }
+        result.value = Some(value);
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for SourceExecutionCompletion {
@@ -130,6 +168,16 @@ pub struct SourceExecutionCompletionScopeWeak {
     inner: std::sync::Weak<std::sync::Mutex<Vec<SourceExecutionCompletion>>>,
 }
 
+fn record_source_execution_completion(
+    target: &std::sync::Mutex<Vec<SourceExecutionCompletion>>,
+    completion: SourceExecutionCompletion,
+) {
+    target
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(completion);
+}
+
 fn record_source_execution_completion_box(
     target: &std::sync::Arc<std::sync::Mutex<Vec<SourceExecutionCompletion>>>,
     completion: SourceExecutionCompletionBox,
@@ -138,10 +186,7 @@ fn record_source_execution_completion_box(
         Ok(completion) => completion,
         Err(completion) => return Err(completion),
     };
-    target
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push(completion);
+    record_source_execution_completion(target, completion);
     Ok(())
 }
 
@@ -198,6 +243,12 @@ impl SourceExecutionCompletionScope {
             inner: std::sync::Arc::downgrade(&self.inner),
         }
     }
+    /// Consume a typed completion into this explicit owner. This does not
+    /// depend on activation or a type-erased downcast across a library boundary.
+    pub fn record(&self, completion: SourceExecutionCompletion) {
+        record_source_execution_completion(&self.inner, completion);
+    }
+
 
 
     /// Make this owned invocation scope current only for the synchronous
@@ -247,10 +298,7 @@ impl SourceExecutionCompletionScope {
         let Some(current) = Self::current_inner() else {
             return Err(completion);
         };
-        current
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(completion);
+        record_source_execution_completion(&current, completion);
         Ok(())
     }
 
@@ -427,7 +475,7 @@ impl<'a> SourceHelperArgumentBuffer<'a> {
             let Some(value) = values.get_mut(write_borrow.parameter_index) else {
                 continue;
             };
-            **write_borrow.slot = std::mem::replace(value, MirRuntimeValue::Moved);
+            *write_borrow.slot = std::mem::replace(value, MirRuntimeValue::Moved);
         }
         self.restored = true;
     }
@@ -444,7 +492,6 @@ impl Drop for SourceHelperArgumentBuffer<'_> {
 /// `NotInvoked` retains exact owned inputs and identifies unchanged borrowed
 /// slots. `Invoked` never carries retry inputs; it exposes only checked
 /// writebacks from the entered invocation.
-#[derive(Debug)]
 pub enum SourceHelperInvocationFailure<'a> {
     NotInvoked {
         cause: SourceDeoptError,
@@ -458,6 +505,37 @@ pub enum SourceHelperInvocationFailure<'a> {
         session: Option<Box<dyn super::deopt::SourceExecutionGuard>>,
         writebacks: Vec<SourceHelperArgumentWriteback<'a>>,
     },
+}
+
+impl std::fmt::Debug for SourceHelperInvocationFailure<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotInvoked {
+                cause,
+                entry_values,
+                write_borrow_indices,
+            } => f
+                .debug_struct("NotInvoked")
+                .field("cause", cause)
+                .field("entry_values", entry_values)
+                .field("write_borrow_indices", write_borrow_indices)
+                .finish(),
+            Self::Invoked {
+                cause,
+                tier,
+                retirement,
+                session,
+                writebacks,
+            } => f
+                .debug_struct("Invoked")
+                .field("cause", cause)
+                .field("tier", tier)
+                .field("retirement", retirement)
+                .field("session", &session.is_some())
+                .field("writebacks", &writebacks.len())
+                .finish(),
+        }
+    }
 }
 
 /// Failed helper invocation plus the counted root that keeps all carried
@@ -591,9 +669,12 @@ impl<'a> SourceHelperInvocationError<'a> {
                         let _activation = activate_source_resource_arena(&arena);
                         match completion_scope.with_current(|| session.retire()) {
                             Ok(completed) => {
-                                let retirement = retirement.map_or(completed, |fallback| {
-                                    merge_source_execution_retirement(fallback, completed)
-                                });
+                                let retirement = match retirement {
+                                    Some(fallback) => {
+                                        merge_source_execution_retirement(fallback, completed)
+                                    }
+                                    None => completed,
+                                };
                                 Some(SourceExecutionCompletionRetirement::Completed(retirement))
                             }
                             Err(mut error) => {
@@ -685,7 +766,6 @@ impl std::fmt::Display for SourceHelperInvocationError<'_> {
 
 impl std::error::Error for SourceHelperInvocationError<'_> {}
 
-#[derive(Debug)]
 enum SourceHelperRunFailure {
     NotInvoked {
         cause: SourceDeoptError,
@@ -697,6 +777,30 @@ enum SourceHelperRunFailure {
         session: Option<Box<dyn super::deopt::SourceExecutionGuard>>,
         writeback_indices: Vec<usize>,
     },
+}
+
+impl std::fmt::Debug for SourceHelperRunFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotInvoked { cause } => {
+                f.debug_struct("NotInvoked").field("cause", cause).finish()
+            }
+            Self::Invoked {
+                cause,
+                retirement,
+                tier,
+                session,
+                writeback_indices,
+            } => f
+                .debug_struct("Invoked")
+                .field("cause", cause)
+                .field("retirement", retirement)
+                .field("tier", tier)
+                .field("session", &session.is_some())
+                .field("writeback_indices", writeback_indices)
+                .finish(),
+        }
+    }
 }
 
 fn source_helper_failure_for_input(
@@ -992,7 +1096,7 @@ impl<'a> SourceHelperExecution<'a> {
     /// the retirement completion keeps cleanup state, not a second result copy.
     pub fn take_result(&mut self) -> Option<super::deopt::SourceExecutionRetirement> {
         Some(super::deopt::SourceExecutionRetirement {
-            outcome: self.outcome.take()?,
+            outcome: Some(self.outcome.take()?),
             value: self.value.take(),
             soft_stop: self.soft_stop,
             stdout: std::mem::take(&mut self.stdout),
@@ -1246,7 +1350,11 @@ pub fn retire_source_entry(
 ) -> Result<super::deopt::SourceExecutionRetirement, SourceExecutionRetirementError> {
     let Some(session) = session else {
         return match resources.retire() {
-            Ok(()) => Ok(fallback),
+            Ok(completions) => {
+                let mut fallback = fallback;
+                fallback.completions.extend(completions);
+                Ok(fallback)
+            }
             Err(error) => Err(SourceExecutionRetirementError::new(
                 SourceExecutionRetirementFailureKind::Resource(error),
                 fallback,
@@ -1266,9 +1374,12 @@ pub fn retire_source_entry(
             return Err(error);
         }
     };
-    let retirement = merge_source_execution_retirement(fallback, retirement);
+    let mut retirement = merge_source_execution_retirement(fallback, retirement);
     match resources.retire() {
-        Ok(()) => Ok(retirement),
+        Ok(completions) => {
+            retirement.completions.extend(completions);
+            Ok(retirement)
+        }
         Err(error) => Err(SourceExecutionRetirementError::new(
             SourceExecutionRetirementFailureKind::Resource(error),
             retirement,
@@ -1367,6 +1478,7 @@ impl CraneliftBackend {
                     ),
                     retirement: None,
                     tier: None,
+                    session: None,
                     writeback_indices: Vec::new(),
                 });
             }
@@ -2435,8 +2547,8 @@ where
             completion_scope,
             native_interface_scope,
             native_interface_context,
-            execution,
-            function: helper_function,
+            execution: Some(execution),
+            function: Some(helper_function),
         }),
         Err(failure) => Err(SourceHelperInvocationError {
             failure,

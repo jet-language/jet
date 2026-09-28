@@ -38,7 +38,7 @@ pub mod Render;
 const OBSERVATION_QUERY: &str = "why is my program slow";
 const OBSERVATION_GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/spec/observability.md"
+    "/../../Docs/spec/observability.md"
 ));
 
 /// One command in the help index.
@@ -118,7 +118,7 @@ fn usage_for(cmd: &str) -> String {
 fn example_for(cmd: &str) -> Option<String> {
     match cmd {
         "run" => Some("jet run".to_string()),
-        "check" | "build" => Some(format!("jet {} examples/features/basics/hello.jet", cmd)),
+        "check" | "build" => Some(format!("jet {} Examples/features/basics/hello.jet", cmd)),
         "dev" => Some("jet dev run.jet".to_string()),
         "learn" => Some("jet learn".to_string()),
         "notebook" => Some("jet notebook analysis.jetnb".to_string()),

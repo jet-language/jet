@@ -43,6 +43,7 @@ enum Body {
     Struct(Vec<Field>),
     Tuple(Vec<Field>),
     Unit,
+    Alias(TypeExpr),
     Enum(Vec<Variant>),
 }
 
@@ -256,18 +257,57 @@ fn quoted_end(bytes: &[u8], start: usize, quote: u8) -> usize {
 }
 
 fn char_literal_end(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut cursor = start + 1;
-    let limit = (start + 12).min(bytes.len());
-    while cursor < limit && bytes[cursor] != b'\n' {
-        if bytes[cursor] == b'\\' {
-            cursor = (cursor + 2).min(bytes.len());
-        } else if bytes[cursor] == b'\'' {
-            return Some(cursor + 1);
-        } else {
-            cursor += 1;
-        }
+    if bytes.get(start) != Some(&b'\'') {
+        return None;
     }
-    None
+    let mut cursor = start + 1;
+    let first = *bytes.get(cursor)?;
+    if first == b'\\' {
+        cursor += 1;
+        match *bytes.get(cursor)? {
+            b'u' => {
+                cursor += 1;
+                if bytes.get(cursor) != Some(&b'{') {
+                    return None;
+                }
+                cursor += 1;
+                let mut digits = 0;
+                while let Some(&byte) = bytes.get(cursor) {
+                    if byte.is_ascii_hexdigit() {
+                        digits += 1;
+                    } else if byte != b'_' {
+                        break;
+                    }
+                    cursor += 1;
+                }
+                if digits == 0 || digits > 6 || bytes.get(cursor) != Some(&b'}') {
+                    return None;
+                }
+                cursor += 1;
+            }
+            b'x' => {
+                cursor += 1;
+                if !bytes.get(cursor..cursor + 2)?.iter().all(u8::is_ascii_hexdigit) {
+                    return None;
+                }
+                cursor += 2;
+            }
+            b'n' | b'r' | b't' | b'0' | b'\\' | b'\'' | b'"' => cursor += 1,
+            _ => return None,
+        }
+    } else {
+        let width = match first {
+            b'\'' | b'\n' | b'\r' => return None,
+            0..=0x7f => 1,
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return None,
+        };
+        std::str::from_utf8(bytes.get(cursor..cursor + width)?).ok()?;
+        cursor += width;
+    }
+    (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
 }
 
 fn parse_imports(source: &str, module: &str) -> BTreeMap<String, String> {
@@ -333,7 +373,8 @@ fn insert_use_tree(statement: &str, module: &str, imports: &mut BTreeMap<String,
             }
             let (name, alias) = split_alias(item);
             let path = normalize_module_path(module, &format!("{prefix}::{name}"));
-            imports.insert(alias.to_string(), path);
+            let local_name = alias.unwrap_or(name.rsplit("::").next().unwrap_or(name));
+            imports.insert(local_name.to_string(), path);
         }
     } else {
         let (path, alias) = split_alias(statement.trim());
@@ -429,7 +470,13 @@ fn parse_definitions(
     let mut definitions = Vec::new();
     let mut cursor = 0usize;
     while let Some((kind, start)) = find_next_definition(source, cursor) {
-        let mut position = start + if kind == "struct" { "pub struct".len() } else { "pub enum".len() };
+        let prefix = match kind {
+            "struct" => "pub struct",
+            "enum" => "pub enum",
+            "type" => "pub type",
+            _ => unreachable!("unknown native MIR definition kind"),
+        };
+        let mut position = start + prefix.len();
         skip_space(source, &mut position);
         if source.as_bytes().get(position) == Some(&b'$') {
             cursor = skip_macro_declaration(source, position);
@@ -444,43 +491,54 @@ fn parse_definitions(
             position = end + 1;
             skip_space(source, &mut position);
         }
-        let body = match source.as_bytes().get(position).copied() {
-            Some(b'{') => {
-                let end = matching_byte(source.as_bytes(), position, b'{', b'}')
-                    .ok_or_else(|| format!("unclosed declaration body for `{name}`"))?;
-                let text = &source[position + 1..end];
-                let body = if kind == "struct" {
-                    Body::Struct(parse_fields(text)?)
-                } else {
-                    Body::Enum(parse_variants(text)?)
-                };
-                position = end + 1;
-                body
-            }
-            Some(b'(') if kind == "struct" => {
-                let end = matching_byte(source.as_bytes(), position, b'(', b')')
-                    .ok_or_else(|| format!("unclosed tuple struct `{name}`"))?;
-                let fields = split_top_level(&source[position + 1..end], ',')
-                    .into_iter()
-                    .filter(|field| !field.trim().is_empty())
-                    .enumerate()
-                    .map(|(index, field)| {
-                        let field = field.trim();
-                        Ok(Field {
-                            name: index.to_string(),
-                            public: field.starts_with("pub ") || field.starts_with("pub("),
-                            ty: parse_type(strip_visibility(field))?,
+        let body = if kind == "type" {
+            let equals = top_level_byte(&source[position..], b'=')
+                .ok_or_else(|| format!("type alias `{name}` has no right-hand side"))?;
+            let rhs_start = position + equals + 1;
+            let end = top_level_byte(&source[rhs_start..], b';')
+                .ok_or_else(|| format!("type alias `{name}` has no terminating semicolon"))?;
+            let rhs = source[rhs_start..rhs_start + end].trim();
+            position = rhs_start + end + 1;
+            Body::Alias(parse_type(rhs)?)
+        } else {
+            match source.as_bytes().get(position).copied() {
+                Some(b'{') => {
+                    let end = matching_byte(source.as_bytes(), position, b'{', b'}')
+                        .ok_or_else(|| format!("unclosed declaration body for `{name}`"))?;
+                    let text = &source[position + 1..end];
+                    let body = if kind == "struct" {
+                        Body::Struct(parse_fields(text)?)
+                    } else {
+                        Body::Enum(parse_variants(text)?)
+                    };
+                    position = end + 1;
+                    body
+                }
+                Some(b'(') if kind == "struct" => {
+                    let end = matching_byte(source.as_bytes(), position, b'(', b')')
+                        .ok_or_else(|| format!("unclosed tuple struct `{name}`"))?;
+                    let fields = split_top_level(&source[position + 1..end], ',')
+                        .into_iter()
+                        .filter(|field| !field.trim().is_empty())
+                        .enumerate()
+                        .map(|(index, field)| {
+                            let field = field.trim();
+                            Ok(Field {
+                                name: index.to_string(),
+                                public: field.starts_with("pub ") || field.starts_with("pub("),
+                                ty: parse_type(strip_visibility(field))?,
+                            })
                         })
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                position = end + 1;
-                Body::Tuple(fields)
+                        .collect::<Result<Vec<_>, String>>()?;
+                    position = end + 1;
+                    Body::Tuple(fields)
+                }
+                Some(b';') if kind == "struct" => {
+                    position += 1;
+                    Body::Unit
+                }
+                _ => return Err(format!("unsupported body for `{name}`")),
             }
-            Some(b';') if kind == "struct" => {
-                position += 1;
-                Body::Unit
-            }
-            _ => return Err(format!("unsupported body for `{name}`")),
         };
         let key = format!("{module}::{name}");
         definitions.push(Definition {
@@ -505,6 +563,7 @@ fn skip_macro_declaration(source: &str, start: usize) -> usize {
     while cursor < bytes.len() {
         match bytes[cursor] {
             b'(' | b'[' | b'{' | b'<' => depth += 1,
+            b'>' if cursor > 0 && bytes[cursor - 1] == b'-' => {}
             b')' | b']' | b'}' | b'>' => depth = depth.saturating_sub(1),
             b';' if depth == 0 => return cursor + 1,
             _ => {}
@@ -557,6 +616,11 @@ fn parse_fields(body: &str) -> Result<Vec<Field>, String> {
     Ok(fields)
 }
 
+fn variant_suffix_supported(suffix: &str) -> bool {
+    let suffix = suffix.trim();
+    suffix.is_empty() || suffix.strip_prefix('=').is_some_and(|value| !value.trim().is_empty())
+}
+
 fn parse_variants(body: &str) -> Result<Vec<Variant>, String> {
     let mut variants = Vec::new();
     for raw in split_top_level(body, ',') {
@@ -571,7 +635,7 @@ fn parse_variants(body: &str) -> Result<Vec<Variant>, String> {
             Some(b'(') => {
                 let end = matching_byte(raw.as_bytes(), cursor, b'(', b')')
                     .ok_or_else(|| format!("unclosed tuple variant `{name}`"))?;
-                if raw[end + 1..].trim().is_empty() {
+                if variant_suffix_supported(&raw[end + 1..]) {
                     VariantBody::Tuple(
                         split_top_level(&raw[cursor + 1..end], ',')
                             .into_iter()
@@ -586,7 +650,7 @@ fn parse_variants(body: &str) -> Result<Vec<Variant>, String> {
             Some(b'{') => {
                 let end = matching_byte(raw.as_bytes(), cursor, b'{', b'}')
                     .ok_or_else(|| format!("unclosed struct variant `{name}`"))?;
-                if raw[end + 1..].trim().is_empty() {
+                if variant_suffix_supported(&raw[end + 1..]) {
                     let mut fields = parse_fields(&raw[cursor + 1..end])?;
                     for field in &mut fields {
                         field.public = true;
@@ -597,6 +661,7 @@ fn parse_variants(body: &str) -> Result<Vec<Variant>, String> {
                 }
             }
             None => VariantBody::Unit,
+            Some(b'=') if variant_suffix_supported(&raw[cursor..]) => VariantBody::Unit,
             _ => VariantBody::Unsupported(raw[cursor..].trim().to_string()),
         };
         variants.push(Variant { name, body: variant_body });
@@ -703,6 +768,8 @@ fn generic_inner<'a>(input: &'a str, name: &str) -> Option<&'a str> {
 fn reachable_schema(schema: &Schema, root: &str) -> Result<BTreeSet<String>, String> {
     let mut pending = vec![root.to_string()];
     let mut reachable = BTreeSet::new();
+    let mut alias_visiting = Vec::new();
+    let mut checked_aliases = BTreeSet::new();
     while let Some(key) = pending.pop() {
         let key = resolve_alias(schema, &key)?;
         if !reachable.insert(key.clone()) {
@@ -713,10 +780,24 @@ fn reachable_schema(schema: &Schema, root: &str) -> Result<BTreeSet<String>, Str
             .get(&key)
             .ok_or_else(|| format!("missing declaration for `{key}`"))?;
         if definition.generic {
+            if matches!(&definition.body, Body::Alias(_)) {
+                return Err(format!(
+                    "generic native MIR type alias `{}` needs an explicit instantiated wire schema",
+                    definition.key
+                ));
+            }
             return Err(format!(
                 "generic native MIR type `{}` needs an explicit instantiated wire schema",
                 definition.key
             ));
+        }
+        if matches!(&definition.body, Body::Alias(_)) {
+            detect_alias_cycle(
+                schema,
+                &key,
+                &mut alias_visiting,
+                &mut checked_aliases,
+            )?;
         }
         if let Body::Enum(variants) = &definition.body {
             if let Some(variant) = variants
@@ -753,6 +834,56 @@ fn reachable_schema(schema: &Schema, root: &str) -> Result<BTreeSet<String>, Str
     Ok(reachable)
 }
 
+fn detect_alias_cycle(
+    schema: &Schema,
+    key: &str,
+    visiting: &mut Vec<String>,
+    checked: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let key = resolve_alias(schema, key)?;
+    let Some(definition) = schema.definitions.get(&key) else {
+        return Err(format!("missing declaration for `{key}`"));
+    };
+    if definition.generic {
+        let kind = if matches!(&definition.body, Body::Alias(_)) {
+            "type alias"
+        } else {
+            "type"
+        };
+        return Err(format!(
+            "generic native MIR {kind} `{}` needs an explicit instantiated wire schema",
+            definition.key
+        ));
+    }
+    if !matches!(&definition.body, Body::Alias(_)) {
+        return Ok(());
+    }
+    if checked.contains(&key) {
+        return Ok(());
+    }
+    if let Some(index) = visiting.iter().position(|item| item == &key) {
+        let mut cycle = visiting[index..].to_vec();
+        cycle.push(key);
+        return Err(format!(
+            "cyclic native MIR type aliases: {}",
+            cycle.join(" -> ")
+        ));
+    }
+    visiting.push(key.clone());
+    let mut names = Vec::new();
+    collect_named_types(&definition.body, &mut names);
+    for name in names {
+        if is_builtin(&name) {
+            continue;
+        }
+        let target = resolve_type_name(schema, definition, &name)?;
+        detect_alias_cycle(schema, &target, visiting, checked)?;
+    }
+    visiting.pop();
+    checked.insert(key);
+    Ok(())
+}
+
 fn collect_named_types(body: &Body, names: &mut Vec<String>) {
     fn collect(ty: &TypeExpr, names: &mut Vec<String>) {
         match ty {
@@ -775,6 +906,7 @@ fn collect_named_types(body: &Body, names: &mut Vec<String>) {
         Body::Struct(fields) | Body::Tuple(fields) => {
             fields.iter().for_each(|field| collect(&field.ty, names))
         }
+        Body::Alias(ty) => collect(ty, names),
         Body::Enum(variants) => {
             for variant in variants {
                 match &variant.body {
@@ -798,7 +930,7 @@ fn body_fields(body: &Body) -> Vec<&Field> {
                 VariantBody::Unit | VariantBody::Tuple(_) | VariantBody::Unsupported(_) => Vec::new(),
             })
             .collect(),
-        Body::Unit => Vec::new(),
+        Body::Alias(_) | Body::Unit => Vec::new(),
     }
 }
 
@@ -807,9 +939,45 @@ fn is_builtin(name: &str) -> bool {
         name,
         "String" | "bool" | "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16"
             | "i32" | "i64" | "isize" | "f32" | "f64" | "char" | "str"
+            | "PathBuf" | "std::path::PathBuf"
     )
 }
+fn generic_type_base(name: &str) -> Option<&str> {
+    let open = top_level_byte(name, b'<')?;
+    let close = matching_byte(name.as_bytes(), open, b'<', b'>')?;
+    if close + 1 != name.len() {
+        return None;
+    }
+    let base = name[..open].trim();
+    (!base.is_empty()).then_some(base)
+}
+
 fn resolve_type_name(schema: &Schema, definition: &Definition, name: &str) -> Result<String, String> {
+    if let Some(base) = generic_type_base(name) {
+        if !is_builtin(base) {
+            if let Ok(key) = resolve_type_name(schema, definition, base) {
+                if let Some(target) = schema.definitions.get(&key) {
+                    if target.generic {
+                        let kind = if matches!(&target.body, Body::Alias(_)) {
+                            "type alias"
+                        } else {
+                            "type"
+                        };
+                        return Err(format!(
+                            "generic native MIR {kind} `{key}` needs an explicit instantiated wire schema"
+                        ));
+                    }
+                }
+            }
+        }
+        return Err(format!(
+            "unsupported generic native MIR type `{name}` referenced by `{}`",
+            definition.key
+        ));
+    }
+    if name == "Self" {
+        return Ok(definition.key.clone());
+    }
     if let Some(local) = schema.definitions.get(&format!("{}::{name}", definition.module)) {
         return Ok(local.key.clone());
     }
@@ -852,14 +1020,19 @@ fn resolve_alias(schema: &Schema, path: &str) -> Result<String, String> {
 }
 
 fn assign_public_paths(schema: &mut Schema) {
-    for definition in schema.definitions.values_mut() {
-        definition.path = if definition.module == "crate::AST::ffi"
-            || definition.module.starts_with("crate::AST::")
-        {
-            format!("crate::AST::{}", definition.name)
-        } else {
-            format!("{}::{}", definition.module, definition.name)
-        };
+    let mut paths = schema.definitions.keys()
+        .map(|key| (key.clone(), key.clone()))
+        .collect::<BTreeMap<_, _>>();
+    for export in schema.aliases.keys() {
+        if let Ok(key) = resolve_alias(schema, export) {
+            let path = paths.get_mut(&key).expect("resolved schema definition");
+            if (export.matches("::").count(), export) < (path.matches("::").count(), &*path) {
+                *path = export.clone();
+            }
+        }
+    }
+    for (key, path) in paths {
+        schema.definitions.get_mut(&key).unwrap().path = path;
     }
 }
 
@@ -903,7 +1076,6 @@ impl MirProgramImageWriter {
         Ok(())
     }
     fn write_string(&mut self, value: &str) -> Result<(), String> { self.write_bytes(value.as_bytes()) }
-    fn write_raw(&mut self, value: &[u8]) { self.bytes.extend_from_slice(value); }
     fn finish(self) -> Vec<u8> { self.bytes }
 }
 struct MirProgramImageReader<'a> { bytes: &'a [u8], cursor: usize }
@@ -1002,6 +1174,15 @@ fn emit_definition_codec(
             writeln!(out, "fn {encoder}(_: &{path}, _: &mut MirProgramImageWriter) -> Result<(), String> {{ Ok(()) }}\nfn {decoder}(_: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{ Ok({path}) }}\n")
                 .map_err(|error| error.to_string())?;
         }
+        Body::Alias(ty) => {
+            let encode = encode_expression(ty, "value", "writer", schema, reachable, definition)?;
+            let decode = decode_expression(ty, "reader", schema, reachable, definition)?;
+            writeln!(
+                out,
+                "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({decode})\n}}\n"
+            )
+            .map_err(|error| error.to_string())?;
+        }
         Body::Enum(variants) => {
             let mut encode_arms = Vec::new();
             let mut decode_arms = Vec::new();
@@ -1069,13 +1250,13 @@ fn encode_expression(
             writeln!(out, "    {writer}.write_u64(u64::try_from(({expression}).len()).map_err(|_| \"native MIR collection exceeds u64\".to_string())?);\n    for __item in ({expression}).iter() {{\n{body}    }}\n").unwrap();
         }
         TypeExpr::Set(inner, _) => {
-            let body = encode_expression(inner, "__item", "__item_writer", schema, reachable, context)?;
-            writeln!(out, "    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in ({expression}).iter() {{ let mut __item_writer = MirProgramImageWriter::new();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} writer.write_u64(u64::try_from(__items.len()).map_err(|_| \"native MIR set exceeds u64\".to_string())?); for __item in __items {{ writer.write_bytes(&__item)?; }} }}\n").unwrap();
+            let body = encode_expression(inner, "__item", "(&mut __item_writer)", schema, reachable, context)?;
+            writeln!(out, "    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in ({expression}).iter() {{ let mut __item_writer = MirProgramImageWriter::new();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} {writer}.write_u64(u64::try_from(__items.len()).map_err(|_| \"native MIR set exceeds u64\".to_string())?); for __item in __items {{ {writer}.write_bytes(&__item)?; }} }}\n").unwrap();
         }
         TypeExpr::Map(key, value, _) => {
-            let key_body = encode_expression(key, "__key", "__key_writer", schema, reachable, context)?;
-            let value_body = encode_expression(value, "__value", "__value_writer", schema, reachable, context)?;
-            writeln!(out, "    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in ({expression}).iter() {{ let mut __key_writer = MirProgramImageWriter::new();\n{key_body}        let mut __value_writer = MirProgramImageWriter::new();\n{value_body}        __entries.push((__key_writer.finish(), __value_writer.finish())); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} writer.write_u64(u64::try_from(__entries.len()).map_err(|_| \"native MIR map exceeds u64\".to_string())?); for (__key, __value) in __entries {{ writer.write_bytes(&__key)?; writer.write_bytes(&__value)?; }} }}\n").unwrap();
+            let key_body = encode_expression(key, "__key", "(&mut __key_writer)", schema, reachable, context)?;
+            let value_body = encode_expression(value, "__value", "(&mut __value_writer)", schema, reachable, context)?;
+            writeln!(out, "    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in ({expression}).iter() {{ let mut __key_writer = MirProgramImageWriter::new();\n{key_body}        let mut __value_writer = MirProgramImageWriter::new();\n{value_body}        __entries.push((__key_writer.finish(), __value_writer.finish())); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} {writer}.write_u64(u64::try_from(__entries.len()).map_err(|_| \"native MIR map exceeds u64\".to_string())?); for (__key, __value) in __entries {{ {writer}.write_bytes(&__key)?; {writer}.write_bytes(&__value)?; }} }}\n").unwrap();
         }
         TypeExpr::Array(inner, _) => {
             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
@@ -1106,6 +1287,7 @@ fn emit_named_encode(
 ) -> Result<(), String> {
     match name {
         "String" => writeln!(out, "    {writer}.write_string(({expression}).as_str())?;\n").unwrap(),
+        "PathBuf" | "std::path::PathBuf" => writeln!(out, "    {writer}.write_string(({expression}).to_str().ok_or_else(|| \"native MIR path is not valid UTF-8\".to_string())?)?;\n").unwrap(),
         "bool" => writeln!(out, "    {writer}.write_u8(u8::from(*({expression})));\n").unwrap(),
         "u8" => writeln!(out, "    {writer}.write_u8(*({expression}));\n").unwrap(),
         "u16" => writeln!(out, "    {writer}.write_u16(*({expression}));\n").unwrap(),
@@ -1126,7 +1308,7 @@ fn emit_named_encode(
                 return Err(format!("native MIR type `{key}` is outside generated codec closure"));
             }
             let path = function_name("encode", &key);
-            writeln!(out, "    {path}({expression}, {writer})?;\n").unwrap();
+            writeln!(out, "    {path}({expression}, &mut *{writer})?;\n").unwrap();
         }
     }
     Ok(())
@@ -1149,13 +1331,13 @@ fn decode_expression(
             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR sequence is too large\".to_string())?; for _ in 0..__count {{ __items.push({value}); }} __items }}")
         }
         TypeExpr::Set(inner, hash) => {
-            let value = decode_expression(inner, "__item_reader", schema, reachable, context)?;
+            let value = decode_expression(inner, "(&mut __item_reader)", schema, reachable, context)?;
             let container = if *hash { "std::collections::HashSet" } else { "std::collections::BTreeSet" };
             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR set is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __bytes = {reader}.read_bytes()?; if !__seen.insert(__bytes.to_vec()) {{ return Err(\"duplicate native MIR set element\".to_string()); }} let mut __item_reader = MirProgramImageReader::new(__bytes); let __item = {value}; __item_reader.finish()?; __items.push(__item); }} let __output = __items.into_iter().collect::<{container}<_>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR set element\".to_string()); }} __output }}")
         }
         TypeExpr::Map(key, value, hash) => {
-            let key_value = decode_expression(key, "__key_reader", schema, reachable, context)?;
-            let value_value = decode_expression(value, "__value_reader", schema, reachable, context)?;
+            let key_value = decode_expression(key, "(&mut __key_reader)", schema, reachable, context)?;
+            let value_value = decode_expression(value, "(&mut __value_reader)", schema, reachable, context)?;
             let container = if *hash { "std::collections::HashMap" } else { "std::collections::BTreeMap" };
             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR map is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __key_bytes = {reader}.read_bytes()?; let mut __key_reader = MirProgramImageReader::new(__key_bytes); let __key = {key_value}; __key_reader.finish()?; if !__seen.insert(__key_bytes.to_vec()) {{ return Err(\"duplicate native MIR map key\".to_string()); }} let __value_bytes = {reader}.read_bytes()?; let mut __value_reader = MirProgramImageReader::new(__value_bytes); let __value = {value_value}; __value_reader.finish()?; __items.push((__key, __value)); }} let __output = __items.into_iter().collect::<{container}<_, _>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}")
         }
@@ -1185,6 +1367,7 @@ fn decode_named(
 ) -> Result<String, String> {
     Ok(match name {
         "String" => format!("{reader}.read_string()?"),
+        "PathBuf" | "std::path::PathBuf" => format!("std::path::PathBuf::from({reader}.read_string()?)"),
         "bool" => format!("match {reader}.read_u8()? {{ 0 => false, 1 => true, _ => return Err(\"invalid native MIR boolean\".to_string()), }}"),
         "u8" => format!("{reader}.read_u8()?"),
         "u16" => format!("{reader}.read_u16()?"),
@@ -1204,7 +1387,7 @@ fn decode_named(
             if !reachable.contains(&key) {
                 return Err(format!("native MIR type `{key}` is outside generated codec closure"));
             }
-            format!("{}({reader})?", function_name("decode", &key))
+            format!("{}(&mut *{reader})?", function_name("decode", &key))
         }
     })
 }
@@ -1217,15 +1400,19 @@ fn function_name(prefix: &str, key: &str) -> String {
     format!("__mir_image_{prefix}_{suffix}")
 }
 fn find_next_definition(source: &str, from: usize) -> Option<(&'static str, usize)> {
-    let structure = find_keyword(source, "pub struct", from);
-    let enumeration = find_keyword(source, "pub enum", from);
-    match (structure, enumeration) {
-        (Some(left), Some(right)) if left < right => Some(("struct", left)),
-        (Some(_), Some(right)) => Some(("enum", right)),
-        (Some(position), None) => Some(("struct", position)),
-        (None, Some(position)) => Some(("enum", position)),
-        (None, None) => None,
+    let mut next: Option<(&'static str, usize)> = None;
+    for (kind, position) in [
+        ("struct", find_keyword(source, "pub struct", from)),
+        ("enum", find_keyword(source, "pub enum", from)),
+        ("type", find_keyword(source, "pub type", from)),
+    ] {
+        if let Some(position) = position {
+            if next.map_or(true, |(_, current)| position < current) {
+                next = Some((kind, position));
+            }
+        }
     }
+    next
 }
 
 fn find_keyword(source: &str, keyword: &str, from: usize) -> Option<usize> {
@@ -1285,7 +1472,7 @@ fn matching_byte(input: &[u8], start: usize, open: u8, close: u8) -> Option<usiz
     for (index, byte) in input.iter().enumerate().skip(start) {
         if *byte == open {
             depth += 1;
-        } else if *byte == close {
+        } else if *byte == close && !(close == b'>' && index > 0 && input[index - 1] == b'-') {
             depth = depth.checked_sub(1)?;
             if depth == 0 {
                 return Some(index);
@@ -1303,6 +1490,7 @@ fn top_level_byte(input: &str, wanted: u8) -> Option<usize> {
         }
         match byte {
             b'<' | b'(' | b'[' | b'{' => depth += 1,
+            b'>' if index > 0 && input.as_bytes()[index - 1] == b'-' => {}
             b'>' | b')' | b']' | b'}' => depth = depth.saturating_sub(1),
             _ => {}
         }
@@ -1317,6 +1505,7 @@ fn split_top_level(input: &str, delimiter: char) -> Vec<&str> {
     for (index, character) in input.char_indices() {
         match character {
             '<' | '(' | '[' | '{' => depth += 1,
+            '>' if index > 0 && input.as_bytes()[index - 1] == b'-' => {}
             '>' | ')' | ']' | '}' => depth = depth.saturating_sub(1),
             character if character == delimiter && depth == 0 => {
                 pieces.push(&input[start..index]);
@@ -1329,3 +1518,246 @@ fn split_top_level(input: &str, delimiter: char) -> Vec<&str> {
     pieces
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouped_imports_use_alias_or_final_path_component() {
+        let mut imports = BTreeMap::new();
+        insert_use_tree(
+            "crate::Mir::{Value, Instruction as Op, nested::Block, *}",
+            "crate::Image",
+            &mut imports,
+        );
+        assert_eq!(
+            imports,
+            BTreeMap::from([
+                ("Value".to_string(), "crate::Mir::Value".to_string()),
+                ("Op".to_string(), "crate::Mir::Instruction".to_string()),
+                ("Block".to_string(), "crate::Mir::nested::Block".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn character_mask_preserves_lifetimes_and_nested_field_delimiters() {
+        let source = "pub struct Rows { pub rows: &'static [(&'static str, Kind)], pub next: u64 }";
+        let masked = mask_comments_and_literals(source);
+        assert_eq!(masked, source);
+        let definitions = parse_definitions(&masked, "crate::Rows", &BTreeMap::new()).unwrap();
+        let Body::Struct(fields) = &definitions[0].body else {
+            panic!("expected struct");
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "rows");
+        assert_eq!(fields[1].name, "next");
+        assert_eq!(mask_comments_and_literals("&'a str, &'b str"), "&'a str, &'b str");
+    }
+
+    #[test]
+    fn character_mask_handles_unicode_and_escapes_without_hiding_following_code() {
+        for literal in ["'a'", "'é'", "'中'", "'\u{10400}'", r"'\n'", r"'\''", r"'\\'", r"'\x7f'", r"'\u{10400}'"] {
+            let source = format!("{literal}, following");
+            let expected = format!("{}, following", " ".repeat(literal.len()));
+            assert_eq!(mask_comments_and_literals(&source), expected, "{literal}");
+        }
+    }
+
+    #[test]
+    fn function_arrows_do_not_close_generic_delimiters() {
+        let ty = "Option<Arc<dyn Fn(u8) -> Result<(u8, u8), String>>>";
+        assert_eq!(matching_byte(ty.as_bytes(), 6, b'<', b'>'), Some(ty.len() - 1));
+        let fields = format!("pub callback: {ty}, pub next: u64");
+        assert_eq!(split_top_level(&fields, ',').len(), 2);
+        assert_eq!(parse_fields(&fields).unwrap().len(), 2);
+        let suffix = format!("{ty}, following");
+        assert_eq!(top_level_byte(&suffix, b','), Some(ty.len()));
+    }
+
+    #[test]
+    fn recursive_self_type_resolves_to_its_declaring_definition() {
+        let definitions = parse_definitions(
+            "pub enum Node { Leaf, Child(Box<Self>) }",
+            "crate::Graph",
+            &BTreeMap::new(),
+        ).unwrap();
+        let mut schema = Schema::default();
+        let definition = definitions[0].clone();
+        schema.definitions.insert(definition.key.clone(), definition.clone());
+        assert_eq!(resolve_type_name(&schema, &definition, "Self").unwrap(), "crate::Graph::Node");
+    }
+    #[test]
+    fn type_aliases_follow_imported_chains_and_container_wire_schema() {
+        let source = mask_comments_and_literals(
+            "use crate::Kinds::Kind;
+             pub type KindAlias = Kind;
+             pub type KindSet = BTreeSet<KindAlias>;
+             pub struct MirProgram { pub items: KindSet }",
+        );
+        let imports = parse_imports(&source, "crate::MIR");
+        let definitions = parse_definitions(&source, "crate::MIR", &imports).unwrap();
+        let kind_definitions = parse_definitions(
+            "pub type Code = u8; pub struct Kind { pub code: Code }",
+            "crate::Kinds",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut schema = Schema::default();
+        for definition in kind_definitions.into_iter().chain(definitions) {
+            schema.definitions.insert(definition.key.clone(), definition);
+        }
+        assign_public_paths(&mut schema);
+
+        let reachable = reachable_schema(&schema, "crate::MIR::MirProgram").unwrap();
+        assert!(reachable.contains("crate::MIR::KindAlias"));
+        assert!(reachable.contains("crate::MIR::KindSet"));
+        assert!(reachable.contains("crate::Kinds::Kind"));
+        assert!(reachable.contains("crate::Kinds::Code"));
+        let generated = emit_codec(&schema, &reachable).unwrap();
+        assert!(generated.contains(&format!(
+            "fn {}(",
+            function_name("encode", "crate::MIR::KindSet")
+        )));
+        assert!(generated.contains(&format!(
+            "fn {}(",
+            function_name("decode", "crate::MIR::KindSet")
+        )));
+        assert!(generated.contains("duplicate native MIR set element encoding"));
+    }
+
+    #[test]
+    fn reachable_alias_only_cycles_are_rejected_without_recursing_forever() {
+        let definitions = parse_definitions(
+            "pub type First = Option<Second>;
+             pub type Second = Box<First>;
+             pub struct MirProgram { pub value: First }",
+            "crate::MIR",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut schema = Schema::default();
+        for definition in definitions {
+            schema.definitions.insert(definition.key.clone(), definition);
+        }
+
+        let error = reachable_schema(&schema, "crate::MIR::MirProgram").unwrap_err();
+        assert!(error.contains("cyclic native MIR type aliases"));
+        assert!(error.contains("crate::MIR::First"));
+        assert!(error.contains("crate::MIR::Second"));
+    }
+
+    #[test]
+    fn reachable_generic_aliases_report_the_unsupported_wire_contract() {
+        let definitions = parse_definitions(
+            "pub type Generic<T> = Vec<T>;
+             pub struct MirProgram { pub value: Generic<u8> }",
+            "crate::MIR",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut schema = Schema::default();
+        for definition in definitions {
+            schema.definitions.insert(definition.key.clone(), definition);
+        }
+
+        let error = reachable_schema(&schema, "crate::MIR::MirProgram").unwrap_err();
+        assert!(error.contains("generic native MIR type alias `crate::MIR::Generic`"));
+        assert!(error.contains("explicit instantiated wire schema"));
+    }
+
+    #[test]
+    fn public_paths_follow_reexports_instead_of_private_modules() {
+        let mut schema = Schema::default();
+        for module in ["crate::AST::details", "crate::Syntax::details"] {
+            let definition = parse_definitions("pub enum Kind { One }", module, &BTreeMap::new()).unwrap().remove(0);
+            schema.definitions.insert(definition.key.clone(), definition);
+        }
+        parse_public_uses("pub use details::Kind;", "crate::AST", &mut schema);
+        parse_public_uses("pub use details::Kind as ExportedKind;", "crate::Syntax", &mut schema);
+        parse_public_uses("pub use crate::Syntax::ExportedKind as Kind;", "crate", &mut schema);
+        assign_public_paths(&mut schema);
+        assert_eq!(schema.definitions["crate::AST::details::Kind"].path, "crate::AST::Kind");
+        assert_eq!(schema.definitions["crate::Syntax::details::Kind"].path, "crate::Kind");
+    }
+
+    #[test]
+    fn explicit_rust_discriminants_preserve_wire_variant_order_and_payloads() {
+        let variants = parse_variants("First = 7, Second(u64) = 2, Third { value: u8 } = -1").unwrap();
+        assert_eq!(variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(), ["First", "Second", "Third"]);
+        assert!(matches!(variants[0].body, VariantBody::Unit));
+        assert!(matches!(&variants[1].body, VariantBody::Tuple(fields) if fields.len() == 1));
+        assert!(matches!(&variants[2].body, VariantBody::Struct(fields) if fields.len() == 1 && fields[0].name == "value"));
+        assert!(matches!(parse_variants("Broken =").unwrap()[0].body, VariantBody::Unsupported(_)));
+    }
+
+    #[test]
+    fn generated_nested_containers_and_paths_round_trip() {
+        let spelling = "BTreeMap<std::path::PathBuf, BTreeSet<BTreeMap<Leaf, Leaf>>>";
+        let ty = parse_type(spelling).unwrap();
+        let context = parse_definitions("pub struct Leaf(pub u64);", "crate", &BTreeMap::new()).unwrap().remove(0);
+        let mut schema = Schema::default();
+        schema.definitions.insert(context.key.clone(), context.clone());
+        let reachable = BTreeSet::from([context.key.clone()]);
+        let mut leaf_codec = String::new();
+        emit_definition_codec(&mut leaf_codec, &schema, &reachable, &context).unwrap();
+        let encode = encode_expression(&ty, "value", "writer", &schema, &reachable, &context).unwrap();
+        let decode = decode_expression(&ty, "reader", &schema, &reachable, &context).unwrap();
+        let mut primitives = String::new();
+        emit_runtime_codec_primitives(&mut primitives);
+        let primitives = primitives.split("fn mir_image_static_str").next().unwrap();
+        let source = format!(r#"
+use std::collections::{{BTreeMap, BTreeSet}};
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Leaf(pub u64);
+{leaf_codec}
+{primitives}
+fn encode(value: &{spelling}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{
+{encode}
+    Ok(())
+}}
+fn decode(reader: &mut MirProgramImageReader<'_>) -> Result<{spelling}, String> {{
+    Ok({decode})
+}}
+fn main() {{
+    let value = BTreeMap::from([(std::path::PathBuf::from("outer/λ"), BTreeSet::from([
+        BTreeMap::from([(Leaf(1), Leaf(7)), (Leaf(2), Leaf(11))]),
+        BTreeMap::from([(Leaf(3), Leaf(13))]),
+    ]))]);
+    let mut writer = MirProgramImageWriter::new();
+    encode(&value, &mut writer).unwrap();
+    let bytes = writer.finish();
+    let mut reader = MirProgramImageReader::new(&bytes);
+    assert_eq!(decode(&mut reader).unwrap(), value);
+    reader.finish().unwrap();
+    let mut truncated = MirProgramImageReader::new(&bytes[..bytes.len() - 1]);
+    assert!(decode(&mut truncated).is_err());
+    #[cfg(unix)]
+    {{
+        use std::os::unix::ffi::OsStringExt;
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));
+        let invalid = BTreeMap::from([(path, BTreeSet::new())]);
+        let mut writer = MirProgramImageWriter::new();
+        assert!(encode(&invalid, &mut writer).unwrap_err().contains("not valid UTF-8"));
+    }}
+}}
+"#);
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let scratch = PathBuf::from(std::env::var_os("HOME").expect("disk-backed test scratch requires HOME"))
+            .join(".cache/jet-test-scratch")
+            .join(format!("mir-codec-roundtrip-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&scratch).unwrap();
+        let source_path = scratch.join("roundtrip.rs");
+        let binary = scratch.join("roundtrip");
+        fs::write(&source_path, source).unwrap();
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let built = std::process::Command::new(compiler)
+            .args(["--edition=2024", "-Awarnings", "-Dunused_parens"])
+            .arg(&source_path).arg("-o").arg(&binary).output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let run = std::process::Command::new(&binary).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        fs::remove_dir_all(scratch).unwrap();
+    }
+}

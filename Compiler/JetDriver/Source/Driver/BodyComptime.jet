@@ -1,0 +1,315 @@
+// Body expressions enter the ordinary comptime source/value graph. The
+// canonical driver evaluator remains the sole execution path; this file owns
+// body-site discovery, staging, and the value-fed function recheck boundary.
+
+struct JetDriverComptimeBodyResult {
+    graph: SemaGraphResult
+    values: [SemaComptimeItemValue]
+    functions: [SemaComptimeFunctionResult]
+    trace: JetDriverCompileTrace
+    complete: Bool
+    soft_stop: Bool
+    internal_problem: ?String
+}
+
+fn jet_driver_comptime_body_result(
+    graph: SemaGraphResult,
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    trace: JetDriverCompileTrace,
+    complete: Bool,
+    soft_stop: Bool,
+) -> JetDriverComptimeBodyResult {
+    JetDriverComptimeBodyResult{
+        graph: graph,
+        values: values,
+        functions: functions,
+        trace: trace,
+        complete: complete,
+        soft_stop: soft_stop,
+        internal_problem: None,
+    }
+}
+
+fn jet_driver_comptime_body_failure(
+    graph: SemaGraphResult,
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    trace: JetDriverCompileTrace,
+    problem: String,
+) -> JetDriverComptimeBodyResult {
+    result := jet_driver_comptime_body_result(graph, values, functions, trace, false, false)
+    result.internal_problem = Val(problem)
+    result
+}
+
+fn jet_driver_comptime_trace_append(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) {
+    loop text in addition.stdout -> target.stdout.push(text)
+    loop text in addition.stderr -> target.stderr.push(text)
+    if addition.exit_code != None -> target.exit_code = addition.exit_code
+    target.soft_stop = target.soft_stop || addition.soft_stop
+}
+
+fn jet_driver_comptime_diagnostic_key(diagnostic: Diagnostic) -> String {
+    span_start := -1
+    span_end := -1
+    if diagnostic.span == .Val(span) {
+        span_start = span.start
+        span_end = span.end
+    }
+    source_path := ""
+    if diagnostic.source_path == .Val(path) -> source_path = path
+    source_offset := -1
+    if diagnostic.source_offset == .Val(offset) -> source_offset = offset
+    source_start := -1
+    if diagnostic.source_start == .Val(start) -> source_start = start
+    detail := ""
+    if diagnostic.detail == .Val(value) -> detail = value
+    "{diagnostic.severity}:{diagnostic.code.len()}:{diagnostic.code}:{span_start}:{span_end}:{source_path.len()}:{source_path}:{source_offset}:{source_start}:{diagnostic.what.len()}:{diagnostic.what}:{diagnostic.why.len()}:{diagnostic.why}:{diagnostic.fix.len()}:{diagnostic.fix}:{detail.len()}:{detail}"
+}
+
+fn jet_driver_comptime_diagnostic_add(diagnostics: &[Diagnostic], diagnostic: Diagnostic) {
+    key := jet_driver_comptime_diagnostic_key(diagnostic)
+    loop existing in diagnostics {
+        if jet_driver_comptime_diagnostic_key(existing) == key -> return
+    }
+    diagnostics.push(diagnostic)
+}
+
+fn jet_driver_comptime_body_source_add(
+    sources: &[SemaComptimeItemSource],
+    known: &[SemaComptimeItemSource],
+    source: SemaComptimeBodySource,
+) {
+    item := sema_comptime_body_item_source(source)
+    loop candidate in known {
+        if candidate.module_identity == item.module_identity && candidate.key == item.key -> return
+    }
+    known.push(item)
+    sources.push(item)
+}
+
+pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptimeBodySource] {
+    sources := [SemaComptimeBodySource]{}
+    loop graph_module in graph.modules {
+        loop source in graph_module.comptime_body_sources {
+            duplicate := false
+            loop existing in sources {
+                if existing.module_identity == source.module_identity && existing.key == source.key -> duplicate = true
+            }
+            if !duplicate -> sources.push(source)
+        }
+    }
+    sources
+}
+
+fn jet_driver_comptime_body_value_present(values: [SemaComptimeItemValue], source: SemaComptimeBodySource) -> Bool {
+    loop value in values {
+        if value.kind == SemaComptimeItemKind.BodyExpression &&
+           value.module_identity == source.module_identity &&
+           value.key == source.key -> return true
+    }
+    false
+}
+
+fn jet_driver_pending_comptime_body_sources(
+    graph: SemaGraphResult,
+    values: [SemaComptimeItemValue],
+) -> [SemaComptimeBodySource] {
+    pending := [SemaComptimeBodySource]{}
+    loop source in jet_driver_comptime_body_sources(graph) {
+        if !jet_driver_comptime_body_value_present(values, source) -> pending.push(source)
+    }
+    pending
+}
+
+fn jet_driver_comptime_body_stage(
+    stage: SemaComptimeDeclarationStage,
+    graph: SemaGraphResult,
+    sources: [SemaComptimeBodySource],
+) -> SemaComptimeDeclarationStage {
+    body_stage := stage
+    body_stage.modules = graph.modules
+    body_stage.names = graph.names
+    body_stage.sources = [SemaComptimeItemSource]{}
+    known := [SemaComptimeItemSource]{}
+    loop source in sources -> jet_driver_comptime_body_source_add(&body_stage.sources, &known, source)
+    body_stage
+}
+
+pub fn jet_driver_run_comptime_body_sources(
+    graph: SemaRegistrationGraph,
+    semantic_graph: SemaGraphResult,
+    stage: SemaComptimeDeclarationStage,
+    sources: [SemaComptimeBodySource],
+    initial_values: [SemaComptimeItemValue],
+    initial_functions: [SemaComptimeFunctionResult],
+    load: JetDriverLoadResult,
+    request: JetDriverCompileRequest,
+    diagnostics: &[Diagnostic],
+) -> JetDriverComptimeRunResult {
+    body_stage := jet_driver_comptime_body_stage(stage, semantic_graph, sources)
+    jet_driver_run_comptime(graph, body_stage, initial_values, initial_functions, load, request, &diagnostics)
+}
+
+pub fn jet_driver_orchestrate_comptime_bodies(
+    graph: SemaRegistrationGraph,
+    stage: SemaComptimeDeclarationStage,
+    initial_graph: SemaGraphResult,
+    initial_values: [SemaComptimeItemValue],
+    initial_functions: [SemaComptimeFunctionResult],
+    initial_trace: JetDriverCompileTrace,
+    load: JetDriverLoadResult,
+    request: JetDriverCompileRequest,
+    diagnostics: &[Diagnostic],
+) -> JetDriverComptimeBodyResult {
+    current_graph := initial_graph
+    values := ~initial_values
+    functions := ~initial_functions
+    trace := initial_trace
+    pass := 0
+    pass_limit := 256
+    loop {
+        if current_graph.modules.len() != graph.modules.len() {
+            return jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                "semantic body rechecking did not return every registered module",
+            )
+        }
+        loop diagnostic in current_graph.diagnostics -> jet_driver_comptime_diagnostic_add(&diagnostics, diagnostic)
+        pending := jet_driver_pending_comptime_body_sources(current_graph, values)
+        if current_graph.complete && pending.len() == 0 && !jet_driver_has_errors(current_graph.diagnostics) {
+            return jet_driver_comptime_body_result(current_graph, values, functions, trace, true, false)
+        }
+        if pending.len() == 0 {
+            if current_graph.diagnostics.len() == 0 && diagnostics.len() == 0 {
+                return jet_driver_comptime_body_failure(
+                    current_graph,
+                    values,
+                    functions,
+                    trace,
+                    "semantic body rechecking did not return a complete resolved package graph",
+                )
+            }
+            return jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false)
+        }
+        if jet_driver_has_errors(current_graph.diagnostics) {
+            return jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false)
+        }
+        pass += 1
+        if pass > pass_limit {
+            return jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                "body comptime rechecking exceeded its bounded progress limit",
+            )
+        }
+        body_stage := jet_driver_comptime_body_stage(stage, current_graph, pending)
+        run := jet_driver_run_comptime_body_sources(
+            graph,
+            current_graph,
+            stage,
+            pending,
+            values,
+            functions,
+            load,
+            request,
+            &diagnostics,
+        )
+        jet_driver_comptime_trace_append(&trace, run.trace)
+        if run.soft_stop {
+            return jet_driver_comptime_body_result(current_graph, run.values, run.functions, trace, false, true)
+        }
+        if !run.complete {
+            result := jet_driver_comptime_body_result(current_graph, run.values, run.functions, trace, false, false)
+            result.internal_problem = run.internal_problem
+            return result
+        }
+        if run.values.len() <= values.len() {
+            return jet_driver_comptime_body_failure(
+                current_graph,
+                values,
+                functions,
+                trace,
+                "body comptime rechecking made no staged-value progress",
+            )
+        }
+        values = run.values
+        functions = run.functions
+        current_graph = jet_driver_recheck_comptime_bodies(graph, body_stage, values, functions)
+    }
+}
+
+pub fn jet_driver_validate_checked_text(
+    graph: SemaRegistrationGraph,
+    stage: SemaComptimeDeclarationStage,
+    initial_graph: SemaGraphResult,
+    initial_values: [SemaComptimeItemValue],
+    initial_functions: [SemaComptimeFunctionResult],
+    initial_trace: JetDriverCompileTrace,
+    load: JetDriverLoadResult,
+    request: JetDriverCompileRequest,
+    diagnostics: &[Diagnostic],
+) -> JetDriverComptimeBodyResult {
+    sources := [SemaComptimeItemSource]{}
+    known := [SemaComptimeItemSource]{}
+    loop graph_module in initial_graph.modules {
+        loop call in graph_module.comptime_requests {
+            if call.checked_text == .Val(evaluation) -> jet_driver_comptime_checked_text_source_add(&sources, &known, evaluation)
+        }
+    }
+    if sources.len() == 0 {
+        return jet_driver_comptime_body_result(initial_graph, initial_values, initial_functions, initial_trace, true, false)
+    }
+    resolved_registration := sema_comptime_graph_with_values(graph, initial_values)
+    validation_stage := stage
+    validation_stage.modules = initial_graph.modules
+    validation_stage.names = initial_graph.names
+    validation_stage.sources = sources
+    run := jet_driver_run_comptime(
+        resolved_registration,
+        validation_stage,
+        initial_values,
+        initial_functions,
+        load,
+        request,
+        &diagnostics,
+    )
+    trace := initial_trace
+    jet_driver_comptime_trace_append(&trace, run.trace)
+    if run.soft_stop {
+        return jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, false, true)
+    }
+    if !run.complete {
+        result := jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, false, false)
+        result.internal_problem = run.internal_problem
+        if result.internal_problem == None && diagnostics.len() == 0 {
+            result.internal_problem = Val("checked text evaluation did not return a complete validation or diagnostic")
+        }
+        return result
+    }
+    if !jet_driver_merge_checked_text_functions(&initial_graph, resolved_registration, run.functions) {
+        return jet_driver_comptime_body_failure(
+            initial_graph,
+            run.values,
+            run.functions,
+            trace,
+            "checked text method closure lost its checked function or registered owner",
+        )
+    }
+    jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, true, false)
+}
+
+pub fn jet_driver_recheck_comptime_bodies(
+    graph: SemaRegistrationGraph,
+    stage: SemaComptimeDeclarationStage,
+    values: [SemaComptimeItemValue],
+    comptime_functions: [SemaComptimeFunctionResult],
+) -> SemaGraphResult {
+    sema_finalize_registration_graph(graph, stage, values, comptime_functions)
+}

@@ -1,0 +1,77 @@
+// Body-level staged values share the canonical Sema item checker/evaluator.
+// A site has no typed value until its expression is staged and its owner body
+// is checked again with that value available.
+
+pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String {
+    "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
+}
+
+pub fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String {
+    "{module_identity}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
+}
+
+pub fn sema_comptime_body_capture(
+    context: &SemaCheckContext,
+    environment: SemaScopeEnvironment,
+    scopes: SemaScopeTable,
+    name: String,
+    expression: Expr,
+    expected_type: Type,
+    source_span: Span,
+    site_span: Span,
+) -> SemaComptimeBodySource {
+    function_key := sema_scope_function_owner_key(scopes)
+    destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
+    source := SemaComptimeBodySource{
+        module_identity: environment.module_identity,
+        function_key: function_key,
+        source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
+        key: "{environment.module_identity}::{destination_key}",
+        destination_key: destination_key,
+        name: name,
+        expression: expression,
+        expected_type: expected_type,
+        span: source_span,
+        site_span: site_span,
+    }
+    loop previous in context.comptime_body_sources {
+        if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
+    }
+    context.comptime_body_sources.push(source)
+    source
+}
+
+pub fn sema_comptime_body_value_find(
+    values: [SemaComptimeBodyValue],
+    module_identity: String,
+    function_key: String,
+    source_span: Span,
+    site_span: Span,
+) -> ?SemaComptimeBodyValue {
+    key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
+    found := None
+    loop value in values {
+        if value.module_identity == module_identity && value.key == key {
+            if found != None -> return None
+            found = Val(value)
+        }
+    }
+    found
+}
+
+pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource {
+    SemaComptimeItemSource{
+        module_identity: source.module_identity,
+        key: source.key,
+        destination_key: source.destination_key,
+        name: source.name,
+        source_file: source.source_file,
+        kind: SemaComptimeItemKind.BodyExpression,
+        expression: source.expression,
+        expected_type: Val(source.expected_type),
+        span: source.span,
+        dependencies: [String]{},
+        checked_text: None,
+    }
+}
+

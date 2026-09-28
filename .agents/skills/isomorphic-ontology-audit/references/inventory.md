@@ -4,7 +4,7 @@
 
 At activation, name the target concept or area and record its finite reachable closure. Include forms, declarations, dependencies, and direct analogues that explain that concept. Do not inventory unrelated Jet. Account for every source in the closure, including unavailable sources as `unknown` with a reason.
 
-Search the live target surfaces in specs, examples, stdlib, the Syntax registry, and CLI. Prefer `scripts/agent/jet-env` and repository search over memory. Source code shows implementation state; ratified decisions and domain specs show design law.
+Search the live target surfaces in specs, examples, stdlib, the Syntax registry, and CLI. Prefer `Tools/agent/jet-env` and repository search over memory. Source code shows implementation state; ratified decisions and domain specs show design law.
 
 ## Inventory and map
 

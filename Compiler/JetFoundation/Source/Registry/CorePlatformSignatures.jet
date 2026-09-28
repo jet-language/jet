@@ -1,0 +1,472 @@
+// Typed source projection of CheckerCoreLib::core_fixed_sig_impl arms 4365–6487.
+// This table keeps the native fixed signatures' concrete types and access modes.
+
+fn core_platform_fn_none(params: [Type]) -> Type {
+    Type.Fn(params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+}
+
+pub fn core_platform_fixed_signature(module_name: String, member: String) -> ?CoreTypedCallSignature {
+    read :: AccessConvention.Read
+    write :: AccessConvention.Write
+    moved :: AccessConvention.Move
+    string :: Type.String
+    integer :: Type.Int
+    float :: Type.Float
+    boolean :: Type.Bool
+    u8 :: Type.IntN(signed: false, bits: 8)
+    bytes :: Type.List(element: u8)
+    list_int :: Type.List(element: integer)
+    list_string :: Type.List(element: string)
+    unit :: core_sig_named("Unit")
+    crypto_error :: core_sig_named("CryptoError")
+    file_crypto_error :: core_sig_named("FileCryptoError")
+    net_error :: core_sig_named("NetError")
+    io_error :: core_sig_named("IOError")
+    archive_error :: core_sig_named("ArchiveError")
+    gzip_error :: core_sig_named("GzipFileError")
+    zstd_error :: core_sig_named("ZstdFileError")
+    db_error :: core_sig_named("DBError")
+    db_value :: core_sig_named("DBValue")
+    db_row :: Type.Map(Type.String, None, db_value)
+    ui_error :: core_sig_named("UiHostError")
+
+    if module_name == "core.crypto" {
+        if member == "sha256" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_named("Digest256"))))
+        if core_sig_one_of(member, [String]{"sha1", "sha224", "sha384", "sha3_224", "sha3_256", "sha3_384", "sha3_512"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(string)))
+        if member == "hmac_sha256" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(bytes)))
+        if member == "pbkdf2_hmac" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(bytes)))
+        if member == "constant_time_equal_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(boolean)))
+        if member == "hkdf_sha256" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read), core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("Secret"), crypto_error))))
+        if member == "x25519_public" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, string))))
+        if member == "x25519_shared" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, string))))
+        if member == "password_hash" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read)}, Val(core_sig_result(core_sig_named("PasswordHash"), crypto_error))))
+        if member == "password_hash_with_salt" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(core_sig_result(string, string))))
+        if member == "password_verify" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read), core_sig_positional(core_sig_named("PasswordHash"), read)}, Val(core_sig_result(boolean, crypto_error))))
+        if member == "seal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: core_sig_named("X25519PublicKey")), read), core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(core_sig_named("Sealed"), crypto_error))))
+        if member == "open" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("X25519SecretKey"), read), core_sig_positional(core_sig_named("Sealed"), read), core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, crypto_error))))
+        if member == "file_seal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: core_sig_named("X25519PublicKey")), read), core_sig_positional(core_sig_named("Path"), read), core_sig_positional(core_sig_named("Path"), read)}, Val(core_sig_result(unit, file_crypto_error))))
+        if member == "file_open" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("X25519SecretKey"), read), core_sig_positional(core_sig_named("Path"), read), core_sig_positional(core_sig_named("Path"), read)}, Val(core_sig_result(unit, file_crypto_error))))
+        if member == "sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SigningKey"), read), core_sig_positional(bytes, read)}, Val(core_sig_result(core_sig_named("Signature"), crypto_error))))
+        if member == "verify" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("VerifyKey"), read), core_sig_positional(bytes, read), core_sig_positional(core_sig_named("Signature"), read)}, Val(core_sig_result(boolean, crypto_error))))
+        if member == "wrap" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read), core_sig_positional(core_sig_named("X25519PublicKey"), read)}, Val(core_sig_result(core_sig_named("WrappedKey"), crypto_error))))
+        if member == "unwrap" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("X25519SecretKey"), read), core_sig_positional(core_sig_named("WrappedKey"), read)}, Val(core_sig_result(core_sig_named("Secret"), crypto_error))))
+        if member == "x25519" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("X25519SecretKey"), read), core_sig_positional(core_sig_named("X25519PublicKey"), read)}, Val(core_sig_result(core_sig_named("SharedSecret"), crypto_error))))
+        if member == "constant_time_equal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read), core_sig_positional(core_sig_named("Secret"), read)}, Val(boolean)))
+        if member == "blake3" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_named("Digest256"))))
+        if member == "sha512" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_named("Digest512"))))
+        return None
+    }
+    if module_name == "core.crypto.expert" {
+        if core_sig_one_of(member, [String]{"xchacha20poly1305_seal", "aes256gcm_seal", "xchacha20poly1305_open", "aes256gcm_open"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, crypto_error))))
+        if member == "open_v1" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, crypto_error))))
+        if member == "migrate_v1" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(core_sig_named("Path"), read), core_sig_positional(Type.List(element: core_sig_named("X25519PublicKey")), read), core_sig_positional(core_sig_named("Path"), read)}, Val(core_sig_result(unit, file_crypto_error))))
+        if member == "ed25519_sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(core_sig_named("Signature"), crypto_error))))
+        if member == "ed25519_verify_strict" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(boolean, crypto_error))))
+        if member == "x25519_raw" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read)}, Val(core_sig_result(core_sig_named("Secret"), crypto_error))))
+        if member == "hkdf_sha256_raw" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("Secret"), crypto_error))))
+        if member == "argon2id" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read), core_sig_positional(bytes, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("Secret"), crypto_error))))
+        if member == "secret_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Secret"), read)}, Val(bytes)))
+        if member == "signing_key_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SigningKey"), read)}, Val(bytes)))
+        if member == "x25519_secret_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("X25519SecretKey"), read)}, Val(bytes)))
+        if member == "shared_secret_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SharedSecret"), read)}, Val(bytes)))
+        return None
+    }
+    if module_name == "core.crypto.vault" {
+        if member == "prepare_import_signing" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, moved)}, Val(core_sig_result(core_sig_apply("MutationPlan", core_sig_named("SigningKey")), core_sig_named("VaultError")))))
+        if member == "prepare_import_x25519" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, moved)}, Val(core_sig_result(core_sig_apply("MutationPlan", core_sig_named("X25519SecretKey")), core_sig_named("VaultError")))))
+        if member == "commit_import_signing" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_apply("VaultWrite", core_sig_named("SigningKey")), moved), core_sig_positional(core_sig_apply("MutationPlan", core_sig_named("SigningKey")), moved)}, Val(core_sig_result(core_sig_apply("KeyRef", core_sig_named("SigningKey")), core_sig_named("VaultError")))))
+        if member == "commit_import_x25519" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_apply("VaultWrite", core_sig_named("X25519SecretKey")), moved), core_sig_positional(core_sig_apply("MutationPlan", core_sig_named("X25519SecretKey")), moved)}, Val(core_sig_result(core_sig_apply("KeyRef", core_sig_named("X25519SecretKey")), core_sig_named("VaultError")))))
+        return None
+    }
+    if module_name == "core.net" {
+        tcp_listener :: core_sig_named("TCPListener")
+        tcp_stream :: core_sig_named("TCPStream")
+        socket_addr :: core_sig_named("SocketAddr")
+        udp_socket :: core_sig_named("UDPSocket")
+        udp_packet :: core_sig_named("UDPPacket")
+        unix_listener :: core_sig_named("UnixListener")
+        unix_stream :: core_sig_named("UnixStream")
+        tls_stream :: core_sig_named("TLSStream")
+        ip_addr :: core_sig_named("IPAddr")
+        net_ready :: core_sig_named("NetReady")
+
+        if member == "gethostname" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(string)))
+        if member == "tcp_listen" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(tcp_listener, net_error))))
+        if member == "ip_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(ip_addr, net_error))))
+        if member == "ip_to_string" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ip_addr, read)}, Val(string)))
+        if member == "ip_is_ipv4" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ip_addr, read)}, Val(boolean)))
+        if member == "socket_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(socket_addr, net_error))))
+        if member == "socket_addr_parse" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(socket_addr, net_error))))
+        if core_sig_one_of(member, [String]{"socket_host", "socket_to_string"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read)}, Val(string)))
+        if member == "socket_port" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read)}, Val(integer)))
+        if member == "tcp_listen_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read)}, Val(core_sig_result(tcp_listener, net_error))))
+        if member == "tcp_accept" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_listener, read)}, Val(core_sig_result(tcp_stream, net_error))))
+        if member == "tcp_connect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(tcp_stream, net_error))))
+        if member == "tcp_connect_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read)}, Val(core_sig_result(tcp_stream, net_error))))
+        if member == "tcp_connect_timeout" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read), core_sig_positional(integer, read)}, Val(core_sig_result(tcp_stream, net_error))))
+        if member == "tcp_connect_happy" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(core_sig_result(tcp_stream, net_error))))
+        if member == "tcp_read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write)}, Val(core_sig_result(string, net_error))))
+        if member == "tcp_write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "tcp_read_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(bytes, net_error))))
+        if member == "tcp_read_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(string, net_error))))
+        if member == "tcp_write_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(bytes, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "tcp_write_all_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(bytes, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "tcp_write_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "tcp_shutdown" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(core_sig_named("NetShutdown"), read)}, Val(core_sig_result(unit, net_error))))
+        if member == "tcp_close" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write)}, Val(core_sig_result(unit, net_error))))
+        if member == "tcp_ready" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(core_sig_named("NetReadyInterest"), read), core_sig_positional(integer, read)}, Val(core_sig_result(net_ready, net_error))))
+        if core_sig_one_of(member, [String]{"ready_readable", "ready_writable"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(net_ready, read)}, Val(boolean)))
+        if core_sig_one_of(member, [String]{"error_operation", "error_message"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(net_error, read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"error_address", "error_name"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(net_error, read)}, Val(Type.Option(inner: string))))
+        if member == "error_os_code" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(net_error, read)}, Val(Type.Option(inner: integer))))
+        if core_sig_one_of(member, [String]{"tcp_local_addr", "tcp_peer_addr"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, read)}, Val(core_sig_result(string, net_error))))
+        if core_sig_one_of(member, [String]{"tcp_local_socket_addr", "tcp_peer_socket_addr"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, read)}, Val(core_sig_result(socket_addr, net_error))))
+        if member == "listener_local_socket_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_listener, read)}, Val(core_sig_result(socket_addr, net_error))))
+        if core_sig_one_of(member, [String]{"set_timeout", "set_read_timeout", "set_write_timeout"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "nodelay" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, read)}, Val(core_sig_result(boolean, net_error))))
+        if member == "set_nodelay" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(boolean, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "ttl" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "set_ttl" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "socket_type" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, read)}, Val(string)))
+        if member == "sendfile" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "tcp_reply" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, moved), core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "udp_bind" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(udp_socket, net_error))))
+        if member == "udp_bind_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(socket_addr, read)}, Val(core_sig_result(udp_socket, net_error))))
+        if member == "udp_local_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read)}, Val(core_sig_result(socket_addr, net_error))))
+        if member == "udp_set_timeout" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read), core_sig_positional(integer, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "udp_send_to" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read), core_sig_positional(string, read), core_sig_positional(socket_addr, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "udp_recv_from" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read), core_sig_positional(integer, read)}, Val(core_sig_result(udp_packet, net_error))))
+        if member == "udp_send_bytes_to" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read), core_sig_positional(bytes, read), core_sig_positional(socket_addr, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "udp_receive" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_socket, read), core_sig_positional(integer, read)}, Val(core_sig_result(udp_packet, net_error))))
+        if member == "udp_packet_data" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_packet, read)}, Val(string)))
+        if member == "udp_packet_addr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_packet, read)}, Val(socket_addr)))
+        if member == "udp_packet_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_packet, read)}, Val(bytes)))
+        if member == "udp_packet_original_len" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_packet, read)}, Val(integer)))
+        if member == "udp_packet_truncated" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(udp_packet, read)}, Val(boolean)))
+        if member == "unix_listen" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(unix_listener, net_error))))
+        if member == "unix_accept" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_listener, read)}, Val(core_sig_result(unix_stream, net_error))))
+        if member == "unix_connect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(unix_stream, net_error))))
+        if member == "unix_read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write)}, Val(core_sig_result(string, net_error))))
+        if member == "unix_write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "unix_read_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(bytes, net_error))))
+        if member == "unix_write_all_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write), core_sig_positional(bytes, read)}, Val(core_sig_result(unit, net_error))))
+        if member == "unix_shutdown" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write), core_sig_positional(core_sig_named("NetShutdown"), read)}, Val(core_sig_result(unit, net_error))))
+        if member == "unix_close" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(unix_stream, write)}, Val(core_sig_result(unit, net_error))))
+        if core_sig_one_of(member, [String]{"dns_a", "dns_aaaa"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List(element: ip_addr), net_error))))
+        if core_sig_one_of(member, [String]{"dns_a_at", "dns_aaaa_at"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List(element: ip_addr), net_error))))
+        if member == "dns_txt" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(list_string, net_error))))
+        if member == "dns_txt_at" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(list_string, net_error))))
+        if member == "dns_ptr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(list_string, net_error))))
+        if member == "getservbyname" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(integer, net_error))))
+        if member == "getservbyport" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(core_sig_result(string, net_error))))
+        if member == "dns_srv" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List(element: core_sig_named("DNSSrv")), net_error))))
+        if member == "dns_srv_at" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List(element: core_sig_named("DNSSrv")), net_error))))
+        if member == "dns_srv_target" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSrv"), read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"dns_srv_port", "dns_srv_priority", "dns_srv_weight"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSrv"), read)}, Val(integer)))
+        if member == "tls_connect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, moved), core_sig_positional(string, read)}, Val(core_sig_result(tls_stream, net_error))))
+        if member == "tls_read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write)}, Val(core_sig_result(string, io_error))))
+        if member == "tls_write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, io_error))))
+        if member == "tls_close" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, moved)}, Val(core_sig_result(unit, io_error))))
+        return None
+    }
+    if module_name == "core.net.tls" {
+        if member == "client" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(tls_stream, io_error))))
+        if member == "read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(bytes, io_error))))
+        if member == "read_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(integer, read)}, Val(core_sig_result(string, io_error))))
+        if member == "write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(bytes, read)}, Val(core_sig_result(integer, io_error))))
+        if member == "write_all" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(bytes, read)}, Val(core_sig_result(unit, io_error))))
+        if member == "write_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, io_error))))
+        if member == "close" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, moved)}, Val(core_sig_result(unit, io_error))))
+        if member == "peer_port" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, read)}, Val(core_sig_result(integer, io_error))))
+        if member == "unwrap" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, read)}, Val(core_sig_result(tcp_stream, io_error))))
+        return None
+    }
+    if module_name == "core.http" {
+        if member == "reason_phrase" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(string)))
+        if member == "basic_auth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(string)))
+        if member == "bearer_auth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+        if member == "get" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("HTTPResponse"), core_sig_named("HTTPError")))))
+        if member == "post" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("HTTPResponse"), core_sig_named("HTTPError")))))
+        return None
+    }
+    if module_name == "core.http.server" {
+        server_parameters := [CoreCallTypedParameter]{
+            core_sig_positional(string, read),
+            core_sig_positional(core_sig_named("HTTPMux"), read),
+            core_sig_positional(Type.Option(inner: core_sig_named("HTTPServerTls")), read),
+            core_sig_positional(Type.Option(inner: core_sig_named("Duration")), read),
+        }
+        if member == "bind" -> return Val(core_sig(module_name, member, server_parameters, Val(core_sig_result(core_sig_named("HTTPServer"), core_sig_named("HTTPError")))))
+        if member == "serve" -> return Val(core_sig(module_name, member, server_parameters, Val(core_sig_result(unit, core_sig_named("HTTPError")))))
+        return None
+    }
+    if module_name == "core.regex" {
+        regex :: core_sig_named("Regex")
+        regex_flags :: core_sig_named("RegexFlags")
+        match :: core_sig_named("Match")
+        if member == "flags" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(boolean, read), core_sig_positional(boolean, read), core_sig_positional(boolean, read)}, Val(regex_flags)))
+        if member == "escape" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+        if member == "compile" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(regex, string))))
+        if member == "compile_with" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(regex_flags, read)}, Val(core_sig_result(regex, string))))
+        if member == "is_match" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(boolean)))
+        if core_sig_one_of(member, [String]{"full_match", "fullmatch"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(boolean)))
+        if core_sig_one_of(member, [String]{"match", "search"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(Type.Option(inner: match))))
+        if member == "find" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(Type.Option(inner: string))))
+        if core_sig_one_of(member, [String]{"find_all", "findall", "split"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(Type.List(element: string))))
+        if core_sig_one_of(member, [String]{"matches", "finditer"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read)}, Val(Type.List(element: match))))
+        if member == "split_limit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(Type.List(element: string))))
+        if core_sig_one_of(member, [String]{"replace", "replace_first", "sub"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(regex, read), core_sig_positional(string, read), core_sig_positional(string, read)}, Val(string)))
+        return None
+    }
+    if module_name == "core.archive" {
+        if member == "zip_decompress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, archive_error))))
+        if core_sig_one_of(member, [String]{"crc32", "adler32"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(integer)))
+        if member == "deflate" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(bytes)))
+        if member == "create" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(bytes)))
+        if member == "compress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(bytes)))
+        if core_sig_one_of(member, [String]{"decompress", "gunzip", "inflate", "zip_open", "zip_close"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, archive_error))))
+        if core_sig_one_of(member, [String]{"zip_names_json", "tar_names_json"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(string, archive_error))))
+        if member == "list" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(list_string, archive_error))))
+        if member == "zip_next" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(core_sig_result(string, archive_error))))
+        if member == "zip_read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(string, read)}, Val(core_sig_result(bytes, archive_error))))
+        if member == "zip_write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, archive_error))))
+        if core_sig_one_of(member, [String]{"zip_extract", "unzip", "tar_get"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(string, read)}, Val(core_sig_result(bytes, archive_error))))
+        if member == "tar_add" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(bytes)))
+        return None
+    }
+    if module_name == "core.archive.gzip" || module_name == "core.archive.zstd" {
+        compression_error :: if module_name == "core.archive.gzip" -> gzip_error else -> zstd_error
+        if member == "compress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(bytes)))
+        if member == "compress_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(bytes)))
+        if member == "decompress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(bytes, compression_error))))
+        if member == "decompress_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(string, compression_error))))
+        if member == "compress_file" || member == "decompress_file" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(boolean, compression_error))))
+        return None
+    }
+    if module_name == "core.game.raylib" {
+        window :: core_sig_named("RaylibWindow")
+        color :: core_sig_named("RaylibColor")
+        sound :: core_sig_named("RaylibSound")
+        atlas :: core_sig_named("RaylibTextureAtlas")
+        if member == "window_open" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(string, read)}, Val(window)))
+        if core_sig_one_of(member, [String]{"window_should_close", "window_ready"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(window, read)}, Val(boolean)))
+        if member == "begin_drawing" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(window, read)}, None))
+        if member == "clear_background" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(color, read)}, None))
+        if member == "draw_rectangle" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(color, read)}, None))
+        if member == "draw_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(color, read)}, None))
+        if member == "end_drawing" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
+        if member == "close_window" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(window, read)}, None))
+        if member == "key_down" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(boolean)))
+        if member == "set_target_fps" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, None))
+        if member == "color" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(color)))
+        if member == "load_sound" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(sound)))
+        if member == "play_sound" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(sound, read)}, Val(boolean)))
+        if member == "gamepad_down" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(string, read)}, Val(boolean)))
+        if member == "gamepad_axis" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(string, read)}, Val(float)))
+        if member == "load_texture_atlas" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(atlas)))
+        if member == "draw_sprite" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(atlas, read), core_sig_positional(string, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, None))
+        return None
+    }
+    if module_name == "core.db" {
+        connection :: core_sig_named("DBConnection")
+        if member == "open" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(connection)))
+        if member == "open_memory" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(connection)))
+        if member == "pool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("DbPool"), db_error))))
+        if member == "policy" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("RowPolicy"), string))))
+        if member == "policy_audit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DBScope"), read)}, Val(string)))
+        if member == "row_value" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(db_value, string))))
+        if member == "row_int" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(integer, string))))
+        if member == "row_float" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(float, string))))
+        if member == "row_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(string, string))))
+        if member == "row_bool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(boolean, string))))
+        if core_sig_one_of(member, [String]{"transaction", "migrate"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DBScope"), read), core_sig_positional(string, read), core_sig_positional(Type.List(element: core_sig_named("SQL")), read)}, Val(core_sig_result(integer, db_error))))
+        return None
+    }
+    if module_name == "core.plugin" && member == "load" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("Authority"), read)}, Val(core_sig_named("Plugin"))))
+    if module_name == "core.mod" && member == "load" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("ModGrant"), read)}, Val(core_sig_result(core_sig_named("Mod"), string))))
+    if module_name == "core.encoding.binary" {
+        if core_sig_one_of(member, [String]{"pack_u8", "pack_i8", "pack_u16le", "pack_u16be", "pack_u32le", "pack_u32be", "pack_u64le", "pack_u64be"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(bytes)))
+        if core_sig_one_of(member, [String]{"unpack_u8", "unpack_u16le", "unpack_u16be", "unpack_u32le", "unpack_u32be", "unpack_u64le", "unpack_u64be"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+        if member == "sign_extend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
+        if core_sig_one_of(member, [String]{"pack_f64le", "pack_f64be"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(bytes)))
+        if core_sig_one_of(member, [String]{"unpack_f64le", "unpack_f64be"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: float))))
+        if member == "calcsize" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(integer, string))))
+        if member == "pack" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(list_int, read)}, Val(core_sig_result(bytes, string))))
+        if member == "unpack" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(core_sig_result(Type.List(element: integer), string))))
+        if member == "iter_unpack" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, read)}, Val(core_sig_result(Type.List(element: Type.List(element: integer)), string))))
+        return None
+    }
+    if module_name == "core.encoding.hex" {
+        if core_sig_one_of(member, [String]{"encode", "hexlify", "b2a_hex", "encode_upper", "encode_prefixed", "dump", "b2a_base64", "b2a_qp", "b2a_uu"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(string)))
+        if member == "is_hex" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(boolean)))
+        if member == "encode_sep" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(string, read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"decode", "unhexlify", "a2b_hex", "a2b_base64", "a2b_qp", "a2b_uu"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(bytes, string))))
+        if member == "crc_hqx" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read), core_sig_positional(integer, read)}, Val(integer)))
+        if member == "crc32" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(integer)))
+        return None
+    }
+    if module_name == "core.encoding.base64" {
+        if core_sig_one_of(member, [String]{"encode", "encode_url", "b64encode", "standard_b64encode", "urlsafe_b64encode", "b32encode", "b32hexencode", "a85encode", "b85encode", "z85encode", "encodebytes", "b2a_base64", "b16encode", "encode_url_padded"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"b16decode", "decode", "b64decode", "standard_b64decode", "b32decode", "b32hexdecode", "a85decode", "b85decode", "z85decode", "decodebytes", "a2b_base64", "decode_padded", "decode_url", "urlsafe_b64decode"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(bytes, string))))
+        if core_sig_one_of(member, [String]{"pad", "unpad"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+        if member == "is_base64" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(boolean)))
+        return None
+    }
+    if module_name == "core.encoding.base32" {
+        if member == "is_base32" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(boolean)))
+        if core_sig_one_of(member, [String]{"encode", "b32encode", "b32hexencode"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"decode", "b32decode", "b32hexdecode"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(bytes, string))))
+        return None
+    }
+    if module_name == "core.crypto.uuid" {
+        clock :: core_sig_named("Clock")
+        if member == "v4" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(string)))
+        if member == "v5" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(string, string))))
+        if member == "parse" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(string, string))))
+        if member == "v7" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(clock, read)}, Val(string)))
+        return None
+    }
+    if module_name == "core.args" && member == "spec" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("ArgsSpec"))))
+    if module_name == "core.term" && member == "read_key" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("Key"))))
+    if module_name == "core.perf" {
+        if member == "fidelity" || member == "default_fidelity" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
+        if member == "override_fidelity" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(core_sig_result(unit, string))))
+        if member == "reset_fidelity" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(unit)))
+        return None
+    }
+    if module_name == "core.math" {
+        if member == "decimal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("Decimal"))))
+        if core_sig_one_of(member, [String]{"isqrt", "factorial"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Option(inner: integer))))
+        if member == "fraction" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option(inner: core_sig_named("Fraction")))))
+        return None
+    }
+    if module_name == "core.ui" {
+        ui_node :: core_sig_named("UiNode")
+        if core_sig_one_of(member, [String]{"phone", "tablet", "desktop"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiPreviewViewport"))))
+        if core_sig_one_of(member, [String]{"preview", "playground"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_result(core_sig_named("UiPreviewViewport"), core_sig_named("Absent")), read), core_sig_positional(core_sig_fn([Type]{}, ui_node), read)}, Val(core_sig_named("UiPreview"))))
+        if member == "null_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("NullBackend"))))
+        if member == "tui_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiBackend"))))
+        if member == "gtk_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("GtkBackend"))))
+        if core_sig_one_of(member, [String]{"point", "size"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(if member == "point" -> core_sig_named("Point") else -> core_sig_named("Size"))))
+        if member == "rect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(core_sig_named("Rect"))))
+        if member == "constraint" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(core_sig_named("SizeConstraint"))))
+        if member == "node" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(ui_node)))
+        if member == "text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(ui_node)))
+        if member == "box" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: ui_node), read)}, Val(ui_node)))
+        if member == "key_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("InputEvent"))))
+        if member == "resize_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(core_sig_named("InputEvent"))))
+        if member == "node_role" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(core_sig_named("UiAriaRole"), read)}, Val(ui_node)))
+        if member == "node_color" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(string, read)}, Val(ui_node)))
+        if core_sig_one_of(member, [String]{"aria_role_button", "aria_role_text_input", "aria_role_label", "aria_role_container"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiAriaRole"))))
+        if member == "node_accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UiAccessibility"), read)}, Val(ui_node)))
+        if member == "node_shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UiShortcut"), read)}, Val(ui_node)))
+        if member == "text_input" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiImeMode"), read)}, Val(ui_node)))
+        return None
+    }
+    if module_name == "core.font" {
+        if member == "system" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FontStyle"), read)}, Val(core_sig_named("FontFace"))))
+        if member == "shape" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("FontFace"), read)}, Val(core_sig_named("GlyphRun"))))
+        return None
+    }
+    if module_name == "core.tui" {
+        tui_event :: core_sig_named("TuiEvent")
+        tui_style :: core_sig_named("TuiStyle")
+        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiCapabilities"))))
+        if member == "key_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(tui_event)))
+        if member == "key_event_modifiers" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(tui_event)))
+        if member == "resize_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(tui_event)))
+        if member == "timer_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(tui_event)))
+        if member == "io_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, moved)}, Val(tui_event)))
+        if member == "focus_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(boolean, read)}, Val(tui_event)))
+        if core_sig_one_of(member, [String]{"interrupt_event", "close_event"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(tui_event)))
+        if core_sig_one_of(member, [String]{"color_ansi16", "color_ansi256"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(core_sig_named("TuiColor"))))
+        if member == "color_rgb" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(core_sig_named("TuiColor"))))
+        if member == "style" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(tui_style)))
+        if core_sig_one_of(member, [String]{"style_foreground", "style_background"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tui_style, moved), core_sig_positional(core_sig_named("TuiColor"), read)}, Val(tui_style)))
+        if core_sig_one_of(member, [String]{"style_bold", "style_dim", "style_underline"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tui_style, moved), core_sig_positional(boolean, read)}, Val(tui_style)))
+        if member == "style_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(tui_style, read), core_sig_positional(core_sig_named("TuiCapabilities"), read)}, Val(string)))
+        if member == "ascii" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+        if member == "display_width" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(integer)))
+        if core_sig_one_of(member, [String]{"length", "min", "max", "percent", "fill"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(core_sig_named("TuiConstraint"))))
+        if core_sig_one_of(member, [String]{"horizontal", "vertical"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiDirection"))))
+        if member == "layout" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Rect"), read), core_sig_positional(core_sig_named("TuiDirection"), read), core_sig_positional(Type.List(element: core_sig_named("TuiConstraint")), moved)}, Val(Type.List(element: core_sig_named("Rect")))))
+        if member == "list" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: string), moved)}, Val(core_sig_named("UiNode"))))
+        if member == "table" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List(element: string), moved), core_sig_positional(Type.List(element: Type.List(element: string)), moved)}, Val(core_sig_named("UiNode"))))
+        if member == "list_state" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiListState"))))
+        if core_sig_one_of(member, [String]{"list_state_select", "list_state_offset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TuiListState"), moved), core_sig_positional(integer, read)}, Val(core_sig_named("TuiListState"))))
+        if member == "list_state_selected" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TuiListState"), read)}, Val(integer)))
+        return None
+    }
+    if module_name == "core.ui.host" {
+        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiCapabilityFacts"))))
+        if member == "file_filter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.List(element: string), read), core_sig_positional(Type.List(element: string), read)}, Val(core_sig_result(core_sig_named("UiFileFilter"), ui_error))))
+        if member == "file_filter_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiFileFilter"))))
+        if core_sig_one_of(member, [String]{"fs_rights_read", "fs_rights_write", "fs_rights_read_write"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiFsRights"))))
+        if member == "fs_grant" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiFsRights"), read)}, Val(core_sig_result(core_sig_named("UiFsGrant"), ui_error))))
+        if core_sig_one_of(member, [String]{"open_request", "save_request"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiFsGrant"), read)}, Val(core_sig_named("UiFileDialogRequest"))))
+        if core_sig_one_of(member, [String]{"open_file", "save_file"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiFileDialogRequest"), read)}, Val(core_sig_result(core_sig_named("UiFileDialogSelection"), ui_error))))
+        if member == "shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiShortcutModifiers"), read)}, Val(core_sig_result(core_sig_named("UiShortcut"), ui_error))))
+        if member == "accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiAccessibility"), ui_error))))
+        return None
+    }
+    if module_name == "core.ui.host.clipboard" {
+        if member == "read_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("UiClipboardText"), ui_error))))
+        if member == "write_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiClipboardWrite"), ui_error))))
+        return None
+    }
+    if module_name == "core.ui.host.ime" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option(inner: core_sig_named("UiImeEvent")), ui_error))))
+    if module_name == "core.ui.host.drag_drop" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option(inner: core_sig_named("UiDragEvent")), ui_error))))
+    if module_name == "core.ui.host.shortcuts" {
+        if member == "binding" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcut"), read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiShortcutBinding"), ui_error))))
+        if member == "register" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcutBinding"), read)}, Val(core_sig_result(core_sig_named("UiShortcutBinding"), ui_error))))
+        if member == "dispatch" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcut"), read)}, Val(core_sig_result(core_sig_named("UiShortcutDispatch"), ui_error))))
+        return None
+    }
+    if module_name == "core.ui.host.accessibility" {
+        if member == "attach" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiNode"), read), core_sig_positional(core_sig_named("UiAccessibility"), read)}, Val(core_sig_result(unit, ui_error))))
+        if member == "project" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiNode"), read), core_sig_positional(core_sig_named("UiNodeId"), read)}, Val(core_sig_result(Type.Option(inner: core_sig_named("UiAccessibilityProjection")), ui_error))))
+        return None
+    }
+    if module_name == "core.web" {
+        web_event :: core_sig_named("WebEvent")
+        if member == "on" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(core_platform_fn_none([Type]{web_event}), read)}, None))
+        if member == "value" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
+        if member == "app" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("App"))))
+        if member == "page" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_named("WebPage"))))
+        if member == "live" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if member == "subscribe" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if core_sig_one_of(member, [String]{"invalidate", "transact_invalidate"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(integer)))
+        if member == "signal_push" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LiveQuery"), read), core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if core_sig_one_of(member, [String]{"live_get", "live_show"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LiveQuery"), read)}, Val(string)))
+        if member == "live_stats" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(string)))
+        if member == "auth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("Auth"))))
+        if member == "auth_oauth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Auth"), read), core_sig_positional(string, read)}, Val(core_sig_named("Auth"))))
+        if core_sig_one_of(member, [String]{"auth_routes", "auth_show"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Auth"), read)}, Val(string)))
+        if member == "sync" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(string)))
+    }
+    if module_name == "app" {
+        if member == "live" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if member == "subscribe" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if core_sig_one_of(member, [String]{"invalidate", "transact_invalidate"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(integer)))
+        if member == "signal_push" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LiveQuery"), read), core_sig_positional(string, read)}, Val(core_sig_named("LiveQuery"))))
+        if core_sig_one_of(member, [String]{"live_get", "live_show"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LiveQuery"), read)}, Val(string)))
+        if member == "live_stats" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(string)))
+        if member == "auth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("Auth"))))
+        if member == "auth_oauth" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Auth"), read), core_sig_positional(string, read)}, Val(core_sig_named("Auth"))))
+        if core_sig_one_of(member, [String]{"auth_routes", "auth_show"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Auth"), read)}, Val(string)))
+        if member == "sync" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(string)))
+    }
+    if module_name == "core.web.storage.local" || module_name == "core.web.storage.session" {
+        if member == "get" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(Type.Option(inner: string))))
+        if member == "set" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, None))
+        if member == "remove" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, None))
+        if member == "clear" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
+        return None
+    }
+    if module_name == "core.web.devserver" {
+        if member == "for_app" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("DevServer"))))
+        if member == "app" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("DevServer"))))
+        return None
+    }
+    None
+}

@@ -21,7 +21,7 @@ fn repo() -> PathBuf {
 }
 
 fn structure_example() -> PathBuf {
-    repo().join("examples/features/tooling/structure_plane.jet")
+    repo().join("Examples/features/tooling/structure_plane.jet")
 }
 
 fn run_jet(args: &[&str]) -> Output {
@@ -110,7 +110,7 @@ fn inspect_structure_is_registered_in_the_cli() {
 
 #[test]
 fn inspect_structure_text_and_json_expose_the_three_rows() {
-    let example = "examples/features/tooling/structure_plane.jet";
+    let example = "Examples/features/tooling/structure_plane.jet";
     let text = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "structure", example])
         .output()
@@ -152,17 +152,17 @@ fn inspect_structure_text_and_json_expose_the_three_rows() {
 
 #[test]
 fn inspect_structure_text_and_json_match_the_fact_report_goldens() {
-    let example = "examples/features/tooling/structure_plane.jet";
+    let example = "Examples/features/tooling/structure_plane.jet";
     let text = successful_stdout(run_jet(&["inspect", "structure", example]));
     let expected_text = fs::read_to_string(
-        repo().join("examples/features/expected/tooling/structure_plane.structure.out"),
+        repo().join("Examples/features/expected/tooling/structure_plane.structure.out"),
     )
     .expect("structure text golden");
     assert_eq!(text, expected_text);
 
     let json = successful_stdout(run_jet(&["inspect", "structure", "--json", example]));
     let expected_json = fs::read_to_string(
-        repo().join("examples/features/expected/tooling/structure_plane.structure.json"),
+        repo().join("Examples/features/expected/tooling/structure_plane.structure.json"),
     )
     .expect("structure JSON golden");
     assert_eq!(json, expected_json);
@@ -262,7 +262,7 @@ fn structure_plane_web_compile_erases_the_fact_plane() {
         eprintln!("note: skipping structure web tier proof (wasm target unavailable)");
         return;
     }
-    let example = "examples/features/tooling/structure_plane.jet";
+    let example = "Examples/features/tooling/structure_plane.jet";
     let output = run_jet(&["build", "--target=web", example]);
     assert!(
         output.status.success(),

@@ -1,0 +1,629 @@
+// Source lowering for checked dynamic data literals and canonical Serde encoding.
+
+fn jet_codegen_data_tree_type() -> Type {
+    Type.Named("DataTree")
+}
+
+fn jet_codegen_data_tree_type_id(builder: &JetCodegenBuilder) -> MirTypeId {
+    jet_codegen_type_instance_id(jet_codegen_data_tree_type(), builder.modules, builder.function.module_identity, builder.generic_type_names)
+}
+
+fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr {
+    TExpr{ty: ty, kind: kind, span: span, integer_bounds: None, cost: None}
+}
+
+fn jet_codegen_data_encode_node(receiver: TExpr) -> TExpr {
+    jet_codegen_data_expr(
+        jet_codegen_data_tree_type(),
+        receiver.span,
+        TExprKind.HandleMethod(receiver, THandleOp.SerdeEncode, [TExpr]{}),
+    )
+}
+
+fn jet_codegen_data_enum_arg(builder: &JetCodegenBuilder, argument: ?TExpr, clone_arg: Bool) -> [MirEnumArg] {
+    if argument == None -> return [MirEnumArg]{}
+    value_expr :: argument ?? panic("checked data enum payload disappeared")
+    value := jet_codegen_lower_expr(&builder, value_expr)
+    if clone_arg -> value = jet_codegen_emit_value(&builder, value_expr.span, value_expr.ty, MirOperation.Copy(value, false))
+    [MirEnumArg]{MirEnumArg{field: None, value: value, boxed: false}}
+}
+fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, expression: TExpr, owner: String, variant: String, argument: ?TExpr, clone_arg: Bool) -> MirValueId {
+    args := jet_codegen_data_enum_arg(&builder, argument, clone_arg)
+    type_id := jet_codegen_type_instance_id(Type.Named(owner), builder.modules, builder.function.module_identity, builder.generic_type_names)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Enum(type_id, variant, args))
+}
+
+
+fn jet_codegen_data_pair_type() -> Type {
+    Type.Tuple([TypeTupleField]{
+        TypeTupleField{name: "key", ty: Type.String},
+        TypeTupleField{name: "value", ty: jet_codegen_data_tree_type()},
+    })
+}
+
+fn jet_codegen_data_pair(builder: &JetCodegenBuilder, span: Span, key: TExpr, value: TExpr) -> MirValueId {
+    pair_type := jet_codegen_data_pair_type()
+    pair := jet_codegen_data_expr(pair_type, span, TExprKind.Tuple([TExpr]{key, jet_codegen_data_encode_node(value)}))
+    jet_codegen_lower_expr(&builder, pair)
+}
+
+fn jet_codegen_lower_ordered_object_encode(builder: &JetCodegenBuilder, expression: TExpr, entries: [TMapEntry]) -> MirValueId {
+    pair_type := jet_codegen_data_pair_type()
+    values := [MirValueId]{}
+    loop entry in entries {
+        values.push(jet_codegen_data_pair(&builder, expression.span, entry.key, entry.value))
+    }
+    payload_type := Type.List(pair_type)
+    payload := jet_codegen_emit_value(&builder, expression.span, payload_type, MirOperation.BuildList(values, None))
+    type_id := jet_codegen_data_tree_type_id(&builder)
+    jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Enum(type_id, "Object", [MirEnumArg]{MirEnumArg{field: None, value: payload, boxed: false}}),
+    )
+}
+
+fn jet_codegen_lower_json_literal(builder: &JetCodegenBuilder, expression: TExpr, variant: String, argument: ?TExpr, clone_arg: Bool) -> MirValueId {
+    if variant == "Object" {
+        value :: argument ?? panic("checked DataTree.Object is missing its map payload")
+        if value.kind == {
+            .MapLit(entries) -> return jet_codegen_lower_ordered_object_encode(&builder, expression, entries)
+            else -> {}
+        }
+        return jet_codegen_lower_container_encode(&builder, expression, value, jet_codegen_data_tree_type(), true)
+    }
+    jet_codegen_lower_data_enum(&builder, expression, "DataTree", variant, argument, clone_arg)
+}
+
+fn jet_codegen_lower_db_value_literal(builder: &JetCodegenBuilder, expression: TExpr, variant: String, argument: ?TExpr, clone_arg: Bool) -> MirValueId {
+    jet_codegen_lower_data_enum(&builder, expression, "DBValue", variant, argument, clone_arg)
+}
+
+fn jet_codegen_codec_kind(ty: Type) -> ?Int {
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .Named(name) -> {
+            if name == "Date" -> return Val(0)
+            if name == "LocalDate" -> return Val(1)
+            if name == "LocalTime" -> return Val(2)
+            if name == "DateTime" -> return Val(3)
+            if name == "Duration" -> return Val(4)
+            if name == "Decimal" -> return Val(5)
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_codegen_typed_codec_target(ty: Type) -> Bool {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .InlineRange(_, _, _) -> return true
+        .IntN(_, _) | .List(_) | .FixedList(_, _) | .Option(_) -> return true
+        .Map(key, _, _) -> return jet_codegen_unwrap_pattern_tags(key) == Type.String
+        .Named(name) -> {
+            if name == "Data" || name == "DataTree" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128" || name == "Secret" -> return true
+            return name.ends_with(".Secret")
+        }
+        .Tagged(_, inner) -> return jet_codegen_typed_codec_target(inner)
+        else -> return false
+    }
+}
+
+fn jet_codegen_encode_kind_value(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId {
+    jet_codegen_emit_value(
+        &builder,
+        span,
+        Type.IntN(true, 64),
+        MirOperation.Constant(MirConstant.Int(value, Val(MirIntegerWidth{signed: true, bits: 64}), None)),
+    )
+}
+
+fn jet_codegen_lower_typed_encode(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, type_arg: Type) -> MirValueId {
+    jet_codegen_lower_builtin_codec(&builder, expression, receiver, type_arg, 0)
+}
+
+fn jet_codegen_lower_builtin_codec(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, type_arg: Type, kind: Int) -> MirValueId {
+    route := jet_codegen_intern_route(
+        &builder,
+        MirPreludeFamily.StaticPrelude,
+        "core.encoding.codec",
+        "encode",
+        "jet_codec_encode",
+        2,
+        [Bool]{false, true},
+        None,
+        jet_codegen_failure_carrier_for_type(expression.ty),
+        MirPreludeAbi.Value,
+    )
+    kind_value := jet_codegen_encode_kind_value(&builder, expression.span, kind)
+    value := jet_codegen_lower_expr(&builder, receiver)
+    type_args := [MirType]{jet_codegen_lower_type_for_function(type_arg, &builder)}
+    args := [MirCallArg]{jet_codegen_numeric_call_arg(kind_value, expression.span), jet_codegen_numeric_call_arg(value, receiver.span)}
+    jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, args, [MirPreludeTypeArg]{}, type_args)),
+    )
+}
+
+fn jet_codegen_lower_optional_encode(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, inner: Type) -> MirValueId {
+    subject := jet_codegen_lower_expr(&builder, receiver)
+    condition := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.OptionIsSome(subject))
+    local := tir_generated_local("encode_option_{subject.value}", expression.span)
+    place := jet_codegen_bind_local(&builder, local, inner, false, None, None, false)
+    present_block := jet_codegen_new_block(&builder, expression.span, "encode-option-present")
+    absent_block := jet_codegen_new_block(&builder, expression.span, "encode-option-absent")
+    join_block := jet_codegen_new_block(&builder, expression.span, "encode-option-join")
+    jet_codegen_terminate(&builder, MirTerminator.Branch(condition, present_block, absent_block))
+    jet_codegen_switch_block(&builder, present_block)
+    value := jet_codegen_emit_value(&builder, expression.span, inner, MirOperation.OptionValue(subject))
+    _ := jet_codegen_emit(&builder, expression.span, None, MirOperation.WritePlace(place, value))
+    inner_expr := jet_codegen_data_expr(inner, receiver.span, TExprKind.Local(local))
+    encoded_expr := jet_codegen_data_expr(jet_codegen_data_tree_type(), receiver.span, TExprKind.Unit)
+    encoded := jet_codegen_lower_serde_encode(&builder, encoded_expr, inner_expr)
+    present_end := builder.current
+    jet_codegen_terminate(&builder, MirTerminator.Jump(join_block))
+
+    jet_codegen_switch_block(&builder, absent_block)
+    null := jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Enum(jet_codegen_data_tree_type_id(&builder), "Null", [MirEnumArg]{}),
+    )
+    absent_end := builder.current
+    jet_codegen_terminate(&builder, MirTerminator.Jump(join_block))
+    jet_codegen_switch_block(&builder, join_block)
+    incoming := [MirPhiIncoming]{
+        MirPhiIncoming{block: present_end, value: encoded},
+        MirPhiIncoming{block: absent_end, value: null},
+    }
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi(incoming))
+}
+
+fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, element: Type, map: Bool) -> MirValueId {
+    source_value := jet_codegen_lower_expr(&builder, receiver)
+    source_local := tir_generated_local("encode_source_{source_value.value}", receiver.span)
+    source_place := jet_codegen_bind_local(&builder, source_local, receiver.ty, false, None, None, false)
+    _ := jet_codegen_emit(&builder, receiver.span, None, MirOperation.WritePlace(source_place, source_value))
+    source_expr := jet_codegen_data_expr(receiver.ty, receiver.span, TExprKind.Local(source_local))
+
+    tree_type := jet_codegen_data_tree_type()
+    encoded_element_type := if map -> jet_codegen_data_pair_type() else -> tree_type
+    output_type := Type.List(encoded_element_type)
+    output_local := tir_generated_local("encode_output_{source_value.value}", expression.span)
+    output_local.mutable = true
+    output_place := jet_codegen_bind_local(&builder, output_local, output_type, true, None, None, false)
+    empty := jet_codegen_emit_value(&builder, expression.span, output_type, MirOperation.BuildList([MirValueId]{}, None))
+    _ := jet_codegen_emit(&builder, expression.span, None, MirOperation.WritePlace(output_place, empty))
+
+    loop_body := [TStmt]{}
+    variable := "encode_item_{source_value.value}"
+    variable_two := None
+    encoded_value := if {
+        map -> {
+            key_name := "encode_key_{source_value.value}"
+            value_name := "encode_value_{source_value.value}"
+            variable = key_name
+            variable_two = Val(value_name)
+            key_local := tir_user_local(key_name, expression.span)
+            item_local := tir_user_local(value_name, expression.span)
+            key_expr := jet_codegen_data_expr(Type.String, expression.span, TExprKind.Local(key_local))
+            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local(item_local))
+            jet_codegen_data_expr(
+                encoded_element_type,
+                expression.span,
+                TExprKind.Tuple([TExpr]{key_expr, jet_codegen_data_encode_node(item_expr)}),
+            )
+        } else -> {
+            item_local := tir_user_local(variable, expression.span)
+            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local(item_local))
+            jet_codegen_data_encode_node(item_expr)
+        }
+    }
+    output_expr := jet_codegen_data_expr(output_type, expression.span, TExprKind.Local(output_local))
+    push_expr := jet_codegen_data_expr(
+        Type.Named("Unit"),
+        expression.span,
+        TExprKind.BuiltinMethod(output_expr, TBuiltinOp.Push, [TExpr]{encoded_value}),
+    )
+    loop_body.push(TStmt.ExprStmt(push_expr, expression.span))
+    jet_codegen_lower_statement(
+        &builder,
+        TStmt.ForIn(None, variable, variable_two, source_expr, source_expr, None, None, false, false, loop_body, expression.span),
+    )
+
+    output_place = jet_codegen_lower_local_place(&builder, output_local)
+    payload := jet_codegen_emit_value(&builder, expression.span, output_type, MirOperation.MovePlace(output_place))
+    variant := if map -> "Object" else -> "Array"
+    jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Enum(jet_codegen_data_tree_type_id(&builder), variant, [MirEnumArg]{MirEnumArg{field: None, value: payload, boxed: false}}),
+    )
+}
+
+fn jet_codegen_data_union_enum_name(members: [Type]) -> String {
+    tags := [String]{}
+    loop member in members -> tags.push(jet_codegen_union_member_tag(member))
+    "__JetUnion_{tags.join("_")}"
+}
+
+fn jet_codegen_data_codec_function(builder: &JetCodegenBuilder, ty: Type, codec: String, method_name: String) -> ?TFunc {
+    owner_type := if ty == {
+        .Union(members) -> Type.Named(jet_codegen_data_union_enum_name(members))
+        else -> ty
+    }
+    owner_name := if owner_type == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> { return None }
+    }
+    if builder.generic_type_names.contains(owner_name) -> return None
+    owner_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    if owner_identity == None -> return None
+    identity :: owner_identity ?? return None
+    target_identity_key := None
+    loop semantic_module in builder.modules {
+        if semantic_module.module_identity != identity.module_identity -> next
+        loop nominal in semantic_module.nominals {
+            if nominal.symbol.name != identity.name -> next
+            if target_identity_key != None -> panic("ambiguous checked Serde {codec} owner identity")
+            target_identity_key = Val(nominal.identity_key)
+        }
+    }
+    target_key :: target_identity_key ?? return None
+    selected := None
+    loop semantic_module in builder.modules {
+        loop implementation in semantic_module.impls {
+            trait_symbol :: implementation.trait_symbol ?? next
+            if trait_symbol.name != codec || implementation.target_identity_key != target_key -> next
+            loop method in implementation.methods {
+                if method.symbol.name != method_name -> next
+                if selected != None -> panic("ambiguous checked Serde {codec} implementation")
+                selected = Val(
+                    jet_codegen_find_function(builder.functions, method.symbol.id.key)
+                        ?? panic("checked Serde {codec}::{method_name} method is not reachable")
+                )
+            }
+        }
+    }
+    selected
+}
+
+fn jet_codegen_data_encode_function(builder: &JetCodegenBuilder, ty: Type) -> ?TFunc {
+    jet_codegen_data_codec_function(&builder, ty, "Encode", "encode")
+}
+
+fn jet_codegen_data_decode_function(builder: &JetCodegenBuilder, ty: Type) -> ?TFunc {
+    jet_codegen_data_codec_function(&builder, ty, "Decode", "decode")
+}
+
+
+fn jet_codegen_data_encode_variant(ty: Type) -> ?String {
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .Int | .IntN(_, _) -> return Val("Int")
+        .Float | .Float32 -> return Val("Float")
+        .Bool -> return Val("Bool")
+        .String | .Char -> return Val("Text")
+        else -> return None
+    }
+}
+
+
+fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr) -> MirValueId {
+    ty := jet_codegen_unwrap_pattern_tags(receiver.ty)
+    function := jet_codegen_data_encode_function(&builder, ty)
+    if function != None {
+        target :: function ?? panic("checked Serde encode target disappeared")
+        owner_type := if ty == {
+            .Union(members) -> Type.Named(jet_codegen_data_union_enum_name(members))
+            else -> receiver.ty
+        }
+        owner := jet_codegen_lower_type_for_function(owner_type, &builder)
+        value := jet_codegen_lower_expr(&builder, receiver)
+        result_type := jet_codegen_checked_method_return_type(&builder, target, owner_type, [Type]{})
+        jet_codegen_note_core_module(&builder, target.module_name)
+        args := [MirCallArg]{jet_codegen_numeric_call_arg(value, receiver.span)}
+        return jet_codegen_emit_value(
+            &builder,
+            expression.span,
+            result_type,
+            MirOperation.Call(MirCallee.Method(jet_codegen_function_id(target), owner), args, [MirType]{}),
+        )
+    }
+
+    if ty == Type.Named("DataTree") -> return jet_codegen_lower_expr(&builder, receiver)
+    builtin_kind := jet_codegen_codec_kind(ty)
+    if builtin_kind != None -> return jet_codegen_lower_builtin_codec(&builder, expression, receiver, ty, builtin_kind ?? 0)
+    if ty == {
+        .List(inner) | .FixedList(inner, _) -> {
+            if jet_codegen_unwrap_pattern_tags(inner) != Type.IntN(false, 8) -> return jet_codegen_lower_container_encode(&builder, expression, receiver, inner, false)
+        }
+        .Map(key, _, value) -> if jet_codegen_unwrap_pattern_tags(key) == Type.String -> return jet_codegen_lower_container_encode(&builder, expression, receiver, value, true)
+        .Option(inner) -> return jet_codegen_lower_optional_encode(&builder, expression, receiver, inner)
+        else -> {}
+    }
+    if jet_codegen_typed_codec_target(ty) -> return jet_codegen_lower_typed_encode(&builder, expression, receiver, ty)
+
+    variant :: jet_codegen_data_encode_variant(ty) ?? panic("checked Serde encode target has no DataTree variant or encode method")
+    value := jet_codegen_lower_expr(&builder, receiver)
+    jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Enum(jet_codegen_data_tree_type_id(&builder), variant, [MirEnumArg]{MirEnumArg{field: None, value: value, boxed: false}}),
+    )
+}
+
+
+fn jet_codegen_lower_data_tree_decode(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, target_type: Type) -> MirValueId {
+    target := jet_codegen_unwrap_pattern_tags(target_type)
+    function := jet_codegen_data_decode_function(&builder, target)
+    if function != None {
+        target_function :: function ?? panic("checked Serde decode target disappeared")
+        owner_type := if target == {
+            .Union(members) -> Type.Named(jet_codegen_data_union_enum_name(members))
+            else -> target_type
+        }
+        owner := jet_codegen_lower_type_for_function(owner_type, &builder)
+        value := jet_codegen_lower_expr(&builder, receiver)
+        result_type := jet_codegen_checked_method_return_type(&builder, target_function, owner_type, [Type]{})
+        jet_codegen_note_core_module(&builder, target_function.module_name)
+        args := [MirCallArg]{jet_codegen_numeric_call_arg(value, receiver.span)}
+        return jet_codegen_emit_value(
+            &builder,
+            expression.span,
+            result_type,
+            MirOperation.Call(MirCallee.Associated(jet_codegen_function_id(target_function), owner), args, [MirType]{}),
+        )
+    }
+    builtin_kind := jet_codegen_codec_kind(target)
+    if builtin_kind != None {
+        route := jet_codegen_intern_route(
+            &builder,
+            MirPreludeFamily.StaticPrelude,
+            "core.encoding.codec",
+            "decode",
+            "jet_codec_decode",
+            2,
+            [Bool]{false, true},
+            None,
+            jet_codegen_failure_carrier_for_type(expression.ty),
+            MirPreludeAbi.Value,
+        )
+        kind_value := jet_codegen_encode_kind_value(&builder, expression.span, builtin_kind ?? 0)
+        value := jet_codegen_lower_expr(&builder, receiver)
+        type_args := [MirType]{jet_codegen_lower_type_for_function(target_type, &builder)}
+        args := [MirCallArg]{jet_codegen_numeric_call_arg(kind_value, expression.span), jet_codegen_numeric_call_arg(value, receiver.span)}
+        return jet_codegen_emit_value(
+            &builder,
+            expression.span,
+            expression.ty,
+            MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, args, [MirPreludeTypeArg]{}, type_args)),
+        )
+    }
+    if jet_codegen_typed_codec_target(target) {
+        route := jet_codegen_intern_route(
+            &builder,
+            MirPreludeFamily.StaticPrelude,
+            "core.encoding.codec",
+            "decode_typed",
+            "jet_codec_decode_typed",
+            1,
+            [Bool]{true},
+            None,
+            jet_codegen_failure_carrier_for_type(expression.ty),
+            MirPreludeAbi.Value,
+        )
+        value := jet_codegen_lower_expr(&builder, receiver)
+        args := [MirCallArg]{jet_codegen_numeric_call_arg(value, receiver.span)}
+        type_args := [MirType]{jet_codegen_lower_type_for_function(target_type, &builder)}
+        return jet_codegen_emit_value(
+            &builder,
+            expression.span,
+            expression.ty,
+            MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, args, [MirPreludeTypeArg]{}, type_args)),
+        )
+    }
+    panic("checked Serde decode target has no DataTree codec or decode method")
+}
+
+
+
+fn jet_codegen_data_mir_db_metadata(metadata: ?TDbQueryMetadata) -> ?MirDbQueryMetadata {
+    if metadata == None -> return None
+    source :: metadata ?? panic("checked database query metadata disappeared")
+    table_facts := [MirDbTableFact]{}
+    loop fact in source.table_facts {
+        table_facts.push(MirDbTableFact{table_id: fact.table_id, read: fact.read, write: fact.write})
+    }
+    Val(MirDbQueryMetadata{
+        source_file: mir_source_file_id(source.source_file),
+        source_path: source.source_file,
+        source_span: source.source_span,
+        statement_identity: source.statement_identity,
+        table_facts: table_facts,
+    })
+}
+
+fn jet_codegen_data_db_query_route(builder: &JetCodegenBuilder, expression: TExpr, operation: THandleOp) -> ?MirPreludeCallId {
+    member := ""
+    symbol := ""
+    metadata := None
+    if operation == {
+        .DBQuery(value) -> {
+            member = "query"
+            symbol = "jet_db_scope_query_with_metadata"
+            metadata = value
+        }
+        .DBQueryOne(value) -> {
+            member = "query_one"
+            symbol = "jet_db_scope_query_one_with_metadata"
+            metadata = value
+        }
+        .DBExecute(value) -> {
+            member = "execute"
+            symbol = "jet_db_scope_execute_with_metadata"
+            metadata = value
+        }
+        else -> return None
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    effect_name :: jet_codegen_core_effect_name(Effect.DB) ?? panic("checked database route lost its canonical effect")
+    identity := "HandleMethod:core.handle:{member}:{symbol}:3:3:[true, true, true]:Some({effect_name}):{jet_codegen_core_route_fallibility_identity(carrier)}:Value"
+    id := MirPreludeCallId{value: stable_id("mir-prelude-call", identity)}
+    call := jet_codegen_intern_prelude_call(
+        &builder,
+        MirPreludeCall{
+            id: id,
+            family: MirPreludeFamily.HandleMethod,
+            module_name: "core.handle",
+            member: member,
+            symbol: MirSymbol.Prelude(symbol),
+            signature: MirCallSignature{arity: 3, max_arity: 3, borrow_mask: [Bool]{true, true, true}},
+            effect_kind: Val(Effect.DB),
+            fallibility: jet_codegen_core_call_fallibility(carrier, &builder),
+            abi: MirPreludeAbi.Value,
+            authority: None,
+            db_metadata: jet_codegen_data_mir_db_metadata(metadata),
+        },
+    )
+    Val(call)
+}
+
+fn jet_codegen_data_handle_route(builder: &JetCodegenBuilder, expression: TExpr, operation: THandleOp) -> ?MirPreludeCallId {
+    db_route := jet_codegen_data_db_query_route(&builder, expression, operation)
+    if db_route != None -> return db_route
+    member := ""
+    symbol := ""
+    arity := 0
+    borrow_mask := [Bool]{}
+    if operation == {
+        .DataTreeField | .JSONField -> {
+            member = "field"
+            symbol = "jet_datatree_field"
+            arity = 2
+            borrow_mask = [Bool]{true, true}
+        }
+        .DataTreeAt | .JSONAt -> {
+            member = "at"
+            symbol = "jet_datatree_at"
+            arity = 2
+            borrow_mask = [Bool]{true, false}
+        }
+        .DataTreeInt | .JSONInt -> {
+            member = "int"
+            symbol = "jet_datatree_int"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DataTreeText | .JSONText -> {
+            member = "text"
+            symbol = "jet_datatree_text"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DataTreeBool | .JSONBool -> {
+            member = "bool"
+            symbol = "jet_datatree_bool"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DataTreeFloat | .JSONFloat -> {
+            member = "float"
+            symbol = "jet_datatree_float"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DataTreeToText | .JSONToText -> {
+            member = "to_text"
+            symbol = "jet_datatree_to_text"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DataTreeEqualUnordered | .JSONEqualUnordered -> {
+            member = "equal_unordered"
+            symbol = "jet_datatree_equal_unordered"
+            arity = 2
+            borrow_mask = [Bool]{true, true}
+        }
+        .DBValueInt -> {
+            member = "int"
+            symbol = "jet_std::DBValue::int"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DBValueFloat -> {
+            member = "float"
+            symbol = "jet_std::DBValue::float"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DBValueText -> {
+            member = "text"
+            symbol = "jet_std::DBValue::text"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DBValueBool -> {
+            member = "bool"
+            symbol = "jet_std::DBValue::bool"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DBValueBlob -> {
+            member = "blob"
+            symbol = "jet_std::DBValue::blob"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        .DBValueIsNull -> {
+            member = "is_null"
+            symbol = "jet_std::DBValue::is_null"
+            arity = 1
+            borrow_mask = [Bool]{true}
+        }
+        else -> return None
+    }
+    Val(jet_codegen_intern_route(
+        &builder,
+        MirPreludeFamily.HandleMethod,
+        "core.encoding.datatree",
+        member,
+        symbol,
+        arity,
+        borrow_mask,
+        None,
+        jet_codegen_failure_carrier_for_type(expression.ty),
+        MirPreludeAbi.Value,
+    ))
+}
+
+fn jet_codegen_lower_data_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
+    if operation == {
+        .DataTreeDecode(target) -> {
+            if args.len() != 0 -> panic("checked DataTree decode has unexpected arguments")
+            return jet_codegen_lower_data_tree_decode(&builder, expression, receiver, target)
+        }
+        else -> {}
+    }
+    route :: jet_codegen_data_handle_route(&builder, expression, operation) ?? panic("checked data handle operation has no dedicated route")
+    expected_args := if operation == {
+        .DataTreeField | .DataTreeAt | .DataTreeEqualUnordered | .JSONField | .JSONAt | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> 1
+        else -> 0
+    }
+    if args.len() != expected_args -> panic("checked data handle operation has unexpected arguments")
+    receiver_value := jet_codegen_lower_expr(&builder, receiver)
+    lowered_args := [MirValueId]{}
+    loop argument in args -> lowered_args.push(jet_codegen_lower_expr(&builder, argument))
+    jet_codegen_emit_value(
+        &builder,
+        expression.span,
+        expression.ty,
+        MirOperation.Semantic(MirSemanticOp.HandleMethod(route, receiver_value, lowered_args, None, None)),
+    )
+}
+
+

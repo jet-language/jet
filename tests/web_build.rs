@@ -221,7 +221,7 @@ fn knowledge_tier_web_source() -> &'static str {
 
 #[test]
 fn anonymous_unions_build_for_web() {
-    let shown = "examples/features/types/anonymous_unions.jet";
+    let shown = "Examples/features/types/anonymous_unions.jet";
     let src = fs::read_to_string(shown).unwrap();
     let dir = build_web_fixture("anonymous_unions", &src, shown);
     let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
@@ -358,12 +358,12 @@ fn web_stream_generator_break_closes_deferred_resource() {
         eprintln!("note: skipping web stream test (need rustc + node)");
         return;
     }
-    let shown = "examples/features/streams/generators.jet";
+    let shown = "Examples/features/streams/generators.jet";
     let src = fs::read_to_string(shown).unwrap();
     let dir = build_web_fixture("streams_generators", &src, shown);
     assert_eq!(
         run_web_app(&dir),
-        include_str!("../examples/features/expected/streams/generators.out")
+        include_str!("../Examples/features/expected/streams/generators.out")
     );
     let app = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
@@ -718,7 +718,7 @@ fn jet_cli_explain_partition_requires_web_target() {
         .args([
             "build",
             "--explain-partition",
-            "examples/features/basics/hello.jet",
+            "Examples/features/basics/hello.jet",
         ])
         .output()
         .unwrap();
@@ -748,7 +748,7 @@ fn jet_cli_web_build_succeeds() {
         .args([
             "build",
             "--target=web",
-            "examples/features/web/web_compute.jet",
+            "Examples/features/web/web_compute.jet",
         ])
         .output()
         .unwrap();
@@ -1207,13 +1207,13 @@ fn jet_cli_html_marker_rejects_hardlinked_source() {
 
 #[test]
 fn compile_web_file_loads() {
-    let out = jet::compile_web("examples/features/web/web_compute.jet").expect("compile_web");
+    let out = jet::compile_web("Examples/features/web/web_compute.jet").expect("compile_web");
     assert!(out.web.is_some());
 }
 
 #[test]
 fn forms_table_web_lowering_preserves_typed_form_contract() {
-    let shown = "examples/features/web/forms_table.jet";
+    let shown = "Examples/features/web/forms_table.jet";
     let source = fs::read_to_string(shown).unwrap();
     let out = jet::compile_web(shown).unwrap_or_else(|diags| {
         panic!(
@@ -2612,9 +2612,9 @@ fn web_edge_preserves_one_error_wire_across_js_and_wasm() {
         eprintln!("note: skipping web failure-edge parity test (need rustc + node)");
         return;
     }
-    let source = include_str!("../examples/features/errors/default_err_edge.jet");
+    let source = include_str!("../Examples/features/errors/default_err_edge.jet");
     let expected =
-        include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
+        include_str!("../Examples/features/expected/errors/default_err_edge.err.out").trim_end();
     let expected_frame_line = format!("frame={expected:?}");
     let harness = r#"
 process.on("unhandledRejection", (error) => {
@@ -2688,7 +2688,7 @@ try {
     let wasm_dir = build_web_fixture(
         "failure_edge_wasm",
         source,
-        "examples/features/errors/default_err_edge.jet",
+        "Examples/features/errors/default_err_edge.jet",
     );
     let wasm = fs::read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap();
     let wasm_js = fs::read_to_string(wasm_dir.join("build/app.js")).unwrap();
@@ -2905,7 +2905,7 @@ try {
 }
 "#;
     let dom_expected =
-        include_str!("../examples/features/expected/web/default_err_edge.harness.out");
+        include_str!("../Examples/features/expected/web/default_err_edge.harness.out");
     assert_eq!(
         run_node_harness(&js_dir, "failure_edge_dom_harness.mjs", dom_harness),
         dom_expected,
@@ -2920,9 +2920,9 @@ try {
 
 #[test]
 fn web_edge_target_is_build_fact_not_runtime_probe() {
-    let source = include_str!("../examples/features/errors/default_err_edge.jet");
+    let source = include_str!("../Examples/features/errors/default_err_edge.jet");
     let output =
-        jet::compile_web_with_path(source, "examples/features/errors/default_err_edge.jet")
+        jet::compile_web_with_path(source, "Examples/features/errors/default_err_edge.jet")
             .expect("failure-edge example must compile for web");
     let web = output.web.expect("web target must emit artifacts");
 
@@ -3976,10 +3976,10 @@ fn web_hello_dom_shim_roundtrip() {
         eprintln!("note: skipping web_build hello (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_hello.jet");
-    let dir = build_web_fixture("hello", src, "examples/features/web/web_hello.jet");
+    let src = include_str!("../Examples/features/web/web_hello.jet");
+    let dir = build_web_fixture("hello", src, "Examples/features/web/web_hello.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_hello.web.out");
+    let expected = include_str!("../Examples/features/expected/web/web_hello.web.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4047,10 +4047,10 @@ fn web_reactive_dom_snapshot_roundtrip() {
         eprintln!("note: skipping web_build reactive (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/ui_web_reactive.jet");
-    let dir = build_web_fixture("reactive", src, "examples/features/web/ui_web_reactive.jet");
+    let src = include_str!("../Examples/features/web/ui_web_reactive.jet");
+    let dir = build_web_fixture("reactive", src, "Examples/features/web/ui_web_reactive.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/ui_web_reactive.web.out");
+    let expected = include_str!("../Examples/features/expected/web/ui_web_reactive.web.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4060,22 +4060,22 @@ fn web_click_counter_dom_roundtrip() {
     // 196_ui_web_click.jet: the exported `jet_main()` entry registers a
     // reactive render whose button click must update one real DOM tree. This
     // fake `document` (no browser, no new dependency) drives the same
-    // entry/click path as examples/features/web/ui_web_click.html.
+    // entry/click path as Examples/features/web/ui_web_click.html.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build click counter (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/ui_web_click.jet");
-    let dir = build_web_fixture("click", src, "examples/features/web/ui_web_click.jet");
+    let src = include_str!("../Examples/features/web/ui_web_click.jet");
+    let dir = build_web_fixture("click", src, "Examples/features/web/ui_web_click.jet");
     let stdout = run_web_click_harness(&dir);
-    let expected = include_str!("../examples/features/expected/web/ui_web_click.harness.out");
+    let expected = include_str!("../Examples/features/expected/web/ui_web_click.harness.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn web_click_companion_starts_exported_entrypoint() {
-    let html = include_str!("../examples/features/web/ui_web_click.html");
+    let html = include_str!("../Examples/features/web/ui_web_click.html");
     assert!(html.contains("import { jet_main } from \"./app.js\";"));
     assert!(html.contains("jet_main();"));
     assert!(!html.contains("import { run } from \"./app.js\";"));
@@ -4300,10 +4300,10 @@ fn web_compute_wasm_bridge_roundtrip() {
         eprintln!("note: skipping web_build compute (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_compute.jet");
-    let dir = build_web_fixture("compute", src, "examples/features/web/web_compute.jet");
+    let src = include_str!("../Examples/features/web/web_compute.jet");
+    let dir = build_web_fixture("compute", src, "Examples/features/web/web_compute.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_compute.out");
+    let expected = include_str!("../Examples/features/expected/web/web_compute.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4314,11 +4314,11 @@ fn web_wasm_int_export_reachability_golden() {
         eprintln!("note: skipping web_build wasm Int export (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_int_export.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_int_export.jet");
     let dir = build_web_fixture(
         "wasm_int_export",
         src,
-        "examples/features/web/web_wasm_int_export.jet",
+        "Examples/features/web/web_wasm_int_export.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -4331,18 +4331,18 @@ fn web_wasm_int_export_reachability_golden() {
         "scalar export must unwrap its shared Outcome before the ABI helper:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_int_export.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_int_export.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn web_compute_webgpu_calls_use_the_browser_prelude() {
-    let source = include_str!("../examples/features/web/web_compute_webgpu.jet");
+    let source = include_str!("../Examples/features/web/web_compute_webgpu.jet");
     let dir = build_web_fixture(
         "compute_webgpu_browser_prelude",
         source,
-        "examples/features/web/web_compute_webgpu.jet",
+        "Examples/features/web/web_compute_webgpu.jet",
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
@@ -4365,7 +4365,7 @@ fn selected_browser_machine_emits_dossier_bound_web_artifact() {
         return;
     }
     // The binding check runs when a JS entry crosses into Wasm.
-    let shown = "examples/features/web/web_compute.jet";
+    let shown = "Examples/features/web/web_compute.jet";
     let src = fs::read_to_string(shown).unwrap();
     let machine = jet::TargetMachine::TargetMachine::wasm_browser();
     assert!(machine.is_browser_target());
@@ -4390,7 +4390,7 @@ fn selected_browser_machine_emits_dossier_bound_web_artifact() {
     assert!(wasm.contains("jet_target_dossier_identity_ptr"));
     assert_eq!(
         run_web_app(&dir),
-        include_str!("../examples/features/expected/web/web_compute.out")
+        include_str!("../Examples/features/expected/web/web_compute.out")
     );
 
     // Replacing only the JS-side binding must fail before `run` can print.
@@ -4481,8 +4481,8 @@ fn web_showcase_dashboard_roundtrip() {
         eprintln!("note: skipping web_build showcase dashboard (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/ui_showcase.jet");
-    let dir = build_web_fixture("showcase", src, "examples/features/web/ui_showcase.jet");
+    let src = include_str!("../Examples/features/web/ui_showcase.jet");
+    let dir = build_web_fixture("showcase", src, "Examples/features/web/ui_showcase.jet");
     let stdout = run_showcase_harness(&dir);
     let lines: Vec<&str> = stdout.lines().collect();
 
@@ -4504,7 +4504,7 @@ fn web_showcase_dashboard_roundtrip() {
         );
     }
 
-    let html = include_str!("../examples/features/web/ui_showcase.html");
+    let html = include_str!("../Examples/features/web/ui_showcase.html");
     assert!(
         html.contains(r#"<button id="boost-btn" type="button" aria-label="Boost fuel" data-motion-state="idle">"#),
         "showcase boost control must have stable button semantics"
@@ -4580,11 +4580,11 @@ fn web_wasm_range_loop_bridge_roundtrip() {
         eprintln!("note: skipping web_build wasm range (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_range.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_range.jet");
     let dir = build_web_fixture(
         "wasm_range",
         src,
-        "examples/features/web/web_wasm_range.jet",
+        "Examples/features/web/web_wasm_range.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -4596,7 +4596,7 @@ fn web_wasm_range_loop_bridge_roundtrip() {
         "loop body assign was dropped:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_range.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_range.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4611,11 +4611,11 @@ fn web_wasm_for_in_bridge_roundtrip() {
         eprintln!("note: skipping web_build wasm for-in (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_for_in.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_for_in.jet");
     let dir = build_web_fixture(
         "wasm_for_in",
         src,
-        "examples/features/web/web_wasm_for_in.jet",
+        "Examples/features/web/web_wasm_for_in.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -4628,7 +4628,7 @@ fn web_wasm_for_in_bridge_roundtrip() {
         "ForIn body assign was dropped:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_for_in.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_for_in.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4641,11 +4641,11 @@ fn web_wasm_string_export_hostile_roundtrip() {
         eprintln!("note: skipping web_build wasm string (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_string.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_string.jet");
     let dir = build_web_fixture(
         "wasm_string",
         src,
-        "examples/features/web/web_wasm_string.jet",
+        "Examples/features/web/web_wasm_string.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -4678,7 +4678,7 @@ fn web_wasm_string_export_hostile_roundtrip() {
         "runtime missing string ABI decode/free:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_string.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_string.out");
     assert_eq!(stdout, expected);
     // Explicit byte-level hostility: tab + newline survived the ABI.
     assert!(
@@ -4700,11 +4700,11 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
         eprintln!("note: skipping web_build wasm string param (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_string_param.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_string_param.jet");
     let dir = build_web_fixture(
         "wasm_string_param",
         src,
-        "examples/features/web/web_wasm_string_param.jet",
+        "Examples/features/web/web_wasm_string_param.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -4739,7 +4739,7 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
         "runtime missing string ABI encode/alloc:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_string_param.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_string_param.out");
     assert_eq!(stdout, expected);
     assert!(
         stdout.as_bytes().contains(&b'\t'),
@@ -4796,8 +4796,8 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         eprintln!("note: skipping web_build wasm list-int (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_list.jet");
-    let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_list.jet");
+    let dir = build_web_fixture("wasm_list", src, "Examples/features/web/web_wasm_list.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains("fn jet_abi_list_int_ret(v: Vec<JetWasmInt>) -> u64"),
@@ -4855,7 +4855,7 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         "runtime missing list-int ABI encode/decode:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_list.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_list.out");
     assert_eq!(stdout, expected);
     assert!(
         stdout.contains("[-1, 2, -3]"),
@@ -4950,11 +4950,11 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         eprintln!("note: skipping web_build wasm list-string (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_list_string.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_list_string.jet");
     let dir = build_web_fixture(
         "wasm_list_string",
         src,
-        "examples/features/web/web_wasm_list_string.jet",
+        "Examples/features/web/web_wasm_list_string.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
@@ -5102,7 +5102,7 @@ console.log("ok");
         "runtime missing list-string ABI encode/decode:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_list_string.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_list_string.out");
     assert_eq!(stdout, expected);
     assert!(
         stdout.as_bytes().contains(&b'\t'),
@@ -5128,8 +5128,8 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
         eprintln!("note: skipping web_build wasm map-string-int (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_map.jet");
-    let dir = build_web_fixture("wasm_map", src, "examples/features/web/web_wasm_map.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_map.jet");
+    let dir = build_web_fixture("wasm_map", src, "Examples/features/web/web_wasm_map.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains("fn jet_abi_map_string_int_ret(")
@@ -5170,7 +5170,7 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
         "runtime missing map-string-int ABI encode/decode:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_map.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_map.out");
     assert_eq!(stdout, expected);
 
     let hostile = r#"
@@ -5426,11 +5426,11 @@ fn web_wasm_event_callback_bridge_roundtrip() {
         eprintln!("note: skipping web_build wasm callback (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/web/web_wasm_callback.jet");
+    let src = include_str!("../Examples/features/web/web_wasm_callback.jet");
     let dir = build_web_fixture(
         "wasm_callback",
         src,
-        "examples/features/web/web_wasm_callback.jet",
+        "Examples/features/web/web_wasm_callback.jet",
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
@@ -5438,7 +5438,7 @@ fn web_wasm_event_callback_bridge_roundtrip() {
         "click handler must call the Wasm bridge:\n{js}"
     );
     let stdout = run_node_harness(&dir, "wasm_callback_harness.mjs", WASM_CALLBACK_HARNESS);
-    let expected = include_str!("../examples/features/expected/web/web_wasm_callback.out");
+    let expected = include_str!("../Examples/features/expected/web/web_wasm_callback.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }

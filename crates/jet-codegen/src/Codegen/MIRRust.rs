@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 
 use jet_foundation::CanonicalPass;
 use jet_foundation::Layout::{LayoutFacts, TargetLayout};
+use jet_foundation::MIROptimization::Acceleration::{AccelerationTransform, D_FRED1_FIXED_ORDER};
 use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
 use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
@@ -934,6 +935,7 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             }
         }
     }
+    emitter.emit_link_closure(out);
     emitter.emit_c_abi_records(out);
     if config.execution.emit_foreign {
         for foreign in &program.foreign {
@@ -9135,7 +9137,7 @@ impl<'a> RustEmitter<'a> {
              let name = name.strip_prefix(\"right/\").unwrap_or(name);\n\
              match name {\n",
         );
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corelib/tzdb");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
         visit(&root, &root, out)?;
         out.push_str("_ => None,\n}\n}\n");
         Ok(())
@@ -13989,6 +13991,7 @@ impl<'a> RustEmitter<'a> {
                         width,
                     )
                 }
+            }
             MirOperation::Move { value } | MirOperation::AttachTag { value, .. } => {
                 self.vector_value_expr(
                     function,
@@ -18143,7 +18146,7 @@ impl<'a> RustEmitter<'a> {
             .any(|variant| !matches!(&variant.payload, MirVariantPayload::Unit))
     }
 
-    fn c_abi_enum_facts<'a>(&self, definition: &'a MirTypeDef) -> &'a LayoutFacts {
+    fn c_abi_enum_facts<'d>(&self, definition: &'d MirTypeDef) -> &'d LayoutFacts {
         let Some(layout) = definition.enum_layout.as_ref() else {
             panic!(
                 "C ABI enum {:?} has no checked TargetLayoutEngine facts",
@@ -18846,6 +18849,10 @@ impl<'a> RustEmitter<'a> {
                 return match arg.access {
                     MirAccess::Read => self
                         .c_abi_encode_ref(&param.ty, &self.value_slot_reference(arg.value, false)),
+                    MirAccess::Write => panic!(
+                        "MIR foreign C call {:?} passes C record parameter `{}` with write access, which has no checked writeback lowering",
+                        foreign.id, param.name
+                    ),
                     MirAccess::Move => {
                         self.c_abi_encode_owned(
                             &param.ty,
@@ -19059,6 +19066,8 @@ impl<'a> RustEmitter<'a> {
                     digest,
                 );
             }
+            _ => {}
+        }
         let c_record_string_count = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
             args.iter()
                 .zip(&foreign.params)
@@ -26061,6 +26070,7 @@ impl<'a> RustEmitter<'a> {
                 | MirOperation::ReadPlace(_)
                 | MirOperation::MovePlace { .. }
                 | MirOperation::InitializeUninit { .. }
+                | MirOperation::Copy { .. }
                 | MirOperation::TraitBox { .. }
                 | MirOperation::Move { .. }
                 | MirOperation::Constant(_)

@@ -349,13 +349,13 @@ pub struct LambdaMeta {
     pub frame_schedule_derivation: ?DerivationRef
 }
 
-pub struct TypedLitBody {
-    pub kind: Int
-    pub fields: [ExprField]
-    pub elements: [Expr]
-    pub entries: [ExprPair]
-    pub value: ?Expr
-    pub byte_text: [ByteTextPart]
+pub enum TypedLitBody {
+    Fields(fields: [ExprField])
+    Elements(elements: [Expr])
+    Entries(entries: [ExprPair])
+    Value(value: Expr)
+    ByteText(parts: [ByteTextPart])
+    Empty
 }
 
 pub enum ByteTextPart {

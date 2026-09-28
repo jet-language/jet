@@ -152,7 +152,9 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
     open :: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the value block")
     statements := [Stmt]{}
     tail := None
-    parser_skip_semicolons(&state)
+    // S6-R: nested block statements leave a zero-width terminator before the
+    // next value-block item; authored semicolons stay visible to diagnostics.
+    parser_skip_synthetic_semicolons(&state)
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         before := state.position
         if {
@@ -176,7 +178,7 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
                 }
             }
         }
-        parser_skip_semicolons(&state)
+        parser_skip_synthetic_semicolons(&state)
         if state.position == before {
             token :: parser_current(&state)
             parser_add_error(&state, token.span, "the parser could not advance through this block", "block recovery stops infinite retries on malformed input", "remove or complete this statement")

@@ -1,0 +1,193 @@
+// Reactive synchronization facts from accepted concurrency boundaries.
+// Reports are stable source metadata; reactive handles already own the
+// synchronized runtime representation.
+
+pub fn sema_function_reactive_handle_type(ty: Type) -> Bool {
+    if ty == {
+        .Apply(name, _) -> name == "Signal" || name == "Derived" || name == "Computed"
+        else -> false
+    }
+}
+
+fn sema_function_reactive_contains(values: [String], value: String) -> Bool {
+    loop existing in values { if existing == value -> return true }
+    false
+}
+
+fn sema_function_reactive_append_unique(values: &[String], value: String) {
+    if !sema_function_reactive_contains(values, value) -> values.push(value)
+}
+
+pub fn sema_function_reactive_is_local(context: SemaCheckContext, symbol_key: String) -> Bool {
+    sema_function_reactive_contains(context.reactive_local_keys, symbol_key)
+}
+
+pub fn sema_function_reactive_is_shared(context: SemaCheckContext, symbol_key: String) -> Bool {
+    sema_function_reactive_contains(context.reactive_shared_keys, symbol_key)
+}
+
+pub fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String, ty: Type, crossing: String) {
+    sema_function_reactive_append_unique(&context.reactive_upgrade_names, name)
+    line := "{name}: {type_name(ty)} synchronized for {crossing} crossing"
+    if !sema_function_reactive_contains(context.reactive_upgrades, line) -> context.reactive_upgrades.push(line)
+}
+
+pub fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) {
+    if !sema_function_reactive_handle_type(ty) -> return
+    name := if value == {.Ident(name, _) -> name else -> "this value"}
+    sema_function_reactive_note_upgrade(&context, name, ty, "channel")
+}
+
+pub fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) {
+    is_local := false
+    is_shared := false
+    loop marker in binding.markers {
+        if marker.name == "Local" -> is_local = true
+        if marker.name == "Shared" -> is_shared = true
+    }
+    if is_local -> sema_function_reactive_append_unique(&context.reactive_local_keys, symbol.id.key)
+    if is_shared -> sema_function_reactive_append_unique(&context.reactive_shared_keys, symbol.id.key)
+    if is_shared && sema_function_reactive_handle_type(ty) -> sema_function_reactive_note_upgrade(&context, binding.name, ty, "#Shared pin")
+}
+
+pub fn sema_function_reactive_note_parallel_lambda(context: &SemaCheckContext, lambda: TLambda) {
+    loop capture in lambda.captures {
+        if sema_function_reactive_contains(lambda.capture_facts.mutable, capture.source) -> next
+        if !sema_function_reactive_handle_type(capture.ty) -> next
+        symbol :: capture.local.symbol_id ?? next
+        if sema_function_reactive_is_local(context, symbol.key) -> next
+        sema_function_reactive_note_upgrade(&context, capture.source, capture.ty, "parallel")
+    }
+}
+
+pub fn sema_function_reactive_note_task_lambda(context: &SemaCheckContext, lambda: TLambda) {
+    loop capture in lambda.captures {
+        if !sema_function_reactive_handle_type(capture.ty) -> next
+        symbol :: capture.local.symbol_id ?? next
+        if sema_function_reactive_is_local(context, symbol.key) -> next
+        crossing := "task"
+        if sema_function_reactive_is_shared(context, symbol.key) -> crossing = "#Shared pin + task"
+        sema_function_reactive_note_upgrade(&context, capture.source, capture.ty, crossing)
+    }
+}
+
+pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [String]) {
+    index := 0
+    loop index < statements.len() {
+        statement := statements[index]
+        if statement == {
+            .Val(binding) -> {
+                if sema_function_reactive_contains(names, binding.name) || sema_function_reactive_binding_shared(binding) {
+                    binding.reactive_upgrade = true
+                    statements[index] = Stmt.Val(binding)
+                }
+            }
+            .While(condition, body, span, arrow_body, label) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.While(condition, body, span, arrow_body, label)
+            }
+            .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization)
+            }
+            .Loop(body, span, arrow_body, label) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Loop(body, span, arrow_body, label)
+            }
+            .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.CountedLoop(init, condition, step, body, span, arrow_body, label)
+            }
+            .Unsafe(audit, audit_expr, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Unsafe(audit, audit_expr, body, span)
+            }
+            .Impure(reason, reason_expr, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Impure(reason, reason_expr, body, span)
+            }
+            .Reactive(body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Reactive(body, span)
+            }
+            .Shield(body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Shield(body, span)
+            }
+            .Switched(marker, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Switched(marker, body, span)
+            }
+            .Region(name, name_span, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Region(name, name_span, body, span)
+            }
+            .Policy(declarations, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Policy(declarations, body, span)
+            }
+            .TaskGroup(name, name_span, limit, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.TaskGroup(name, name_span, limit, body, span)
+            }
+            .AuthorityScope(caps, caps_span, binding, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.AuthorityScope(caps, caps_span, binding, body, span)
+            }
+            .ComptimeBlock(body, is_template_loop, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.ComptimeBlock(body, is_template_loop, span)
+            }
+            .ContextBlock(fields, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.ContextBlock(fields, body, span)
+            }
+            .Live(body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Live(body, span)
+            }
+            .AssumeDet(reason, reason_expr, body, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.AssumeDet(reason, reason_expr, body, span)
+            }
+            .Transact(name, name_span, body, implicit, span) -> {
+                sema_function_reactive_apply_upgrade_flags(&body, names)
+                statements[index] = Stmt.Transact(name, name_span, body, implicit, span)
+            }
+            .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> {
+                loop arm_index in 0..<arms.len() {
+                    arm := arms[arm_index]
+                    sema_function_reactive_apply_upgrade_flags(&arm.body, names)
+                    arms[arm_index] = arm
+                }
+                if else_body == .Val(body) {
+                    sema_function_reactive_apply_upgrade_flags(&body, names)
+                    else_body = Val(body)
+                }
+                if statement == {
+                    .Switch(_, _, _, _) -> {
+                        statements[index] = Stmt.Switch(subject, arms, else_body, span)
+                    }
+                    else -> {
+                        statements[index] = Stmt.ComptimeSwitch(subject, arms, else_body, span)
+                    }
+                }
+            }
+            .ComptimeIf(condition, condition_span, then_body, else_body, span, selected_then) -> {
+                sema_function_reactive_apply_upgrade_flags(&then_body, names)
+                if else_body == .Val(body) {
+                    sema_function_reactive_apply_upgrade_flags(&body, names)
+                    else_body = Val(body)
+                }
+                statements[index] = Stmt.ComptimeIf(condition, condition_span, then_body, else_body, span, selected_then)
+            }
+            else -> {}
+        }
+        index += 1
+    }
+}
+
+fn sema_function_reactive_binding_shared(binding: Binding) -> Bool {
+    loop marker in binding.markers { if marker.name == "Shared" -> return true }
+    false
+}

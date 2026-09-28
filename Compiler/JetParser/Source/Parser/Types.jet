@@ -126,14 +126,17 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
     fields := [TypeTupleField]{}
     loop {
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
-            name :: parser_bump(&state)
-            parser_bump(&state)
-            ty :: parser_parse_type(&state, depth + 1)
-            fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
-        } else {
-            ty :: parser_parse_type(&state, depth + 1)
-            fields.push(TypeTupleField{name: "", ty: ty.ty})
+        if {
+            parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON -> {
+                name :: parser_bump(&state)
+                parser_bump(&state)
+                ty :: parser_parse_type(&state, depth + 1)
+                fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
+            }
+            else -> {
+                ty :: parser_parse_type(&state, depth + 1)
+                fields.push(TypeTupleField{name: "", ty: ty.ty})
+            }
         }
         if parser_current_kind(&state) == TOKEN_RPAREN -> break
         if parser_current_kind(&state) != TOKEN_COMMA {
@@ -185,11 +188,14 @@ fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span,
     args := [Type]{}
     if !parser_type_close_here(&state) {
         loop {
-            if (name == "Vec" | "Matrix") && parser_current_kind(&state) == TOKEN_IDENT {
-                measure_token :: parser_bump(&state)
-                args.push(Type.Measure(measure: Measure.Symbol(kind: "shape", name: measure_token.payload.decoded)))
-            } else {
-                args.push(parser_parse_type(&state, depth + 1).ty)
+            if {
+                (name == "Vec" | "Matrix") && parser_current_kind(&state) == TOKEN_IDENT -> {
+                    measure_token :: parser_bump(&state)
+                    args.push(Type.Measure(measure: Measure.Symbol(kind: "shape", name: measure_token.payload.decoded)))
+                }
+                else -> {
+                    args.push(parser_parse_type(&state, depth + 1).ty)
+                }
             }
             if parser_type_close_here(&state) -> break
             if parser_current_kind(&state) != TOKEN_COMMA {

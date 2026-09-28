@@ -1175,17 +1175,17 @@ fn quiet_suppresses_sbom_write_confirmation() {
 /// writes every generated grammar section but suppresses the per-file `wrote
 /// <path>` lines and the `regenerated editor grammar sections` summary. Runs
 /// in an isolated cwd carrying stub grammar files (with just the real
-/// BEGIN/END markers) instead of the tracked `editors/` tree, so a test run
+/// BEGIN/END markers) instead of the tracked `Tools/editors/` tree, so a test run
 /// never rewrites real repo files.
 #[test]
 fn quiet_suppresses_devtools_grammars_confirmation() {
     let dir = isolated_cwd("quiet_devtools_grammars");
     let stub = "before\n// BEGIN GENERATED JET SYNTAX HIGHLIGHTS\nstale\n// END GENERATED JET SYNTAX HIGHLIGHTS\nafter\n";
     let files = [
-        "editors/vscode/syntaxes/jet.tmLanguage.json",
-        "editors/jet.tmGrammar",
-        "editors/tree-sitter/grammar.js",
-        "editors/zed/languages/jet/highlights.scm",
+        "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+        "Tools/editors/jet.tmGrammar",
+        "Tools/editors/tree-sitter/grammar.js",
+        "Tools/editors/zed/languages/jet/highlights.scm",
     ];
     for rel in files {
         let path = dir.join(rel);

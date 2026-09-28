@@ -156,7 +156,10 @@ fn jet_web_json_quote(value: String) -> String {
                 low :: String.from_bytes([hex.bytes()[code % 16]]) ?? "0"
                 "{out}\\u00{high}{low}"
             }
-            else -> "{out}{String.from_bytes([byte]) ?? \"\"}"
+            else -> {
+                byte_text :: String.from_bytes([byte]) ?? ""
+                "{out}{byte_text}"
+            }
         }
     }
     "{out}\""
@@ -203,7 +206,7 @@ fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bo
 }
 
 fn jet_web_is_wasm_export(function: MirFunction) -> Bool {
-    function.web_marker == Val(MirWebPartitionMarker.WasmExport)
+    function.web_marker == (Val(MirWebPartitionMarker.WasmExport))
 }
 
 fn jet_web_find_function(program: MirProgram, id: MirFunctionId) -> ?MirFunction {
@@ -253,7 +256,7 @@ fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String {
     line := 1
     offset := 0
     loop offset < function.span.start && offset < text.bytes().len() {
-        if text.bytes()[offset] == U8{10} -> line += 1
+        if text.bytes()[offset] == (U8{10}) -> line += 1
         offset += 1
     }
     lines :: text.split("\n")
@@ -327,7 +330,7 @@ fn jet_web_validate_artifact(ctx: &JetWebEmitContext) {
 }
 
 fn program_has_module(program: MirProgram, id: MirModuleId) -> Bool {
-    loop module in program.modules { if module.id == id -> return true }
+    loop module_row in program.modules { if module_row.id == id -> return true }
     false
 }
 
@@ -335,13 +338,13 @@ fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MirFunction) {
     if function.target_applicability.web && function.web_bucket == None {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web-applicable MIR function has no Web bucket", "partition selection must be a checked MIR fact before emission", Val(function.span))
     }
-    if function.web_bucket == Val(MirWebBucket.JS) && function.web_marker == Val(MirWebPartitionMarker.Wasm) {
+    if function.web_bucket == (Val(MirWebBucket.JS)) && function.web_marker == (Val(MirWebPartitionMarker.Wasm)) {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS Web bucket has a Wasm marker", "contradictory checked partition facts cannot be published", Val(function.span))
     }
-    if function.web_bucket == Val(MirWebBucket.JS) && function.web_marker == Val(MirWebPartitionMarker.WasmExport) {
+    if function.web_bucket == (Val(MirWebBucket.JS)) && function.web_marker == (Val(MirWebPartitionMarker.WasmExport)) {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS Web bucket has a WasmExport marker", "contradictory checked partition facts cannot be published", Val(function.span))
     }
-    if function.web_bucket == Val(MirWebBucket.Wasm) && function.web_marker == Val(MirWebPartitionMarker.JS) {
+    if function.web_bucket == (Val(MirWebBucket.Wasm)) && function.web_marker == (Val(MirWebPartitionMarker.JS)) {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Wasm Web bucket has a JS marker", "contradictory checked partition facts cannot be published", Val(function.span))
     }
     loop reconstruction in function.web_param_reconstructions {

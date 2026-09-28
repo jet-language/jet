@@ -24,7 +24,7 @@ UNIT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 TERMINAL = {"done", "blocked", "unavailable"}
 REPO = Path(__file__).resolve().parents[4]
 RUN_BASE = (REPO / ".tmp" / "surface-frequency-audit").resolve()
-REPORT_BASE = (REPO / "docs" / "audits").resolve()
+REPORT_BASE = (REPO / "Docs" / "audits").resolve()
 REPORT_NAME = re.compile(r"^surface-frequency-audit-\d{4}-\d{2}-\d{2}(?:-[A-Za-z0-9._-]+)?\.md$")
 REPORT_HEADINGS = (
     "# Surface frequency audit",

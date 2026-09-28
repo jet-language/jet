@@ -125,16 +125,19 @@ fn jet_target_json_quote(value: String) -> String {
                 if byte < 32 -> "\\u00{jet_target_json_hex((byte >> 4) & 15)}{jet_target_json_hex(byte & 15)}" else -> ""
             }
         }
-        if escape.len() > 0 {
-            if segment_start < index {
-                chunk :: String.from_bytes(bytes[segment_start..index]) ?? ""
-                output = "{output}{chunk}"
+        if {
+            escape.len() > 0 -> {
+                if segment_start < index {
+                    chunk :: String.from_bytes(bytes[segment_start..index]) ?? ""
+                    output = "{output}{chunk}"
+                }
+                output = "{output}{escape}"
+                index += 1
+                segment_start = index
             }
-            output = "{output}{escape}"
-            index += 1
-            segment_start = index
-        } else {
-            index += 1
+            else -> {
+                index += 1
+            }
         }
     }
     if segment_start < bytes.len() {

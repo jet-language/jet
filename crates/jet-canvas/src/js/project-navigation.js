@@ -745,7 +745,7 @@
         appendText(meta, "span", "library-entry-state", action.stageable ? "staged until wired" : availability.available ? "checked source" : "unavailable");
         const inputPins = (action.pins || []).filter((pin) => pin.direction === "input").map((pin) => `${pin.name || "arg"}: ${pin.type || "Value"}`).join(", ");
         if (inputPins) appendText(meta, "small", "library-entry-pins", inputPins);
-        appendText(meta, "small", "library-entry-source", action.source || (action.kind === "canvas.core_catalog" ? "docs/spec/reference/core-library.md" : modulePath));
+        appendText(meta, "small", "library-entry-source", action.source || (action.kind === "canvas.core_catalog" ? "Docs/spec/reference/core-library.md" : modulePath));
         if (!availability.available) appendText(meta, "small", "library-entry-reason", availability.reason);
         body.appendChild(row);
       }

@@ -1,0 +1,1481 @@
+// Closed Prelude routing and ordinary MIR lowering for checked THandleOp nodes.
+// Special expression families stay owned by their structural codegen paths.
+
+struct JetCodegenHandleRoute {
+    pub family: MirPreludeFamily
+    pub module_name: String
+    pub member: String
+    pub symbol: String
+    pub borrow_mask: [Bool]
+    pub effect_kind: ?Effect
+    pub abi: MirPreludeAbi
+}
+fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect, abi: MirPreludeAbi) -> JetCodegenHandleRoute {
+    JetCodegenHandleRoute{family: family, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
+}
+fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect) -> JetCodegenHandleRoute {
+    jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
+}
+fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect) -> JetCodegenHandleRoute {
+    jet_codegen_handle_route(MirPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
+}
+
+
+fn jet_codegen_handle_type_without_tags(ty: Type) -> Type {
+    if ty == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_handle_type_without_tags(inner)
+        else -> return ty
+    }
+}
+
+fn jet_codegen_handle_task_route(receiver: Type) -> JetCodegenHandleRoute {
+    task_type := jet_codegen_handle_type_without_tags(receiver)
+    if task_type == {
+        .Apply(name, args) -> {
+            if name != "Task" || args.len() != 1 -> panic("checked task join has an unsupported receiver type")
+            symbol := if args[0] == {
+                .Result(_, _) -> "jet_std::jet_task_join_result"
+                else -> "jet_std::JetTask::join"
+            }
+            return jet_codegen_handle_core("core.tasks", "join", symbol, [Bool]{false}, None)
+        }
+        else -> panic("checked task join has an unsupported receiver type")
+    }
+}
+
+fn jet_codegen_handle_allocator_name(receiver: Type) -> String {
+    if jet_codegen_handle_type_without_tags(receiver) == {
+        .Named(name) -> {
+            if name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed" -> return name
+        }
+        else -> {}
+    }
+    panic("checked allocator method has no allocator receiver")
+}
+
+fn jet_codegen_handle_nominal_name(ty: Type) -> String {
+    if jet_codegen_handle_type_without_tags(ty) == {
+        .Named(name) | .Apply(name, _) -> return name
+        else -> panic("checked route requires a nominal receiver type")
+    }
+}
+
+fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+    name := jet_codegen_handle_nominal_name(receiver)
+    if name == {
+        "Event" | "AsyncEvent" | "Hook" | "DecisionHook" | "Subscription" | "EventScope" | "EventTrace" | "DispatchReport" -> {}
+        else -> return None
+    }
+    symbol := ""
+    mask := [Bool]{}
+    if name == {
+        "Event" -> {
+            if method == {
+                "on" | "once" -> {
+                    symbol = "jet_std::JetEvent::{method}"
+                    mask = [Bool]{true, true, false}
+                }
+                "on_priority" -> {
+                    symbol = "jet_std::JetEvent::on_priority"
+                    mask = [Bool]{true, true, false, false}
+                }
+                "emit" -> {
+                    symbol = "jet_std::JetEvent::emit"
+                    mask = [Bool]{true, false}
+                }
+                "listener_count" | "trace" -> {
+                    symbol = "jet_std::JetEvent::{method}"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "AsyncEvent" -> {
+            if method == {
+                "on" | "once" -> {
+                    symbol = "jet_std::JetAsyncEvent::{method}"
+                    mask = [Bool]{true, true, false}
+                }
+                "on_priority" -> {
+                    symbol = "jet_std::JetAsyncEvent::on_priority"
+                    mask = [Bool]{true, true, false, false}
+                }
+                "emit_async" -> {
+                    symbol = if carrier == {
+                        .Result(_, _) -> "jet_std::JetAsyncEvent::emit_async_result"
+                        else -> "jet_std::JetAsyncEvent::emit_async"
+                    }
+                    mask = [Bool]{true, false}
+                }
+                "close" | "listener_count" | "queued_count" | "running_count" | "blocked_count" -> {
+                    symbol = "jet_std::JetAsyncEvent::{method}"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "Hook" -> {
+            if method == {
+                "on" | "once" -> {
+                    symbol = "jet_std::JetHook::{method}"
+                    mask = [Bool]{true, true, false}
+                }
+                "on_priority" -> {
+                    symbol = "jet_std::JetHook::on_priority"
+                    mask = [Bool]{true, true, false, false}
+                }
+                "run" -> {
+                    symbol = "jet_std::JetHook::run"
+                    mask = [Bool]{true, false, false}
+                }
+                "listener_count" | "trace" -> {
+                    symbol = "jet_std::JetHook::{method}"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "DecisionHook" -> {
+            if method == {
+                "on" | "once" -> {
+                    symbol = "jet_std::JetDecisionHook::{method}"
+                    mask = [Bool]{true, true, false}
+                }
+                "on_priority" -> {
+                    symbol = "jet_std::JetDecisionHook::on_priority"
+                    mask = [Bool]{true, true, false, false}
+                }
+                "run" -> {
+                    symbol = "jet_std::JetDecisionHook::run"
+                    mask = [Bool]{true, false}
+                }
+                "listener_count" -> {
+                    symbol = "jet_std::JetDecisionHook::listener_count"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "Subscription" -> {
+            if method == {
+                "unsubscribe" -> {
+                    symbol = "jet_std::JetSubscription::unsubscribe"
+                    mask = [Bool]{true}
+                }
+                "is_active" -> {
+                    symbol = "jet_std::JetSubscription::active"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "EventScope" -> {
+            if method == {
+                "cancel" -> {
+                    symbol = "jet_std::JetEventScope::cancel"
+                    mask = [Bool]{true}
+                }
+                "active_count" -> {
+                    symbol = "jet_std::JetEventScope::active_count"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "EventTrace" -> {
+            if method == {
+                "summary" | "delivered" | "queued" | "dropped" -> {
+                    symbol = "jet_std::JetEventTrace::{method}"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        "DispatchReport" -> {
+            if method == {
+                "state" | "accepted" | "failures" | "trace" -> {
+                    symbol = "jet_std::JetDispatchReport::{method}"
+                    mask = [Bool]{true}
+                }
+                "delivered_handlers" -> {
+                    symbol = "jet_std::JetDispatchReport::delivered_handlers"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+    Val(jet_codegen_handle_route(MirPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MirPreludeAbi.Value))
+}
+
+fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+    name := if jet_codegen_handle_type_without_tags(receiver) == {
+        .Named(value) -> value
+        else -> {
+            return None
+        }
+    }
+    if name == "WatchHandle" {
+        if method == {
+            "poll" | "events" -> return Val(jet_codegen_handle_h("watch.poll", "jet_jit_watch_poll", [Bool]{true}, Val(Effect.IO)))
+            "cancel" -> return Val(jet_codegen_handle_h("watch.cancel", "jet_jit_watch_cancel", [Bool]{true}, Val(Effect.IO)))
+            "is_active" -> return Val(jet_codegen_handle_h("watch.is_active", "jet_jit_watch_is_active", [Bool]{true}, None))
+            "summary" -> return Val(jet_codegen_handle_h("watch.summary", "jet_jit_watch_summary", [Bool]{true}, None))
+            "on" | "once" -> return Val(jet_codegen_handle_route(MirPreludeFamily.ClosureMethod, "core.watcher", method, "jet_jit_watch_{method}", [Bool]{true, true, false}, Val(Effect.IO), MirPreludeAbi.Value))
+            else -> return None
+        }
+    }
+    if name == "WatchSet" {
+        if method == {
+            "add" -> return Val(jet_codegen_handle_h("watchset.add", "jet_jit_watchset_add", [Bool]{true, true}, Val(Effect.IO)))
+            "poll" | "events" -> return Val(jet_codegen_handle_h("watchset.poll", "jet_jit_watchset_poll", [Bool]{true}, Val(Effect.IO)))
+            "summary" -> return Val(jet_codegen_handle_h("watchset.summary", "jet_jit_watchset_summary", [Bool]{true}, None))
+            else -> return None
+        }
+    }
+    None
+}
+
+fn jet_codegen_handle_reactive_name(ty: Type) -> ?String {
+    return if ty == {
+        .Tagged(_, inner) -> jet_codegen_handle_reactive_name(inner)
+        .Named(name) | .Apply(name, _) -> Val(name)
+        else -> None
+    }
+}
+
+fn jet_codegen_handle_reactive_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+    name := jet_codegen_handle_reactive_name(receiver) ?? return None
+    if name == "Signal" && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None, MirPreludeAbi.Value))
+    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None, MirPreludeAbi.Value))
+    if name == "Signal" && method == "set" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None, MirPreludeAbi.Value))
+    None
+}
+
+fn jet_codegen_handle_precise_route(type_name: String, method: String) -> ?JetCodegenHandleRoute {
+    arity := if method == {
+        "add" | "sub" | "mul" | "div" | "equal" | "compare" -> 2
+        "to_string" | "numerator" | "denominator" | "to_float" | "is_zero" -> 1
+        else -> {
+            return None
+        }
+    }
+    type_key := jet_codegen_precise_type_key(type_name)
+    mask := if arity == 2 -> [Bool]{true, true} else -> [Bool]{true}
+    Val(jet_codegen_handle_route(MirPreludeFamily.PreciseBuiltin, type_name, method, "jet_{type_key}_{method}", mask, None, MirPreludeAbi.Value))
+}
+
+fn jet_codegen_handle_is_simd_lane_type(name: String) -> Bool {
+    if name == {
+        "F32x4" | "F64x2" | "F32x8" | "F64x4" | "I8x16" | "I16x8" | "I32x4" | "I64x2" |
+        "U8x16" | "U16x8" | "U32x4" | "U64x2" | "I8x32" | "I16x16" | "I32x8" | "I64x4" |
+        "U8x32" | "U16x16" | "U32x8" | "U64x4" -> {
+            true
+        }
+        else -> {
+            false
+        }
+    }
+}
+
+fn jet_codegen_handle_is_geometry_type(name: String) -> Bool {
+    if name == {
+        "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
+        "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> {
+            true
+        }
+        else -> {
+            false
+        }
+    }
+}
+
+fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: ?String) -> ?JetCodegenHandleRoute {
+    suffix := ""
+    if {
+        method == "reduce" -> {
+            suffix = if reduce_op == {
+                (Val("Add")) -> "reduce_add"
+                (Val("Mul")) -> "reduce_mul"
+                (Val("Min")) -> "reduce_min"
+                (Val("Max")) -> "reduce_max"
+                (Val("Avg")) -> "reduce_avg"
+                else -> {
+                    return None
+                }
+            }
+        }
+        reduce_op != None -> {
+            return None
+        }
+        jet_codegen_handle_is_geometry_type(type_name) -> {
+            if method == {
+                "add" | "sub" | "then" | "ray" | "inverse" | "point" | "point_at_depth" -> suffix = method
+                else -> return None
+            }
+        }
+        jet_codegen_handle_is_simd_lane_type(type_name) -> {
+            if method == {
+                "to_array" | "sum" | "product" | "min" | "max" -> suffix = method
+                else -> return None
+            }
+        }
+        type_name == "Vec2" || type_name == "Vec3" || type_name == "Vec4" -> {
+            if method == {
+                "to_array" | "length" | "normalize" | "dot" -> suffix = method
+                else -> {
+                    if {
+                        type_name == "Vec3" && method == "cross" -> {
+                            suffix = "cross"
+                        }
+                        else -> {
+                            return None
+                        }
+                    }
+                }
+            }
+        }
+        type_name == "Mat3" || type_name == "Mat4" -> {
+            if method == {
+                "to_array" | "transpose" | "matmul" | "transform" -> suffix = method
+                else -> return None
+            }
+        }
+        else -> {
+            return None
+        }
+    }
+    arity := if {
+        suffix == "point_at_depth" -> {
+            3
+        }
+        suffix == "dot" || suffix == "cross" || suffix == "matmul" || suffix == "transform" || suffix == "add" || suffix == "sub" || suffix == "then" || suffix == "ray" || suffix == "point" -> {
+            2
+        }
+        else -> {
+            1
+        }
+    }
+    mask := if {
+        arity == 1 -> [Bool]{true}
+        arity == 2 -> [Bool]{true, false}
+        else -> [Bool]{true, false, false}
+    }
+    if jet_codegen_handle_is_geometry_type(type_name) -> return Val(jet_codegen_handle_route(MirPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None, MirPreludeAbi.Value))
+    Val(jet_codegen_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
+}
+
+fn jet_codegen_handle_measurement_route(method: String) -> ?JetCodegenHandleRoute {
+    if method == {
+        "value" -> return Val(jet_codegen_handle_h("Measurement.value", "jet_std::JetMeasurement::value", [Bool]{true}, None))
+        "uncertainty" -> return Val(jet_codegen_handle_h("Measurement.uncertainty", "jet_std::JetMeasurement::uncertainty", [Bool]{true}, None))
+        "add" | "sub" | "mul" | "div" -> return Val(jet_codegen_handle_h("Measurement.{method}", "jet_std::JetMeasurement::{method}", [Bool]{true, false}, None))
+        "sqrt" -> return Val(jet_codegen_handle_h("Measurement.sqrt", "jet_std::JetMeasurement::sqrt", [Bool]{true}, None))
+        else -> return None
+    }
+}
+
+fn jet_codegen_handle_layout_route(method: String) -> ?JetCodegenHandleRoute {
+    if method == {
+        "h" | "v" | "suggest" -> return Val(jet_codegen_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true, false, false}, None))
+        "value" -> return Val(jet_codegen_handle_core("core.layout", "layout.value", "jet_layout::Handle::value", [Bool]{true, false}, None))
+        "is_feasible" | "conflict" -> return Val(jet_codegen_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true}, None))
+        "required" | "strong" | "medium" | "weak" -> return Val(jet_codegen_handle_core("core.layout", "layout.{method}", "jet_layout::Constraint::{method}", [Bool]{false}, None))
+        else -> return None
+    }
+}
+
+fn jet_codegen_handle_loadable_route(method: String) -> ?JetCodegenHandleRoute {
+    if method == {
+        "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> return Val(jet_codegen_handle_core("core.pending", "loadable.{method}", "JetLoadable::{method}", [Bool]{true}, None))
+        "or_else" -> return Val(jet_codegen_handle_core("core.pending", "loadable.or_else", "JetLoadable::or_else", [Bool]{true, false}, None))
+        else -> return None
+    }
+}
+
+fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+    if receiver == {
+        .Named(_) | .Apply(_, _) -> {}
+        else -> return None
+    }
+    raw_name := jet_codegen_handle_nominal_name(receiver)
+    pieces := raw_name.split("::")
+    name := if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> raw_name
+    pieces = name.split(".")
+    name = if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> name
+    backend := if name == {
+        "NullBackend" -> "JetNullBackend"
+        "TuiBackend" -> "JetTuiBackend"
+        "GtkBackend" -> "JetGtkBackend"
+        else -> {
+            return None
+        }
+    }
+    member := ""
+    if method == {
+        "measure" -> member = "measure_node"
+        "layout" -> member = "layout_node"
+        "paint" -> member = "paint_node"
+        "on_event" -> member = "dispatch_event"
+        "mount_default" -> member = "mount_node_default"
+        "mount" -> member = "mount_node"
+        "set_focus_group" -> member = "set_focus_group"
+        "focused_label" -> member = "focused_label"
+        else -> {}
+    }
+    if method == "commands" && name == "NullBackend" -> member = "paint_commands"
+    if (method == "frame_lines" || method == "render_count") && name == "TuiBackend" -> member = method
+    if method == "present" && name == "GtkBackend" -> member = "present"
+    if member == "" -> return None
+    mask := if method == {
+        "measure" | "layout" | "mount" -> [Bool]{true, false, false}
+        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, false}
+        else -> [Bool]{true}
+    }
+    Val(jet_codegen_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
+}
+
+fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> ?JetCodegenHandleRoute {
+    arity := if {
+        (sketch == "HyperLogLog" && method == "add") || (sketch == "CountMinSketch" && (method == "add" || method == "count")) -> {
+            2
+        }
+        (sketch == "HyperLogLog" && method == "count") || (sketch == "ReservoirSampler" && method == "sample") -> {
+            1
+        }
+        (sketch == "TDigest" && (method == "add" || method == "quantile")) || (sketch == "ReservoirSampler" && method == "add") -> {
+            2
+        }
+        else -> {
+            return None
+        }
+    }
+    mask := if {
+        arity == 1 -> [Bool]{true}
+        sketch == "TDigest" || sketch == "ReservoirSampler" -> [Bool]{true, false}
+        else -> [Bool]{true, true}
+    }
+    Val(jet_codegen_handle_h("{sketch}.{method}", "Jet{sketch}::{method}", mask, None))
+}
+
+fn jet_codegen_handle_regex_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+    symbol := ""
+    if {
+        kind == "Regex" -> {
+            if method == {
+                "pattern" | "source" | "flags" | "options" | "names" -> symbol = "jet_std::JetRegex::{method}"
+                "count" | "is_match" | "full_match" | "find" | "find_all" | "matches" | "split" -> symbol = "jet_std::JetRegex::{method}"
+                "match" -> symbol = "jet_std::JetRegex::match_value"
+                "replace" | "replace_first" | "replace_all_with" | "split_limit" -> symbol = "jet_std::JetRegex::{method}"
+                else -> return None
+            }
+        }
+        kind == "Match" -> {
+            if method == {
+                "start" | "end" | "named_captures" -> symbol = "jet_std::JetRegexMatch::{method}"
+                "group" -> symbol = "jet_std::JetRegexMatch::group"
+                "name" -> symbol = "jet_std::JetRegexMatch::name"
+                "group_start" | "group_end" -> symbol = "jet_std::JetRegexMatch::{method}"
+                else -> return None
+            }
+        }
+        else -> {
+            return None
+        }
+    }
+    mask := if {
+        kind == "Match" -> {
+            if method == {
+                "group" | "group_start" | "group_end" -> [Bool]{true, false}
+                "name" -> [Bool]{true, true}
+                else -> [Bool]{true}
+            }
+        }
+        else -> {
+            if method == {
+                "pattern" | "source" | "flags" | "options" | "names" | "start" | "end" | "named_captures" -> [Bool]{true}
+                "replace" | "replace_first" -> [Bool]{true, true, true}
+                "replace_all_with" | "split_limit" -> [Bool]{true, true, false}
+                else -> [Bool]{true, true}
+            }
+        }
+    }
+    Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
+}
+
+fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+    symbol := ""
+    if {
+        kind == "Url" -> {
+            if method == {
+                "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs" | "fragment" | "normalize" | "username" | "password" | "userinfo" | "authority" | "default_port" -> {
+                    symbol = "jet_std::JetURL::{method}"
+                }
+                "to_string" -> {
+                    symbol = "jet_std::JetURL::to_string_value"
+                }
+                "join" | "set_query" | "add_query" -> {
+                    symbol = "jet_std::JetURL::{method}"
+                }
+                else -> {
+                    return None
+                }
+            }
+        }
+        kind == "Mime" -> {
+            if method == {
+                "media_type" | "subtype" | "essence" | "params" -> {
+                    symbol = "jet_std::JetMIME::{method}"
+                }
+                "to_string" -> {
+                    symbol = "jet_std::JetMIME::to_string_value"
+                }
+                "param" -> {
+                    symbol = "jet_std::JetMIME::param"
+                }
+                else -> {
+                    return None
+                }
+            }
+        }
+        else -> {
+            return None
+        }
+    }
+    mask := [Bool]{true}
+    if {
+        kind == "Mime" -> {
+            if method == "param" -> mask = [Bool]{true, true}
+        }
+        method == "join" -> {
+            mask = [Bool]{true, true}
+        }
+        method == "set_query" || method == "add_query" -> {
+            mask = [Bool]{true, true, true}
+        }
+    }
+    Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
+}
+
+fn jet_codegen_handle_devserver_route(method: String) -> ?JetCodegenHandleRoute {
+    if method == {
+        "html" | "port" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_{method}", [Bool]{true, false}, None))
+        "serve" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_serve", [Bool]{true}, Val(Effect.Net)))
+        else -> return None
+    }
+}
+
+fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> ?JetCodegenHandleRoute {
+    arity := 0
+    if method == {
+        "route" | "page" | "layout" | "form" -> {
+            if {
+                source_arg_count == 2 -> arity = 4
+                else -> {}
+            }
+        }
+        "loader" -> {
+            if {
+                source_arg_count == 2 -> arity = 4
+                source_arg_count == 3 -> arity = 5
+                else -> {}
+            }
+        }
+        "pending" | "not_found" | "error" -> {
+            if {
+                source_arg_count == 1 -> arity = 2
+                else -> {}
+            }
+        }
+        "action" -> {
+            if {
+                source_arg_count == 2 -> arity = 3
+                else -> {}
+            }
+        }
+        "data" -> {
+            if {
+                source_arg_count == 2 -> arity = 3
+                else -> {}
+            }
+        }
+        "mount" -> {
+            if {
+                source_arg_count == 2 -> arity = 3
+                source_arg_count == 3 -> arity = 4
+                source_arg_count == 4 -> arity = 5
+                else -> {}
+            }
+        }
+        "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" -> {
+            if {
+                source_arg_count == 1 -> arity = 2
+                else -> {}
+            }
+        }
+        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" | "facts_json" -> {
+            if {
+                source_arg_count == 0 -> arity = 1
+                else -> {}
+            }
+        }
+        "serve" -> {
+            if {
+                source_arg_count == 0 -> arity = 1
+                source_arg_count == 1 -> arity = 2
+                else -> {}
+            }
+        }
+        "serve_on" -> {
+            if {
+                source_arg_count == 1 -> arity = 2
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    if arity == 0 -> return None
+    mask := [Bool]{}
+    index := 0
+    loop index < arity {
+        mask.push(index == 0)
+        index += 1
+    }
+    route_effect := if method == "serve" || method == "serve_on" -> Val(Effect.Net) else -> None
+    symbol := "jet_app_{method}"
+    if method == "loader" && source_arg_count == 3 -> symbol = "jet_app_loader_preload"
+    if method == "mount" && source_arg_count == 3 -> symbol = "jet_app_mount_with_effect"
+    if method == "mount" && source_arg_count == 4 -> symbol = "jet_app_mount_with_policy"
+    if method == "serve" && source_arg_count == 1 -> symbol = "jet_app_serve_with_port"
+    Val(jet_codegen_handle_core("core.web.app", method, symbol, mask, route_effect))
+}
+
+fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+    is_date := kind == "Date" || kind == "LocalDate"
+    prefix := if {
+        is_date -> {
+            "JetDate"
+        }
+        kind == "LocalTime" -> {
+            "JetLocalTime"
+        }
+        kind == "DateTime" -> {
+            "JetDateTime"
+        }
+        kind == "Instant" -> {
+            "JetInstant"
+        }
+        kind == "Period" -> {
+            "JetPeriod"
+        }
+        kind == "Zone" -> {
+            "JetZone"
+        }
+        kind == "ZonedDateTime" -> {
+            "JetZonedDateTime"
+        }
+        else -> {
+            return None
+        }
+    }
+    valid := if {
+        is_date -> {
+            if method == {
+                "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week" | "iso_week_year" |
+                "quarter_of_year" | "days_in_month" | "is_leap_year" | "to_string" | "add_days" | "add_months" |
+                "add_period" | "subtract_period" | "diff_days" | "truncate" | "replace" | "format" | "format_checked" |
+                "until" | "since" | "with" | "equal" | "compare" -> true
+                else -> false
+            }
+        }
+        kind == "LocalTime" -> {
+            if method == {
+                "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_string" |
+                "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil" | "until" |
+                "since" | "format" | "format_checked" | "equal" | "compare" -> true
+                else -> false
+            }
+        }
+        kind == "DateTime" -> {
+            if method == {
+                "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond" | "to_timestamp" |
+                "to_unix_ms" | "to_unix_s" | "to_unix_us" | "to_unix_ns" | "date" | "time" | "to_string" |
+                "format_rfc3339" | "format" | "format_checked" | "plus_duration" | "subtract_duration" |
+                "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "until" | "since" |
+                "truncate" | "round" | "floor" | "ceil" | "replace" | "in_zone" | "with" | "equal" | "compare" -> true
+                else -> false
+            }
+        }
+        kind == "Instant" -> {
+            if method == { "elapsed_millis" | "elapsed" | "equal" | "compare" -> true else -> false }
+        }
+        kind == "Period" -> {
+            if method == { "years" | "months" | "days" | "sign" | "is_zero" | "abs" | "negated" | "add" | "sub" | "total_in" | "to_string" -> true else -> false }
+        }
+        kind == "Zone" -> {
+            if method == { "name" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day" -> true else -> false }
+        }
+        else -> {
+            if method == {
+                "date" | "time" | "offset_seconds" | "is_dst" | "to_datetime" | "zone" | "to_string" | "format" |
+                "format_rfc9557" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" |
+                "subtract_period" | "with_time" | "with_zone" | "until" | "since" | "next_transition" |
+                "previous_transition" | "start_of_day" | "hours_in_day" | "equal" | "compare" -> true
+                else -> false
+            }
+        }
+    }
+    if !valid -> return None
+
+    member := "{kind}.{method}"
+    symbol_method := method
+    if method == "to_string" -> symbol_method = "to_string_fmt"
+    if method == "format" -> symbol_method = "format_pattern"
+    if method == "format_checked" -> symbol_method = "format_checked_text"
+    if method == "equal" -> symbol_method = "equal_value"
+    if method == "compare" -> symbol_method = "compare_value"
+    if method == "until" -> symbol_method = "until_duration"
+    if method == "since" -> symbol_method = "since_duration"
+    if {
+        is_date -> {
+            if method == "add_period" -> symbol_method = "add_period_value"
+            if method == "subtract_period" -> symbol_method = "subtract_period_value"
+            if method == "diff_days" -> symbol_method = "diff_days_value"
+            if method == "with" -> symbol_method = "with_overflow"
+        }
+        kind == "LocalTime" -> {
+            if method == "add_duration" -> symbol_method = "add_duration_value"
+            if method == "subtract_duration" -> symbol_method = "subtract_duration_value"
+            if method == "round" -> symbol_method = "round_with"
+            if method == "truncate" || method == "floor" || method == "ceil" -> symbol_method = "{method}_with"
+        }
+        kind == "DateTime" -> {
+            if method == "to_unix_ms" -> symbol_method = "to_unix_ms_value"
+            if method == "to_unix_s" -> symbol_method = "to_unix_seconds_value"
+            if method == "to_unix_us" -> symbol_method = "to_unix_microseconds_value"
+            if method == "to_unix_ns" -> symbol_method = "to_unix_nanoseconds_value"
+            if method == "time" -> symbol_method = "time_for_output"
+            if method == "plus_duration" -> symbol_method = "plus_duration_value"
+            if method == "subtract_duration" -> symbol_method = "subtract_duration_value"
+            if method == "difference" -> symbol_method = "difference_duration"
+            if method == "add_period" -> symbol_method = "add_period_value"
+            if method == "subtract_period" -> symbol_method = "subtract_period_value"
+            if method == "truncate" || method == "floor" || method == "ceil" -> symbol_method = "{method}_with"
+            if method == "round" -> symbol_method = "round_with"
+            if method == "in_zone" -> symbol_method = "in_zone_value"
+            if method == "with" -> symbol_method = "with_overflow"
+        }
+        kind == "Instant" -> {
+            if method == "elapsed" -> symbol_method = "elapsed_duration"
+        }
+        kind == "Period" -> {
+            if method == "years" || method == "months" || method == "days" -> symbol_method = "{method}_value"
+            if method == "add" -> symbol_method = "add_value"
+            if method == "sub" -> symbol_method = "sub_value"
+            if method == "total_in" -> symbol_method = "total_in_value"
+        }
+        kind == "Zone" -> {
+            if method == "next_transition" || method == "previous_transition" || method == "start_of_day" || method == "hours_in_day" -> symbol_method = "{method}_value"
+        }
+        else -> {
+            if method == "add_duration" -> symbol_method = "add_duration_value"
+            if method == "subtract_duration" -> symbol_method = "subtract_duration_value"
+            if method == "add_period" -> symbol_method = "add_period_value"
+            if method == "subtract_period" -> symbol_method = "subtract_period_value"
+            if method == "next_transition" || method == "previous_transition" -> symbol_method = "{method}_value"
+        }
+    }
+    if kind == "DateTime" && method == "to_string" || kind == "LocalTime" && method == "to_string" || kind == "Date" && method == "to_string" || kind == "LocalDate" && method == "to_string" || kind == "ZonedDateTime" && method == "to_string" || kind == "Period" && method == "to_string" {
+        symbol_method = "to_string_fmt"
+    }
+    if kind == "DateTime" && method == "format_rfc3339" -> symbol_method = "format_rfc3339"
+    if kind == "ZonedDateTime" && method == "format_rfc9557" -> symbol_method = "format_rfc9557"
+    if kind == "ZonedDateTime" && (method == "start_of_day" || method == "hours_in_day") -> symbol_method = method
+    if kind == "ZonedDateTime" && method == "with_time" || kind == "ZonedDateTime" && method == "with_zone" -> symbol_method = method
+    if kind == "DateTime" && method == "date" -> symbol_method = "date"
+    if kind == "ZonedDateTime" && (method == "date" || method == "time" || method == "offset_seconds" || method == "is_dst" || method == "to_datetime" || method == "zone") -> symbol_method = method
+
+    arity := 1
+    if {
+        is_date -> {
+            if method == {
+                "add_days" | "add_months" | "add_period" | "subtract_period" | "diff_days" | "truncate" | "format" | "format_checked" | "equal" | "compare" -> arity = 2
+                "replace" -> arity = 4
+                "until" | "since" -> arity = 6
+                "with" -> arity = 5
+                else -> {}
+            }
+        }
+        kind == "LocalTime" -> {
+            if method == {
+                "add_duration" | "subtract_duration" | "format" | "format_checked" | "equal" | "compare" -> arity = 2
+                "round" -> arity = 4
+                "truncate" | "floor" | "ceil" -> arity = 3
+                "until" | "since" -> arity = 6
+                else -> {}
+            }
+        }
+        kind == "DateTime" -> {
+            if method == {
+                "format" | "format_checked" | "plus_duration" | "subtract_duration" | "add_nanoseconds" | "difference" | "add_period" | "subtract_period" | "in_zone" | "equal" | "compare" -> arity = 2
+                "until" | "since" -> arity = 6
+                "truncate" | "floor" | "ceil" -> arity = 3
+                "round" -> arity = 4
+                "replace" -> arity = 7
+                "with" -> arity = 8
+                else -> {}
+            }
+        }
+        kind == "Instant" -> {
+            if method == "equal" || method == "compare" -> arity = 2
+        }
+        kind == "Period" -> {
+            if method == "add" || method == "sub" -> arity = 2
+            if method == "total_in" -> arity = 3
+        }
+        kind == "Zone" -> {
+            if method != "name" -> arity = 2
+        }
+        kind == "ZonedDateTime" -> {
+            if method == {
+                "format" | "format_checked" | "add_duration" | "subtract_duration" | "add_period" | "subtract_period" | "with_zone" | "equal" | "compare" -> arity = 2
+                "with_time" -> arity = 3
+                "until" | "since" -> arity = 6
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+
+    mask := [Bool]{}
+    index := 0
+    loop index < arity {
+        mask.push(index == 0)
+        index += 1
+    }
+
+    if arity == 2 && (method == "format" || method == "format_checked" || method == "truncate") -> mask = [Bool]{true, true}
+    if arity == 6 && (method == "until" || method == "since") -> mask = [Bool]{true, false, true, true, true, false}
+    if is_date && method == "with" -> mask = [Bool]{true, false, false, false, true}
+    if kind == "LocalTime" && method == "round" -> mask = [Bool]{true, true, false, true}
+    if kind == "LocalTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
+    if kind == "DateTime" && method == "replace" -> mask = [Bool]{true, false, false, false, false, false, false}
+    if kind == "DateTime" && method == "with" -> mask = [Bool]{true, false, false, false, false, false, false, true}
+    if kind == "DateTime" && method == "round" -> mask = [Bool]{true, true, false, true}
+    if kind == "DateTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
+    if kind == "Period" && method == "total_in" -> mask = [Bool]{true, true, true}
+    if kind == "ZonedDateTime" && method == "with_time" -> mask = [Bool]{true, true, true}
+    Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.time", member, "{prefix}::{symbol_method}", mask, None, MirPreludeAbi.Value))
+}
+
+fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+    if operation == {
+        .HTTPServerMethod(kind, method) -> {
+            route :: jet_codegen_browser_handle_route(kind, method, argument_count, true)
+            if route != None -> return route
+        }
+        .HTTPClientMethod(kind, method) -> {
+            route :: jet_codegen_browser_handle_route(kind, method, argument_count, false)
+            if route != None -> return route
+        }
+        else -> {}
+    }
+    if operation == {
+        .AllocAlloc | .AllocTryAlloc | .AllocReset -> {
+            allocator := jet_codegen_handle_allocator_name(receiver)
+            member := "alloc"
+            symbol := "jet_mem::Jet{allocator}::alloc"
+            mask := [Bool]{true, false}
+            if operation == {
+                .AllocTryAlloc -> {
+                    member = "try_alloc"
+                    symbol = "jet_mem::Jet{allocator}::try_alloc"
+                }
+                .AllocReset -> {
+                    member = "reset"
+                    symbol = "jet_mem::Jet{allocator}::reset"
+                    mask = [Bool]{true}
+                }
+                else -> {}
+            }
+            return Val(jet_codegen_handle_h("{allocator}.{member}", symbol, mask, Val(Effect.Mem)))
+        }
+        .ReactiveGet -> return jet_codegen_handle_reactive_route(receiver, "get")
+        .ReactiveSet -> return jet_codegen_handle_reactive_route(receiver, "set")
+        .TaskJoin -> return Val(jet_codegen_handle_task_route(receiver))
+        .PreciseMethod(type_name, method) -> return jet_codegen_handle_precise_route(type_name, method)
+        .MathMethod(type_name, method, reduce_op) -> return jet_codegen_handle_math_route(type_name, method, reduce_op)
+        .EventMethod(method) -> return jet_codegen_handle_event_route(receiver, method, carrier)
+        .WatchMethod(method, _) -> return jet_codegen_handle_watch_route(receiver, method)
+        .MeasurementMethod(method) -> return jet_codegen_handle_measurement_route(method)
+        .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
+        .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
+        .UiBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
+        .SketchMethod(sketch, method) -> return jet_codegen_handle_sketch_route(sketch, method)
+        .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
+        .UrlMimeMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
+        .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
+        .DevServerMethod(method) -> return jet_codegen_handle_devserver_route(method)
+        .AppMethod(method, source_arg_count) -> return jet_codegen_handle_app_route(method, source_arg_count)
+        .ProcessChildMethod(method) -> {
+            if method == {
+                "id" -> return Val(jet_codegen_handle_h("process.child.id", "jet_process_child_id", [Bool]{true}, None))
+                "wait" -> return Val(jet_codegen_handle_h("process.child.wait", "jet_process_child_wait", [Bool]{true}, Val(Effect.Exec)))
+                "exited" -> return Val(jet_codegen_handle_h("process.child.exited", "jet_process_child_exited", [Bool]{true}, Val(Effect.Exec)))
+                "kill" -> return Val(jet_codegen_handle_h("process.child.kill", "jet_process_child_kill", [Bool]{true}, Val(Effect.Exec)))
+                "terminate" -> return Val(jet_codegen_handle_h("process.child.terminate", "jet_process_child_terminate", [Bool]{true}, Val(Effect.Exec)))
+                "interrupt" -> return Val(jet_codegen_handle_h("process.child.interrupt", "jet_process_child_interrupt", [Bool]{true}, Val(Effect.Exec)))
+                else -> return None
+            }
+        }
+        .ProcessSpecMethod(method, declared_count) -> {
+            if declared_count != argument_count -> return None
+            if method == {
+                "cwd" -> return Val(jet_codegen_handle_h("process.spec.cwd", "jet_process_spec_cwd", [Bool]{false, true}, None))
+                "arg" -> return Val(jet_codegen_handle_h("process.spec.arg", "jet_process_spec_arg", [Bool]{false, true}, None))
+                "args_extend" -> return Val(jet_codegen_handle_h("process.spec.args_extend", "jet_process_spec_args_extend", [Bool]{false, true}, None))
+                "env" -> return Val(jet_codegen_handle_h("process.spec.env", "jet_process_spec_env", [Bool]{false, true, true}, None))
+                "env_remove" -> return Val(jet_codegen_handle_h("process.spec.env_remove", "jet_process_spec_env_remove", [Bool]{false, true}, None))
+                "env_clear" -> return Val(jet_codegen_handle_h("process.spec.env_clear", "jet_process_spec_env_clear", [Bool]{false}, None))
+                "stdin" -> return Val(jet_codegen_handle_h("process.spec.stdin", "jet_process_spec_stdin", [Bool]{false, true}, None))
+                "stdout" -> return Val(jet_codegen_handle_h("process.spec.stdout", "jet_process_spec_stdout", [Bool]{false, true}, None))
+                "stderr" -> return Val(jet_codegen_handle_h("process.spec.stderr", "jet_process_spec_stderr", [Bool]{false, true}, None))
+                "timeout" -> return Val(jet_codegen_handle_h("process.spec.timeout", "jet_process_spec_timeout", [Bool]{false, true}, None))
+                "output_limit" -> return Val(jet_codegen_handle_h("process.spec.output_limit", "jet_process_spec_output_limit", [Bool]{false, false}, None))
+                "cpu_time_limit" -> return Val(jet_codegen_handle_h("process.spec.cpu_time_limit", "jet_process_spec_cpu_time_limit", [Bool]{false, true}, None))
+                "memory_limit" -> return Val(jet_codegen_handle_h("process.spec.memory_limit", "jet_process_spec_memory_limit", [Bool]{false, false}, None))
+                "open_file_limit" -> return Val(jet_codegen_handle_h("process.spec.open_file_limit", "jet_process_spec_open_file_limit", [Bool]{false, false}, None))
+                "detached" -> return Val(jet_codegen_handle_h("process.spec.detached", "jet_process_spec_detached", [Bool]{false}, None))
+                "terminal" -> {
+                    if argument_count == 0 -> return Val(jet_codegen_handle_h("process.spec.terminal", "jet_process_spec_terminal", [Bool]{false}, None))
+                    if argument_count == 1 -> return Val(jet_codegen_handle_h("process.spec.terminal_with_policy", "jet_process_spec_terminal_with_policy", [Bool]{false, true}, None))
+                    return None
+                }
+                "abilities" -> return Val(jet_codegen_handle_h("process.spec.abilities", "jet_process_spec_abilities", [Bool]{true}, None))
+                "under" -> return Val(jet_codegen_handle_h("process.spec.under", "jet_std_process_spec_under", [Bool]{false, true}, None))
+                "plan" -> return Val(jet_codegen_handle_h("process.spec.plan", "jet_process_spec_plan", [Bool]{true}, None))
+                "run" -> return Val(jet_codegen_handle_h("process.spec.run", "jet_process_spec_run", [Bool]{true}, Val(Effect.Exec)))
+                "run_checked" -> return Val(jet_codegen_handle_h("process.spec.run_checked", "jet_process_spec_run_checked", [Bool]{true}, Val(Effect.Exec)))
+                "spawn" -> return Val(jet_codegen_handle_h("process.spec.spawn", "jet_process_spec_spawn", [Bool]{true}, Val(Effect.Exec)))
+                else -> return None
+            }
+        }
+        .ExpiringMethod(method) -> {
+            if method == "get" -> return Val(jet_codegen_handle_h("expiring.get", "jet_expiring_get", [Bool]{true, true}, Val(Effect.Time)))
+            return None
+        }
+        .HTTPServerMethod(kind, method) -> {
+            if kind == "WsConn" {
+                if method == {
+                    "send_text" -> return Val(jet_codegen_handle_h("ws.send_text", "jet_ws_send_text", [Bool]{true, true}, Val(Effect.Net)))
+                    "send_bytes" -> return Val(jet_codegen_handle_h("ws.send_bytes", "jet_ws_send_binary", [Bool]{true, true}, Val(Effect.Net)))
+                    "close" -> return Val(jet_codegen_handle_h("ws.close", "jet_ws_close", [Bool]{true, false, true}, Val(Effect.Net)))
+                    else -> return None
+                }
+            }
+            if kind == "WsMessage" {
+                if method == {
+                    "is_text" -> return Val(jet_codegen_handle_h("ws.message_is_text", "jet_ws_message_is_text", [Bool]{true}, None))
+                    "is_binary" -> return Val(jet_codegen_handle_h("ws.message_is_binary", "jet_ws_message_is_binary", [Bool]{true}, None))
+                    "is_close" -> return Val(jet_codegen_handle_h("ws.message_is_close", "jet_ws_message_is_close", [Bool]{true}, None))
+                    "bytes" -> return Val(jet_codegen_handle_h("ws.message_bytes", "jet_ws_message_bytes", [Bool]{true}, None))
+                    else -> return None
+                }
+            }
+            if kind == "HTTPMux" && method == "middleware" -> return Val(jet_codegen_handle_h("http_mux.middleware", "jet_http_mux_middleware", [Bool]{true, false}, Val(Effect.Net)))
+            if kind == "HTTPServer" {
+                if method == {
+                    "local_addr" -> return Val(jet_codegen_handle_h("http_server.local_addr", "jet_http_server_local_addr", [Bool]{true}, Val(Effect.Net)))
+                    "serve" -> return Val(jet_codegen_handle_h("http_server.serve", "jet_http_server_serve", [Bool]{true}, Val(Effect.Net)))
+                    "wait" -> return Val(jet_codegen_handle_h("http_server.wait", "jet_http_server_wait", [Bool]{true}, Val(Effect.Net)))
+                    "shutdown" -> return Val(jet_codegen_handle_h("http_server.shutdown", "jet_http_server_shutdown", [Bool]{true, true}, Val(Effect.Net)))
+                    else -> return None
+                }
+            }
+            return None
+        }
+        else -> None
+    }
+}
+
+fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+    dynamic := jet_codegen_handle_dynamic_route(operation, receiver, argument_count, carrier)
+    if dynamic != None -> return dynamic
+    if operation == {
+        .DurationNew(unit, is_float) -> {
+            symbol := if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
+            return Val(jet_codegen_handle_core("core.time", "duration_new", symbol, [Bool]{false, false}, None))
+        }
+        .FileReaderReadLine -> return Val(jet_codegen_handle_h("file_reader.read_line", "jet_std_file_reader_read_line", [Bool]{true}, Val(Effect.FS)))
+        .FileReaderPath -> return Val(jet_codegen_handle_h("file_reader.path", "jet_std_file_reader_path", [Bool]{true}, None))
+        .MappedFileWindow -> return Val(jet_codegen_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, false, false}, Val(Effect.FS)))
+        .MappedFileWindowLen -> return Val(jet_codegen_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, false, false}, Val(Effect.FS)))
+        .MappedFileLines -> return Val(jet_codegen_handle_h("mapped_file.lines", "jet_std_fs_map_lines_view", [Bool]{true}, Val(Effect.FS)))
+        .MappedFileLen -> return Val(jet_codegen_handle_h("mapped_file.len", "jet_std_fs_map_len", [Bool]{true}, None))
+        .MappedFileIsEmpty -> return Val(jet_codegen_handle_h("mapped_file.is_empty", "jet_std_fs_map_is_empty", [Bool]{true}, None))
+        .FileWriterWriteLine -> return Val(jet_codegen_handle_h("file_writer.write_line", "jet_std_file_writer_write_line", [Bool]{true, true}, Val(Effect.FS)))
+        .FileWriterFlush -> return Val(jet_codegen_handle_h("file_writer.flush", "jet_std_file_writer_flush", [Bool]{true}, Val(Effect.FS)))
+        .FileWriterPath -> return Val(jet_codegen_handle_h("file_writer.path", "jet_std_file_writer_path", [Bool]{true}, None))
+        .JSONReaderNext -> return Val(jet_codegen_handle_h("json_reader.next", "jet_enc_json_reader_next", [Bool]{true}, Val(Effect.IO)))
+        .JSONWriterWrite -> return Val(jet_codegen_handle_h("json_writer.write", "jet_enc_json_writer_write", [Bool]{true, false}, Val(Effect.IO)))
+        .JSONWriterFlush -> return Val(jet_codegen_handle_h("json_writer.flush", "jet_enc_json_writer_flush", [Bool]{true}, Val(Effect.IO)))
+        .JSONWriterFinish -> return Val(jet_codegen_handle_h("json_writer.finish", "jet_enc_json_writer_finish", [Bool]{true}, Val(Effect.IO)))
+        .JSONLReaderNext -> return Val(jet_codegen_handle_h("jsonl_reader.next", "jet_enc_jsonl_reader_next", [Bool]{true}, Val(Effect.IO)))
+        .JSONLWriterWrite -> return Val(jet_codegen_handle_h("jsonl_writer.write", "jet_enc_jsonl_writer_write", [Bool]{true, false}, Val(Effect.IO)))
+        .JSONLWriterFlush -> return Val(jet_codegen_handle_h("jsonl_writer.flush", "jet_enc_jsonl_writer_flush", [Bool]{true}, Val(Effect.IO)))
+        .JSONLWriterFinish -> return Val(jet_codegen_handle_h("jsonl_writer.finish", "jet_enc_jsonl_writer_finish", [Bool]{true}, Val(Effect.IO)))
+        .CSVReaderNext -> return Val(jet_codegen_handle_h("csv_reader.next", "jet_enc_csv_reader_next", [Bool]{true}, Val(Effect.IO)))
+        .DataStreamNext -> return Val(jet_codegen_handle_h("data_stream.next", "jet_data_stream_next", [Bool]{true}, Val(Effect.IO)))
+        .StreamWithEventTime -> return Val(jet_codegen_handle_h("stream.with_event_time", "jet_stream_with_event_time", [Bool]{false, false}, Val(Effect.IO)))
+        .StreamWithEventTimeNs -> return Val(jet_codegen_handle_h("stream.with_event_time.datetime", "jet_stream_with_event_time_ns", [Bool]{false, false}, Val(Effect.IO)))
+        .StreamKeyBy -> return Val(jet_codegen_handle_h("stream.key_by", "jet_stream_key_by", [Bool]{false, false}, Val(Effect.IO)))
+        .StreamWindow -> return Val(jet_codegen_handle_h("stream.window", "jet_keyed_stream_window", [Bool]{false, false, false, false}, Val(Effect.IO)))
+        .XMLReaderNext -> return Val(jet_codegen_handle_h("xml_reader.next", "jet_enc_xml_reader_next", [Bool]{true}, Val(Effect.IO)))
+        .XMLWriterWrite -> return Val(jet_codegen_handle_h("xml_writer.write", "jet_enc_xml_writer_write", [Bool]{true, false}, Val(Effect.IO)))
+        .XMLWriterFlush -> return Val(jet_codegen_handle_h("xml_writer.flush", "jet_enc_xml_writer_flush", [Bool]{true}, Val(Effect.IO)))
+        .XMLWriterFinish -> return Val(jet_codegen_handle_h("xml_writer.finish", "jet_enc_xml_writer_finish", [Bool]{true}, Val(Effect.IO)))
+        .CSVWriterWrite -> return Val(jet_codegen_handle_h("csv_writer.write", "jet_enc_csv_writer_write", [Bool]{true, false}, Val(Effect.IO)))
+        .CSVWriterFlush -> return Val(jet_codegen_handle_h("csv_writer.flush", "jet_enc_csv_writer_flush", [Bool]{true}, Val(Effect.IO)))
+        .CSVWriterFinish -> return Val(jet_codegen_handle_h("csv_writer.finish", "jet_enc_csv_writer_finish", [Bool]{true}, Val(Effect.IO)))
+        .CBORReaderNext -> return Val(jet_codegen_handle_h("cbor_reader.next", "jet_enc_cbor_reader_next", [Bool]{true}, Val(Effect.IO)))
+        .CBORWriterWrite -> return Val(jet_codegen_handle_h("cbor_writer.write", "jet_enc_cbor_writer_write", [Bool]{true, false}, Val(Effect.IO)))
+        .CBORWriterFlush -> return Val(jet_codegen_handle_h("cbor_writer.flush", "jet_enc_cbor_writer_flush", [Bool]{true}, Val(Effect.IO)))
+        .CBORWriterFinish -> return Val(jet_codegen_handle_h("cbor_writer.finish", "jet_enc_cbor_writer_finish", [Bool]{true}, Val(Effect.IO)))
+        .StdinReadLine -> return Val(jet_codegen_handle_h("stdin.read_line", "jet_std_io_stdin_read_line", [Bool]{true}, Val(Effect.IO)))
+        .StdoutWrite -> return Val(jet_codegen_handle_h("stdout.write", "jet_std_io_stdout_write", [Bool]{true, true}, Val(Effect.IO)))
+        .StdoutWriteLine -> return Val(jet_codegen_handle_h("stdout.write_line", "jet_std_io_stdout_write_line", [Bool]{true, true}, Val(Effect.IO)))
+        .StdoutWriteBytes -> return Val(jet_codegen_handle_h("stdout.write_bytes", "jet_std_io_stdout_write_bytes", [Bool]{true, true}, Val(Effect.IO)))
+        .StdoutFlush -> return Val(jet_codegen_handle_h("stdout.flush", "jet_std_io_stdout_flush", [Bool]{true}, Val(Effect.IO)))
+        .StdoutIsTty -> return Val(jet_codegen_handle_h("stdout.is_tty", "jet_std_io_stdout_is_tty", [Bool]{true}, Val(Effect.IO)))
+        .StderrWrite -> return Val(jet_codegen_handle_h("stderr.write", "jet_std_io_stderr_write", [Bool]{true, true}, Val(Effect.IO)))
+        .StderrWriteLine -> return Val(jet_codegen_handle_h("stderr.write_line", "jet_std_io_stderr_write_line", [Bool]{true, true}, Val(Effect.IO)))
+        .StderrWriteBytes -> return Val(jet_codegen_handle_h("stderr.write_bytes", "jet_std_io_stderr_write_bytes", [Bool]{true, true}, Val(Effect.IO)))
+        .StderrFlush -> return Val(jet_codegen_handle_h("stderr.flush", "jet_std_io_stderr_flush", [Bool]{true}, Val(Effect.IO)))
+        .StderrIsTty -> return Val(jet_codegen_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
+        .StopwatchElapsedMillis -> return Val(jet_codegen_handle_h("stopwatch.elapsed_millis", "jet_stopwatch_elapsed_millis", [Bool]{true}, Val(Effect.Time)))
+        .TestSuiteRun -> return Val(jet_codegen_handle_h("test_suite.run", "jet_test_suite_run", [Bool]{true}, None))
+        .ClockNow -> return Val(jet_codegen_handle_h("clock.now", "jet_clock_now", [Bool]{true}, Val(Effect.Time)))
+        .ClockTick -> return Val(jet_codegen_handle_h("clock.tick", "jet_clock_tick", [Bool]{true, false}, Val(Effect.Time)))
+        .ClockAdvance -> return Val(jet_codegen_handle_h("clock.advance", "jet_clock_advance", [Bool]{true, false}, Val(Effect.Time)))
+        .ClockWait -> return Val(jet_codegen_handle_h("clock.wait", "jet_clock_wait", [Bool]{true, true}, Val(Effect.Time)))
+        .WorldNow -> return Val(jet_codegen_handle_h("deterministic_world.now", "jet_world_now", [Bool]{true}, Val(Effect.Time)))
+        .WorldAdvance -> return Val(jet_codegen_handle_h("deterministic_world.advance", "jet_world_advance", [Bool]{true, true}, Val(Effect.Time)))
+        .WorldWaitIdle -> return Val(jet_codegen_handle_h("deterministic_world.wait_idle", "jet_world_wait_idle", [Bool]{true}, Val(Effect.Time)))
+        .WorldHistory -> return Val(jet_codegen_handle_h("deterministic_world.history", "jet_world_history", [Bool]{true}, None))
+        .RealtimeNextDeadline -> return Val(jet_codegen_handle_h("realtime.next_deadline", "jet_rt_next_deadline", [Bool]{true}, None))
+        .RealtimeReceipt -> return Val(jet_codegen_handle_h("realtime.receipt", "jet_rt_receipt", [Bool]{true}, None))
+        .RealtimeCancel -> return Val(jet_codegen_handle_h("realtime.cancel", "jet_rt_cancel", [Bool]{false}, Val(Effect.Time)))
+        .RealtimeIsCancelled -> return Val(jet_codegen_handle_h("realtime.is_cancelled", "jet_rt_is_cancelled", [Bool]{true}, None))
+        .RngInt -> return Val(jet_codegen_handle_h("rng.int", "jet_rng_int", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RngFloat -> return Val(jet_codegen_handle_h("rng.float", "jet_rng_float", [Bool]{true}, Val(Effect.Rand)))
+        .RngFloatRange -> return Val(jet_codegen_handle_h("rng.float_range", "jet_rng_float_range", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RngBool -> return Val(jet_codegen_handle_h("rng.bool", "jet_rng_bool", [Bool]{true}, Val(Effect.Rand)))
+        .RngBoolP -> return Val(jet_codegen_handle_h("rng.bool_p", "jet_rng_bool_p", [Bool]{true, false}, Val(Effect.Rand)))
+        .RngNormal -> return Val(jet_codegen_handle_h("rng.normal", "jet_rng_normal", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RngExponential -> return Val(jet_codegen_handle_h("rng.exponential", "jet_rng_exponential", [Bool]{true, false}, Val(Effect.Rand)))
+        .RngBytes -> return Val(jet_codegen_handle_h("rng.bytes", "jet_rng_bytes", [Bool]{true, false}, Val(Effect.Rand)))
+        .RngSplit -> return Val(jet_codegen_handle_h("rng.split", "jet_rng_split", [Bool]{true}, Val(Effect.Rand)))
+        .RngPick -> return Val(jet_codegen_handle_h("rng.pick", "jet_rng_pick", [Bool]{true, true}, Val(Effect.Rand)))
+        .RngWeightedPick -> return Val(jet_codegen_handle_h("rng.weighted_pick", "jet_rng_weighted_pick", [Bool]{true, true, true}, Val(Effect.Rand)))
+        .RngSample -> return Val(jet_codegen_handle_h("rng.sample", "jet_rng_sample", [Bool]{true, true, false}, Val(Effect.Rand)))
+        .RngShuffle -> return Val(jet_codegen_handle_h("rng.shuffle", "jet_rng_shuffle", [Bool]{true, true}, Val(Effect.Rand)))
+        .HistoryRngNextU64 -> return Val(jet_codegen_handle_h("history_rng.next_u64", "jet_testing_history_rng_next_u64", [Bool]{true}, Val(Effect.Rand)))
+        .HistoryRngBelow -> return Val(jet_codegen_handle_h("history_rng.below", "jet_testing_history_rng_below", [Bool]{true, false}, Val(Effect.Rand)))
+        .FakeLocale -> return Val(jet_codegen_handle_h("fake.locale", "jet_fake_locale", [Bool]{true, true}, Val(Effect.Rand)))
+        .FakeName -> return Val(jet_codegen_handle_h("fake.name", "jet_fake_name", [Bool]{true}, Val(Effect.Rand)))
+        .FakeEmail -> return Val(jet_codegen_handle_h("fake.email", "jet_fake_email", [Bool]{true}, Val(Effect.Rand)))
+        .FakeHost -> return Val(jet_codegen_handle_h("fake.host", "jet_fake_host", [Bool]{true}, Val(Effect.Rand)))
+        .FakeAddress -> return Val(jet_codegen_handle_h("fake.address", "jet_fake_address", [Bool]{true}, Val(Effect.Rand)))
+        .SolverNew -> return Val(jet_codegen_handle_h("solver.new", "jet_solver_new", [Bool]{false}, None))
+        .SolverRequire -> return Val(jet_codegen_handle_h("solver.require", "jet_solver_require", [Bool]{true, false}, None))
+        .SolverFailureCount -> return Val(jet_codegen_handle_h("solver.failure_count", "jet_solver_failure_count", [Bool]{true}, None))
+        .SolverStatus -> return Val(jet_codegen_handle_h("solver.status", "jet_solver_status", [Bool]{true}, None))
+        .GameSceneNew -> return Val(jet_codegen_handle_h("game.scene_new", "jet_game_scene_new", [Bool]{true}, None))
+        .GameReplayRecord -> return Val(jet_codegen_handle_h("game.replay_record", "jet_game_replay_record", [Bool]{true}, None))
+        .GameBackendHeadless -> return Val(jet_codegen_handle_core("core.game", "backend_headless", "jet_game_backend_headless", [Bool]{}, None))
+        .GameBackendShouldContinue -> return Val(jet_codegen_handle_h("game.backend_should_continue", "jet_game_backend_should_continue", [Bool]{true}, None))
+        .GameBackendPresent -> return Val(jet_codegen_handle_h("game.backend_present", "jet_game_backend_present", [Bool]{true}, None))
+        .GameSceneOnFrame(_, _) -> return Val(jet_codegen_handle_h("game.scene_on_frame", "jet_game_scene_on_frame", [Bool]{true, false, false, false}, None))
+        .GameSceneComponent -> return Val(jet_codegen_handle_h("game.scene_component", "jet_game_scene_component", [Bool]{true, true}, None))
+        .GameSceneQuery -> return Val(jet_codegen_handle_h("game.scene_query", "jet_game_scene_query", [Bool]{true, true}, None))
+        .GameAssetsImage -> return Val(jet_codegen_handle_h("game.assets_image", "jet_game_assets_image", [Bool]{true, true}, Val(Effect.FS)))
+        .GameAssetsSound -> return Val(jet_codegen_handle_h("game.assets_sound", "jet_game_assets_sound", [Bool]{true, true}, Val(Effect.FS)))
+        .GameInputBind -> return Val(jet_codegen_handle_h("game.input_bind", "jet_game_input_bind", [Bool]{true, true, true}, None))
+        .GameInputPressed -> return Val(jet_codegen_handle_h("game.input_pressed", "jet_game_input_pressed", [Bool]{true, true}, None))
+        .DurationIn(_) -> return Val(jet_codegen_handle_h("duration.in", "jet_duration_in", [Bool]{true, true}, None))
+        .DurationIsZero -> return Val(jet_codegen_handle_h("duration.is_zero", "jet_duration_is_zero", [Bool]{true}, None))
+        .DurationTotalSeconds -> return Val(jet_codegen_handle_h("duration.total_seconds", "jet_duration_total_seconds", [Bool]{true}, None))
+        .DurationDifference -> return Val(jet_codegen_handle_h("duration.difference", "jet_duration_difference", [Bool]{true, true}, None))
+        .DurationAbs -> return Val(jet_codegen_handle_h("duration.abs", "jet_duration_abs", [Bool]{true}, None))
+        .DurationNegated -> return Val(jet_codegen_handle_h("duration.negated", "jet_duration_negated", [Bool]{true}, None))
+        .DurationSign -> return Val(jet_codegen_handle_h("duration.sign", "jet_duration_sign", [Bool]{true}, None))
+        .DurationTotalIn -> return Val(jet_codegen_handle_h("duration.total_in", "jet_duration_total_in", [Bool]{true, true}, None))
+        .DurationRound -> return Val(jet_codegen_handle_h("duration.round", "jet_duration_round", [Bool]{true, true, true, true}, None))
+        .DurationScale -> return Val(jet_codegen_handle_h("duration.scale", "jet_duration_scale", [Bool]{true, true}, None))
+        .DurationDivide -> return Val(jet_codegen_handle_h("duration.divide", "jet_duration_divide", [Bool]{true, true}, None))
+        .TcpListenerAccept -> return Val(jet_codegen_handle_h("tcp_listener.accept", "jet_net_tcp_accept", [Bool]{true}, Val(Effect.Net)))
+        .TcpListenerAcceptDeadline -> return Val(jet_codegen_handle_h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
+        .TcpListenerLocalAddr -> return Val(jet_codegen_handle_h("tcp_listener.local_addr", "jet_net_listener_local_addr", [Bool]{true}, Val(Effect.Net)))
+        .TcpStreamRead -> return Val(jet_codegen_handle_h("tcp_stream.read", "jet_net_tcp_read", [Bool]{true}, Val(Effect.Net)))
+        .TcpStreamWrite -> return Val(jet_codegen_handle_h("tcp_stream.write", "jet_net_tcp_write", [Bool]{true, true}, Val(Effect.Net)))
+        .TcpStreamPeerAddr -> return Val(jet_codegen_handle_h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", [Bool]{true}, Val(Effect.Net)))
+        .TcpStreamLocalAddr -> return Val(jet_codegen_handle_h("tcp_stream.local_addr", "jet_net_tcp_local_addr", [Bool]{true}, Val(Effect.Net)))
+        .TcpStreamClose -> return Val(jet_codegen_handle_h("tcp_stream.close", "jet_net_tcp_close", [Bool]{true}, Val(Effect.Net)))
+        .TcpStreamReadBytes -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", [Bool]{true, false}, Val(Effect.Net)))
+        .TcpStreamReadBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TcpStreamReadText -> return Val(jet_codegen_handle_h("tcp_stream.read_text", "jet_net_tcp_read_text", [Bool]{true, false}, Val(Effect.Net)))
+        .TcpStreamReadTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TcpStreamWriteBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", [Bool]{true, true}, Val(Effect.Net)))
+        .TcpStreamWriteBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TcpStreamWriteAllBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", [Bool]{true, true}, Val(Effect.Net)))
+        .TcpStreamWriteAllBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TcpStreamWriteText -> return Val(jet_codegen_handle_h("tcp_stream.write_text", "jet_net_tcp_write_text", [Bool]{true, true}, Val(Effect.Net)))
+        .TcpStreamWriteTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TcpStreamShutdown -> return Val(jet_codegen_handle_h("tcp_stream.shutdown", "jet_net_tcp_shutdown", [Bool]{true, false}, Val(Effect.Net)))
+        .TcpStreamReady -> return Val(jet_codegen_handle_h("tcp_stream.ready", "jet_net_tcp_ready_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UdpSocketReady -> return Val(jet_codegen_handle_h("udp_socket.ready", "jet_net_udp_ready", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UdpSocketClose -> return Val(jet_codegen_handle_h("udp_socket.close", "jet_net_udp_close", [Bool]{true}, Val(Effect.Net)))
+        .UdpSocketReceiveDeadline -> return Val(jet_codegen_handle_h("udp_socket.receive_deadline", "jet_net_udp_receive_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UdpSocketSendToDeadline -> return Val(jet_codegen_handle_h("udp_socket.send_to_deadline", "jet_net_udp_send_bytes_to_deadline", [Bool]{true, true, true, true}, Val(Effect.Net)))
+        .UnixListenerAcceptDeadline -> return Val(jet_codegen_handle_h("unix_listener.accept_deadline", "jet_net_unix_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
+        .UnixStreamReadDeadline -> return Val(jet_codegen_handle_h("unix_stream.read_deadline", "jet_net_unix_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UnixStreamWriteAllDeadline -> return Val(jet_codegen_handle_h("unix_stream.write_all_deadline", "jet_net_unix_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .UnixStreamReady -> return Val(jet_codegen_handle_h("unix_stream.ready", "jet_net_unix_ready", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UnixStreamClose -> return Val(jet_codegen_handle_h("unix_stream.close", "jet_net_unix_close", [Bool]{true}, Val(Effect.Net)))
+        .UnixStreamSetTimeout -> return Val(jet_codegen_handle_h("unix_stream.set_timeout", "jet_net_unix_set_timeout", [Bool]{true, true}, Val(Effect.Net)))
+        .TLSStreamReadDeadline -> return Val(jet_codegen_handle_h("tls_stream.read_deadline", "jet_net_tls_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TLSStreamWriteAllDeadline -> return Val(jet_codegen_handle_h("tls_stream.write_all_deadline", "jet_net_tls_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TLSStreamReady -> return Val(jet_codegen_handle_h("tls_stream.ready", "jet_net_tls_ready", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TLSStreamClose -> return Val(jet_codegen_handle_h("tls_stream.close", "jet_net_tls_close", [Bool]{true}, Val(Effect.Net)))
+        .TLSStreamCloseWrite -> return Val(jet_codegen_handle_h("tls_stream.close_write", "jet_net_tls_close_write", [Bool]{true, true}, Val(Effect.Net)))
+        .TLSStreamPeerIdentity -> return Val(jet_codegen_handle_h("tls_stream.peer_identity", "jet_net_tls_peer_identity", [Bool]{true}, Val(Effect.Net)))
+        .TLSClientConfigDefault -> return Val(jet_codegen_handle_h("tls.config_default", "jet_tls_client_config_default", [Bool]{}, Val(Effect.Net)))
+        .TLSClientConfigWithAlpn -> return Val(jet_codegen_handle_h("tls.config_with_alpn", "jet_tls_client_config_with_alpn", [Bool]{false, true}, Val(Effect.Net)))
+        .TLSRootCertificatesFromPem -> return Val(jet_codegen_handle_h("tls.root_certificates_from_pem", "jet_tls_root_certificates_from_pem", [Bool]{true}, Val(Effect.Net)))
+        .TLSClientIdentityFromPem -> return Val(jet_codegen_handle_h("tls.client_identity_from_pem", "jet_tls_client_identity_from_pem", [Bool]{true, true}, Val(Effect.Net)))
+        .TLSClientConfigWithTrust -> return Val(jet_codegen_handle_h("tls.config_with_trust", "jet_tls_client_config_with_trust", [Bool]{false, false}, Val(Effect.Net)))
+        .TLSClientConfigWithIdentity -> return Val(jet_codegen_handle_h("tls.config_with_identity", "jet_tls_client_config_with_client_identity", [Bool]{false, true}, Val(Effect.Net)))
+        .TLSClientConfigWithVersionBounds -> return Val(jet_codegen_handle_h("tls.config_with_version_bounds", "jet_tls_client_config_with_version_bounds", [Bool]{false, false, false}, Val(Effect.Net)))
+        .HTTPClientNew -> return Val(jet_codegen_handle_h("http.client_new", "jet_http_client_new_impl", [Bool]{}, Val(Effect.Net)))
+        .HTTPReqParam -> return Val(jet_codegen_handle_h("http.request_param", "jet_http_srv_req_param", [Bool]{true, true}, Val(Effect.Net)))
+        .HTTPReqHeader -> return Val(jet_codegen_handle_h("http.request_header", "jet_http_srv_req_header", [Bool]{true, true}, None))
+        .HTTPReqTrailers -> return Val(jet_codegen_handle_h("http.request_trailers", "jet_http_srv_req_trailers", [Bool]{true}, Val(Effect.Net)))
+        .HTTPRespTrailers -> return Val(jet_codegen_handle_h("http.response_trailers", "jet_http_srv_response_trailers", [Bool]{true, false}, Val(Effect.Net)))
+        .ArgsSpecFlag -> return Val(jet_codegen_handle_h("args.flag", "jet_args_flag", [Bool]{false, true, true}, Val(Effect.Env)))
+        .ArgsSpecFlagShort -> return Val(jet_codegen_handle_h("args.flag_short", "jet_args_flag_short", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOption -> return Val(jet_codegen_handle_h("args.option", "jet_args_option", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionShort -> return Val(jet_codegen_handle_h("args.option_short", "jet_args_option_short", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionDefault -> return Val(jet_codegen_handle_h("args.option_default", "jet_args_option_default", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionEnv -> return Val(jet_codegen_handle_h("args.option_env", "jet_args_option_env", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionInt -> return Val(jet_codegen_handle_h("args.option_int", "jet_args_option_int", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionFloat -> return Val(jet_codegen_handle_h("args.option_float", "jet_args_option_float", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecOptionChoice -> return Val(jet_codegen_handle_h("args.option_choice", "jet_args_option_choice", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecRepeat -> return Val(jet_codegen_handle_h("args.repeat", "jet_args_repeat", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecRequiredOption -> return Val(jet_codegen_handle_h("args.required_option", "jet_args_required_option", [Bool]{false, true, true, true}, Val(Effect.Env)))
+        .ArgsSpecPositional -> return Val(jet_codegen_handle_h("args.positional", "jet_args_positional", [Bool]{false, true, true}, Val(Effect.Env)))
+        .ArgsSpecDescription -> return Val(jet_codegen_handle_h("args.description", "jet_args_description", [Bool]{false, true}, Val(Effect.Env)))
+        .ArgsSpecSubcommand -> return Val(jet_codegen_handle_h("args.subcommand", "jet_args_subcommand", [Bool]{false, true, true, false}, Val(Effect.Env)))
+        .ArgsSpecVersion -> return Val(jet_codegen_handle_h("args.version", "jet_args_version", [Bool]{false, true}, Val(Effect.Env)))
+        .ArgsSpecCompletion -> return Val(jet_codegen_handle_h("args.completion", "jet_args_completion", [Bool]{true, true}, Val(Effect.Env)))
+        .ArgsSpecParse -> return Val(jet_codegen_handle_h("args.parse", "jet_args_parse", [Bool]{true, true}, Val(Effect.Env)))
+        .ArgsSpecParseOrExit -> return Val(jet_codegen_handle_h("args.parse_or_exit", "jet_args_parse_or_exit", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsFlag -> return Val(jet_codegen_handle_h("parsed.flag", "jet_parsed_flag", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsOption -> return Val(jet_codegen_handle_h("parsed.option", "jet_parsed_option", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsOptionInt -> return Val(jet_codegen_handle_h("parsed.option_int", "jet_parsed_option_int", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsOptionFloat -> return Val(jet_codegen_handle_h("parsed.option_float", "jet_parsed_option_float", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsOptions -> return Val(jet_codegen_handle_h("parsed.options", "jet_parsed_options", [Bool]{true, true}, Val(Effect.Env)))
+        .ParsedArgsPositional -> return Val(jet_codegen_handle_h("parsed.positional", "jet_parsed_positional", [Bool]{true, false}, Val(Effect.Env)))
+        .ParsedArgsSubcommand -> return Val(jet_codegen_handle_h("parsed.subcommand", "jet_parsed_subcommand", [Bool]{true}, Val(Effect.Env)))
+        .TerminalSessionResize -> return Val(jet_codegen_handle_h("terminal.resize", "jet_terminal_session_resize", [Bool]{true, true}, Val(Effect.IO)))
+        .ProcessStdinWrite -> return Val(jet_codegen_handle_h("process.stdin_write", "jet_process_stdin_write", [Bool]{true, true}, Val(Effect.Exec)))
+        .ProcessStdinClose -> return Val(jet_codegen_handle_h("process.stdin_close", "jet_process_stdin_close", [Bool]{true}, Val(Effect.Exec)))
+        .PathFrom -> return Val(jet_codegen_handle_h("path.from", "jet_path_from", [Bool]{true}, None))
+        .PathToString -> return Val(jet_codegen_handle_h("path.to_string", "jet_path_to_string", [Bool]{true}, None))
+        .PathHome -> return Val(jet_codegen_handle_h("path.home", "jet_path_home", [Bool]{}, Val(Effect.FS)))
+        .PathJoin -> return Val(jet_codegen_handle_h("path.join", "jet_path_join", [Bool]{true, true}, None))
+        .PathParent -> return Val(jet_codegen_handle_h("path.parent", "jet_path_parent", [Bool]{true}, None))
+        .PathExtension -> return Val(jet_codegen_handle_h("path.extension", "jet_path_extension", [Bool]{true}, None))
+        .PathStem -> return Val(jet_codegen_handle_h("path.stem", "jet_path_stem", [Bool]{true}, None))
+        .PathNormalize -> return Val(jet_codegen_handle_h("path.normalize", "jet_path_normalize", [Bool]{true}, None))
+        .PathIsWithin -> return Val(jet_codegen_handle_h("path.is_within", "jet_path_is_within", [Bool]{true, true}, None))
+        .PathWriteAtomic -> return Val(jet_codegen_handle_h("path.write_atomic", "jet_path_write_atomic", [Bool]{true, true}, Val(Effect.FS)))
+        .PathWalk -> return Val(jet_codegen_handle_h("path.walk", "jet_path_walk", [Bool]{true}, Val(Effect.FS)))
+        .ReaderOver(owned) -> {
+            symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
+            mask := if owned -> [Bool]{false} else -> [Bool]{true}
+            return Val(jet_codegen_handle_h("reader.over", symbol, mask, None))
+        }
+        .ReaderReadU8 -> return Val(jet_codegen_handle_h("reader.read_u8", "jet_reader_read_u8", [Bool]{true}, None))
+        .ReaderReadI8 -> return Val(jet_codegen_handle_h("reader.read_i8", "jet_reader_read_i8", [Bool]{true}, None))
+        .ReaderReadU16Le -> return Val(jet_codegen_handle_h("reader.read_u16_le", "jet_reader_read_u16_le", [Bool]{true}, None))
+        .ReaderReadU16Be -> return Val(jet_codegen_handle_h("reader.read_u16_be", "jet_reader_read_u16_be", [Bool]{true}, None))
+        .ReaderReadI16Le -> return Val(jet_codegen_handle_h("reader.read_i16_le", "jet_reader_read_i16_le", [Bool]{true}, None))
+        .ReaderReadI16Be -> return Val(jet_codegen_handle_h("reader.read_i16_be", "jet_reader_read_i16_be", [Bool]{true}, None))
+        .ReaderReadU32Le -> return Val(jet_codegen_handle_h("reader.read_u32_le", "jet_reader_read_u32_le", [Bool]{true}, None))
+        .ReaderReadU32Be -> return Val(jet_codegen_handle_h("reader.read_u32_be", "jet_reader_read_u32_be", [Bool]{true}, None))
+        .ReaderReadI32Le -> return Val(jet_codegen_handle_h("reader.read_i32_le", "jet_reader_read_i32_le", [Bool]{true}, None))
+        .ReaderReadI32Be -> return Val(jet_codegen_handle_h("reader.read_i32_be", "jet_reader_read_i32_be", [Bool]{true}, None))
+        .ReaderReadU64Le -> return Val(jet_codegen_handle_h("reader.read_u64_le", "jet_reader_read_u64_le", [Bool]{true}, None))
+        .ReaderReadU64Be -> return Val(jet_codegen_handle_h("reader.read_u64_be", "jet_reader_read_u64_be", [Bool]{true}, None))
+        .ReaderReadI64Le -> return Val(jet_codegen_handle_h("reader.read_i64_le", "jet_reader_read_i64_le", [Bool]{true}, None))
+        .ReaderReadI64Be -> return Val(jet_codegen_handle_h("reader.read_i64_be", "jet_reader_read_i64_be", [Bool]{true}, None))
+        .ReaderReadF32Le -> return Val(jet_codegen_handle_h("reader.read_f32_le", "jet_reader_read_f32_le", [Bool]{true}, None))
+        .ReaderReadF32Be -> return Val(jet_codegen_handle_h("reader.read_f32_be", "jet_reader_read_f32_be", [Bool]{true}, None))
+        .ReaderReadF64Le -> return Val(jet_codegen_handle_h("reader.read_f64_le", "jet_reader_read_f64_le", [Bool]{true}, None))
+        .ReaderReadF64Be -> return Val(jet_codegen_handle_h("reader.read_f64_be", "jet_reader_read_f64_be", [Bool]{true}, None))
+        .ReaderPeek -> return Val(jet_codegen_handle_h("reader.peek", "jet_reader_peek", [Bool]{true}, None))
+        .ReaderSeek -> return Val(jet_codegen_handle_h("reader.seek", "jet_reader_seek", [Bool]{true, false}, None))
+        .ReaderSkip -> return Val(jet_codegen_handle_h("reader.skip", "jet_reader_skip", [Bool]{true, false}, None))
+        .ReaderTake -> return Val(jet_codegen_handle_h("reader.take", "jet_reader_take", [Bool]{true, false}, None))
+        .ReaderRemaining -> return Val(jet_codegen_handle_h("reader.remaining", "jet_reader_remaining", [Bool]{true}, None))
+        .ReaderAtEnd -> return Val(jet_codegen_handle_h("reader.at_end", "jet_reader_at_end", [Bool]{true}, None))
+        .CursorOver -> return Val(jet_codegen_handle_h("cursor.over", "jet_cursor_over", [Bool]{true}, None))
+        .CursorTakeUntil -> return Val(jet_codegen_handle_h("cursor.take_until", "jet_cursor_take_until", [Bool]{true, true}, None))
+        .CursorSkipWs -> return Val(jet_codegen_handle_h("cursor.skip_ws", "jet_cursor_skip_ws", [Bool]{true}, None))
+        .DBWithPolicy -> return Val(jet_codegen_handle_h("db.with_policy", "jet_db_with_policy", [Bool]{true, false, false}, Val(Effect.DB)))
+        .DBBegin -> return Val(jet_codegen_handle_h("db.begin", "jet_db_begin", [Bool]{false}, Val(Effect.DB)))
+        .DBCommit -> return Val(jet_codegen_handle_h("db.commit", "jet_db_commit", [Bool]{false}, Val(Effect.DB)))
+        .DBRollback -> return Val(jet_codegen_handle_h("db.rollback", "jet_db_rollback", [Bool]{false}, Val(Effect.DB)))
+        .DBClose -> return Val(jet_codegen_handle_h("db.close", "jet_db_close", [Bool]{false}, Val(Effect.DB)))
+        .DBLeaseClose -> return Val(jet_codegen_handle_h("db_lease.close", "jet_db_lease_close", [Bool]{false}, Val(Effect.DB)))
+        .DBPoolAcquire -> return Val(jet_codegen_handle_h("db_pool.acquire", "jet_db_pool_acquire", [Bool]{true}, Val(Effect.DB)))
+        .DBPoolAcquireDeadline -> return Val(jet_codegen_handle_h("db_pool.acquire_deadline", "jet_db_pool_acquire_deadline", [Bool]{true, true}, Val(Effect.DB)))
+        .DBPoolReady -> return Val(jet_codegen_handle_h("db_pool.ready", "jet_db_pool_ready", [Bool]{true}, Val(Effect.DB)))
+        .DBPoolDrain -> return Val(jet_codegen_handle_h("db_pool.drain", "jet_db_pool_drain", [Bool]{true}, Val(Effect.DB)))
+        .DBPoolReceipt -> return Val(jet_codegen_handle_h("db_pool.receipt", "jet_db_pool_receipt", [Bool]{true}, Val(Effect.DB)))
+        .ReflectValueTypeName -> return Val(jet_codegen_handle_core("core.reflect", "value.type_name", "jet_jit_reflect_type_name", [Bool]{true}, None))
+        .ReflectValuePath -> return Val(jet_codegen_handle_core("core.reflect", "value.path", "jet_jit_reflect_path", [Bool]{true}, None))
+        .ReflectValueDisplay -> return Val(jet_codegen_handle_core("core.reflect", "value.display", "jet_jit_reflect_display", [Bool]{true}, None))
+        .ReflectValueFields -> return Val(jet_codegen_handle_core("core.reflect", "value.fields", "jet_jit_reflect_fields", [Bool]{true}, None))
+        .ReflectFieldName -> return Val(jet_codegen_handle_core("core.reflect", "field.name", "jet_jit_reflect_field_name", [Bool]{true}, None))
+        .ReflectFieldValue -> return Val(jet_codegen_handle_core("core.reflect", "field.value", "jet_jit_reflect_field_value", [Bool]{true}, None))
+        .FfiCallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
+        .WebVirtualWindowFacts -> return Val(jet_codegen_handle_core("core.web.virtual", "facts_json", "jet_web_virtual_window_facts", [Bool]{true}, None))
+        .TaskDetach -> return Val(jet_codegen_handle_core("core.tasks", "detach", "jet_std::JetTask::detach", [Bool]{false}, None))
+        .TaskPause -> return Val(jet_codegen_handle_h("task.pause", "jet_std::JetTask::pause", [Bool]{true}, None))
+        .TaskResume -> return Val(jet_codegen_handle_h("task.resume", "jet_std::JetTask::resume", [Bool]{true}, None))
+        .TaskCancel -> return Val(jet_codegen_handle_h("task.cancel", "jet_std::JetTask::cancel", [Bool]{true}, None))
+        .ChannelReceive -> return Val(jet_codegen_handle_core("core.channels", "receiver.receive", "jet_std::JetReceiver::receive", [Bool]{true}, None))
+        .ChannelTryReceive -> return Val(jet_codegen_handle_core("core.channels", "receiver.try_receive", "jet_std::JetReceiver::try_receive", [Bool]{true}, None))
+        .ChannelIsTimer -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_timer", "jet_std::JetReceiver::is_timer", [Bool]{true}, None))
+        .ChannelIsInterval -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_interval", "jet_std::JetReceiver::is_interval", [Bool]{true}, None))
+        .ChannelIsCancelled -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_cancelled", "jet_std::JetReceiver::is_cancelled", [Bool]{true}, None))
+        .ChannelIsReady -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_ready", "jet_std::JetReceiver::is_ready", [Bool]{true}, None))
+        .ChannelDelayMs -> return Val(jet_codegen_handle_core("core.channels", "receiver.delay_ms", "jet_std::JetReceiver::delay_ms", [Bool]{true}, None))
+        .ChannelClose -> {
+            sender_receiver := if jet_codegen_handle_type_without_tags(receiver) == {
+                .Named(name) | .Apply(name, _) -> name == "Sender"
+                else -> false
+            }
+            if sender_receiver -> return Val(jet_codegen_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
+            return Val(jet_codegen_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
+        }
+        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .DataTreeField | .DataTreeAt | .DataTreeInt | .DataTreeText | .DataTreeBool | .DataTreeFloat | .DataTreeToText | .DataTreeEqualUnordered | .DataTreeDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) | .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod(_) | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ExpiringMethod(_) | .ModOnTick | .Method(_) | .ReceiptAttach -> return None
+        else -> return None
+    }
+}
+
+fn jet_codegen_handle_arg_is_host_borrow_callback(argument: TExpr) -> Bool {
+    if argument.kind == {
+        .HostBorrowCallback(_, _) -> return true
+        .FnValue(kind) -> {
+            return if kind == {
+                .Send(value) -> {
+                    if value.kind == {
+                        .HostBorrowCallback(_, _) -> true
+                        else -> false
+                    }
+                }
+                else -> false
+            }
+        }
+        else -> false
+    }
+}
+
+fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THandleOp, index: Int, argument: TExpr) -> MirValueId {
+    if operation == {
+        .EventMethod(method) -> {
+            if method == "on_priority" {
+                if index == 1 -> return jet_codegen_lower_handle_native_int(&builder, argument)
+            }
+        }
+        else -> {}
+    }
+    if operation == {
+        .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .UdpSocketReceiveDeadline | .UnixStreamReadDeadline | .TLSStreamReadDeadline -> {
+            if index == 0 -> return jet_codegen_lower_handle_native_int(&builder, argument)
+        }
+        else -> {}
+    }
+    jet_codegen_lower_expr(&builder, argument)
+}
+
+fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: THandleOp, args: [TExpr]) -> [MirValueId] {
+    values := [?MirValueId]{}
+    loop _ in args -> values.push(None)
+    index := 0
+    loop index < args.len() {
+        if !jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
+        index += 1
+    }
+    index = 0
+    loop index < args.len() {
+        if jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
+        index += 1
+    }
+    lowered := [MirValueId]{}
+    loop value in values -> lowered.push(value ?? panic("checked handle argument lowering left a hole"))
+    lowered
+}
+
+fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr) -> MirValueId {
+    if !jet_codegen_numeric_plain_int(value.ty) -> return jet_codegen_lower_expr(&builder, value)
+    location := jet_codegen_source_location_at(&builder, value.span, false)
+    converted := TExpr{
+        ty: Type.IntN(true, 64),
+        kind: TExprKind.NumericMethod(value, TNumericOp.CheckedIntToFixed(3, "i64", "I64", location.line)),
+        span: value.span,
+        integer_bounds: None,
+        cost: None,
+    }
+    jet_codegen_lower_expr(&builder, converted)
+}
+
+fn jet_codegen_lower_frame_schedule(schedule: ?FrameSchedule) -> ?MirFrameSchedule {
+    if schedule == None -> return None
+    source :: schedule ?? panic("checked frame schedule disappeared")
+    operations := [MirFrameOperation]{}
+    loop operation in source.operations {
+        accesses := [MirResourceAccess]{}
+        loop access in operation.accesses {
+            resource := if access.resource == {
+                .Named(name) -> MirResourceIdentity.Named(name)
+                .Unknown -> MirResourceIdentity.Unknown
+            }
+            mode := if access.mode == {
+                .Read -> MirResourceAccessMode.Read
+                .Write -> MirResourceAccessMode.Write
+                .Move -> MirResourceAccessMode.Move
+            }
+            region := if access.region == {
+                .Whole -> MirResourceRegion.Whole
+                .Bytes(start, length) -> MirResourceRegion.Bytes(start, length)
+                .Unknown -> MirResourceRegion.Unknown
+            }
+            layout := if access.layout == {
+                None -> None
+                Val(value) -> Val(MirResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
+            }
+            accesses.push(MirResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary})
+        }
+        completion := if operation.completion == {
+            .Synchronous -> MirFrameCompletion.Synchronous
+            .Pending(token) -> MirFrameCompletion.Pending(token)
+            .Event(token) -> MirFrameCompletion.Event(token)
+        }
+        operations.push(MirFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: completion, completion_provider: operation.completion_provider, external_effect: operation.external_effect})
+    }
+    dependencies := [MirFrameDependency]{}
+    loop dependency in source.dependencies -> dependencies.push(MirFrameDependency{before: dependency.before, after: dependency.after, resource: dependency.resource, reason: dependency.reason})
+    transfers := [MirFrameTransfer]{}
+    loop transfer in source.transfers -> transfers.push(MirFrameTransfer{before: transfer.before, after: transfer.after, resource: transfer.resource, from_device: transfer.from_device, to_device: transfer.to_device})
+    reuse := [MirFrameReuse]{}
+    loop item in source.reuse -> reuse.push(MirFrameReuse{previous_resource: item.previous_resource, next_resource: item.next_resource, previous_last_use: item.previous_last_use, next_first_use: item.next_first_use, legal: item.legal, reason: item.reason})
+    retentions := [MirFrameRetention]{}
+    loop item in source.retentions -> retentions.push(MirFrameRetention{resource: item.resource, operation: item.operation, owner: item.owner, completion_token: item.completion_token, completed: item.completed})
+    Val(MirFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: source.conservative})
+}
+
+fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool {
+    if operation == {
+        .HTTPClientMethod(kind, method) -> return kind == "BrowserTestServer" && method == "stop"
+        else -> {}
+    }
+    if operation == {
+        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TcpStreamRead | .TcpStreamWrite | .TcpStreamClose | .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .TcpStreamWriteBytes | .TcpStreamWriteBytesDeadline | .TcpStreamWriteAllBytes | .TcpStreamWriteAllBytesDeadline | .TcpStreamWriteText | .TcpStreamWriteTextDeadline | .TcpStreamShutdown | .TcpStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        else -> false
+    }
+}
+
+fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    route_value := jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier)
+    if route_value == None -> panic("checked THandleOp requires a dedicated lowering body or an unregistered closed route")
+    route :: route_value ?? panic("checked general handle route disappeared")
+    static_call := if operation == {
+        .TLSClientConfigDefault | .TLSRootCertificatesFromPem | .TLSClientIdentityFromPem | .HTTPClientNew -> {
+            true
+        }
+        else -> {
+            false
+        }
+    }
+    if static_call {
+        if args.len() != route.borrow_mask.len() -> panic("checked static handle constructor arity disagrees with its closed route")
+        values := [MirCallArg]{}
+        index := 0
+        loop index < args.len() {
+            value := jet_codegen_lower_expr(&builder, args[index])
+            access := if route.borrow_mask[index] -> MirAccess.Read else -> MirAccess.Move
+            values.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
+            index += 1
+        }
+        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, values, [MirPreludeTypeArg]{}, [MirType]{})))
+    }
+
+    if operation == THandleOp.TaskJoin || operation == THandleOp.TaskDetach {
+        if args.len() != 0 -> panic("checked consuming task operation takes no arguments")
+        receiver_value := jet_codegen_lower_consuming_task_value(&builder, receiver)
+        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, receiver_value, [MirValueId]{}, None, None)))
+    }
+
+    lowered_receiver := if {
+        jet_codegen_handle_receiver_is_mutating(operation) -> {
+            jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Write).value
+        }
+        else -> {
+            jet_codegen_lower_expr(&builder, receiver)
+        }
+    }
+    lowered_args := jet_codegen_lower_handle_arguments(&builder, operation, args)
+    if route.family == MirPreludeFamily.ClosureMethod {
+        if route.borrow_mask.len() != args.len() + 1 -> panic("checked closure-style handle route has an invalid operand count")
+        closure_args := [MirCallArg]{}
+        index := 0
+        loop index < args.len() {
+            value := lowered_args[index]
+            access := jet_codegen_host_value_access(builder, value, route.borrow_mask[index + 1])
+            closure_args.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
+            index += 1
+        }
+        call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ClosureMethod(lowered_receiver, closure_args, call)))
+    }
+    if operation == {
+        .DurationNew(unit, _) -> {
+            if route.borrow_mask.len() != 2 -> panic("checked Duration constructor route has an invalid closed ABI")
+            type_id := jet_codegen_type_instance_id(Type.Named("DurationUnit"), builder.modules, builder.function.module_identity, builder.generic_type_names)
+            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named("DurationUnit"), MirOperation.Enum(type_id, unit, [MirEnumArg]{}))
+            lowered_args.push(unit_value)
+        }
+        else -> {}
+    }
+    expected_args := if route.borrow_mask.len() == 0 -> 0 else -> route.borrow_mask.len() - 1
+    if lowered_args.len() != expected_args -> panic("checked handle argument arity disagrees with its closed route")
+    call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
+    frame_schedule := if operation == {
+        .GameSceneOnFrame(schedule, _) -> jet_codegen_lower_frame_schedule(schedule)
+        else -> None
+    }
+    frame_schedule_derivation := if operation == {
+        .GameSceneOnFrame(_, derivation) -> {
+            if derivation == None -> None else -> Val(MirDerivationRef{id: (derivation ?? DerivationRef{id: ""}).id})
+        }
+        else -> None
+    }
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, lowered_receiver, lowered_args, frame_schedule, frame_schedule_derivation)))
+}

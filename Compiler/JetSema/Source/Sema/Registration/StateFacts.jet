@@ -1,0 +1,128 @@
+// Canonical state graph facts for reflection and semantic consumers.
+// Invalid transition labels are omitted here; the dedicated state diagnostic
+// pass remains responsible for reporting them.
+
+pub struct SemaStateGraphNode {
+    pub name: String
+    pub terminal: Bool
+    pub reachable: ?Bool
+}
+
+pub struct SemaStateGraphTransition {
+    pub operation: String
+    pub from: ?String
+    pub to: String
+}
+
+pub struct SemaStateGraphFact {
+    pub type_name: String
+    pub states: [SemaStateGraphNode]
+    pub transitions: [SemaStateGraphTransition]
+}
+
+struct SemaStateGraphEdge {
+    from: String
+    to: String
+}
+
+fn sema_state_graph_contains(values: [String], name: String) -> Bool {
+    loop value in values {
+        if value == name -> return true
+    }
+    false
+}
+
+fn sema_state_graph_leaf(owner: String, state: String) -> ?String {
+    if !state.contains(".") -> return Val(state)
+    parts :: state.split(".")
+    if parts.len() != 3 || parts[0] != owner || parts[1] != "State" -> return None
+    Val(parts[2])
+}
+
+fn sema_state_graph_add_method_transitions(
+    methods: [Func],
+    owner: String,
+    state_names: [String],
+    outgoing: &[String],
+    edges: &[SemaStateGraphEdge],
+    transitions: &[SemaStateGraphTransition],
+    entries: &[String],
+) {
+    loop method in methods {
+        transition :: method.state_transition ?? next
+        from := None
+        if transition.from == .Val(raw_from) {
+            from_leaf :: sema_state_graph_leaf(owner, raw_from) ?? next
+            if !sema_state_graph_contains(state_names, from_leaf) -> next
+            from = Val(from_leaf)
+        }
+        to :: sema_state_graph_leaf(owner, transition.to) ?? next
+        if !sema_state_graph_contains(state_names, to) -> next
+        if from == {
+            .Val(from_name) -> {
+                outgoing.push(from_name)
+                edges.push(SemaStateGraphEdge{from: from_name, to: to})
+            }
+            else -> {
+                entries.push(to)
+            }
+        }
+        transitions.push(SemaStateGraphTransition{operation: method.name, from: from, to: to})
+    }
+}
+
+fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStateGraphFact {
+    state :: definition.state ?? StateDecl{is_pub: false, is_package_pub: false, type_name: definition.name, type_name_span: definition.name_span, states: [NamedSpan]{}, span: definition.span}
+    state_names :: loop member in state.states -> member.name
+    outgoing := [String]{}
+    edges := [SemaStateGraphEdge]{}
+    transitions := [SemaStateGraphTransition]{}
+    entries := [String]{}
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> if implementation.type_name == definition.name {
+                sema_state_graph_add_method_transitions(implementation.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
+            }
+            .Struct(candidate) -> if candidate.name == definition.name {
+                sema_state_graph_add_method_transitions(candidate.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
+                loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
+            }
+            .Enum(candidate) -> if candidate.name == definition.name {
+                sema_state_graph_add_method_transitions(candidate.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
+                loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
+            }
+            else -> {}
+        }
+    }
+    reachable_states := [String]{}
+    if entries.len() > 0 {
+        queue := entries
+        cursor := 0
+        loop cursor < queue.len() {
+            current :: queue[cursor]
+            cursor += 1
+            if sema_state_graph_contains(reachable_states, current) -> next
+            reachable_states.push(current)
+            loop edge in edges {
+                if edge.from == current && !sema_state_graph_contains(reachable_states, edge.to) -> queue.push(edge.to)
+            }
+        }
+    }
+    nodes := [SemaStateGraphNode]{}
+    loop name in state_names {
+        nodes.push(SemaStateGraphNode{
+            name: name,
+            terminal: !sema_state_graph_contains(outgoing, name),
+            reachable: if entries.len() == 0 -> None else -> Val(sema_state_graph_contains(reachable_states, name)),
+        })
+    }
+    SemaStateGraphFact{type_name: definition.name, states: nodes, transitions: transitions}
+}
+
+pub fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] {
+    graphs := [SemaStateGraphFact]{}
+    loop item in items {
+        if item == .Struct(definition) && definition.state != None -> graphs.push(sema_state_graph_for_struct(definition, items))
+    }
+    graphs
+}

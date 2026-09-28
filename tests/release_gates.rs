@@ -29,10 +29,10 @@ fn small_profile_binary_is_smaller_than_default() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/collections/wordcount.jet");
+    let example = root.join("Examples/features/collections/wordcount.jet");
     assert!(
         example.is_file(),
-        "examples/features/collections/wordcount.jet must exist"
+        "Examples/features/collections/wordcount.jet must exist"
     );
 
     let dir = std::env::temp_dir().join(format!("jet_small_test_{}", std::process::id()));
@@ -91,8 +91,8 @@ fn small_profile_binary_is_smaller_than_default() {
 // Section: Epoch 2 GA checklist (was tests/ga.rs) — E2-M17
 //
 // Asserts that Epoch 2 exit criteria still hold at the compiler level.
-// Showcase programs were retired from `examples/`; milestone coverage now
-// lives in `examples/features/` (I5 golden tests).
+// Showcase programs were retired from `Examples/`; milestone coverage now
+// lives in `Examples/features/` (I5 golden tests).
 // ============================================================================
 
 fn root() -> PathBuf {
@@ -119,7 +119,7 @@ fn ga_every_diagnostic_has_explain() {
 
 // ── 2. Milestone feature examples are front-end clean ─────────────────────
 
-/// D-GA1=B milestone coverage now lives under `examples/features/`.
+/// D-GA1=B milestone coverage now lives under `Examples/features/`.
 #[test]
 fn ga_milestone_features_front_end_clean() {
     let features: &[(&str, &str)] = &[
@@ -129,7 +129,7 @@ fn ga_milestone_features_front_end_clean() {
         ("lowlevel/freestanding.jet", "freestanding smoke"),
     ];
 
-    let features_dir = root().join("examples/features");
+    let features_dir = root().join("Examples/features");
     for (file, desc) in features {
         let path = features_dir.join(file);
         assert!(
@@ -169,7 +169,7 @@ fn ga_feature_size_budgets() {
         ("lowlevel/freestanding.jet", 4_194_304),
     ];
 
-    let features_dir = root().join("examples/features");
+    let features_dir = root().join("Examples/features");
     let build_dir = std::env::temp_dir().join(format!("jet_ga_budgets_{}", std::process::id()));
     fs::create_dir_all(build_dir.join(".jet/build")).unwrap();
 
@@ -215,7 +215,7 @@ fn ga_feature_size_budgets() {
 // names the edition/epoch gate it needs (the m2 exit criteria).
 //
 // Fixtures live in tests/release/*.txt. To re-bless after an INTENTIONAL change
-// (read it against docs/spec/diagnostics.md and docs/spec/release-policy.md
+// (read it against Docs/spec/diagnostics.md and Docs/spec/release-policy.md
 // first):
 //
 //     UPDATE_EXPECT=1 cargo test --test release_gates
@@ -406,7 +406,7 @@ fn cbor_deprecation_release_fixture() {
 #[test]
 fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
     let root = root();
-    let gate = fs::read_to_string(root.join("tools/ci/compiled-workload-gate.sh"))
+    let gate = fs::read_to_string(root.join("Tools/ci/compiled-workload-gate.sh"))
         .expect("read compiled workload gate");
     for field in [
         "--contract",
@@ -429,7 +429,7 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         assert!(gate.contains(field), "compiled workload gate lost {field}");
     }
 
-    let runner_path = root.join("tools/ci/compiled-workload-runner.mjs");
+    let runner_path = root.join("Tools/ci/compiled-workload-runner.mjs");
     let runner = fs::read_to_string(&runner_path).expect("read compiled workload runner");
     for field in [
         "runMeasured",
@@ -476,7 +476,7 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         "Windows memory measurement must use peak working set: {metric_registry}"
     );
 
-    let self_check = fs::read_to_string(root.join("tools/ci/test-compiled-workload-gate.sh"))
+    let self_check = fs::read_to_string(root.join("Tools/ci/test-compiled-workload-gate.sh"))
         .expect("read compiled workload gate self-check");
     let canaries = fs::read_to_string(root.join("tests/compiled_workloads/canaries.tsv"))
         .expect("read compiled workload canaries");
@@ -494,29 +494,8 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         "compiled workload self-check must stay in the named test suites"
     );
 
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read CI workflow");
-    assert!(
-        workflow.contains("name: Compiled workload measurements (Unix)")
-            && workflow.contains("name: Compiled workload measurements (Windows)")
-            && workflow.contains("compiled-workload-runner.mjs")
-            && workflow.contains("tools/ci/compiled-workload-gate.sh --contract")
-            && workflow.contains("tools/ci/test-compiled-workload-gate.sh"),
-        "CI must invoke the real runner, contract, and canary self-check"
-    );
-    let review_workflow =
-        fs::read_to_string(root.join(".github/workflows/compiled-workload-review.yml"))
-            .expect("read compiled workload review workflow");
-    assert!(
-        review_workflow.contains("workflow_run:")
-            && review_workflow.contains("compiled-workload-review.mjs")
-            && review_workflow.contains("compiled-workload-reviewed-")
-            && review_workflow.contains("CANDIDATE_SHA"),
-        "review workflow must independently consume and publish immutable reports"
-    );
-
     let output = Command::new("bash")
-        .arg(root.join("tools/ci/compiled-workload-gate.sh"))
+        .arg(root.join("Tools/ci/compiled-workload-gate.sh"))
         .arg("--contract")
         .current_dir(&root)
         .output()
@@ -534,7 +513,7 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
 
 /// The exact `cargo metadata` inventory of test-bearing targets, as
 /// `-p PKG --lib` / `-p PKG --bin NAME` / `-p PKG --test NAME` lines — the
-/// same shape `tools/ci/test-shards.sh` emits. Computed independently here
+/// same shape `Tools/ci/test-shards.sh` emits. Computed independently here
 /// (a separate `jq` invocation, not a call into the script) so a bug in the
 /// script's own partition math still shows up as a mismatch below.
 fn full_workspace_test_target_inventory(root: &std::path::Path) -> Vec<String> {
@@ -583,47 +562,6 @@ fn full_workspace_test_target_inventory(root: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
-fn ci_shard_matrix_matches_test_shards_script_count() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    assert!(
-        workflow.contains("verify-tests:"),
-        "CI must name the #211 sharded verify-tests job"
-    );
-    let shard_list = workflow
-        .split("shard: [")
-        .nth(1)
-        .and_then(|rest| rest.split(']').next())
-        .unwrap_or_else(|| panic!("verify-tests job must declare a `shard: [...]` matrix"));
-    let declared_count = shard_list
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .count();
-    assert!(
-        declared_count >= 1,
-        "verify-tests shard matrix must not be empty"
-    );
-    assert!(
-        workflow.contains(&format!(r#"JET_TEST_SHARD_COUNT: "{declared_count}""#)),
-        "JET_TEST_SHARD_COUNT must equal the matrix's shard count ({declared_count})"
-    );
-
-    let out = Command::new("bash")
-        .arg(root.join("tools/ci/test-shards.sh"))
-        .arg("0")
-        .arg(declared_count.to_string())
-        .current_dir(&root)
-        .output()
-        .expect("run tools/ci/test-shards.sh");
-    assert!(
-        out.status.success(),
-        "tools/ci/test-shards.sh must accept the workflow's own shard count:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-#[test]
 fn ci_test_shards_cover_every_workspace_target_exactly_once() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let shard_count = 6;
@@ -638,12 +576,12 @@ fn ci_test_shards_cover_every_workspace_target_exactly_once() {
     let mut got: Vec<String> = Vec::new();
     for shard in 0..shard_count {
         let out = Command::new("bash")
-            .arg(root.join("tools/ci/test-shards.sh"))
+            .arg(root.join("Tools/ci/test-shards.sh"))
             .arg(shard.to_string())
             .arg(shard_count.to_string())
             .current_dir(&root)
             .output()
-            .expect("run tools/ci/test-shards.sh");
+            .expect("run Tools/ci/test-shards.sh");
         assert!(
             out.status.success(),
             "shard {shard} enumeration failed:\n{}",
@@ -692,8 +630,8 @@ fn ci_test_shards_cover_every_workspace_target_exactly_once() {
 #[test]
 fn ci_test_shards_use_the_committed_weight_table() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let table = fs::read_to_string(root.join("tools/ci/test-weights.tsv"))
-        .expect("read tools/ci/test-weights.tsv");
+    let table = fs::read_to_string(root.join("Tools/ci/test-weights.tsv"))
+        .expect("read Tools/ci/test-weights.tsv");
     let inventory: std::collections::BTreeSet<String> = full_workspace_test_target_inventory(&root)
         .into_iter()
         .collect();
@@ -708,28 +646,28 @@ fn ci_test_shards_use_the_committed_weight_table() {
         assert_eq!(
             fields.len(),
             4,
-            "tools/ci/test-weights.tsv:{row} must be \
+            "Tools/ci/test-weights.tsv:{row} must be \
              '<package>\\t<kind>\\t<target>\\t<seconds>': {line:?}"
         );
         let (package, kind, name, seconds) = (fields[0], fields[1], fields[2], fields[3]);
         assert!(
             seconds.parse::<u64>().is_ok(),
-            "tools/ci/test-weights.tsv:{row} seconds must be a whole number: {seconds:?}"
+            "Tools/ci/test-weights.tsv:{row} seconds must be a whole number: {seconds:?}"
         );
         let target = match kind {
             "lib" => format!("-p {package} --lib"),
             "bin" => format!("-p {package} --bin {name}"),
             "test" => format!("-p {package} --test {name}"),
-            other => panic!("tools/ci/test-weights.tsv:{row} has unknown target kind `{other}`"),
+            other => panic!("Tools/ci/test-weights.tsv:{row} has unknown target kind `{other}`"),
         };
         assert!(
             inventory.contains(&target),
-            "tools/ci/test-weights.tsv:{row} weighs `{target}`, which is not a workspace test \
+            "Tools/ci/test-weights.tsv:{row} weighs `{target}`, which is not a workspace test \
              target — renamed or deleted, so its weight silently stopped applying"
         );
         assert!(
             weighed.insert(target.clone()),
-            "tools/ci/test-weights.tsv:{row} repeats `{target}`"
+            "Tools/ci/test-weights.tsv:{row} repeats `{target}`"
         );
     }
     assert!(
@@ -741,11 +679,11 @@ fn ci_test_shards_use_the_committed_weight_table() {
     // The script must actually consult it, and say what it computed: the shard
     // load and the spread are the numbers that show whether the split is honest.
     let out = Command::new("bash")
-        .arg(root.join("tools/ci/test-shards.sh"))
+        .arg(root.join("Tools/ci/test-shards.sh"))
         .args(["0", "6"])
         .current_dir(&root)
         .output()
-        .expect("run tools/ci/test-shards.sh");
+        .expect("run Tools/ci/test-shards.sh");
     assert!(
         out.status.success(),
         "weighted shard enumeration failed:\n{}",
@@ -754,245 +692,39 @@ fn ci_test_shards_use_the_committed_weight_table() {
     let summary = String::from_utf8_lossy(&out.stderr);
     assert!(
         summary.contains("predicted ") && summary.contains("spread "),
-        "tools/ci/test-shards.sh must report the load and spread it computed: {summary}"
+        "Tools/ci/test-shards.sh must report the load and spread it computed: {summary}"
     );
 }
 
 #[test]
 fn verify_full_default_run_covers_whole_workspace() {
     // The unsharded default path (no JET_TEST_SHARD set) is what local/manual
-    // `scripts/agent/verify-full.sh` runs use; it must cover the same
-    // complete inventory as the sharded CI path, via plain `cargo test
-    // --workspace` rather than the old default-members-only `cargo test`.
+    // `Tools/agent/verify-full.sh` runs use; it must cover the complete
+    // inventory via plain `cargo test --workspace` rather than the old
+    // default-members-only `cargo test`.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
-        .expect("read scripts/agent/verify-full.sh");
+    let verify = fs::read_to_string(root.join("Tools/agent/verify-full.sh"))
+        .expect("read Tools/agent/verify-full.sh");
     assert!(
         verify.contains("cargo test --workspace \"$@\""),
         "the unsharded default path must run `cargo test --workspace`, not the \
          default-members-only `cargo test`"
     );
     assert!(
-        verify.contains("tools/ci/test-shards.sh"),
-        "the sharded path must delegate enumeration to tools/ci/test-shards.sh"
+        verify.contains("Tools/ci/test-shards.sh"),
+        "the sharded path must delegate enumeration to Tools/ci/test-shards.sh"
     );
-}
-
-
-fn workflow_job(workflow: &str, name: &str) -> String {
-    let marker = format!("  {name}:");
-    let mut in_job = false;
-    let mut job = String::new();
-    for line in workflow.lines() {
-        if line == marker {
-            in_job = true;
-        } else if in_job && line.starts_with("  ") && !line.starts_with("    ") {
-            break;
-        }
-        if in_job {
-            job.push_str(line);
-            job.push('\n');
-        }
-    }
-    job
-}
-
-fn job_has_run(job: &str, command: &str) -> bool {
-    let expected = format!("        run: {command}");
-    job.lines().any(|line| line == expected.as_str())
-}
-
-const GRAMMAR_GATE_COMMAND: &str =
-    "nix develop .#full -c cargo test --test grammar --locked -- --nocapture";
-
-fn change_gate_is_accepted(job: &str) -> bool {
-    job.contains("ref: ${{ github.sha }}")
-        && job_has_run(job, GRAMMAR_GATE_COMMAND)
-        && job.contains("RUSTDOCFLAGS: \"-D warnings\"")
-        && job.contains("cargo doc --workspace --no-deps --locked")
-        && !job.contains("if:")
-        && !job.contains("continue-on-error")
-        && !job.contains("|| true")
-        && !job.contains("|| :")
-}
-
-fn nightly_slice_is_accepted(workflow: &str) -> bool {
-    let change_gate = workflow_job(workflow, "change-gate");
-    !change_gate.is_empty()
-        && change_gate_is_accepted(&change_gate)
-        && workflow.contains("nightly-fuzz:")
-        && workflow.contains("FUZZ_VARIANTS: \"1000\"")
-        && workflow.contains("tools/perf/ci-perf-check.sh")
-}
-
-/// #806 criterion 6: the nightly slice owns a targeted proof that the real
-/// workflow cannot bypass the direct `tests/grammar.rs` gate.
-#[test]
-fn ci_nightly_slice_rejects_grammar_gate_bypass() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    let job = workflow_job(&workflow, "change-gate");
-    assert!(!job.is_empty(), "CI must define the change-gate job");
-
-    assert!(
-        job.contains("ref: ${{ github.sha }}"),
-        "change-gate must check out the event's exact candidate revision"
-    );
-    assert!(
-        job_has_run(&job, GRAMMAR_GATE_COMMAND),
-        "change-gate must invoke tests/grammar.rs directly; the broad test inventory is not enough"
-    );
-    assert!(nightly_slice_is_accepted(&workflow));
-    let bypassed = job.replacen(
-        GRAMMAR_GATE_COMMAND,
-        "nix develop .#full -c cargo test --workspace --locked -- --nocapture",
-        1,
-    );
-    assert!(
-        !nightly_slice_is_accepted(&workflow.replacen(
-            &job,
-            &bypassed,
-            1,
-        )),
-        "the change-gate proof must fail when its direct tests/grammar.rs invocation is bypassed"
-    );
-    assert!(
-        job.contains("RUSTDOCFLAGS: \"-D warnings\"")
-            && job.contains("cargo doc --workspace --no-deps --locked"),
-        "change-gate must build workspace documentation with warnings denied"
-    );
-    assert!(
-        !job.contains("if:")
-            && !job.contains("continue-on-error")
-            && !job.contains("|| true")
-            && !job.contains("|| :"),
-        "grammar and documentation checks must not have a skip or false-green path"
-    );
-}
-
-fn verify_tests_evidence_is_accepted(job: &str) -> bool {
-    [
-        "      - name: Failure propagation canary",
-        r#"          bash tools/ci/ci-evidence.sh \
-            --report-dir "$JET_CI_EVIDENCE_DIR/canary" \
-            -- bash -c 'printf "expected canary failure\\n" >&2; exit 23'"#,
-        "          test \"$status\" -eq 23",
-        r#"          grep -Fxq "status=fail" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
-        r#"          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
-        "      - name: Finalize durable gate evidence",
-        "        if: always()",
-        "          JOB_STATUS: ${{ job.status }}",
-        "      - name: Upload durable gate evidence",
-        "          name: ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}",
-        "          path: ci-evidence/shard-${{ matrix.shard }}/",
-        "          if-no-files-found: error",
-    ]
-    .iter()
-    .all(|needle| job.contains(needle))
-        && job_has_run(
-            job,
-            r#"bash tools/ci/ci-evidence.sh --report-dir "$JET_CI_EVIDENCE_DIR" -- nix develop .#full -c scripts/agent/verify-full.sh"#,
-        )
-        && !job.contains("continue-on-error")
-}
-
-fn nightly_gate_is_accepted(job: &str) -> bool {
-    job.contains("if: github.event_name == 'schedule'")
-        && job.contains("runs-on: ubuntu-latest")
-        && job.contains("JET_REQUIRE_RUSTC: \"1\"")
-        && job.contains("FUZZ_VARIANTS: \"1000\"")
-        && job.contains(
-            "FUZZ_SEED=\"$seed\" nix develop -c cargo test --release --test fuzz_sema -- --nocapture",
-        )
-        && job.contains("CARGO_BUILD_JOBS: \"6\"")
-        && job.contains("nix develop .#full -c cargo build")
-        && job.contains("nix develop -c sh tools/perf/ci-perf-check.sh")
-        && job.contains("nix develop .#full -c bash tools/perf/web-bundle-check.sh")
-        && !job.contains("continue-on-error")
-        && !job.contains("|| true")
-        && !job.contains("|| :")
+    assert!(verify.contains("cargo test $test_target --no-run"));
+    assert!(verify.contains("test_targets_repeat"));
+    assert!(verify.contains("test-target inventory is nondeterministic"));
+    assert!(verify.contains("CARGO_BUILD_JOBS"));
+    assert!(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""));
 }
 
 #[test]
-fn ci_nightly_gate_runs_production_fuzz_and_perf_checks() {
-    let workflow = fs::read_to_string(root().join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    let job = workflow_job(&workflow, "nightly-fuzz");
-    assert!(!job.is_empty(), "CI must define the nightly-fuzz job");
-    assert!(nightly_gate_is_accepted(&job));
-
-    for (name, command, replacement) in [
-        (
-            "fuzz",
-            "FUZZ_SEED=\"$seed\" nix develop -c cargo test --release --test fuzz_sema -- --nocapture",
-            "true",
-        ),
-        (
-            "Jet build",
-            "nix develop .#full -c cargo build",
-            "true",
-        ),
-        (
-            "compiler-speed perf",
-            "nix develop -c sh tools/perf/ci-perf-check.sh",
-            "true",
-        ),
-        (
-            "web bundle perf",
-            "nix develop .#full -c bash tools/perf/web-bundle-check.sh",
-            "true",
-        ),
-    ] {
-        let bypassed = job.replacen(command, replacement, 1);
-        assert_ne!(bypassed, job, "{name} command mutation did not apply");
-        assert!(
-            !nightly_gate_is_accepted(&bypassed),
-            "nightly gate proof must fail when the {name} production command is bypassed"
-        );
-    }
-}
-
-#[test]
-fn ci_warning_free_gate_is_strict_and_curated() {
-    let workflow = fs::read_to_string(root().join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    let verify = fs::read_to_string(root().join("scripts/agent/verify-full.sh"))
-        .expect("read scripts/agent/verify-full.sh");
-    let gate = workflow
-        .split("  rust-lint:\n")
-        .nth(1)
-        .and_then(|rest| rest.split("  verify-tests:\n").next())
-        .expect("CI must define a rust-lint job before verify-tests");
-
-    assert!(
-        gate.contains("cargo fmt --all -- --check"),
-        "D-CI2 rust-lint job must run rustfmt in check mode"
-    );
-    assert!(
-        gate.contains("ref: ${{ github.sha }}"),
-        "D-CI2 rust-lint job must lint the event's exact candidate revision"
-    );
-    assert!(
-        gate.contains("cargo clippy --workspace --all-targets --locked"),
-        "D-CI2 rust-lint job must lint every workspace target from the lockfile"
-    );
-    assert!(
-        gate.contains("RUSTFLAGS: \"-D warnings\"") && gate.contains("-D warnings"),
-        "D-CI2 rust-lint job must deny Rust warnings"
-    );
-    assert!(
-        gate.contains("-D clippy::correctness") && gate.contains("-D clippy::suspicious"),
-        "D-CI2 rust-lint job must deny correctness and suspicious Clippy lints"
-    );
-    assert!(
-        gate.contains("-A clippy::style"),
-        "D-CI2 rust-lint job must leave house-conflicting style lints advisory"
-    );
-    assert!(
-        !gate.contains("continue-on-error") && !gate.contains("if: always()"),
-        "D-CI2 lint failures must block the change gate"
-    );
+fn warning_free_policy_is_strict_and_curated() {
+    let verify = fs::read_to_string(root().join("Tools/agent/verify-full.sh"))
+        .expect("read Tools/agent/verify-full.sh");
     assert!(
         verify.contains("D-CI2=A") && verify.contains("-D warnings"),
         "the production test path must inherit the warning wall"
@@ -1012,7 +744,7 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
     let scratch = common::test_scratch_root(&format!("ci-evidence-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     fs::create_dir_all(&scratch).unwrap();
-    let script = root.join("tools/ci/ci-evidence.sh");
+    let script = root.join("Tools/ci/ci-evidence.sh");
 
     let success_dir = scratch.join("success");
     let success = Command::new("bash")
@@ -1205,36 +937,6 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
-#[test]
-fn ci_workflow_uploads_candidate_bound_evidence_without_false_green_controls() {
-    let root = root();
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
-    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
-        .expect("read scripts/agent/verify-full.sh");
-    let verify_tests = workflow_job(&workflow, "verify-tests");
-    assert!(
-        verify_tests_evidence_is_accepted(&verify_tests),
-        "verify-tests must keep failure canary and durable evidence on the required path"
-    );
-    let bypassed = verify_tests.replacen(
-        r#"          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
-        "          true",
-        1,
-    );
-    assert_ne!(bypassed, verify_tests, "receipt assertion mutation did not apply");
-    assert!(
-        !verify_tests_evidence_is_accepted(&bypassed),
-        "the evidence proof must fail when the failure canary no longer checks its receipt"
-    );
-    assert!(verify.contains("tools/ci/test-shards.sh"));
-    assert!(verify.contains("cargo test $test_target --no-run"));
-    assert!(verify.contains("test_targets_repeat"));
-    assert!(verify.contains("test-target inventory is nondeterministic"));
-    assert!(verify.contains("CARGO_BUILD_JOBS"));
-    assert!(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""));
-}
-
 // ============================================================================
 // Section: #805 read-only Tower hygiene (D-ONCE-LEDGER1=A)
 
@@ -1245,7 +947,7 @@ fn run_tower_hygiene_gate(
     report: &Path,
 ) -> std::process::Output {
     Command::new("bash")
-        .arg(repo.join("tools/ci/tower-hygiene-gate.sh"))
+        .arg(repo.join("Tools/ci/tower-hygiene-gate.sh"))
         .current_dir(repo)
         .env("TOWER_DATA", tower_dir)
         .env("JET_TOWER_LINT_SCOPE", docs_root)
@@ -1260,7 +962,7 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     let repo = root();
     let fixture = common::test_scratch_root(&format!("tower-hygiene-gate-{}", std::process::id()));
     let _ = fs::remove_dir_all(&fixture);
-    fs::create_dir_all(fixture.join("docs/spec")).unwrap();
+    fs::create_dir_all(fixture.join("Docs/spec")).unwrap();
     fs::create_dir_all(fixture.join("tower")).unwrap();
 
     fs::write(
@@ -1290,7 +992,7 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
         "must not change\n",
     )
     .unwrap();
-    fs::write(fixture.join("docs/spec/ok.md"), "D-OK1\n").unwrap();
+    fs::write(fixture.join("Docs/spec/ok.md"), "D-OK1\n").unwrap();
 
     let tower_before = fs::read(fixture.join("tower/tower.json")).unwrap();
     let history_before = fs::read(fixture.join("tower/history.json")).unwrap();
@@ -1299,7 +1001,7 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     let success = run_tower_hygiene_gate(
         &repo,
         &fixture.join("tower"),
-        &fixture.join("docs"),
+        &fixture.join("Docs"),
         &success_report,
     );
     assert!(
@@ -1337,12 +1039,12 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
         fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
     );
 
-    fs::write(fixture.join("docs/spec/bad.md"), "D-MISSING1\n").unwrap();
+    fs::write(fixture.join("Docs/spec/bad.md"), "D-MISSING1\n").unwrap();
     let failure_report = fixture.join("failure.txt");
     let failure = run_tower_hygiene_gate(
         &repo,
         &fixture.join("tower"),
-        &fixture.join("docs"),
+        &fixture.join("Docs"),
         &failure_report,
     );
     assert!(
@@ -1380,7 +1082,7 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     let traversal = run_tower_hygiene_gate(
         &repo,
         &fixture.join("tower"),
-        &fixture.join("docs"),
+        &fixture.join("Docs"),
         &traversal_report,
     );
     assert!(
@@ -1403,7 +1105,7 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     let locked = run_tower_hygiene_gate(
         &repo,
         &fixture.join("tower"),
-        &fixture.join("docs"),
+        &fixture.join("Docs"),
         &locked_report,
     );
     assert!(
@@ -1417,9 +1119,9 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     assert!(locked_text.contains("write lock"), "{locked_text}");
     let _ = fs::remove_dir_all(fixture.join("tower/tower.json.lock"));
 
-    let verify = fs::read_to_string(repo.join("scripts/agent/verify-full.sh")).unwrap();
+    let verify = fs::read_to_string(repo.join("Tools/agent/verify-full.sh")).unwrap();
     assert!(
-        verify.contains("tools/ci/tower-hygiene-gate.sh"),
+        verify.contains("Tools/ci/tower-hygiene-gate.sh"),
         "verify-full must run the production Tower hygiene gate"
     );
     let _ = fs::remove_dir_all(&fixture);

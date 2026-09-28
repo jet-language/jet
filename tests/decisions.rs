@@ -1,6 +1,6 @@
-//! Ratification enforcement (invariant I7 + docs/spec/syntax-decisions.md).
+//! Ratification enforcement (invariant I7 + Docs/spec/syntax-decisions.md).
 //!
-//! Every `cargo test` run verifies that `docs/spec/syntax-decisions.md` and
+//! Every `cargo test` run verifies that `Docs/spec/syntax-decisions.md` and
 //! `crates/jet-foundation/src/Syntax.rs` plus its split fragments stay in sync — ratified decisions
 //! cannot drift back to "provisional" in code, and open/deferred decisions cannot land in syntax
 //! without owner sign-off.
@@ -13,14 +13,14 @@ use std::fs;
 #[test]
 fn ratified_decisions_enforced() {
     let docs =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md");
     let syntax = read_syntax_surface();
     let ratified = extract_section_ids(&docs, "## Ratified", "## Enforcement");
 
     for (id, status) in parse_syntax_rs_status(&syntax) {
         assert!(
             ratified.contains(&id),
-            "{id} is in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments but not ratified in docs/spec/syntax-decisions.md"
+            "{id} is in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments but not ratified in Docs/spec/syntax-decisions.md"
         );
         assert_ne!(
             status, "provisional",
@@ -112,7 +112,7 @@ fn every_syntax_const_has_adjacent_decision_comment() {
 }
 
 /// #1670 / D-ONCE-LAW1=A: a real tombstone guard, not two hand-picked
-/// sentences. Every truth has one home (docs/spec/syntax-decisions.md's
+/// sentences. Every truth has one home (Docs/spec/syntax-decisions.md's
 /// "Superseded & deferred IDs (tombstones)" section); a comment citing a
 /// tombstoned ID is only honest if it says so. This parses the tombstone ID
 /// list from that section (so a newly-tombstoned ID is covered automatically,
@@ -137,7 +137,7 @@ fn every_syntax_const_has_adjacent_decision_comment() {
 #[test]
 fn tombstoned_decision_ids_carry_provenance() {
     let docs =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md");
     let tombstones = extract_tombstone_d_ids(&docs);
     assert!(
         tombstones.contains("D-CTMARKER1")
@@ -284,7 +284,7 @@ fn contains_id(text: &str, id: &str) -> bool {
 }
 
 /// Parse `D-`-prefixed tombstone IDs out of the "Superseded & deferred IDs
-/// (tombstones)" section of docs/spec/syntax-decisions.md. Each record is a
+/// (tombstones)" section of Docs/spec/syntax-decisions.md. Each record is a
 /// `**id-list [— title]**: description.` paragraph; the id-list is a
 /// comma/` / `-separated list, and a compact `D-PREFIXn/m/o` spelling expands
 /// to `D-PREFIXn`, `D-PREFIXm`, `D-PREFIXo`. Bare S/N/U tombstone numbers are
@@ -413,10 +413,10 @@ fn extract_section_ids(docs: &str, start: &str, end: &str) -> BTreeSet<String> {
 fn section_between<'a>(docs: &'a str, start: &str, end: &str) -> &'a str {
     let from = docs
         .find(start)
-        .unwrap_or_else(|| panic!("docs/spec/syntax-decisions.md missing section header: {start}"));
+        .unwrap_or_else(|| panic!("Docs/spec/syntax-decisions.md missing section header: {start}"));
     let rest = &docs[from + start.len()..];
     let to = rest.find(end).unwrap_or_else(|| {
-        panic!("docs/spec/syntax-decisions.md missing section header after {start}: {end}")
+        panic!("Docs/spec/syntax-decisions.md missing section header after {start}: {end}")
     });
     &rest[..to]
 }

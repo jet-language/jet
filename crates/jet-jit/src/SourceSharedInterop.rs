@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use jet_foundation::MIR::MirRuntimeValue;
+use jet_foundation::MIR::{MirNativeOwned, MirRuntimeValue};
 
 pub type SourceSharedInteropPayloadFinalizer =
     crate::Memory::shared_protocol::JetSharedPhysicalFinalizerBinding<MirRuntimeValue>;
@@ -173,7 +173,10 @@ pub struct SourceSharedInteropOwnerAlias {
 }
 
 impl SourceSharedInteropOwnerAlias {
-    fn new(owner_identity: usize, lease: Box<dyn SourceSharedInteropOwnerAliasLease>) -> Self {
+    pub(crate) fn new(
+        owner_identity: usize,
+        lease: Box<dyn SourceSharedInteropOwnerAliasLease>,
+    ) -> Self {
         let token_id = lease.token_id();
         Self {
             owner_identity,
@@ -1511,7 +1514,7 @@ impl SourceSharedInterop {
         Some(SourceSharedInteropWeak {
             type_id: self.type_id,
             identity: self.identity(),
-            physical_identity: self.physical_identity,
+            physical_identity: self.physical_identity(),
             protocol_order_key: self.protocol_order_key,
             owner_alias_count: aliases.strong_count.clone(),
             owner: Arc::from((owner.downgrade)()),

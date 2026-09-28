@@ -11,7 +11,7 @@ fn repo() -> PathBuf {
 }
 
 fn example() -> &'static str {
-    "examples/features/tooling/structure_liveness.jet"
+    "Examples/features/tooling/structure_liveness.jet"
 }
 
 fn run_jet(args: &[&str]) -> Output {
@@ -101,7 +101,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     assert!(text.status.success(), "structure inspect failed: {text:?}");
     let text = String::from_utf8(text.stdout).expect("structure text is utf8");
     let expected_text = fs::read_to_string(
-        repo().join("examples/features/expected/tooling/structure_liveness.structure.out"),
+        repo().join("Examples/features/expected/tooling/structure_liveness.structure.out"),
     )
     .expect("structure text golden");
     assert_eq!(text, expected_text);
@@ -123,7 +123,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     );
     let json = String::from_utf8(json.stdout).expect("structure JSON is utf8");
     let expected_json = fs::read_to_string(
-        repo().join("examples/features/expected/tooling/structure_liveness.structure.json"),
+        repo().join("Examples/features/expected/tooling/structure_liveness.structure.json"),
     )
     .expect("structure JSON golden");
     assert_eq!(json, expected_json);

@@ -802,7 +802,7 @@ fn precise_expected(type_name: &str, function: &str) -> Option<(&'static str, us
     }
 }
 
-fn success_type<'a>(result_ty: &'a MirType, span: Span) -> Result<&'a MirType, Diagnostic> {
+fn success_type<'a>(result_ty: &'a MirType, _span: Span) -> Result<&'a MirType, Diagnostic> {
     if let Some(inner) = result_ty.option_inner() {
         return Ok(inner);
     }

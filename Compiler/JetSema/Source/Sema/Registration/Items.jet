@@ -67,14 +67,19 @@ fn sema_registration_unit_type_name(name: String) -> String {
 }
 
 fn sema_registration_unit_leaf_name(ty: Type) -> ?String {
-    name :: if ty == {
-        .Named(value) -> value
-        .Apply(value, _) -> value
+    if ty == {
         .Tagged(_, inner) -> return sema_registration_unit_leaf_name(inner)
-        else -> return None
+        else -> {}
     }
-    parts :: name.split("::")
-    if parts.len() == 0 -> None else -> Val(parts[parts.len() - 1])
+    name :: if ty == {
+        .Named(value) -> Val(value)
+        .Apply(value, _) -> Val(value)
+        else -> None
+    }
+    name_value :: name ?? return None
+    parts :: name_value.split("::")
+    if parts.len() == 0 -> return None
+    Val(parts[parts.len() - 1])
 }
 
 fn sema_registration_unit_fact_push(facts: &[SemaRegistrationUnitFact], fact: SemaRegistrationUnitFact) {
@@ -376,6 +381,7 @@ pub struct SemaRegistrationGraph {
     pub imports: [SemaRegistrationImport]
     pub unit_facts: [SemaRegistrationUnitFact]
     pub numeric_unit_conversion_exact: ?fn(Float, String, String, String, String) -> ?Float
+    pub typed_boundary_literal_validate: ?fn(MirTypedHeadKind, [String]) -> ?String
     pub internal_problem: ?String
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -1364,10 +1370,13 @@ fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String
 }
 
 fn sema_registration_push_graph_diagnostic(graph: &[SemaRegistrationGraph], module_index: Int, diagnostic: Diagnostic) {
-    if module_index >= 0 && module_index < graph[0].modules.len() {
-        graph[0].diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph[0].modules[module_index].source_segments))
-    } else {
-        graph[0].diagnostics.push(diagnostic)
+    if {
+        module_index >= 0 && module_index < graph[0].modules.len() -> {
+            graph[0].diagnostics.push(sema_diagnostic_with_source_location(diagnostic, graph[0].modules[module_index].source_segments))
+        }
+        else -> {
+            graph[0].diagnostics.push(diagnostic)
+        }
     }
 }
 
@@ -1560,7 +1569,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     if package_identity == "" || entry_module_identity == "" {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, modules: modules, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, numeric_unit_conversion_exact: numeric_unit_conversion_exact, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, modules: modules, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, numeric_unit_conversion_exact: numeric_unit_conversion_exact, typed_boundary_literal_validate: None, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0}
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))
     }

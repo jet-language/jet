@@ -41,7 +41,7 @@ fn check_stderr(path: &std::path::Path) -> Vec<u8> {
 #[test]
 fn codemod_rename_dry_run_apply_and_undo() {
     let dir = temp_dir("rename");
-    let source = dir.join("examples/main.jet");
+    let source = dir.join("Examples/main.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
@@ -130,7 +130,7 @@ fn retired_codemod_dry_run_teaches_flag() {
 #[test]
 fn codemod_undo_refuses_changed_file() {
     let dir = temp_dir("stale");
-    let source = dir.join("examples/main.jet");
+    let source = dir.join("Examples/main.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
@@ -176,7 +176,7 @@ fn codemod_undo_refuses_changed_file() {
 #[test]
 fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     let project = temp_dir("batch_chain");
-    let example_relative = PathBuf::from("examples").join("report.jet");
+    let example_relative = PathBuf::from("Examples").join("report.jet");
     let example = project.join(&example_relative);
     let fixture_relative = PathBuf::from("tests").join("ui").join("report_type.jet");
     let fixture = project.join(&fixture_relative);
@@ -279,7 +279,7 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
 }
 
 fn simple_batch(project: &std::path::Path, matches: usize) -> PathBuf {
-    let example = project.join("examples/a.jet");
+    let example = project.join("Examples/a.jet");
     fs::create_dir_all(example.parent().unwrap()).unwrap();
     fs::write(
         &example,
@@ -290,7 +290,7 @@ fn simple_batch(project: &std::path::Path, matches: usize) -> PathBuf {
     fs::write(
         &object,
         format!(
-            "{{\"version\":2,\"name\":\"BatchRename\",\"project\":\".\",\"roots\":[{{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":{matches}}}]}}\n"
+            "{{\"version\":2,\"name\":\"BatchRename\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":{matches}}}]}}\n"
         ),
     )
     .unwrap();
@@ -301,7 +301,7 @@ fn simple_batch(project: &std::path::Path, matches: usize) -> PathBuf {
 fn batch_refuses_declared_count_and_unknown_fields_without_writes() {
     let project = temp_dir("batch_refuse");
     let object = simple_batch(&project, 3);
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     let before = fs::read(&source).unwrap();
     let count = Command::new(jet())
         .args(["inspect", "codemod"])
@@ -334,8 +334,8 @@ fn batch_refuses_declared_count_and_unknown_fields_without_writes() {
 fn interrupted_batch_recovers_before_the_next_plan() {
     let project = temp_dir("batch_recovery");
     let object = simple_batch(&project, 2);
-    let source = project.join("examples/a.jet");
-    let source_b = project.join("examples/b.jet");
+    let source = project.join("Examples/a.jet");
+    let source_b = project.join("Examples/b.jet");
     fs::write(
         &source_b,
         "fn report() { print(\"b\") }\nfn run() { report() }\n",
@@ -345,7 +345,7 @@ fn interrupted_batch_recovers_before_the_next_plan() {
     fs::write(
         &object,
         object_text
-            .replace("examples/a.jet", "examples")
+            .replace("Examples/a.jet", "Examples")
             .replace("\"matches\":2", "\"matches\":4"),
     )
     .unwrap();
@@ -387,7 +387,7 @@ fn interrupted_batch_recovers_before_the_next_plan() {
 fn all_after_crash_completes_log_then_undo_restores_every_file() {
     let project = temp_dir("batch_complete_recovery");
     let object = simple_batch(&project, 2);
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     let before = fs::read(&source).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_RENAME", "1")
@@ -421,12 +421,12 @@ fn all_after_crash_completes_log_then_undo_restores_every_file() {
 fn batch_rejects_symlink_and_parent_escape_roots() {
     use std::os::unix::fs::symlink;
     let project = temp_dir("batch_paths");
-    fs::create_dir_all(project.join("examples")).unwrap();
+    fs::create_dir_all(project.join("Examples")).unwrap();
     let outside = project.parent().unwrap().join("codemod-outside.jet");
     fs::write(&outside, "fn run() {}\n").unwrap();
-    symlink(&outside, project.join("examples/link.jet")).unwrap();
+    symlink(&outside, project.join("Examples/link.jet")).unwrap();
     let object = project.join("bad.codemod.json");
-    for root in ["examples/link.jet", "examples/../tests/ui/x.jet"] {
+    for root in ["Examples/link.jet", "Examples/../tests/ui/x.jet"] {
         fs::write(&object, format!("{{\"version\":2,\"name\":\"Bad\",\"project\":\".\",\"roots\":[{{\"path\":\"{root}\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"x\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"run\",\"symbol_kind\":\"function\"}},\"to\":\"start\",\"matches\":1}}]}}\n")).unwrap();
         let output = Command::new(jet())
             .args(["inspect", "codemod"])
@@ -441,7 +441,7 @@ fn batch_rejects_symlink_and_parent_escape_roots() {
 #[test]
 fn schema_one_inverse_edit_log_remains_readable() {
     let dir = temp_dir("schema_one_log");
-    let source = dir.join("examples/main.jet");
+    let source = dir.join("Examples/main.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     let before = "fn report() {}\nfn run() { report() }\n";
     let after = "fn summarize() {}\nfn run() { summarize() }\n";
@@ -465,13 +465,13 @@ fn schema_one_inverse_edit_log_remains_readable() {
 #[test]
 fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
     let project = temp_dir("batch_semantic_refusals");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     let body = "fn report(value: Int) { print(value) }\nfn summarize(value: Int) { print(value) }\nfn run() { report(report(1)) }\n";
     fs::write(&source, body).unwrap();
     let object = project.join("bad.codemod.json");
 
-    fs::write(&object, "{\"version\":2,\"name\":\"Collision\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":3}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Collision\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":3}]}\n").unwrap();
     let collision = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())
@@ -481,7 +481,7 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
     assert!(!collision.status.success());
     assert!(String::from_utf8_lossy(&collision.stderr).contains("destination `summarize`"));
 
-    fs::write(&object, "{\"version\":2,\"name\":\"Binding\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"binding\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"missing($value)\",\"matches\":2}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Binding\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"binding\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"missing($value)\",\"matches\":2}]}\n").unwrap();
     let binding = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())
@@ -491,7 +491,7 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
     assert!(!binding.status.success());
     assert!(String::from_utf8_lossy(&binding.stderr).contains("does not resolve"));
 
-    fs::write(&object, "{\"version\":2,\"name\":\"Overlap\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"overlap\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"summarize($value)\",\"matches\":2}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Overlap\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"overlap\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"summarize($value)\",\"matches\":2}]}\n").unwrap();
     let overlap = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())
@@ -510,12 +510,12 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
 #[test]
 fn semantic_rename_uses_resolved_reference_identity_not_spelling() {
     let project = temp_dir("batch_identity");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     let before = "fn report() { print(\"function\") }\nfn run() { report :: 7\nprint(report) }\n";
     fs::write(&source, before).unwrap();
     let object = project.join("rename.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"Identity\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":1}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Identity\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":1}]}\n").unwrap();
 
     let output = Command::new(jet())
         .args([
@@ -541,7 +541,7 @@ fn semantic_rename_uses_resolved_reference_identity_not_spelling() {
 #[test]
 fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
     let project = temp_dir("batch_node_class");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
@@ -549,7 +549,7 @@ fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
     )
     .unwrap();
     let object = project.join("types.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"Types\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"type\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":1}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Types\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"type\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":1}]}\n").unwrap();
 
     let output = Command::new(jet())
         .args([
@@ -575,7 +575,7 @@ fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
 #[test]
 fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets() {
     let project = temp_dir("batch_type_coverage");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
@@ -583,7 +583,7 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
     )
     .unwrap();
     let object = project.join("types.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int !Int\",\"replace\":\"Float !Float\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int !Int\",\"replace\":\"Float !Float\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
     let output = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())
@@ -603,7 +603,7 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
 #[test]
 fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
     let project = temp_dir("batch_repeated_capture");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
@@ -611,7 +611,7 @@ fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
     )
     .unwrap();
     let object = project.join("repeat.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"Repeat\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"repeat\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"pair($value, $value)\",\"replace\":\"same($value)\",\"matches\":1}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Repeat\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"repeat\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"pair($value, $value)\",\"replace\":\"same($value)\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
         .args([
             "inspect",
@@ -635,11 +635,11 @@ fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
 #[test]
 fn typed_ast_variadic_capture_consumes_one_compiler_list_slot() {
     let project = temp_dir("batch_variadic_capture");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(&source, "fn run() { values :: [1, 2, 3]\nprint(values) }\n").unwrap();
     let object = project.join("variadic.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"Variadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"append\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"[$values...]\",\"replace\":\"[$values..., 4]\",\"matches\":1}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Variadic\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"append\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"[$values...]\",\"replace\":\"[$values..., 4]\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
         .args([
             "inspect",
@@ -661,12 +661,12 @@ fn typed_ast_variadic_capture_consumes_one_compiler_list_slot() {
 #[test]
 fn typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot() {
     let project = temp_dir("batch_variadic_scalar");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     let before = "fn run() { print(1 + 2) }\n";
     fs::write(&source, before).unwrap();
     let object = project.join("variadic.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"ScalarVariadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"scalar\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"$values... + 2\",\"replace\":\"$values... + 3\",\"matches\":1}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"ScalarVariadic\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"scalar\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"$values... + 2\",\"replace\":\"$values... + 3\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())
@@ -688,7 +688,7 @@ fn typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot() {
 fn transaction_rejects_swapped_temp_inode_before_destination_rename() {
     let project = temp_dir("batch_temp_swap");
     let object = simple_batch(&project, 2);
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     let before = fs::read(&source).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
@@ -732,7 +732,7 @@ fn transaction_rejects_swapped_temp_inode_before_destination_rename() {
 fn transaction_rejects_destination_parent_directory_swap() {
     let project = temp_dir("batch_directory_swap");
     let object = simple_batch(&project, 2);
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     let before = fs::read(&source).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
@@ -747,9 +747,9 @@ fn transaction_rejects_destination_parent_directory_swap() {
         .unwrap();
     assert_eq!(crashed.status.code(), Some(87));
     let held = project.join("examples-held");
-    fs::rename(project.join("examples"), &held).unwrap();
-    fs::create_dir(project.join("examples")).unwrap();
-    let hostile = project.join("examples/a.jet");
+    fs::rename(project.join("Examples"), &held).unwrap();
+    fs::create_dir(project.join("Examples")).unwrap();
+    let hostile = project.join("Examples/a.jet");
     fs::write(&hostile, b"fn hostile() {}\n").unwrap();
 
     let recovered = Command::new(jet())
@@ -800,8 +800,8 @@ fn undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading() {
     use std::fs::hard_link;
     use std::os::unix::fs::symlink;
     let project = temp_dir("undo_aliases");
-    let a = project.join("examples/a.jet");
-    let b = project.join("examples/b.jet");
+    let a = project.join("Examples/a.jet");
+    let b = project.join("Examples/b.jet");
     let logs = project.join(".jet/codemods");
     fs::create_dir_all(a.parent().unwrap()).unwrap();
     fs::create_dir_all(&logs).unwrap();
@@ -890,11 +890,11 @@ fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
 #[test]
 fn dry_run_diff_preserves_eof_newline_truth() {
     let project = temp_dir("batch_eof_diff");
-    let source = project.join("examples/a.jet");
+    let source = project.join("Examples/a.jet");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(&source, b"fn report() {}\nfn run() { report() }").unwrap();
     let object = project.join("rename.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"Eof\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":2}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"Eof\",\"project\":\".\",\"roots\":[{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":2}]}\n").unwrap();
 
     let output = Command::new(jet())
         .args(["inspect", "codemod"])

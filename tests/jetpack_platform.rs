@@ -49,29 +49,6 @@ fn platform_tier_audit_contract_names_linux_macos_windows() {
 }
 
 #[test]
-fn platform_tier_audit_ci_has_native_lane_scaffold() {
-    let workflow = std::fs::read_to_string(".github/workflows/ci.yml").unwrap();
-    assert!(
-        workflow.contains("jetpack-platform"),
-        "CI must name the U25 platform audit job"
-    );
-    for runner in ["ubuntu-latest", "macos-latest", "windows-latest"] {
-        assert!(
-            workflow.contains(runner),
-            "CI must scaffold a jetpack platform lane for {runner}"
-        );
-    }
-    assert!(
-        workflow.contains("cargo test --test jetpack_platform"),
-        "platform lanes must run the focused U25 audit test"
-    );
-    assert!(
-        workflow.contains("platform_tier_gate_accepts_data_only_output_without_executable_service"),
-        "non-Linux lanes must run the data-only lease proof"
-    );
-}
-
-#[test]
 #[cfg(target_os = "linux")]
 fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     let root = Scratch::new("platform-gate-root");

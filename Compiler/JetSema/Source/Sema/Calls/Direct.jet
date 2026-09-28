@@ -74,7 +74,10 @@ fn sema_call_check_special_approx(call: Call, expected: ?Type, environment: Sema
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     target :: if expected == {
-        .Val(Type.Float32) -> Type.Float32
+        .Val(expected_type) -> if expected_type == {
+            .Float32 -> Type.Float32
+            else -> Type.Float
+        }
         else -> Type.Float
     }
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
@@ -91,8 +94,81 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: ?Type, environment:
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }
+// Core registry rows are selected by the caller's canonical route.  These
+// source-owned projections run before the generic fixed-row producer; an
+// unhandled projection deliberately leaves the row for that producer.
+pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    // The compiler query checker has a source-owned lowerer only for the
+    // compiler API.  Build graph rows stay on the fixed Core path until their
+    // caller-approved lowering exists; no runtime-shaped fallback is invented.
+    if record.module_name == "core.compiler" && sema_compiler_services_call_contract(record.module_name, record.member) != None {
+        compiler_allowed := scopes.comptime_execution_depth > 0
+        check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
+        if !check.arguments_complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+        value := sema_compiler_services_lower_core_call(check, span, expected, environment, &scopes, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: value}
+    }
+
+    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, [SemaCallModelOutputInput]{}, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}
+
+    reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if reactive.handled -> return reactive
+
+    data := sema_call_try_data_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if data.handled -> return data
+
+    http := sema_call_try_http_core_call(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if http.handled -> return http
+
+    service := sema_call_try_service_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if service.handled -> return service
+
+    ui := sema_call_try_ui_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if ui.handled -> return ui
+
+    SemaDirectSpecialCheck{handled: false, value: None}
+}
+pub fn sema_call_try_core_direct_call(call: Call, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
+    parts := call.name.split(".")
+    if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
+    alias := parts[0]
+    member := parts[1]
+    module_name :: sema_call_core_import_module(environment, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    expected_type_arg_count := 0
+    if core_call_typed_signature(module_name, member, call.args.len()) == {
+        .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
+        .None -> {}
+    }
+    diagnostics_before := diagnostics.len()
+    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), call.name_span, call.name_span, &context, &diagnostics)
+    route_value :: route ?? {
+        if diagnostics.len() != diagnostics_before -> return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: false, value: None}
+    }
+    if route_value == {
+        .Source(target) -> {
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            return SemaDirectSpecialCheck{handled: true, value: value}
+        }
+        .Core(record) -> {
+            special := sema_call_try_core_direct_record(record, call.args, call.type_args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if special.handled -> return special
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_fixed(environment, module_name, member, call.type_args, call.args, call.name_span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            return SemaDirectSpecialCheck{handled: true, value: value}
+        }
+    }
+}
+
 
 fn sema_call_default_err_span(call: Call) -> Span {
+
     if {
         call.args.len() > 0 -> {
             last :: call.args[call.args.len() - 1]
@@ -169,7 +245,7 @@ fn sema_call_default_err_constructor(call: Call, expected: ?Type, wrap_result: B
                 if label_name != None -> diagnostics.push(sema_error("E0767", label_span, "`message` is the positional argument of `Err`", "the short constructor starts with the error message", "remove the label and write `Err(\"message\", ...)`"))
                 message = Val(argument.expr)
             }
-            label_name == Val("code") -> {
+            label_name == (Val("code")) -> {
                 if {
                     code != None -> {
                         diagnostics.push(sema_error("E0765", label_span, "`code:` is written twice in this call to `Err`", "each constructor label sets one field", "remove the second `code:` argument"))
@@ -181,7 +257,7 @@ fn sema_call_default_err_constructor(call: Call, expected: ?Type, wrap_result: B
                     }
                 }
             }
-            label_name == Val("cause") -> {
+            label_name == (Val("cause")) -> {
                 if {
                     cause != None -> {
                         diagnostics.push(sema_error("E0765", label_span, "`cause:` is written twice in this call to `Err`", "each constructor label sets one field", "remove the second `cause:` argument"))
@@ -214,7 +290,7 @@ fn sema_call_default_err_constructor(call: Call, expected: ?Type, wrap_result: B
     payload :: sema_check_expression(struct_expr, Val(Type.Named("Err")), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !wrap_result -> return Val(payload)
     result_value :: sema_call_default_err_result(expected) ?? Type.Result(Type.Named("Unit"), Type.Named("Err"))
-    if result_value == {
+    return if result_value == {
         .Result(ok, err) -> {
             compatible :: sema_call_type_assignable(err, payload.ty, environment) ?? return None
             if !compatible {

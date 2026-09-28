@@ -60,7 +60,7 @@ fn interpreter_matches_expected_golden() {
         if uses_ffi_bridge(&stem) {
             continue;
         }
-        // `examples/features/expected/web/web_wasm_*.out` are Node/browser
+        // `Examples/features/expected/web/web_wasm_*.out` are Node/browser
         // harness goldens (web_build), not interpreter `fn run()` print shape.
         if stem.starts_with("web/web_wasm_") {
             continue;
@@ -83,7 +83,7 @@ fn interpreter_matches_expected_golden() {
             checked += 1;
             continue;
         }
-        let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
+        let expected_path = root.join(format!("Examples/features/expected/{}.out", stem));
         match dev_iteration_with_timeout(&stem, &file, true) {
             RunOutcome::Ran { stdout, .. } => {
                 if let Some(expected) = host_expected_stdout(&stem) {

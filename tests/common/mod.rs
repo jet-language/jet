@@ -784,7 +784,7 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
 /// The answers one example needs on stdin.
 pub struct ExampleStdin {
     /// Answers for a run whose stdin is a pipe or a file. This is what the
-    /// checked-in `examples/features/expected/<stem>.out` golden was recorded
+    /// checked-in `Examples/features/expected/<stem>.out` golden was recorded
     /// against, so it is also what any harness comparing against that golden
     /// owes the program.
     pub piped: &'static str,
@@ -2035,7 +2035,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
 ///
 /// #2025: the I1 scans used to ask `line.contains("unsafe")`, which reads DATA
 /// as CODE. Generated Rust embeds the program's own source path and its string
-/// literals verbatim — `crate::jet_stack_enter("examples/features/memory/
+/// literals verbatim — `crate::jet_stack_enter("Examples/features/memory/
 /// unsafe_sentries.jet", …)`, `jet_mem::jet_sentry_scope(true, "…/
 /// unsafe_obligations.jet", …)`, `print("unsafe gate")` — so four examples were
 /// permanently red for owning the word `unsafe` in their FILE NAME, and
@@ -2087,12 +2087,12 @@ pub fn unsafe_keyword_columns(line: &str) -> Vec<usize> {
 /// DATA. Every string below is a real line from `jet emit --rust` output.
 #[test]
 fn unsafe_keyword_scan_reads_code_not_data() {
-    let path_argument = "    let __jet_stack_frame = crate::jet_stack_enter(\"examples/features/memory/unsafe_sentries.jet\", 5, \"run\", \"fn run() {\");";
+    let path_argument = "    let __jet_stack_frame = crate::jet_stack_enter(\"Examples/features/memory/unsafe_sentries.jet\", 5, \"run\", \"fn run() {\");";
     assert!(
         unsafe_keyword_columns(path_argument).is_empty(),
         "an example's own path in a stack-frame argument is data, not an `unsafe` block"
     );
-    let sentry = "        let _jet_sentry = jet_mem::jet_sentry_scope(true, \"examples/features/lowlevel/unsafe_obligations.jet\", 5, \"cell stays live\");";
+    let sentry = "        let _jet_sentry = jet_mem::jet_sentry_scope(true, \"Examples/features/lowlevel/unsafe_obligations.jet\", 5, \"cell stays live\");";
     assert!(
         unsafe_keyword_columns(sentry).is_empty(),
         "sentry reason strings are data"

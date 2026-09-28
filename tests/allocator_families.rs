@@ -663,8 +663,8 @@ fn run() {
 
 #[test]
 fn try_allocation_example_reports_exhaustion_as_a_value() {
-    let src = include_str!("../examples/features/memory/try_allocation.jet");
-    let expected = include_str!("../examples/features/expected/memory/try_allocation.out");
+    let src = include_str!("../Examples/features/memory/try_allocation.jet");
+    let expected = include_str!("../Examples/features/expected/memory/try_allocation.out");
     if common::have_rustc() {
         let (code, stdout, stderr) = run_jet("try_allocation", src);
         assert_eq!(code, 0, "{stderr}");
@@ -899,10 +899,10 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
         return;
     }
     let source_project =
-        std::fs::canonicalize("examples/features/memory/program_allocator").unwrap();
+        std::fs::canonicalize("Examples/features/memory/program_allocator").unwrap();
     let staged = common::ProjectScratch::for_project(&source_project, "program-allocator");
     let expected =
-        std::fs::read_to_string("examples/features/expected/memory/program_allocator.out").unwrap();
+        std::fs::read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
         ("jit", &["run", "run.jet"][..]),
         ("interpreter", &["run", "--interpret", "run.jet"][..]),

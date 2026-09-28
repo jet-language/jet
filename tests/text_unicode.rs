@@ -78,7 +78,7 @@ fn pinned_unicode_tables_regenerate_byte_identically() {
     );
     let output = Command::new("node")
         .args([
-            "scripts/agent/gen-unicode-tables.mjs",
+            "Tools/agent/gen-unicode-tables.mjs",
             "--check",
             "tests/data/unicode/ucd",
         ])
@@ -542,8 +542,8 @@ fn run() {
 #[test]
 fn unicode_text_audit_matches_golden_on_all_run_tiers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/text/unicode_text_audit.jet");
-    let expected = fs::read(root.join("examples/features/expected/text/unicode_text_audit.out"))
+    let example = root.join("Examples/features/text/unicode_text_audit.jet");
+    let expected = fs::read(root.join("Examples/features/expected/text/unicode_text_audit.out"))
         .expect("read Unicode text audit golden");
     let scratch = common::Scratch::new("unicode_text_audit_tiers");
 
@@ -583,9 +583,9 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
 #[test]
 fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/text/wrap_semantics_audit.jet");
+    let example = root.join("Examples/features/text/wrap_semantics_audit.jet");
     let expected = fs::read(
-        root.join("examples/features/expected/text/wrap_semantics_audit.out"),
+        root.join("Examples/features/expected/text/wrap_semantics_audit.out"),
     )
     .expect("read textwrap semantics audit golden");
     let scratch = common::Scratch::new("wrap_semantics_audit_tiers");
@@ -626,8 +626,8 @@ fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
 #[test]
 fn string_from_bytes_matches_golden_on_all_run_tiers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/strings/from_bytes.jet");
-    let expected = fs::read(root.join("examples/features/expected/strings/from_bytes.out"))
+    let example = root.join("Examples/features/strings/from_bytes.jet");
+    let expected = fs::read(root.join("Examples/features/expected/strings/from_bytes.out"))
         .expect("read String.from_bytes golden");
     let scratch = common::Scratch::new("string_from_bytes_tiers");
 

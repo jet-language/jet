@@ -7,7 +7,7 @@ Read this file before implementing any HTML page. This is the authority for the 
 - `theme.css` is the canonical CSS block. Paste it inline at the top of the page's single `<style>` block.
 - `fonts.css` follows `theme.css` in that same `<style>` block. Its fonts are embedded as data URIs, never linked. It adds about 100 KB per page and keeps the page zero-network.
 - `hl.js` is the canonical highlighter. Paste it inside the page's single `<script>` block. It is the same tokenizer Tower uses.
-- Use tokens from `theme.css`, never raw hex values in page rules. The tokens match `plugins/tower/app/ui/tower.css` so reports and the board read as one product.
+- Use tokens from `theme.css`, never raw hex values in page rules. The tokens match `Tools/tower/app/ui/tower.css` so reports and the board read as one product.
 
 ## Identity
 

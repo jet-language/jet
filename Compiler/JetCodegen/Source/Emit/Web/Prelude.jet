@@ -53,7 +53,8 @@ fn jet_web_timezone_fragment(ctx: &JetWebEmitContext) -> String {
 fn jet_web_harfbuzz_fragment(ctx: &JetWebEmitContext) -> String {
     bytes :: ctx.config.assets.harfbuzz_wasm
     digest :: mir_sha256_hex_bytes(bytes)
-    "\n// D-FOUND-PLATFORM1=A: the checked HarfBuzz bridge travels with the app.\nconst __jetCanonicalHarfBuzzWasmAsset = Object.freeze({{path: {jet_web_js_quote(\"wasm/jet_harfbuzz.wasm\")},sha256: {jet_web_js_quote(digest)},bytes: new Uint8Array({jet_web_js_byte_array(bytes)})}});\nglobalThis.__jetCanonicalHarfBuzzWasm = __jetCanonicalHarfBuzzWasmAsset;"
+    wasm_path :: jet_web_js_quote("wasm/jet_harfbuzz.wasm")
+    "\n// D-FOUND-PLATFORM1=A: the checked HarfBuzz bridge travels with the app.\nconst __jetCanonicalHarfBuzzWasmAsset = Object.freeze({{path: {wasm_path},sha256: {jet_web_js_quote(digest)},bytes: new Uint8Array({jet_web_js_byte_array(bytes)})}});\nglobalThis.__jetCanonicalHarfBuzzWasm = __jetCanonicalHarfBuzzWasmAsset;"
 }
 
 fn jet_web_compose_prelude(ctx: &JetWebEmitContext) -> String {

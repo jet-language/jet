@@ -1,0 +1,119 @@
+// Structural type capabilities selected from the declaration's signed markers.
+// The caller must pass items from this declaration's module only.
+pub struct SemaTypeMetadataAutoDerives {
+    pub printable: Bool
+    pub debug: Bool
+    pub equatable: Bool
+}
+
+fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+        .List(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_metadata_field_auto_ok(inner)
+        .Map(key, _, value) | .Result(key, value) -> sema_type_metadata_field_auto_ok(key) && sema_type_metadata_field_auto_ok(value)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_type_metadata_field_auto_ok(field.ty) -> return false
+            }
+            true
+        }
+        .Union(members) -> {
+            loop member in members {
+                if !sema_type_metadata_field_auto_ok(member) -> return false
+            }
+            true
+        }
+        .Named(_) -> true
+        .Apply(name, _) -> name != "SharedGuard"
+        .Shared(_) | .TraitObject(_) | .Fn(_, _, _, _, _, _) -> false
+    }
+}
+
+fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool {
+    if definition.is_single_use -> return false
+    loop field in definition.fields {
+        if field.computed != None -> next
+        if !sema_type_metadata_field_auto_ok(field.ty) -> return false
+    }
+    true
+}
+
+fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool {
+    if payload == {
+        .Unit -> true
+        .Single(ty, _) -> sema_type_metadata_field_auto_ok(ty)
+        .Named(fields) -> {
+            loop field in fields {
+                if !sema_type_metadata_field_auto_ok(field.ty) -> return false
+            }
+            true
+        }
+    }
+}
+
+fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool {
+    if definition.is_single_use -> return false
+    loop variant in definition.variants {
+        if !sema_type_metadata_variant_auto_ok(variant.payload) -> return false
+    }
+    true
+}
+
+fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool {
+    index := markers.len() - 1
+    loop index >= 0 {
+        marker :: markers[index]
+        if marker.name == trait_name -> return !marker.negated
+        index -= 1
+    }
+    package_default
+}
+
+fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: String) -> Bool {
+    loop block in blocks {
+        if block.trait_name == trait_name -> return true
+    }
+    false
+}
+
+fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String, trait_name: String) -> Bool {
+    loop item in module_items {
+        if item == {
+            .Impl(definition) -> {
+                if definition.type_name == type_name && definition.trait_name == Val(trait_name) -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool {
+    structurally_eligible && !explicit_block && !explicit_impl && sema_type_metadata_trait_requested(markers, trait_name, package_default)
+}
+
+// `definition` supplies the complete type-marker sequence, package default,
+// fields/variants, and inline trait blocks. `module_items` supplies only that
+// same module's top-level impl declarations, so unrelated modules cannot
+// suppress this type's selection.
+pub fn sema_type_metadata_auto_derives(definition: Item, module_items: [Item]) -> SemaTypeMetadataAutoDerives {
+    if definition == {
+        .Struct(value) -> {
+            eligible :: sema_type_metadata_struct_auto_ok(value)
+            SemaTypeMetadataAutoDerives{
+                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Printable"), "Printable"),
+                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Debug"), "Debug"),
+                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Equatable"), "Equatable"),
+            }
+        }
+        .Enum(value) -> {
+            eligible :: sema_type_metadata_enum_auto_ok(value)
+            SemaTypeMetadataAutoDerives{
+                printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Printable"), "Printable"),
+                debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Debug"), "Debug"),
+                equatable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Equatable"), sema_type_metadata_has_explicit_impl(module_items, value.name, "Equatable"), "Equatable"),
+            }
+        }
+        else -> SemaTypeMetadataAutoDerives{printable: false, debug: false, equatable: false}
+    }
+}

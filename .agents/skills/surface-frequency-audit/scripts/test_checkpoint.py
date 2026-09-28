@@ -15,7 +15,7 @@ SCRIPT = Path(__file__).with_name("checkpoint.py")
 AGGREGATE = Path(__file__).with_name("aggregate.py")
 REPO = SCRIPT.resolve().parents[4]
 RUN_BASE = REPO / ".tmp" / "surface-frequency-audit"
-REPORT_BASE = REPO / "docs" / "audits"
+REPORT_BASE = REPO / "Docs" / "audits"
 
 
 class CheckpointTest(unittest.TestCase):

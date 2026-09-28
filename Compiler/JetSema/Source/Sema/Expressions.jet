@@ -71,7 +71,7 @@ fn sema_expr_numeric_widening_to(source: Type, target: Type) -> ?Bool {
         target_range :: target_bounds ?? SemaIntegerRange{lo: 0, hi: 0}
         return Val(target_range.lo <= source_range.lo && source_range.hi <= target_range.hi)
     }
-    if source != source_base -> {
+    if source != source_base {
         if type_identity_equal(source_base, target) -> return Val(false)
         return sema_expr_numeric_widening_to(source_base, target)
     }
@@ -80,9 +80,17 @@ fn sema_expr_numeric_widening_to(source: Type, target: Type) -> ?Bool {
     }
     if type_identity_equal(source_base, target_base) && sema_expr_is_numeric(source_base) -> return Val(false)
     if source_base == {
-        .IntN(_, _) -> if target_base == Type.Int -> return Val(false)
-        .Int -> if target_base == {.IntN(_, _) -> return Val(true)}
-        .Float32 -> if target_base == Type.Float -> return Val(false)
+        .IntN(_, _) -> {
+            if target_base == Type.Int -> return Val(false)
+        }
+        .Int -> {
+            if target_base == {
+                .IntN(_, _) -> return Val(true)
+            }
+        }
+        .Float32 -> {
+            if target_base == Type.Float -> return Val(false)
+        }
         else -> {}
     }
     if source_base == Type.Int && (target_base == Type.Float || target_base == Type.Float32) -> return Val(true)
@@ -111,16 +119,22 @@ fn sema_expr_numeric_join(left: Type, right: Type) -> ?Type {
 fn sema_expr_numeric_join_values(left: TExpr, right: TExpr) -> ?Type {
     left_literal := sema_expr_integer_literal_value(left)
     right_literal := sema_expr_integer_literal_value(right)
-    if left_literal != None && right.ty == {
-        .IntN(signed, bits) -> {
-            if sema_expr_integer_fits(left_literal ?? 0, signed, bits) -> return Val(right.ty)
-            return Val(Type.Int)
+    if left_literal != None {
+        if right.ty == {
+            .IntN(signed, bits) -> {
+                if sema_expr_integer_fits(left_literal ?? 0, signed, bits) -> return Val(right.ty)
+                return Val(Type.Int)
+            }
+            else -> {}
         }
     }
-    if right_literal != None && left.ty == {
-        .IntN(signed, bits) -> {
-            if sema_expr_integer_fits(right_literal ?? 0, signed, bits) -> return Val(left.ty)
-            return Val(Type.Int)
+    if right_literal != None {
+        if left.ty == {
+            .IntN(signed, bits) -> {
+                if sema_expr_integer_fits(right_literal ?? 0, signed, bits) -> return Val(left.ty)
+                return Val(Type.Int)
+            }
+            else -> {}
         }
     }
     sema_expr_numeric_join(left.ty, right.ty)
@@ -145,16 +159,19 @@ fn sema_expr_numeric_host_kind(ty: Type) -> ?Int {
     base := sema_expr_numeric_base(ty)
     if base == {
         .IntN(signed, bits) -> {
-            if signed {
-                if bits == 8 -> return Val(0)
-                if bits == 16 -> return Val(1)
-                if bits == 32 -> return Val(2)
-                if bits == 64 -> return Val(3)
-            } else {
-                if bits == 8 -> return Val(4)
-                if bits == 16 -> return Val(5)
-                if bits == 32 -> return Val(6)
-                if bits == 64 -> return Val(7)
+            if {
+                signed -> {
+                    if bits == 8 -> return Val(0)
+                    if bits == 16 -> return Val(1)
+                    if bits == 32 -> return Val(2)
+                    if bits == 64 -> return Val(3)
+                }
+                else -> {
+                    if bits == 8 -> return Val(4)
+                    if bits == 16 -> return Val(5)
+                    if bits == 32 -> return Val(6)
+                    if bits == 64 -> return Val(7)
+                }
             }
         }
         else -> {}
@@ -198,11 +215,14 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
         operation = Val(TNumericOp.CheckedIntToFixed{host_kind: host_kind, dst_rust: rust_type, dst_spelling: type_name(destination), line: line})
     }
     if operation == None {
-        if destination == Type.Float32 && source == Type.Float {
-            operation = Val(TNumericOp.FloatNarrow{dst_spelling: type_name(destination)})
-        } else {
-            rust_type :: sema_expr_numeric_rust_type(destination) ?? return None
-            operation = Val(TNumericOp.CastAs{dst_rust: rust_type})
+        if {
+            destination == Type.Float32 && source == Type.Float -> {
+                operation = Val(TNumericOp.FloatNarrow{dst_spelling: type_name(destination)})
+            }
+            else -> {
+                rust_type :: sema_expr_numeric_rust_type(destination) ?? return None
+                operation = Val(TNumericOp.CastAs{dst_rust: rust_type})
+            }
         }
     }
     TExpr{ty: target, kind: TExprKind.NumericMethod(value, operation ?? TNumericOp.CastAs{dst_rust: ""}), span: span, integer_bounds: None, cost: None}
@@ -331,17 +351,23 @@ fn sema_expr_operator_ordering_test(op: BinOp, comparison: TExpr, span: Span, li
 }
 fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs: TExpr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], line: Int) -> ?TExpr {
     resolution := None
-    if op == BinOp.Eq || op == BinOp.Ne {
-        graph :: environment.registration_graph ?? return None
-        comparable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Comparable", "compare", false, span, environment, &scopes, &diagnostics)
-        equatable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Equatable", "equal", false, span, environment, &scopes, &diagnostics)
-        if comparable.len() == 1 && equatable.len() == 1 {
-            resolution = Val(comparable[0])
-        } else {
+    if {
+        op == BinOp.Eq || op == BinOp.Ne -> {
+            graph :: environment.registration_graph ?? return None
+            comparable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Comparable", "compare", false, span, environment, &scopes, &diagnostics)
+            equatable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Equatable", "equal", false, span, environment, &scopes, &diagnostics)
+            if {
+                comparable.len() == 1 && equatable.len() == 1 -> {
+                    resolution = Val(comparable[0])
+                }
+                else -> {
+                    resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, &scopes, &diagnostics)
+                }
+            }
+        }
+        else -> {
             resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, &scopes, &diagnostics)
         }
-    } else {
-        resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, &scopes, &diagnostics)
     }
     resolved :: resolution ?? return None
     receiver_expr := left
@@ -379,7 +405,8 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
 
 fn sema_expr_operator_target_matches(implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool {
     if implementation.target_identity_key == nominal.identity_key -> return true
-    if implementation.target_module_identity == Val(nominal.symbol.module_name) && implementation.target_type_name == nominal.symbol.name -> return true
+    target_module :: nominal.symbol.module_name
+    if implementation.target_module_identity == (Val(target_module)) && implementation.target_type_name == nominal.symbol.name -> return true
     false
 }
 
@@ -403,8 +430,8 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
             owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
             loop implementation in graph_module.impls {
                 if !sema_expr_operator_target_matches(implementation, nominal) -> next
-                if implementation.trait_name != Val(trait_name) -> next
-                if require_commutative && implementation.operator_marker != Val(OperatorMarker.Commutative) -> next
+                if implementation.trait_name != (Val(trait_name)) -> next
+                if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
                 implementation_rhs := implementation.operator_rhs
                 if implementation_rhs == None -> implementation_rhs = Val(owner_type)
                 qualified_rhs := sema_inference_substitute_type_bindings(implementation_rhs ?? owner_type, owner_inference.substitutions)
@@ -431,7 +458,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                         .Struct(definition) -> {
                             loop block in definition.trait_impls {
                                 if block.trait_name != trait_name -> next
-                                if require_commutative && block.operator_marker != Val(OperatorMarker.Commutative) -> next
+                                if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
                                 block_rhs := block.operator_rhs ?? owner_type
                                 block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                                 if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
@@ -460,7 +487,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                         .Enum(definition) -> {
                             loop block in definition.trait_impls {
                                 if block.trait_name != trait_name -> next
-                                if require_commutative && block.operator_marker != Val(OperatorMarker.Commutative) -> next
+                                if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
                                 block_rhs := block.operator_rhs ?? owner_type
                                 block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                                 if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
@@ -496,8 +523,8 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
     loop graph_module in graph.modules {
         loop implementation in graph_module.impls {
             if implementation.target_type_name != receiver_name -> next
-            if implementation.trait_name != Val(trait_name) -> next
-            if require_commutative && implementation.operator_marker != Val(OperatorMarker.Commutative) -> next
+            if implementation.trait_name != (Val(trait_name)) -> next
+            if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
             owner_type := implementation.target_type
             implementation_rhs := implementation.operator_rhs ?? owner_type
             if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
@@ -574,21 +601,21 @@ fn sema_expr_binary_name(op: BinOp) -> String {
 }
 
 fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) -> ?Type {
-    if op == BinOp.And | BinOp.Or {
+    if op == BinOp.And || op == BinOp.Or {
         if lhs == Type.Bool && rhs == Type.Bool -> return Val(Type.Bool)
         diagnostics.push(sema_error("E0110", span, "logical operators need Bool values", "a logical condition must have a clear yes or no value", "compare each value to produce Bool"))
         return None
     }
-    if op == BinOp.Eq | BinOp.Ne {
+    if op == BinOp.Eq || op == BinOp.Ne {
         if !type_identity_equal(lhs, rhs) {
             if sema_expr_numeric_join(lhs, rhs) != None -> return Val(Type.Bool)
             diagnostics.push(sema_error("E0109", span, "both sides of this comparison must have the same type", "equality compares values of one type", "convert one side or compare values with matching types"))
             return None
         }
-        if (lhs == Type.Int | lhs == Type.Float | lhs == Type.Float32 | lhs == Type.Bool | lhs == Type.String | lhs == Type.Char) || sema_expr_is_integer(lhs) || sema_expr_precise_name(lhs) != None -> return Val(Type.Bool)
+        if (lhs == Type.Int || lhs == Type.Float || lhs == Type.Float32 || lhs == Type.Bool || lhs == Type.String || lhs == Type.Char) || sema_expr_is_integer(lhs) || sema_expr_precise_name(lhs) != None -> return Val(Type.Bool)
         return None
     }
-    if op == BinOp.Lt | op == BinOp.Gt | op == BinOp.Le | op == BinOp.Ge {
+    if op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge {
         if !type_identity_equal(lhs, rhs) {
             if sema_expr_numeric_join(lhs, rhs) != None -> return Val(Type.Bool)
             diagnostics.push(sema_error("E0109", span, "both sides of this comparison must have the same type", "an ordered comparison needs matching numeric operands", "make both sides the same number type"))
@@ -603,12 +630,12 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
         if sema_expr_numeric_join(lhs, rhs) != None -> return Val(Type.Named("Ordering"))
         return None
     }
-    if op == BinOp.Shl | BinOp.Shr {
+    if op == BinOp.Shl || op == BinOp.Shr {
         if sema_expr_is_integer(lhs) && sema_expr_is_integer(rhs) -> return Val(lhs)
         diagnostics.push(sema_error("E0109", span, "shift operators work on integer values only", "the left side is the value being shifted and the right side is its bit count", "use whole-number operands"))
         return None
     }
-    if op == BinOp.Mod | BinOp.Rem | BinOp.BitAnd | BinOp.BitOr | BinOp.BitXor {
+    if op == BinOp.Mod || op == BinOp.Rem || op == BinOp.BitAnd || op == BinOp.BitOr || op == BinOp.BitXor {
         if type_identity_equal(lhs, rhs) && sema_expr_is_integer(lhs) -> return Val(lhs)
         if {
             !sema_expr_is_integer(lhs) || !sema_expr_is_integer(rhs) -> diagnostics.push(sema_error("E0109", span, "this operator works on integer values only", "remainder and bitwise operations preserve an integer width", "use whole-number operands"))
@@ -617,7 +644,7 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
         return None
     }
     if op == BinOp.Div && lhs == Type.Int && rhs == Type.Int -> return Val(Type.Named("Fraction"))
-    if op == BinOp.Add | op == BinOp.Sub | op == BinOp.Mul | op == BinOp.Div | op == BinOp.FloorDiv | op == BinOp.Pow {
+    if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.FloorDiv || op == BinOp.Pow {
         if type_identity_equal(lhs, rhs) && sema_expr_is_numeric(lhs) -> return Val(lhs)
         if sema_expr_precise_name(lhs) != None && type_identity_equal(lhs, rhs) -> return Val(lhs)
         if sema_expr_is_numeric(lhs) && sema_expr_is_numeric(rhs) -> return None
@@ -756,30 +783,35 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
     right := rhs
     lname := left_name
     rname := right_name
-    if lname == Val("Complex") && rname == None && sema_expr_is_numeric(rhs.ty) {
-        right = sema_expr_precise_complex(rhs, span, line, &diagnostics) ?? return None
-        rname = Val("Complex")
-    } else if rname == Val("Complex") && lname == None && sema_expr_is_numeric(lhs.ty) {
-        left = sema_expr_precise_complex(lhs, span, line, &diagnostics) ?? return None
-        lname = Val("Complex")
-    } else if lname != None && rname == None && lname != Val("Complex") {
-        if sema_expr_integer_literal_value(rhs) != None {
-            right = sema_expr_precise_integer(rhs, lname ?? "", span) ?? {
-                sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
-                return None
-            }
-            rname = lname
+    if {
+        lname == (Val("Complex")) && rname == None && sema_expr_is_numeric(rhs.ty) -> {
+            right = sema_expr_precise_complex(rhs, span, line, &diagnostics) ?? return None
+            rname = Val("Complex")
         }
-    } else if rname != None && lname == None && rname != Val("Complex") {
-        if sema_expr_integer_literal_value(lhs) != None {
-            left = sema_expr_precise_integer(lhs, rname ?? "", span) ?? {
-                sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
-                return None
+        rname == (Val("Complex")) && lname == None && sema_expr_is_numeric(lhs.ty) -> {
+            left = sema_expr_precise_complex(lhs, span, line, &diagnostics) ?? return None
+            lname = Val("Complex")
+        }
+        lname != None && rname == None && lname != (Val("Complex")) -> {
+            if sema_expr_integer_literal_value(rhs) != None {
+                right = sema_expr_precise_integer(rhs, lname ?? "", span) ?? {
+                    sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
+                    return None
+                }
+                rname = lname
             }
-            lname = rname
+        }
+        rname != None && lname == None && rname != (Val("Complex")) -> {
+            if sema_expr_integer_literal_value(lhs) != None {
+                left = sema_expr_precise_integer(lhs, rname ?? "", span) ?? {
+                    sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
+                    return None
+                }
+                lname = rname
+            }
         }
     }
-    if (lname == Val("Decimal") && (rhs.ty == Type.Float || rhs.ty == Type.Float32)) || (rname == Val("Decimal") && (lhs.ty == Type.Float || lhs.ty == Type.Float32)) {
+    if (lname == (Val("Decimal")) && (rhs.ty == Type.Float || rhs.ty == Type.Float32)) || (rname == (Val("Decimal")) && (lhs.ty == Type.Float || lhs.ty == Type.Float32)) {
         diagnostics.push(sema_error("E0131", span, "`Float` and `Decimal` can't be mixed — got `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "exact Decimal values do not silently cross the approximate floating-point boundary", "use `Decimal` for both operands, or convert explicitly at the call site"))
         return None
     }
@@ -922,7 +954,10 @@ fn sema_expr_geometry_space(ty: Type) -> ?Type {
 }
 
 fn sema_expr_geometry_dynamic(ty: Type) -> Bool {
-    if ty == {.Apply(name, _) -> return name == "Point2" || name == "Delta2" else -> false}
+    if ty == {
+        .Apply(name, _) -> return name == "Point2" || name == "Delta2"
+        else -> false
+    }
 }
 
 fn sema_expr_geometry_scalar(ty: Type) -> Type {
@@ -944,29 +979,44 @@ fn sema_expr_geometry_result(op: BinOp, lhs: Type, rhs: Type) -> ?Type {
     if !type_identity_equal(left_space, right_space) -> return Val(Type.Named("__GeometrySpaceMismatch"))
     dynamic := sema_expr_geometry_dynamic(lhs) || sema_expr_geometry_dynamic(rhs)
     result := None
-    if op == BinOp.Add {
-        if left_point && right_delta {
-            result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-        } else if left_delta && right_point {
-            result = Val(if dynamic -> sema_expr_geometry_generic("Point2", rhs) else -> rhs)
-        } else if left_delta && right_delta {
-            result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
-        }
-    } else if op == BinOp.Sub {
-        if left_point && right_delta {
-            result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-        } else if left_point && right_point {
-            if dynamic {
-                result = Val(sema_expr_geometry_generic("Delta2", lhs))
-            } else {
-                point_name :: if lhs == Type.Named("ScreenPoint") -> "ScreenDelta" else -> if lhs == Type.Named("WorldPoint") -> "WorldDelta" else -> if lhs == Type.Named("ViewPoint") -> "ViewDelta" else -> if lhs == Type.Named("CameraPoint") -> "CameraDelta" else -> if lhs == Type.Named("DevicePoint") -> "DeviceDelta" else -> ""
-                if point_name != "" -> result = Val(Type.Named(point_name))
+    if {
+        op == BinOp.Add -> {
+            if {
+                left_point && right_delta -> {
+                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
+                }
+                left_delta && right_point -> {
+                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", rhs) else -> rhs)
+                }
+                left_delta && right_delta -> {
+                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
+                }
             }
-        } else if left_delta && right_delta {
-            result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
         }
-    } else if op == BinOp.Eq || op == BinOp.Ne {
-        if (left_point && right_point) || (left_delta && right_delta) -> result = Val(Type.Bool)
+        op == BinOp.Sub -> {
+            if {
+                left_point && right_delta -> {
+                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
+                }
+                left_point && right_point -> {
+                    if {
+                        dynamic -> {
+                            result = Val(sema_expr_geometry_generic("Delta2", lhs))
+                        }
+                        else -> {
+                            point_name :: if lhs == Type.Named("ScreenPoint") -> "ScreenDelta" else -> if lhs == Type.Named("WorldPoint") -> "WorldDelta" else -> if lhs == Type.Named("ViewPoint") -> "ViewDelta" else -> if lhs == Type.Named("CameraPoint") -> "CameraDelta" else -> if lhs == Type.Named("DevicePoint") -> "DeviceDelta" else -> ""
+                            if point_name != "" -> result = Val(Type.Named(point_name))
+                        }
+                    }
+                }
+                left_delta && right_delta -> {
+                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
+                }
+            }
+        }
+        op == BinOp.Eq || op == BinOp.Ne -> {
+            if (left_point && right_point) || (left_delta && right_delta) -> result = Val(Type.Bool)
+        }
     }
     result_value :: result ?? return Val(Type.Named("__GeometryUnsupported"))
     if dynamic && result_value != Type.Bool {
@@ -1047,13 +1097,17 @@ fn sema_expr_check_time_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         return Val(sema_tir_expr(result_ty, TExprKind.Binary(sema_expr_tir_binary_op(op), false, line, lhs, rhs), span))
     }
     result := None
-    if lhs.ty == Type.Named("Duration") && rhs.ty == Type.Named("Duration") {
-        if op == BinOp.Add || op == BinOp.Sub -> result = Val(Type.Named("Duration"))
-    } else if lhs.ty == Type.Named("Instant") && rhs.ty == Type.Named("Instant") {
-        if op == BinOp.Sub -> result = Val(Type.Named("Duration"))
-    } else if (lhs.ty == Type.Named("Instant") && rhs.ty == Type.Named("Duration")) || (lhs.ty == Type.Named("Duration") && rhs.ty == Type.Named("Instant")) {
-        if op == BinOp.Add -> result = Val(Type.Named("Instant"))
-        if lhs.ty == Type.Named("Instant") && op == BinOp.Sub -> result = Val(Type.Named("Instant"))
+    if {
+        lhs.ty == Type.Named("Duration") && rhs.ty == Type.Named("Duration") -> {
+            if op == BinOp.Add || op == BinOp.Sub -> result = Val(Type.Named("Duration"))
+        }
+        lhs.ty == Type.Named("Instant") && rhs.ty == Type.Named("Instant") -> {
+            if op == BinOp.Sub -> result = Val(Type.Named("Duration"))
+        }
+        (lhs.ty == Type.Named("Instant") && rhs.ty == Type.Named("Duration")) || (lhs.ty == Type.Named("Duration") && rhs.ty == Type.Named("Instant")) -> {
+            if op == BinOp.Add -> result = Val(Type.Named("Instant"))
+            if lhs.ty == Type.Named("Instant") && op == BinOp.Sub -> result = Val(Type.Named("Instant"))
+        }
     }
     result_ty :: result ?? return None
     Val(sema_tir_expr(result_ty, TExprKind.Binary(sema_expr_tir_binary_op(op), false, line, lhs, rhs), span))
@@ -1067,24 +1121,30 @@ struct SemaExprDistinctFacts {
 }
 
 fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> ?SemaExprDistinctFacts {
-    name :: if ty == {.Named(value) -> value else -> return None}
-    owner := sema_expression_type_symbol(scopes, name) ?? return None
-    declaration := sema_scope_resolve_declaration(environment, owner.id) ?? return None
-    definition :: if declaration == {
-        .Distinct(value) -> value
+    name := ""
+    if ty == {
+        .Named(value) -> name = value
         else -> return None
     }
-    if definition.quantity != None -> return None
+    owner := sema_expression_type_symbol(scopes, name) ?? return None
+    declaration := sema_scope_resolve_declaration(environment, owner.id) ?? return None
+    definition := None
+    if declaration == {
+        .Distinct(value) -> definition = Val(value)
+        else -> {}
+    }
+    definition_value :: definition ?? return None
+    if definition_value.quantity != None -> return None
     numeric := false
-    loop marker in definition.derives {
+    loop marker in definition_value.derives {
         if marker.name == "Numeric" -> numeric = true
     }
     range := None
-    if definition.range != None {
-        value :: definition.range ?? return None
+    if definition_value.range != None {
+        value :: definition_value.range ?? return None
         range = Val(TIntegerBounds{lo: value.lo, hi: value.hi})
     }
-    Val(SemaExprDistinctFacts{name: name, base: definition.base, numeric: numeric, range: range})
+    Val(SemaExprDistinctFacts{name: name, base: definition_value.base, numeric: numeric, range: range})
 }
 
 fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, left_facts: ?SemaExprDistinctFacts, right_facts: ?SemaExprDistinctFacts, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> ?TExpr {
@@ -1305,10 +1365,13 @@ fn sema_expr_dimension_add_axis(axes: &[DimensionAxis], name: String, exponent: 
 
             current :: measure_signed_value(axes[index].exponent) ?? return false
             next := current + exponent
-            if next == 0 {
-                _ := axes.remove(index)
-            } else {
-                axes[index].exponent = Measure.SignedLiteral("dimension", next)
+            if {
+                next == 0 -> {
+                    _ := axes.remove(index)
+                }
+                else -> {
+                    axes[index].exponent = Measure.SignedLiteral("dimension", next)
+                }
             }
             return true
         }
@@ -1341,7 +1404,10 @@ fn sema_expr_dimension_combine(left: Dimension, right: Dimension, multiply: Bool
 }
 
 fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment) -> ?Dimension {
-    if ty == {.Quantity(_, dimension) -> return Val(dimension) else -> {}}
+    if ty == {
+        .Quantity(_, dimension) -> return Val(dimension)
+        else -> {}
+    }
     fact := sema_expr_unit_fact(ty, environment) ?? return None
     fact.dimension
 }
@@ -1849,7 +1915,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, scopes: &SemaSc
         diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
     }
-    context.comptime_requests.push(SemaComptimeRequest{callee_key: symbol.key, module_identity: target.module_identity, args: args, span: span})
+    context.comptime_requests.push(SemaComptimeRequest{callee_key: symbol.key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
     true
 }
 
@@ -1896,8 +1962,12 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
 }
 
 fn sema_expr_check_direct_call(call: Call, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if sema_expression_zip_family_name(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
+        return sema_expression_zip_free_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    core_direct := sema_call_try_core_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if core_direct.handled -> return core_direct.value
     special := sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
         checked_default := sema_call_check_default_err(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1961,20 +2031,24 @@ fn sema_expr_check_unit_conversion_source(argument: Expr, method: String, rounde
 }
 
 fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    destination_name :: if receiver == {
-        .Ident(name, _) -> name
+    destination_name := ""
+    if receiver == {
+        .Ident(name, _) -> destination_name = name
         else -> return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if !method.starts_with("from_") -> return SemaMethodSpecialCheck{handled: false, value: None}
     destination_fact :: sema_expr_unit_fact(Type.Named(destination_name), environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     rounded := sema_call_method_gate(method) != None
-    if rounded {
-        if args.len() != 3 -> return SemaMethodSpecialCheck{handled: false, value: None}
-        _ := sema_expr_unit_rounding_mode(args[1].expr) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-        label :: args[2].label ?? return SemaMethodSpecialCheck{handled: false, value: None}
-        if label.name != "digits" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    } else {
-        if args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if {
+        rounded -> {
+            if args.len() != 3 -> return SemaMethodSpecialCheck{handled: false, value: None}
+            _ := sema_expr_unit_rounding_mode(args[1].expr) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+            label :: args[2].label ?? return SemaMethodSpecialCheck{handled: false, value: None}
+            if label.name != "digits" -> return SemaMethodSpecialCheck{handled: false, value: None}
+        }
+        else -> {
+            if args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
+        }
     }
 
     rounding_mode := None
@@ -2014,10 +2088,15 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
         checked_digits := sema_check_expression(args[2].expr, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         digits_value = Val(checked_digits)
         if args[2].expr == {
-            .Unary(UnOp.Neg, inner, _) -> {
-                if inner == {.Int(_, _, _, _) -> {
-                    diagnostics.push(sema_error("E0127", expr_span(args[2].expr), "rounded unit conversion needs nonnegative digits", "digits counts destination decimal places", "write `digits: 0` or another nonnegative Int"))
-                } else -> {}
+            .Unary(operator, inner, _) -> {
+                if operator == UnOp.Neg {
+                    if inner == {
+                        .Int(_, _, _, _) -> {
+                            diagnostics.push(sema_error("E0127", expr_span(args[2].expr), "rounded unit conversion needs nonnegative digits", "digits counts destination decimal places", "write `digits: 0` or another nonnegative Int"))
+                        }
+                        else -> {}
+                    }
+                }
             }
             else -> {}
         }
@@ -2040,39 +2119,297 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
+fn sema_expr_check_take_pattern_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "take_pattern" || (receiver_value.ty != Type.Named("Cursor") && receiver_value.ty != Type.Named("Reader")) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 {
+        diagnostics.push(sema_error("E0104", span, "`take_pattern` expects one literal pattern, got {args.len()} arguments", "a pattern is a compile-time literal and is the whole argument list", "write exactly one string or `[U8]` pattern literal"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if receiver_value.ty == Type.Named("Cursor") {
+        if args[0].expr == {
+            .StrMatchLit(parts, lit_span) -> {
+                validation := sema_pattern_text(Type.String, parts, lit_span, &diagnostics, false)
+                if !validation.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+                canonical := [TCanonicalField]{}
+                tuple_fields := [TypeTupleField]{}
+                loop binding in validation.bindings {
+                    canonical.push(TCanonicalField{name: binding.name, ty: binding.ty})
+                    tuple_fields.push(TypeTupleField{name: binding.name, ty: binding.ty})
+                }
+                ok_ty := if tuple_fields.len() == 0 -> Type.Named("Unit") else -> Type.Tuple(fields: tuple_fields)
+                result_ty := Type.Result(ok_ty, Type.String)
+                operation := THandleOp.CursorTakePattern(parts: parts, canonical: canonical)
+                value := sema_tir_expr(result_ty, TExprKind.HandleMethod(receiver_value, operation, [TExpr]{}), span)
+                checked := sema_expr_expected(value, expected, environment, &diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: checked}
+            }
+            else -> {
+                diagnostics.push(sema_error("E0112", args[0].span, "`Cursor.take_pattern` needs a literal text pattern", "Cursor patterns use string literals with typed capture holes", "write `cursor.take_pattern(\"prefix-{{{{name:Int}}}}-suffix\")`"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
+    if args[0].expr == {
+        .BinMatchLit(parts, lit_span) -> {
+            byte_type := Type.List(Type.IntN(false, 8))
+            validation := sema_pattern_binary(byte_type, parts, lit_span, &diagnostics, false)
+            if !validation.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+            canonical := [TCanonicalField]{}
+            tuple_fields := [TypeTupleField]{}
+            loop binding in validation.bindings {
+                canonical.push(TCanonicalField{name: binding.name, ty: binding.ty})
+                tuple_fields.push(TypeTupleField{name: binding.name, ty: binding.ty})
+            }
+            ok_ty := if tuple_fields.len() == 0 -> Type.Named("Unit") else -> Type.Tuple(fields: tuple_fields)
+            result_ty := Type.Result(ok_ty, Type.String)
+            operation := THandleOp.ReaderTakePattern(parts: parts, canonical: canonical)
+            value := sema_tir_expr(result_ty, TExprKind.HandleMethod(receiver_value, operation, [TExpr]{}), span)
+            checked := sema_expr_expected(value, expected, environment, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: checked}
+        }
+        else -> {
+            diagnostics.push(sema_error("E0112", args[0].span, "`Reader.take_pattern` needs a literal binary pattern", "Reader patterns use `[U8]` literals with typed bit or rest captures", "write `reader.take_pattern([U8]{{\"prefix-{{{{name:U8}}}}-suffix\"}})`"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    }
+}
+
+fn sema_expr_core_module_alias_visible(alias: String, scopes: SemaScopeTable) -> Bool {
+    index :: sema_scope_resolve_index(scopes, alias) ?? return false
+    kind := scopes.bindings[index].symbol.kind
+    kind == SymbolKind.Module || kind == SymbolKind.Import
+}
+
+fn sema_expr_canonical_type_binding(name: String, scopes: SemaScopeTable) -> Bool {
+    index :: sema_scope_resolve_index(scopes, name) ?? return false
+    binding := scopes.bindings[index]
+    if binding.symbol.kind != SymbolKind.Type -> return false
+    if binding.symbol.module_name == "" || binding.symbol.module_name.starts_with("core.") -> return true
+    sema_scope_binding_is_compiler_builtin(binding, name)
+}
+
+fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    alias := ""
+    if receiver == {
+        .Ident(name, _) -> alias = name
+        else -> return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    alias_span :: if receiver == {.Ident(_, span) -> span else -> method_span}
+    if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    module_name :: sema_call_core_import_module(environment, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    expected_type_arg_count := 0
+    if core_call_typed_signature(module_name, method, args.len()) == {
+        .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
+        .None -> {}
+    }
+    diagnostics_before := diagnostics.len()
+    route := sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics)
+    route_value :: route ?? {
+        if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    if route_value == {
+        .Source(target) -> {
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            return SemaMethodSpecialCheck{handled: true, value: value}
+        }
+        .Core(record) -> {
+            special := sema_call_try_core_direct_record(record, args, type_args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if special.handled -> return SemaMethodSpecialCheck{handled: true, value: special.value}
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_fixed(environment, module_name, method, type_args, args, method_span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            return SemaMethodSpecialCheck{handled: true, value: value}
+        }
+    }
+}
+
+fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    task_surface := sema_taskgroup_check_surface_method(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if task_surface.handled -> return task_surface
+
+    module_alias := if receiver == {
+        .Field(base, _, _) -> if base == {.Ident(name, _) -> Val(name) else -> None}
+        else -> None
+    }
+    alias :: module_alias ?? ""
+    if alias != "" && sema_expr_core_module_alias_visible(alias, scopes) {
+        memory := sema_call_try_memory_static(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if memory.handled -> return memory
+        http := sema_call_try_http_static(receiver, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if http.handled -> return http
+        tls := sema_call_try_network_tls_static(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if tls.handled -> return tls
+    }
+
+    owner :: if receiver == {.Ident(name, _) -> name else -> ""}
+    if owner != "" && sema_expr_canonical_type_binding(owner, scopes) {
+        stream := sema_call_try_stream_handle_static(owner, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if stream.handled -> return stream
+        time := sema_call_try_time_static_method(owner, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if time.handled -> return time
+        data := sema_call_try_data_literal(Type.Named(owner), method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if data.handled -> return data
+    }
+
+    game := sema_call_try_game_static(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if game.handled -> return game
+
+    static := sema_call_try_static_method(receiver, method, method_span, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if static.handled -> return static
+
+    core := sema_expr_try_core_module_method(receiver, method, method_span, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if core.handled -> return core
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+fn sema_expr_record_hardware_result(result: SemaHardwareMethodCheck, scopes: &SemaScopeTable, context: &SemaCheckContext) -> SemaMethodSpecialCheck {
+    sema_hardware_use_merge(&context.hardware_use, sema_hardware_use_snapshot(result.hardware_use))
+    if result.dma_transfer == .Val(fact) && result.check.value != None -> scopes.hardware_pending_transfers.push(fact)
+    result.check
+}
+
+fn sema_expr_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    hardware := sema_call_try_hardware_pre_receiver(receiver, method, args, None, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if hardware == .Val(result) && result.check.handled -> return sema_expr_record_hardware_result(result, &scopes, &context)
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+
+fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if data.handled -> return data
+
+    sql := sema_call_try_sql_raw(receiver, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sql.handled -> return sql
+    database := sema_call_try_database_method(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if database.handled -> return database
+
+    http := sema_call_try_http_method(receiver, receiver_value, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if http.handled -> return http
+    ui := sema_call_try_ui_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if ui.handled -> return ui
+    stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if stream.handled -> return stream
+    process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if process.handled -> return process
+    time := sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if time.handled -> return time
+    network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if network.handled -> return network
+    text := sema_call_try_text_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if text.handled -> return text
+    email := sema_call_try_email_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if email.handled -> return email
+    reflection := sema_call_try_reflection_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if reflection.handled -> return reflection
+    compiler_value := sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if compiler_value.handled -> return compiler_value
+
+    tree := sema_check_service_tree_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if tree == .Val(check) {
+        if check.handled -> return check
+    }
+    workflow := sema_check_service_workflow_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if workflow == .Val(check) {
+        if check.handled -> return check
+    }
+    endpoint := sema_check_service_endpoint_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if endpoint == .Val(check) {
+        if check.handled -> return check
+    }
+    delivery := sema_check_delivery_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if delivery == .Val(check) {
+        if check.handled -> return check
+    }
+    delivery_state := sema_check_delivery_state_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if delivery_state == .Val(check) {
+        if check.handled -> return check
+    }
+    runtime := sema_check_service_runtime_method(method, receiver, receiver_value, args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if runtime == .Val(check) {
+        if check.handled -> return check
+    }
+
+    reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if reactive.handled -> return reactive
+    game := sema_call_try_game_method(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if game == .Val(check) {
+        if check.handled -> return check
+    }
+    geometry := sema_call_try_geometry(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if geometry.handled -> return geometry
+    transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, state)
+    hardware := sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if hardware == .Val(result) && result.check.handled -> return sema_expr_record_hardware_result(result, &scopes, &context)
+    memory := sema_call_try_memory_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if memory.handled -> return memory
+    collections := sema_call_try_builtin_collections(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if collections.handled -> return collections
+    concurrency := sema_call_try_builtin_concurrency(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if concurrency.handled -> return concurrency
+    task_group := sema_taskgroup_check_group_method(receiver, receiver_value.ty, method, args, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if task_group.handled -> return task_group
+
+    builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if builtin.handled -> return builtin
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    checked_text := sema_expression_checked_text_static_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if explicit_unit.handled -> return explicit_unit.value
+    pre_receiver := sema_expr_try_method_static_routes(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if pre_receiver.handled -> return pre_receiver.value
+    hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if hardware_pre_receiver.handled -> return hardware_pre_receiver.value
     scopes.ownership_call_depth += 1
     receiver_checked := sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None
-    builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if builtin.handled -> return builtin.value
+    take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &diagnostics)
+    if take_pattern.handled -> return take_pattern.value
+    zip := sema_expression_zip_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if zip.handled -> return zip.value
+    special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if special.handled -> return special.value
     candidates := [SemaCallMethodCandidate]{}
-    if environment.registration_graph != None {
-        graph :: environment.registration_graph ?? return None
-        candidates = sema_expr_registration_method_candidates(graph, receiver_value.ty, method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
-    } else {
-        candidates = sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+    if {
+        environment.registration_graph != None -> {
+            graph :: environment.registration_graph ?? return None
+            candidates = sema_expr_registration_method_candidates(graph, receiver_value.ty, method, owner_type_args, type_args, method_span, environment, &scopes, &diagnostics)
+        }
+        else -> {
+            candidates = sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
+        }
     }
     argument_types := [?Type]{}
     argument_index := 0
     loop argument_index < args.len() {
         argument := args[argument_index]
-        if sema_call_inference_needs_context(argument.expr) {
-            argument_types.push(None)
-        } else {
-            probe_scopes := sema_scope_snapshot(scopes)
-            probe_context := sema_check_context_snapshot(context)
-            probe_state := sema_ownership_state_snapshot(state)
-            probe_diagnostics := [Diagnostic]{}
-            checked_argument := sema_check_expression(argument.expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
-            if checked_argument != None {
-                checked_value :: checked_argument ?? return None
-                argument_types.push(Val(checked_value.ty))
-            } else {
+        if {
+            sema_call_inference_needs_context(argument.expr) -> {
                 argument_types.push(None)
+            }
+            else -> {
+                probe_scopes := sema_scope_snapshot(scopes)
+                probe_context := sema_check_context_snapshot(context)
+                probe_state := sema_ownership_state_snapshot(state)
+                probe_diagnostics := [Diagnostic]{}
+                checked_argument := sema_check_expression(argument.expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
+                if {
+                    checked_argument != None -> {
+                        checked_value :: checked_argument ?? return None
+                        argument_types.push(Val(checked_value.ty))
+                    }
+                    else -> {
+                        argument_types.push(None)
+                    }
+                }
             }
         }
         argument_index += 1
@@ -2108,6 +2445,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: ?Type, environ
         }
     }
     if !sema_ownership_check_use(&state, expr, scopes, &diagnostics) -> return None
+    if !sema_hardware_note_cpu_use(expr, scopes, state, &context, &diagnostics) -> return None
     binding_index :: sema_scope_resolve_index(scopes, name) ?? return Val(value)
     symbol := scopes.bindings[binding_index].symbol
     reference_kind := "semantic"
@@ -2176,9 +2514,11 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: ?Type, span: Span, e
     value :: sema_check_expression(operand, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
         if value.ty == {
-            .IntN(false, _) -> {
-                diagnostics.push(sema_error("E0109", span, "`-` can't negate {type_name(value.ty)}, which is unsigned", "unsigned numbers have no negative values", "use a signed integer type if this value needs a negative result"))
-                return None
+            .IntN(signed, _) -> {
+                if !signed {
+                    diagnostics.push(sema_error("E0109", span, "`-` can't negate {type_name(value.ty)}, which is unsigned", "unsigned numbers have no negative values", "use a signed integer type if this value needs a negative result"))
+                    return None
+                }
             }
             else -> {}
         }
@@ -2268,18 +2608,18 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     effective_lhs := lhs
     effective_rhs := rhs
     target := None
-    if op == BinOp.Shl || op == BinOp.Shr {
-        if sema_expr_is_integer(lhs.ty) && sema_expr_is_integer(rhs.ty) && (!type_identity_equal(lhs.ty, rhs.ty) || sema_expr_numeric_base(lhs.ty) != lhs.ty || sema_expr_numeric_base(rhs.ty) != rhs.ty) {
-            target = Val(sema_expr_numeric_base(lhs.ty))
+    if {
+        op == BinOp.Shl || op == BinOp.Shr -> {
+            if sema_expr_is_integer(lhs.ty) && sema_expr_is_integer(rhs.ty) && (!type_identity_equal(lhs.ty, rhs.ty) || sema_expr_numeric_base(lhs.ty) != lhs.ty || sema_expr_numeric_base(rhs.ty) != rhs.ty) {
+                target = Val(sema_expr_numeric_base(lhs.ty))
+            }
         }
-    } else if {
         op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.FloorDiv || op == BinOp.Pow || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge -> {
             target = sema_expr_numeric_join_values(lhs, rhs)
         }
         op == BinOp.Mod || op == BinOp.Rem || op == BinOp.BitAnd || op == BinOp.BitOr || op == BinOp.BitXor -> {
             if sema_expr_is_integer(lhs.ty) && sema_expr_is_integer(rhs.ty) -> target = sema_expr_numeric_join_values(lhs, rhs)
         }
-        else -> {}
     }
     if target != None {
         target_type := sema_expr_numeric_base(target ?? lhs.ty)
@@ -2315,16 +2655,7 @@ fn sema_expr_copy_string_view(value: Expr, scopes: &SemaScopeTable) -> Bool {
     }
 }
 
-fn sema_expr_check_copy(value: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
-    previous_borrow := context.borrow_ctx
-    previous_string_view_read := context.allow_string_view_read
-    context.borrow_ctx = true
-    context.allow_string_view_read = true
-    checked_value := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.borrow_ctx = previous_borrow
-    context.allow_string_view_read = previous_string_view_read
-    checked :: checked_value ?? return None
-    string_view := sema_expr_copy_string_view(value, scopes)
+pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool) -> ?TExpr {
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Explicit, environment, context.generic_params, string_view)
     effect_name := sema_copy_effect_name(facts)
     if effect_name != None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
@@ -2343,10 +2674,86 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: ?Type, environment: S
     sema_expr_expected(sema_tir_expr(facts.target, result_kind, span), expected, environment, &diagnostics)
 }
 
+fn sema_expr_check_copy(value: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    previous_borrow := context.borrow_ctx
+    previous_string_view_read := context.allow_string_view_read
+    context.borrow_ctx = true
+    context.allow_string_view_read = true
+    checked_value := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_string_view_read
+    checked :: checked_value ?? return None
+    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(value, scopes))
+}
+
 fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if context.unsafe_depth > 0 -> return true
     diagnostics.push(sema_error("E3103", span, "`{operation}` requires an `#Unsafe` region", "raw pointer operations can violate memory safety and must be explicitly audited", "put this operation inside `#Unsafe(\"reason\") {{ … }}`"))
     false
+}
+
+fn sema_expr_core_import_module(environment: SemaScopeEnvironment, alias: String) -> ?String {
+    graph :: environment.registration_graph ?? return None
+    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    input := sema_core_module_input_from_registration(graph.modules[module_index], false, [String]{})
+    imported :: sema_core_import_find(input.imports, alias) ?? return None
+    target := sema_registration_module_index(graph, imported.module_name)
+    if target != None {
+        index :: target ?? return None
+        return Val(graph.modules[index].module_name)
+    }
+    Val(imported.module_name)
+}
+
+fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element: Type, address: Expr, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if sema_expr_core_import_module(environment, alias) != (Val("core.mem")) {
+        diagnostics.push(sema_error("E3102", alias_span, "`Ptr` is part of the low-level tier", "naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate", "add `use core.mem;` and call through `{alias}.…`"))
+        _ := sema_check_expression(address, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    forbidden := context.unsafe_depth == 0
+    if forbidden {
+        diagnostics.push(sema_error("E3101", span, "`from_addr` can only run inside an `#Unsafe` block", "this operation can violate memory safety, so it must sit in an audited region", "wrap it: #Unsafe(\"why this is safe\") {{ … }}"))
+    }
+    checked :: sema_check_expression(address, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    valid_address := if checked.ty == {
+        .Int | .InlineRange(_, _, _) -> true
+        else -> false
+    }
+    if !valid_address {
+        diagnostics.push(sema_error("E0112", expr_span(address), "`from_addr` needs an Int address, not {type_name(checked.ty)}", "a pointer is built from a numeric machine address", "pass an Int, e.g. from `mem.address_of(x)`"))
+        return None
+    }
+    if forbidden -> return None
+    pointer := Type.Apply("Ptr", [Type]{element})
+    sema_expr_expected(sema_tir_expr(pointer, TExprKind.PtrFromAddr(checked, element), span), expected, environment, &diagnostics)
+}
+
+fn sema_expr_check_comptime_name(name: String, span: Span, embedded: ?CtValue, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if embedded == .Val(value) {
+        ty := sema_expr_expected_type(ast_comptime_value_type(value), environment)
+        kind := if value == {
+            .Int(number) -> TExprKind.IntLit(number, None)
+            .Float(number) -> if number == {
+                .F32(number) | .F64(number) -> TExprKind.FloatLit(number)
+            }
+            .Bool(value) -> TExprKind.BoolLit(value)
+            .Char(value) -> {
+                code :: sema_checked_const_char("{value}") ?? return None
+                TExprKind.CharLit(code)
+            }
+            .Str(value) -> TExprKind.StrLit([TStrPart]{TStrPart.Literal(value)})
+            .Unit -> TExprKind.Unit
+            .Enum(type_name, variant, args) -> if args.len() == 0 -> TExprKind.EnumLit(type_name, variant, TEnumPayload.Unit) else -> TExprKind.CtLit(sema_checked_comptime(value) ?? return None)
+            else -> TExprKind.CtLit(sema_checked_comptime(value) ?? return None)
+        }
+        return sema_expr_expected(sema_tir_expr(ty, kind, span), expected, environment, &diagnostics)
+    }
+    if sema_scope_resolve_index(scopes, name) == None {
+        if scopes.comptime_execution_depth == 0 -> diagnostics.push(sema_unknown_name(name, span))
+        return None
+    }
+    sema_expr_check_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics)
 }
 
 fn sema_check_expression_inner(expr: Expr, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
@@ -2361,8 +2768,17 @@ fn sema_check_expression_inner(expr: Expr, expected: ?Type, environment: SemaSco
         .Unit(span) -> sema_expr_expected(sema_tir_expr(Type.Named("Unit"), TExprKind.Unit, span), expected, environment, &diagnostics)
         .Absent(span) -> sema_expression_absent(span, expected, &diagnostics)
         .Char(value, span) -> sema_expression_char(value, span, expected, environment, &diagnostics)
+        .StrMatchLit(_, span) -> {
+            diagnostics.push(sema_error("E0112", span, "a pattern literal is only valid as a `take_pattern` argument", "this string has typed holes (`{{name:Type}}`), which only `take_pattern` understands", "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string"))
+            None
+        }
+        .BinMatchLit(_, span) -> {
+            diagnostics.push(sema_error("E0112", span, "a binary pattern literal is only valid as a `take_pattern` argument", "this `[U8].{{\"…\"}}` literal has typed holes (`{{name:U<width>}}`), which only `take_pattern` understands", "call it as `reader.take_pattern([U8].{{\"…\"}})`"))
+            None
+        }
         .UnitLit(raw, int_value, float_value, suffix, suffix_span, span) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, &diagnostics)
         .Ident(name, span) -> sema_expr_check_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics)
+        .ComptimeName(name, span, value) -> sema_expr_check_comptime_name(name, span, value, expected, environment, &scopes, &state, &context, &diagnostics)
         .Paren(value, span) -> {
             checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             return Val(TExpr{ty: checked.ty, kind: checked.kind, span: span, integer_bounds: checked.integer_bounds, cost: checked.cost})
@@ -2372,7 +2788,10 @@ fn sema_check_expression_inner(expr: Expr, expected: ?Type, environment: SemaSco
         .Call(call) -> sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _) -> sema_expr_check_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .ListLit(elements, span) -> sema_expression_list(expr, elements, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .ListLit(elements, span) -> {
+            expanded := sema_expression_list_member_spreads(elements)
+            sema_expression_list(Expr.ListLit(expanded, span), expanded, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         .MapLit(entries, span) -> sema_expression_map(expr, entries, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .TupleLit(fields, span, _) -> sema_expression_tuple(fields, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Range(start, end, exclusive, span) -> sema_expression_range(start, end, exclusive, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2389,6 +2808,7 @@ fn sema_check_expression_inner(expr: Expr, expected: ?Type, environment: SemaSco
             if scopes.ownership_call_depth == 0 && !sema_ownership_check_expression(&state, expr, scopes, &diagnostics) -> return None
             sema_expression_incdec(op, operand, postfix, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
+        .TypedLit(head, body, span) -> sema_expression_typed_literal(head, body, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .StructLit(type_name, type_args, _, as_trait, fields, inferred, span) -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Present(value, span) -> sema_expression_present(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2398,25 +2818,39 @@ fn sema_check_expression_inner(expr: Expr, expected: ?Type, environment: SemaSco
         .OrFallback(value, fallback, _, span) -> sema_expression_or_fallback(value, fallback, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Lambda(lambda) -> sema_expression_lambda(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .ReduceMarker(name, span) -> {
+            diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
+            None
+        }
         .Todo(span, _) -> Val(sema_tir_expr(expected ?? Type.Named("Never"), TExprKind.Never("todo"), span))
         .NoElse(span) -> Val(sema_tir_expr(expected ?? Type.Named("Never"), TExprKind.Never("no else arm"), span))
         .RawOf(value, span) -> {
-            if !sema_expr_require_unsafe("raw address", span, &context, &diagnostics) -> return None
-            _ := value
-            sema_expr_reject_unlowered(span, &diagnostics)
+            forbidden := context.unsafe_depth == 0
+            if forbidden {
+                diagnostics.push(sema_error("E0208", span, "taking a raw pointer requires `#Unsafe`", "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe {{ … }}` region", "wrap this in `#Unsafe(\"why this is safe\") {{ … }}` — to dereference a pointer use postfix `p.*`"))
+            }
+            checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if forbidden -> return None
+            pointer := Type.Apply("Ptr", [Type]{checked.ty})
+            sema_expr_expected(sema_tir_expr(pointer, TExprKind.RawOf(checked), span), expected, environment, &diagnostics)
         }
-        .PtrFromAddr(_, _, _, _, span) -> {
-            if !sema_expr_require_unsafe("pointer construction from an address", span, &context, &diagnostics) -> return None
-            sema_expr_reject_unlowered(span, &diagnostics)
-        }
-        .Tainted(value, tag, span) -> {
-            if tag != None && !sema_taint_validate_tag(tag ?? "", environment, span, &diagnostics) -> return None
+        .PtrFromAddr(alias, alias_span, element, address, span) -> sema_expr_check_pointer_from_address(alias, alias_span, element, address, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Tainted(value, tag_value, span) -> {
+            if tag_value != None && !sema_taint_validate_tag(tag_value ?? "", environment, span, &diagnostics) -> return None
             sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         .Copy(value, span) -> sema_expr_check_copy(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Spread(_, span) -> sema_expr_reject_unlowered(span, &diagnostics)
-        .MemberSpread(_, _, span) -> sema_expr_reject_unlowered(span, &diagnostics)
-        .PatternTest(_, _, span) -> sema_expr_reject_unlowered(span, &diagnostics)
+        .MemberSpread(base, members, span) -> {
+            fields := sema_expression_member_spread_fields(base, members, span)
+            sema_expression_list(Expr.ListLit(fields, span), fields, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        .PatternTest(subject, pattern, span) -> {
+            checked_subject :: sema_check_expression(subject, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked :: checked_pattern.checked ?? return None
+            sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.PatternMatches(checked.subject, checked.pattern), span), expected, environment, &diagnostics)
+        }
         else -> None
     }
 }

@@ -187,8 +187,8 @@ fn mir_pass_loop_init(function: MirFunction, cursor: MirValueId, form: MirLoopFo
         loop instruction in &block.instructions {
             if instruction.result != Val(cursor) -> next
             if instruction.operation == {
-                .LoopRangeInit(_, _, _, _, _) -> if form == .Counted -> return Val(instruction)
-                .LoopIterInit(_, _, _, _, _) -> if form == .Iterator -> return Val(instruction)
+                .LoopRangeInit(_, _, _, _, _) && form == .Counted -> return Val(instruction)
+                .LoopIterInit(_, _, _, _, _) && form == .Iterator -> return Val(instruction)
                 else -> {}
             }
         }
@@ -203,8 +203,8 @@ fn mir_pass_loop_induction_value(function: MirFunction, body: [MirBlockId], curs
         loop instruction in &block.instructions {
             if instruction.operation == wanted && instruction.result != None -> return instruction.result
             if instruction.operation == {
-                .LoopRangeValue(_, value) -> if form == .Counted && value == cursor -> return instruction.result
-                .LoopIterValue(_, value) -> if form == .Iterator && value == cursor -> return instruction.result
+                .LoopRangeValue(_, value) && form == .Counted && value == cursor -> return instruction.result
+                .LoopIterValue(_, value) && form == .Iterator && value == cursor -> return instruction.result
                 else -> {}
             }
         }
@@ -299,18 +299,18 @@ fn mir_pass_loop_trip_count(function: MirFunction, init: ?MirInstruction) -> ?In
             end_constant :: mir_pass_constant_for(constants, end) ?? return None
             first :: if start_constant == {
                 .Int(value, _, _) -> value
-                else -> return None
+                else -> { return None }
             }
             last :: if end_constant == {
                 .Int(value, _, _) -> value
-                else -> return None
+                else -> { return None }
             }
             step_value :: if step == {
                 .Val(step_id) -> {
                     step_constant :: mir_pass_constant_for(constants, step_id) ?? return None
                     if step_constant == {
                         .Int(value, _, _) -> value
-                        else -> return None
+                        else -> { return None }
                     }
                 }
                 else -> 1
@@ -325,16 +325,19 @@ fn mir_pass_range_trip_count(start: Int, end: Int, step: Int, exclusive: Bool) -
     if step == 0 -> return None
     count := 0
     magnitude := 0
-    if step > 0 {
-        if start > end || start == end && exclusive -> return Val(0)
-        distance :: mir_pass_checked_sub(end, start) ?? return None
-        count = if exclusive -> distance else -> mir_pass_checked_add(distance, 1) ?? return None
-        magnitude = step
-    } else {
-        if start < end || start == end && exclusive -> return Val(0)
-        distance :: mir_pass_checked_sub(start, end) ?? return None
-        count = if exclusive -> distance else -> mir_pass_checked_add(distance, 1) ?? return None
-        magnitude :: mir_pass_checked_sub(0, step) ?? return None
+    if {
+        step > 0 -> {
+            if start > end || start == end && exclusive -> return Val(0)
+            distance :: mir_pass_checked_sub(end, start) ?? return None
+            count = if exclusive -> distance else -> mir_pass_checked_add(distance, 1) ?? return None
+            magnitude = step
+        }
+        else -> {
+            if start < end || start == end && exclusive -> return Val(0)
+            distance :: mir_pass_checked_sub(start, end) ?? return None
+            count = if exclusive -> distance else -> mir_pass_checked_add(distance, 1) ?? return None
+            magnitude = mir_pass_checked_sub(0, step) ?? return None
+        }
     }
     adjusted :: mir_pass_checked_add(count, magnitude - 1) ?? return None
     trip :: adjusted / magnitude
@@ -437,7 +440,7 @@ fn mir_pass_loop_reduction(function: MirFunction, shape: MirPassLoopShape) -> ?M
                     if place.projections.len() > 0 -> next
                     definition :: mir_pass_instruction_for_value(function, value) ?? next
                     if definition.operation == {
-                        .Binary(.Add, .Primitive, _, left, right) -> {
+                        .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> {
                             if left == right -> next
                             read_left :: mir_pass_instruction_for_value(function, left) ?? next
                             read_right :: mir_pass_instruction_for_value(function, right) ?? next
@@ -513,17 +516,21 @@ fn mir_pass_loop_vector_fact(
                     }
                     if {
                         mir_pass_loop_induction_place_seen(induction, place_id) -> {
-                            if instruction.result == .Val(result) {
-                                if !mir_pass_value_id_seen(induction.values, result) -> effect_free = false
-                            } else {
-                                effect_free = false
+                            if {
+                                instruction.result == .Val(result) -> {
+                                    if !mir_pass_value_id_seen(induction.values, result) -> effect_free = false
+                                }
+                                else -> effect_free = false
                             }
                         }
                         mir_pass_place_uses_index(place, induction.values) -> {
                             if !mir_pass_place_id_seen(roots, place_id) -> roots.push(place_id)
                             mir_pass_vector_access_put(&accesses, place)
                             if place.projections.len() > 0 {
-                                if place.projections[place.projections.len() - 1] == { .Field(_, _) -> field_access else -> {} }
+                                if place.projections[place.projections.len() - 1] == {
+                                    .Field(_, _) -> { field_access = true }
+                                    else -> {}
+                                }
                             }
                             element_type = Val(place.ty)
                         }
@@ -534,14 +541,21 @@ fn mir_pass_loop_vector_fact(
                     if dispatch != .Primitive || !(op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Eq || op == .Lt || op == .Le || op == .Gt || op == .Ge) -> effect_free = false
                 }
                 .Unary(_, _) | .Constant(_) | .Phi(_) | .Copy(_, _) | .Move(_) | .LoopRangeHasNext(_, _) | .LoopRangeValue(_, _) | .LoopRangeAdvance(_, _) | .LoopIterHasNext(_, _) | .LoopIterValue(_, _) | .LoopIterAdvance(_, _) -> {}
-                .Index(_, _, _, kind, _, _, _) -> if kind != .FixedListProof -> effect_free = false
-                .Convert(_, _, _, _) -> effect_free = false
-                else -> effect_free = false
+                .Index(_, _, _, kind, _, _, _) -> {
+                    if kind != .FixedListProof -> effect_free = false
+                }
+                .Convert(_, _, _, _) -> { effect_free = false }
+                else -> { effect_free = false }
             }
             loop place_id in mir_pass_operation_place_refs(instruction.operation) {
                 place :: mir_pass_find_place(function.places, place_id) ?? next
                 loop projection in place.projections {
-                    if projection == { .Index(_, _, call, _, _, _, _) -> if !mir_pass_prelude_is_pure(prelude_calls, call) -> effect_free = false else -> {} }
+                    if projection == {
+                        .Index(_, _, call, _, _, _, _) -> {
+                            if !mir_pass_prelude_is_pure(prelude_calls, call) -> effect_free = false
+                        }
+                        else -> {}
+                    }
                 }
             }
         }
@@ -602,7 +616,12 @@ fn mir_pass_loop_vector_fact(
 
 fn mir_pass_place_uses_index(place: MirPlace, indices: [MirValueId]) -> Bool {
     loop projection in place.projections {
-        if projection == { .Index(_, value, _, _, _, _, _) -> if mir_pass_value_id_seen(indices, value) -> return true else -> {} }
+        if projection == {
+            .Index(_, value, _, _, _, _, _) -> {
+                if mir_pass_value_id_seen(indices, value) -> return true
+            }
+            else -> {}
+        }
     }
     false
 }

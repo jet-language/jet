@@ -15,7 +15,7 @@ mod common;
 use common::{jetpack_bin, Scratch};
 
 const EXPECTED_STDOUT: &[u8] =
-    include_bytes!("../examples/continuity/script_to_system/expected.out");
+    include_bytes!("../Examples/continuity/script_to_system/expected.out");
 const RECEIPT_NAME: &str = "script-to-system.tsv";
 const RECEIPT_VERSION: u8 = 2;
 
@@ -370,7 +370,7 @@ fn cc() -> Option<&'static str> {
 #[test]
 fn script_to_system_continuity_preserves_one_source() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/continuity/script_to_system/run.jet");
+        .join("Examples/continuity/script_to_system/run.jet");
     let scratch = Scratch::new("script-to-system");
     let cache = scratch.join("cache");
     fs::copy(&fixture, scratch.join("run.jet")).expect("copy the lone starting script");

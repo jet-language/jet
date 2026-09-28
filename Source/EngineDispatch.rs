@@ -73,7 +73,7 @@ fn is_executable(p: &std::path::Path) -> bool {
 }
 
 /// E1228 `engine-missing`: rendered exactly like every other `jet` teaching
-/// diagnostic (docs/spec/diagnostics.md).
+/// diagnostic (Docs/spec/diagnostics.md).
 fn missing_engine_message(engine: &str, verb: &str) -> String {
     format!(
         "Error [E1228]: `{verb}` needs the `{engine}` engine, which isn't installed\n \

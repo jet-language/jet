@@ -1,6 +1,6 @@
 # Jet
 
-<p align="center"><img src="./assets/jetlang.png" width="120" alt="Jet logo" /></p>
+<p align="center"><img src="./Docs/assets/jetlang.png" width="120" alt="Jet logo" /></p>
 
 Jet is a memory-safe, compiled programming language. Beginners get safe
 defaults, little ceremony, and diagnostics that explain what went wrong, why,
@@ -10,7 +10,7 @@ regions — without that machinery leaking into everyday code.
 > **Pre-release.** Jet is at 0.1 and has no compatibility promise yet. The
 > language, standard library, and tools change in place, without deprecation
 > periods, until a 1.0 policy is declared. See the
-> [release policy](docs/spec/release-policy.md).
+> [release policy](Docs/spec/release-policy.md).
 
 ## A first look
 
@@ -83,7 +83,7 @@ A few things to notice:
   lists `--name` with its documentation and default.
 - `#Test` blocks live next to the code they test and run with `jet test`.
 
-The [executable examples](examples/README.md) cover the rest of the
+The [executable examples](Examples/README.md) cover the rest of the
 language, each with golden-tested output.
 
 ## What Jet provides
@@ -104,7 +104,7 @@ language, each with golden-tested output.
 - **A batteries-included core library.** Files, HTTP, JSON and other
   encodings, time, text, collections, concurrency, terminal and UI, data,
   and more ship as `core.*` modules, most of them written in Jet. See the
-  [core library reference](docs/spec/reference/core-library.md).
+  [core library reference](Docs/spec/reference/core-library.md).
 - **One tool for the whole workflow.** The `jet` command formats, checks,
   tests, documents, debugs, profiles, packages, and manages dependencies.
   `jet help` lists every command.
@@ -134,13 +134,13 @@ jet test         # runs the project's #Test blocks
 
 | Start with | For |
 |---|---|
-| [First-hour guide](docs/spec/guides/first-hour.md) | Install, then `new` → `run` → `check` → `test` → `fix` → `explain` |
+| [First-hour guide](Docs/spec/guides/first-hour.md) | Install, then `new` → `run` → `check` → `test` → `fix` → `explain` |
 | `jet learn` | Offline practice exercises in your terminal |
-| [Examples](examples/README.md) | Small, golden-tested programs for each feature |
-| [Diagnostic recovery](docs/spec/guides/diagnostic-recovery.md) | Reading and fixing compiler errors |
-| [Core library reference](docs/spec/reference/core-library.md) | The standard `core.*` modules |
-| [Language spec](docs/spec/spec.md) | The language contract, topic by topic |
-| [Documentation index](docs/README.md) | Everything else |
+| [Examples](Examples/README.md) | Small, golden-tested programs for each feature |
+| [Diagnostic recovery](Docs/spec/guides/diagnostic-recovery.md) | Reading and fixing compiler errors |
+| [Core library reference](Docs/spec/reference/core-library.md) | The standard `core.*` modules |
+| [Language spec](Docs/spec/spec.md) | The language contract, topic by topic |
+| [Documentation index](Docs/README.md) | Everything else |
 
 ## How Jet is built
 
@@ -164,18 +164,18 @@ compiler reproducibly builds itself and becomes the default compiler.
 
 Read [AGENTS.md](AGENTS.md) first: it defines how decisions are made, the
 invariants every change must keep, and how work is proven. Plans, decisions,
-and status live in [Tower](plugins/tower/skills/tower/SKILL.md), the
+and status live in [Tower](Tools/tower/skills/tower/SKILL.md), the
 project board, not in documentation.
 
 Run repository commands through the pinned contributor environment:
 
 ```sh
-scripts/agent/jet-env cargo build
-scripts/agent/jet-env jet run examples/features/basics/hello.jet
-scripts/agent/jet-env jet check examples/features/basics/functions.jet
+Tools/agent/jet-env cargo build
+Tools/agent/jet-env jet run Examples/features/basics/hello.jet
+Tools/agent/jet-env jet check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+Tools/agent/jet-env env JET_GOLDEN_FILTER=Examples/features/basics/hello.jet \
   cargo test --test golden examples_compile_and_run -- --nocapture
 ```
 
@@ -186,17 +186,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 
 | Path | Contents |
 |---|---|
-| [`Source/`](Source/), [`crates/`](crates/) | The Rust-hosted reference compiler, CLI, execution engines, and tools |
-| `Compiler/` | The staged Jet-authored compiler port |
+| [`Source/`](Source/) | The `jet` command-line tool (Rust reference implementation) |
+| [`crates/`](crates/) | Rust crates: front end, code generation, JIT, runtime, Jetpack, and a vendored Cranelift patch |
+| [`Compiler/`](Compiler/) | The staged Jet-authored compiler port |
 | [`Core/`](Core/) | The core library's Jet sources |
-| [`crates/jet-codegen/src/Prelude/`](crates/jet-codegen/src/Prelude/) | Shared runtime semantics used by every execution tier |
-| [`examples/`](examples/) | Executable examples and their expected output |
-| [`tests/`](tests/) | Behavior, diagnostic snapshot, and regression tests |
-| [`docs/`](docs/README.md) | Specifications, guides, and dated evidence |
-| [`editors/`](editors/) | VS Code and Zed integrations and the tree-sitter grammar |
-| [`gauntlet/`](gauntlet/) | Cross-language performance comparisons |
-| [`plugins/tower/`](plugins/tower/) | Tower, the project board |
-| [`scripts/`](scripts/), [`tools/`](tools/) | Contributor scripts and supporting tools |
+| [`Jetpack/`](Jetpack/) | The staged Jet-authored port of the Jetpack package manager |
+| [`Examples/`](Examples/) | Executable examples and their golden output |
+| [`tests/`](tests/) | Behavior, diagnostic-snapshot, regression, and compiler-proof tests |
+| [`Docs/`](Docs/README.md) | Specifications, guides, dated evidence, and the project website |
+| [`Tools/`](Tools/) | Contributor tooling: the agent environment, CI and performance scripts, the performance gauntlet, editor integrations, and Tower, the project board |
+
+`crates/` and `tests/` keep Cargo's lowercase names; every other top-level
+folder is capitalized.
 
 ## License
 

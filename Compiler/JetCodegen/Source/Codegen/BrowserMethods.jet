@@ -1,0 +1,506 @@
+// Exact Core Prelude routes for Browser handles. BrowserTest* handles share
+// the HTTPClientMethod TIR spelling, while Browser handles use HTTPServerMethod.
+
+fn jet_codegen_browser_test_handle_kind(kind: String) -> Bool {
+    kind == "BrowserTestServer" || kind == "BrowserTestReport" || kind == "BrowserTestConfig"
+}
+
+fn jet_codegen_browser_handle_route(kind: String, method: String, argument_count: Int, server_method: Bool) -> ?JetCodegenHandleRoute {
+    if server_method {
+        member := "{kind}.{method}"
+        symbol := ""
+        mask := [Bool]{}
+        route_effect := None
+        if {
+            kind == "Browser" -> {
+            if {
+                method == "abilities" -> {
+                    symbol = "jet_browser_abilities"
+                    mask = [Bool]{true}
+                }
+                method == "context" -> {
+                    symbol = "jet_browser_context"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "subscribe" -> {
+                    symbol = "jet_browser_subscribe"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "next_event" -> {
+                    symbol = "jet_browser_next_event"
+                    mask = [Bool]{true, false}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "add_intercept" -> {
+                    symbol = "jet_browser_add_intercept"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "add_intercept_url" -> {
+                    symbol = "jet_browser_add_intercept_url"
+                    mask = [Bool]{true, true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "continue_request" -> {
+                    symbol = "jet_browser_continue_request"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "fail_request" -> {
+                    symbol = "jet_browser_fail_request"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "fulfill_request" -> {
+                    symbol = "jet_browser_fulfill_request"
+                    mask = [Bool]{true, true, false, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "allow_downloads" -> {
+                    symbol = "jet_browser_allow_downloads"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "protocol" -> {
+                    symbol = "jet_browser_protocol"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "trace" -> {
+                    symbol = "jet_browser_trace"
+                    mask = [Bool]{true}
+                }
+                method == "privacy" -> {
+                    symbol = "jet_browser_privacy"
+                    mask = [Bool]{true}
+                }
+                method == "receipt" -> {
+                    symbol = "jet_browser_receipt"
+                    mask = [Bool]{true}
+                }
+                method == "close" -> {
+                    symbol = "jet_browser_close"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                else -> return None
+            }
+        } kind == "BrowserContext" -> {
+            if {
+                method == "page" -> {
+                    symbol = "jet_browser_context_page"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "tab" -> {
+                    symbol = "jet_browser_context_tab"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "close" -> {
+                    symbol = "jet_browser_context_close"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "isolated" -> {
+                    symbol = "jet_browser_context_isolated"
+                    mask = [Bool]{true}
+                }
+                method == "user_hash" -> {
+                    symbol = "jet_browser_context_user_hash"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserPage" -> {
+            if {
+                method == "goto" -> {
+                    symbol = "jet_browser_page_goto"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "get_by_role" -> {
+                    symbol = "jet_browser_page_get_by_role"
+                    mask = [Bool]{true, true, true}
+                }
+                method == "get_by_text" -> {
+                    symbol = "jet_browser_page_get_by_text"
+                    mask = [Bool]{true, true}
+                }
+                method == "get_by_label" -> {
+                    symbol = "jet_browser_page_get_by_label"
+                    mask = [Bool]{true, true}
+                }
+                method == "get_by_placeholder" -> {
+                    symbol = "jet_browser_page_get_by_placeholder"
+                    mask = [Bool]{true, true}
+                }
+                method == "get_by_test_id" -> {
+                    symbol = "jet_browser_page_get_by_test_id"
+                    mask = [Bool]{true, true}
+                }
+                method == "get_by_css" -> {
+                    symbol = "jet_browser_page_get_by_css"
+                    mask = [Bool]{true, true}
+                }
+                method == "main_frame" -> {
+                    symbol = "jet_browser_page_main_frame"
+                    mask = [Bool]{true}
+                }
+                method == "frames" -> {
+                    symbol = "jet_browser_page_frames"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "close" -> {
+                    symbol = "jet_browser_page_close"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "screenshot" -> {
+                    symbol = "jet_browser_page_screenshot"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "pdf" -> {
+                    symbol = "jet_browser_page_pdf"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "set_cookie" -> {
+                    symbol = "jet_browser_page_set_cookie"
+                    mask = [Bool]{true, true, true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "cookie" -> {
+                    symbol = "jet_browser_page_cookie"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "clear_cookies" -> {
+                    symbol = "jet_browser_page_clear_cookies"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "storage_get" -> {
+                    symbol = "jet_browser_page_storage_get"
+                    mask = [Bool]{true, true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "storage_set" -> {
+                    symbol = "jet_browser_page_storage_set"
+                    mask = [Bool]{true, true, true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "storage_clear" -> {
+                    symbol = "jet_browser_page_storage_clear"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                else -> return None
+            }
+        } kind == "BrowserFrame" -> {
+            if {
+                method == "close" -> {
+                    symbol = "jet_browser_frame_close"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                } else -> {
+                    return None
+                }
+            }
+        } kind == "BrowserLocator" -> {
+            if {
+                method == "wait" -> {
+                    symbol = "jet_browser_locator_wait"
+                    mask = [Bool]{true, false}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "wait_gone" -> {
+                    symbol = "jet_browser_locator_wait_gone"
+                    mask = [Bool]{true, false}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "click" -> {
+                    symbol = "jet_browser_locator_click"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "hover" -> {
+                    symbol = "jet_browser_locator_hover"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "fill" -> {
+                    symbol = "jet_browser_locator_fill"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "press" -> {
+                    symbol = "jet_browser_locator_press"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                method == "set_files" -> {
+                    symbol = "jet_browser_locator_set_files"
+                    mask = [Bool]{true, true}
+                    route_effect = Val(Effect.Net)
+                }
+                else -> return None
+            }
+        } kind == "BrowserIntercept" -> {
+            if {
+                method == "remove" -> {
+                    symbol = "jet_browser_intercept_remove"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.Net)
+                } else -> {
+                    return None
+                }
+            }
+        } kind == "BrowserEvent" -> {
+            if {
+                method == "kind" -> {
+                    symbol = "jet_browser_event_kind"
+                    mask = [Bool]{true}
+                }
+                method == "request_id" -> {
+                    symbol = "jet_browser_event_request_id"
+                    mask = [Bool]{true}
+                }
+                method == "request_method" -> {
+                    symbol = "jet_browser_event_request_method"
+                    mask = [Bool]{true}
+                }
+                method == "url_hash" -> {
+                    symbol = "jet_browser_event_url_hash"
+                    mask = [Bool]{true}
+                }
+                method == "is_blocked" -> {
+                    symbol = "jet_browser_event_is_blocked"
+                    mask = [Bool]{true}
+                }
+                method == "status_code" -> {
+                    symbol = "jet_browser_event_status_code"
+                    mask = [Bool]{true}
+                }
+                method == "download_id" -> {
+                    symbol = "jet_browser_event_download_id"
+                    mask = [Bool]{true}
+                }
+                method == "suggested_filename_hash" -> {
+                    symbol = "jet_browser_event_suggested_filename_hash"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserAbilities" -> {
+            if {
+                method == "bidi" -> {
+                    symbol = "jet_browser_abilities_bidi"
+                    mask = [Bool]{true}
+                }
+                method == "cdp" -> {
+                    symbol = "jet_browser_abilities_cdp"
+                    mask = [Bool]{true}
+                }
+                method == "profile" -> {
+                    symbol = "jet_browser_abilities_profile"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserTrace" -> {
+            if {
+                method == "entry_count" -> {
+                    symbol = "jet_browser_trace_entry_count"
+                    mask = [Bool]{true}
+                }
+                method == "redacted" -> {
+                    symbol = "jet_browser_trace_redacted"
+                    mask = [Bool]{true}
+                }
+                method == "summary" -> {
+                    symbol = "jet_browser_trace_summary"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserReceipt" -> {
+            if {
+                method == "entry_count" -> {
+                    symbol = "jet_browser_receipt_entry_count"
+                    mask = [Bool]{true}
+                }
+                method == "redacted" -> {
+                    symbol = "jet_browser_receipt_redacted"
+                    mask = [Bool]{true}
+                }
+                method == "summary" -> {
+                    symbol = "jet_browser_receipt_summary"
+                    mask = [Bool]{true}
+                }
+                method == "isolated" -> {
+                    symbol = "jet_browser_receipt_isolated"
+                    mask = [Bool]{true}
+                }
+                method == "cleaned" -> {
+                    symbol = "jet_browser_receipt_cleaned"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserPrivacy" -> {
+            if {
+                method == "isolated_profiles" -> {
+                    symbol = "jet_browser_privacy_isolated_profiles"
+                    mask = [Bool]{true}
+                }
+                method == "redact_receipts" -> {
+                    symbol = "jet_browser_privacy_redact_receipts"
+                    mask = [Bool]{true}
+                }
+                method == "shared_profiles" -> {
+                    symbol = "jet_browser_privacy_shared_profiles"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        } kind == "BrowserProtocol" -> {
+            if {
+                method == "send" -> {
+                    symbol = "jet_browser_protocol_send"
+                    mask = [Bool]{true, true, true}
+                    route_effect = Val(Effect.Net)
+                } else -> {
+                    return None
+                }
+            }
+        } kind == "BrowserLocked" -> {
+            if {
+                method == "engine" -> {
+                    symbol = "jet_browser_locked_engine"
+                    mask = [Bool]{true}
+                }
+                method == "version" -> {
+                    symbol = "jet_browser_locked_version"
+                    mask = [Bool]{true}
+                }
+                method == "binary" -> {
+                    symbol = "jet_browser_locked_binary"
+                    mask = [Bool]{true}
+                }
+                method == "protocol" -> {
+                    symbol = "jet_browser_locked_protocol"
+                    mask = [Bool]{true}
+                }
+                method == "verify" -> {
+                    symbol = "jet_browser_locked_verify"
+                    mask = [Bool]{true}
+                    route_effect = Val(Effect.FS)
+                }
+                else -> return None
+            }
+        } else -> {
+            return None
+        }
+        }
+        if argument_count + 1 != mask.len() -> return None
+        return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MirPreludeAbi.Value))
+    }
+
+    if !jet_codegen_browser_test_handle_kind(kind) -> return None
+    member := "{kind}.{method}"
+    symbol := ""
+    mask := [Bool]{}
+    route_effect := None
+    if {
+        kind == "BrowserTestConfig" -> {
+            if {
+                method == "engines" -> {
+                    symbol = "jet_browser_test_config_engines"
+                    mask = [Bool]{true}
+                }
+                method == "retries" -> {
+                    symbol = "jet_browser_test_config_retries"
+                    mask = [Bool]{true}
+                }
+                method == "filter" -> {
+                    symbol = "jet_browser_test_config_filter"
+                    mask = [Bool]{true}
+                }
+                method == "reporter" -> {
+                    symbol = "jet_browser_test_config_reporter"
+                    mask = [Bool]{true}
+                }
+                method == "ui" -> {
+                    symbol = "jet_browser_test_config_ui"
+                    mask = [Bool]{true}
+                }
+                method == "visual" -> {
+                    symbol = "jet_browser_test_config_visual"
+                    mask = [Bool]{true}
+                }
+                method == "watch" -> {
+                    symbol = "jet_browser_test_config_watch"
+                    mask = [Bool]{true}
+                }
+                method == "server_url" -> {
+                    symbol = "jet_browser_test_config_server_url"
+                    mask = [Bool]{true}
+                }
+                method == "artifact_dir" -> {
+                    symbol = "jet_browser_test_config_artifact_dir"
+                    mask = [Bool]{true}
+                }
+                method == "report_path" -> {
+                    symbol = "jet_browser_test_config_report_path"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        kind == "BrowserTestServer" -> {
+            if {
+                method == "stop" -> {
+                    symbol = "jet_browser_test_server_stop"
+                    mask = [Bool]{true}
+                }
+                method == "url" -> {
+                    symbol = "jet_browser_test_server_url"
+                    mask = [Bool]{true}
+                }
+                method == "logs" -> {
+                    symbol = "jet_browser_test_server_logs"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+        kind == "BrowserTestReport" -> {
+            if {
+                method == "json" -> {
+                    symbol = "jet_browser_test_report_json"
+                    mask = [Bool]{true}
+                }
+                method == "text" -> {
+                    symbol = "jet_browser_test_report_text"
+                    mask = [Bool]{true}
+                }
+                method == "html" -> {
+                    symbol = "jet_browser_test_report_html"
+                    mask = [Bool]{true}
+                }
+                method == "exit_code" -> {
+                    symbol = "jet_browser_test_report_exit_code"
+                    mask = [Bool]{true}
+                }
+                else -> return None
+            }
+        }
+    }
+    if server_method || argument_count + 1 != mask.len() -> return None
+    Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MirPreludeAbi.Value))
+}

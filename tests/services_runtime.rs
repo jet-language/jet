@@ -21,11 +21,11 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
         return;
     }
     let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/tooling/service_runtime/run.jet");
+        .join("Examples/features/tooling/service_runtime/run.jet");
     let source = fs::read_to_string(source_path).unwrap();
     let expected = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/features/expected/tooling/service_runtime.out"),
+            .join("Examples/features/expected/tooling/service_runtime.out"),
     )
     .unwrap();
     let (aot_code, aot_stdout, aot_stderr) =
@@ -2134,7 +2134,7 @@ fn a_forward_only_migration_refuses_to_roll_back() {
 }
 
 const PARTITION_RECONCILE_SOURCE: &str =
-    include_str!("../examples/features/tooling/service_partition_reconcile.jet");
+    include_str!("../Examples/features/tooling/service_partition_reconcile.jet");
 
 #[test]
 fn grouped_durable_partition_reconciles_after_handoff() {

@@ -50,11 +50,11 @@ pub(crate) fn rust_trait_name(trait_name: &str) -> String {
 const CORELIB_DIGEST_CACHE_LIMIT: usize = 32;
 
 pub const JET_CANONICAL_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../site/assets/fonts/exo2-700.ttf");
+    include_bytes!("../../../../Docs/site/assets/fonts/exo2-700.ttf");
 pub const JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../site/assets/fonts/noto-sans-arabic-regular.ttf");
+    include_bytes!("../../../../Docs/site/assets/fonts/noto-sans-arabic-regular.ttf");
 pub const JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../site/assets/fonts/noto-sans-symbols2-regular.ttf");
+    include_bytes!("../../../../Docs/site/assets/fonts/noto-sans-symbols2-regular.ttf");
 
 /// Emit the checked canonical font bytes into generated native sources.  The
 /// generated program must not resolve a host filesystem font, or glyph IDs and
@@ -194,7 +194,6 @@ pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
 pub use Web::build_wasm_jet_source_map;
-pub(crate) use Web::canonical_web_raw_assets;
 
 /// Build the interpreter's bundle-wide Core alias map from the same import
 /// resolver used by AOT and JIT lowering. In particular, member-list imports
@@ -1871,7 +1870,8 @@ const JETSTD_COMMON_TYPES_PRELUDE: &str = concat!(
 );
 const JETSTD_XML_OPTIONS_PRELUDE: &str = concat!(
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_xml_options\n\
-     // AUDIT: D-ENC-XML-SURFACE1 keeps XML stream limits and policies shared\n+     // between the AOT Prelude and the resident JIT stream host.\n",
+     // AUDIT: D-ENC-XML-SURFACE1 keeps XML stream limits and policies shared\n\
+     // between the AOT Prelude and the resident JIT stream host.\n",
     include_str!("../Prelude/CoreLib/JetStd/XmlOptions.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_xml_options\n",
 );

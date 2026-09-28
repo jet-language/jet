@@ -3538,7 +3538,7 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     ),
     truth_row(
         "JetVocabulary",
-        "docs/spec/vocabulary.md",
+        "Docs/spec/vocabulary.md",
         &["Markdown docs"],
         Guard {
             test: "vocabulary_page_has_one_definition_and_no_retired_senses",

@@ -416,7 +416,7 @@ pub fn mir_view_copy_kind(source: MirType) -> ?MirViewCopyKind {
 }
 
 pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> Bool {
-    if target.kind == {.Tagged(_, inner) -> return mir_view_copy_target_matches(kind, inner)}
+    if target.kind == {.Tagged(_, inner) -> { return mir_view_copy_target_matches(kind, inner) }}
     if target.kind == {
         .Apply(name, args) -> {
             if kind == MirViewCopyKind.String && args.len() == 0 && name.name == "String" -> return true
@@ -425,8 +425,8 @@ pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> B
         else -> {}
     }
     if kind == MirViewCopyKind.String -> return target.kind == .String
-    if kind == MirViewCopyKind.List -> {
-        if target.kind == {.List(_) -> return true}
+    if kind == MirViewCopyKind.List {
+        if target.kind == {.List(_) -> { return true }}
     }
     false
 }
@@ -1050,7 +1050,7 @@ pub struct MirPreludeCall {
     pub member: String
     pub symbol: MirSymbol
     pub signature: MirCallSignature
-    pub effect: ?Effect
+    pub effect_kind: ?Effect
     pub fallibility: MirCallFallibility
     pub abi: MirPreludeAbi
     pub authority: ?MirAuthorityDecision

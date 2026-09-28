@@ -117,11 +117,11 @@ fn run() {
     tir_support::assert_tiers_agree("arena_view_write", src, "43\n100\n7\n");
     tir_support::assert_example_cli_tiers_agree(
         "memory/arena",
-        include_str!("../examples/features/expected/memory/arena.out"),
+        include_str!("../Examples/features/expected/memory/arena.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "memory/try_allocation",
-        include_str!("../examples/features/expected/memory/try_allocation.out"),
+        include_str!("../Examples/features/expected/memory/try_allocation.out"),
     );
 }
 

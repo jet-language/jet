@@ -1208,9 +1208,9 @@ impl JetZone {
             roots.push(std::path::PathBuf::from(dir));
         }
         if let Some(root) = std::env::var_os("JET_ROOT") {
-            roots.push(std::path::PathBuf::from(root).join("corelib/tzdb"));
+            roots.push(std::path::PathBuf::from(root).join("Core/time/tzdb"));
         }
-        roots.push(std::path::PathBuf::from("corelib/tzdb"));
+        roots.push(std::path::PathBuf::from("Core/time/tzdb"));
         roots.push(std::path::PathBuf::from("/usr/share/zoneinfo"));
         roots.push(std::path::PathBuf::from("/usr/share/lib/zoneinfo"));
         roots.push(std::path::PathBuf::from("/etc/zoneinfo"));

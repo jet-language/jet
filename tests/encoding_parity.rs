@@ -510,9 +510,9 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
             ),
         ),
     ] {
-        let jet_path = root.join("examples/features").join(format!("{stem}.jet"));
+        let jet_path = root.join("Examples/features").join(format!("{stem}.jet"));
         let expected_path = root
-            .join("examples/features/expected")
+            .join("Examples/features/expected")
             .join(format!("{stem}.out"));
         assert_eq!(
             fs::read_to_string(&expected_path).expect("serde golden output"),
@@ -548,7 +548,7 @@ fn serde_derive_examples_match_production_cli_tiers() {
         "serde/serde_generic",
     ] {
         let expected_path = root
-            .join("examples/features/expected")
+            .join("Examples/features/expected")
             .join(format!("{stem}.out"));
         let expected = fs::read_to_string(&expected_path)
             .unwrap_or_else(|error| panic!("read {expected_path:?}: {error}"));
@@ -1571,9 +1571,9 @@ fn json_stream_reader_writer_matches_aot_and_default_dev() {
             "criterion 5 requires rustc: the canonical encoding_json_stream example must execute across all tiers"
         );
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let jet_path = root.join("examples/features/serde/encoding_json_stream.jet");
-        let python_path = root.join("examples/features/serde/encoding_json_stream.py");
-        let expected_path = root.join("examples/features/expected/serde/encoding_json_stream.out");
+        let jet_path = root.join("Examples/features/serde/encoding_json_stream.jet");
+        let python_path = root.join("Examples/features/serde/encoding_json_stream.py");
+        let expected_path = root.join("Examples/features/expected/serde/encoding_json_stream.out");
         let expected = fs::read_to_string(&expected_path).expect("canonical encoding golden");
         let expected_json = "{\"a\":1,\"b\":2}";
         let expected_events =
@@ -1992,7 +1992,7 @@ fn exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner() {
         return;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let python_path = root.join("examples/features/serde/json_typed.py");
+    let python_path = root.join("Examples/features/serde/json_typed.py");
     let python = Command::new("python3")
         .arg(&python_path)
         .output()

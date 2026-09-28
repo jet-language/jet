@@ -1,4 +1,4 @@
-// html skill — code highlighter. Paste inside the page's single <script>; the same tokenizer and classes as Tower's board (plugins/tower/app/ui/tower.js).
+// html skill — code highlighter. Paste inside the page's single <script>; the same tokenizer and classes as Tower's board (Tools/tower/app/ui/tower.js).
 // Usage: pre.innerHTML = hl(sourceText)   or   `<pre>${hl(src)}</pre>`. Classes: hl-k keyword, hl-s string, hl-n number, hl-c comment, hl-f call, hl-t type or sigil.
 const HL_ESC = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const HL_KW = new Set(('fn func function def let var const val mut return yield if elif else match switch case when default for while loop do in of as is import use mod module package from pub priv private public protected internal static struct enum trait impl interface type class extends implements where async await comptime defer go chan select new self this super sizeof typeof null nil none None true false True False and or not break continue throw try catch finally with lambda then begin end macro derive emit').split(' '));

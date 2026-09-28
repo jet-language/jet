@@ -6,6 +6,6 @@ publish exploit details, credentials, private keys, or customer data in a
 public issue or pull request.
 
 The adoption bundle's evidence, handling, and response requirements are in the
-[security policy](adoption/compliance/security-policy.md). For repository scan
-closure, use the [security-closure procedure](docs/spec/contributing/security-closure.md);
+[security policy](Tools/adoption/compliance/security-policy.md). For repository scan
+closure, use the [security-closure procedure](Docs/spec/contributing/security-closure.md);
 Tower remains the work ledger for remediation and acceptance evidence.

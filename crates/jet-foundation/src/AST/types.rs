@@ -2245,7 +2245,7 @@ impl Type {
         }
     }
 
-    /// Plain-words name for diagnostics (docs/spec/diagnostics.md voice: name both types).
+    /// Plain-words name for diagnostics (Docs/spec/diagnostics.md voice: name both types).
     pub fn show(&self) -> String {
         match self {
             Type::Int => "Int (a whole number)".to_string(),

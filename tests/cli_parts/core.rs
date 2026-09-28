@@ -129,7 +129,7 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     }
     let dir = isolated_cwd("lua_bind_e2e");
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/interop/lua");
+    let example = root.join("Examples/interop/lua");
     fs::copy(example.join("ops.lua"), dir.join("ops.lua")).unwrap();
     fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
     let bind = Command::new(jet())
@@ -300,7 +300,7 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
     .unwrap();
     fs::write(
         project.join("run.jet"),
-        include_str!("../../examples/features/devloop/job_runner.jet"),
+        include_str!("../../Examples/features/devloop/job_runner.jet"),
     )
     .unwrap();
 
@@ -414,7 +414,7 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
     assert_eq!(jobs_error.stderr, run_error.stderr);
 
     let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
     let workspace = isolated_cwd("jobs_workspace");
     fs::remove_dir_all(&workspace).unwrap();
     copy_dir_all(&fixture, &workspace);

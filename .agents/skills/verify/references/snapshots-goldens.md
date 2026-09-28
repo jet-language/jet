@@ -8,7 +8,7 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 
 - Keep the row in
   `crates/jet-codegen/src/Prelude/Diagnostics.jet`; the registry and consumers
-  project that row. Use `docs/spec/diagnostics.md` for the What/Why/Fix,
+  project that row. Use `Docs/spec/diagnostics.md` for the What/Why/Fix,
   structured-fix, coverage, and cross-tier contract.
 - Keep the matching fixture and snapshot under `tests/ui/` or `tests/ui_lint/`.
   The report must retain the actionable span, registered code, structured
@@ -22,26 +22,26 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 For example, a single UI fixture uses its repository-relative filter:
 
 ```sh
-scripts/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+Tools/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
   cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
-scripts/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+Tools/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
   UPDATE_EXPECT=tests/ui/arg_type_mismatch.jet \
   cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
-scripts/agent/jet-env jet self devtools bless tests/ui/arg_type_mismatch.jet --dry-run
+Tools/agent/jet-env jet self devtools bless tests/ui/arg_type_mismatch.jet --dry-run
 ```
 
-Build a fresh binary with `scripts/agent/jet-env cargo build` before any `jet
+Build a fresh binary with `Tools/agent/jet-env cargo build` before any `jet
 explain`, runtime, or generated-page claim; then bless only the named target
 after its dry run and review. Do not create a Markdown diagnostic catalog or
 status mirror.
 
 ## Executable goldens
 
-Use `docs/spec/contributing/examples.md` and the relevant example under
-`examples/`. Run the exact example criterion through a fresh binary; when the
+Use `Docs/spec/contributing/examples.md` and the relevant example under
+`Examples/`. Run the exact example criterion through a fresh binary; when the
 criterion applies to both execution forms, prove `jet run` and
 `jet run --release`, then update only its matching file under
-`examples/features/expected/`. Preserve the program's meaning and path
+`Examples/features/expected/`. Preserve the program's meaning and path
 consumers rather than changing a golden to make a regression disappear.
 
 A snapshot or golden is green only after its named focused command actually

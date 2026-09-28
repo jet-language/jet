@@ -1529,7 +1529,7 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
 }
 
 // ──────────────────────────────────────────────
-// Provider boundary (R0; see docs/spec/syntax-decisions.md).
+// Provider boundary (R0; see Docs/spec/syntax-decisions.md).
 //
 // Each provider owns acquisition and realization behind one trait. `core`
 // realizes first-party Jet packages (no Nix); `nix` leverages nixpkgs. Source

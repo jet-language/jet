@@ -37,7 +37,7 @@ scope:
   decision or card;
 - run `tower lint` after writes and read cards and decisions back.
 
-Write one Markdown report under `docs/research/` through the project-approved
+Write one Markdown report under `Docs/research/` through the project-approved
 non-serve CLI. The report is the retained artifact; capture files are temporary
 and must be removed after close.
 

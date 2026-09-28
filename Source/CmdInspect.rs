@@ -1287,7 +1287,7 @@ pub(crate) fn run_output(args: &[String], json: bool) {
         crate::cli_error!(
             @fix "E2104",
             "`jet inspect output` needs an entry file",
-            "run `jet inspect output examples/features/tooling/output_callable.jet`"
+            "run `jet inspect output Examples/features/tooling/output_callable.jet`"
         );
         exit(jet::ExitCodes::USAGE);
     };
@@ -1646,13 +1646,13 @@ fn llm_digest() -> String {
     let diagnostic_text = digest_diagnostic_text();
     let core_text = digest_core_module_text();
     let idiom_suites_body = [
-        "Each idiom has one executable, golden-backed source of truth under `examples/suites/`.",
+        "Each idiom has one executable, golden-backed source of truth under `Examples/suites/`.",
         "",
-        "- Dispatch: `examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
-        "- Failure: `examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
-        "- Finite state: `examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
-        "- Ownership: `examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.",
-        "- Wire output: `examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
+        "- Dispatch: `Examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
+        "- Failure: `Examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
+        "- Finite state: `Examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
+        "- Ownership: `Examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.",
+        "- Wire output: `Examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
     ]
     .join("\n");
 
@@ -2475,7 +2475,7 @@ pub(crate) fn run_shapes(args: &[String], json: bool) {
         crate::cli_error!(
             @fix "E2104",
             "`jet inspect shapes` needs an entry file",
-            "run `jet inspect shapes examples/features/encoding/records.jet`"
+            "run `jet inspect shapes Examples/features/encoding/records.jet`"
         );
         exit(jet::ExitCodes::USAGE);
     };
@@ -2559,7 +2559,7 @@ pub(crate) fn run_types(args: &[String], json: bool) {
         crate::cli_error!(
             @fix "E2104",
             "`jet inspect types` needs an entry file",
-            "run `jet inspect types examples/features/operators/mixed_types.jet`"
+            "run `jet inspect types Examples/features/operators/mixed_types.jet`"
         );
         exit(jet::ExitCodes::USAGE);
     };

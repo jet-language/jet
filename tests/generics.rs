@@ -99,7 +99,7 @@ fn run() { print(tuned.slots()) }
 #[test]
 fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let fixture = repo.join("examples/features/modules");
+    let fixture = repo.join("Examples/features/modules");
     let root = std::env::temp_dir().join(format!(
         "jet_generic_module_fact_parity_{}",
         std::process::id()
@@ -112,7 +112,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     std::fs::copy(fixture.join("package.jet"), root.join("package.jet"))
         .expect("copy fact-value package");
     let expected =
-        std::fs::read(repo.join("examples/features/expected/modules/fact_value_arguments.out"))
+        std::fs::read(repo.join("Examples/features/expected/modules/fact_value_arguments.out"))
             .expect("fact-value module golden");
     for (profile, setting, expected_output) in [
         ("compact", "2", b"2\n".as_slice()),
@@ -304,7 +304,7 @@ fn run() {}
 #[test]
 fn generic_modules_complete_instantiation() {
     // FEATURE_CLAIM: claim.generic-modules / complete-instantiation
-    let complete = include_str!("../examples/features/modules/generic_modules.jet");
+    let complete = include_str!("../Examples/features/modules/generic_modules.jet");
     jet::compile(complete)
         .unwrap_or_else(|diags| panic!("closed generic-module surface failed: {diags:#?}"));
 
@@ -636,9 +636,9 @@ fn run() {}
 #[test]
 fn generic_examples_build_and_run() {
     for name in [
-        "examples/features/types/traits.jet",
-        "examples/features/types/generic_types.jet",
-        "examples/features/basics/printable.jet",
+        "Examples/features/types/traits.jet",
+        "Examples/features/types/generic_types.jet",
+        "Examples/features/basics/printable.jet",
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_jet"))
             .arg("run")

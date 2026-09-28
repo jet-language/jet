@@ -95,8 +95,8 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
         "named_args runtime proof requires a supported resident Cranelift host"
     );
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let file = root.join("examples/features/basics/named_args.jet");
-    let expected_path = root.join("examples/features/expected/basics/named_args.out");
+    let file = root.join("Examples/features/basics/named_args.jet");
+    let expected_path = root.join("Examples/features/expected/basics/named_args.out");
     let expected = fs::read_to_string(&expected_path).expect("named_args golden output");
     let shown = file.to_string_lossy().into_owned();
 
@@ -179,7 +179,7 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
 #[test]
 fn bounded_workers_example_has_total_tir() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/concurrency/bounded_workers.jet");
+        .join("Examples/features/concurrency/bounded_workers.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
@@ -927,7 +927,7 @@ fn run() {
         .spawn()
         .expect("run prompt named-deopt fixture");
     // This fixture drives the same prompt sequence as
-    // `examples/features/io/terminal_parity.jet`, so it needs the same answers
+    // `Examples/features/io/terminal_parity.jet`, so it needs the same answers
     // and reads them from their one home in `tests/common` (I8): the asserted
     // `false|production|non-tty` below is exactly what those answers produce.
     let answers =
@@ -1291,7 +1291,7 @@ fn iter_adapter_latches_emit_dominating_clif() {
     });
 
     // The `chunk_while` grouping, the `dedup_by` keys, and the `is_sorted_by`
-    // verdict are the same facts `examples/features/collections/iter_adapters`
+    // verdict are the same facts `Examples/features/collections/iter_adapters`
     // records, so this literal is the shared observable, not a tier's opinion.
     let expected = "[[1, 2, 3], [5, 6], [9, 10], [12]]\n[2, 1, 8]\ntrue\n".to_string();
 
@@ -1355,7 +1355,7 @@ fn iter_adapter_latches_emit_dominating_clif() {
 
 /// Three optional-returning builtins answered the resident tier with a small
 /// wrong integer where AOT answered the real value: `last_index_of` gave `0` for
-/// `3` (`examples/features/collections/iter_adapters`), `map.pop(key)` gave `0`
+/// `3` (`Examples/features/collections/iter_adapters`), `map.pop(key)` gave `0`
 /// for `4`, and `pq.pop()` gave `1` for `9` (`collections/pop_table`). One cause:
 /// each host answers with the result-arena Option carrier (`option_i64`, a
 /// 1-based `rt.results` handle) while `LowerCtx::uses_result_option_abi` — the one
@@ -2455,7 +2455,7 @@ fn nbody_entry_runs_on_resident_jit_without_deopt() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("gauntlet/entries/nbody/jet/run.jet");
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("Tools/gauntlet/entries/nbody/jet/run.jet");
     let shown = file.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("nbody entry loads");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);

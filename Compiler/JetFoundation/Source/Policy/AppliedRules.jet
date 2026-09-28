@@ -1,0 +1,48 @@
+pub enum TAppliedRuleArgKind { Any String Path Ident Bool Int DurationOrString EffectRoots }
+
+pub enum TAppliedRuleStatus {
+    Active
+    Retired(replacement: String)
+}
+
+pub struct TAppliedRuleParameter {
+    pub name: String
+    pub kind: TAppliedRuleArgKind
+    pub source_type: String
+    pub default_source: ?String
+}
+
+pub struct TAppliedRuleSignature {
+    pub params: [TAppliedRuleParameter]
+    pub variadic: ?TAppliedRuleArgKind
+    pub variadic_source_type: ?String
+}
+
+pub struct TAppliedRuleCompanionSite {
+    pub rule: String
+    pub site: String
+}
+
+pub struct TAppliedRule {
+    pub name: String
+    pub signature: TAppliedRuleSignature
+    pub policy_scopes: [String]
+    pub sites: [String]
+    pub repeatable: Bool
+    pub owns_menu: Bool
+    pub companion_site: ?TAppliedRuleCompanionSite
+    pub status: TAppliedRuleStatus
+    pub inherits: Bool
+    pub resolution: String
+}
+
+pub struct TAppliedRuleArgumentMenu {
+    pub name: String
+    pub variants: [String]
+    pub first_variant_segment: Bool
+}
+
+pub struct TAppliedRuleCatalog {
+    pub rows: [TAppliedRule]
+    pub argument_menus: [TAppliedRuleArgumentMenu]
+}

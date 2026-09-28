@@ -175,6 +175,8 @@ enum RetAbi {
     /// owned byte buffer before the bridge frees it.
     Record,
 }
+
+#[derive(Clone)]
 struct FfiRecordField {
     name: String,
     ty: MirType,
@@ -1161,7 +1163,7 @@ fn mir_bridge_specs_selected(
             .map(|parameter| parameter.access)
             .collect::<Vec<_>>();
         let ret_type = foreign.return_type.clone();
-        mir_ret_abi(
+        let ret = mir_ret_abi(
             foreign.return_type.as_ref(),
             foreign
                 .return_type
@@ -2997,6 +2999,7 @@ fn encode_bytes_at(
         | MirTypeKind::Tagged { inner: base, .. }
         | MirTypeKind::Quantity { base, .. } => {
             encode_bytes_at(value, base, records, bytes, wrapper, span)?
+        }
         MirTypeKind::FixedList { elem, .. } => {
             let MirRuntimeValue::List(values) = value else {
                 return Err(ffi_diag(wrapper, "received a non-list fixed array", span));
@@ -3188,6 +3191,7 @@ fn decode_bytes(
             if let Some(enum_info) = descriptor.enum_info.as_ref() {
                 return decode_enum_bytes(bytes, enum_info, records, &descriptor.name, wrapper, span);
             }
+            let mut fields = Vec::with_capacity(descriptor.fields.len());
             for field in &descriptor.fields {
                 let (_, field_size) = type_size_align(&field.ty, records)
                     .map(|(size, _)| (field.offset, size))

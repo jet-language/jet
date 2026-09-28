@@ -379,7 +379,7 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
 
 #[test]
 fn canvas_graph_source_id_stays_project_relative_for_relative_entries() {
-    let graph = jet::Canvas::graph_json_for_file(Path::new("examples/features/basics/hello.jet"))
+    let graph = jet::Canvas::graph_json_for_file(Path::new("Examples/features/basics/hello.jet"))
         .expect("relative Canvas entry should project");
     assert!(
         graph.contains("\"source_id\":\"hello.jet\""),

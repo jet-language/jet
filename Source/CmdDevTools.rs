@@ -1942,7 +1942,7 @@ fn next_dev_job_wake(snapshot: Option<&jet::CheckedMirSnapshot>) -> Option<Durat
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
 /// jetos timer projection are the production/OS consumers of the identical
 /// `#Every(…)` declaration — see the D-SCHEDULE1 row in
-/// docs/spec/syntax-decisions.md for the full three-consumer law.
+/// Docs/spec/syntax-decisions.md for the full three-consumer law.
 fn run_due_jobs(
     snapshot: &jet::CheckedMirSnapshot,
     file: &str,
@@ -3221,22 +3221,22 @@ pub(crate) fn run_devtools(args: &[&String], mode: OutputMode) {
     match args.first().map(|s| s.as_str()) {
         Some("grammars") => {
             write_generated_section(
-                "editors/vscode/syntaxes/jet.tmLanguage.json",
+                "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
                 &jet::Syntax::render_vscode_generated_highlights(),
                 mode.quiet,
             );
             write_generated_section(
-                "editors/jet.tmGrammar",
+                "Tools/editors/jet.tmGrammar",
                 &jet::Syntax::render_vscode_generated_highlights(),
                 mode.quiet,
             );
             write_generated_section(
-                "editors/tree-sitter/grammar.js",
+                "Tools/editors/tree-sitter/grammar.js",
                 &jet::Syntax::render_tree_sitter_generated_highlights(),
                 mode.quiet,
             );
             write_generated_section(
-                "editors/zed/languages/jet/highlights.scm",
+                "Tools/editors/zed/languages/jet/highlights.scm",
                 &jet::Syntax::render_zed_generated_highlights(),
                 mode.quiet,
             );
@@ -3577,8 +3577,8 @@ pub(crate) fn run_devtools_ice_report(args: &[&String]) {
 // ──────────────────────────────────────────────
 
 /// `jet self devtools new-example <topic>/<name>` — scaffolds
-/// `examples/features/<topic>/<name>.jet` and
-/// `examples/features/expected/<topic>/<name>.out`, matching the layout
+/// `Examples/features/<topic>/<name>.jet` and
+/// `Examples/features/expected/<topic>/<name>.out`, matching the layout
 /// `tests/golden.rs` walks exactly. The stub is a real, passing example (I5:
 /// no example ships broken) that the author edits to demonstrate the feature.
 pub(crate) fn run_devtools_new_example(args: &[&String]) {
@@ -3599,8 +3599,8 @@ pub(crate) fn run_devtools_new_example(args: &[&String]) {
     };
 
     let ext = jet::Syntax::FILE_EXT;
-    let example_dir = PathBuf::from("examples/features").join(topic);
-    let expected_dir = PathBuf::from("examples/features/expected").join(topic);
+    let example_dir = PathBuf::from("Examples/features").join(topic);
+    let expected_dir = PathBuf::from("Examples/features/expected").join(topic);
     let example_path = example_dir.join(format!("{}.{}", name, ext));
     let expected_path = expected_dir.join(format!("{}.out", name));
 
@@ -3630,7 +3630,7 @@ pub(crate) fn run_devtools_new_example(args: &[&String]) {
 
     let greeting = format!("scaffold: {}/{}", topic, name);
     let src = format!(
-        "// TODO: describe examples/features/{}/{}.{}\nfn run() {{\n    print(\"{}\")\n}}\n",
+        "// TODO: describe Examples/features/{}/{}.{}\nfn run() {{\n    print(\"{}\")\n}}\n",
         topic, name, ext, greeting
     );
     fs::write(&example_path, &src).unwrap_or_else(|e| {
@@ -3728,7 +3728,7 @@ fn run() {\n    print(definitely_undefined_scaffold_symbol)\n}\n"
 // ──────────────────────────────────────────────
 
 /// `jet self devtools check-fixture-paths` — greps every `tests/**/*.rs` file for
-/// hardcoded fixture path literals (`examples/features/...`, `docs/spec/...`,
+/// hardcoded fixture path literals (`Examples/features/...`, `Docs/spec/...`,
 /// `tests/ui/...`, etc.) and confirms each one exists on disk relative to the
 /// current directory (run from the repo root). Path-embedding fixtures rot
 /// silently when an example moves; this is the check that catches it.
@@ -3829,8 +3829,8 @@ fn extract_hardcoded_paths(text: &str) -> Vec<String> {
 }
 
 fn is_hardcoded_fixture_path(lit: &str) -> bool {
-    let known_prefix = lit.starts_with("examples/features/")
-        || lit.starts_with("docs/spec/")
+    let known_prefix = lit.starts_with("Examples/features/")
+        || lit.starts_with("Docs/spec/")
         || lit.starts_with("tests/ui/")
         || lit.starts_with("tests/ui_lint/")
         || lit.starts_with("tests/cli/")

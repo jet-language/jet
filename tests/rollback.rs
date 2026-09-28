@@ -112,7 +112,7 @@ fn run() {
 /// callback receiver, not only through an address-backed place.
 #[test]
 fn rollback_trait_interpreter_restores_projected_fields() {
-    let mut bundle = jet::Loader::load_entry("examples/features/errors/rollback_trait.jet")
+    let mut bundle = jet::Loader::load_entry("Examples/features/errors/rollback_trait.jet")
         .expect("rollback trait fixture should load");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors = diagnostics
@@ -138,7 +138,7 @@ fn rollback_trait_interpreter_restores_projected_fields() {
             assert_eq!(exit_code, 0);
             assert_eq!(
                 stdout,
-                include_str!("../examples/features/expected/errors/rollback_trait.out")
+                include_str!("../Examples/features/expected/errors/rollback_trait.out")
             );
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {

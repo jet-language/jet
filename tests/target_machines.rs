@@ -171,7 +171,7 @@ fn no_os_core_mem_try_allocation_compiles_with_fixed_allocator() {
     let file = dir.join("try_allocation.jet");
     std::fs::write(
         &file,
-        include_str!("../examples/features/memory/try_allocation.jet"),
+        include_str!("../Examples/features/memory/try_allocation.jet"),
     )
     .unwrap();
     jet::Driver::compile_bundle_path_with_target_machine(

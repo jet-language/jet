@@ -1790,7 +1790,7 @@ fn fix_project_for(path: &Path) -> PathBuf {
         let Some(relative) = path.strip_prefix(ancestor).ok() else {
             continue;
         };
-        if relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui")) {
+        if relative.starts_with("Examples") || relative.starts_with(Path::new("tests").join("ui")) {
             return ancestor.to_path_buf();
         }
     }
@@ -2055,13 +2055,13 @@ fn managed_project_for_entry(entry: &Path) -> PathBuf {
             .strip_prefix(ancestor)
             .ok()
             .is_some_and(|relative| {
-                relative.starts_with("examples") || relative.starts_with("tests/ui")
+                relative.starts_with("Examples") || relative.starts_with("tests/ui")
             })
         {
             return ancestor.to_path_buf();
         }
     }
-    fail("version 1 codemod entry must be beneath examples/ or tests/ui/")
+    fail("version 1 codemod entry must be beneath Examples/ or tests/ui/")
 }
 
 fn edit(s: jet_semindex::SourceSpan, text: &str) -> TextEdit {
@@ -2157,13 +2157,13 @@ fn verify_inputs(inputs: &BTreeMap<PathBuf, String>) {
 }
 fn secure_existing(project: &Path, raw: &str, allow_dir: bool) -> PathBuf {
     reject_parent_or_absolute(raw, "root path");
-    let allowed = raw == "examples"
-        || raw.starts_with("examples/")
+    let allowed = raw == "Examples"
+        || raw.starts_with("Examples/")
         || raw == "tests/ui"
         || raw.starts_with("tests/ui/");
     if !allowed {
         fail(&format!(
-            "editable root `{raw}` must be beneath examples/ or tests/ui/"
+            "editable root `{raw}` must be beneath Examples/ or tests/ui/"
         ))
     }
     let p = secure_components(project, raw);

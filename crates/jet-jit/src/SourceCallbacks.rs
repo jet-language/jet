@@ -346,7 +346,7 @@ struct ReplyCell<R> {
     on_lost: Arc<dyn Fn(Result<R, SourceCallbackError>) + Send + Sync>,
 }
 
-impl<R: Send + 'static> ReplyCell<R> {
+impl<R> ReplyCell<R> {
     fn send(
         &self,
         result: Result<R, SourceCallbackError>,
@@ -676,6 +676,10 @@ pub struct SourceCallbackAbandonment<P, C, X, R> {
 }
 
 impl<P, C, X, R> SourceCallbackAbandonment<P, C, X, R> {
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty() && self.callbacks.values().all(|entry| entry.payload.is_none())
+    }
+
     pub fn with_payload<T>(
         &mut self,
         callback: SourceCallbackId,
@@ -788,13 +792,17 @@ where
     X: Send + 'static,
     R: Send + 'static,
 {
+    /// Retain the existing transport only for a notified owner job. The ready
+    /// hook itself remains weak and cannot make the session own its worker.
+    pub fn session(&self) -> Option<SourceCallbackSession<P, C, X, R>> {
+        Some(SourceCallbackSession { state: self.state.upgrade()? })
+    }
+
     /// Pop and materialize exactly one ready event for an independent owner
     /// task. Returns `None` if the session was dropped or another task won.
     /// Owners must schedule one call per ready notification or drain the session.
     pub fn try_next(&self) -> Option<SourceCallbackEvent<P, C, X, R>> {
-        let state = self.state.upgrade()?;
-        let session = SourceCallbackSession { state };
-        session.try_next()
+        self.session()?.try_next()
     }
 }
 
@@ -1167,6 +1175,59 @@ where
     pub fn take_context(&mut self) -> Option<X> {
         self.context.take()
     }
+    /// Borrow the cleanup origin without spinning while an invocation owns it.
+    /// A busy payload parks this exact event until the existing borrow returns.
+    pub fn try_with_payload_mut<T>(
+        mut self,
+        body: impl FnOnce(&mut P, &mut Self) -> T,
+    ) -> Result<T, SourceCallbackError> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(entry) = state.callbacks.get_mut(&self.callback) else {
+            drop(state);
+            return Err(SourceCallbackError::UnknownCallback);
+        };
+        let payload = if entry.payload.is_some() {
+            entry.borrows += 1;
+            entry.payload.take()
+        } else {
+            None
+        };
+        let Some(payload) = payload else {
+            let pending = PendingEvent::Cleanup {
+                callback: self.callback,
+                request: self.request,
+                command: self.command.take(),
+                context: self.context.take(),
+                completion: self.completion.clone(),
+            };
+            state
+                .deferred
+                .entry(self.callback)
+                .or_default()
+                .push_back(pending);
+            self.completed = true;
+            drop(state);
+            return Err(SourceCallbackError::PayloadBusy);
+        };
+        drop(state);
+        let mut root = PayloadRoot {
+            state: self.state.clone(),
+            callback: self.callback,
+            payload: Some(payload),
+        };
+        let result = body(
+            root.payload
+                .as_mut()
+                .expect("borrowed cleanup payload is present"),
+            &mut self,
+        );
+        drop(root);
+        Ok(result)
+    }
+
     /// Commit cleanup after the owner has handled any command/context values.
     pub fn complete(mut self) {
         self.completed = true;
@@ -1246,7 +1307,7 @@ impl<R: Send + 'static> SourceCallbackReplyCleanup<R> {
     }
 }
 
-impl<R: Send + 'static> Drop for SourceCallbackReplyCleanup<R> {
+impl<R> Drop for SourceCallbackReplyCleanup<R> {
     fn drop(&mut self) {
         if self.completed {
             return;
@@ -1565,8 +1626,8 @@ where
             if state.phase == SessionPhase::Retired {
                 return None;
             }
-            state = state
-                .wake
+            let wake = Arc::clone(&state.wake);
+            state = wake
                 .wait(state)
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
         }

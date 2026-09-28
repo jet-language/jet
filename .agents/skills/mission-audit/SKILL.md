@@ -7,7 +7,7 @@ description: >-
 
 # Mission audit
 
-Score the requested Jet area against `docs/spec/philosophy.md` and `AGENTS.md` invariants. Check beginner defaults, expert control, one mechanism, hidden rustc, diagnostics as product, batteries, systems path, one package graph, and lean tools. Mark each dimension `aligned`, `drift`, or `unknown` with evidence and the smallest corrective action. Treat the philosophy as the target; do not claim current status without evidence.
+Score the requested Jet area against `Docs/spec/philosophy.md` and `AGENTS.md` invariants. Check beginner defaults, expert control, one mechanism, hidden rustc, diagnostics as product, batteries, systems path, one package graph, and lean tools. Mark each dimension `aligned`, `drift`, or `unknown` with evidence and the smallest corrective action. Treat the philosophy as the target; do not claim current status without evidence.
 
 Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns the mission scorecard, coding-agent facet, evidence, and finite closeout.
 
@@ -33,4 +33,4 @@ Use this invariant mapping without making an unsupported ownership claim: verdic
 
 Stop when every named mission dimension and all five coding-agent quantities have a grade, evidence or an honest `unknown`, and smallest correction; every required source and workload is accounted for; and the report's disposition marker is complete. A report can contain zero drift findings when the declared evidence supports that result.
 
-This is a report-only method. Write one report under `docs/audits/` through the project-approved non-serve CLI, cite existing Tower records read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Keep alignment grades and corrective actions separate from implementation completion. Follow the shared disposition contract before publication.
+This is a report-only method. Write one report under `Docs/audits/` through the project-approved non-serve CLI, cite existing Tower records read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Keep alignment grades and corrective actions separate from implementation completion. Follow the shared disposition contract before publication.

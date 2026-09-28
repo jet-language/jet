@@ -33,7 +33,7 @@ fn linalg_and_fft_use_the_cpu_oracle() {
         |stdout| {
             assert_eq!(
                 stdout,
-                include_str!("../examples/features/expected/tooling/compute_linalg.out")
+                include_str!("../Examples/features/expected/tooling/compute_linalg.out")
             );
         },
     );
@@ -69,9 +69,9 @@ fn run() {
 
 #[test]
 fn autodiff_sparse_simd_and_streams_use_real_paths() {
-    let source = include_str!("../examples/features/tooling/compute_autodiff.jet");
-    let expected = include_str!("../examples/features/expected/tooling/compute_autodiff.out");
-    let mut bundle = jet::Loader::load_entry("examples/features/tooling/compute_autodiff.jet")
+    let source = include_str!("../Examples/features/tooling/compute_autodiff.jet");
+    let expected = include_str!("../Examples/features/expected/tooling/compute_autodiff.out");
+    let mut bundle = jet::Loader::load_entry("Examples/features/tooling/compute_autodiff.jet")
         .expect("load compute autodiff example");
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert_tiers_agree("compute_autodiff_targeted", source, expected);
@@ -196,8 +196,8 @@ fn run() {
 
 #[test]
 fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
-    let ml_source = include_str!("../examples/features/tooling/compute_ml.jet");
-    let ml_output = include_str!("../examples/features/expected/tooling/compute_ml.out");
+    let ml_source = include_str!("../Examples/features/tooling/compute_ml.jet");
+    let ml_output = include_str!("../Examples/features/expected/tooling/compute_ml.out");
     assert_tiers_agree("compute_ml_targeted", ml_source, ml_output);
     let (resident_code, resident_stdout, resident_stderr) = run_default_multi(
         "compute_ml_resident",
@@ -239,20 +239,20 @@ fn run() {
     );
     assert_aot_and_default_parity(
         "compute_device_targeted",
-        include_str!("../examples/features/tooling/compute_device.jet"),
+        include_str!("../Examples/features/tooling/compute_device.jet"),
         &["device:CPU", "placement:Placement", "transfer:Transfer("],
     );
     assert_aot_and_default_parity(
         "compute_metal_targeted",
-        include_str!("../examples/features/tooling/compute_metal.jet"),
+        include_str!("../Examples/features/tooling/compute_metal.jet"),
         &["metal:f64:rejected", "stream:cpu-ok"],
     );
 }
 
 #[test]
 fn metal_public_path_matches_cpu_oracle_and_declared_failure() {
-    let source = include_str!("../examples/features/tooling/compute_metal.jet");
-    let expected = include_str!("../examples/features/expected/tooling/compute_metal.out");
+    let source = include_str!("../Examples/features/tooling/compute_metal.jet");
+    let expected = include_str!("../Examples/features/expected/tooling/compute_metal.out");
     assert_tiers_agree("compute_metal_public_path", source, expected);
 }
 
@@ -260,12 +260,12 @@ fn metal_public_path_matches_cpu_oracle_and_declared_failure() {
 fn safe_kernel_boundary_and_f32_profile_are_explicit() {
     assert_aot_and_default_parity(
         "compute_kernel_targeted",
-        include_str!("../examples/features/tooling/compute_kernel.jet"),
+        include_str!("../Examples/features/tooling/compute_kernel.jet"),
         &["kernel:42", "bounds:true"],
     );
     assert_aot_and_default_parity(
         "compute_simd_targeted",
-        include_str!("../examples/features/tooling/compute_simd.jet"),
+        include_str!("../Examples/features/tooling/compute_simd.jet"),
         &[
             "profile=F32Strict+Reproducible",
             "tile:[19.0, 22.0, 43.0, 50.0]",

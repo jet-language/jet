@@ -158,10 +158,10 @@ fn run() {
 fn result_handler_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "errors/result_handler",
-        include_str!("../examples/features/expected/errors/result_handler.out"),
+        include_str!("../Examples/features/expected/errors/result_handler.out"),
     );
 
-    let source = include_str!("../examples/features/errors/result_handler.jet");
+    let source = include_str!("../Examples/features/errors/result_handler.jet");
     let (code, stdout, stderr) = tir_support::jit_run_traced("result_handler_example_jit", source);
     assert_eq!(
         code, 0,
@@ -169,7 +169,7 @@ fn result_handler_example_matches_all_execution_tiers() {
     );
     assert_eq!(
         stdout,
-        include_str!("../examples/features/expected/errors/result_handler.out")
+        include_str!("../Examples/features/expected/errors/result_handler.out")
     );
     assert!(
         stderr
@@ -836,7 +836,7 @@ fn run() {
 fn returned_function_call_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "functions/returned_function_call",
-        include_str!("../examples/features/expected/functions/returned_function_call.out"),
+        include_str!("../Examples/features/expected/functions/returned_function_call.out"),
     );
 }
 
@@ -847,7 +847,7 @@ fn returned_function_call_example_matches_all_execution_tiers() {
 fn named_function_value_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "functions/named_function_value",
-        include_str!("../examples/features/expected/functions/named_function_value.out"),
+        include_str!("../Examples/features/expected/functions/named_function_value.out"),
     );
 }
 
@@ -858,7 +858,7 @@ fn named_function_value_example_matches_all_execution_tiers() {
 fn binary_codec_writer_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "parsing/binary-codecs",
-        include_str!("../examples/features/expected/parsing/binary-codecs.out"),
+        include_str!("../Examples/features/expected/parsing/binary-codecs.out"),
     );
 }
 
@@ -870,7 +870,7 @@ fn binary_codec_writer_example_matches_all_execution_tiers() {
 fn body_rules_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "basics/body_rules",
-        include_str!("../examples/features/expected/basics/body_rules.out"),
+        include_str!("../Examples/features/expected/basics/body_rules.out"),
     );
 }
 
@@ -880,7 +880,7 @@ fn body_rules_example_matches_all_execution_tiers() {
 fn fallible_type_spelling_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "errors/fallible_run",
-        include_str!("../examples/features/expected/errors/fallible_run.out"),
+        include_str!("../Examples/features/expected/errors/fallible_run.out"),
     );
 }
 
@@ -890,11 +890,11 @@ fn fallible_type_spelling_example_matches_all_execution_tiers() {
 fn bindingless_loop_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "basics/loop_bindingless",
-        include_str!("../examples/features/expected/basics/loop_bindingless.out"),
+        include_str!("../Examples/features/expected/basics/loop_bindingless.out"),
     );
 
     let path = format!(
-        "{}/examples/features/basics/loop_bindingless.jet",
+        "{}/Examples/features/basics/loop_bindingless.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     match dev_iteration(&path, false, true) {
@@ -906,7 +906,7 @@ fn bindingless_loop_example_matches_all_execution_tiers() {
             assert_eq!(exit_code, 0);
             assert_eq!(
                 stdout,
-                include_str!("../examples/features/expected/basics/loop_bindingless.out")
+                include_str!("../Examples/features/expected/basics/loop_bindingless.out")
             );
             assert_eq!(stderr, "");
         }
@@ -923,11 +923,11 @@ fn bindingless_loop_example_matches_all_execution_tiers() {
 fn comprehension_forms_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "basics/comprehension_forms",
-        include_str!("../examples/features/expected/basics/comprehension_forms.out"),
+        include_str!("../Examples/features/expected/basics/comprehension_forms.out"),
     );
 
     let path = format!(
-        "{}/examples/features/basics/comprehension_forms.jet",
+        "{}/Examples/features/basics/comprehension_forms.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     match dev_iteration(&path, false, true) {
@@ -939,7 +939,7 @@ fn comprehension_forms_example_matches_all_execution_tiers() {
             assert_eq!(exit_code, 0);
             assert_eq!(
                 stdout,
-                include_str!("../examples/features/expected/basics/comprehension_forms.out")
+                include_str!("../Examples/features/expected/basics/comprehension_forms.out")
             );
             assert_eq!(stderr, "");
         }
@@ -953,11 +953,11 @@ fn comprehension_forms_example_matches_all_execution_tiers() {
 /// byte-identical through AOT, default `jet run`, and forced interpretation.
 #[test]
 fn loop_values_example_matches_all_execution_tiers() {
-    let expected = include_str!("../examples/features/expected/basics/loop_values.out");
+    let expected = include_str!("../Examples/features/expected/basics/loop_values.out");
     tir_support::assert_example_cli_tiers_agree("basics/loop_values", expected);
 
     let path = format!(
-        "{}/examples/features/basics/loop_values.jet",
+        "{}/Examples/features/basics/loop_values.jet",
         env!("CARGO_MANIFEST_DIR")
     );
     match dev_iteration(&path, false, true) {
@@ -983,19 +983,19 @@ fn loop_values_example_matches_all_execution_tiers() {
 fn channel_select_examples_match_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "concurrency/select_channel",
-        include_str!("../examples/features/expected/concurrency/select_channel.out"),
+        include_str!("../Examples/features/expected/concurrency/select_channel.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "concurrency/select_generic",
-        include_str!("../examples/features/expected/concurrency/select_generic.out"),
+        include_str!("../Examples/features/expected/concurrency/select_generic.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "concurrency/channel_builtin_1560",
-        include_str!("../examples/features/expected/concurrency/channel_builtin_1560.out"),
+        include_str!("../Examples/features/expected/concurrency/channel_builtin_1560.out"),
     );
     tir_support::assert_example_cli_tiers_agree(
         "concurrency/task_runtime_audit",
-        include_str!("../examples/features/expected/concurrency/task_runtime_audit.out"),
+        include_str!("../Examples/features/expected/concurrency/task_runtime_audit.out"),
     );
 }
 
@@ -1007,12 +1007,12 @@ fn task_observation_examples_match_all_execution_tiers() {
     tir_support::assert_example_cli_error_tiers_agree(
         "concurrency/task_panic",
         70,
-        include_str!("../examples/features/expected/concurrency/task_panic.err.out"),
+        include_str!("../Examples/features/expected/concurrency/task_panic.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "concurrency/task_blocked",
         70,
-        include_str!("../examples/features/expected/concurrency/task_blocked.err.out"),
+        include_str!("../Examples/features/expected/concurrency/task_blocked.err.out"),
     );
 }
 
@@ -1023,7 +1023,7 @@ fn default_entry_error_golden_matches_all_execution_tiers() {
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/default_error_conversion",
         1,
-        include_str!("../examples/features/expected/errors/default_error_conversion.err.out"),
+        include_str!("../Examples/features/expected/errors/default_error_conversion.err.out"),
     );
 }
 
@@ -1039,7 +1039,7 @@ fn propagation_trail_golden_matches_all_execution_tiers() {
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/error_context",
         1,
-        include_str!("../examples/features/expected/errors/error_context.err.out"),
+        include_str!("../Examples/features/expected/errors/error_context.err.out"),
     );
 }
 
@@ -1052,17 +1052,17 @@ fn runtime_stop_goldens_match_all_execution_tiers() {
     tir_support::assert_example_cli_error_tiers_agree(
         "collections/list_bounds",
         70,
-        include_str!("../examples/features/expected/collections/list_bounds.err.out"),
+        include_str!("../Examples/features/expected/collections/list_bounds.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "collections/map_key",
         70,
-        include_str!("../examples/features/expected/collections/map_key.err.out"),
+        include_str!("../Examples/features/expected/collections/map_key.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/panic",
         70,
-        include_str!("../examples/features/expected/errors/panic.err.out"),
+        include_str!("../Examples/features/expected/errors/panic.err.out"),
     );
     // #1967: the `??` right side is a stop too. `assert_example_cli_error_tiers_agree`
     // requires EMPTY stdout, so a tier that reports the panic without ending the
@@ -1071,22 +1071,22 @@ fn runtime_stop_goldens_match_all_execution_tiers() {
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/qq_panic",
         70,
-        include_str!("../examples/features/expected/errors/qq_panic.err.out"),
+        include_str!("../Examples/features/expected/errors/qq_panic.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/stack_overflow",
         70,
-        include_str!("../examples/features/expected/errors/stack_overflow.err.out"),
+        include_str!("../Examples/features/expected/errors/stack_overflow.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/todo_stop",
         70,
-        include_str!("../examples/features/expected/errors/todo_stop.err.out"),
+        include_str!("../Examples/features/expected/errors/todo_stop.err.out"),
     );
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/u8_divide_zero",
         70,
-        include_str!("../examples/features/expected/errors/u8_divide_zero.err.out"),
+        include_str!("../Examples/features/expected/errors/u8_divide_zero.err.out"),
     );
 }
 
@@ -1110,7 +1110,7 @@ authority: {
         |actual| {
             assert_eq!(
                 actual,
-                include_str!("../examples/features/expected/io/process_exit_cleanup.out")
+                include_str!("../Examples/features/expected/io/process_exit_cleanup.out")
             );
         },
     );
@@ -1190,7 +1190,7 @@ fn run() {
 }
 
 /// Statement-form if / else-if / else with a returning helper — mirrors the
-/// shape of examples/features/basics/fizzbuzz.jet's `label`.
+/// shape of Examples/features/basics/fizzbuzz.jet's `label`.
 #[test]
 fn if_else_chain_and_return() {
     if !have_rustc() {
@@ -2159,7 +2159,7 @@ fn run() {
 /// A unit-variant enum, enum literals (`Light.Red` etc.), and two exhaustive
 /// variant matches (the `_ => unreachable!` fallthrough is dead but mandatory).
 /// `next`, `label`, and `main` (an enum-typed local + covered helper calls) all
-/// route through the TIR. Mirrors examples/features/types/enums.jet.
+/// route through the TIR. Mirrors Examples/features/types/enums.jet.
 #[test]
 fn enum_unit_variants_and_exhaustive_match() {
     let src = "\
@@ -2332,7 +2332,7 @@ fn run() {
 
 /// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch
 /// `if/else if … else` lowering, with the parity `__jet_switch_subject` binding).
-/// Mirrors examples/features/basics/pattern_matching.jet's `score_grade`.
+/// Mirrors Examples/features/basics/pattern_matching.jet's `score_grade`.
 #[test]
 fn arm_head_range_dispatch() {
     if !have_rustc() {

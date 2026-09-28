@@ -399,12 +399,12 @@ fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        include_str!("../examples/features/web/ui_web_click.jet"),
+        include_str!("../Examples/features/web/ui_web_click.jet"),
     )
     .unwrap();
     fs::write(
         dir.join("ui_web_click.html"),
-        include_str!("../examples/features/web/ui_web_click.html"),
+        include_str!("../Examples/features/web/ui_web_click.html"),
     )
     .unwrap();
 
@@ -590,7 +590,7 @@ fn tanstack_start_dev_reference_loop_recovers_last_good_browser_state() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("public")).unwrap();
     for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
-        let source = repo.join("examples/features/web/tanstack_start").join(path);
+        let source = repo.join("Examples/features/web/tanstack_start").join(path);
         let destination = root.join(path);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -600,15 +600,15 @@ fn tanstack_start_dev_reference_loop_recovers_last_good_browser_state() {
 
     let output = Command::new("node")
         .env("CHROMIUM", "chromium")
-        .arg(repo.join("scripts/web-dev-test/reference_app.mjs"))
+        .arg(repo.join("Tools/web-dev-test/reference_app.mjs"))
         .args([
             "--metric",
             "error_to_fix",
             "--manifest",
         ])
-        .arg(repo.join("tools/agent-eval/dx/manifest.json"))
+        .arg(repo.join("Tools/agent-eval/dx/manifest.json"))
         .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"])
-        .arg(repo.join("scripts/agent/jet-env"))
+        .arg(repo.join("Tools/agent/jet-env"))
         .current_dir(&root)
         .output()
         .expect("run TanStack reference dev loop");
@@ -693,7 +693,7 @@ impl Drop for WebTestStaticServer {
 fn start_web_test_static_server(root: &Path) -> (u16, WebTestStaticServer) {
     let port = unused_local_port();
     let child = Command::new("node")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/web-test/serve.mjs"))
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/web-test/serve.mjs"))
         .arg("--port")
         .arg(port.to_string())
         .arg("--root")
@@ -739,7 +739,7 @@ fn web_test_static_server_rejects_symlink_escape() {
 
     let port = unused_local_port();
     let child = Command::new("node")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/web-test/serve.mjs"))
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/web-test/serve.mjs"))
         .arg("--port")
         .arg(port.to_string())
         .arg("--root")
@@ -1369,7 +1369,7 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("node")
-        .arg(repo.join("scripts/web-dev-test/hybrid.mjs"))
+        .arg(repo.join("Tools/web-dev-test/hybrid.mjs"))
         .arg("--port")
         .arg(port.to_string())
         .arg("--source")
@@ -2293,7 +2293,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     );
     assert!(catalog.contains("\"path\":\"core.http\""), "{catalog}");
     assert!(
-        catalog.contains("\"source\":\"docs/spec/reference/core-library.md\""),
+        catalog.contains("\"source\":\"Docs/spec/reference/core-library.md\""),
         "{catalog}"
     );
 
@@ -2901,12 +2901,12 @@ fn jet_dev_static_generator_serves_reloads_and_watches_inputs() {
     let source_path = dir.join("generate.jet");
     fs::write(
         &source_path,
-        include_str!("../examples/features/devloop/static_site_generator/run.jet"),
+        include_str!("../Examples/features/devloop/static_site_generator/run.jet"),
     )
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        include_str!("../examples/features/devloop/static_site_generator/package.jet"),
+        include_str!("../Examples/features/devloop/static_site_generator/package.jet"),
     )
     .unwrap();
     fs::write(dir.join("content.txt"), "first headline").unwrap();
@@ -2956,11 +2956,11 @@ fn jet_dev_static_generator_serves_reloads_and_watches_inputs() {
         "generator input edit was not served"
     );
 
-    let edited_source = include_str!("../examples/features/devloop/static_site_generator/run.jet")
+    let edited_source = include_str!("../Examples/features/devloop/static_site_generator/run.jet")
         .replace("<h1>{headline}</h1>", "<h1>source edit: {headline}</h1>");
     assert_ne!(
         edited_source,
-        include_str!("../examples/features/devloop/static_site_generator/run.jet"),
+        include_str!("../Examples/features/devloop/static_site_generator/run.jet"),
         "static generator source fixture did not change"
     );
     fs::write(&source_path, edited_source).unwrap();

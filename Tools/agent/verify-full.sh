@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Keep stdout reserved for probe data (for example, the four temp-root rows).
+# Preflight status belongs on stderr so callers can parse stdout safely.
+if [ "${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
+  "$repo/Tools/agent/clean-nix-tmp.sh"
+fi
+export JET_NIX_TMP_CLEANED=1
+probe_mode=""
+case "${1:-}" in
+  --probe-temp-root)
+    probe_mode="exit"
+    shift
+    ;;
+  --probe-temp-root-signal)
+    probe_mode="signal"
+    shift
+    ;;
+esac
+if [ -z "$probe_mode" ]; then
+  # Full verification is an epoch/release closeout, never a per-card
+  # confidence check. Bind it to a review-ready milestone and frozen HEAD
+  # before any verification work starts.
+  node "$repo/Tools/agent/closeout-gate.mjs" check
+fi
+node "$repo/Tools/agent/check-agent-doc-flags.mjs" >&2
+node "$repo/Tools/agent/check-unsafe-ratchet.mjs" >&2
+tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
+case "$tmp_parent" in
+  /tmp|/tmp/*)
+    echo "error: verify-full scratch must not use /tmp; use $HOME/.cache/jet-test-scratch" >&2
+    exit 1
+    ;;
+esac
+mkdir -p -- "$tmp_parent"
+tmp="$(mktemp -d "$tmp_parent/jet-verify.XXXXXX")"
+oracle_cache_dir="$repo/.tmp/jet-test-scratch/verify-oracles-$$"
+cleanup() {
+  # card 1640: artifact footprint stays visible every run — target/ has no
+  # automatic pruning and once reached 619G unnoticed.
+  target_kb="$(du -sk -- "${CARGO_TARGET_DIR:-$repo/target}" 2>/dev/null | cut -f1 || true)"
+  scratch_kb="$(du -sk -- "$tmp" 2>/dev/null | cut -f1 || true)"
+  echo "artifact footprint: target=$(( ${target_kb:-0} / 1048576 ))G scratch=$(( ${scratch_kb:-0} / 1024 ))M" >&2
+  if [ "${target_kb:-0}" -gt 157286400 ]; then
+    echo "warning: target/ exceeds 150G — run cargo clean (see AGENTS.md pruning note)" >&2
+  fi
+  rm -rf -- "$tmp"
+  rm -rf -- "$oracle_cache_dir"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+export TMPDIR="$tmp"
+export TMP="$tmp"
+export TEMP="$tmp"
+export JET_VERIFY_TMPDIR="$tmp"
+export JET_DEV_ORACLE_CACHE_DIR="$oracle_cache_dir"
+export JET_TEST_JOBS="${JET_TEST_JOBS:-6}"
+requested_build_jobs="${CARGO_BUILD_JOBS:-$JET_TEST_JOBS}"
+case "$requested_build_jobs" in
+  ''|*[!0-9]*)
+    echo "error: CARGO_BUILD_JOBS must be a non-negative integer" >&2
+    exit 1
+    ;;
+esac
+if [ "$requested_build_jobs" -gt 6 ]; then
+  requested_build_jobs=6
+fi
+export CARGO_BUILD_JOBS="$requested_build_jobs"
+
+# D-CI2=A: every workspace test shard inherits the warning wall. The separate
+# rust-lint job owns rustfmt and Clippy; this keeps the real test path strict.
+case " ${RUSTFLAGS:-} " in
+  *" -D warnings "*) ;;
+  *) export RUSTFLAGS="${RUSTFLAGS:-} -D warnings" ;;
+esac
+
+export JET_CI_EVIDENCE_DIR="${JET_CI_EVIDENCE_DIR:-$repo/.tmp/ci-evidence/${JET_TEST_SHARD:-all}-$$}"
+mkdir -p -- "$JET_CI_EVIDENCE_DIR"
+export JET_TOWER_HYGIENE_REPORT="${JET_TOWER_HYGIENE_REPORT:-$JET_CI_EVIDENCE_DIR/tower-hygiene.txt}"
+
+case "$probe_mode" in
+  exit)
+    printf '%s\n' "$TMPDIR" "$TMP" "$TEMP" "$JET_VERIFY_TMPDIR"
+    exit 0
+    ;;
+  signal)
+    printf '%s\n' "$TMPDIR" "$TMP" "$TEMP" "$JET_VERIFY_TMPDIR"
+    kill -TERM "$$"
+    exit 143
+    ;;
+esac
+
+
+export JET_CANVAS_PREREQUISITES=strict
+
+canvas_missing=()
+for canvas_tool in chromium firefox geckodriver node; do
+  canvas_command="$canvas_tool"
+  case "$canvas_tool" in
+    chromium) canvas_command="${JET_CANVAS_CHROMIUM:-chromium}" ;;
+    firefox) canvas_command="${JET_CANVAS_FIREFOX:-firefox}" ;;
+    geckodriver) canvas_command="${JET_CANVAS_GECKODRIVER:-geckodriver}" ;;
+    node) canvas_command="${JET_CANVAS_NODE:-node}" ;;
+  esac
+  canvas_resolved="$(command -v -- "$canvas_command" 2>/dev/null || true)"
+  canvas_version=""
+  if [ -n "$canvas_resolved" ]; then
+    canvas_version="$("$canvas_resolved" --version 2>&1 || true)"
+  fi
+  case "$canvas_tool:$canvas_version" in
+    chromium:*Chromium*|chromium:*Chrome*) ;;
+    firefox:*Firefox*) ;;
+    geckodriver:geckodriver*) ;;
+    node:v[0-9]*) ;;
+    *) canvas_resolved="" ;;
+  esac
+  if [ -z "$canvas_resolved" ]; then
+    canvas_missing+=("$canvas_tool")
+  elif [ "$canvas_tool" = "chromium" ]; then
+    export JET_CANVAS_CHROMIUM_RESOLVED="$canvas_resolved"
+  elif [ "$canvas_tool" = "firefox" ]; then
+    export JET_CANVAS_FIREFOX_RESOLVED="$canvas_resolved"
+  elif [ "$canvas_tool" = "geckodriver" ]; then
+    export JET_CANVAS_GECKODRIVER_RESOLVED="$canvas_resolved"
+  else
+    export JET_CANVAS_NODE_RESOLVED="$canvas_resolved"
+  fi
+done
+
+if ((${#canvas_missing[@]})); then
+  missing_list="$(IFS=', '; echo "${canvas_missing[*]}")"
+  echo "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: $missing_list. Run Tools/agent/jet-env full Tools/agent/verify-full.sh." >&2
+  exit 1
+fi
+
+export JET_CANVAS_GECKO_SMOKE=1
+
+# tests/cffi_native_matrix.rs::required_native_c_abi_matrix never skips (card
+# #436) — it needs a real C compiler/archiver/Rust toolchain to build and run
+# a native C ABI fixture. `Tools/agent/jet-env full` provides all three on the host
+# target, so full verification runs the matrix for real rather than treating
+# it as optional; same strict-missing-means-fail shape as the Canvas block.
+cffi_missing=()
+for cffi_tool in cc ar rustc; do
+  cffi_command="$cffi_tool"
+  case "$cffi_tool" in
+    cc) cffi_command="${JET_CFFI_CC:-cc}" ;;
+    ar) cffi_command="${JET_CFFI_AR:-ar}" ;;
+    rustc) cffi_command="${JET_CFFI_RUSTC:-rustc}" ;;
+  esac
+  cffi_resolved="$(command -v -- "$cffi_command" 2>/dev/null || true)"
+  if [ -z "$cffi_resolved" ]; then
+    cffi_missing+=("$cffi_tool")
+  else
+    case "$cffi_tool" in
+      cc) export JET_CFFI_CC="$cffi_resolved" ;;
+      ar) export JET_CFFI_AR="$cffi_resolved" ;;
+      rustc) export JET_CFFI_RUSTC="$cffi_resolved" ;;
+    esac
+  fi
+done
+
+if ((${#cffi_missing[@]})); then
+  missing_list="$(IFS=', '; echo "${cffi_missing[*]}")"
+  echo "error: the native C ABI matrix requires a C compiler, archiver, and rustc; missing: $missing_list. Run Tools/agent/jet-env full Tools/agent/verify-full.sh." >&2
+  exit 1
+fi
+
+export JET_CFFI_MATRIX_REQUIRED=1
+# Native host run: no cross target, alternate linker, or runner wrapper.
+export JET_CFFI_ABI="${JET_CFFI_ABI:-default}"
+
+# Focused hostile tests exercise this exact preflight without recursively
+# starting the repository's full test suite.
+if [ "${JET_VERIFY_CANVAS_PREREQUISITES_ONLY:-}" = "1" ]; then
+  exit 0
+fi
+
+# #805 / D-ONCE-LEDGER1=A: Tower is read-only here; Docs/spec is its rendered
+# decision surface. The gate writes only its audit report, never board data.
+bash "$repo/Tools/ci/tower-hygiene-gate.sh"
+
+# The shell manifest comparison is deliberately independent of Nix. CI runs it
+# before the Nix-backed stop-line so package selection cannot hide a parity gap.
+node "$repo/Tools/agent/verify-jet-shell-parity.js"
+
+# Live compiler dogfood is deliberately separate from hermetic fixture tests.
+# It downloads real signed closures and builds the compiler in an empty-/nix
+# namespace. The coordinator supplies disk-backed scratch and the shared target.
+if [ "$(uname -s)" = "Linux" ]; then
+  : "${JETPACK_DOGFOOD_ROOT:?set a fresh bounded disk-backed dogfood root}"
+  : "${JETPACK_DOGFOOD_TARGET_DIR:?set the coordinated shared Cargo target}"
+  timeout --kill-after=30s 1800s cargo test --test jetpack_dogfood \
+    jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures \
+    -- --exact --ignored --nocapture
+fi
+
+"$repo/Tools/agent/verify-nix-eval-stopline.sh"
+
+# Compile every selected workspace test target before running tests.
+# A non-compiling target must fail this gate loudly.
+# D-CMD-OVERRIDE1=C: this gate delegates to Cargo; any direct Jet test/bench
+# invocation in verification uses --show-default so a file-scoped override cannot
+# change the repository gate.
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  shard_count="${JET_TEST_SHARD_COUNT:?JET_TEST_SHARD requires JET_TEST_SHARD_COUNT}"
+  test_targets="$("$repo/Tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+else
+  test_targets="$("$repo/Tools/ci/test-shards.sh" 0 1)"
+fi
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  test_targets_repeat="$("$repo/Tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+else
+  test_targets_repeat="$("$repo/Tools/ci/test-shards.sh" 0 1)"
+fi
+if [ "$test_targets" != "$test_targets_repeat" ]; then
+  echo "error: test-target inventory is nondeterministic; refusing a release gate with unstable shard evidence" >&2
+  exit 1
+fi
+if [ -z "$test_targets" ]; then
+  echo "error: test-target inventory selected no targets; refusing a false-green verify-full run" >&2
+  exit 1
+fi
+while IFS= read -r test_target; do
+  [ -n "$test_target" ] || continue
+  echo "verify-full: compiling test target: cargo test $test_target --no-run" >&2
+  # shellcheck disable=SC2086
+  cargo test $test_target --no-run
+done <<<"$test_targets"
+
+# #211 (D-CI1=A): default run covers the complete workspace test-target
+# inventory (`--workspace` — not just the `.`/jet-driver/jetpack-bin/jetos
+# default-members plain `cargo test` silently limited itself to). CI sets
+# JET_TEST_SHARD/JET_TEST_SHARD_COUNT to run one balanced shard of that same
+# inventory per job instead (see Tools/ci/test-shards.sh); local/nightly runs
+# leave them unset and get everything in one pass.
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  # Plain assignment (not `< <(...)` process substitution, whose failure a
+  # downstream `while read` loop would silently ignore under 0 iterations):
+  # `set -e` aborts this script immediately if test-shards.sh itself fails,
+  # instead of reporting a false-green empty shard.
+  shard_targets="$test_targets"
+  status=0
+  while IFS= read -r shard_args; do
+    # shellcheck disable=SC2086
+    cargo test $shard_args "$@" || status=$?
+  done <<<"$shard_targets"
+  exit "$status"
+else
+  cargo test --workspace "$@"
+fi

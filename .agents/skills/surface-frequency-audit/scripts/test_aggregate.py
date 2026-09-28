@@ -16,7 +16,7 @@ CHECKPOINT = SCRIPTS / "checkpoint.py"
 AGGREGATE = SCRIPTS / "aggregate.py"
 REPO = CHECKPOINT.resolve().parents[4]
 RUN_BASE = REPO / ".tmp" / "surface-frequency-audit"
-REPORT_BASE = REPO / "docs" / "audits"
+REPORT_BASE = REPO / "Docs" / "audits"
 
 
 class AggregateTest(unittest.TestCase):

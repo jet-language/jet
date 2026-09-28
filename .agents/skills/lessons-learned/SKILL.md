@@ -22,7 +22,7 @@ widen scope because another lineage looks interesting.
 
 Read `.agents/skills/_shared/audit-dispositions.md` before running. It owns
 shared publication and workflow boundaries. This method remains report-only:
-write one Markdown report under `docs/research/` through the
+write one Markdown report under `Docs/research/` through the
 project-approved non-serve CLI. Do not create Tower work or implementation
 edits unless the owner explicitly asks.
 

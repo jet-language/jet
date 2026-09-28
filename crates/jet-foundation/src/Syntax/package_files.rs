@@ -714,7 +714,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[
 // moved `Pure`, `MustUse`, `Codable`, `Debug`, and others onto `@`) are
 // historical spelling-reconciliation notes only — every one of those markers
 // is back on `#` today. Do not reintroduce `@Pure`-style markers from reading
-// old comments or docs; check docs/spec/syntax-decisions.md for the live law
+// old comments or docs; check Docs/spec/syntax-decisions.md for the live law
 // before trusting any comment that predates 2026-07-23.
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BREAK, KW_CONC_TASK, KW_DEFER,

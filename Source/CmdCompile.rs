@@ -8577,8 +8577,8 @@ fn skip_fmt_walk_path(path: &Path) -> bool {
     } else {
         s.clone()
     };
-    if rel == "docs/spec/reference/syntax-surface.jet"
-        || rel.ends_with("/docs/spec/reference/syntax-surface.jet")
+    if rel == "Docs/spec/reference/syntax-surface.jet"
+        || rel.ends_with("/Docs/spec/reference/syntax-surface.jet")
         || rel == "syntax-surface.jet"
     {
         return true;
@@ -14232,7 +14232,7 @@ fn build_inner(
                 jet_store::runtime::PreparedRuntime::inline(rust_code)
             }
             Err(jet_store::runtime::RuntimeError::Tool(_)) => {
-                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
+                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -14382,7 +14382,7 @@ fn build_inner(
         match cmd.output() {
             Ok(output) => output,
             Err(_) => {
-                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
+                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
                 exit(ExitCodes::USER_ERROR);
             }
         }

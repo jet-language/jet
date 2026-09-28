@@ -12,7 +12,7 @@ pub const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
 /// the same stems golden.rs treats as intentionally exercising the audited
 /// `#Unsafe` expert tier (I1). Everything else must generate zero bare
 /// `unsafe` in user-authored lowering. Corpus files copied from
-/// `examples/features/<dir>/<name>.jet` are named `ex_<dir>_<name>.jet`
+/// `Examples/features/<dir>/<name>.jet` are named `ex_<dir>_<name>.jet`
 /// (see `original_example_stem`); every other naming scheme (the `ui_*`
 /// reuse from tests/ui, and the handwritten seeds) is never gated.
 pub const GATED_UNSAFE_STEMS: &[&str] = &[
@@ -24,9 +24,9 @@ pub const GATED_UNSAFE_STEMS: &[&str] = &[
     "crypto/crypto_migration",
 ];
 
-/// Recover the `examples/features/<dir>/<name>` stem from an `ex_`-prefixed
+/// Recover the `Examples/features/<dir>/<name>` stem from an `ex_`-prefixed
 /// corpus filename (`ex_<dir>_<name>` — every topic dir under
-/// `examples/features` is a single path segment with no underscore, so
+/// `Examples/features` is a single path segment with no underscore, so
 /// splitting on the first `_` is exact). Returns `None` for any other
 /// naming scheme (never gated).
 pub fn original_example_stem(file_stem: &str) -> Option<String> {

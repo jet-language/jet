@@ -910,7 +910,7 @@ repository: "https://repo-user:repo-secret@example.test/acme/repo?token=repo-que
 #[test]
 fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
     let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/tooling/compiler_api_package");
+        .join("Examples/features/tooling/compiler_api_package");
     assert!(
         !source_root.join(".jet").exists(),
         "checked-in compiler API example already has generated `.jet` state"
@@ -923,7 +923,7 @@ fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
     );
     let expected = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/features/expected/tooling/compiler_api_package.out"),
+            .join("Examples/features/expected/tooling/compiler_api_package.out"),
     )
     .expect("read compiler API package expected output");
     let entry = root.join("run.jet");

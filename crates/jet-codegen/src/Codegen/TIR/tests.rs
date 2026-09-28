@@ -472,7 +472,7 @@ fn default_parameter_call_sites_are_tir_covered() {
         crate::Codegen::MIREval::install_mir_bridge();
         let source = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/features/basics/default_refs.jet"
+            "/../../Examples/features/basics/default_refs.jet"
         ));
         let bundle = checked_bundle(source);
         let module = &bundle.modules[bundle.entry];

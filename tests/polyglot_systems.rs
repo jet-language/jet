@@ -380,7 +380,7 @@ fn cpp_link_metadata_requires_exact_selected_target() {
 // Card #1348 — mixed-repository adoption loop.
 //
 // This is deliberately kept in the existing polyglot target.  It is the
-// executable companion to docs/spec/reference/mixed-repo.md and exercises the
+// executable companion to Docs/spec/reference/mixed-repo.md and exercises the
 // shipped Jet-as-host surfaces in one representative repository shape.  The
 // native Jet Library -> C/C++ host direction is covered by
 // `tests/library_outputs.rs`; JVM/JS/Python guest exports remain outside the

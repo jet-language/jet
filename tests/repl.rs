@@ -871,8 +871,8 @@ fn repl_strips_terminal_control_bytes() {
 
 #[test]
 fn repl_load_hello() {
-    // Load examples/features/basics/hello.jet and check it runs.
-    let out = run_transcript(&[":load examples/features/basics/hello.jet"], None);
+    // Load Examples/features/basics/hello.jet and check it runs.
+    let out = run_transcript(&[":load Examples/features/basics/hello.jet"], None);
     assert!(
         out.contains("hello, world"),
         "load should run main, got: {:?}",
@@ -3073,8 +3073,8 @@ fn repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable() {
 
 // ── D-INTBIG1: comptime/REPL exact Int ─────────────────────────────────────
 // Same expression shapes and expected decimal strings as the AOT golden
-// example `examples/features/text/int_exact.jet` /
-// `examples/features/expected/text/int_exact.out` — proves R12 parity, not just
+// example `Examples/features/text/int_exact.jet` /
+// `Examples/features/expected/text/int_exact.out` — proves R12 parity, not just
 // "doesn't crash".
 
 #[test]

@@ -1,0 +1,338 @@
+// Static associated-method lookup and checked StaticCall construction.
+// The owner is a type name, never a runtime receiver; owner and method generic
+// arguments stay separate through inference and TIR construction.
+
+struct SemaStaticMethodTarget {
+    pub owner_name: String
+    pub owner_type: Type
+    pub method: TMethodRef
+    pub target: SemaCallDirectTarget
+    pub function: ?Func
+}
+
+fn sema_call_static_symbol_nominal(graph: SemaRegistrationGraph, symbol: SymbolId) -> ?SemaRegistrationNominal {
+    loop module_row in graph.modules {
+        loop nominal in module_row.nominals {
+            if nominal.symbol.id.key == symbol.key -> return Val(nominal)
+        }
+    }
+    None
+}
+fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, environment: SemaScopeEnvironment) -> Bool {
+    owner_module := nominal.symbol.module_name
+    owner_package := ""
+    loop module_row in graph.modules {
+        loop registered in module_row.nominals {
+            if registered.symbol.id.key == nominal.symbol.id.key {
+                owner_module = module_row.module_identity
+                owner_package = module_row.package_identity
+                break
+            }
+        }
+    }
+    loop function in nominal.methods {
+        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
+            if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return true
+        }
+    }
+    loop module_row in graph.modules {
+        loop implementation in module_row.impls {
+            if implementation.trait_name != None -> next
+            if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+            loop function in implementation.methods {
+                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
+                    if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, module_row.module_identity, module_row.package_identity) -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
+fn sema_call_static_local_generic_method_exists(symbol: Symbol, method: String, environment: SemaScopeEnvironment) -> Bool {
+    loop declaration in environment.declarations {
+        if declaration.item == {
+            .Struct(value) -> {
+                if value.name == symbol.name && value.type_params.len() > 0 {
+                    loop function in value.methods {
+                        if function.name == method && (function.params.len() == 0 || function.params[0].name != "self") -> return true
+                    }
+                }
+            }
+            .Enum(value) -> {
+                if value.name == symbol.name && value.type_params.len() > 0 {
+                    loop function in value.methods {
+                        if function.name == method && (function.params.len() == 0 || function.params[0].name != "self") -> return true
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+fn sema_call_static_has_method(targets: [SemaStaticMethodTarget], symbol: SymbolId) -> Bool {
+    loop target in targets {
+        if target.method.symbol.key == symbol.key -> return true
+    }
+    false
+}
+
+fn sema_call_static_function_target(symbol: Symbol, signature: Type, generic_params: [SemaInferenceTypeParam], type_args: [Type], environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallDirectTarget {
+    if generic_params.len() == 0 {
+        if type_args.len() > 0 {
+            diagnostics.push(sema_error("E0119", span, "`{symbol.name}` is not generic", "only a generic static method accepts function-level type arguments", "remove the explicit method type arguments"))
+            return None
+        }
+        return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
+    }
+    if type_args.len() == 0 {
+        return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
+    }
+    context := sema_inference_context(environment.registration_graph, environment.module_identity, environment.package_identity, generic_params, environment.generic_params, None)
+    result :: sema_infer_validate_explicit(&context, type_args, span, &diagnostics) ?? return None
+    specialized :: sema_inference_substitute_type_bindings(signature, result.substitutions)
+    Val(SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence})
+}
+
+fn sema_call_static_owner_resolution(owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], signature: Type, args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+    explicit_args :: loop ty in owner_type_args -> sema_call_resolved_type(ty, environment)
+    inference_context := sema_inference_context(environment.registration_graph, environment.module_identity, environment.package_identity, owner_params, environment.generic_params, expected)
+    if owner_type_args.len() > 0 -> return sema_infer_validate_explicit(&inference_context, explicit_args, span, &diagnostics)
+    if owner_params.len() == 0 -> return Val(SemaInferenceResult{substitutions: [SemaInferenceBinding]{}, type_args: [Type]{}, parameters: [Type]{}, return_type: None, evidence: [SemaInferenceBoundEvidence]{}, complete: true, compatible: true})
+
+    params :: sema_call_params_from_type(signature) ?? return None
+    probe_args := args
+    probe_diagnostics := [Diagnostic]{}
+    binding :: sema_call_bind_direct("static method", signature, &probe_args, span, &probe_diagnostics) ?? return None
+    facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
+    return_type :: sema_call_signature_return(signature)
+    result :: sema_infer_callable(&inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, &probe_diagnostics) ?? return None
+    if !result.complete -> return None
+    Val(result)
+}
+
+fn sema_call_static_append_registered(output: &[SemaStaticMethodTarget], graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, function: SemaRegistrationFunction, owner_name: String, owner_module: String, owner_package: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) {
+    if function.symbol.name == "" || sema_call_static_has_method(output, function.symbol.id) -> return
+    if function.parameters.len() > 0 && function.parameters[0].symbol.name == "self" -> return
+    if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return
+
+    target :: sema_call_static_function_target(function.symbol, function.signature, sema_inference_registration_params(function.generic_params), type_args, environment, span, &diagnostics) ?? return
+    owner_params :: sema_inference_registration_params(nominal.generic_params)
+    owner_result :: sema_call_static_owner_resolution(owner_params, owner_type_args, target.signature, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return
+    if !owner_result.complete -> return
+    owner_type :: sema_inference_substitute_type_bindings(nominal.ty, owner_result.substitutions)
+    target.signature = sema_inference_substitute_type_bindings(target.signature, owner_result.substitutions)
+    reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+    output.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function.declaration)})
+}
+
+fn sema_call_static_registered_targets(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] {
+    targets := [SemaStaticMethodTarget]{}
+    owner_name := nominal.symbol.name
+    owner_module := nominal.symbol.module_name
+    owner_package := ""
+    loop module_row in graph.modules {
+        loop registered in module_row.nominals {
+            if registered.symbol.id.key == nominal.symbol.id.key {
+                owner_module = module_row.module_identity
+                owner_package = module_row.package_identity
+                break
+            }
+        }
+    }
+    loop function in nominal.methods {
+        if function.symbol.name == method {
+            sema_call_static_append_registered(&targets, graph, nominal, function, owner_name, owner_module, owner_package, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
+        }
+    }
+    loop module_row in graph.modules {
+        loop implementation in module_row.impls {
+            if implementation.trait_name != None -> next
+            if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+            loop function in implementation.methods {
+                if function.symbol.name == method {
+                    sema_call_static_append_registered(&targets, graph, nominal, function, owner_name, module_row.module_identity, module_row.package_identity, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
+                }
+            }
+        }
+    }
+    targets
+}
+
+fn sema_call_static_local_target(owner_symbol: Symbol, owner_name: String, declared_owner: Type, owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], function: Func, type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?SemaStaticMethodTarget {
+    if function.params.len() > 0 && function.params[0].name == "self" -> return None
+    method_id :: symbol_id(SymbolKind.Function, environment.module_identity, owner_name, function.name)
+    signature :: sema_function_symbol_type(function, method_id, environment.source_file, environment.source_origin, environment.source_segments)
+    visibility :: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
+    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
+    target :: sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, span, &diagnostics) ?? return None
+    owner_result :: sema_call_static_owner_resolution(owner_params, owner_type_args, target.signature, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return None
+    owner_type :: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)
+    target.signature = sema_inference_substitute_type_bindings(target.signature, owner_result.substitutions)
+    reference := TMethodRef{symbol: method_symbol.id, name: function.name, mangled: true, trait_owner: None, operator_identity: None}
+    Val(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function)})
+}
+
+fn sema_call_static_local_targets(symbol: Symbol, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] {
+    targets := [SemaStaticMethodTarget]{}
+    loop declaration in environment.declarations {
+        if declaration.item == {
+            .Struct(value) -> {
+                if value.name != symbol.name -> next
+                owner_params :: sema_inference_type_params(value.type_params)
+                declared_owner :: if owner_params.len() == 0 -> Type.Named(value.name) else -> Type.Apply(value.name, loop parameter in owner_params -> Type.Named(parameter.name))
+                loop function in value.methods {
+                    if function.name == method {
+                        candidate :: sema_call_static_local_target(symbol, value.name, declared_owner, owner_params, owner_type_args, function, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? next
+                        targets.push(candidate)
+                    }
+                }
+            }
+            .Enum(value) -> {
+                if value.name != symbol.name -> next
+                owner_params :: sema_inference_type_params(value.type_params)
+                declared_owner :: if owner_params.len() == 0 -> Type.Named(value.name) else -> Type.Apply(value.name, loop parameter in owner_params -> Type.Named(parameter.name))
+                loop function in value.methods {
+                    if function.name == method {
+                        candidate :: sema_call_static_local_target(symbol, value.name, declared_owner, owner_params, owner_type_args, function, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? next
+                        targets.push(candidate)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    targets
+}
+
+fn sema_call_static_local_defaults(target: SemaStaticMethodTarget, binding: SemaCallBinding, environment: SemaScopeEnvironment) -> ?[SemaCallDefaultValue] {
+    if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
+    function :: target.function ?? return None
+    defaults := [SemaCallDefaultValue]{}
+    loop reference in binding.default_refs {
+        if reference.owner_key != target.method.symbol.key -> return None
+        parameter_index :: reference.parameter_index
+        if parameter_index < 0 || parameter_index >= function.params.len() -> return None
+        expression :: function.params[parameter_index].default ?? return None
+        expression_span :: expr_span(expression)
+        if expression_span.start != reference.span.start || expression_span.end != reference.span.end -> return None
+        source_file :: sema_source_file_at(environment.source_segments, reference.source_file, environment.source_origin, expression_span)
+        if source_file != reference.source_file -> return None
+        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+    }
+    Val(defaults)
+}
+
+fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget) -> Bool {
+    if value.kind == {
+        .Call(symbol, type_args, args) -> {
+            if symbol.key != target.method.symbol.key -> return false
+            value.kind = TExprKind.StaticCall(TStaticOwner.User(target.owner_name), Val(target.owner_type), target.method, type_args, args)
+            return true
+        }
+        .TraitBox(inner, target_type) -> {
+            if !sema_call_static_rewrite_value(&inner, target) -> return false
+            value.kind = TExprKind.TraitBox(inner, target_type)
+            return true
+        }
+        .InlineBlock(statements) -> {
+            if statements.len() == 0 -> return false
+            last :: statements.len() - 1
+            if statements[last] == {
+                .ExprStmt(call, statement_span) -> {
+                    if !sema_call_static_rewrite_value(&call, target) -> return false
+                    statements[last] = TStmt.ExprStmt(call, statement_span)
+                    value.kind = TExprKind.InlineBlock(statements)
+                    return true
+                }
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+    false
+}
+fn sema_call_static_call_value(value: TExpr, symbol: SymbolId) -> ?TExpr {
+    if value.kind == {
+        .Call(callee, _, _) -> if callee.key == symbol.key -> return Val(value) else -> return None
+        .TraitBox(inner, _) -> return sema_call_static_call_value(inner, symbol)
+        .InlineBlock(statements) -> {
+            if statements.len() == 0 -> return None
+            last :: statements.len() - 1
+            if statements[last] == {
+                .ExprStmt(call, _) -> return sema_call_static_call_value(call, symbol)
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+    None
+}
+
+pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    type_name :: if receiver == {
+        .Ident(name, _) -> name
+        else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
+    }
+    binding_index :: sema_scope_resolve_index(scopes, type_name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner_symbol :: scopes.bindings[binding_index].symbol
+    if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
+
+    diagnostics_before := diagnostics.len()
+    targets := [SemaStaticMethodTarget]{}
+    generic_owner_method := false
+    if environment.registration_graph == .Val(graph) {
+        nominal :: sema_call_static_symbol_nominal(graph, owner_symbol.id)
+        if nominal == .Val(owner) {
+            targets = sema_call_static_registered_targets(graph, owner, method, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
+            generic_owner_method = owner.generic_params.len() > 0 && owner_type_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment)
+        }
+    }
+    if targets.len() == 0 && environment.registration_graph == None {
+        targets = sema_call_static_local_targets(owner_symbol, method, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
+        generic_owner_method = owner_type_args.len() == 0 && sema_call_static_local_generic_method_exists(owner_symbol, method, environment)
+    }
+    if targets.len() == 0 {
+        if diagnostics.len() > diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if {
+            generic_owner_method -> {
+                diagnostics.push(sema_error("E0904", method_span, "cannot infer the owner type arguments for `{type_name}.{method}`", "static method lookup needs one concrete owner type before building `StaticCall`", "provide the owner's type arguments or add argument/expected-type evidence"))
+            }
+            else -> {
+                diagnostics.push(sema_error("E0311", method_span, "`{type_name}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", "use a declared static method on this type"))
+            }
+        }
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+
+    direct_targets :: loop target in targets -> target.target
+    selected :: sema_call_resolve_direct_candidates("{type_name}.{method}", args, direct_targets, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    target := targets[0]
+    loop candidate in targets {
+        if candidate.target.symbol.id.key == selected.symbol.id.key {
+            target = candidate
+            break
+        }
+    }
+    probe_args := args
+    binding :: sema_call_bind_direct("{type_name}.{method}", selected.signature, &probe_args, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    defaults :: if environment.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return SemaMethodSpecialCheck{handled: true, value: None} else -> sema_call_static_local_defaults(target, binding, environment) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    call := Call{name: "{type_name}.{method}", name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+    checked :: sema_call_check_direct_target_owned(&state, selected, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    call_value :: sema_call_static_call_value(checked.value, target.method.symbol) ?? {
+        diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    call_checked := checked
+    call_checked.value = call_value
+    context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
+    if !sema_expr_record_call_fact(environment, &scopes, &context, span, call_checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := checked.value
+    if !sema_call_static_rewrite_value(&value, target) {
+        diagnostics.push(sema_error("E0104", span, "static method call `{type_name}.{method}` could not be lowered", "the checked callable did not preserve its registered SymbolId", "use the registered static method declaration"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}

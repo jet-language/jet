@@ -93,7 +93,7 @@ pub(crate) mod jet_encoding_json {
 /// that the guarantee must hold for every entry below — which is why it is
 /// generated here instead of reviewed per call site. `host_seam.rs` carries the
 /// full decision record and `tests/jit_no_unwind_boundary.rs` is the mechanical
-/// check. See also `docs/spec/architecture.md` R13.
+/// check. See also `Docs/spec/architecture.md` R13.
 macro_rules! host_fns {
     (
         struct $StructName:ident;

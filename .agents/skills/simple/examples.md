@@ -32,7 +32,7 @@
 **After**
 > To verify the change:
 >
-> 1. Make sure you use `scripts/agent/jet-env`.
+> 1. Make sure you use `Tools/agent/jet-env`.
 > 2. Run the targeted tests.
 > 3. Read the test output.
 > 4. Stop if a test fails.

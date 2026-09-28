@@ -3301,7 +3301,7 @@ pub fn compare_booking_case(
     let mut identity = ComparisonIdentity::new(
         case.case_id.clone(),
         case.input_id(),
-        "examples/features/tooling/test_history/run.jet",
+        "Examples/features/tooling/test_history/run.jet",
         HISTORY_ENGINE,
         "booking",
     );
@@ -3335,7 +3335,7 @@ pub fn run_booking_history_campaign(
         seed,
         cases,
         bounds,
-        "examples/features/tooling/test_history/run.jet",
+        "Examples/features/tooling/test_history/run.jet",
         HISTORY_ENGINE,
         "booking",
         ObservationRelation::OrderedEffects,
@@ -3352,7 +3352,7 @@ pub fn run_booking_history_campaign(
             let identity = ComparisonIdentity::new(
                 case.case_id.clone(),
                 case.input_id(),
-                "examples/features/tooling/test_history/run.jet",
+                "Examples/features/tooling/test_history/run.jet",
                 HISTORY_ENGINE,
                 "booking",
             );

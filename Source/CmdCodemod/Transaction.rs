@@ -296,11 +296,11 @@ fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::i
         ));
     }
     let allowed =
-        relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui"));
+        relative.starts_with("Examples") || relative.starts_with(Path::new("tests").join("ui"));
     if !allowed || components.len() < 2 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "destination must be beneath examples/ or tests/ui/",
+            "destination must be beneath Examples/ or tests/ui/",
         ));
     }
     let extension = path.extension().and_then(|value| value.to_str());
@@ -1006,7 +1006,7 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
         });
         let components = relative.components().collect::<Vec<_>>();
         let allowed =
-            relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui"));
+            relative.starts_with("Examples") || relative.starts_with(Path::new("tests").join("ui"));
         let extension = record.path.extension().and_then(|value| value.to_str());
         let allowed_extension = extension == Some("jet")
             || (relative.starts_with(Path::new("tests").join("ui")) && extension == Some("stderr"));

@@ -16,18 +16,18 @@ const VECTOR_TABLE: &str = include_str!("fixtures/datetime_accuracy.tsv");
 const BATCHES: [(&str, &str, &str); 3] = [
     (
         "epoch_parse",
-        "examples/features/time/datetime_accuracy_epoch_parse.jet",
-        "examples/features/expected/time/datetime_accuracy_epoch_parse.out",
+        "Examples/features/time/datetime_accuracy_epoch_parse.jet",
+        "Examples/features/expected/time/datetime_accuracy_epoch_parse.out",
     ),
     (
         "civil_arithmetic",
-        "examples/features/time/datetime_accuracy_civil_arithmetic.jet",
-        "examples/features/expected/time/datetime_accuracy_civil_arithmetic.out",
+        "Examples/features/time/datetime_accuracy_civil_arithmetic.jet",
+        "Examples/features/expected/time/datetime_accuracy_civil_arithmetic.out",
     ),
     (
         "zones",
-        "examples/features/time/datetime_accuracy_zones.jet",
-        "examples/features/expected/time/datetime_accuracy_zones.out",
+        "Examples/features/time/datetime_accuracy_zones.jet",
+        "Examples/features/expected/time/datetime_accuracy_zones.out",
     ),
 ];
 
@@ -217,7 +217,7 @@ fn run_witness(
         .current_dir(root)
         .env("JET_STORE_DIR", cache.join("build"))
         .env("JET_RUN_CACHE_DIR", cache.join("run"))
-        .env("JET_TZDB_DIR", root.join("corelib/tzdb"))
+        .env("JET_TZDB_DIR", root.join("Core/time/tzdb"))
         .env("JETPACK_ENV", "1")
         .env("NO_COLOR", "1")
         .output()

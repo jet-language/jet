@@ -172,6 +172,15 @@ fn parser_skip_semicolons(state: &JetParserState) {
     loop parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
 }
 
+fn parser_skip_synthetic_semicolons(state: &JetParserState) {
+    loop {
+        if parser_current_kind(&state) != TOKEN_SEMI -> break
+        semi :: parser_current(&state)
+        if semi.span.start != semi.span.end -> break
+        parser_bump(&state)
+    }
+}
+
 fn parser_recover_statement(state: &JetParserState) {
     loop {
         kind :: parser_current_kind(&state)

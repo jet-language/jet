@@ -51,7 +51,7 @@ fn fuzz_seed() -> u64 {
 }
 
 fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let ext = jet::Syntax::FILE_EXT;
     let mut seeds = Vec::new();
     // examples live one level down in topic directories (D-REPO-EXAMPLES1)
@@ -80,7 +80,7 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
                 continue;
             }
             let src = fs::read_to_string(&path).unwrap();
-            let shown = format!("examples/features/{}.{}", stem, ext);
+            let shown = format!("Examples/features/{}.{}", stem, ext);
             if src.contains("#Unsafe") {
                 continue;
             }

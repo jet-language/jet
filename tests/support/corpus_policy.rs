@@ -606,7 +606,7 @@ impl CorpusPolicy {
             all.extend(evaluate_program(&self.manifest, path, row, &program));
         }
         if applies(&self.manifest, path, row, "first-hour-doc-recipe")
-            && path == "docs/spec/guides/first-hour.md"
+            && path == "Docs/spec/guides/first-hour.md"
         {
             let typed = jet_fences(source).iter().any(|fence| {
                 parse_program(path, fence)
@@ -1464,7 +1464,7 @@ fn fixture_role_for_path(path: &str) -> Option<SourceRole> {
         Some(SourceRole::NegativeDiagnostic)
     } else if path.starts_with("tests/fuzz/")
         || path.starts_with("tests/conformance/corpus/")
-        || path.starts_with("adoption/fixtures/")
+        || path.starts_with("Tools/adoption/fixtures/")
     {
         Some(SourceRole::FixtureHarnessBoundary)
     } else {
@@ -2402,7 +2402,7 @@ fn evaluate_program(
     }
 
     if applies(manifest, path, row, "first-hour-doc-recipe")
-        && path == "examples/features/types/typed_literal_forms.jet"
+        && path == "Examples/features/types/typed_literal_forms.jet"
     {
         if let Some(expression) = expressions
             .iter()

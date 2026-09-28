@@ -1,0 +1,117 @@
+fn jet_codegen_migration_insert_sorted(values: [String], value: String) -> [String] {
+    result := [String]{}
+    inserted := false
+    loop current in values {
+        if current == value -> return values
+        if !inserted && current > value {
+            result.push(value)
+            inserted = true
+        }
+        result.push(current)
+    }
+    if !inserted -> result.push(value)
+    result
+}
+
+fn jet_codegen_migration_remove(values: [String], value: String) -> [String] {
+    result := [String]{}
+    loop current in values {
+        if current != value -> result.push(current)
+    }
+    result
+}
+
+fn jet_codegen_migration_rename_all(definition: TTypeDef) -> ?String {
+    loop attribute in definition.serde {
+        if attribute.kind == TSerdeAttributeKind.RenameAll -> return attribute.value
+    }
+    None
+}
+
+fn jet_codegen_migration_json_key(fields: [TField], style: ?String, name: String) -> String {
+    loop field in fields {
+        if field.name == name -> return field.shape_names.json ?? field.shape_names.text
+    }
+    sema_migration_wire_name(style, name)
+}
+
+fn jet_codegen_migration_shape(fields: [TField], blocks: [MigrationDecl], style: ?String) -> [[String]] {
+    current := [String]{}
+    loop field in fields {
+        if field.skip -> next
+        key := jet_codegen_migration_json_key(fields, style, field.name)
+        current = jet_codegen_migration_insert_sorted(current, key)
+    }
+    reversed := [[String]]{}
+    shape := current
+    block_index := blocks.len()
+    loop block_index > 0 {
+        block_index -= 1
+        block := blocks[block_index]
+        loop operation in block.ops {
+            if operation == {
+                .Add(field, _, _, _, _, _, _) -> shape = jet_codegen_migration_remove(shape, jet_codegen_migration_json_key(fields, style, field))
+                .Remove(field, _) -> shape = jet_codegen_migration_insert_sorted(shape, jet_codegen_migration_json_key(fields, style, field))
+                .Rename(from, _, to, _) -> {
+                    shape = jet_codegen_migration_remove(shape, jet_codegen_migration_json_key(fields, style, to))
+                    shape = jet_codegen_migration_insert_sorted(shape, jet_codegen_migration_json_key(fields, style, from))
+                }
+                .Change(_, _, _, _, _, _, _, _, _) -> {}
+            }
+        }
+        reversed.push(shape)
+    }
+    historical := [[String]]{}
+    index := reversed.len()
+    loop index > 0 {
+        index -= 1
+        historical.push(reversed[index])
+    }
+    historical
+}
+
+fn jet_codegen_migration_steps(fields: [TField], blocks: [MigrationDecl], style: ?String) -> ?[MirSchemaMigrationStep] {
+    steps := [MirSchemaMigrationStep]{}
+    loop (block_index, block) in blocks {
+        operations := [MirSchemaMigrationOp]{}
+        loop operation in block.ops {
+            if operation == {
+                .Rename(from, _, to, _) -> operations.push(MirSchemaMigrationOp.Rename(jet_codegen_migration_json_key(fields, style, from), jet_codegen_migration_json_key(fields, style, to)))
+                .Remove(field, _) -> operations.push(MirSchemaMigrationOp.Remove(jet_codegen_migration_json_key(fields, style, field)))
+                .Add(field, _, ty, _, _, _, default_fn) -> {
+                    function_name :: default_fn ?? return None
+                    key := jet_codegen_migration_json_key(fields, style, field)
+                    operations.push(MirSchemaMigrationOp.Add(key, type_name(ty), function_name))
+                }
+                .Change(field, _, from_ty, _, to_ty, _, _, _, conv_fn) -> {
+                    function_name :: conv_fn ?? return None
+                    key := jet_codegen_migration_json_key(fields, style, field)
+                    operations.push(MirSchemaMigrationOp.Change(key, type_name(from_ty), type_name(to_ty), function_name))
+                }
+            }
+        }
+        steps.push(MirSchemaMigrationStep{from_shape: "v{block_index + 1}", to_shape: "v{block_index + 2}", ops: operations})
+    }
+    Val(steps)
+}
+
+pub fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[MigrationDecl]) -> ?MirSchemaMigrationPlan {
+    published := definition.published_schema
+    loop derive_name in definition.derives {
+        if derive_name == "PublishedSchema" -> published = true
+    }
+    if !published || definition.generic_params.len() != 0 -> return None
+    fields := if definition.kind == {
+        .Struct(values, _) -> values
+        else -> { return None }
+    }
+    blocks := [MigrationDecl]{}
+    loop migration in migrations {
+        if migration.type_name == definition.name -> blocks.push(migration)
+    }
+    if blocks.len() == 0 -> return None
+    style := jet_codegen_migration_rename_all(definition)
+    historical := jet_codegen_migration_shape(fields, blocks, style)
+    steps :: jet_codegen_migration_steps(fields, blocks, style) ?? return None
+    Val(MirSchemaMigrationPlan{type_name: definition.name, historical_shapes: historical, steps: steps})
+}

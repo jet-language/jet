@@ -1,0 +1,924 @@
+// Canonical structural collection contracts shared by Source Sema and TIR lowering.
+// Zip and para_* are intentionally owned by their dedicated checkers.
+
+pub enum SemaCollectionKind {
+    List(element: Type)
+    FixedList(element: Type)
+    Iter(element: Type)
+    ViewIter(element: Type)
+    View(element: Type)
+    Map(key: Type, value: Type)
+    Set(element: Type)
+    Rank(element: Type)
+    Bits
+    Tally(element: Type)
+    Cache(key: Type, value: Type)
+    Queue(element: Type)
+    PriorityQueue(element: Type)
+}
+
+pub enum SemaCollectionOperation {
+    Builtin(operation: TBuiltinOp)
+    Closure(operation: TClosureOp)
+    ListShuffle
+    SetClosure(operation: TClosureOp)
+    SetMinimum
+}
+
+pub struct SemaCollectionMethodContract {
+    pub minimum_arity: Int
+    pub maximum_arity: Int
+    pub receiver_access: AccessConvention
+    pub callback_indices: [Int]
+    pub accepts_labels: Bool
+}
+
+fn sema_collection_kind(ty: Type) -> ?SemaCollectionKind {
+    if ty == {
+        .Tagged(_, inner) -> sema_collection_kind(inner)
+        .List(element) -> Val(SemaCollectionKind.List(element))
+        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList(element))
+        .Map(key, _, value) -> Val(SemaCollectionKind.Map(key, value))
+        .Apply(name, args) -> {
+            if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter(args[0]))
+            if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter(args[0]))
+            if name == "View" && args.len() == 1 -> return Val(SemaCollectionKind.View(args[0]))
+            if name == "Set" && args.len() == 1 -> return Val(SemaCollectionKind.Set(args[0]))
+            if name == "Rank" && args.len() == 1 -> return Val(SemaCollectionKind.Rank(args[0]))
+            if name == "Tally" && args.len() == 1 -> return Val(SemaCollectionKind.Tally(args[0]))
+            if name == "Queue" && args.len() == 1 -> return Val(SemaCollectionKind.Queue(args[0]))
+            if name == "PriorityQueue" && args.len() == 1 -> return Val(SemaCollectionKind.PriorityQueue(args[0]))
+            if name == "Cache" && args.len() == 2 -> return Val(SemaCollectionKind.Cache(args[0], args[1]))
+            None
+        }
+        .Named(name) -> {
+            if name == "Bits" -> return Val(SemaCollectionKind.Bits)
+            None
+        }
+        else -> None
+    }
+}
+
+pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type {
+    if kind == {
+        .List(element) | .FixedList(element) | .Iter(element) | .ViewIter(element) | .View(element) | .Set(element) | .Rank(element) | .Tally(element) | .Queue(element) | .PriorityQueue(element) -> element
+        .Map(_, value) | .Cache(_, value) -> value
+        .Bits -> Type.Int
+}
+}
+pub fn sema_collection_receiver_element(receiver: Type) -> ?Type {
+    kind :: sema_collection_kind(receiver) ?? return None
+    Val(sema_collection_kind_element(kind))
+}
+
+pub fn sema_collection_is_list(receiver: Type) -> Bool {
+    kind :: sema_collection_kind(receiver) ?? return false
+    if kind == {
+        .List(_) | .FixedList(_) -> true
+        else -> false
+    }
+}
+
+pub fn sema_collection_is_iter(receiver: Type) -> Bool {
+    kind :: sema_collection_kind(receiver) ?? return false
+    if kind == {
+        .Iter(_) | .ViewIter(_) -> true
+        else -> false
+    }
+}
+
+pub fn sema_collection_is_view_iter(receiver: Type) -> Bool {
+    kind :: sema_collection_kind(receiver) ?? return false
+    if kind == {
+        .ViewIter(_) -> true
+        else -> false
+    }
+}
+pub fn sema_collection_is_map(receiver: Type) -> Bool {
+    kind :: sema_collection_kind(receiver) ?? return false
+    if kind == {
+        .Map(_, _) -> true
+        else -> false
+    }
+}
+
+pub fn sema_collection_is_set(receiver: Type) -> Bool {
+    kind :: sema_collection_kind(receiver) ?? return false
+    if kind == {
+        .Set(_) -> true
+        else -> false
+    }
+}
+
+
+
+
+
+
+fn sema_collection_fn(params: [Type], ret: ?Type) -> Type {
+    Type.Fn(params, ret, None, None, None, None)
+}
+
+fn sema_collection_iter_type(receiver: Type, element: Type) -> Type {
+    if sema_collection_is_view_iter(receiver) -> return Type.Apply("ViewIter", [Type]{element})
+    Type.Apply("Iter", [Type]{element})
+}
+
+fn sema_collection_output_iter(receiver: Type, element: Type) -> Type {
+    sema_collection_iter_type(receiver, element)
+}
+
+fn sema_collection_arity(minimum: Int, maximum: Int, receiver_access: AccessConvention, callbacks: [Int]) -> SemaCollectionMethodContract {
+    SemaCollectionMethodContract{minimum_arity: minimum, maximum_arity: maximum, receiver_access: receiver_access, callback_indices: callbacks, accepts_labels: false}
+}
+
+// This is the single Source contract table for the sequence adapter families.
+pub fn sema_collection_method_contract(receiver: Type, method: String) -> ?SemaCollectionMethodContract {
+    kind :: sema_collection_kind(receiver) ?? return None
+    is_list := if kind == {.List(_) | .FixedList(_) -> true else -> false}
+    is_iter := if kind == {.Iter(_) | .ViewIter(_) -> true else -> false}
+    is_view := if kind == {.View(_) -> true else -> false}
+    read := AccessConvention.Read
+    move := AccessConvention.Move
+    write := AccessConvention.Write
+    if kind == {
+        .Set(_) -> {
+            if method == "map" || method == "filter" || method == "each" || method == "all" || method == "flat_map" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+            if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
+            if method == "min" || method == "clear" -> return Val(sema_collection_arity(0, 0, if method == "clear" -> write else -> read, [Int]{}))
+            if method == "copy" || method == "to_set" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            if method == "add" || method == "remove" || method == "discard" || method == "has" || method == "pop" || method == "take" || method == "replace" -> return Val(sema_collection_arity(1, 1, if method == "has" -> read else -> write, [Int]{}))
+            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "equal" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" -> return Val(sema_collection_arity(1, 1, if method.ends_with("_update") || method == "update" -> write else -> read, [Int]{}))
+            if method == "len" || method == "is_empty" || method == "to_list" || method == "capacity" || method == "first" || method == "values" || method == "sort" || method == "shuffle" || method == "max" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            return None
+        }
+        .Rank(_) -> {
+            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "has" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "is_subset" || method == "is_superset" || method == "is_disjoint" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "len" || method == "is_empty" || method == "to_list" || method == "first" || method == "last" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        .Bits -> {
+            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "has" || method == "contains" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            return None
+        }
+        .Tally(_) -> {
+            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "has" || method == "count" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "any" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+            if method == "len" || method == "is_empty" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        .Cache(_, _) -> {
+            if method == "add" || method == "add_new" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
+            if method == "get" || method == "remove" || method == "has_key" -> return Val(sema_collection_arity(1, 1, if method == "has_key" -> read else -> write, [Int]{}))
+            if method == "len" || method == "capacity" || method == "is_empty" || method == "keys" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        .Queue(_) -> {
+            if method == "push_front" || method == "push_back" || method == "delete" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "get" || method == "split" -> return Val(sema_collection_arity(1, 1, if method == "split" -> write else -> read, [Int]{}))
+            if method == "join" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "len" || method == "capacity" || method == "is_empty" || method == "pop_front" || method == "pop_back" || method == "peek_front" || method == "peek_back" || method == "to_list" || method == "reverse" -> return Val(sema_collection_arity(0, 0, if method == "pop_front" || method == "pop_back" || method == "reverse" -> write else -> read, [Int]{}))
+            if method == "contains" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        .PriorityQueue(_) -> {
+            if method == "remove" -> return Val(sema_collection_arity(1, 2, write, [Int]{}))
+            if method == "push" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "len" || method == "is_empty" || method == "pop" || method == "peek" || method == "to_sorted_list" -> return Val(sema_collection_arity(0, 0, if method == "pop" -> write else -> read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        else -> {}
+    }
+    if kind == {
+        .Map(_, _) -> {
+            if method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
+            if method == "remove" || method == "pop" || method == "get" || method == "has_key" || method == "contains_value" -> return Val(sema_collection_arity(1, 1, if method == "get" || method == "has_key" || method == "contains_value" -> read else -> write, [Int]{}))
+            if method == "pop_first" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            if method == "update" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+            if method == "merge" -> return Val(sema_collection_arity(1, 2, read, [Int]{1}))
+            if method == "equal" || method == "intersection" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "slice" || method == "top_n" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+            if method == "map" || method == "filter" || method == "flat_map" || method == "each" || method == "any" || method == "all" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+            if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
+            if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+            return None
+        }
+        else -> {}
+    }
+    if is_view {
+        if method == "map" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+        if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
+        return None
+    }
+    if is_list {
+        if method == "push" || method == "append" || method == "try_push" || method == "try_reserve" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
+        if method == "insert" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
+        if method == "remove" -> return Val(sema_collection_arity(1, 2, write, [Int]{}))
+        if method == "pop" || method == "reverse" || method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+        if method == "get" || method == "index_of" || method == "index" || method == "contains" || method == "count" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+        if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+        if method == "update_first" -> return Val(sema_collection_arity(2, 2, write, [Int]{0}))
+        if method == "replace" -> return Val(sema_collection_arity(2, 2, read, [Int]{}))
+        if method == "binary_search" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
+        if method == "binary_search_by" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+        if method == "random" || method == "min_max" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+        if method == "min_max_by" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
+    }
+    if method == "map" || method == "filter" || method == "each" || method == "find" || method == "any" || method == "all" || method == "filter_map" || method == "flat_map" || method == "take_while" || method == "skip_while" || method == "position" || method == "min_by" || method == "max_by" || method == "group_by" || method == "count_by" || method == "count_where" || method == "partition" || method == "dedup_by" || method == "is_sorted_by" || method == "chunk_while" {
+        if is_list || is_iter -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{0}))
+    }
+    if method == "sort_by" || method == "sort_by_desc" {
+        if is_list -> return Val(sema_collection_arity(1, 1, write, [Int]{0}))
+    }
+    if method == "reduce" || method == "fold" {
+        if is_list || is_iter -> return Val(sema_collection_arity(2, 2, if is_iter -> move else -> read, [Int]{1}))
+    }
+    if method == "scan" {
+        if is_list || is_iter -> return Val(sema_collection_arity(2, 2, if is_iter -> move else -> read, [Int]{1}))
+    }
+    if method == "lazy" {
+        if is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+    }
+    if method == "sort" || method == "sort_desc" {
+        if is_list -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
+    }
+    if method == "take" || method == "skip" || method == "step_by" || method == "chunks" || method == "windows" || method == "repeat" || method == "cycle" || method == "drop_last" {
+        if is_list || is_iter -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{}))
+    }
+    if method == "dedup" || method == "flatten" || method == "indexed" || method == "indexes" || method == "first" || method == "sum" || method == "product" || method == "min" || method == "max" || method == "is_sorted" || method == "counts" || method == "average" || method == "unzip" || method == "is_empty" || method == "len" {
+        if is_list || is_iter -> return Val(sema_collection_arity(0, 0, if is_iter -> move else -> read, [Int]{}))
+    }
+    if method == "shuffle" && is_iter -> return Val(sema_collection_arity(0, 0, move, [Int]{}))
+    if method == "shuffle" && is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+    if method == "to_set" && is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
+    if method == "to_list" || method == "collect" {
+        if is_iter -> return Val(sema_collection_arity(0, 0, move, [Int]{}))
+    }
+    if method == "join" && (is_list || is_iter) -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{}))
+    if method == "intersperse" || method == "concat" || method == "extend" || method == "compare" || method == "starts_with" || method == "ends_with" || method == "equal" || method == "union" || method == "intersection" || method == "difference" || method == "slice" || method == "split" || method == "last_index_of" {
+        if (method == "intersperse" || method == "split" || method == "compare" || method == "last_index_of") && (is_list || is_iter) {
+            count := 1
+            return Val(sema_collection_arity(count, count, if is_iter -> move else -> read, [Int]{}))
+        }
+        if is_list && method != "split" && method != "compare" && method != "last_index_of" {
+            count := if method == "slice" -> 2 else -> 1
+            access := if method == "extend" -> write else -> read
+            return Val(sema_collection_arity(count, count, access, [Int]{}))
+        }
+    }
+    None
+}
+pub fn sema_collection_method_effect_row(receiver: Type, method: String, span: Span) -> [EffectRowEntry] {
+    kind :: sema_collection_kind(receiver) ?? return [EffectRowEntry]{}
+    has_mem_effect := if kind == {
+        .List(_) | .FixedList(_) -> method == "push" || method == "append" || method == "try_push" || method == "try_reserve" || method == "insert" || method == "remove" || method == "pop" || method == "extend" || method == "reverse" || method == "sort" || method == "sort_desc" || method == "sort_by" || method == "sort_by_desc" || method == "clear" || method == "update_first"
+        .Map(_, _) -> method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" || method == "remove" || method == "pop" || method == "pop_first" || method == "update" || method == "clear"
+        .Set(_) -> method == "add" || method == "remove" || method == "discard" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" || method == "pop" || method == "take" || method == "replace" || method == "clear"
+        .Rank(_) -> method == "add" || method == "remove" || method == "clear"
+        .Bits -> method == "add" || method == "remove" || method == "clear"
+        .Tally(_) -> method == "add" || method == "remove" || method == "clear"
+        .Cache(_, _) -> method == "add" || method == "add_new" || method == "get" || method == "remove" || method == "clear"
+        .Queue(_) -> method == "push_front" || method == "push_back" || method == "pop_front" || method == "pop_back" || method == "delete" || method == "reverse" || method == "split" || method == "clear"
+        .PriorityQueue(_) -> method == "push" || method == "pop" || method == "remove" || method == "clear"
+        else -> false
+    }
+    if has_mem_effect -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
+    [EffectRowEntry]{}
+}
+
+pub fn sema_collection_method_argument_type(receiver: Type, method: String, index: Int, seed: ?Type, comparator: Bool) -> ?Type {
+    kind :: sema_collection_kind(receiver) ?? return None
+    element :: sema_collection_kind_element(kind)
+    seed_ty :: seed ?? Type.Int
+    if kind == {
+        .Map(key, value) -> {
+            if method == "fold" {
+                if index == 0 -> return Val(seed_ty)
+                if index == 1 -> return Val(sema_collection_fn([Type]{seed_ty, key, value}, Val(seed_ty)))
+                return None
+            }
+            if method == "flat_map" -> return Val(sema_collection_fn([Type]{key, value}, Val(Type.Map(key, None, value))))
+            if method == "merge" && index == 1 -> return Val(sema_collection_fn([Type]{key, value, value}, Val(value)))
+            if method == "map" || method == "filter" || method == "each" || method == "any" || method == "all" {
+                if index != 0 -> return None
+                ret := if method == "filter" || method == "any" || method == "all" -> Val(Type.Bool) else -> None
+                return Val(sema_collection_fn([Type]{key, value}, ret))
+            }
+            if method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" {
+                if index == 0 -> return Val(key)
+                if index == 1 -> return Val(value)
+                return None
+            }
+            if index != 0 -> return None
+            if method == "remove" || method == "pop" || method == "get" || method == "has_key" -> return Val(key)
+            if method == "contains_value" -> return Val(value)
+            if method == "update" || method == "merge" || method == "equal" || method == "intersection" -> return Val(Type.Map(key, None, value))
+            if method == "slice" -> return Val(Type.List(key))
+            if method == "top_n" -> return Val(Type.Int)
+            return None
+        }
+        else -> {}
+    }
+    if kind == {
+        .List(_) | .FixedList(_) -> {
+            if method == "insert" {
+                if index == 0 -> return Val(Type.Int)
+                if index == 1 -> return Val(element)
+            }
+            if method == "remove" {
+                if index == 0 -> return Val(element)
+                if index == 1 -> return Val(Type.Named("RemoveBy"))
+            }
+            if method == "replace" {
+                if index == 0 -> return Val(Type.Int)
+                if index == 1 -> return Val(element)
+            }
+            if method == "update_first" {
+                if index == 0 -> return Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
+                if index == 1 -> return Val(element)
+            }
+            if method == "binary_search" -> return Val(element)
+            if method == "binary_search_by" || method == "min_max_by" -> return Val(sema_collection_fn([Type]{element}, None))
+            if method == "push" || method == "append" || method == "try_push" || method == "contains" || method == "count" || method == "index" -> return Val(element)
+            if method == "try_reserve" || method == "get" || method == "index_of" -> return Val(Type.Int)
+            if method == "extend" || method == "concat" || method == "union" || method == "intersection" || method == "difference" || method == "equal" || method == "compare" || method == "starts_with" || method == "ends_with" -> return Val(Type.List(element))
+        }
+        .Set(_) | .Rank(_) -> {
+            if method == "add" || method == "remove" || method == "discard" || method == "has" || method == "pop" || method == "take" || method == "replace" -> return Val(element)
+            if method == "equal" || method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" {
+                name := if kind == {.Set(_) -> "Set" else -> "Rank"}
+                return Val(Type.Apply(name, [Type]{element}))
+            }
+        }
+        .Bits -> if method == "add" || method == "remove" || method == "has" -> return Val(Type.Int)
+        .Tally(_) -> {
+            if method == "add" || method == "remove" || method == "has" || method == "count" -> return Val(element)
+            if method == "any" -> return Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
+        }
+        .Cache(key, value) -> {
+            if method == "add" || method == "add_new" {
+                if index == 0 -> return Val(key)
+                if index == 1 -> return Val(value)
+            }
+            if method == "get" || method == "remove" || method == "has_key" -> return Val(key)
+        }
+        .Queue(_) -> {
+            if method == "push_front" || method == "push_back" || method == "delete" -> return Val(element)
+            if method == "get" || method == "split" -> return Val(Type.Int)
+            if method == "join" -> return Val(Type.String)
+        }
+        .PriorityQueue(_) -> {
+            if method == "push" || (method == "remove" && index == 0) -> return Val(element)
+            if method == "remove" && index == 1 -> return Val(Type.Named("RemoveBy"))
+        }
+        else -> {}
+    }
+    if method == "map" || method == "filter" || method == "each" || method == "filter_map" || method == "flat_map" || method == "group_by" || method == "count_by" || method == "min_by" || method == "max_by" || method == "reduce" || method == "fold" || method == "scan" || method == "take_while" || method == "skip_while" || method == "find" || method == "any" || method == "all" || method == "position" || method == "count_where" || method == "partition" || method == "dedup_by" || method == "is_sorted_by" || method == "chunk_while" || method == "sort_by" || method == "sort_by_desc" {
+        if method == "reduce" || method == "fold" || method == "scan" {
+            if index == 0 -> return Val(seed_ty)
+            if index == 1 {
+                params := [Type]{seed_ty, element}
+                return Val(sema_collection_fn(params, None))
+            }
+        }
+        if index != 0 -> return None
+        params := [Type]{element}
+        ret := None
+        if method == "find" || method == "any" || method == "all" || method == "take_while" || method == "skip_while" || method == "position" || method == "count_where" || method == "partition" {
+            ret = Val(Type.Bool)
+        }
+        if method == "chunk_while" {
+            params = [Type]{element, element}
+            ret = Val(Type.Bool)
+        }
+        if method == "sort_by" && comparator {
+            params = [Type]{element, element}
+            ret = Val(Type.Named("Ordering"))
+        }
+        if method == "sort_by_desc" && comparator -> return None
+        return Val(sema_collection_fn(params, ret))
+    }
+    if method == "take" || method == "skip" || method == "step_by" || method == "chunks" || method == "windows" || method == "repeat" || method == "cycle" || method == "drop_last" || method == "slice" || method == "split" -> return Val(Type.Int)
+    if method == "intersperse" -> return Val(element)
+    if method == "concat" || method == "extend" || method == "union" || method == "intersection" || method == "difference" -> return Val(Type.List(element))
+    if method == "compare" || method == "starts_with" || method == "ends_with" || method == "equal" -> return Val(Type.List(element))
+    if method == "join" -> return Val(Type.String)
+    if method == "last_index_of" -> return Val(element)
+    None
+}
+
+// Result-returning set and sequence filters preserve the error type and require Bool success.
+pub fn sema_collection_method_result_type(receiver: Type, method: String, _argument_count: Int, callback_return: ?Type, seed: ?Type) -> ?Type {
+    kind :: sema_collection_kind(receiver) ?? return None
+    element :: sema_collection_kind_element(kind)
+    is_list := if kind == {.List(_) | .FixedList(_) -> true else -> false}
+    is_view := if kind == {.View(_) -> true else -> false}
+    callback :: callback_return ?? Type.Named("Unit")
+    success := if callback == {.Result(ok, _) | .Option(ok) -> ok else -> callback}
+    if kind == {
+        .Map(key, value) -> {
+            if method == "map" -> return Val(Type.Map(key, None, callback))
+            if method == "filter" {
+                if callback == Type.Bool -> return Val(Type.Map(key, None, value))
+                return None
+            }
+            if method == "flat_map" -> return Val(Type.Map(key, None, value))
+            if method == "each" -> return Val(Type.Named("Unit"))
+            if method == "any" || method == "all" -> return Val(Type.Bool)
+            if method == "fold" {
+                if callback_return != None -> return Val(callback)
+                return seed
+            }
+        }
+        else -> {}
+    }
+    if kind == {
+        .Map(key, value) -> {
+            pair := Type.Tuple([TypeTupleField]{TypeTupleField{name: "key", ty: key}, TypeTupleField{name: "value", ty: value}})
+            if method == "add" -> return Val(Type.Option(value))
+            if method == "try_insert" -> return Val(Type.Result(Type.Option(value), Type.Named("AllocError")))
+            if method == "add_new" || method == "has_key" || method == "contains_value" || method == "equal" -> return Val(Type.Bool)
+            if method == "setdefault" -> return Val(value)
+            if method == "get" || method == "remove" || method == "pop" || method == "pop_first" || method == "min" || method == "max" -> return Val(Type.Option(value))
+            if method == "update" -> return Val(Type.Named("Unit"))
+            if method == "clear" -> return Val(Type.Named("Unit"))
+            if method == "merge" || method == "intersection" || method == "slice" -> return Val(Type.Map(key, None, value))
+            if method == "keys" -> return Val(Type.Apply("Iter", [Type]{key}))
+            if method == "values" -> return Val(Type.Apply("Iter", [Type]{value}))
+            if method == "first" -> return Val(Type.Option(key))
+            if method == "to_list" || method == "items" || method == "top_n" -> return Val(Type.List(pair))
+        }
+        .Set(element) -> {
+            if method == "len" || method == "capacity" -> return Val(Type.Int)
+            if method == "is_empty" -> return Val(Type.Bool)
+            if method == "add" || method == "has" || method == "equal" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "all" -> return Val(Type.Bool)
+            if method == "clear" || method == "remove" || method == "discard" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" || method == "each" -> return Val(Type.Named("Unit"))
+            if method == "min" || method == "pop" || method == "take" || method == "replace" || method == "first" || method == "max" -> return Val(Type.Option(element))
+            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" -> return Val(Type.Apply("Set", [Type]{element}))
+            if method == "to_list" || method == "sort" || method == "shuffle" -> return Val(Type.List(element))
+            if method == "values" -> return Val(Type.Apply("Iter", [Type]{element}))
+            if method == "map" {
+                if callback == {
+                    .Result(_, err) -> return Val(Type.Result(Type.List(success), err))
+                    else -> {}
+                }
+                return Val(Type.List(callback))
+            }
+            if method == "filter" {
+                if callback == Type.Bool -> return Val(Type.List(element))
+                if callback == {
+                    .Result(ok, err) -> {
+                        if ok == Type.Bool -> return Val(Type.Result(Type.List(element), err))
+                        return None
+                    }
+                    else -> {}
+                }
+                return None
+            }
+            if method == "fold" {
+                if callback_return != None -> return Val(callback)
+                return seed
+            }
+            if method == "flat_map" {
+                inner :: if callback == {
+                    .List(value) | .FixedList(value, _) -> Val(value)
+                    else -> None
+                } ?? return None
+                return Val(Type.Apply("Iter", [Type]{inner}))
+            }
+        }
+        .Rank(element) -> {
+            if method == "len" -> return Val(Type.Int)
+            if method == "is_empty" -> return Val(Type.Bool)
+            if method == "add" -> return Val(Type.Bool)
+            if method == "remove" -> return Val(Type.Named("Unit"))
+            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" -> return Val(Type.Apply("Rank", [Type]{element}))
+            if method == "is_subset" || method == "is_superset" || method == "is_disjoint" -> return Val(Type.Bool)
+            if method == "first" || method == "last" -> return Val(Type.Option(element))
+            if method == "clear" -> return Val(Type.Named("Unit"))
+            if method == "to_list" -> return Val(Type.List(element))
+        }
+        .Bits -> {
+            if method == "len" || method == "count" -> return Val(Type.Int)
+            if method == "is_empty" || method == "add" || method == "has" -> return Val(Type.Bool)
+            if method == "remove" -> return Val(Type.Named("Unit"))
+            if method == "clear" -> return Val(Type.Named("Unit"))
+            if method == "to_list" -> return Val(Type.List(Type.Int))
+        }
+        .Tally(_) -> {
+            if method == "len" -> return Val(Type.Int)
+            if method == "is_empty" || method == "add" -> return Val(Type.Bool)
+            if method == "remove" -> return Val(Type.Named("Unit"))
+            if method == "has" || method == "any" -> return Val(Type.Bool)
+            if method == "count" -> return Val(Type.Int)
+            if method == "clear" -> return Val(Type.Named("Unit"))
+        }
+        .Cache(key, value) -> {
+            if method == "len" || method == "capacity" -> return Val(Type.Int)
+            if method == "is_empty" || method == "add_new" || method == "has_key" -> return Val(Type.Bool)
+            if method == "add" -> return Val(Type.Option(value))
+            if method == "get" || method == "remove" -> return Val(Type.Option(value))
+            if method == "keys" -> return Val(Type.List(key))
+            if method == "clear" -> return Val(Type.Named("Unit"))
+        }
+        .Queue(element) -> {
+            if method == "len" || method == "capacity" -> return Val(Type.Int)
+            if method == "is_empty" || method == "contains" -> return Val(Type.Bool)
+            if method == "push_front" || method == "push_back" || method == "delete" || method == "reverse" -> return Val(Type.Named("Unit"))
+            if method == "pop_front" || method == "pop_back" || method == "peek_front" || method == "peek_back" || method == "get" -> return Val(Type.Option(element))
+            if method == "to_list" -> return Val(Type.List(element))
+            if method == "join" -> return Val(Type.String)
+            if method == "split" -> return Val(Type.Apply("Queue", [Type]{element}))
+            if method == "clear" -> return Val(Type.Named("Unit"))
+        }
+        .PriorityQueue(element) -> {
+            if method == "len" -> return Val(Type.Int)
+            if method == "is_empty" -> return Val(Type.Bool)
+            if method == "pop" || method == "peek" || method == "remove" -> return Val(Type.Option(element))
+            if method == "push" || method == "clear" -> return Val(Type.Named("Unit"))
+            if method == "to_sorted_list" -> return Val(Type.List(element))
+        }
+        .List(element) | .FixedList(element) -> {
+            if {
+                method == "push" || method == "append" || method == "insert" || method == "reverse" || method == "clear" || method == "try_push" || method == "try_reserve" -> {
+                    if method == "try_push" || method == "try_reserve" -> return Val(Type.Result(Type.Named("Unit"), Type.Named("AllocError")))
+                    return Val(Type.Named("Unit"))
+                }
+            }
+            if method == "pop" || method == "get" || method == "first" || method == "last" || method == "remove" -> return Val(Type.Option(element))
+            if method == "index_of" || method == "index" || method == "binary_search" || method == "binary_search_by" -> return Val(Type.Option(Type.Int))
+            if method == "contains" -> return Val(Type.Bool)
+            if method == "count" -> return Val(Type.Int)
+            if method == "update_first" -> return Val(Type.Bool)
+            if method == "replace" -> return Val(Type.List(element))
+            if method == "random" -> return Val(Type.Option(element))
+            if method == "min_max" || method == "min_max_by" -> return Val(Type.Option(Type.Tuple([TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}})))
+        }
+        else -> {}
+    }
+    if method == "map" {
+        mapped := if is_list || is_view -> Type.List(success) else -> sema_collection_output_iter(receiver, success)
+        if callback == {
+            .Result(_, err) -> return Val(Type.Result(mapped, err))
+            else -> {}
+        }
+        return Val(mapped)
+    }
+    if method == "filter" {
+        filtered := if is_list || is_view -> Type.List(element) else -> sema_collection_output_iter(receiver, element)
+        if callback == {
+            .Result(ok, err) -> {
+                if ok == Type.Bool -> return Val(Type.Result(filtered, err))
+                return None
+            }
+            else -> {}
+        }
+        if callback != Type.Bool -> return None
+        return Val(filtered)
+    }
+    if method == "each" -> return Val(Type.Named("Unit"))
+    if method == "find" || method == "min_by" || method == "max_by" -> return Val(Type.Option(element))
+    if method == "any" || method == "all" || method == "is_sorted_by" -> return Val(Type.Bool)
+    if method == "sort_by" || method == "sort_by_desc" || method == "sort" || method == "sort_desc" {
+        if callback == {
+            .Result(_, err) -> return Val(Type.Result(Type.Named("Unit"), err))
+            else -> {}
+        }
+        return Val(Type.Named("Unit"))
+    }
+    if method == "reduce" || method == "fold" {
+        if callback_return != None -> return Val(callback)
+        return seed
+    }
+    if method == "scan" -> return Val(sema_collection_output_iter(receiver, callback))
+    if method == "lazy" -> return Val(Type.Apply("Iter", [Type]{element}))
+    if method == "filter_map" {
+        mapped := success
+        if success == {
+            .Option(inner) -> mapped = inner
+            else -> {}
+        }
+        return Val(sema_collection_output_iter(receiver, mapped))
+    }
+    if method == "flat_map" {
+        inner :: if callback == {
+            .List(value) | .FixedList(value, _) -> Val(value)
+            else -> None
+        } ?? return None
+        return Val(if is_list -> Type.List(inner) else -> sema_collection_output_iter(receiver, inner))
+    }
+    if method == "group_by" -> return Val(Type.Map(callback, None, Type.List(element)))
+    if method == "count_by" -> return Val(Type.Map(callback, None, Type.Int))
+    if method == "count_where" -> return Val(Type.Int)
+    if method == "partition" -> return Val(Type.Tuple([TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List(element)}, TypeTupleField{name: "true_", ty: Type.List(element)}}))
+    if method == "position" -> return Val(Type.Option(Type.Int))
+    if method == "take_while" || method == "skip_while" || method == "take" || method == "skip" || method == "step_by" || method == "dedup" || method == "repeat" || method == "cycle" || method == "drop_last" || method == "shuffle" || method == "intersperse" -> return Val(sema_collection_output_iter(receiver, element))
+    if method == "chunks" || method == "windows" || method == "chunk_while" -> return Val(sema_collection_output_iter(receiver, Type.List(element)))
+    if method == "flatten" {
+        if element == {
+            .List(inner) | .FixedList(inner, _) -> return Val(if is_list -> Type.List(inner) else -> sema_collection_output_iter(receiver, inner))
+            else -> return None
+        }
+    }
+    if method == "indexed" -> return Val(sema_collection_output_iter(receiver, Type.Tuple([TypeTupleField]{TypeTupleField{name: "index", ty: Type.Int}, TypeTupleField{name: "item", ty: element}})))
+    if method == "indexes" -> return Val(sema_collection_output_iter(receiver, Type.Int))
+    if method == "unzip" {
+        if element == {
+            .Tuple(fields) -> {
+                output := [TypeTupleField]{}
+                loop field in fields -> output.push(TypeTupleField{name: field.name, ty: Type.List(field.ty)})
+                return Val(Type.Tuple(output))
+            }
+            else -> return None
+        }
+    }
+    if method == "to_list" || method == "collect" -> return Val(Type.List(element))
+    if method == "first" -> return Val(Type.Option(element))
+    if method == "sum" || method == "product" -> return Val(element)
+    if method == "min" || method == "max" -> return Val(Type.Option(element))
+    if method == "is_sorted" -> return Val(Type.Bool)
+    if method == "counts" -> return Val(Type.Map(element, None, Type.Int))
+    if method == "average" -> return Val(Type.Float)
+    if method == "to_set" -> return Val(Type.Apply("Set", [Type]{element}))
+    if method == "is_empty" -> return Val(Type.Bool)
+    if method == "len" -> return Val(Type.Int)
+    if method == "join" -> return Val(Type.String)
+    if method == "compare" -> return Val(Type.Int)
+    if method == "starts_with" || method == "ends_with" || method == "equal" -> return Val(Type.Bool)
+    if method == "concat" -> return Val(Type.List(element))
+    if method == "extend" -> return Val(Type.Named("Unit"))
+    if method == "slice" -> return Val(Type.List(element))
+    if method == "split" -> return Val(Type.Tuple([TypeTupleField]{TypeTupleField{name: "left", ty: Type.List(element)}, TypeTupleField{name: "right", ty: Type.List(element)}}))
+    if method == "last_index_of" -> return Val(Type.Option(Type.Int))
+    if method == "intersperse" -> return Val(sema_collection_output_iter(receiver, element))
+    None
+}
+
+pub fn sema_collection_method_operation(receiver: Type, method: String, argument_count: Int, line: Int, callback_return: ?Type, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> ?SemaCollectionOperation {
+    kind :: sema_collection_kind(receiver) ?? return None
+    is_view := if kind == {.View(_) -> true else -> false}
+    element :: sema_collection_kind_element(kind)
+    is_float := element == Type.Float || element == Type.Float32
+    is_f32 := element == Type.Float32
+    callback :: callback_return ?? Type.Named("Unit")
+    fallible := if callback == {.Result(_, _) -> true else -> false}
+    if method == "len" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LenList))
+    if method == "is_empty" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IsEmpty))
+    if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
+    if kind == {
+        .Map(_, _) -> {
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.InsertMap))
+            if method == "try_insert" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryInsertMap))
+            if method == "add_new" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.AddNewMap))
+            if method == "setdefault" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapSetDefault))
+            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.GetMap))
+            if method == "remove" || method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.RemoveMap))
+            if method == "has_key" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ContainsKey))
+            if method == "contains_value" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapContainsValue))
+            if method == "pop_first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapPopFirst))
+            if method == "update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapUpdate))
+            if method == "merge" -> return Val(SemaCollectionOperation.Builtin(if argument_count == 2 -> TBuiltinOp.MapMergeWith else -> TBuiltinOp.MapMerge))
+            if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapEqual))
+            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapIntersection))
+            if method == "slice" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapSliceKeys))
+            if method == "top_n" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapTopN(tuple_struct)))
+            if method == "keys" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Keys))
+            if method == "values" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Values))
+            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapFirst))
+            if method == "to_list" || method == "items" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapToList(tuple_struct)))
+            if method == "min" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapMin))
+            if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapMax))
+            if method == "map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapMap))
+            if method == "filter" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFilter))
+            if method == "each" -> return Val(SemaCollectionOperation.Closure(TClosureOp.EachMap))
+            if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapAny))
+            if method == "all" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapAll))
+            if method == "fold" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFold))
+            if method == "flat_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFlatMap))
+            if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
+            return None
+        }
+        .Set(_) -> {
+            if method == "map" -> return Val(SemaCollectionOperation.SetClosure(if {
+                fallible -> TClosureOp.TryMap
+                callback_mutable -> TClosureOp.MapMut
+                else -> TClosureOp.Map
+            }))
+            if method == "filter" -> return Val(SemaCollectionOperation.SetClosure(if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter))
+            if method == "each" -> return Val(SemaCollectionOperation.SetClosure(if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each))
+            if method == "all" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.All))
+            if method == "fold" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.Fold))
+            if method == "flat_map" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.FlatMap))
+            if method == "min" -> return Val(SemaCollectionOperation.SetMinimum)
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetInsert))
+            if method == "remove" || method == "discard" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetRemove))
+            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
+            if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetUnion))
+            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIntersection))
+            if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetDifference))
+            if method == "symmetric_difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSymmetricDifference))
+            if method == "is_subset" || method == "issubset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsSubset))
+            if method == "is_superset" || method == "issuperset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsSuperset))
+            if method == "is_disjoint" || method == "isdisjoint" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsDisjoint))
+            if method == "update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetUpdate))
+            if method == "difference_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetDifferenceUpdate))
+            if method == "intersection_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIntersectionUpdate))
+            if method == "symmetric_difference_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSymmetricDifferenceUpdate))
+            if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetEqual))
+            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetCapacity))
+            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetFirst))
+            if method == "values" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetValues))
+            if method == "pop" || method == "take" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetPop))
+            if method == "replace" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetReplace))
+            if method == "sort" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSort))
+            if method == "shuffle" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetShuffle))
+            if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Max(false)))
+            return None
+        }
+        .Rank(_) -> {
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetInsert))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetRemove))
+            if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetUnion))
+            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIntersection))
+            if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetDifference))
+            if method == "symmetric_difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetSymmetricDifference))
+            if method == "is_subset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsSubset))
+            if method == "is_superset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsSuperset))
+            if method == "is_disjoint" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsDisjoint))
+            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetToList))
+            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
+            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
+            if method == "last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Last))
+            return None
+        }
+        .Bits -> {
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetAdd))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetRemove))
+            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
+            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetCount))
+            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetToList))
+            return None
+        }
+        .Tally(_) -> {
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagAdd))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagRemove))
+            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagHas))
+            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagCount))
+            if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.BagAny))
+            return None
+        }
+        .Cache(_, _) -> {
+            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruPut))
+            if method == "add_new" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruAddNew))
+            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruGet))
+            if method == "has_key" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ContainsKey))
+            if method == "keys" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruKeys))
+            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruCapacity))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruRemove))
+            return None
+        }
+        .Queue(_) -> {
+            if method == "push_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePushFront))
+            if method == "push_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePushBack))
+            if method == "pop_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePopFront))
+            if method == "pop_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePopBack))
+            if method == "peek_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePeekFront))
+            if method == "peek_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePeekBack))
+            if method == "contains" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeContains))
+            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeGet))
+            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeToList))
+            if method == "join" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeJoin))
+            if method == "split" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeSplit))
+            if method == "delete" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeDelete))
+            if method == "reverse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeReverse))
+            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeCapacity))
+            return None
+        }
+        .PriorityQueue(_) -> {
+            if method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueuePop))
+            if method == "peek" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueuePeek))
+            if method == "to_sorted_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueueToSortedList))
+            if method == "push" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Push))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueueRemove(line, if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic)))
+            return None
+        }
+        .List(_) | .FixedList(_) -> {
+            if method == "shuffle" -> return Val(SemaCollectionOperation.ListShuffle)
+            if method == "push" || method == "append" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Push))
+            if method == "try_push" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryPush))
+            if method == "try_reserve" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryReserve))
+            if method == "insert" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.InsertList))
+            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.RemoveList(line, if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic)))
+            if method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Pop))
+            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.GetList))
+            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
+            if method == "last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Last))
+            if method == "index_of" || method == "index" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IndexOf))
+            if method == "contains" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
+            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.CountList))
+            if method == "reverse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Reverse))
+            if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
+            if method == "update_first" -> return Val(SemaCollectionOperation.Closure(TClosureOp.UpdateFirst))
+            if method == "replace" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListReplace))
+            if method == "binary_search" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListBinarySearch))
+            if method == "binary_search_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ListBinarySearchBy))
+            if method == "random" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListRandom))
+            if method == "min_max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListMinMax(tuple_struct)))
+            if method == "min_max_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ListMinMaxBy(tuple_struct)))
+        }
+        else -> {}
+    }
+    if method == "map" {
+        if fallible -> return Val(SemaCollectionOperation.Closure(TClosureOp.TryMap))
+        if is_view -> return Val(SemaCollectionOperation.Closure(TClosureOp.ViewMap))
+        if callback_mutable -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapMut))
+        return Val(SemaCollectionOperation.Closure(TClosureOp.Map))
+    }
+    if method == "filter" -> return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter))
+    if method == "each" -> return Val(SemaCollectionOperation.Closure(if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each))
+    if method == "find" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Find))
+    if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Any))
+    if method == "all" -> return Val(SemaCollectionOperation.Closure(TClosureOp.All))
+    if method == "sort_by" {
+        if comparator -> return Val(SemaCollectionOperation.Closure(TClosureOp.SortByCompare))
+        return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TrySortBy else -> TClosureOp.SortBy))
+    }
+    if method == "sort_by_desc" -> return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TrySortByDesc else -> TClosureOp.SortByDesc))
+    if method == "reduce" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Reduce))
+    if method == "fold" {
+        if is_view -> return Val(SemaCollectionOperation.Closure(TClosureOp.ViewFold))
+        return Val(SemaCollectionOperation.Closure(TClosureOp.Fold))
+    }
+    if method == "filter_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.FilterMap))
+    if method == "flat_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.FlatMap))
+    if method == "take_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.TakeWhile))
+    if method == "skip_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.SkipWhile))
+    if method == "scan" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Scan))
+    if method == "position" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Position))
+    if method == "min_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MinBy))
+    if method == "max_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MaxBy))
+    if method == "group_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.GroupBy))
+    if method == "count_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.CountBy))
+    if method == "count_where" -> return Val(SemaCollectionOperation.Closure(TClosureOp.CountWhere))
+    if method == "partition" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Partition(tuple_struct)))
+    if method == "dedup_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.DedupBy))
+    if method == "is_sorted_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.IsSortedBy))
+    if method == "chunk_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ChunkWhile))
+    if method == "lazy" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListLazy))
+    if method == "take" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Take))
+    if method == "skip" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Skip))
+    if method == "step_by" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.StepBy))
+    if method == "dedup" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Dedup))
+    if method == "chunks" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Chunks))
+    if method == "windows" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Windows))
+    if method == "repeat" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterRepeat))
+    if method == "cycle" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCycle))
+    if method == "drop_last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterDropLast))
+    if method == "flatten" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Flatten))
+    if method == "intersperse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Intersperse))
+    if method == "indexed" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Indexed(tuple_struct)))
+    if method == "indexes" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Indexes))
+    if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterToList))
+    if method == "collect" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCollect))
+    if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
+    if method == "is_empty" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IsEmpty))
+    if method == "len" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LenList))
+    if method == "sum" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Sum(is_float, is_f32)))
+    if method == "product" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Product(is_float)))
+    if method == "min" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Min(is_float)))
+    if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Max(is_float)))
+    if method == "is_sorted" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterIsSorted))
+    if method == "counts" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Counts))
+    if method == "average" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterAverage(is_float)))
+    if method == "to_set" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetFrom))
+    if method == "join" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.JoinSep))
+    if method == "compare" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCompare))
+    if method == "starts_with" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.StartsWith))
+    if method == "ends_with" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.EndsWith))
+    if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListEqual))
+    if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListUnion))
+    if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListIntersection))
+    if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListDifference))
+    if method == "unzip" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Unzip(tuple_struct)))
+    if method == "concat" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ConcatList))
+    if method == "extend" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ExtendList))
+    if method == "slice" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListSlice))
+    if method == "split" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterSplit(tuple_struct)))
+    if method == "last_index_of" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterLastIndexOf))
+    if method == "shuffle" && sema_collection_is_iter(receiver) -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterShuffle))
+    if method == "sort" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Sort))
+    if method == "sort_desc" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortDesc))
+    None
+}

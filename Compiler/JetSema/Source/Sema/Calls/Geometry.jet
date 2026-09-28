@@ -1,0 +1,222 @@
+// Generic coordinate-space Transform receiver contracts. Point/delta binary
+// operations already live in Expressions.jet and are intentionally not repeated.
+
+pub struct SemaCallGeometryTransformParts {
+    pub scalar: Type
+    pub from: Type
+    pub to: Type
+    pub name: String
+}
+
+fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    graph :: environment.registration_graph ?? return false
+    sema_type_resolve_nominal(graph, ty, environment.module_identity) == None
+}
+
+pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> ?SemaCallGeometryTransformParts {
+    resolved :: sema_call_resolved_type(ty, environment)
+    matches := if resolved == {
+        .Apply(name, args) -> (name == "Transform" && args.len() == 2) || (name == "Transform2" && args.len() == 3)
+        else -> false
+    }
+    if !matches {
+        return None
+    }
+    if !sema_call_geometry_intrinsic_type(resolved, environment) -> return None
+    if resolved == {
+        .Apply(name, args) -> {
+            if name == "Transform" {
+                return Val(SemaCallGeometryTransformParts{scalar: Type.Float, from: args[0], to: args[1], name: "Transform"})
+            }
+            if name == "Transform2" {
+                return Val(SemaCallGeometryTransformParts{scalar: args[0], from: args[1], to: args[2], name: "Transform2"})
+            }
+            return None
+        }
+        else -> { return None }
+    }
+}
+
+fn sema_call_geometry_is_point(ty: Type) -> Bool {
+    if ty == {
+        .Named(name) -> name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" || name == "CameraPoint" || name == "DevicePoint"
+        .Apply(name, args) -> name == "Point2" && args.len() == 2
+        else -> false
+    }
+}
+
+fn sema_call_geometry_space(ty: Type) -> ?Type {
+    if ty == {
+        .Named(name) -> {
+            if name == "ScreenPoint" || name == "ScreenDelta" {
+                return Val(Type.Named("Screen"))
+            }
+            if name == "WorldPoint" || name == "WorldDelta" {
+                return Val(Type.Named("World"))
+            }
+            if name == "ViewPoint" || name == "ViewDelta" {
+                return Val(Type.Named("View"))
+            }
+            if name == "CameraPoint" || name == "CameraDelta" {
+                return Val(Type.Named("Camera"))
+            }
+            if name == "DevicePoint" || name == "DeviceDelta" {
+                return Val(Type.Named("Device"))
+            }
+            None
+        }
+        .Apply(name, args) -> {
+            if (name == "Point2" || name == "Delta2") && args.len() == 2 {
+                return Val(args[1])
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+fn sema_call_geometry_generic(name: String, scalar: Type, space: Type) -> Type {
+    Type.Apply(name, [Type]{scalar, space})
+}
+
+fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from: Type, to: Type) -> Type {
+    if type_identity_equal(parts.scalar, Type.Float) -> Type.Apply("Transform", [Type]{from, to})
+    else -> Type.Apply("Transform2", [Type]{parts.scalar, from, to})
+}
+
+pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> ?Type {
+    parts :: sema_call_geometry_transform_parts(receiver_type, environment) ?? return None
+    if method == "then" && args.len() == 1 {
+        next :: sema_call_geometry_transform_parts(args[0], environment) ?? return None
+        if !type_identity_equal(parts.scalar, next.scalar) || !type_identity_equal(parts.to, next.from) -> return None
+        return Val(Type.Result(sema_call_geometry_transform_type(parts, parts.from, next.to), Type.Named("TransformError")))
+    }
+    if method == "inverse" && args.len() == 0 {
+        return Val(Type.Result(sema_call_geometry_transform_type(parts, parts.to, parts.from), Type.Named("TransformError")))
+    }
+    if method == "point" && args.len() == 1 {
+        point_type :: sema_call_resolved_type(args[0], environment)
+        point_space :: sema_call_geometry_space(point_type) ?? return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        return Val(Type.Result(sema_call_geometry_generic("Point2", parts.scalar, parts.to), Type.Named("TransformError")))
+    }
+    if method == "point_at_depth" && args.len() == 2 {
+        point_type :: sema_call_resolved_type(args[0], environment)
+        point_space :: sema_call_geometry_space(point_type) ?? return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        return Val(Type.Result(sema_call_geometry_generic("Point2", parts.scalar, parts.to), Type.Named("TransformError")))
+    }
+    if method == "ray" && args.len() == 1 {
+        point_type :: sema_call_resolved_type(args[0], environment)
+        point_space :: sema_call_geometry_space(point_type) ?? return None
+        if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
+        return Val(Type.Result(Type.Apply("Ray2", [Type]{parts.scalar, parts.from, parts.to}), Type.Named("TransformError")))
+    }
+    None
+}
+
+fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    if method != "then" || args.len() != 1 -> return false
+    first_type := sema_call_resolved_type(receiver, environment)
+    second_type := sema_call_resolved_type(args[0], environment)
+    first :: sema_call_geometry_transform_parts(first_type, environment) ?? return false
+    second :: sema_call_geometry_transform_parts(second_type, environment) ?? return false
+    if type_identity_equal(first.to, second.from) -> return false
+    diagnostics.push(sema_error(
+        "E2521",
+        span,
+        "Cannot compose `{type_name(first_type)}` with `{type_name(second_type)}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
+        "A transform chain is valid only when the destination of the first transform is the source of the next one.",
+        "Reverse or replace one transform so both middle spaces are the same.",
+    ))
+    true
+}
+
+fn sema_call_geometry_report_method_error(receiver: Type, owner: String, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+    expected_type := sema_call_resolved_type(receiver, environment)
+    actual_type :: if args.len() > 0 -> sema_call_resolved_type(args[0], environment) else -> Type.Named("Unknown")
+    expected := type_name(expected_type)
+    actual := if args.len() > 0 -> type_name(sema_call_geometry_space(actual_type) ?? actual_type) else -> "<missing>"
+    diagnostics.push(sema_error(
+        "E2520",
+        span,
+        "`{owner}.{method}` needs `{expected}` space, got `{actual}`.",
+        "Coordinate-space tags are ordinary type facts; combining different spaces would make a numerically valid result mean the wrong thing.",
+        "Use a `{expected}` point or displacement, or convert it with a checked transform.",
+    ))
+}
+
+fn sema_call_geometry_argument_types(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type] {
+    types := [Type]{}
+    loop argument in args {
+        checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        types.push(if checked == .Val(value) -> value.ty else -> Type.Named("Unknown"))
+    }
+    types
+}
+
+fn sema_call_geometry_method_arg_count(method: String) -> ?Int {
+    if method == "then" || method == "point" || method == "ray" -> return Val(1)
+    if method == "inverse" -> return Val(0)
+    if method == "point_at_depth" -> return Val(2)
+    None
+}
+
+fn sema_call_geometry_call_facts(result_type: Type) -> SemaCallFacts {
+    failure_carrier :: if result_type == {.Result(ok, err) -> TFailureCarrier.Result(ok, err) else -> TFailureCarrier.Infallible}
+    SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
+}
+
+fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] {
+    params :: loop (index, ty) in types -> SemaCallParam{label: "arg{index + 1}", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false}
+    params
+}
+
+pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    parts :: sema_call_geometry_transform_parts(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    expected_count :: sema_call_geometry_method_arg_count(method)
+    if expected_count == None {
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        arg_types :: sema_call_geometry_argument_types(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if args.len() != (expected_count ?? 0) {
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        arg_types :: sema_call_geometry_argument_types(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    values := [TExpr]{}
+    types := [Type]{}
+    valid := true
+    loop (index, argument) in args {
+        depth_argument := method == "point_at_depth" && index == 1 && args.len() == 2
+        checked :: if depth_argument -> sema_check_expression(argument.expr, Val(Type.Float), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if checked == {
+            .Val(value) -> {
+                values.push(value)
+                types.push(value.ty)
+            }
+            else -> {
+                valid = false
+                types.push(Type.Named("Unknown"))
+            }
+        }
+    }
+    if !valid {
+        _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    ownership := sema_ownership_check_method_call(&state, "{parts.name}.{method}", receiver, AccessConvention.Read, sema_call_geometry_method_params(types), &args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type :: sema_call_geometry_transform_method_return(receiver_value.ty, method, types, environment) ?? {
+        chain_mismatch := sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, types, span, environment, &diagnostics)
+        if !chain_mismatch -> sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    value :: sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, THandleOp.MathMethod(parts.name, method, None), values), span)
+    if !sema_effect_record_intrinsic_fact(environment, scopes, context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+

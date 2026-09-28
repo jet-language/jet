@@ -2103,6 +2103,11 @@ fn bind_value(
 
 fn lower_enum_match(
     ctx: &mut LowerCtx,
+    scrutinee: &TExpr,
+    clone_subject: bool,
+    arms: &[TMatchArm],
+    else_body: Option<&[TStmt]>,
+    fallthrough: bool,
 ) -> Result<(), LowerError> {
     let mut subject = lower_expr(ctx, scrutinee)?;
     if clone_subject {

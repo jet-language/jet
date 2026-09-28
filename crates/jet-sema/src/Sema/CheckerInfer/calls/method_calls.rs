@@ -6923,7 +6923,7 @@ impl<'a> Checker<'a> {
             // D-ANY-JAI1 (c7jaiany §6): accessor methods on `reflect.of(x)`'s
             // `Value`/`Field` handles — same zero-arg-getter shape as `DBValue`
             // above. `Value`/`Field` are common enough words a user struct might
-            // reuse them (`examples/features/memory/zerocopy.jet` already has its
+            // reuse them (`Examples/features/memory/zerocopy.jet` already has its
             // own `struct Field`) — `!self.registry.contains(tn)` makes a
             // user-declared type of that name win, same principle as codegen's
             // `!self.type_names.contains(name)` guard on the Rust-type-name side.
@@ -7949,7 +7949,7 @@ impl<'a> Checker<'a> {
                 return source;
             }
             // Keep the original single-trait wording byte-for-byte (it's snapshot-
-            // pinned product copy, docs/spec/diagnostics.md) when there's only one
+            // pinned product copy, Docs/spec/diagnostics.md) when there's only one
             // bound trait; only the multi-bound case needs the "none of" phrasing.
             let (headline, fix) = match trait_names.as_slice() {
                 [only] => (

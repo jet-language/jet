@@ -20,7 +20,7 @@ impl Drop for Scratch {
 #[test]
 fn user_story_suite_matches_expected_output() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let suite = root.join("examples/suites");
+    let suite = root.join("Examples/suites");
     let mut programs = fs::read_dir(&suite)
         .expect("user-story suite exists")
         .flatten()

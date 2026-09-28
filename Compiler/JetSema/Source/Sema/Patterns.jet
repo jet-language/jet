@@ -82,8 +82,8 @@ fn sema_pattern_subject_args(ty: Type) -> [Type] {
     }
 }
 
-fn sema_pattern_nominal(graph: SemaRegistrationGraph, module: String, ty: Type) -> ?SemaRegistrationNominal {
-    sema_type_resolve_nominal(graph, sema_pattern_nominal_type(ty) ?? return None, module)
+fn sema_pattern_nominal(graph: SemaRegistrationGraph, module_identity: String, ty: Type) -> ?SemaRegistrationNominal {
+    sema_type_resolve_nominal(graph, sema_pattern_nominal_type(ty) ?? return None, module_identity)
 }
 
 fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] {
@@ -225,7 +225,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
 }
 
 fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool, boxed: Bool) -> TPatternBindingFact {
-    TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, boxed: boxed}
+    TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, boxed: boxed, symbol_id: None}
 }
 
 fn sema_pattern_binding_shape(name: String, span: Span) -> TPatternBinding {
@@ -288,20 +288,23 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], owner: ?SymbolId,
         has_type :: index < expected.len()
         if slot == {
             .Bind(name, binding_span) -> {
-                if has_type {
-                    ty :: expected[index]
-                    edge :: if payload == {
-                        Val(payload_value) -> if payload_value == {
-                            .Named(fields) -> if index < fields.len() -> "{variant}.{fields[index].name}" else -> variant
-                            .Unit -> ""
-                            .Single(_, _) -> variant
+                if {
+                    has_type -> {
+                        ty :: expected[index]
+                        edge :: if payload == {
+                            Val(payload_value) -> if payload_value == {
+                                .Named(fields) -> if index < fields.len() -> "{variant}.{fields[index].name}" else -> variant
+                                .Unit -> ""
+                                .Single(_, _) -> variant
+                            }
+                            None -> ""
                         }
-                        None -> ""
+                        boxed :: sema_pattern_boxed_edge(env, owner, edge)
+                        facts.push(sema_pattern_fact(name, binding_span, ty, mutable, boxed))
                     }
-                    boxed :: sema_pattern_boxed_edge(env, owner, edge)
-                    facts.push(sema_pattern_fact(name, binding_span, ty, mutable, boxed))
-                } else {
-                    complete = false
+                    else -> {
+                        complete = false
+                    }
                 }
                 tir_bindings.push(sema_pattern_binding_shape(name, binding_span))
             }
@@ -334,13 +337,16 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, slots: [PatS
     if !payload.known {
         return SemaPatternValidation{shape: TPatternShape.Variant(variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span), enum_type: payload.owner, bindings: facts, complete: false}
     }
-    if payload.group {
-        if slots.len() != 0 {
-            diagnostics.push(sema_error("E0306", span, "pattern `{variant}` expects no bindings", "an enum group carries no payload of its own", "match a leaf variant to bind its payload"))
-            complete = false
+    if {
+        payload.group -> {
+            if slots.len() != 0 {
+                diagnostics.push(sema_error("E0306", span, "pattern `{variant}` expects no bindings", "an enum group carries no payload of its own", "match a leaf variant to bind its payload"))
+                complete = false
+            }
         }
-    } else {
-        if !sema_pattern_slot_facts(slots, payload.types, payload.owner, variant, payload.payload, payload.range_forbidden, env, span, mutable, &diagnostics, &facts, &tir_bindings) -> complete = false
+        else -> {
+            if !sema_pattern_slot_facts(slots, payload.types, payload.owner, variant, payload.payload, payload.range_forbidden, env, span, mutable, &diagnostics, &facts, &tir_bindings) -> complete = false
+        }
     }
     SemaPatternValidation{shape: TPatternShape.Variant(variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span), enum_type: payload.owner, bindings: facts, complete: complete}
 }
@@ -355,12 +361,12 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: ?Span, 
         return SemaPatternValidation{shape: TPatternShape.Struct(fields: [TPatternField]{}, rest: rest, span: span), enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
     nominal :: sema_pattern_nominal(graph, env.module_identity, subject_ty) ?? {
-        diagnostics.push(sema_error("E0313", span, "`{ … }` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
+        diagnostics.push(sema_error("E0313", span, "`{{ … }}` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
         return SemaPatternValidation{shape: TPatternShape.Struct(fields: [TPatternField]{}, rest: rest, span: span), enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
     is_struct :: nominal.kind == SemaRegistrationNominalKind.Struct
     if !is_struct {
-        diagnostics.push(sema_error("E0313", span, "`{ … }` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
+        diagnostics.push(sema_error("E0313", span, "`{{ … }}` can only match a struct value, but this is `{type_name(subject_ty)}`", "a struct pattern reads named fields from a struct value", "match a struct value instead"))
     }
     names :: loop field in fields -> if field == {
         .Bind(field_name, _, _, _) -> field_name
@@ -385,7 +391,12 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: ?Span, 
             }
         }
         if !known {
-            diagnostics.push(sema_error("E0107", if field == {.Bind(_, field_span, _, _) -> field_span .Value(_, field_span, _) -> field_span}, "nothing named `{field_name}` exists on this struct", "struct patterns can only name declared fields", "check the field spelling"))
+            unknown_span :: if field == {
+                .Bind(_, binding_span, _, _) -> binding_span
+                .Value(_, value_span, _) -> value_span
+                else -> span
+            }
+            diagnostics.push(sema_error("E0107", unknown_span, "nothing named `{field_name}` exists on this struct", "struct patterns can only name declared fields", "check the field spelling"))
             complete = false
             next
         }

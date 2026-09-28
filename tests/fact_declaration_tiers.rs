@@ -270,15 +270,15 @@ fn measure_rows_share_one_registry_and_all_tiers_examples() {
     for (stem, expected) in [
         (
             "collections/fixed_arrays",
-            include_str!("../examples/features/expected/collections/fixed_arrays.out"),
+            include_str!("../Examples/features/expected/collections/fixed_arrays.out"),
         ),
         (
             "tooling/compute_linalg",
-            include_str!("../examples/features/expected/tooling/compute_linalg.out"),
+            include_str!("../Examples/features/expected/tooling/compute_linalg.out"),
         ),
         (
             "types/dimensional_quantities",
-            include_str!("../examples/features/expected/types/dimensional_quantities.out"),
+            include_str!("../Examples/features/expected/types/dimensional_quantities.out"),
         ),
     ] {
         tir_support::assert_example_cli_tiers_agree(stem, expected);

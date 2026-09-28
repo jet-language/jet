@@ -29,7 +29,7 @@ fn valid_corpus_reaches_rustc() {
 /// classified structurally by provenance. Every `valid`/`differential`
 /// fixture's generated Rust must be free of bare `unsafe` once the vetted
 /// prelude modules (FFI/mem/term/os/atomic/gtk bridges) are stripped —
-/// except the handful of `examples/features/{lowlevel,memory,effects,
+/// except the handful of `Examples/features/{lowlevel,memory,effects,
 /// crypto}` stems that intentionally exercise the audited `#Unsafe` gate
 /// (`GATED_UNSAFE_STEMS`), which may contain only *gated* `unsafe { … }` /
 /// `unsafe fn` forms, never an ungated one. Mirrors golden.rs's per-example

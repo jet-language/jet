@@ -51,35 +51,41 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
         marked := false
         name_span := parser_current(&state).span
         name := ""
-        if parser_current_kind(&state) == TOKEN_AT {
-            at :: parser_bump(&state)
-            name_token :: parser_expect_name(&state, "after `@` in marker declaration metadata")
-            name = "@{name_token.payload.decoded}"
-            name_span = parser_cover(at.span, name_token.span)
-            marked = true
-        } else {
-            name_token :: parser_expect_name(&state, "for a marker declaration parameter")
-            name = name_token.payload.decoded
-            name_span = name_token.span
+        if {
+            parser_current_kind(&state) == TOKEN_AT -> {
+                at :: parser_bump(&state)
+                name_token :: parser_expect_name(&state, "after `@` in marker declaration metadata")
+                name = "@{name_token.payload.decoded}"
+                name_span = parser_cover(at.span, name_token.span)
+                marked = true
+            }
+            else -> {
+                name_token :: parser_expect_name(&state, "for a marker declaration parameter")
+                name = name_token.payload.decoded
+                name_span = name_token.span
+            }
         }
         parser_expect(&state, TOKEN_COLON, "between a marker parameter name and its type or value")
-        if marked {
-            value :: parser_parse_expression(&state, 1, 0)
-            params.push(MarkerDeclParam{name: name, name_span: name_span, ty: None, value: Val(value.expr), variadic: false})
-        } else {
-            variadic := false
-            if parser_current_kind(&state) == TOKEN_DOT_DOT_DOT {
-                parser_bump(&state)
-                variadic = true
+        if {
+            marked -> {
+                value :: parser_parse_expression(&state, 1, 0)
+                params.push(MarkerDeclParam{name: name, name_span: name_span, ty: None, value: Val(value.expr), variadic: false})
             }
-            parsed :: parser_parse_type(&state, 0)
-            default := None
-            if parser_current_kind(&state) == TOKEN_LBRACE {
-                parser_bump(&state)
-                default = Val(parser_parse_expression(&state, 1, 0).expr)
-                parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
+            else -> {
+                variadic := false
+                if parser_current_kind(&state) == TOKEN_DOT_DOT_DOT {
+                    parser_bump(&state)
+                    variadic = true
+                }
+                parsed :: parser_parse_type(&state, 0)
+                default := None
+                if parser_current_kind(&state) == TOKEN_LBRACE {
+                    parser_bump(&state)
+                    default = Val(parser_parse_expression(&state, 1, 0).expr)
+                    parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
+                }
+                params.push(MarkerDeclParam{name: name, name_span: name_span, ty: Val(parsed.ty), value: default, variadic: variadic})
             }
-            params.push(MarkerDeclParam{name: name, name_span: name_span, ty: Val(parsed.ty), value: default, variadic: variadic})
         }
         if parser_current_kind(&state) == TOKEN_RPAREN -> break
         if parser_current_kind(&state) != TOKEN_COMMA {

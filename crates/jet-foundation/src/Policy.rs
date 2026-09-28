@@ -1795,7 +1795,7 @@ pub fn marker_unknown_error(
         .map(|(candidate, _)| candidate);
     let fix = nearest.as_ref().map_or_else(
         || {
-            "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
+            "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
                 .to_string()
         },
         |nearest| format!("did you mean `#{nearest}`?"),

@@ -1,6 +1,6 @@
 # First-principles proposal
 
-Write the retained proposal at `docs/proposals/<area>-<slug>.md` in direct `simple` prose. Do not hard-wrap paragraphs. Use tables, code, and diagrams so the owner can judge the surface instead of trusting a description. Give every material claim a code block, before/after pair, tree, or table.
+Write the retained proposal at `Docs/proposals/<area>-<slug>.md` in direct `simple` prose. Do not hard-wrap paragraphs. Use tables, code, and diagrams so the owner can judge the surface instead of trusting a description. Give every material claim a code block, before/after pair, tree, or table.
 
 Load and follow the `simple` skill before writing. Use short, direct sentences and common words; avoid dense jargon, stodgy report-speak, and needless repetition.
 

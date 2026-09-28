@@ -139,7 +139,7 @@ fn jet_codegen_add_binary_prelude(builder: &JetCodegenBuilder, member: String, s
         member: member,
         symbol: MirSymbol.Prelude(symbol),
         signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask},
-        effect: call_effect,
+        effect_kind: call_effect,
         fallibility: MirCallFallibility.Infallible,
         abi: MirPreludeAbi.Value,
         authority: None,
@@ -327,7 +327,11 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, args: [TExternArg]
             .ResourceTake(_) -> true
             else -> false
         }
-        access := if argument.mut_borrow -> MirAccess.Write else if argument.clone || resource_take -> MirAccess.Move else -> MirAccess.Read
+        access := if {
+            argument.mut_borrow -> MirAccess.Write
+            argument.clone || resource_take -> MirAccess.Move
+            else -> MirAccess.Read
+        }
         lowered.push(MirCallArg{
             value: value,
             place: None,
@@ -502,17 +506,17 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, argument: TExpr,
     }
 }
 
-fn jet_codegen_intern_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], effect: ?Effect, carrier: TFailureCarrier, abi: MirPreludeAbi) -> MirPreludeCallId {
-    jet_codegen_intern_route_with_authority(&builder, family, module, member, symbol, arity, borrow_mask, effect, carrier, abi, None)
+fn jet_codegen_intern_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: ?Effect, carrier: TFailureCarrier, abi: MirPreludeAbi) -> MirPreludeCallId {
+    jet_codegen_intern_route_with_authority(&builder, family, module_name, member, symbol, arity, borrow_mask, route_effect, carrier, abi, None)
 }
-fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: MirPreludeFamily, module: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], effect: ?Effect, carrier: TFailureCarrier, abi: MirPreludeAbi, authority: ?MirAuthorityDecision) -> MirPreludeCallId {
+fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: ?Effect, carrier: TFailureCarrier, abi: MirPreludeAbi, authority: ?MirAuthorityDecision) -> MirPreludeCallId {
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed -> mask_names.push("true") else -> mask_names.push("false")
     }
     effect_identity := "None"
-    if effect != None {
-        effect_name :: jet_codegen_core_effect_name(effect) ?? panic("checked Prelude route effect lost its canonical name")
+    if route_effect != None {
+        effect_name :: jet_codegen_core_effect_name(route_effect) ?? panic("checked Prelude route effect lost its canonical name")
         effect_identity = "Some({effect_name})"
     }
     abi_identity := if abi == {
@@ -521,21 +525,35 @@ fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: 
         .Control -> "Control"
         .Effect -> "Effect"
     }
-    identity := "{family}:{module}:{member}:{symbol}:{arity}:{arity}:[{mask_names.join(", ")}]:{effect_identity}:{jet_codegen_core_route_fallibility_identity(carrier)}:{abi_identity}"
+    identity := "{family}:{module_name}:{member}:{symbol}:{arity}:{arity}:[{mask_names.join(", ")}]:{effect_identity}:{jet_codegen_core_route_fallibility_identity(carrier)}:{abi_identity}"
     id := MirPreludeCallId{value: stable_id("mir-prelude-call", identity)}
     jet_codegen_intern_prelude_call(&builder, MirPreludeCall{
         id: id,
         family: family,
-        module_name: module,
+        module_name: module_name,
         member: member,
         symbol: MirSymbol.Prelude(symbol),
         signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask},
-        effect: effect,
+        effect_kind: route_effect,
         fallibility: jet_codegen_core_call_fallibility(carrier, builder),
         abi: abi,
         authority: authority,
         db_metadata: None,
     })
+}
+fn jet_codegen_slice_route(builder: &JetCodegenBuilder, base: Type, has_range: Bool, carrier: TFailureCarrier) -> MirPreludeCallId {
+    if base == {
+        .Shared(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_slice_route(&builder, inner, has_range, carrier)
+        .String -> {
+            if has_range -> return jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "slice_string_range", "jet_slice_range", 4, [Bool]{true, true, false, false}, None, carrier, MirPreludeAbi.Value)
+            return jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "slice_string", "jet_string_slice", 5, [Bool]{true, false, false, false, false}, None, carrier, MirPreludeAbi.Value)
+        }
+        .List(_) | .FixedList(_, _) -> {
+            if has_range -> return jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "slice_list_range", "jet_slice_vec_range", 4, [Bool]{true, true, false, false}, None, carrier, MirPreludeAbi.Value)
+            return jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "slice_list", "jet_slice_vec", 5, [Bool]{true, false, false, false, false}, None, carrier, MirPreludeAbi.Value)
+        }
+        else -> panic("checked slice base has no canonical slice Prelude route")
+    }
 }
 fn jet_codegen_precise_type_key(type_name: String) -> String {
     if type_name == "Decimal" -> return "decimal"
@@ -598,11 +616,22 @@ fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MirIndexKind {
         .Lane(_) -> MirIndexKind.Lane
         .Unknown -> {
             if base == {
-                .Map(_, _, _) -> return MirIndexKind.Map
-                .Apply(name, _) -> if name == "Pool" -> return MirIndexKind.Pool
+                .Map(_, _, _) -> {
+                    return MirIndexKind.Map
+                }
+                .Apply(name, _) -> {
+                    if name == "Pool" {
+                        return MirIndexKind.Pool
+                    }
+                }
                 else -> {}
             }
-            if base == { .FixedList(_, _) -> return MirIndexKind.FixedListProof else -> {} }
+            if base == {
+                .FixedList(_, _) -> {
+                    return MirIndexKind.FixedListProof
+                }
+                else -> {}
+            }
             MirIndexKind.List
         }
         .Range | .User(_) | .LayoutField(_) -> panic("checked non-place index kind reached place lowering")
@@ -611,20 +640,21 @@ fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MirIndexKind {
 
 fn jet_codegen_index_element_type(base: Type, kind: MirIndexKind) -> Type {
     if kind == {
-        .List | .FixedListProof -> {
-            if base == {
-                .List(inner) | .FixedList(inner, _) -> return inner
-                .Apply(name, args) -> {
-                    if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 -> return args[0]
-                }
-                else -> {}
-            }
+        .List | .FixedListProof -> if base == {
+            .List(inner) | .FixedList(inner, _) -> inner
+            .Apply(name, args) -> if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 -> args[0] else -> panic("checked index place has no element type")
+            else -> panic("checked index place has no element type")
         }
-        .Map -> if base == { .Map(_, _, value) -> return value else -> {} }
-        .Pool -> if base == { .Apply(name, args) -> if name == "Pool" && args.len() == 1 -> return args[0] else -> {} }
-        .Lane -> {}
+        .Map -> if base == {
+            .Map(_, _, value) -> value
+            else -> panic("checked index place has no element type")
+        }
+        .Pool -> if base == {
+            .Apply(name, args) -> if name == "Pool" && args.len() == 1 -> args[0] else -> panic("checked index place has no element type")
+            else -> panic("checked index place has no element type")
+        }
+        .Lane -> panic("checked index place has no element type")
     }
-    panic("checked index place has no element type")
 }
 
 fn jet_codegen_index_route(builder: &JetCodegenBuilder, kind: MirIndexKind, access: MirAccess, carrier: TFailureCarrier) -> MirPreludeCallId {
@@ -634,23 +664,53 @@ fn jet_codegen_index_route(builder: &JetCodegenBuilder, kind: MirIndexKind, acce
     borrow_mask := [Bool]{true, false, true, false}
     if kind == {
         .List | .FixedListProof -> {
-            if access == MirAccess.Read { member = "index_list"; symbol = "jet_index_vec" }
-            else if access == MirAccess.Write { member = "index_list_mut"; symbol = "jet_index_vec_mut" }
-            else -> panic("checked list index place cannot move")
+            if access == {
+                MirAccess.Read -> {
+                    member = "index_list"
+                    symbol = "jet_index_vec"
+                }
+                MirAccess.Write -> {
+                    member = "index_list_mut"
+                    symbol = "jet_index_vec_mut"
+                }
+                else -> {
+                    panic("checked list index place cannot move")
+                }
+            }
         }
         .Map -> {
             arity = 8
             borrow_mask = [Bool]{true, true, true, false, true, true, false, false}
-            if access == MirAccess.Read { member = "index_map"; symbol = "jet_index_map" }
-            else if access == MirAccess.Write { member = "index_map_mut"; symbol = "jet_index_map_mut" }
-            else -> panic("checked map index place cannot move")
+            if access == {
+                MirAccess.Read -> {
+                    member = "index_map"
+                    symbol = "jet_index_map"
+                }
+                MirAccess.Write -> {
+                    member = "index_map_mut"
+                    symbol = "jet_index_map_mut"
+                }
+                else -> {
+                    panic("checked map index place cannot move")
+                }
+            }
         }
         .Pool -> {
             arity = 6
             borrow_mask = [Bool]{true, false, true, false, true, true}
-            if access == MirAccess.Read { member = "index_pool"; symbol = "jet_std::jet_pool_get" }
-            else if access == MirAccess.Write { member = "index_pool_mut"; symbol = "jet_std::jet_pool_get_mut" }
-            else -> panic("checked pool index place cannot move")
+            if access == {
+                MirAccess.Read -> {
+                    member = "index_pool"
+                    symbol = "jet_std::jet_pool_get"
+                }
+                MirAccess.Write -> {
+                    member = "index_pool_mut"
+                    symbol = "jet_std::jet_pool_get_mut"
+                }
+                else -> {
+                    panic("checked pool index place cannot move")
+                }
+            }
         }
         .Lane -> panic("checked lane place requires its typed lane kernel")
     }
@@ -669,12 +729,14 @@ fn jet_codegen_index_write_route(builder: &JetCodegenBuilder, kind: MirIndexKind
             arity = 3
             if base == {
                 .Map(key, _, _) -> {
-                    if key == Type.String {
-                        symbol = "jet_map_update_string"
-                        borrow_mask = [Bool]{true, true, false}
-                    } else {
-                        symbol = "jet_map_insert"
-                        borrow_mask = [Bool]{true, false, false}
+                    if {
+                        key == Type.String -> {
+                            symbol = "jet_map_update_string"
+                            borrow_mask = [Bool]{true, true, false}
+                        } else -> {
+                            symbol = "jet_map_insert"
+                            borrow_mask = [Bool]{true, false, false}
+                        }
                     }
                 }
                 else -> panic("checked map index setter has no map type")
@@ -827,7 +889,7 @@ fn jet_codegen_lower_local_place(builder: &JetCodegenBuilder, local: TLocal) -> 
         key :: local.persist_key ?? ""
         found := None
         loop place in builder.places {
-            if place.persist_key == Val(key) -> found = Val(place.id)
+            if place.persist_key == (Val(key)) -> found = Val(place.id)
         }
         place_id := if found == {
             Val(value) -> value
@@ -986,9 +1048,12 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, expression: TEx
     }
     resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member)
     field_id := jet_codegen_mir_field_id(resolved)
-    selected_type := if flatten -> expression.ty else -> if expression.ty == {
-        .Option(inner) -> inner
-        else -> panic("checked non-flattening optional field result is not optional")
+    selected_type := if {
+        flatten -> expression.ty
+        else -> if expression.ty == {
+            .Option(inner) -> inner
+            else -> panic("checked non-flattening optional field result is not optional")
+        }
     }
     subject := jet_codegen_lower_expr(&builder, base)
     condition := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.OptionIsSome(subject))
@@ -1305,22 +1370,24 @@ fn jet_codegen_lower_named_function_value(builder: &JetCodegenBuilder, expressio
 }
 
 fn jet_codegen_lower_host_borrow_callback(builder: &JetCodegenBuilder, expression: TExpr, callable: TExpr, params: [Type], send: Bool) -> MirValueId {
-    callable_value := if send {
-        if callable.kind == {
-            .Lambda(lambda) -> jet_codegen_lower_lambda(&builder, lambda, true, "direct").value
-            .FnValue(kind) -> if kind == {
-                .NamedFn(name, lambda) -> {
-                    if lambda != None -> jet_codegen_lower_lambda(&builder, lambda ?? panic("checked named lambda disappeared"), true, "direct").value
-                    jet_codegen_lower_named_function_value(&builder, callable, name ?? panic("checked SendFn named function has no key"), true)
+    callable_value := if {
+        send -> {
+            if callable.kind == {
+                .Lambda(lambda) -> jet_codegen_lower_lambda(&builder, lambda, true, "direct").value
+                .FnValue(kind) -> if kind == {
+                    .NamedFn(name, lambda) -> {
+                        if lambda != None -> jet_codegen_lower_lambda(&builder, lambda ?? panic("checked named lambda disappeared"), true, "direct").value
+                        jet_codegen_lower_named_function_value(&builder, callable, name ?? panic("checked SendFn named function has no key"), true)
+                    }
+                    .Send(_) | .Local(_) -> jet_codegen_lower_expr(&builder, callable)
+                    else -> panic("checked SendFn HostBorrowCallback requires a named function, lambda, or SendFn local")
                 }
-                .Send(_) | .Local(_) -> jet_codegen_lower_expr(&builder, callable)
+                .Local(_) -> jet_codegen_lower_expr(&builder, callable)
                 else -> panic("checked SendFn HostBorrowCallback requires a named function, lambda, or SendFn local")
             }
-            .Local(_) -> jet_codegen_lower_expr(&builder, callable)
-            else -> panic("checked SendFn HostBorrowCallback requires a named function, lambda, or SendFn local")
+        } else -> {
+            jet_codegen_lower_expr(&builder, callable)
         }
-    } else {
-        jet_codegen_lower_expr(&builder, callable)
     }
     lowered_params := [MirType]{}
     loop ty in params -> lowered_params.push(jet_codegen_lower_type_for_function(ty, builder))
@@ -1457,26 +1524,36 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, expression: TExpr, ki
 fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, function: String, args: [TExpr]) -> MirValueId {
     values := [MirValueId]{}
     loop argument in args -> values.push(jet_codegen_lower_expr(&builder, argument))
+    jet_codegen_emit_math_builtin(&builder, expression, type_name, function, values)
+}
+
+fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, function: String, values: [MirValueId]) -> MirValueId {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     symbol := "jet_math_{type_name}_{function}"
-    module := type_name
+    module_name := type_name
     if function == "abs" {
-        module = "core.math"
-        symbol = if type_name == "Int" && expression.ty == Type.Int {
-            "jet_std::jet_int_abs"
-        } else if type_name == "Float" && expression.ty == Type.Float {
-            "jet_std_math_abs_f64"
-        } else if type_name == "F32" && expression.ty == Type.Float32 {
-            "jet_std_math_abs_f32"
-        } else if type_name == "Complex" && expression.ty == Type.Float {
-            "jet_complex_abs"
-        } else {
-            panic("checked abs builtin has no canonical typed route")
+        module_name = "core.math"
+        symbol = if {
+            type_name == "Int" && expression.ty == Type.Int -> {
+                "jet_std::jet_int_abs"
+            }
+            type_name == "Float" && expression.ty == Type.Float -> {
+                "jet_std_math_abs_f64"
+            }
+            type_name == "F32" && expression.ty == Type.Float32 -> {
+                "jet_std_math_abs_f32"
+            }
+            type_name == "Complex" && expression.ty == Type.Float -> {
+                "jet_complex_abs"
+            }
+            else -> {
+                panic("checked abs builtin has no canonical typed route")
+            }
         }
     }
     borrow_mask := [Bool]{}
-    loop _ in args -> borrow_mask.push(false)
-    call := jet_codegen_intern_route(&builder, MirPreludeFamily.MathBuiltin, module, function, symbol, args.len(), borrow_mask, None, carrier, MirPreludeAbi.Value)
+    loop _ in values -> borrow_mask.push(false)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.MathBuiltin, module_name, function, symbol, values.len(), borrow_mask, None, carrier, MirPreludeAbi.Value)
     math_type := if type_name == {
         "Int" -> Type.Int
         "Float" -> Type.Float
@@ -1555,20 +1632,22 @@ fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, definition: TType
                     if order < orders[check] && insert_at == lowered.len() -> insert_at = check
                     check += 1
                 }
-                if insert_at == lowered.len() {
-                    orders.push(order)
-                    lowered.push(item)
-                } else {
-                    orders.push(0)
-                    lowered.push(item)
-                    cursor := lowered.len() - 1
-                    loop cursor > insert_at {
-                        orders[cursor] = orders[cursor - 1]
-                        lowered[cursor] = lowered[cursor - 1]
-                        cursor -= 1
+                if {
+                    insert_at == lowered.len() -> {
+                        orders.push(order)
+                        lowered.push(item)
+                    } else -> {
+                        orders.push(0)
+                        lowered.push(item)
+                        cursor := lowered.len() - 1
+                        loop cursor > insert_at {
+                            orders[cursor] = orders[cursor - 1]
+                            lowered[cursor] = lowered[cursor - 1]
+                            cursor -= 1
+                        }
+                        orders[insert_at] = order
+                        lowered[insert_at] = item
                     }
-                    orders[insert_at] = order
-                    lowered[insert_at] = item
                 }
             }
             return lowered
@@ -1581,6 +1660,48 @@ fn jet_codegen_lower_enum_literal(builder: &JetCodegenBuilder, expression: TExpr
     type_id := jet_codegen_type_instance_id(Type.Named(enum_type), builder.modules, builder.function.module_identity, builder.generic_type_names)
     args := jet_codegen_lower_enum_payload(&builder, definition, variant, payload)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Enum(type_id, variant, args))
+}
+
+fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, expression: TExpr, owner: SymbolId, variant: SymbolId, payload: [TEnumArg]) -> MirValueId {
+    loop semantic_module in builder.modules {
+        loop nominal in semantic_module.nominals {
+            if nominal.symbol.id.key != owner.key -> next
+            loop candidate in nominal.variants {
+                if candidate.symbol.id.key != variant.key -> next
+                definition := None
+                loop declared in semantic_module.declarations.type_defs {
+                    if declared.name == nominal.symbol.name -> definition = Val(declared)
+                }
+                declared :: definition ?? panic("checked enum constructor has no type declaration")
+                lowered := [MirEnumArg]{}
+                if candidate.payload == {
+                    .Unit -> {
+                        if payload.len() != 0 -> panic("checked unit enum constructor carries a payload")
+                    }
+                    .Single(_, _) -> {
+                        if payload.len() != 1 -> panic("checked enum constructor has the wrong payload arity")
+                        value := jet_codegen_lower_enum_argument(&builder, payload[0])
+                        lowered.push(MirEnumArg{field: None, value: value, boxed: false})
+                    }
+                    .Named(fields) -> {
+                        if payload.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
+                        index := 0
+                        loop index < fields.len() {
+                            field := fields[index]
+                            field_id := mir_field_id("{declared.key}::{candidate.symbol.name}::{field.name}")
+                            value := jet_codegen_lower_enum_argument(&builder, payload[index])
+                            lowered.push(MirEnumArg{field: Val(field_id), value: value, boxed: false})
+                            index += 1
+                        }
+                    }
+                }
+                type_id := jet_codegen_type_instance_id(expression.ty, builder.modules, builder.function.module_identity, builder.generic_type_names)
+                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Enum(type_id, candidate.symbol.name, lowered))
+            }
+            panic("checked enum constructor variant does not belong to its owner")
+        }
+    }
+    panic("checked enum constructor has no registered nominal owner")
 }
 fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> String {
     loop semantic_module in builder.modules {
@@ -1626,7 +1747,7 @@ fn jet_codegen_method_function(builder: &JetCodegenBuilder, method: TMethodRef) 
             trait_name := jet_codegen_symbol_name(&builder, trait_symbol)
             if function.params.len() == 0 -> next
             identity := "{type_name(owner_type)}::{trait_name}::{method.name}<{type_name(function.params[0].ty)}>"
-            if method.operator_identity != Val(identity) -> next
+            if method.operator_identity != (Val(identity)) -> next
         }
         if selected != None -> panic("checked method function identity is ambiguous")
         selected = Val(function)
@@ -1654,12 +1775,14 @@ fn jet_codegen_method_receiver_arg(builder: &JetCodegenBuilder, receiver: TExpr,
         _ := jet_codegen_emit(&builder, receiver.span, None, MirOperation.WritePlace(temporary, value))
         place = Val(temporary)
     }
-    value := if access == MirAccess.Read || place == None {
-        jet_codegen_lower_expr(&builder, receiver)
-    } else {
-        target := place ?? panic("checked method receiver has no place")
-        operation := if access == MirAccess.Write -> MirOperation.AddressOf(target, access) else -> MirOperation.MovePlace(target)
-        jet_codegen_emit_value(&builder, receiver.span, receiver.ty, operation)
+    value := if {
+        access == MirAccess.Read || place == None -> {
+            jet_codegen_lower_expr(&builder, receiver)
+        } else -> {
+            target := place ?? panic("checked method receiver has no place")
+            operation := if access == MirAccess.Write -> MirOperation.AddressOf(target, access) else -> MirOperation.MovePlace(target)
+            jet_codegen_emit_value(&builder, receiver.span, receiver.ty, operation)
+        }
     }
     MirCallArg{
         value: value,
@@ -1703,16 +1826,30 @@ fn jet_codegen_checked_function_return_type(function: TFunc, type_args: [Type]) 
 }
 
 fn jet_codegen_checked_method_return_type(builder: &JetCodegenBuilder, function: TFunc, receiver_type: Type, type_args: [Type]) -> Type {
-    return_type := jet_codegen_checked_function_return_type(function, type_args)
-    owner_names := jet_codegen_function_type_generic_names(function, builder.modules)
-    if owner_names.len() == 0 -> return return_type
-    owner_args := if jet_codegen_unwrap_pattern_tags(receiver_type) == {
-        .Named(_) -> [Type]{}
-        .Apply(_, args) -> args
-        else -> panic("checked method receiver is not its nominal owner")
+    return_type := function.ret ?? Type.Named("Unit")
+    if function.generic_params.len() != type_args.len() -> panic("checked generic call has incomplete return-type arguments")
+    names := [String]{}
+    arguments := [Type]{}
+    index := 0
+    loop index < function.generic_params.len() {
+        names.push(function.generic_params[index].name)
+        arguments.push(type_args[index])
+        index += 1
     }
-    if owner_names.len() != owner_args.len() -> panic("checked method receiver has incomplete owner type arguments")
-    sema_inference_substitute_type(return_type, owner_names, owner_args)
+    owner_names := jet_codegen_function_type_generic_names(function, builder.modules)
+    if owner_names.len() > 0 {
+        owner_bindings := jet_codegen_function_owner_bindings(function, jet_codegen_unwrap_pattern_tags(receiver_type), builder.modules)
+        if !owner_bindings.complete -> panic("checked method receiver has incomplete owner type arguments")
+        index = 0
+        loop index < owner_bindings.names.len() {
+            if !names.contains(owner_bindings.names[index]) {
+                names.push(owner_bindings.names[index])
+                arguments.push(owner_bindings.arguments[index])
+            }
+            index += 1
+        }
+    }
+    sema_inference_substitute_type(return_type, names, arguments)
 }
 
 fn jet_codegen_callable_return_type(signature: Type) -> Type {
@@ -1755,29 +1892,31 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
     access := MirAccess.Read
     call_return_type := expression.ty
     lowered_args := [MirCallArg]{}
-    if dynamic_trait {
-        trait_method := jet_codegen_resolve_trait_method(&builder, method)
-        call_return_type = trait_method.method.return_type
-        trait_access := trait_method.method.self_access ?? panic("checked trait method has no receiver convention")
-        access = jet_codegen_lower_access(trait_access)
-        trait_symbol :: method.trait_owner ?? panic("checked trait method call has no owner symbol")
-        trait_ref := jet_codegen_mir_trait_ref_for_symbol(builder.modules, trait_symbol)
-        method_id := MirTraitMethodId{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
-        callee = Val(MirCallee.TraitMethod(method_id, trait_ref, owner))
-        lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
-        loop argument in jet_codegen_lower_trait_method_args(&builder, args, trait_method.method) -> lowered_args.push(argument)
-    } else {
-        function :: target ?? panic("checked instance method has no reachable TFunc")
-        call_return_type = jet_codegen_checked_method_return_type(&builder, function, receiver.ty, type_args)
-        if function.kind == {
-            .Method(convention, _) | .TraitMethod(_, convention, _, _, _) -> access = jet_codegen_lower_access(convention ?? panic("checked method has no receiver convention"))
-            else -> panic("checked method target is not an instance function")
+    if {
+        dynamic_trait -> {
+            trait_method := jet_codegen_resolve_trait_method(&builder, method)
+            call_return_type = trait_method.method.return_type
+            trait_access := trait_method.method.self_access ?? panic("checked trait method has no receiver convention")
+            access = jet_codegen_lower_access(trait_access)
+            trait_symbol :: method.trait_owner ?? panic("checked trait method call has no owner symbol")
+            trait_ref := jet_codegen_mir_trait_ref_for_symbol(builder.modules, trait_symbol)
+            method_id := MirTraitMethodId{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
+            callee = Val(MirCallee.TraitMethod(method_id, trait_ref, owner))
+            lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
+            loop argument in jet_codegen_lower_trait_method_args(&builder, args, trait_method.method) -> lowered_args.push(argument)
+        } else -> {
+            function :: target ?? panic("checked instance method has no reachable TFunc")
+            call_return_type = jet_codegen_checked_method_return_type(&builder, function, receiver.ty, type_args)
+            if function.kind == {
+                .Method(convention, _) | .TraitMethod(_, convention, _, _, _) -> access = jet_codegen_lower_access(convention ?? panic("checked method has no receiver convention"))
+                else -> panic("checked method target is not an instance function")
+            }
+            function_id := jet_codegen_function_id(function)
+            callee = Val(MirCallee.Method(function_id, owner))
+            lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
+            loop argument in jet_codegen_lower_call_args(&builder, args, function.params) -> lowered_args.push(argument)
+            jet_codegen_note_core_module(&builder, function.module_name)
         }
-        function_id := jet_codegen_function_id(function)
-        callee = Val(MirCallee.Method(function_id, owner))
-        lowered_args.push(jet_codegen_method_receiver_arg(&builder, receiver, access))
-        loop argument in jet_codegen_lower_call_args(&builder, args, function.params) -> lowered_args.push(argument)
-        jet_codegen_note_core_module(&builder, function.module_name)
     }
     lowered_types := [MirType]{}
     loop ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, builder))
@@ -1915,13 +2054,17 @@ fn jet_codegen_lower_numeric_method(builder: &JetCodegenBuilder, expression: TEx
             return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(MirCallee.Prelude(call), args, [MirType]{}))
         }
         .ToShow -> return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildString([MirStringPart]{MirStringPart{kind: MirStringPartKind.Interpolation(receiver, MirStringFormat.Display)}}))
-        .InlineRange(_, _, false) -> return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Copy(receiver, false))
-        .CheckedIntToFloat(_, _, _)
-        | .CheckedIntToFixed(_, _, _, _)
-        | .TryFrom(_, _, _)
-        | .FloatToInt(_, _, _, _, _)
-        | .FloatNarrow(_)
-        | .InlineRange(_, _, true) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+        .InlineRange(_, _, checked) -> {
+            if checked {
+                return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+            }
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Copy(receiver, false))
+        }
+        .CheckedIntToFloat(_, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+        .CheckedIntToFixed(_, _, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+        .TryFrom(_, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+        .FloatToInt(_, _, _, _, _) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
+        .FloatNarrow(_) -> return jet_codegen_lower_numeric_conversion(&builder, expression, receiver, receiver_expr.ty, operation)
         .Predicate(method) -> {
             member := if method == {
                 "is_nan" -> "is_nan"
@@ -1929,7 +2072,11 @@ fn jet_codegen_lower_numeric_method(builder: &JetCodegenBuilder, expression: TEx
                 "is_finite" -> "is_finite"
                 else -> panic("checked numeric predicate is unknown")
             }
-            symbol := if member == "is_nan" -> "jet_std_math_is_nan" else if member == "is_infinite" -> "jet_std_math_is_infinite" else -> "jet_std_math_is_finite"
+            symbol := if {
+                member == "is_nan" -> "jet_std_math_is_nan"
+                member == "is_infinite" -> "jet_std_math_is_infinite"
+                else -> "jet_std_math_is_finite"
+            }
             call := jet_codegen_intern_route(&builder, MirPreludeFamily.BuiltinMethod, "core.math", member, symbol, 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
             return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.NumericMethod(call, receiver)))
         }
@@ -1949,6 +2096,72 @@ fn jet_codegen_lower_numeric_binary_method(builder: &JetCodegenBuilder, expressi
     symbol := if member == "div_euclid" -> "jet_std::jet_int_div_euclid" else -> "jet_std::jet_int_rem_euclid"
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.Overflow, "core.numeric", member, symbol, 2, [Bool]{false, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.NumericBinaryMethod(call, receiver, argument)))
+}
+
+fn jet_codegen_overflow_opt_arity(prefix: String, operation: String) -> Int {
+    if prefix == "checked" && (operation == "add" || operation == "sub" || operation == "mul" || operation == "div" || operation == "rem" || operation == "pow") -> return 2
+    if prefix == "checked_policy" && (operation == "add" || operation == "sub" || operation == "mul" || operation == "div" || operation == "rem" || operation == "pow") -> return 4
+    if (prefix == "wrapping" || prefix == "saturating") && (operation == "add" || operation == "sub" || operation == "mul") -> return 2
+    if (prefix == "wrapping" || prefix == "saturating") && (operation == "div" || operation == "pow") -> return 4
+    if (prefix == "rotate_left" || prefix == "rotate_right") && operation == "rotate" -> return 4
+    panic("checked overflow option has no canonical Prelude route")
+}
+
+fn jet_codegen_overflow_opt_route(builder: &JetCodegenBuilder, prefix: String, operation: String, input: Type, result: Type, carrier: TFailureCarrier) -> MirPreludeCallId {
+    width :: jet_codegen_fixed_width(input) ?? panic("checked overflow option has no resolved fixed-width receiver type")
+    checked := prefix == "checked"
+    if {
+        checked -> {
+            if result == {
+                .Option(value) -> {
+                    if type_identity_key(value) != type_identity_key(input) -> panic("checked overflow option has a mismatched payload type")
+                }
+                else -> panic("checked overflow option has no Option result type")
+            }
+            if carrier == {
+                .Optional(value) -> {
+                    if type_identity_key(value) != type_identity_key(input) -> panic("checked overflow option has a mismatched failure carrier")
+                }
+                else -> panic("checked overflow option has a mismatched failure carrier")
+            }
+        }
+        else -> {
+            if type_identity_key(result) != type_identity_key(input) -> panic("overflow option has a mismatched resolved result type")
+            if carrier == {
+                .Optional(_) -> panic("value-producing overflow option has an optional failure carrier")
+                else -> {}
+            }
+        }
+    }
+    arity := jet_codegen_overflow_opt_arity(prefix, operation)
+    mode := if prefix == "checked_policy" -> "trap" else -> prefix
+    route_effect := if arity == 4 -> Val(Effect.Panic) else -> None
+    symbol := if prefix == "rotate_left" || prefix == "rotate_right" -> "jet_{width}_{prefix}" else -> "jet_{width}_{mode}_{operation}"
+    member := "{width}.{prefix}.{operation}"
+    borrow_mask := if arity == 2 -> [Bool]{false, false} else -> [Bool]{false, false, false, false}
+    jet_codegen_intern_route(&builder, MirPreludeFamily.Overflow, "core.numeric", member, symbol, arity, borrow_mask, route_effect, carrier, MirPreludeAbi.Value)
+}
+
+fn jet_codegen_lower_overflow_opt(builder: &JetCodegenBuilder, expression: TExpr, prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr) -> MirValueId {
+    left := jet_codegen_lower_expr(&builder, lhs)
+    right := jet_codegen_lower_expr(&builder, rhs)
+    result_type := jet_codegen_unwrap_pattern_tags(expression.ty)
+    unbounded_int := result_type == Type.Int && jet_codegen_fixed_width(lhs.ty) == None
+    if unbounded_int && (prefix == "wrapping" || prefix == "saturating") {
+        binop := if operation == {
+            "add" -> TBinaryOp.Add
+            "sub" -> TBinaryOp.Sub
+            "mul" -> TBinaryOp.Mul
+            "div" -> TBinaryOp.Div
+            "rem" -> TBinaryOp.Rem
+            else -> panic("overflow option `{prefix}_{operation}` has no Int route")
+        }
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Binary(jet_codegen_lower_binary(binop), MirBinaryDispatch.Primitive, MirBinaryOverflow.Unchecked, left, right))
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_overflow_opt_route(&builder, prefix, operation, lhs.ty, expression.ty, carrier)
+    location := if jet_codegen_overflow_opt_arity(prefix, operation) == 4 -> Val(MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}) else -> None
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.OverflowOption(call, left, right, location)))
 }
 
 fn jet_codegen_lower_callback_adapter(builder: &JetCodegenBuilder, expression: TExpr, symbol: String, lambda: TLambda, ret: ?Type, managed: Bool, plan_digest: ?String, callback_identity: ?String) -> MirValueId {
@@ -2037,7 +2250,14 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, expression: 
             handle := TExpr{ty: binding.ty, kind: TExprKind.Local(tir_user_local(handle_name, expression.span)), span: expression.span, integer_bounds: None, cost: None}
             values.push(jet_codegen_lower_expr(&builder, handle))
             closure = Val(jet_codegen_lower_lambda(&builder, executable, false, "direct").value)
-            if kind == { .OnCommit(_, _) -> mir_kind = MirCoreClosureKind.OnCommit else -> mir_kind = MirCoreClosureKind.OnRollback }
+            if kind == {
+                .OnCommit(_, _) -> {
+                    mir_kind = MirCoreClosureKind.OnCommit
+                }
+                else -> {
+                    mir_kind = MirCoreClosureKind.OnRollback
+                }
+            }
         }
         .UiButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
             values.push(jet_codegen_lower_expr(&builder, label))
@@ -2075,55 +2295,117 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, expression: 
         }
     }
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    module := ""
+    module_name := ""
     member := ""
     symbol := ""
     arity := 0
     borrow_mask := [Bool]{}
-    effect := None
+    route_effect := None
     if mir_kind == {
         .Spawn -> {
-            if grouped_spawn {
-                module = "core.tasks"
-                member = "spawn_grouped"
-                symbol = "jet_std::JetTaskGroup::spawn_at"
-                arity = 4
-                borrow_mask = [Bool]{false, false, false, false}
-            } else {
-                module = "core.tasks"
-                member = "spawn"
-                symbol = "jet_std::JetTask::spawn_at"
-                arity = 3
-                borrow_mask = [Bool]{false, false, false}
+            if {
+                grouped_spawn -> {
+                    module_name = "core.tasks"
+                    member = "spawn_grouped"
+                    symbol = "jet_std::JetTaskGroup::spawn_at"
+                    arity = 4
+                    borrow_mask = [Bool]{false, false, false, false}
+                } else -> {
+                    module_name = "core.tasks"
+                    member = "spawn"
+                    symbol = "jet_std::JetTask::spawn_at"
+                    arity = 3
+                    borrow_mask = [Bool]{false, false, false}
+                }
             }
         }
         .Realtime -> {
-            module = "core.rt"
+            module_name = "core.rt"
             member = "callback"
             symbol = "jet_rt_callback"
             arity = 3
             borrow_mask = [Bool]{false, false, false}
-            effect = Val(Effect.Time)
+            route_effect = Val(Effect.Time)
         }
-        .Serve -> { module = "core.http"; member = "serve"; symbol = "jet_http_serve"; arity = 2; borrow_mask = [Bool]{true, false} }
-        .OnInterrupt -> { module = "core.sys"; member = "on_interrupt"; symbol = "jet_std_os_on_interrupt"; arity = 1; borrow_mask = [Bool]{false} }
-        .Guard -> { module = "core.mem.scope"; member = "guard"; symbol = "jet_scope_guard"; arity = 1; borrow_mask = [Bool]{false} }
-        .OnCommit -> { module = "core.transaction"; member = "on_commit"; symbol = "jet_transaction_on_commit"; arity = 2; borrow_mask = [Bool]{true, false} }
-        .OnRollback -> { module = "core.transaction"; member = "on_rollback"; symbol = "jet_transaction_on_rollback"; arity = 2; borrow_mask = [Bool]{true, false} }
-        .ReactiveDerived -> { module = "core.reactive"; member = "derived"; symbol = "jet_std::JetDerived::new"; arity = 1; borrow_mask = [Bool]{false} }
-        .ReactiveEffect -> { module = "core.reactive"; member = "effect"; symbol = "jet_std::jet_reactive_effect"; arity = 1; borrow_mask = [Bool]{false} }
-        .UiMount -> { module = "core.ui"; member = "reactive_render"; symbol = "jet_ui_reactive_render"; arity = 1; borrow_mask = [Bool]{false} }
-        .UiAction -> { module = "core.ui"; member = "button"; symbol = "jet_ui_button_on_click"; arity = 4; borrow_mask = [Bool]{true, false, false, false} }
-        .UiTextInputOnDrop -> { module = "core.ui"; member = "text_input"; symbol = "jet_ui_text_input_on_drop"; arity = 3; borrow_mask = [Bool]{true, false, false} }
+        .Serve -> {
+            module_name = "core.http"
+            member = "serve"
+            symbol = "jet_http_serve"
+            arity = 2
+            borrow_mask = [Bool]{true, false}
+        }
+        .OnInterrupt -> {
+            module_name = "core.sys"
+            member = "on_interrupt"
+            symbol = "jet_std_os_on_interrupt"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .Guard -> {
+            module_name = "core.mem.scope"
+            member = "guard"
+            symbol = "jet_scope_guard"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .OnCommit -> {
+            module_name = "core.transaction"
+            member = "on_commit"
+            symbol = "jet_transaction_on_commit"
+            arity = 2
+            borrow_mask = [Bool]{true, false}
+        }
+        .OnRollback -> {
+            module_name = "core.transaction"
+            member = "on_rollback"
+            symbol = "jet_transaction_on_rollback"
+            arity = 2
+            borrow_mask = [Bool]{true, false}
+        }
+        .ReactiveDerived -> {
+            module_name = "core.reactive"
+            member = "derived"
+            symbol = "jet_std::JetDerived::new"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .ReactiveEffect -> {
+            module_name = "core.reactive"
+            member = "effect"
+            symbol = "jet_std::jet_reactive_effect"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .UiMount -> {
+            module_name = "core.ui"
+            member = "reactive_render"
+            symbol = "jet_ui_reactive_render"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .UiAction -> {
+            module_name = "core.ui"
+            member = "button"
+            symbol = "jet_ui_button_on_click"
+            arity = 4
+            borrow_mask = [Bool]{true, false, false, false}
+        }
+        .UiTextInputOnDrop -> {
+            module_name = "core.ui"
+            member = "text_input"
+            symbol = "jet_ui_text_input_on_drop"
+            arity = 3
+            borrow_mask = [Bool]{true, false, false}
+        }
         .UiPreview(playground, _, _, _, _, _, _, _, _) -> {
-            module = "core.ui"
+            module_name = "core.ui"
             member = if playground -> "playground" else -> "preview"
             symbol = if playground -> "jet_ui_playground_with_viewport" else -> "jet_ui_preview_with_viewport"
             arity = 3
             borrow_mask = [Bool]{true, false, false}
         }
     }
-    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, module, member, symbol, arity, borrow_mask, effect, carrier, MirPreludeAbi.Value)
+    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, symbol, arity, borrow_mask, route_effect, carrier, MirPreludeAbi.Value)
     identity := jet_codegen_identity(&builder, "site", expression.span, "core-closure", "")
     site := MirSiteId{value: stable_id("mir-site", identity)}
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.CoreClosureCall(route, mir_kind, values, closure, site, label_text)))
@@ -2160,45 +2442,60 @@ fn jet_codegen_host_call_value_arg(value: MirValueId, span: Span, access: MirAcc
 }
 
 fn jet_codegen_lower_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MirValueId {
+    if jet_codegen_reflection_host_method(receiver.ty, method, args.len()) -> return jet_codegen_lower_reflection_host_method(&builder, expression, receiver, method, args)
+    if jet_codegen_compiler_value_host_method(receiver.ty, method, args.len()) -> return jet_codegen_lower_compiler_value_host_method(&builder, expression, receiver, method, args)
     if args.len() != 1 -> panic("checked host callback method must have exactly one callback")
     member := ""
     symbol := ""
     receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Read)
     lowered := [MirCallArg]{receiver_arg}
-    if method == "shared.read" || method == "shared.edit" {
-        if builder.transactions.len() > 0 {
-            transaction := builder.transactions[builder.transactions.len() - 1]
-            stm_place :: transaction.stm_place ?? panic("checked Shared transaction callback has no active STM place")
-            stm := jet_codegen_emit_value(&builder, expression.span, Type.Named("Stm"), MirOperation.ReadPlace(stm_place))
-            lowered.push(jet_codegen_host_call_value_arg(stm, expression.span, MirAccess.Write, Val(stm_place)))
-            if method == "shared.read" {
-                member = "Shared.read_txn"
-                symbol = "jet_shared_read_txn"
-            } else {
-                member = "Shared.edit_txn"
-                symbol = "jet_shared_edit_txn"
+    if {
+        method == "shared.read" || method == "shared.edit" -> {
+            if {
+                builder.transactions.len() > 0 -> {
+                    transaction := builder.transactions[builder.transactions.len() - 1]
+                    stm_place :: transaction.stm_place ?? panic("checked Shared transaction callback has no active STM place")
+                    stm := jet_codegen_emit_value(&builder, expression.span, Type.Named("Stm"), MirOperation.ReadPlace(stm_place))
+                    lowered.push(jet_codegen_host_call_value_arg(stm, expression.span, MirAccess.Write, Val(stm_place)))
+                    if {
+                        method == "shared.read" -> {
+                            member = "Shared.read_txn"
+                            symbol = "jet_shared_read_txn"
+                        } else -> {
+                            member = "Shared.edit_txn"
+                            symbol = "jet_shared_edit_txn"
+                        }
+                    }
+                }
+                method == "shared.read" -> {
+                    member = "Shared.read"
+                    symbol = "jet_shared_read"
+                }
+                else -> {
+                    member = "Shared.edit"
+                    symbol = "jet_shared_edit"
+                }
             }
-        } else if method == "shared.read" {
-            member = "Shared.read"
-            symbol = "jet_shared_read"
-        } else {
-            member = "Shared.edit"
-            symbol = "jet_shared_edit"
         }
-    } else if method == "cell.read" {
-        member = "Cell.read"
-        symbol = "jet_cell_read"
-    } else if method == "cell.edit" {
-        member = "Cell.edit"
-        symbol = "jet_cell_edit"
-    } else if method == "cell_read_guard.read" {
-        member = "CellReadGuard.read"
-        symbol = "jet_cell_read_guard_read"
-    } else if method == "cell_edit_guard.edit" {
-        member = "CellEditGuard.edit"
-        symbol = "jet_cell_edit_guard_edit"
-    } else {
-        panic("checked callback host method has no static route")
+        method == "cell.read" -> {
+            member = "Cell.read"
+            symbol = "jet_cell_read"
+        }
+        method == "cell.edit" -> {
+            member = "Cell.edit"
+            symbol = "jet_cell_edit"
+        }
+        method == "cell_read_guard.read" -> {
+            member = "CellReadGuard.read"
+            symbol = "jet_cell_read_guard_read"
+        }
+        method == "cell_edit_guard.edit" -> {
+            member = "CellEditGuard.edit"
+            symbol = "jet_cell_edit_guard_edit"
+        }
+        else -> {
+            panic("checked callback host method has no static route")
+        }
     }
     callback := jet_codegen_lower_expr(&builder, args[0])
     lowered.push(jet_codegen_host_call_value_arg(callback, args[0].span, MirAccess.Move, None))
@@ -2222,7 +2519,11 @@ fn jet_codegen_unit_ratio_digits(value: String, negative: Bool) -> Bool {
 }
 
 fn jet_codegen_unit_ratio_nonzero(value: String) -> Bool {
-    loop byte in value.bytes() { if byte != U8{48} -> return true }
+    loop byte in value.bytes() {
+        if byte != (U8{48}) {
+            return true
+        }
+    }
     false
 }
 
@@ -2252,10 +2553,17 @@ fn jet_codegen_unit_measurement_type(ty: Type) -> Bool {
 }
 
 fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, ty: Type) -> ?Type {
-    name := if ty == {
-        .Named(value) -> value
-        .Apply(value, _) -> value
-        else -> return None
+    name := ""
+    if ty == {
+        .Named(value) -> {
+            name = value
+        }
+        .Apply(value, _) -> {
+            name = value
+        }
+        else -> {
+            return None
+        }
     }
     identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return None
@@ -2265,8 +2573,12 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, ty: Type) -> ?Type
         loop definition in semantic_module.declarations.type_defs {
             if definition.name != owner.name -> next
             if definition.kind == {
-                .Distinct(base, _) -> return Val(base)
-                else -> return None
+                .Distinct(base, _) -> {
+                    return Val(base)
+                }
+                else -> {
+                    return None
+                }
             }
         }
     }
@@ -2303,7 +2615,7 @@ fn jet_codegen_is_default_err_type(builder: &JetCodegenBuilder, ty: Type) -> Boo
     target_id :: identity ?? return false
     loop semantic_module in builder.modules {
         loop definition in semantic_module.declarations.type_defs {
-            if mir_type_id(definition.key) == target_id && jet_codegen_compiler_builtin(definition, builder.modules) == Val(MirCompilerBuiltin.DefaultErr) -> return true
+            if mir_type_id(definition.key) == target_id && jet_codegen_compiler_builtin(definition, builder.modules) == (Val(MirCompilerBuiltin.DefaultErr)) -> return true
         }
     }
     false
@@ -2314,7 +2626,7 @@ fn jet_codegen_default_err_type(builder: &JetCodegenBuilder) -> Type {
     loop semantic_module in builder.modules {
         if semantic_module.module_identity != builder.function.module_identity -> next
         loop definition in semantic_module.declarations.type_defs {
-            if jet_codegen_compiler_builtin(definition, builder.modules) == Val(MirCompilerBuiltin.DefaultErr) {
+            if jet_codegen_compiler_builtin(definition, builder.modules) == (Val(MirCompilerBuiltin.DefaultErr)) {
                 if selected != None -> panic("current module has multiple compiler-owned default error types")
                 selected = Val(Type.Named(definition.key))
             }
@@ -2384,7 +2696,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
             route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "apply_conversion", "jet_err_apply_conversion", 3, [Bool]{false, false, false}, None, TFailureCarrier.Infallible, MirPreludeAbi.Value)
             return jet_codegen_emit_static_prelude_call(&builder, span, target, route, [MirValueId]{converted, source_name, target_name})
         }
-        .WidenUnion(_, tag) -> {
+        .WidenUnion(_, tag_name) -> {
             target := if carrier == {
                 .Result(_, error_type) -> error_type
                 else -> panic("checked error union widening has no Result failure carrier")
@@ -2394,7 +2706,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
                     matched := false
                     loop member in members {
                         if type_identity_key(member) == type_identity_key(source_error) {
-                            if jet_codegen_union_member_tag(member) != jet_codegen_union_member_tag_name(tag) -> panic("checked union widening tag disagrees with its source member")
+                            if jet_codegen_union_member_tag(member) != jet_codegen_union_member_tag_name(tag_name) -> panic("checked union widening tag disagrees with its source member")
                             matched = true
                         }
                     }
@@ -2404,7 +2716,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
             }
             union_type := jet_codegen_lower_type_for_function(target, builder)
             identity :: union_type.identity ?? panic("checked union widening target has no MIR identity")
-            variant := jet_codegen_union_member_tag_name(tag)
+            variant := jet_codegen_union_member_tag_name(tag_name)
             return jet_codegen_emit_value(&builder, span, target, MirOperation.Enum(identity, variant, [MirEnumArg]{MirEnumArg{field: None, value: error, boxed: false}}))
         }
         .Never | .ProtocolExit -> panic("diverging try conversion was lowered through the value conversion path")
@@ -2413,10 +2725,18 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
 
 fn jet_codegen_try_target_is_default_err(builder: &JetCodegenBuilder, source_error: Type, conversion: TTryConvert) -> Bool {
     if conversion == {
-        .DefaultErr -> true
-        .Typed(_, _, target) -> return jet_codegen_is_default_err_type(builder, target)
-        .NoConversion -> return jet_codegen_is_default_err_type(builder, source_error)
-        else -> false
+        .DefaultErr -> {
+            return true
+        }
+        .Typed(_, _, target) -> {
+            return jet_codegen_is_default_err_type(builder, target)
+        }
+        .NoConversion -> {
+            return jet_codegen_is_default_err_type(builder, source_error)
+        }
+        else -> {
+            return false
+        }
     }
 }
 
@@ -2435,11 +2755,15 @@ fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, span: Span, conver
 fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr, note: ?TExpr, conversion: TTryConvert, file: ?String, line: Int, function: ?String) -> MirValueId {
     input := jet_codegen_lower_expr(&builder, inner)
     input_type := jet_codegen_expression_call_return_type(&builder, inner) ?? inner.ty
-    is_result := input_type == {
+    jet_codegen_lower_try_value(&builder, expression, input, input_type, inner.span, note, conversion, file, line, function)
+}
+
+fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, input: MirValueId, input_type: Type, input_span: Span, note: ?TExpr, conversion: TTryConvert, file: ?String, line: Int, function: ?String) -> MirValueId {
+    is_result := if input_type == {
         .Result(_, _) -> true
         else -> false
     }
-    is_option := input_type == {
+    is_option := if input_type == {
         .Option(_) -> true
         else -> false
     }
@@ -2476,33 +2800,38 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: 
         .Never -> jet_codegen_terminate(&builder, MirTerminator.Unreachable("checked try conversion is unreachable"))
         .ProtocolExit -> {
             if !is_result -> panic("checked protocol-exit try does not consume a Result")
-            error := jet_codegen_emit_value(&builder, inner.span, source_error, MirOperation.ResultValue(input, false))
+            error := jet_codegen_emit_value(&builder, input_span, source_error, MirOperation.ResultValue(input, false))
             route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "entry_error_exit", "jet_entry_error_exit_jet", 1, [Bool]{false}, Val("Panic"), TFailureCarrier.Diverges(Type.Named("Never")), MirPreludeAbi.Control)
-            _ := jet_codegen_emit_value(&builder, expression.span, Type.Named("Never"), MirOperation.Call(MirCallee.Prelude(route), [MirCallArg]{jet_codegen_numeric_call_arg(error, inner.span)}, [MirType]{}))
+            _ := jet_codegen_emit_value(&builder, expression.span, Type.Named("Never"), MirOperation.Call(MirCallee.Prelude(route), [MirCallArg]{jet_codegen_numeric_call_arg(error, input_span)}, [MirType]{}))
             jet_codegen_terminate(&builder, MirTerminator.Unreachable("protocol error exit diverges"))
         }
         else -> if carrier == {
             .Result(success_type, error_type) -> {
                 if !is_result -> panic("checked try Result propagation consumes an Option without a conversion")
-                error := jet_codegen_emit_value(&builder, inner.span, source_error, MirOperation.ResultValue(input, false))
+                error := jet_codegen_emit_value(&builder, input_span, source_error, MirOperation.ResultValue(input, false))
                 target_error := jet_codegen_try_output_error_type(&builder, source_error, conversion, carrier)
                 target_error_mir := jet_codegen_lower_type_for_function(target_error, &builder)
                 carrier_error_mir := jet_codegen_lower_type_for_function(error_type, &builder)
                 if !mir_type_same_checked_type(target_error_mir, carrier_error_mir) -> panic("checked try conversion target disagrees with the enclosing Result error type")
                 converted := jet_codegen_lower_try_failure_conversion(&builder, expression.span, error, source_error, conversion, carrier)
-                if context_enabled {
-                    values := jet_codegen_try_context_values(&builder, expression.span, file ?? "", line, function ?? "", note)
-                    converted = jet_codegen_lower_try_context(&builder, expression.span, converted, target_error, source_error, conversion, values)
-                } else if note != None {
-                    panic("checked try note has no source context")
+                if {
+                    context_enabled -> {
+                        values := jet_codegen_try_context_values(&builder, expression.span, file ?? "", line, function ?? "", note)
+                        converted = jet_codegen_lower_try_context(&builder, expression.span, converted, target_error, source_error, conversion, values)
+                    }
+                    note != None -> {
+                        panic("checked try note has no source context")
+                    }
                 }
                 return_type := Type.Result(success_type, error_type)
                 failure := jet_codegen_emit_value(&builder, expression.span, return_type, MirOperation.ResultErr(converted))
-                if builder.contract_scopes.len() > 0 {
-                    jet_codegen_lower_contract_return(&builder, Val(failure), expression.span)
-                } else {
-                    terminator := MirTerminator.Return(Val(failure))
-                    _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
+                if {
+                    builder.contract_scopes.len() > 0 -> {
+                        jet_codegen_lower_contract_return(&builder, Val(failure), expression.span)
+                    } else -> {
+                        terminator := MirTerminator.Return(Val(failure))
+                        _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
+                    }
                 }
             }
             .Optional(success_type) -> {
@@ -2514,11 +2843,13 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: 
                 }
                 return_type := Type.Option(success_type)
                 absent := jet_codegen_emit_value(&builder, expression.span, return_type, MirOperation.Absent)
-                if builder.contract_scopes.len() > 0 {
-                    jet_codegen_lower_contract_return(&builder, Val(absent), expression.span)
-                } else {
-                    terminator := MirTerminator.Return(Val(absent))
-                    _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
+                if {
+                    builder.contract_scopes.len() > 0 -> {
+                        jet_codegen_lower_contract_return(&builder, Val(absent), expression.span)
+                    } else -> {
+                        terminator := MirTerminator.Return(Val(absent))
+                        _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
+                    }
                 }
             }
             .Diverges(_) -> jet_codegen_terminate(&builder, MirTerminator.Unreachable("try failure diverges"))
@@ -2608,22 +2939,27 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, expression: TExpr
     member := ""
     symbol := ""
     borrow_mask := [Bool]{}
-    if rounded && measured {
-        member = "conversion_rounded_measurement"
-        symbol = "jet_std::jet_unit_conversion_rounded_measurement"
-        borrow_mask = [Bool]{false, true, true, true, true, false, false, false}
-    } else if rounded {
-        member = "conversion_rounded"
-        symbol = "jet_unit_conversion_rounded"
-        borrow_mask = [Bool]{false, true, true, true, true, false, false}
-    } else if measured {
-        member = "conversion_exact_measurement"
-        symbol = "jet_std::jet_unit_conversion_exact_measurement"
-        borrow_mask = [Bool]{false, true, true, true, true, false}
-    } else {
-        member = "conversion_exact"
-        symbol = "jet_unit_conversion_exact"
-        borrow_mask = [Bool]{false, true, true, true, true}
+    if {
+        rounded && measured -> {
+            member = "conversion_rounded_measurement"
+            symbol = "jet_std::jet_unit_conversion_rounded_measurement"
+            borrow_mask = [Bool]{false, true, true, true, true, false, false, false}
+        }
+        rounded -> {
+            member = "conversion_rounded"
+            symbol = "jet_unit_conversion_rounded"
+            borrow_mask = [Bool]{false, true, true, true, true, false, false}
+        }
+        measured -> {
+            member = "conversion_exact_measurement"
+            symbol = "jet_std::jet_unit_conversion_exact_measurement"
+            borrow_mask = [Bool]{false, true, true, true, true, false}
+        }
+        else -> {
+            member = "conversion_exact"
+            symbol = "jet_unit_conversion_exact"
+            borrow_mask = [Bool]{false, true, true, true, true}
+        }
     }
     parameters := [MirValueId]{}
     parameters.push(jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.Constant(MirConstant.String(scale_parts[0]))))
@@ -2647,8 +2983,232 @@ fn jet_codegen_lower_unit_convert(builder: &JetCodegenBuilder, expression: TExpr
     target := jet_codegen_lower_type_for_function(expression.ty, builder)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Convert(raw_value, parameters, target, MirConversion.Prelude(route, location, failure)))
 }
+fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, expression: TExpr, parts: [TListSpreadPart]) -> MirValueId {
+    element := if jet_codegen_unwrap_pattern_tags(expression.ty) == {
+        .List(inner) -> jet_codegen_unwrap_pattern_tags(inner)
+        else -> panic("checked list spread result is not a List")
+    }
+    trait_type := None
+    if element == {
+        .TraitObject(bounds) -> {
+            if bounds.len() == 1 {
+                trait_type = Val(element)
+            }
+        }
+        .Named(name) -> {
+            if jet_codegen_trait_bound_is_declared(builder.modules, name, builder.function.module_identity) {
+                trait_type = Val(Type.TraitObject([String]{name}))
+            }
+        }
+        else -> {}
+    }
+    trait_coercion := if trait_type == {
+        None -> None
+        Val(target) -> {
+            jet_codegen_require_trait_box_target(target, builder)
+            identity :: jet_codegen_lower_type_for_function(target, builder).identity ?? panic("checked list spread trait target has no MIR identity")
+            Val(identity)
+        }
+    }
+    accumulator := jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList([MirValueId]{}, trait_coercion))
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    route := jet_codegen_intern_route(&builder, MirPreludeFamily.BuiltinMethod, "core.builtin", "list_concat", "jet_list_concat", 2, [Bool]{true, true}, None, carrier, MirPreludeAbi.Value)
+    loop part in parts {
+        chunk := if part == {
+            .Element(value) -> {
+                lowered := jet_codegen_lower_expr(&builder, value)
+                jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList([MirValueId]{lowered}, trait_coercion))
+            }
+            .Spread(value) -> {
+                if jet_codegen_unwrap_pattern_tags(value.ty) == {
+                    .List(_) -> {}
+                    else -> panic("checked list spread operand is not a List")
+                }
+                jet_codegen_lower_expr(&builder, value)
+            }
+        }
+        accumulator = jet_codegen_emit_static_prelude_call(&builder, expression.span, expression.ty, route, [MirValueId]{accumulator, chunk})
+    }
+    accumulator
+}
+
+fn jet_codegen_lower_data_entries_to_map(builder: &JetCodegenBuilder, expression: TExpr, local: TLocal) -> MirValueId {
+    binding :: jet_codegen_find_binding_for_local(builder, local) ?? panic("checked data entries have no MIR local")
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "entries_to_map", "jet_data_entries_to_map", 1, [Bool]{false}, None, carrier, MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.DataEntriesToMap(call, binding.local)))
+}
+
+fn jet_codegen_lower_decode_under(builder: &JetCodegenBuilder, expression: TExpr, segment: TExpr, inner: TExpr) -> MirValueId {
+    segment_value := jet_codegen_lower_expr(&builder, segment)
+    inner_value := jet_codegen_lower_expr(&builder, inner)
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.encoding", "decode_under", "jet_std::FieldError::under", 2, [Bool]{true, false}, None, carrier, MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.DecodeUnder(call, segment_value, inner_value)))
+}
+
+fn jet_codegen_lower_pool_slot_value(builder: &JetCodegenBuilder, expression: TExpr, pool: TExpr, index: TExpr, mutable: Bool, field: ?String, line: Int, source_line: String) -> MirValueId {
+    element_type := jet_codegen_index_element_type(pool.ty, MirIndexKind.Pool)
+    access := if mutable -> MirAccess.Write else -> MirAccess.Read
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_index_route(&builder, MirIndexKind.Pool, access, carrier)
+    location := MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}
+    context := MirPanicContext{function: builder.function.name, source_line: source_line, caret: 0, locals: [MirPanicLocal]{}}
+    pool_value := jet_codegen_lower_expr(&builder, pool)
+    index_value := jet_codegen_lower_expr(&builder, index)
+    slot := jet_codegen_emit_value(&builder, expression.span, element_type, MirOperation.Index(call, pool_value, index_value, MirIndexKind.Pool, access, location, context))
+    if field == {
+        None -> {
+            if type_identity_key(expression.ty) != type_identity_key(element_type) -> panic("checked pool slot result disagrees with its element type")
+            slot
+        }
+        Val(name) -> {
+            resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, element_type, name)
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Field(slot, jet_codegen_mir_field_id(resolved)))
+        }
+    }
+}
+
+fn jet_codegen_lower_math_lane_index_value(builder: &JetCodegenBuilder, expression: TExpr, lane_type: String, base: TExpr, index: TExpr, line: Int) -> MirValueId {
+    if type_identity_key(base.ty) != type_identity_key(Type.Named(lane_type)) -> panic("checked math lane index type disagrees with its base type")
+    scalar_type := jet_codegen_math_scalar_type(lane_type)
+    if type_identity_key(expression.ty) != type_identity_key(scalar_type) -> panic("checked math lane result disagrees with its scalar type")
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_lane_index_route(&builder, lane_type, scalar_type, carrier)
+    source := jet_codegen_source_location_at(&builder, expression.span, true)
+    location := MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}
+    context := MirPanicContext{function: builder.function.name, source_line: source.source_line ?? "", caret: 0, locals: [MirPanicLocal]{}}
+    base_value := jet_codegen_lower_expr(&builder, base)
+    index_value := jet_codegen_lower_expr(&builder, index)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Index(call, base_value, index_value, MirIndexKind.Lane, MirAccess.Read, location, context))
+}
+
+fn jet_codegen_lower_index_value(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: ?SymbolId, checked_location: TPanicLoc) -> MirValueId {
+    if kind == {
+        .User(_) -> {
+            if access != AccessConvention.Read -> panic("checked index value lowering requires a read access")
+            return jet_codegen_lower_index_hook(&builder, expression, base, index, checked_location.line, checked_call)
+        }
+        .LayoutField(name) -> {
+            if access != AccessConvention.Read || checked_call != None -> panic("checked layout field selector is not an ordinary field read")
+            return jet_codegen_lower_layout_field_index(&builder, expression, base, name, checked_location.line)
+        }
+        else -> {}
+    }
+    if checked_call != None -> panic("checked custom index call requires the absent Source index-hook lowering body")
+    mir_access := jet_codegen_lower_access(access)
+    if mir_access != MirAccess.Read -> panic("checked index value lowering requires a read access")
+    index_base_type := base.ty
+    loop {
+        if index_base_type == {
+            .Tagged(_, inner) -> index_base_type = inner
+            else -> break
+        }
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    panic_location := MirPanicLoc{file: mir_source_file_id(checked_location.file), line: checked_location.line, column: checked_location.column}
+    if kind == {
+        .Range -> {
+            element_type := if index_base_type == {
+                .List(element) -> element
+                else -> panic("checked range index base is not a List")
+            }
+            if type_identity_key(expression.ty) != type_identity_key(Type.List(element_type)) -> panic("checked range index result disagrees with its List element type")
+            if index.kind == {
+                .Range(start, end, exclusive) -> {
+                    base_value := jet_codegen_lower_expr(&builder, base)
+                    start_value := jet_codegen_lower_expr(&builder, start)
+                    end_value := jet_codegen_lower_expr(&builder, end)
+                    range_value := jet_codegen_emit_value(&builder, index.span, index.ty, MirOperation.Range(start_value, end_value, exclusive))
+                    call := jet_codegen_slice_route(&builder, base.ty, true, carrier)
+                    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Slice(call, base_value, start_value, end_value, Val(range_value), panic_location))
+                }
+                else -> {
+                    base_value := jet_codegen_lower_expr(&builder, base)
+                    range_value := jet_codegen_lower_expr(&builder, index)
+                    unused_bound := jet_codegen_emit_value(&builder, index.span, Type.Int, MirOperation.Constant(MirConstant.Int(0, None, None)))
+                    call := jet_codegen_slice_route(&builder, base.ty, true, carrier)
+                    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Slice(call, base_value, unused_bound, unused_bound, Val(range_value), panic_location))
+                }
+            }
+        }
+        else -> {}
+    }
+    mir_kind := jet_codegen_index_kind(index_base_type, kind)
+    result_type := if {
+        mir_kind == MirIndexKind.Lane -> {
+            lane_type := if kind == { .Lane(name) -> name else -> panic("checked lane index has no lane type") }
+            if type_identity_key(index_base_type) != type_identity_key(Type.Named(lane_type)) -> panic("checked lane index type disagrees with its base type")
+            jet_codegen_math_scalar_type(lane_type)
+        } else -> {
+            jet_codegen_index_element_type(index_base_type, mir_kind)
+        }
+    }
+    if type_identity_key(result_type) != type_identity_key(expression.ty) -> panic("checked index result disagrees with its element type")
+    base_value := jet_codegen_lower_expr(&builder, base)
+    index_value := jet_codegen_lower_expr(&builder, index)
+    call := if {
+        mir_kind == MirIndexKind.Lane -> {
+            lane_type := if kind == { .Lane(name) -> name else -> panic("checked lane index has no lane type") }
+            jet_codegen_lane_index_route(&builder, lane_type, result_type, carrier)
+        } else -> {
+            jet_codegen_index_route(&builder, mir_kind, mir_access, carrier)
+        }
+    }
+    locals := [MirPanicLocal]{}
+    loop local in checked_location.locals {
+        binding :: jet_codegen_find_binding_for_local(builder, local.local) ?? next
+        locals.push(MirPanicLocal{name: local.display_name, local: binding.local})
+    }
+    context := MirPanicContext{function: checked_location.function, source_line: checked_location.source_line, caret: checked_location.caret, locals: locals}
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Index(call, base_value, index_value, mir_kind, mir_access, panic_location, context))
+}
+
+fn jet_codegen_lower_slice(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, start: TExpr, end: TExpr, range: ?TExpr, checked_location: TPanicLoc) -> MirValueId {
+    base_value := jet_codegen_lower_expr(&builder, base)
+    start_value := jet_codegen_lower_expr(&builder, start)
+    end_value := jet_codegen_lower_expr(&builder, end)
+    range_value := if range == {
+        None -> None
+        Val(range_expr) -> Val(jet_codegen_lower_expr(&builder, range_expr))
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_slice_route(&builder, base.ty, range_value != None, carrier)
+    location := MirPanicLoc{file: mir_source_file_id(checked_location.file), line: checked_location.line, column: checked_location.column}
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Slice(call, base_value, start_value, end_value, range_value, location))
+}
+
 fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
     if operation == {
+        .SerdeEncode -> {
+            if args.len() != 0 -> panic("checked Serde encode has unexpected arguments")
+            jet_codegen_lower_serde_encode(&builder, expression, receiver)
+        }
+        .Hardware(_) | .ReceiptAttach -> jet_codegen_lower_special_handle_method(&builder, expression, receiver, operation, args)
+        .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) -> jet_codegen_lower_take_pattern(&builder, expression, receiver, operation, args)
+        .EmailMethod(_) -> jet_codegen_lower_email_method(&builder, expression, receiver, operation, args)
+        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) -> jet_codegen_lower_http_handle_method(&builder, expression, receiver, operation, args)
+        .HTTPServerMethod(kind, method) -> {
+            if {
+                jet_codegen_http_field_projection(receiver.ty, operation, args.len()) != None || (kind == "HTTPResponse" && method == "header") -> {
+                    jet_codegen_lower_http_handle_method(&builder, expression, receiver, operation, args)
+                } else -> {
+                    jet_codegen_lower_general_handle_method(&builder, expression, receiver, operation, args)
+                }
+            }
+        }
+        .DataTreeField | .DataTreeAt | .DataTreeInt | .DataTreeText | .DataTreeBool | .DataTreeFloat | .DataTreeToText | .DataTreeEqualUnordered | .DataTreeDecode(_) -> jet_codegen_lower_data_handle_method(&builder, expression, receiver, operation, args)
+        .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> jet_codegen_lower_data_handle_method(&builder, expression, receiver, operation, args)
+        .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> jet_codegen_lower_data_handle_method(&builder, expression, receiver, operation, args)
+        .DurationNsValue | .DurationSecondsValue -> {
+            if args.len() != 0 -> panic("checked Duration value projection has unexpected arguments")
+            nanoseconds := operation == THandleOp.DurationNsValue
+            member := if nanoseconds -> "duration.ns_value" else -> "duration.seconds_value"
+            symbol := if nanoseconds -> "jet_duration_ns_value" else -> "jet_duration_seconds_value"
+            value := jet_codegen_lower_expr(&builder, receiver)
+            call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", member, symbol, 1, [Bool]{true}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, value, [MirValueId]{}, None, None)))
+        }
         .PluginInvoke(export_name, signature) -> {
             handle := jet_codegen_lower_expr(&builder, receiver)
             lowered_args := [MirValueId]{}
@@ -2668,13 +3228,534 @@ fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, expression: TExp
             )
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.PluginInvoke(route, handle, export_name, signature, lowered_args)))
         }
-        else -> panic("checked handle method lies outside the current Jet codegen contract")
+        else -> jet_codegen_lower_general_handle_method(&builder, expression, receiver, operation, args)
     }
 }
+fn jet_codegen_lower_typed_text_interpolation(builder: &JetCodegenBuilder, expression: TExpr, kind: MirTypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool]) -> MirValueId {
+    lowered_holes := [MirValueId]{}
+    loop hole in holes -> lowered_holes.push(jet_codegen_lower_expr(&builder, hole))
+    member := ""
+    symbol := ""
+    arity := 2
+    borrow_mask := [Bool]{true, false}
+    if kind == {
+        .SQL -> {
+            member = "sql_interpolate"
+            symbol = "jet_typed_sql_interpolate"
+        }
+        .HTML -> {
+            member = "html_interpolate"
+            symbol = "jet_typed_html_interpolate"
+            arity = 3
+            borrow_mask = [Bool]{true, false, true}
+        }
+        .Sh -> {
+            member = "sh_interpolate"
+            symbol = "jet_typed_sh_interpolate"
+        }
+        .URL -> {
+            member = "url_literal"
+            symbol = "jet_std::jet_typed_url_literal"
+        }
+        .Path -> {
+            member = "path_literal"
+            symbol = "jet_typed_path_literal"
+        }
+        .DateTime -> {
+            member = "datetime_literal"
+            symbol = "jet_typed_datetime_literal"
+        }
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.typed_text", member, symbol, arity, borrow_mask, None, carrier, MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.TypedTextInterp(call, kind, literals, lowered_holes, trusted_html)))
+}
+
+fn jet_codegen_lower_typed_text_projection(builder: &JetCodegenBuilder, expression: TExpr, kind: TTypedTextForm, argument: TExpr) -> MirValueId {
+    value := jet_codegen_lower_expr(&builder, argument)
+    member := if kind == {
+        .SQLRaw -> "sql_raw"
+        .HTMLRaw -> "html_raw"
+        .ShRaw -> "sh_raw"
+        .SQLTemplate -> "sql_template"
+        .SQLParams -> "sql_params"
+        .HTMLText -> "html_text"
+    }
+    borrowed := kind == TTypedTextForm.SQLTemplate || kind == TTypedTextForm.SQLParams
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.typed_text", member, "jet_typed_{member}", 1, [Bool]{borrowed}, None, carrier, MirPreludeAbi.Value)
+    jet_codegen_emit_static_prelude_call(&builder, expression.span, expression.ty, call, [MirValueId]{value})
+}
+
+fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, field: String, notes: Bool) -> MirValueId {
+    unwrapped_type := jet_codegen_unwrap_pattern_tags(receiver.ty)
+    report_type := if unwrapped_type == {
+        .Result(_, error) -> error
+        else -> unwrapped_type
+    }
+    resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, report_type, field)
+    value := jet_codegen_lower_expr(&builder, receiver)
+    carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
+    member := if notes -> "notes" else -> "partial"
+    symbol := if notes -> "jet_notes" else -> "jet_partial"
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.outcome", member, symbol, 1, [Bool]{true}, None, carrier, MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.CarrierFact(call, value, jet_codegen_mir_field_id(resolved), notes)))
+}
+
+fn jet_codegen_lower_option_probe(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr, probe: TOptionProbe) -> MirValueId {
+    if probe == {
+        .Field(name) -> jet_codegen_lower_optional_field(&builder, expression, inner, name, false)
+        .IsSome -> {
+            subject := jet_codegen_lower_expr(&builder, inner)
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.OptionIsSome(subject))
+        }
+        .Unwrap -> {
+            subject := jet_codegen_lower_expr(&builder, inner)
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.OptionValue(subject))
+        }
+    }
+}
+
+fn jet_codegen_lower_tuple_index(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: Int) -> MirValueId {
+    field := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "{index}")
+    value := jet_codegen_lower_expr(&builder, base)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Field(value, jet_codegen_mir_field_id(field)))
+}
+
+fn jet_codegen_lower_fixed_list_index(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, line: Int) -> MirValueId {
+    location := jet_codegen_assignment_panic_location(&builder, expression.span, false)
+    location.line = line
+    place := jet_codegen_index_place(&builder, base, index, TIndexKind.FixedListProof, expression.ty, MirAccess.Read, location, expression.span)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace(place))
+}
+
+fn jet_codegen_lower_yield_send(builder: &JetCodegenBuilder, expression: TExpr, value: TExpr) -> MirValueId {
+    yielded := jet_codegen_lower_expr(&builder, value)
+    resume := jet_codegen_new_block(&builder, expression.span, "yield-resume")
+    jet_codegen_terminate(&builder, MirTerminator.Yield(yielded, resume))
+    jet_codegen_switch_block(&builder, resume)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant(MirConstant.Unit))
+}
+
+fn jet_codegen_host_value_access(builder: JetCodegenBuilder, value: MirValueId, borrowed: Bool) -> MirAccess {
+    if borrowed -> return MirAccess.Read
+    index := builder.values.len()
+    loop index > 0 {
+        index -= 1
+        fact := builder.values[index]
+        if fact.id == value {
+            if fact.ownership.mode == MirOwnershipMode.Copy -> return MirAccess.Read
+            return MirAccess.Move
+        }
+    }
+    panic("checked host argument has no MIR ownership fact")
+}
+
+fn jet_codegen_apply_host_route_access(builder: &JetCodegenBuilder, args: &[MirCallArg], borrow_mask: [Bool]) {
+    index := 0
+    loop index < args.len() {
+        argument := args[index]
+        if argument.access != MirAccess.Write {
+            borrowed := false
+            if index < borrow_mask.len() -> borrowed = borrow_mask[index]
+            argument.access = jet_codegen_host_value_access(builder, argument.value, borrowed)
+            args[index] = argument
+        }
+        index += 1
+    }
+}
+
+fn jet_codegen_emit_host_route_call(builder: &JetCodegenBuilder, expression: TExpr, call: MirPreludeCallId, args: [MirCallArg], borrow_mask: [Bool]) -> MirValueId {
+    if args.len() != borrow_mask.len() -> panic("checked host operation arity disagrees with its Prelude route")
+    jet_codegen_apply_host_route_access(&builder, &args, borrow_mask)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HostCall(call, args)))
+}
+
+fn jet_codegen_lower_host_args(builder: &JetCodegenBuilder, args: [THostArg], span: Span) -> [MirCallArg] {
+    lowered := [MirCallArg]{}
+    loop argument in args {
+        value := if argument == {
+            .Expr(value) | .Borrow(value) -> jet_codegen_lower_expr(&builder, value)
+            .Lambda(lambda) -> jet_codegen_lower_lambda(&builder, lambda, false, "direct").value
+        }
+        lowered.push(jet_codegen_numeric_call_arg(value, span))
+    }
+    lowered
+}
+
+fn jet_codegen_field_owner_type(ty: Type) -> Type {
+    if ty == {
+        .Tagged(_, inner) -> return jet_codegen_field_owner_type(inner)
+        .Apply(name, args) -> {
+            if (name == "SharedGuard" || name == "CellReadGuard" || name == "CellEditGuard" || name == "Pin") && args.len() == 1 -> return jet_codegen_field_owner_type(args[0])
+        }
+        else -> {}
+    }
+    ty
+}
+
+fn jet_codegen_host_field_id(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> MirFieldId {
+    owner := jet_codegen_field_owner_type(owner_type)
+    if owner == {
+        .Tuple(fields) -> {
+            loop field in fields {
+                if field.name == field_name {
+                    mir_type := jet_codegen_lower_type_for_function(owner, &builder)
+                    return mir_field_id("{mir_type_identity_key(mir_type)}::{field_name}")
+                }
+            }
+            panic("checked tuple projection field is missing")
+        }
+        else -> {}
+    }
+    resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, owner, field_name)
+    jet_codegen_mir_field_id(resolved)
+}
+
+fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> Type {
+    owner := jet_codegen_field_owner_type(owner_type)
+    if owner == {
+        .Tuple(fields) -> {
+            loop field in fields {
+                if field.name == field_name -> return field.ty
+            }
+            panic("checked tuple projection field type is missing")
+        }
+        else -> {}
+    }
+    owner_name := if owner == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> panic("checked host projection owner is not nominal")
+    }
+    identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    nominal_identity :: identity ?? panic("checked host projection owner has no registered nominal identity")
+    generic_args := if owner == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    loop semantic_module in builder.modules {
+        if semantic_module.module_identity != nominal_identity.module_identity -> next
+        loop nominal in semantic_module.nominals {
+            if nominal.symbol.name != nominal_identity.name -> next
+            loop field in nominal.fields {
+                if field.symbol.name == field_name {
+                    generic_names := [String]{}
+                    loop parameter in nominal.generic_params -> generic_names.push(parameter.name)
+                    if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
+                    return sema_inference_substitute_type(field.ty, generic_names, generic_args)
+                }
+            }
+            panic("checked host projection field has no registered nominal field")
+        }
+    }
+    panic("checked host projection nominal disappeared from Codegen input")
+}
+
+fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: Type) -> ?TFunc {
+    untagged_type := jet_codegen_unwrap_pattern_tags(value_type)
+    value_name := ""
+    if untagged_type == {
+        .Named(name) | .Apply(name, _) -> {
+            value_name = name
+        }
+        else -> {
+            return None
+        }
+    }
+    value_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, value_name, builder.generic_type_names)
+    nominal_identity :: value_identity ?? return None
+    selected := None
+    loop function in builder.functions {
+        if function.name != "display" -> next
+        if function.kind == {
+            .TraitMethod(_, convention, owner, trait_symbol, _) -> {
+                if convention == None || jet_codegen_symbol_name(&builder, trait_symbol) != "Display" -> next
+                owner_name := if owner == {
+                    .Named(name) | .Apply(name, _) -> name
+                    else -> next
+                }
+                owner_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+                if owner_identity == None || (owner_identity ?? nominal_identity).key != nominal_identity.key -> next
+                if selected != None -> panic("checked Display method for a type is ambiguous")
+                selected = Val(function)
+            }
+            else -> {}
+        }
+    }
+    selected
+}
+
+fn jet_codegen_lower_direct_display(builder: &JetCodegenBuilder, value: MirValueId, value_type: Type, span: Span) -> MirValueId {
+    direct := jet_codegen_direct_display_function(builder, value_type)
+    if direct != None {
+        function :: direct ?? panic("checked Display method disappeared")
+        return jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Call(MirCallee.User(jet_codegen_function_id(function)), [MirCallArg]{jet_codegen_numeric_call_arg(value, span)}, [MirType]{}))
+    }
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.text.fmt", "display", "jet_fmt_display", 1, [Bool]{true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Value)
+    args := [MirCallArg]{jet_codegen_numeric_call_arg(value, span)}
+    jet_codegen_apply_host_route_access(&builder, &args, [Bool]{true})
+    jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Call(MirCallee.Prelude(call), args, [MirType]{}))
+}
+
+fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> ?MirConstant {
+    if ty == Type.Float32 {
+        if member == "MAX" -> return Val(MirConstant.Float(3.4028234663852886e38, true, None))
+        if member == "MIN" -> return Val(MirConstant.Float(-3.4028234663852886e38, true, None))
+        if member == "NAN" -> return Val(MirConstant.Float(0.0 / 0.0, true, None))
+        if member == "INFINITY" -> return Val(MirConstant.Float(1.0 / 0.0, true, None))
+        if member == "NEG_INFINITY" -> return Val(MirConstant.Float(-(1.0 / 0.0), true, None))
+        if member == "EPSILON" -> return Val(MirConstant.Float(1.1920928955078125e-7, true, None))
+    }
+    if ty == Type.Float {
+        if member == "MAX" -> return Val(MirConstant.Float(1.7976931348623157e308, false, None))
+        if member == "MIN" -> return Val(MirConstant.Float(-1.7976931348623157e308, false, None))
+        if member == "NAN" -> return Val(MirConstant.Float(0.0 / 0.0, false, None))
+        if member == "INFINITY" -> return Val(MirConstant.Float(1.0 / 0.0, false, None))
+        if member == "NEG_INFINITY" -> return Val(MirConstant.Float(-(1.0 / 0.0), false, None))
+        if member == "EPSILON" -> return Val(MirConstant.Float(2.220446049250313e-16, false, None))
+    }
+    if ty == Type.Int {
+        if member == "MAX" -> return Val(MirConstant.Int(9223372036854775807, None, None))
+        if member == "MIN" -> return Val(MirConstant.Int(-9223372036854775808, None, None))
+    }
+    if ty == {
+        .IntN(signed, bits) -> {
+            if bits < 1 || bits > 64 || (member != "MAX" && member != "MIN") -> return None
+            width := Val(MirIntegerWidth{signed: signed, bits: bits})
+            value := 0
+            if {
+                member == "MAX" -> {
+                    if {
+                        signed -> {
+                            if {
+                                bits == 64 -> {
+                                    value = 9223372036854775807
+                                } else -> {
+                                    bound := 1
+                                    shift := 1
+                                    loop shift < bits {
+                                        bound *= 2
+                                        shift += 1
+                                    }
+                                    value = bound - 1
+                                }
+                            }
+                        }
+                        bits == 64 -> {
+                            value = -1
+                        }
+                        bits == 63 -> {
+                            value = 9223372036854775807
+                        }
+                        else -> {
+                            bound := 1
+                            shift := 0
+                            loop shift < bits {
+                                bound *= 2
+                                shift += 1
+                            }
+                            value = bound - 1
+                        }
+                    }
+                }
+                signed -> {
+                    if {
+                        bits == 64 -> {
+                            value = -9223372036854775808
+                        } else -> {
+                            bound := 1
+                            shift := 1
+                            loop shift < bits {
+                                bound *= 2
+                                shift += 1
+                            }
+                            value = -bound
+                        }
+                    }
+                }
+            }
+            return Val(MirConstant.Int(value, width, None))
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, expression: TExpr, name: String) -> MirValueId {
+    name_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.Constant(MirConstant.String(name)))
+    bound_value := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant(MirConstant.Int(-1, None, None)))
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.memo", "stats", "jet_memo_stats", 2, [Bool]{false, false}, None, carrier, MirPreludeAbi.Value)
+    args := [MirCallArg]{
+        jet_codegen_numeric_call_arg(name_value, expression.span),
+        jet_codegen_numeric_call_arg(bound_value, expression.span),
+    }
+    jet_codegen_emit_host_route_call(&builder, expression, call, args, [Bool]{false, false})
+}
+
+fn jet_codegen_lower_host_helper(builder: &JetCodegenBuilder, expression: TExpr, kind: THelperKind, host_args: [THostArg]) -> MirValueId {
+    member := ""
+    symbol := ""
+    arity := 0
+    borrow_mask := [Bool]{}
+    if kind == {
+        .ClockNew -> {
+            member = "clock_new"
+            symbol = "jet_std_clock_new"
+            arity = 1
+            borrow_mask = [Bool]{false}
+        }
+        .ClockSystem -> {
+            member = "clock_system"
+            symbol = "jet_std_clock_system"
+        }
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.clock", member, symbol, arity, borrow_mask, None, carrier, MirPreludeAbi.Value)
+    args := jet_codegen_lower_host_args(&builder, host_args, expression.span)
+    jet_codegen_emit_host_route_call(&builder, expression, call, args, borrow_mask)
+}
+
+fn jet_codegen_lower_cell_guard_project(builder: &JetCodegenBuilder, expression: TExpr, recv: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool) -> MirValueId {
+    guard := jet_codegen_lower_expr(&builder, recv)
+    field_paths := [[MirFieldId]]{}
+    loop path in paths {
+        owner_type := recv.ty
+        fields := [MirFieldId]{}
+        loop field in path {
+            fields.push(jet_codegen_host_field_id(builder, owner_type, field))
+            owner_type = jet_codegen_checked_host_field_type(builder, owner_type, field)
+        }
+        field_paths.push(fields)
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    map_member := if editable -> "map_edit" else -> "map_read"
+    map_call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.cell_guard", map_member, "jet_cell_guard_map", 2, [Bool]{true, false}, None, carrier, MirPreludeAbi.Value)
+    split_call := None
+    if field_paths.len() == 2 {
+        split_member := if editable -> "split_edit" else -> "split_read"
+        split_call = Val(jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.cell_guard", split_member, "jet_cell_guard_split", 3, [Bool]{true, false, false}, None, carrier, MirPreludeAbi.Value))
+    }
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.CellGuardProject(map_call, split_call, guard, field_paths, editable, edit_paths_disjoint)))
+}
+
+fn jet_codegen_lower_gc_read(builder: &JetCodegenBuilder, expression: TExpr, root: TLocal) -> MirValueId {
+    root_value := jet_codegen_lower_gc_local(&builder, root, expression.span)
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.gc", "read", "jet_gc_read", 1, [Bool]{true}, Val(Effect.Mem), carrier, MirPreludeAbi.Value)
+    args := [MirCallArg]{jet_codegen_numeric_call_arg(root_value, expression.span)}
+    jet_codegen_emit_host_route_call(&builder, expression, call, args, [Bool]{true})
+}
+
+fn jet_codegen_lower_expect_snapshot(builder: &JetCodegenBuilder, expression: TExpr, value: TExpr, snap_path: String) -> MirValueId {
+    value_type := value.ty
+    shown_value := jet_codegen_lower_expr(&builder, value)
+    shown := jet_codegen_lower_direct_display(&builder, shown_value, value_type, expression.span)
+    path := jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.Constant(MirConstant.String(snap_path)))
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.test", "expect_snapshot", "jet_expect_snapshot", 2, [Bool]{false, false}, Val(Effect.FS), carrier, MirPreludeAbi.Value)
+    args := [MirCallArg]{
+        jet_codegen_numeric_call_arg(shown, expression.span),
+        jet_codegen_numeric_call_arg(path, expression.span),
+    }
+    jet_codegen_emit_host_route_call(&builder, expression, call, args, [Bool]{false, false})
+}
+
+fn jet_codegen_lower_expiring_new(builder: &JetCodegenBuilder, expression: TExpr, value: TExpr, duration: TExpr, clock: TExpr, elem: Type, secret: Bool) -> MirValueId {
+    values := [TExpr]{value, duration, clock}
+    args := [MirCallArg]{}
+    loop item in values -> args.push(jet_codegen_numeric_call_arg(jet_codegen_lower_expr(&builder, item), expression.span))
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    member := if secret -> "secret_new" else -> "new"
+    symbol := if secret -> "jet_expiring_secret_new" else -> "jet_expiring_new"
+    borrow_mask := [Bool]{false, true, true}
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.expiring", member, symbol, 3, borrow_mask, Val(Effect.Time), carrier, MirPreludeAbi.Value)
+    jet_codegen_apply_host_route_access(&builder, &args, borrow_mask)
+    type_args := if secret -> [MirType]{jet_codegen_lower_type_for_function(elem, &builder)} else -> [MirType]{jet_codegen_lower_type_for_function(value.ty, &builder)}
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, args, [MirPreludeTypeArg]{}, type_args)))
+}
+
+fn jet_codegen_lower_ambient_input(builder: &JetCodegenBuilder, expression: TExpr, prompt: ?TExpr) -> MirValueId {
+    prompt_value := None
+    if prompt == .Val(value) -> prompt_value = Val(jet_codegen_lower_expr(&builder, value))
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.term", "input", "jet_std_io_input", 1, [Bool]{true}, Val(Effect.IO), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Effect)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.AmbientInput(call, prompt_value)))
+}
+
+fn jet_codegen_close_function(builder: JetCodegenBuilder, receiver_type: Type) -> TFunc {
+    name := if jet_codegen_unwrap_pattern_tags(receiver_type) == {
+        .Named(value) | .Apply(value, _) -> value
+        else -> panic("checked close receiver has no nominal owner")
+    }
+    owner :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
+    selected := None
+    loop function in builder.functions {
+        if function.name != "close" -> next
+        function_owner := if function.kind == {
+            .Method(_, ty) | .TraitMethod(_, _, ty, _, _) -> ty
+            else -> next
+        }
+        function_owner_name := if jet_codegen_unwrap_pattern_tags(function_owner) == {
+            .Named(value) | .Apply(value, _) -> value
+            else -> next
+        }
+        identity :: jet_codegen_find_nominal_identity(builder.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        if identity.key != owner.key -> next
+        if selected != None -> panic("checked close method is ambiguous")
+        selected = Val(function)
+    }
+    selected ?? panic("checked close method has no reachable function")
+}
+
+fn jet_codegen_lower_close(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr) -> MirValueId {
+    receiver_type := jet_codegen_unwrap_pattern_tags(inner.ty)
+    name := if receiver_type == {
+        .Named(value) | .Apply(value, _) -> value
+        else -> ""
+    }
+    if jet_codegen_is_core_file_owner_type(builder, receiver_type) || name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed" {
+        value := jet_codegen_lower_expr(&builder, inner)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Drop(value, jet_codegen_ownership(inner.ty).drop))
+    }
+    if name == "DbLease" {
+        receiver := jet_codegen_lower_expr(&builder, inner)
+        call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", "db_lease.close", "jet_db_lease_close", 1, [Bool]{false}, Val(Effect.DB), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, receiver, [MirValueId]{}, None, None)))
+    }
+    function := jet_codegen_close_function(builder, inner.ty)
+    result_type := jet_codegen_checked_method_return_type(&builder, function, inner.ty, [Type]{})
+    argument := jet_codegen_method_receiver_arg(&builder, inner, MirAccess.Move)
+    jet_codegen_emit_value(&builder, expression.span, result_type, MirOperation.Call(MirCallee.User(jet_codegen_function_id(function)), [MirCallArg]{argument}, [MirType]{}))
+}
+
 fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, expression: TExpr, call: THostCall) -> MirValueId {
     if call == {
         .CCallback(symbol, lambda, ret, managed, plan_digest, callback_identity) -> return jet_codegen_lower_callback_adapter(&builder, expression, symbol, lambda, ret, managed, plan_digest, callback_identity)
         .Method(receiver, method, args) -> return jet_codegen_lower_host_method(&builder, expression, receiver, method, args)
+        .TypedText(kind, argument) -> return jet_codegen_lower_typed_text_projection(&builder, expression, kind, argument)
+        .TypedTextInterp(kind, literals, holes, trusted_html) -> return jet_codegen_lower_typed_text_interpolation(&builder, expression, kind, literals, holes, trusted_html)
+        .CarrierFact(receiver, field, notes) -> return jet_codegen_lower_carrier_fact(&builder, expression, receiver, field, notes)
+        .OptionProbe(inner, probe) -> return jet_codegen_lower_option_probe(&builder, expression, inner, probe)
+        .TupleIndex(base, index) -> return jet_codegen_lower_tuple_index(&builder, expression, base, index)
+        .FixedListIndex(base, index, line) -> return jet_codegen_lower_fixed_list_index(&builder, expression, base, index, line)
+        .YieldSend(value) -> return jet_codegen_lower_yield_send(&builder, expression, value)
+        .MemoStats(name) -> return jet_codegen_lower_memo_stats(&builder, expression, name)
+        .Helper(_, kind, args) -> return jet_codegen_lower_host_helper(&builder, expression, kind, args)
+        .CellGuardProject(recv, paths, result_type, editable, edit_paths_disjoint) -> return jet_codegen_lower_cell_guard_project(&builder, expression, recv, paths, result_type, editable, edit_paths_disjoint)
+        .GcRead(root) -> return jet_codegen_lower_gc_read(&builder, expression, root)
+        .ExpectSnapshot(value, snap_path) -> return jet_codegen_lower_expect_snapshot(&builder, expression, value, snap_path)
+        .NumericBounds(ty, member) -> {
+            constant :: jet_codegen_numeric_bound_constant(ty, member) ?? panic("unsupported numeric bound `{member}` on {type_name(ty)}")
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant(constant))
+        }
+        .ExpiringSecretNew(value, duration, clock, elem) -> return jet_codegen_lower_expiring_new(&builder, expression, value, duration, clock, elem, true)
+        .ExpiringValueNew(value, duration, clock) -> return jet_codegen_lower_expiring_new(&builder, expression, value, duration, clock, value.ty, false)
+        .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, expression, subject, parts, probe)
+        .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, expression, subject, parts, probe)
+        .EnvSet(name, value, location) -> return jet_codegen_lower_env_set(&builder, expression, name, value, location)
+        .GcEdit(root, _, edges, edit, index_temp, kind) -> return jet_codegen_lower_gc_edit(&builder, expression, root, edges, edit, index_temp, kind)
+        .SwitchSubjectField(field) -> return jet_codegen_lower_switch_subject(&builder, expression, Val(field))
+        .SwitchSubjectValue -> return jet_codegen_lower_switch_subject(&builder, expression, None)
         else -> panic("checked host call lies outside the current Jet codegen contract")
     }
 }
@@ -2698,9 +3779,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
         }
         .StructLit(fields, extra, as_trait) -> jet_codegen_lower_struct_literal(&builder, expression, fields, extra, as_trait)
         .EnumLit(enum_type, variant, payload) -> jet_codegen_lower_enum_literal(&builder, expression, enum_type, variant, payload)
+        .EnumCtor(owner, variant, payload) -> jet_codegen_lower_enum_constructor(&builder, expression, owner, variant, payload)
         .Local(local) -> jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace(jet_codegen_lower_local_place(&builder, local)))
+        .ConstRef(symbol) -> jet_codegen_lower_constant_reference(&builder, expression, symbol)
         .Field(receiver, field) -> jet_codegen_lower_field_expr(&builder, expression, receiver, field)
         .OptField(base, member, flatten) -> jet_codegen_lower_optional_field(&builder, expression, base, member, flatten)
+        .OrFallback(value, fallback, ambient_err) -> jet_codegen_lower_or_fallback(&builder, expression, value, fallback, ambient_err)
+        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> jet_codegen_lower_result_handler(&builder, expression, subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal)
+        .OptionLift2(function, left, right) -> jet_codegen_lower_option_lift2(&builder, expression, function, left, right)
+        .DecodeUnder(segment, inner) -> jet_codegen_lower_decode_under(&builder, expression, segment, inner)
+        .DataEntriesToMap(local) -> jet_codegen_lower_data_entries_to_map(&builder, expression, local)
         .InlineBlock(body) -> jet_codegen_lower_inline_block(&builder, expression, body)
         .Unit -> jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant(MirConstant.Unit))
         .CtLit(value) -> {
@@ -2741,6 +3829,9 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
         .MathBuiltin(type_name, function, args) -> jet_codegen_lower_math_builtin(&builder, expression, type_name, function, args)
         .CoreCall(record, args, _, type_args, widen_to_vec, data_plan, failure) -> {
             canonical_record := jet_codegen_canonical_core_record(record)
+            if canonical_record.module_name == "core.encoding.xml" && canonical_record.member == "decode" {
+                return jet_codegen_lower_xml_typed_decode(&builder, expression, args, type_args, data_plan) ?? panic("checked typed XML decode has no target type")
+            }
             registered_math := jet_codegen_lower_registered_math_constructor(&builder, expression, canonical_record, args, type_args, data_plan, failure)
             if registered_math != None -> return registered_math ?? panic("checked precise math constructor lowering disappeared")
             call := jet_codegen_intern_core_call(&builder, canonical_record)
@@ -2756,6 +3847,9 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             lowered_types := [MirType]{}
             loop ty in type_args -> lowered_types.push(jet_codegen_lower_type_for_function(ty, &builder))
             call_failure := jet_codegen_core_call_fallibility(failure, &builder)
+            if (canonical_record.module_name == "core.sys" && canonical_record.member == "stop") || (canonical_record.module_name == "core.process" && canonical_record.member == "exit") {
+                jet_codegen_emit_explicit_stop_cleanups(&builder)
+            }
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.CoreCall(call, route, lowered_args, lowered_types, call_failure, data_plan))
         }
         .Call(callee, type_args, args) -> {
@@ -2817,6 +3911,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
         .MethodCall(receiver, method, type_args, args) -> jet_codegen_lower_method_call(&builder, expression, receiver, method, type_args, args)
         .NumericMethod(receiver, operation) -> jet_codegen_lower_numeric_method(&builder, expression, receiver, operation)
         .NumericBinaryMethod(receiver, operation, argument) -> jet_codegen_lower_numeric_binary_method(&builder, expression, receiver, operation, argument)
+        .OverflowOpt(prefix, operation, line, _, lhs, rhs) -> jet_codegen_lower_overflow_opt(&builder, expression, prefix, operation, line, lhs, rhs)
         .Unary(op, operand) -> {
             value := jet_codegen_lower_expr(&builder, operand)
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Unary(jet_codegen_lower_unary(op), value))
@@ -2834,13 +3929,25 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Binary(jet_codegen_lower_binary(op), dispatch, mir_overflow, left, right))
         }
         .CompareChain(operands, operators, hooks) -> jet_codegen_lower_compare_chain(&builder, expression, operands, operators, hooks)
+        .LayoutCompare(op, lhs, rhs) -> jet_codegen_lower_layout_compare(&builder, expression, op, lhs, rhs)
         .IncDec(op, place, postfix, ty) -> jet_codegen_lower_inc_dec(&builder, expression, op, place, postfix, ty)
+        .Index(base, index, kind, access, checked_call, location) -> jet_codegen_lower_index_value(&builder, expression, base, index, kind, access, checked_call, location)
+        .PoolSlot(pool, index, mutable, field, line, source_line) -> jet_codegen_lower_pool_slot_value(&builder, expression, pool, index, mutable, field, line, source_line)
+        .MathLaneIndex(lane_type, base, index, line) -> jet_codegen_lower_math_lane_index_value(&builder, expression, lane_type, base, index, line)
+        .MathSwizzleRead(type_name, receiver, lanes) -> jet_codegen_lower_math_swizzle_read(&builder, expression, type_name, receiver, lanes)
+        .ColumnarGather(base, index, line) -> jet_codegen_lower_columnar_gather(&builder, expression, base, index, line)
+        .ColumnarColumnRead(base, index, owner, field, column, _) -> jet_codegen_lower_columnar_read(&builder, expression, base, index, owner, field, column)
+        .IndexHook(_, base, index, line) -> jet_codegen_lower_index_hook(&builder, expression, base, index, line, None)
+        .Slice(base, start, end, range, location) -> jet_codegen_lower_slice(&builder, expression, base, start, end, range, location)
         .Range(start, end, exclusive) -> {
             lowered_start := jet_codegen_lower_expr(&builder, start)
             lowered_end := jet_codegen_lower_expr(&builder, end)
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Range(lowered_start, lowered_end, exclusive))
         }
         .Tuple(values) -> jet_codegen_lower_tuple(&builder, expression, values)
+        .ListSpread(parts) -> jet_codegen_lower_list_spread(&builder, expression, parts)
+        .JSONLit(variant, argument, clone_arg) -> jet_codegen_lower_json_literal(&builder, expression, variant, argument, clone_arg)
+        .DBValueLit(variant, argument, clone_arg) -> jet_codegen_lower_db_value_literal(&builder, expression, variant, argument, clone_arg)
         .List(values, trait_coercion) -> {
             lowered_values := [MirValueId]{}
             loop value in values -> lowered_values.push(jet_codegen_lower_expr(&builder, value))
@@ -2857,6 +3964,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
                     }
                     jet_codegen_lower_type_for_function(ty, builder).identity
                 }
+            }
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList(lowered_values, lowered_coercion))
         }
         .Map(entries) -> {
@@ -2899,6 +4007,9 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             lowered := jet_codegen_lower_expr(&builder, value)
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Copy(lowered, true))
         }
+        .RequireStop(kind, location, always_stops) -> jet_codegen_lower_require_stop(&builder, expression, kind, always_stops, location)
+        .AmbientInput(prompt) -> jet_codegen_lower_ambient_input(&builder, expression, prompt)
+        .Close(inner) -> jet_codegen_lower_close(&builder, expression, inner)
         .Move(value) -> {
             if value.kind == {
                 .Local(local) -> {
@@ -2939,6 +4050,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             lowered := jet_codegen_lower_expr(&builder, value)
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.LayoutLiteral(lowered)))
         }
+        .Unreachable(line) -> jet_codegen_lower_unreachable(&builder, expression, line)
+        .Todo(line) -> jet_codegen_lower_todo(&builder, expression, line)
         .Never(reason) -> jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Never(reason))
         .PatternMatches(subject, pattern) -> {
             subject_value := jet_codegen_lower_expr(&builder, subject)
@@ -2947,9 +4060,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
         .Lambda(lambda) | .LambdaValue(lambda) -> jet_codegen_lower_lambda(&builder, lambda, false, "direct").value
         .SharedGuardWait(guard, condition, predicate) -> jet_codegen_lower_shared_guard_wait(&builder, expression, guard, condition, predicate)
         .CoreClosureCall(kind) -> jet_codegen_lower_core_closure_call(&builder, expression, kind)
+        .TaskGroupAll(tasks) -> jet_codegen_lower_task_group_value(&builder, expression, tasks, MirTaskGroupKind.All)
+        .TaskGroupRace(tasks) -> jet_codegen_lower_task_group_value(&builder, expression, tasks, MirTaskGroupKind.Race)
+        .TaskGroupAny(tasks) -> jet_codegen_lower_task_group_value(&builder, expression, tasks, MirTaskGroupKind.Any)
+        .SelectWait(table, nonblocking) -> jet_codegen_lower_select_wait(&builder, expression, table, nonblocking)
+        .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) -> panic("readiness-table construction is only valid as the operand of select wait")
         .FnValue(kind) -> jet_codegen_lower_fn_value(&builder, expression, kind)
         .HostBorrowCallback(callable, params) -> jet_codegen_lower_host_borrow_callback(&builder, expression, callable, params, false)
+        .BuiltinMethod(receiver, operation, args) -> jet_codegen_lower_builtin_method(&builder, expression, receiver, operation, args)
         .HandleMethod(receiver, operation, args) -> jet_codegen_lower_handle_method(&builder, expression, receiver, operation, args)
+        .ClosureMethod(receiver, operation, args) -> jet_codegen_lower_closure_method(&builder, expression, receiver, operation, args)
         .HostCall(call) -> jet_codegen_lower_host_call(&builder, expression, call)
         else -> panic("checked TIR expression lies outside the current Jet codegen contract")
     }
@@ -3085,13 +4205,16 @@ fn jet_codegen_pattern_binding_fact(pattern: TPattern, name: String) -> TPattern
 
 fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, fact: TPatternBindingFact, value: MirValueId, reuse: Bool) {
     if fact.name == "" || fact.name == "_" -> return
-    place := if reuse {
-        binding :: jet_codegen_find_binding(builder, fact.name) ?? panic("checked or-pattern binding has no shared MIR local")
-        binding.place
-    } else {
-        local := tir_user_local(fact.name, fact.span)
-        local.mutable = fact.mutable
-        jet_codegen_bind_local(&builder, local, fact.ty, fact.mutable, None, None, false)
+    local := tir_user_local(fact.name, fact.span)
+    local.mutable = fact.mutable
+    local.symbol_id = fact.symbol_id
+    place := if {
+        reuse -> {
+            binding :: jet_codegen_find_binding_for_local(builder, local) ?? panic("checked or-pattern binding has no shared MIR local")
+            binding.place
+        } else -> {
+            jet_codegen_bind_local(&builder, local, fact.ty, fact.mutable, None, None, false)
+        }
     }
     bound_value := value
     if fact.boxed -> bound_value = jet_codegen_emit_value(&builder, fact.span, fact.ty, MirOperation.Deref(value))
@@ -3110,7 +4233,7 @@ fn jet_codegen_pattern_match_route(builder: &JetCodegenBuilder, binary: Bool) ->
         member: member,
         symbol: MirSymbol.Prelude(symbol),
         signature: MirCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}},
-        effect: None,
+        effect_kind: None,
         fallibility: MirCallFallibility.Infallible,
         abi: MirPreludeAbi.Value,
         authority: None,
@@ -3438,4 +4561,305 @@ fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, patter
 
 fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, pattern: TPattern, subject: TExpr, subject_value: MirValueId, bind_success: Bool) -> MirValueId {
     jet_codegen_lower_pattern_shape_condition(&builder, pattern, subject, subject_value, pattern.shape, bind_success, false)
+}
+
+fn jet_codegen_task_result_type(ty: Type) -> Bool {
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .Apply(name, args) -> {
+            if name != "Task" || args.len() != 1 -> return false
+            if jet_codegen_unwrap_pattern_tags(args[0]) == {.Result(_, _) -> true else -> false}
+        }
+        else -> false
+    }
+}
+
+fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool {
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .List(inner) | .FixedList(inner, _) -> jet_codegen_task_result_type(inner)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !jet_codegen_task_result_type(field.ty) -> return false
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+fn jet_codegen_lower_consuming_task_value(builder: &JetCodegenBuilder, value: TExpr) -> MirValueId {
+    if jet_codegen_lower_expression_place(&builder, value, MirAccess.Move) == .Val(place) {
+        return jet_codegen_emit_value(&builder, value.span, value.ty, MirOperation.MovePlace(place))
+    }
+    jet_codegen_lower_expr(&builder, value)
+}
+
+fn jet_codegen_lower_task_group_value(builder: &JetCodegenBuilder, expression: TExpr, tasks: TExpr, kind: MirTaskGroupKind) -> MirValueId {
+    member := if kind == {
+        .All -> "all"
+        .Race -> "race"
+        .Any -> "any"
+    }
+    if jet_codegen_task_group_result_tasks(tasks.ty) -> member = "{member}_result"
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.tasks", member, "jet_std::jet_task_{member}", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+    value := jet_codegen_lower_consuming_task_value(&builder, tasks)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.TaskGroup(call, kind, [MirValueId]{value})))
+}
+
+fn jet_codegen_lower_select_builder(builder: &JetCodegenBuilder, table: TExpr, receivers: &[MirValueId], timers: &[MirValueId]) {
+    if table.kind == {
+        .SelectStart -> {}
+        .SelectRecv(previous, channel) -> {
+            receivers.push(jet_codegen_lower_expr(&builder, channel))
+            jet_codegen_lower_select_builder(&builder, previous, &receivers, &timers)
+        }
+        .SelectAfter(previous, duration, value) -> {
+            if value != None -> panic("readiness timer arm unexpectedly carries a value")
+            nanoseconds := TExpr{ty: Type.Int, kind: TExprKind.HandleMethod(duration, THandleOp.DurationNsValue, [TExpr]{}), span: table.span, integer_bounds: None, cost: None}
+            timers.push(jet_codegen_lower_expr(&builder, nanoseconds))
+            jet_codegen_lower_select_builder(&builder, previous, &receivers, &timers)
+        }
+        else -> panic("select wait has a non-canonical readiness-table builder")
+    }
+}
+
+fn jet_codegen_select_payload_type(ty: Type) -> Type {
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .Result(ok, _) | .Option(ok) -> jet_codegen_select_payload_type(ok)
+        .Apply(name, args) -> if name == "Task" && args.len() == 1 -> args[0] else -> ty
+        else -> ty
+    }
+}
+
+fn jet_codegen_lower_select_wait(builder: &JetCodegenBuilder, expression: TExpr, table: TExpr, nonblocking: Bool) -> MirValueId {
+    receivers := [MirValueId]{}
+    timers := [MirValueId]{}
+    jet_codegen_lower_select_builder(&builder, table, &receivers, &timers)
+    payload := jet_codegen_select_payload_type(expression.ty)
+    receiver_type := Type.Apply("Receiver", [Type]{payload})
+    receiver_list := jet_codegen_emit_value(&builder, expression.span, Type.List(receiver_type), MirOperation.BuildList(receivers, None))
+    timer_list := jet_codegen_emit_value(&builder, expression.span, Type.List(Type.Int), MirOperation.BuildList(timers, None))
+    member := if nonblocking -> "select_try_wait_tagged" else -> "select_wait_tagged"
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.tasks", member, "jet_std::jet_{member}", 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.Select(call, MirSelectKind.Wait, [MirValueId]{receiver_list, timer_list})))
+}
+
+fn jet_codegen_lower_math_swizzle_read(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, receiver: TExpr, lanes: [Int]) -> MirValueId {
+    if lanes.len() == 0 -> panic("checked swizzle has no lanes")
+    base := jet_codegen_lower_expr(&builder, receiver)
+    scalar := jet_codegen_math_scalar_type(type_name)
+    source := jet_codegen_source_location_at(&builder, expression.span, true)
+    location := MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: source.line, column: 0}
+    context := MirPanicContext{function: builder.function.name, source_line: source.source_line ?? "", caret: 0, locals: [MirPanicLocal]{}}
+    values := [MirValueId]{}
+    loop lane in lanes {
+        index := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant(MirConstant.Int(lane, None, None)))
+        call := jet_codegen_lane_index_route(&builder, type_name, scalar, jet_codegen_failure_carrier_for_type(scalar))
+        values.push(jet_codegen_emit_value(&builder, expression.span, scalar, MirOperation.Index(call, base, index, MirIndexKind.Lane, MirAccess.Read, location, context)))
+    }
+    if values.len() == 1 -> return values[0]
+    result_name := if jet_codegen_unwrap_pattern_tags(expression.ty) == {
+        .Named(name) -> name
+        else -> panic("checked multi-lane swizzle has no vector result type")
+    }
+    jet_codegen_emit_math_builtin(&builder, expression, result_name, "new", values)
+}
+
+fn jet_codegen_lower_layout_compare(builder: &JetCodegenBuilder, expression: TExpr, op: TBinaryOp, lhs: TExpr, rhs: TExpr) -> MirValueId {
+    operation := if op == {
+        .Eq -> MirLayoutCompareOp.Equal
+        .Le -> MirLayoutCompareOp.LessEqual
+        .Ge -> MirLayoutCompareOp.GreaterEqual
+        else -> panic("checked layout comparison has an invalid operator")
+    }
+    member := if operation == {
+        .Equal -> "eq"
+        .LessEqual -> "le"
+        .GreaterEqual -> "ge"
+    }
+    symbol := if operation == {
+        .Equal -> "jet_layout::eq_"
+        .LessEqual -> "jet_layout::le"
+        .GreaterEqual -> "jet_layout::ge"
+    }
+    left := jet_codegen_lower_expr(&builder, lhs)
+    right := jet_codegen_lower_expr(&builder, rhs)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.layout", member, symbol, 2, [Bool]{false, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.LayoutCompare(call, operation, left, right)))
+}
+
+fn jet_codegen_lower_columnar_gather(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, line: Int) -> MirValueId {
+    call := jet_codegen_index_route(&builder, MirIndexKind.List, MirAccess.Read, jet_codegen_failure_carrier_for_type(expression.ty))
+    source := jet_codegen_source_location_at(&builder, expression.span, true)
+    location := MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}
+    value := jet_codegen_lower_expr(&builder, base)
+    position := jet_codegen_lower_expr(&builder, index)
+    context := MirPanicContext{function: builder.function.name, source_line: source.source_line ?? "", caret: 0, locals: [MirPanicLocal]{}}
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Index(call, value, position, MirIndexKind.List, MirAccess.Read, location, context))
+}
+
+fn jet_codegen_lower_columnar_read(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, owner: String, field: String, column: Int) -> MirValueId {
+    field_id := jet_codegen_host_field_id(builder, Type.Named(owner), field)
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.ColumnarAccess, "core.columnar", "{owner}::{field}#{column}", "jet_columns_gather_cell", 3, [Bool]{true, false, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+    value := jet_codegen_lower_expr(&builder, base)
+    position := jet_codegen_lower_expr(&builder, index)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ColumnarRead(call, value, position, field_id, column)))
+}
+
+fn jet_codegen_index_hook_get_call(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, checked_call: ?SymbolId) -> MirValueId {
+    target := jet_codegen_index_hook_function(builder, base.ty, "Index", "get")
+    method_symbol := None
+    trait_symbol := None
+    if target == {
+        .Val(function) -> {
+            method_symbol = Val(SymbolId{key: function.key})
+            if function.kind == {
+                .TraitMethod(_, _, _, symbol, _) -> trait_symbol = Val(symbol)
+                .Method(_, _) -> {}
+                else -> panic("checked Index::get target is not an instance method")
+            }
+        }
+        else -> {
+            resolved := jet_codegen_index_hook_trait_method(builder, base.ty, None, "Index", "get")
+            method_symbol = Val(SymbolId{key: resolved.method.key})
+            trait_symbol = Val(resolved.symbol)
+        }
+    }
+    method := TMethodRef{symbol: method_symbol ?? panic("checked Index::get has no method identity"), name: "get", mangled: false, trait_owner: trait_symbol, operator_identity: None}
+    if checked_call == .Val(required) && required.key != method.symbol.key -> panic("checked index call disagrees with its registered Index::get identity")
+    argument := jet_codegen_transaction_call_arg(index)
+    argument.borrow = !jet_codegen_is_scalar_type(index.ty)
+    args := [TCallArg]{argument}
+    call_expression := TExpr{ty: Type.Option(expression.ty), kind: TExprKind.MethodCall(base, method, [Type]{}, args), span: expression.span, integer_bounds: None, cost: None}
+    jet_codegen_lower_method_call(&builder, call_expression, base, method, [Type]{}, args)
+}
+
+fn jet_codegen_lower_index_hook_failure(builder: &JetCodegenBuilder, span: Span, line: Int) {
+    never := Type.Named("Never")
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.index", "index_miss", "jet_panic", 3, [Bool]{true, false, true}, Val(Effect.Panic), TFailureCarrier.Diverges(never), MirPreludeAbi.Control)
+    file := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant(MirConstant.String(builder.function.source_file)))
+    line_value := jet_codegen_emit_value(&builder, span, Type.IntN(false, 32), MirOperation.Constant(MirConstant.Int(line, Val(MirIntegerWidth{signed: false, bits: 32}), None)))
+    message := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant(MirConstant.String("index miss")))
+    values := [MirValueId]{file, line_value, message}
+    args := [MirCallArg]{}
+    source_index := 0
+    loop value in values {
+        argument := jet_codegen_host_call_value_arg(value, span, MirAccess.Read, None)
+        argument.source_index = Val(source_index)
+        args.push(argument)
+        source_index += 1
+    }
+    jet_codegen_emit_explicit_stop_cleanups(&builder)
+    _ := jet_codegen_emit_value(&builder, span, never, MirOperation.Call(MirCallee.Prelude(call), args, [MirType]{}))
+    jet_codegen_terminate(&builder, MirTerminator.Unreachable("index miss"))
+}
+
+fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, index: TExpr, line: Int, checked_call: ?SymbolId) -> MirValueId {
+    call := jet_codegen_index_hook_get_call(&builder, expression, base, index, checked_call)
+    success := jet_codegen_new_block(&builder, expression.span, "index-hook-success")
+    failure := jet_codegen_new_block(&builder, expression.span, "index-hook-failure")
+    join := jet_codegen_new_block(&builder, expression.span, "index-hook-join")
+    condition := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.OptionIsSome(call))
+    jet_codegen_terminate(&builder, MirTerminator.Branch(condition, success, failure))
+    incoming := [MirPhiIncoming]{}
+    jet_codegen_switch_block(&builder, success)
+    value := jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.OptionValue(call))
+    source := builder.current
+    if jet_codegen_current_is_open(builder) {
+        jet_codegen_terminate(&builder, MirTerminator.Jump(join))
+        incoming.push(MirPhiIncoming{block: source, value: value})
+    }
+    jet_codegen_switch_block(&builder, failure)
+    jet_codegen_lower_index_hook_failure(&builder, expression.span, line)
+    if incoming.len() == 0 -> panic("checked Index::get has no reachable success branch")
+    jet_codegen_switch_block(&builder, join)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi(incoming))
+}
+
+fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, field_name: String, line: Int) -> MirValueId {
+    field_type := Type.Named("LayoutField")
+    fields := TExpr{ty: Type.List(field_type), kind: TExprKind.Field(base, "fields"), span: expression.span, integer_bounds: None, cost: None}
+    owner_key := "{builder.function.key}::layout-field-select@{expression.span.start}..{expression.span.end}"
+    parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, "layout_field")
+    parameter := tir_symbol_local("layout_field", expression.span, parameter_symbol)
+    parameter.deref = true
+    parameter_value := TExpr{ty: field_type, kind: TExprKind.Local(parameter), span: expression.span, integer_bounds: None, cost: None}
+    name := TExpr{ty: Type.String, kind: TExprKind.Field(parameter_value, "name"), span: expression.span, integer_bounds: None, cost: None}
+    expected_name := TExpr{ty: Type.String, kind: TExprKind.StrLit([TStrPart]{TStrPart.Literal(field_name)}), span: expression.span, integer_bounds: None, cost: None}
+    predicate := TExpr{ty: Type.Bool, kind: TExprKind.Binary(TBinaryOp.Eq, false, line, name, expected_name), span: expression.span, integer_bounds: None, cost: None}
+    lambda := TLambda{
+        executable: TLambdaBody.Expr(predicate),
+        source_span: expression.span,
+        frame_schedule: None,
+        frame_schedule_derivation: None,
+        capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        host_param_conventions: None,
+        source_params: [String]{parameter.name},
+        source_param_symbols: [SymbolId]{parameter_symbol},
+        jit_name: "",
+        param_types: [Type]{field_type},
+        ret: Val(Type.Bool),
+        is_move: true,
+        boxed: false,
+        rc: false,
+        arc: false,
+        captures: [TCapture]{},
+        materialized_captures: [String]{},
+        frozen_captures: [String]{},
+        uses_stack_sentry: false,
+    }
+    callback_type := Type.Fn([Type]{field_type}, Val(Type.Bool), None, None, None, None)
+    callback := TExpr{ty: callback_type, kind: TExprKind.Lambda(lambda), span: expression.span, integer_bounds: None, cost: None}
+    args := [TExpr]{callback}
+    found := TExpr{ty: Type.Option(field_type), kind: TExprKind.ClosureMethod(fields, TClosureOp.Find, args), span: expression.span, integer_bounds: None, cost: None}
+    value := jet_codegen_lower_closure_method(&builder, found, fields, TClosureOp.Find, args)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.OptionValue(value))
+}
+
+fn jet_codegen_lower_take_pattern(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
+    if args.len() != 0 -> panic("checked take_pattern still carries a runtime pattern argument")
+    lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, receiver, true)
+    receiver_value := lowered_receiver.value
+    receiver_place :: lowered_receiver.place ?? panic("checked take_pattern requires a writable receiver place")
+    if operation == {
+        .CursorTakePattern(parts, canonical) -> {
+            lowered_parts := [MirTextPatternPart]{}
+            capture_index := 0
+            loop part in parts {
+                if part == {
+                    .Lit(text) -> lowered_parts.push(MirTextPatternPart.Literal(text))
+                    .Hole(_, _, span) -> {
+                        if capture_index >= canonical.len() -> panic("checked text pattern has no canonical capture type")
+                        ty := canonical[capture_index].ty
+                        lowered_parts.push(MirTextPatternPart.Hole(jet_codegen_pattern_text_hole_kind(ty), jet_codegen_pattern_mir_type_id(builder, ty), span))
+                        capture_index += 1
+                    }
+                }
+            }
+            if capture_index != canonical.len() -> panic("checked text pattern has unused canonical capture types")
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.CursorTakePattern(receiver_value, receiver_place, lowered_parts)))
+        }
+        .ReaderTakePattern(parts, canonical) -> {
+            lowered_parts := [MirBinaryPatternPart]{}
+            capture_index := 0
+            loop part in parts {
+                if part == {
+                    .Lit(bytes) -> lowered_parts.push(MirBinaryPatternPart.Literal(bytes))
+                    .Hole(_, spec, span) -> {
+                        if capture_index >= canonical.len() -> panic("checked binary pattern has no canonical capture type")
+                        ty := jet_codegen_pattern_mir_type_id(builder, canonical[capture_index].ty)
+                        if spec == {
+                            .Bits(width, endian) -> lowered_parts.push(MirBinaryPatternPart.Bits(U8{width}, ty, endian == BinEndian.Little, span))
+                            .Rest -> lowered_parts.push(MirBinaryPatternPart.Rest(ty, span))
+                        }
+                        capture_index += 1
+                    }
+                }
+            }
+            if capture_index != canonical.len() -> panic("checked binary pattern has unused canonical capture types")
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ReaderTakePattern(receiver_value, receiver_place, lowered_parts)))
+        }
+        else -> panic("checked handle operation is not a take_pattern operation")
+    }
 }

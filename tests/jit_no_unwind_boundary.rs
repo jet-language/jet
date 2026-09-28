@@ -14,7 +14,7 @@
 //! the guarantee has to hold across ~1.7k host symbols — "so it needs a
 //! mechanical check, not review discipline." This file is that check. The
 //! decision record is `crates/jet-jit/src/host_seam.rs` and
-//! `docs/spec/architecture.md` R13.
+//! `Docs/spec/architecture.md` R13.
 //!
 //! Why the checks below and not "does each seam catch?": the guarantee is
 //! structural, not per-body.
@@ -51,7 +51,7 @@
 //!    (`tests/dev_parts/support.rs`) refuses to classify one on any tier, using
 //!    the `ABORT_MARKERS` list below so the two checks cannot drift.
 //!
-//! Run: `scripts/agent/jet-env cargo test --test jit_no_unwind_boundary`
+//! Run: `Tools/agent/jet-env cargo test --test jit_no_unwind_boundary`
 
 mod common;
 
@@ -323,7 +323,7 @@ fn no_unguardable_extern_c_seam_is_defined_in_the_jit_crate() {
          \x20 - the kernel calls it -> it is a signal handler, and there is \
          exactly one, in `SIGNAL_HANDLER_OWNER`; marshal to it instead of \
          re-forking it here (#2027).\n\
-         (crates/jet-jit/src/host_seam.rs, docs/spec/architecture.md R13.) \
+         (crates/jet-jit/src/host_seam.rs, Docs/spec/architecture.md R13.) \
          Offending definitions:\n{}",
         offenders.join("\n")
     );
@@ -813,8 +813,8 @@ fn terminating_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 /// delivered at a real wait point.
 #[test]
 fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
-    let example = repo_root().join("examples/features/concurrency/task_controls.jet");
-    let golden = repo_root().join("examples/features/expected/concurrency/task_controls.out");
+    let example = repo_root().join("Examples/features/concurrency/task_controls.jet");
+    let golden = repo_root().join("Examples/features/expected/concurrency/task_controls.out");
     let expected = fs::read_to_string(&golden).expect("task_controls golden");
     let shown = example.to_string_lossy().into_owned();
 
@@ -838,7 +838,7 @@ fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
             terminating_signal(&output.status).is_none(),
             "{tier}: a cancelled task killed the process with signal {:?} \
              instead of producing a report. An abort is never an outcome \
-             (#1995/#1997, docs/spec/architecture.md R13).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+             (#1995/#1997, Docs/spec/architecture.md R13).\nstdout:\n{stdout}\nstderr:\n{stderr}",
             terminating_signal(&output.status)
         );
         for marker in ABORT_MARKERS {

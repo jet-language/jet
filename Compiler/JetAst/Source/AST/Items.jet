@@ -100,7 +100,6 @@ pub enum RuleSite {
     Text
 }
 
-
 pub struct ImportDecl {
     pub kind: ImportKind
     pub alias: String
@@ -1005,7 +1004,6 @@ pub enum SerdeWireShape {
     Number
 }
 
-
 pub struct TypedField {
     pub name: String
     pub name_span: Span
@@ -1104,21 +1102,22 @@ pub struct ErrorConvDef {
 pub struct MigrationDecl {
     pub type_name: String
     pub type_span: Span
-    pub renames: [FieldRename]
+    pub ops: [MigrationOp]
     pub span: Span
 }
 
-pub struct FieldRename {
-    pub from: String
-    pub from_span: Span
-    pub to: String
-    pub to_span: Span
+pub enum MigrationOp {
+    Rename(from: String, from_span: Span, to: String, to_span: Span)
+    Add(field: String, field_span: Span, ty: Type, ty_span: Span, default: Expr, default_span: Span, default_fn: ?String)
+    Remove(field: String, field_span: Span)
+    Change(field: String, field_span: Span, from_ty: Type, from_span: Span, to_ty: Type, to_span: Span, converter: ?Expr, converter_span: ?Span, conv_fn: ?String)
 }
 
 pub struct ParseResult {
     pub program: Program
     pub diagnostics: [Diagnostic]
 }
+
 pub fn ast_program() -> Program {
     Program{
         imports: [ImportDecl]{},

@@ -233,7 +233,7 @@ pub(crate) struct SharedSnapshot {
     revision: u64,
     value: i64,
     valid: Arc<std::sync::atomic::AtomicBool>,
-    consumed: std::sync::atomic::AtomicBool,
+    consumed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(crate) struct SharedWeakOwner {
@@ -1455,7 +1455,10 @@ pub(crate) fn source_shared_canonical_permit(
     interop: crate::SourceSharedInterop::SourceSharedInterop,
     editable: bool,
 ) -> Result<Arc<dyn shared_protocol::JetSharedCanonicalPermit>, String> {
-    source_shared_canonical_owner_record(interop)?.acquire_permit(editable)
+    shared_protocol::JetSharedCanonicalOwner::acquire_permit(
+        source_shared_canonical_owner_record(interop)?,
+        editable,
+    )
 }
 
 pub(crate) fn source_shared_canonical_permit_with_entry_view(
@@ -1488,11 +1491,20 @@ pub(crate) fn source_shared_canonical_permit_with_entry_view(
     Ok((permit, view))
 }
 
+/// Borrow the concrete Source permit behind a canonical permit. The permit
+/// holds a thread-affine lease, so it is inspected in place, never re-owned.
+fn source_shared_concrete_permit(
+    permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
+) -> Result<&SourceSharedCanonicalPermit, String> {
+    let any: &dyn std::any::Any = permit.as_ref();
+    any.downcast_ref::<SourceSharedCanonicalPermit>()
+        .ok_or_else(|| "Source Shared canonical permit type changed".to_string())
+}
+
 pub(crate) fn source_shared_canonical_read(
     permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
 ) -> Result<(jet_foundation::MIR::MirRuntimeValue, u64), String> {
-    let permit = Arc::downcast::<SourceSharedCanonicalPermit>(permit.clone().into_any())
-        .map_err(|_| "Source Shared canonical permit type changed".to_string())?;
+    let permit = source_shared_concrete_permit(permit)?;
     Ok((permit.guard.read_value()?, permit.guard.revision()?))
 }
 
@@ -1501,8 +1513,7 @@ pub(crate) fn source_shared_canonical_wait_suspend(
     permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
     value: jet_foundation::MIR::MirRuntimeValue,
 ) -> Result<(), String> {
-    let permit = Arc::downcast::<SourceSharedCanonicalPermit>(permit.clone().into_any())
-        .map_err(|_| "Source Shared canonical permit type changed".to_string())?;
+    let permit = source_shared_concrete_permit(permit)?;
     permit.guard.wait_suspend(value)
 }
 
@@ -1510,16 +1521,14 @@ pub(crate) fn source_shared_canonical_wait_resume(
     permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
     cancelled: &mut dyn FnMut() -> bool,
 ) -> Result<Option<jet_foundation::MIR::MirRuntimeValue>, String> {
-    let permit = Arc::downcast::<SourceSharedCanonicalPermit>(permit.clone().into_any())
-        .map_err(|_| "Source Shared canonical permit type changed".to_string())?;
+    let permit = source_shared_concrete_permit(permit)?;
     permit.guard.wait_resume(cancelled)
 }
 
 pub(crate) fn source_shared_canonical_wait_abort(
     permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
 ) -> Result<(), String> {
-    let permit = Arc::downcast::<SourceSharedCanonicalPermit>(permit.clone().into_any())
-        .map_err(|_| "Source Shared canonical permit type changed".to_string())?;
+    let permit = source_shared_concrete_permit(permit)?;
     permit.guard.wait_abort()
 }
 
@@ -1527,8 +1536,7 @@ pub(crate) fn source_shared_canonical_finish(
     permit: &Arc<dyn shared_protocol::JetSharedCanonicalPermit>,
     raw: i64,
 ) -> Result<(), String> {
-    let permit = Arc::downcast::<SourceSharedCanonicalPermit>(permit.clone().into_any())
-        .map_err(|_| "Source Shared canonical permit type changed".to_string())?;
+    let permit = source_shared_concrete_permit(permit)?;
     let value =
         crate::runtime_host::native_shared_value_from_raw(&permit.owner.interop, raw)?;
     permit.guard.finish_value(value)
@@ -1557,7 +1565,10 @@ fn shared_snapshot_store(
     let owner_alias = if let Some(interop) = physical_owner.as_ref() {
         interop.retain_owner_alias()?
     } else {
-        owner.retain_owner_alias()?
+        crate::SourceSharedInterop::SourceSharedInteropOwnerAlias::new(
+            root_identity,
+            owner.retain_owner_alias()?,
+        )
     };
     let snapshot = Arc::new(SharedSnapshot {
         owner,
@@ -1568,7 +1579,7 @@ fn shared_snapshot_store(
         revision,
         value,
         valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        consumed: std::sync::atomic::AtomicBool::new(false),
+        consumed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     });
     let ticket = next_shared_ticket(&NEXT_SHARED_SNAPSHOT_TICKET)?;
     rt.shared_snapshots.insert(ticket, snapshot);
@@ -1598,13 +1609,13 @@ fn shared_snapshot_store_for_handle(
     value: i64,
 ) -> Result<i64, String> {
     let interop = crate::runtime_host::native_shared_interop_for_type(handle, type_id)?;
-    Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_string(|rt| {
         shared_snapshot_store(rt, owner, type_id, revision, value, Some(interop))
     })
 }
 
 fn shared_snapshot_clone_ticket(handle: i64, type_id: u64) -> Result<i64, String> {
-    Concurrency::with_runtime_mut(|rt| shared_snapshot_clone_in_runtime(rt, handle, type_id))
+    Concurrency::with_runtime_string(|rt| shared_snapshot_clone_in_runtime(rt, handle, type_id))
 }
 
 pub(crate) fn shared_snapshot_clone_in_runtime(
@@ -1635,7 +1646,7 @@ pub(crate) fn shared_snapshot_clone_in_runtime(
 }
 
 fn shared_snapshot_release_ticket(handle: i64, type_id: u64) -> Result<(), String> {
-    Concurrency::with_runtime_mut(|rt| shared_snapshot_release_in_runtime(rt, handle, type_id))
+    Concurrency::with_runtime_string(|rt| shared_snapshot_release_in_runtime(rt, handle, type_id))
 }
 
 pub(crate) fn shared_snapshot_release_in_runtime(
@@ -1649,7 +1660,7 @@ pub(crate) fn shared_snapshot_release_in_runtime(
 }
 
 fn shared_weak_clone_ticket(handle: i64, type_id: u64) -> Result<i64, String> {
-    Concurrency::with_runtime_mut(|rt| shared_weak_clone_in_runtime(rt, handle, type_id))
+    Concurrency::with_runtime_string(|rt| shared_weak_clone_in_runtime(rt, handle, type_id))
 }
 
 pub(crate) fn shared_weak_clone_in_runtime(
@@ -1662,7 +1673,7 @@ pub(crate) fn shared_weak_clone_in_runtime(
 }
 
 fn shared_weak_release_ticket(handle: i64, type_id: u64) -> Result<(), String> {
-    Concurrency::with_runtime_mut(|rt| shared_weak_release_in_runtime(rt, handle, type_id))
+    Concurrency::with_runtime_string(|rt| shared_weak_release_in_runtime(rt, handle, type_id))
 }
 
 pub(crate) fn shared_weak_release_in_runtime(
@@ -2865,9 +2876,9 @@ fn jet_jit_shared_replace(handle: i64, value: i64) -> i64 {
     if let Some(result) = crate::runtime_host::native_shared_replace_value(handle, value) {
         return result.unwrap_or_else(|error| shared_callback_fault(&error));
     }
-    if shared.value.is_none() {
+    let Some(value_slot) = shared.value.as_ref() else {
         return shared_callback_fault("external Shared replace is missing its physical owner");
-    }
+    };
     let Some(permit) = shared.acquire_state_permit(true) else {
         return 0;
     };
@@ -3002,7 +3013,7 @@ fn jet_jit_shared_capture(handle: i64, type_id: i64) -> i64 {
         return shared_callback_fault("Shared.capture received an invalid shared handle or type");
     };
     let captured = match crate::runtime_host::native_shared_capture(handle) {
-        Some(Ok(captured)) => Some(captured),
+        Some(Ok((value, revision))) => Some((revision, value)),
         Some(Err(error)) => return shared_callback_fault(&error),
         None => shared_capture_parts(&shared),
     };
@@ -3146,7 +3157,7 @@ fn jet_jit_shared_capture_txn_plain(handle: i64, _stm: i64, type_id: i64) -> i64
         Ok(token) => token,
         Err(error) => return shared_callback_fault(&error),
     };
-    let snapshot = match Concurrency::with_runtime_mut(|rt| {
+    let snapshot = match Concurrency::with_runtime_string(|rt| {
         shared_snapshot_load(rt, token, type_id)
     }) {
         Ok(snapshot) => snapshot,
@@ -3212,7 +3223,7 @@ fn jet_jit_shared_capture_txn(handle: i64, _stm: i64, callback: i64, type_id: i6
         Ok(token) => token,
         Err(error) => return shared_callback_fault(&error),
     };
-    let snapshot = match Concurrency::with_runtime_mut(|rt| {
+    let snapshot = match Concurrency::with_runtime_string(|rt| {
         shared_snapshot_load(rt, token, type_id)
     }) {
         Ok(snapshot) => snapshot,
@@ -3245,7 +3256,7 @@ fn jet_jit_shared_try_replace(
         Ok(interop) => interop,
         Err(error) => return shared_callback_fault(&error),
     };
-    let snapshot = match Concurrency::with_runtime_mut(|rt| {
+    let snapshot = match Concurrency::with_runtime_string(|rt| {
         shared_snapshot_load(rt, snapshot_handle, type_id)
     }) {
         Ok(snapshot) => snapshot,
@@ -3355,7 +3366,7 @@ fn jet_jit_shared_snapshot_value(snapshot_handle: i64, type_id: i64) -> i64 {
     let Ok(type_id) = u64::try_from(type_id) else {
         return shared_callback_fault("SharedSnapshot.value received an invalid checked type ID");
     };
-    match Concurrency::with_runtime_mut(|rt| shared_snapshot_load(rt, snapshot_handle, type_id)) {
+    match Concurrency::with_runtime_string(|rt| shared_snapshot_load(rt, snapshot_handle, type_id)) {
         Ok(snapshot) => snapshot.value,
         Err(error) => shared_callback_fault(&error),
     }
@@ -3477,7 +3488,7 @@ fn jet_jit_shared_downgrade(handle: i64, type_id: i64) -> i64 {
         Ok(owner) => owner,
         Err(error) => return shared_callback_fault(&error),
     };
-    match Concurrency::with_runtime_mut(|rt| shared_weak_owner_store(rt, type_id, owner)) {
+    match Concurrency::with_runtime_string(|rt| shared_weak_owner_store(rt, type_id, owner)) {
         Ok(ticket) => ticket,
         Err(error) => shared_callback_fault(&error),
     }
@@ -3518,7 +3529,7 @@ fn jet_jit_shared_weak_upgrade(ticket: i64, type_id: i64) -> i64 {
     let Ok(type_id) = u64::try_from(type_id) else {
         return shared_callback_fault("Shared weak upgrade received an invalid checked type ID");
     };
-    let owner = match Concurrency::with_runtime_mut(|rt| {
+    let owner = match Concurrency::with_runtime_string(|rt| {
         shared_weak_owner_load(rt, ticket, type_id)
     }) {
         Ok(owner) => owner,
@@ -3657,7 +3668,7 @@ fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
                 let native_entry = match native_entry {
                     Some(Ok(native_entry)) => Some(native_entry),
                     Some(Err(error)) => {
-                        rt.set_trap(error);
+                        rt.set_trap(&error);
                         return 0;
                     }
                     None => None,
@@ -3716,7 +3727,7 @@ fn jet_jit_shared_guard_split(guard: i64, first: i64, second: i64, editable: i64
                 let native_entry = match native_entry {
                     Some(Ok(native_entry)) => Some(native_entry),
                     Some(Err(error)) => {
-                        rt.set_trap(error);
+                        rt.set_trap(&error);
                         return 0;
                     }
                     None => None,
@@ -3790,7 +3801,7 @@ fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
         Some(Ok(native_entry)) => Some(native_entry),
         Some(Err(message)) => {
             return Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(message);
+                rt.set_trap(&message);
                 0
             });
         }
@@ -4034,6 +4045,25 @@ fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
         }
     });
 }
+
+fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+            return;
+        };
+        let stored = if root {
+            rt.heap.record_set_int(record, field, value).is_some()
+        } else {
+            rt.heap.record_set_string(record, field, value).is_some()
+        };
+        if stored {
+            mark_shared_guard_dirty(rt, guard);
+        } else {
+            rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+        }
+    });
+}
+
 fn jet_jit_shared_guard_end(guard: i64) {
     let Some((shared_handle, shared, value, editable, dirty, root, state)) =
         Concurrency::with_runtime_mut(|rt| {
@@ -4297,7 +4327,7 @@ fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
             jet_codegen::scheduler::JetSchedulerWait::Panicked(_)
         )
     {
-        let _ = handoff.abort();
+        let _ = shared_protocol::JetSharedWaitHandoff::abort(&mut handoff);
     }
     if let Some(error) = handoff.take_error() {
         return shared_callback_fault(&error);
@@ -4308,7 +4338,7 @@ fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
         jet_codegen::scheduler::JetSchedulerWait::Ready(Ok(())) => {
             let Some(fresh) = resumed.or_else(|| {
                 Concurrency::with_runtime_mut(|rt| {
-                    Some(shared(rt, shared_handle)?.value.load(Ordering::Acquire))
+                    Some(shared(rt, shared_handle)?.value.as_ref()?.load(Ordering::Acquire))
                 })
             }) else {
                 return Concurrency::with_runtime_mut(|rt| {

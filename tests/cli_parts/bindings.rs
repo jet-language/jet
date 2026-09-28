@@ -1408,7 +1408,7 @@ fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
         return;
     }
     let dir = isolated_cwd("powershell_bind_round_trip");
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/powershell");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/powershell");
     let script = dir.join("ops.ps1");
     fs::copy(example.join("ops.ps1"), &script).unwrap();
     let bind = Command::new(jet())
@@ -1592,7 +1592,7 @@ fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
     }
     let dir = isolated_cwd("perl_bind_round_trip");
     let script = dir.join("ops.pl");
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/perl");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/perl");
     fs::copy(example.join("ops.pl"), &script).unwrap();
     let bind = Command::new(jet())
         .args(["inspect", "bind", "perl"])

@@ -21,7 +21,7 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
         .map(|s| s.as_str());
 
     let Some(path) = path else {
-        crate::cli_error!(@fix "E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex examples/features/basics/hello.jet");
+        crate::cli_error!(@fix "E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 

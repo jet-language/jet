@@ -71,10 +71,12 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         ));
     }
 
+    let source_program = symbols.type_symbol("MirProgram")?;
     let source_binding_type = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
     let source_binding_identity = "::jet_jit::SourceResources::SourceNativeBindingIdentity";
     let resource_handle = "::jet_jit::SourceResources::SourceResourceHandle";
     let expected_receiver_key = format!("{:?}", receiver_type.canonical_key());
+    emit_native_callback_jobs(out)?;
     writeln!(
         out,
         "#[doc(hidden)]\n\
@@ -90,9 +92,11 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          struct __JetBootstrapNativeAdapterRoot {{
              bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,
              program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+             source_program: ::std::sync::Arc<{source_program}>,
              machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
              shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
              completion_scope: ::jet_jit::SourceExecutionCompletionScopeWeak,\n\
+             callback_jobs: ::std::sync::Weak<dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner>,\n\
              resources_weak: ::jet_jit::SourceResources::SourceResourceLeaseWeak,\n\
              artifact: ::jet_foundation::MIR::MirArtifactId,
              receiver_type: ::jet_foundation::MIR::MirType,
@@ -128,18 +132,21 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              instance: ::std::sync::OnceLock<::jet_jit::SourceInterfaces::NativeInterfaceObject>,\n\
              capability: ::std::sync::OnceLock<::jet_jit::SourceResources::SourceResourceHandle>,\n\
              callback_failed: ::std::sync::Arc<::std::sync::atomic::AtomicBool>,\n\
+             context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,\n\
+             borrowed_session: bool,\n\
          }}\n\
          impl Drop for __JetBootstrapNativeAdapterOwner {{
              fn drop(&mut self) {{
                  if let Some(capability) = self.capability.take() {{
-                     if self.resources.arena().release_capability(&capability).is_err() {{
-                         self.callback_failed.store(true, ::std::sync::atomic::Ordering::Release);
+                     if let Err(error) = self.resources.arena().release_capability(&capability) {{
+                         self.context.record_failure(::jet_jit::SourceDeoptError::InvalidRequest(error));
                      }}
                  }}
                  let _ = self.instance.take();
              }}
          }}
          #[doc(hidden)]\n\
+         #[derive(Clone)]\n\
          struct __JetBootstrapNativeAdapter {{\n\
              root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,\n\
              resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
@@ -148,6 +155,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              instance: ::jet_jit::SourceInterfaces::NativeInterfaceObject,\n\
              capability: ::jet_jit::SourceResources::SourceResourceHandle,\n\
              owner: ::std::sync::Arc<__JetBootstrapNativeAdapterOwner>,\n\
+             borrowed_session: bool,\n\
          }}\n\
          fn __jet_bootstrap_native_adapter_template(\n\
              bindings: &::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,\n\
@@ -223,9 +231,11 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
                  bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,\n\
                  program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
+                 source_program: ::std::sync::Arc<{source_program}>,\n\
                  machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
                  shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
                  completion_scope: ::jet_jit::SourceExecutionCompletionScope,\n\
+                 callback_jobs: ::std::sync::Arc<dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner>,\n\
                  artifact: ::jet_foundation::MIR::MirArtifactId,\n\
                  receiver_type: ::jet_foundation::MIR::MirType,\n\
                  template: ::jet_jit::SourceInterfaces::NativeInterfaceObject,\n\
@@ -251,9 +261,11 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  let root = ::std::sync::Arc::new(__JetBootstrapNativeAdapterRoot {{\n\
                      bindings,\n\
                      program,\n\
+                     source_program,\n\
                      machine_abi_shape,\n\
                      shared_payload_shapes,\n\
                      completion_scope: completion_scope.downgrade(),\n\
+                     callback_jobs: ::std::sync::Arc::downgrade(&callback_jobs),\n\
                      resources_weak: resources.downgrade(),\n\
                      artifact,\n\
                      execution,\n\
@@ -302,8 +314,8 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
             .join(", ");
         let separator = if parameters.is_empty() { "" } else { ", " };
         let result = match metadata.name.as_str() {
-            "new_session" => "Box::new(__jet_bootstrap_native_adapter_new_scope(self.root.clone(), self.resources.clone(), self.cleanup.clone()).unwrap_or_else(|error| panic!(\"Source callback-scope adapter construction failed: {error}\")))".to_string(),
-            "clone_adapter" => "Box::new(__JetBootstrapNativeAdapter { root: self.root.clone(), resources: self.resources.clone(), cleanup: self.cleanup.clone(), callbacks: self.callbacks.clone(), instance: self.instance.clone(), capability: self.capability.clone(), owner: self.owner.clone() })".to_string(),
+            "new_session" => "if self.borrowed_session { Box::new(self.clone()) } else { Box::new(__jet_bootstrap_native_adapter_new_scope(self.root.clone(), self.resources.clone(), self.cleanup.clone()).unwrap_or_else(|error| panic!(\"Source callback-scope adapter construction failed: {error}\"))) }".to_string(),
+            "clone_adapter" => "Box::new(self.clone())".to_string(),
             "poll_callbacks" => "{ let _ = __jet_arg_0; __jet_bootstrap_native_poll_callbacks(self) }".to_string(),
             "drain_callbacks" => "{ let _ = __jet_arg_0; __jet_bootstrap_native_drain_callbacks(self) }".to_string(),
             "host_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); let compiler_program = self.root.program.as_ref(); let physical = __JetBootstrapNativePhysicalBindings::new(self); __jet_bootstrap_native_host_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4, __jet_arg_5, compiler_program, &physical) }".to_string(),
@@ -328,6 +340,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
     writeln!(out, "}}")
         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     emit_native_interface_helpers(out, &methods)?;
+    emit_native_callback_scope_helpers(out)?;
     emit_native_callback_helpers(out, symbols)?;
     emit_native_binding_helpers(out, symbols)
 }
@@ -339,6 +352,217 @@ fn mir_access_expression(access: jet_foundation::MIR::MirAccess) -> &'static str
         jet_foundation::MIR::MirAccess::Move => "::jet_foundation::MIR::MirAccess::Move",
     }
 }
+fn emit_native_callback_jobs(out: &mut String) -> Result<(), BootstrapHostCodecError> {
+    out.push_str(
+        r#"#[doc(hidden)]
+struct __JetBootstrapNativeCallbackJobState {
+    admission_closed: bool,
+    open_sessions: usize,
+    active: Vec<::jet_jit::JetSchedulerJoin<Result<(), ::jet_jit::JetTaskFailure>>>,
+    failures: Vec<::jet_jit::JetTaskFailure>,
+    draining: bool,
+    transitions: usize,
+}
+
+#[doc(hidden)]
+struct __JetBootstrapNativeCallbackJobs {
+    state: ::std::sync::Mutex<__JetBootstrapNativeCallbackJobState>,
+}
+
+impl __JetBootstrapNativeCallbackJobs {
+    pub(crate) fn new() -> ::std::sync::Arc<Self> {
+        ::std::sync::Arc::new(Self {
+            state: ::std::sync::Mutex::new(__JetBootstrapNativeCallbackJobState {
+                admission_closed: false,
+                open_sessions: 0,
+                active: Vec::new(),
+                failures: Vec::new(),
+                draining: false,
+                transitions: 0,
+            }),
+        })
+    }
+
+    fn lock_state(&self) -> ::std::sync::MutexGuard<'_, __JetBootstrapNativeCallbackJobState> {
+        self.state
+            .lock()
+            .unwrap_or_else(::std::sync::PoisonError::into_inner)
+    }
+
+    fn schedule(
+        &self,
+        job: ::jet_jit::SourceCallbacks::SourceCallbackJob,
+    ) -> Result<(), ::jet_jit::SourceCallbacks::SourceCallbackJob> {
+        let job_slot = ::std::sync::Arc::new(::std::sync::Mutex::new(Some(job)));
+        {
+            let mut state = self.lock_state();
+            if state.admission_closed && state.open_sessions == 0 {
+                return Err(job_slot
+                    .lock()
+                    .unwrap_or_else(::std::sync::PoisonError::into_inner)
+                    .take()
+                    .expect("rejected callback job missing"));
+            }
+            let Some(reservations) = state.transitions.checked_add(1) else {
+                return Err(job_slot
+                    .lock()
+                    .unwrap_or_else(::std::sync::PoisonError::into_inner)
+                    .take()
+                    .expect("rejected callback job missing"));
+            };
+            if state.active.try_reserve(reservations).is_err() {
+                return Err(job_slot
+                    .lock()
+                    .unwrap_or_else(::std::sync::PoisonError::into_inner)
+                    .take()
+                    .expect("rejected callback job missing"));
+            }
+            state.transitions += 1;
+        }
+
+        let task_slot = ::std::sync::Arc::clone(&job_slot);
+        let spawned = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(move || {
+            ::jet_jit::jet_scheduler_spawn(move || {
+                let job = task_slot
+                    .lock()
+                    .unwrap_or_else(::std::sync::PoisonError::into_inner)
+                    .take()
+                    .expect("callback job was already taken");
+                job()
+            })
+        }));
+        match spawned {
+            Ok(join) => {
+                let mut state = self.lock_state();
+                state.active.push(join);
+                state.transitions -= 1;
+                Ok(())
+            }
+            Err(payload) => {
+                let job = job_slot
+                    .lock()
+                    .unwrap_or_else(::std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(job) = job {
+                    self.lock_state().transitions -= 1;
+                    Err(job)
+                } else {
+                    // The scheduler accepted the task before unwinding; keep its
+                    // completion debt so no later drain can claim it was joined.
+                    ::std::panic::resume_unwind(payload);
+                }
+            }
+        }
+    }
+
+    fn drain_jobs(&self) -> ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome {
+        loop {
+            let handle = {
+                let mut state = self.lock_state();
+                if state.active.is_empty() {
+                    if state.admission_closed
+                        && state.open_sessions == 0
+                        && state.transitions == 0
+                    {
+                        return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
+                            failures: state.failures.clone(),
+                        };
+                    }
+                    return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                        open_callback_sessions: state.open_sessions,
+                        pending_jobs: state.active.len() + state.transitions,
+                    };
+                }
+                state.failures.reserve(1);
+                state.transitions += 1;
+                state.active.swap_remove(0)
+            };
+            let mut handle = Some(handle);
+            let joined = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                handle.as_mut().expect("callback job handle missing").join()
+            }));
+            match joined {
+                Ok(joined) => {
+                    let mut state = self.lock_state();
+                    state.transitions -= 1;
+                    if let Ok(Err(failure)) | Err(failure) = joined {
+                        state.failures.push(failure);
+                    }
+                    drop(state);
+                    drop(handle.take());
+                }
+                Err(payload) => {
+                    let handle = handle.take().expect("callback job handle missing");
+                    let mut state = self.lock_state();
+                    state.active.push(handle);
+                    state.transitions -= 1;
+                    drop(state);
+                    ::std::panic::resume_unwind(payload);
+                }
+            }
+        }
+    }
+}
+
+impl ::jet_jit::SourceCallbacks::SourceCallbackJobOwner for __JetBootstrapNativeCallbackJobs {
+    fn session_started(&self) -> Result<(), String> {
+        let mut state = self.lock_state();
+        if state.admission_closed {
+            return Err("native callback-job session admission is closed".to_string());
+        }
+        let Some(open_sessions) = state.open_sessions.checked_add(1) else {
+            return Err("native callback-job session count overflow".to_string());
+        };
+        state.open_sessions = open_sessions;
+        Ok(())
+    }
+
+    fn session_finished(&self) {
+        let mut state = self.lock_state();
+        if state.open_sessions == 0 {
+            panic!("native callback-job session registration underflow");
+        }
+        state.open_sessions -= 1;
+    }
+
+    fn close_admission(&self) {
+        self.lock_state().admission_closed = true;
+    }
+
+    fn submit(
+        &self,
+        job: ::jet_jit::SourceCallbacks::SourceCallbackJob,
+    ) -> Result<(), ::jet_jit::SourceCallbacks::SourceCallbackJob> {
+        self.schedule(job)
+    }
+
+    fn drain(&self) -> ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome {
+        {
+            let mut state = self.lock_state();
+            if state.draining {
+                return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                    open_callback_sessions: state.open_sessions,
+                    pending_jobs: state.active.len() + state.transitions,
+                };
+            }
+            state.draining = true;
+        }
+        let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+            self.drain_jobs()
+        }));
+        self.lock_state().draining = false;
+        match result {
+            Ok(outcome) => outcome,
+            Err(payload) => ::std::panic::resume_unwind(payload),
+        }
+    }
+}
+"#,
+    );
+    Ok(())
+}
+
+
 fn emit_native_interface_helpers(
     out: &mut String,
     methods: &[(&crate::Codegen::MIRRust::MirRustTraitMethodMetadata, usize)],
@@ -382,6 +606,7 @@ fn emit_native_interface_helpers(
                 callbacks: owner.callbacks.clone(),
                 instance,
                 capability,
+                borrowed_session: owner.borrowed_session,
                 owner,
             })
         }
@@ -492,6 +717,125 @@ fn emit_native_interface_helpers(
     Ok(())
 }
 
+
+fn emit_native_callback_scope_helpers(out: &mut String) -> Result<(), BootstrapHostCodecError> {
+    out.push_str(r#"
+struct __JetBootstrapNativeCallbackContext {
+    root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
+    resources: ::jet_jit::SourceResources::SourceResourceLeaseWeak,
+    cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
+    registration: ::std::sync::Arc<::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration>,
+    completion_scope: ::jet_jit::SourceExecutionCompletionScope,
+    failed: ::std::sync::Arc<::std::sync::atomic::AtomicBool>,
+}
+
+impl __JetBootstrapNativeCallbackContext {
+    fn record_failure(&self, cause: ::jet_jit::SourceDeoptError) {
+        self.failed.store(true, ::std::sync::atomic::Ordering::Release);
+        self.completion_scope.record(::jet_jit::SourceExecutionCompletion {
+            execution: Some(self.root.execution.clone()),
+            function: None,
+            lease: self.resources.upgrade(),
+            disposition: ::jet_jit::SourceExecutionCompletionDisposition::NotInvoked {
+                cause,
+                entry_values: Vec::new(),
+                write_borrow_indices: Vec::new(),
+                completions: Vec::new(),
+            },
+        });
+    }
+
+    fn submit(&self, job: ::jet_jit::SourceCallbacks::SourceCallbackJob) {
+        if let Err(job) = self.registration.submit(job) {
+            // Only the exact unstarted job is returned by the shared owner ABI.
+            // A mandatory transport hook cannot discard its owned packets.
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(job));
+            let failure = match result {
+                Ok(Ok(())) => return,
+                Ok(Err(failure)) => failure,
+                Err(payload) => {
+                    let message = payload.downcast_ref::<String>().cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
+                        .unwrap_or_else(|| "Source callback cleanup job panicked".to_string());
+                    ::jet_jit::JetTaskFailure::Panicked(message)
+                }
+            };
+            self.record_failure(::jet_jit::SourceDeoptError::CallbackJob(failure));
+        }
+    }
+}
+
+fn __jet_bootstrap_native_callback_transport(
+    context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,
+) -> __JetBootstrapNativeCallbackSession {
+    let abandoned_context = context.clone();
+    __JetBootstrapNativeCallbackSession::new(
+        move |abandonment| {
+            if abandonment.is_empty() {
+                return;
+            }
+            let job_context = abandoned_context.clone();
+            abandoned_context.submit(Box::new(move || {
+                let scope = job_context.completion_scope.clone();
+                scope.with_current(|| __jet_bootstrap_native_callback_abandoned(job_context, abandonment))
+            }));
+        },
+        move |ready| {
+            let Some(callbacks) = ready.session() else {
+                return;
+            };
+            let job_context = context.clone();
+            context.submit(Box::new(move || {
+                let scope = job_context.completion_scope.clone();
+                scope.with_current(|| __jet_bootstrap_native_callback_ready(job_context, callbacks))
+            }));
+        },
+    )
+}
+
+fn __jet_bootstrap_native_adapter_owner_from_context(
+    context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,
+    callbacks: __JetBootstrapNativeCallbackSession,
+    resources: ::jet_jit::SourceResources::SourceResourceLease,
+    borrowed_session: bool,
+) -> ::std::sync::Arc<__JetBootstrapNativeAdapterOwner> {
+    ::std::sync::Arc::new(__JetBootstrapNativeAdapterOwner {
+        root: context.root.clone(),
+        callbacks,
+        resources,
+        cleanup: context.cleanup.clone(),
+        instance: ::std::sync::OnceLock::new(),
+        capability: ::std::sync::OnceLock::new(),
+        callback_failed: context.failed.clone(),
+        context,
+        borrowed_session,
+    })
+}
+
+fn __jet_bootstrap_native_adapter_owner_new(
+    root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
+    resources: ::jet_jit::SourceResources::SourceResourceLease,
+    cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
+) -> Result<::std::sync::Arc<__JetBootstrapNativeAdapterOwner>, String> {
+    let completion_scope = root.completion_scope.upgrade()
+        .ok_or_else(|| "Source callback origin has no live completion receiver".to_string())?;
+    let jobs = root.callback_jobs.upgrade()
+        .ok_or_else(|| "Source callback origin has no live job owner".to_string())?;
+    let registration = ::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration::start(jobs)?;
+    let context = ::std::sync::Arc::new(__JetBootstrapNativeCallbackContext {
+        root,
+        resources: resources.downgrade(),
+        cleanup,
+        registration: ::std::sync::Arc::new(registration),
+        completion_scope,
+        failed: ::std::sync::Arc::new(::std::sync::atomic::AtomicBool::new(false)),
+    });
+    let callbacks = __jet_bootstrap_native_callback_transport(context.clone());
+    Ok(__jet_bootstrap_native_adapter_owner_from_context(context, callbacks, resources, false))
+}
+"#);
+    Ok(())
+}
 
 fn emit_native_callback_helpers(
     out: &mut String,
@@ -750,8 +1094,6 @@ fn emit_native_binding_helpers(
     let transfer_consumed_failure =
         symbols.variant_path("JetEvalResultHostTransferCommitDisposition", "ConsumedFailure")?;
     let source_binding_identity = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
-    let owned_root_config = callable_symbol(symbols, "jet_eval_owned_root_config")?;
-    let task_root_config = callable_symbol(symbols, "jet_eval_task_root_config")?;
     let host_adapter_field_symbol = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
     let host_value = symbols.type_symbol("JetEvalHostValue")?;
     let owner_native = symbols.variant_path("JetEvalHostOwner", "Native")?;
@@ -1104,7 +1446,30 @@ fn emit_native_binding_helpers(
             resources: ::jet_jit::SourceResources::SourceResourceLease,
             cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
         ) -> Result<__JetBootstrapNativeAdapter, String> {
-            let owner = __jet_bootstrap_native_adapter_owner_new(root.clone(), resources.clone(), cleanup.clone())?;
+            let owner = __jet_bootstrap_native_adapter_owner_new(root, resources, cleanup)?;
+            __jet_bootstrap_native_adapter_bind_owner(owner)
+        }
+
+        fn __jet_bootstrap_native_adapter_borrow_scope(
+            adapter: &__JetBootstrapNativeAdapter,
+            resources: ::jet_jit::SourceResources::SourceResourceLease,
+        ) -> Result<__JetBootstrapNativeAdapter, String> {
+            let owner = __jet_bootstrap_native_adapter_owner_from_context(
+                adapter.owner.context.clone(),
+                adapter.callbacks.clone(),
+                resources,
+                true,
+            );
+            __jet_bootstrap_native_adapter_bind_owner(owner)
+        }
+
+        fn __jet_bootstrap_native_adapter_bind_owner(
+            owner: ::std::sync::Arc<__JetBootstrapNativeAdapterOwner>,
+        ) -> Result<__JetBootstrapNativeAdapter, String> {
+            let root = owner.root.clone();
+            let resources = owner.resources.clone();
+            let cleanup = owner.cleanup.clone();
+            let _activation = resources.activate();
             let context = __JetBootstrapNativeAdapterInstance {
                 root: root.clone(),
                 owner: ::std::sync::Arc::downgrade(&owner),
@@ -1141,6 +1506,7 @@ fn emit_native_binding_helpers(
                 callbacks: owner.callbacks.clone(),
                 instance,
                 capability,
+                borrowed_session: owner.borrowed_session,
                 owner,
             })
         }
@@ -1370,30 +1736,28 @@ fn emit_native_binding_helpers(
                 .ok_or_else(|| "checked owned-root drop helper has no OwnedRoot parameter".to_string())?.ty;
             let (root_type, root_value) = packet;
             let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-            let (mut config, cleanup) = if root_type.same_checked_type(callback_root_type) {
-                let source_root = crate::__jet_bootstrap_entry_jet_eval_task_root_from_runtime(
+            let mut config = if root_type.same_checked_type(callback_root_type) {
+                let config = crate::__jet_bootstrap_entry_jet_eval_task_root_config_from_runtime(
                     root_type,
-                    root_value.clone(),
-                    adapter.root.program.as_ref(),
+                    root_value,
+                    &adapter.root.program,
                     &physical,
-                ).map_err(|error| error.error)?;
-                (__JET_TASK_ROOT_CONFIG__(&source_root), None)
+                )?;
+                config
             } else if root_type.same_checked_type(owned_root_type) {
-                let source_root = crate::__jet_bootstrap_entry_jet_eval_owned_root_from_runtime(
+                let config = crate::__jet_bootstrap_entry_jet_eval_owned_root_config_from_runtime(
                     root_type,
-                    root_value.clone(),
-                    adapter.root.program.as_ref(),
+                    root_value,
+                    &adapter.root.program,
                     &physical,
-                ).map_err(|error| error.error)?;
-                let cleanup = live_resources.cleanup_lease()?;
-                (__JET_OWNED_ROOT_CONFIG__(source_root), Some(cleanup))
+                )?;
+                config
             } else {
                 return Err("callback helper root is neither the checked TaskRoot nor OwnedRoot carrier".to_string());
             };
-            let callback_adapter = __jet_bootstrap_native_adapter_new_scope(
-                adapter.root.clone(),
+            let callback_adapter = __jet_bootstrap_native_adapter_borrow_scope(
+                adapter,
                 live_resources.clone(),
-                cleanup,
             )?;
             config.__JET_HOST_ADAPTER_FIELD__ = Ok(Box::new(callback_adapter));
             Ok(config)
@@ -2155,8 +2519,6 @@ fn emit_native_binding_helpers(
         .replace("__JET_RESULT_TRANSFER_DISPOSE__", &result_transfer_dispose)
         .replace("__JET_EVAL_MACHINE__", &eval_machine)
         .replace("__JET_EVAL_CONFIG__", &symbols.type_symbol("JetEvalConfig")?)
-        .replace("__JET_OWNED_ROOT_CONFIG__", &owned_root_config)
-        .replace("__JET_TASK_ROOT_CONFIG__", &task_root_config)
         .replace("__JET_RESULT_TRANSFER_DISPOSITION__", &result_transfer_disposition)
         .replace("__JET_TRANSFER_COMMITTED__", &transfer_committed)
         .replace("__JET_TRANSFER_REJECTED__", &transfer_rejected)

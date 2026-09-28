@@ -530,7 +530,10 @@ fn runtime_value_matches_shape(shape: &str, value: &MirRuntimeValue) -> bool {
                 || carrier.contains(" ! ")
         }
         MirRuntimeValue::Unit => carrier == "Unit" || carrier == "()",
-        MirRuntimeValue::Moved | MirRuntimeValue::Closure(_) => false,
+        MirRuntimeValue::Moved
+        | MirRuntimeValue::Closure(_)
+        | MirRuntimeValue::NativeCursor(_)
+        | MirRuntimeValue::NativeOwned(_) => false,
     }
 }
 
@@ -1162,6 +1165,35 @@ fn json_bool_field(payload: &str, field: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_shapes_reject_native_capabilities_even_inside_data() {
+        use crate::MIR::{MirNativeCursor, MirNativeCursorError, MirNativeCursorState, MirNativeOwned};
+
+        struct UnusedCursor;
+        impl MirNativeCursorState for UnusedCursor {
+            fn has_next(&mut self) -> Result<bool, MirNativeCursorError> {
+                panic!("persistence must not inspect native cursor state")
+            }
+            fn value(&mut self) -> Result<MirRuntimeValue, MirNativeCursorError> {
+                panic!("persistence must not inspect native cursor state")
+            }
+            fn advance(&mut self) -> Result<(), MirNativeCursorError> {
+                panic!("persistence must not inspect native cursor state")
+            }
+        }
+
+        for value in [
+            MirRuntimeValue::NativeOwned(MirNativeOwned::new(7u64)),
+            MirRuntimeValue::NativeCursor(MirNativeCursor::new(UnusedCursor)),
+        ] {
+            assert!(!runtime_value_matches_shape("id:42", &value));
+            assert!(!runtime_value_matches_shape("Int", &value));
+            assert!(!runtime_value_matches_shape("List<Int>", &MirRuntimeValue::List(vec![value])));
+        }
+        assert!(runtime_value_matches_shape("Int", &MirRuntimeValue::Int(7)));
+        assert!(runtime_value_matches_shape("List<Int>", &MirRuntimeValue::List(vec![MirRuntimeValue::Int(7)])));
+    }
 
     #[test]
     fn migrate_keeps_compatible_and_rejects_incompatible() {

@@ -282,10 +282,10 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, ef
     graph :: environment.registration_graph ?? return None
     canonical_identity :: graph.canonical_effect_module_identity
     if canonical_identity == "" -> return None
-    loop module in graph.modules {
-        if module.module_identity == canonical_identity {
-            if module.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || module.module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
-            return sema_effect_declarations_irreversible_fact(module.program.items, effect_name)
+    loop module_row in graph.modules {
+        if module_row.module_identity == canonical_identity {
+            if module_row.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || module_row.module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
+            return sema_effect_declarations_irreversible_fact(module_row.program.items, effect_name)
         }
     }
     None
@@ -325,6 +325,10 @@ pub fn sema_effect_call_api(value: TExpr) -> String {
         .Call(callee, _, _) -> callee.key
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
+        .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
+        .AllocNew(_, _) -> "intrinsic allocation"
+        .SharedGuardWait(_, _, _) -> "shared guard wait"
+        .CoreClosureCall(_) -> "core closure intrinsic"
         else -> "call"
     }
 }
@@ -542,7 +546,46 @@ fn sema_effect_node_from_source(function: TFunc, source: ?SemaEffectFunctionSour
     node
 }
 
-fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, expression: TExpr, diagnostics: &[Diagnostic]) {
+// Intrinsic producers use the same fact carrier as checked calls. The effect
+// row is authoritative producer input: an empty present row means known-pure,
+// while an absent row remains unknown and is conservatively maximal downstream.
+pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool {
+    wall := sema_effect_check_transaction_wall(environment, scopes, facts.effect_bound, api, span, &diagnostics)
+    allowed :: wall ?? return false
+    if !allowed -> return false
+    caller_key := sema_scope_function_owner_key(scopes)
+    if caller_key != "" {
+        context.call_facts.push(SemaCallSiteFact{
+            span: span,
+            caller_key: caller_key,
+            callee: None,
+            facts: facts,
+        })
+    }
+    true
+}
+
+// Convenience entry point for intrinsic operations whose only call metadata
+// is their canonical effect row. Use an empty row to record a known-pure site.
+pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool {
+    sema_effect_record_intrinsic_fact(
+        environment,
+        scopes,
+        context,
+        api,
+        span,
+        SemaCallFacts{
+            return_type: Type.Unit,
+            failure_carrier: TFailureCarrier.Infallible,
+            effect_bound: Val(effect_row),
+            type_args: [Type]{},
+            default_refs: [FunctionDefaultRef]{},
+        },
+        diagnostics,
+    )
+}
+
+fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
     callee_key :: fact.callee.map((callee) -> callee.key) ?? ""
     known_callee :: callee_key != "" && sema_effect_node_index(nodes, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
@@ -555,7 +598,7 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_index: Int, fact: Sema
                 diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
-            if !known_callee -> sema_effect_node_add_direct(&nodes, node_index, effect_name, fact.span)
+            if !known_callee -> sema_effect_node_add_direct(&nodes, node_index, effect_name, entry.span)
         }
     }
     if callee_key == "" && !row_known {
@@ -586,6 +629,14 @@ fn sema_effect_find_fact(facts: [SemaCallSiteFact], caller_key: String, span: Sp
     }
     best
 }
+fn sema_effect_find_exact_fact(facts: [SemaCallSiteFact], caller_key: String, span: Span) -> ?SemaCallSiteFact {
+    loop fact in facts {
+        if fact.caller_key == caller_key && sema_effect_span_same(fact.span, span) -> return Val(fact)
+    }
+    None
+}
+
+
 
 fn sema_effect_is_call(expression: TExpr) -> Bool {
     if expression.kind == {
@@ -593,9 +644,25 @@ fn sema_effect_is_call(expression: TExpr) -> Bool {
         | .IndirectCall(_, _, _, _)
         | .MethodCall(_, _, _, _)
         | .StaticCall(_, _, _, _, _)
-        | .ModuleCall(_, _, _, _)
-        | .CoreCall(_, _, _, _, _, _)
-        | .ExternCall(_, _, _) -> true
+        | .ModuleCall(_, _, _, _, _)
+        | .CoreCall(_, _, _, _, _, _, _)
+        | .ExternCall(_, _, _)
+        | .MathBuiltin(_, _, _)
+        | .PreciseBuiltin(_, _, _)
+        | .Print(_)
+        | .Drop(_)
+        | .Close(_)
+        | .ResourceNew(_)
+        | .AmbientInput(_)
+        | .HostCall(_)
+        | .AllocNew(_, _)
+        | .BuiltinMethod(_, _, _)
+        | .ClosureMethod(_, _, _)
+        | .HandleMethod(_, _, _)
+        | .NumericMethod(_, _)
+        | .NumericBinaryMethod(_, _, _)
+        | .SharedGuardWait(_, _, _)
+        | .CoreClosureCall(_) -> true
         else -> false
     }
 }
@@ -632,11 +699,17 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int,
 }
 
 fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller_key: String) {
-    if sema_effect_is_call(expression) {
-        fact :: sema_effect_find_fact(facts, caller_key, expression.span)
-        if fact == {
-            .Val(value) -> sema_effect_record_fact(&nodes, node_index, value, expression, &diagnostics)
-            .None -> sema_effect_record_unresolved_call(&nodes, node_index, expression)
+    if {
+        sema_effect_is_call(expression) -> {
+            fact :: sema_effect_find_fact(facts, caller_key, expression.span)
+            if fact == {
+                .Val(value) -> sema_effect_record_fact(&nodes, node_index, value, &diagnostics)
+                .None -> sema_effect_record_unresolved_call(&nodes, node_index, expression)
+            }
+        }
+        else -> {
+            fact :: sema_effect_find_exact_fact(facts, caller_key, expression.span)
+            if fact == .Val(value) -> sema_effect_record_fact(&nodes, node_index, value, &diagnostics)
         }
     }
     if expression.kind == {
@@ -1042,7 +1115,8 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
             }
             function_diagnostics := [Diagnostic]{}
             sema_effect_collect_function(&nodes, node_index, function, module_row.call_facts, &function_diagnostics)
-            sema_effect_check_unsafe_statements_tir(&nodes, module_row.call_facts, function.key, function.body, false, &function_diagnostics)
+            audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
+            sema_effect_check_unsafe_statements_tir(&nodes, module_row.call_facts, function.key, function.body, audited, &function_diagnostics)
             sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
         }
         module_index += 1

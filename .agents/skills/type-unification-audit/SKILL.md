@@ -30,7 +30,7 @@ The probe and honesty sections of the standing lens apply to the declared target
 | Census, taxonomy, and report shape | [`references/taxonomy.md`](references/taxonomy.md) |
 | Ratification, soundness, I8 traps, and reviews | [`references/reviews.md`](references/reviews.md) |
 
-For the declared target: inventory relevant kind mechanisms and fields; census phantom names; run minimal `.jet` repros through `scripts/agent/jet-env`; classify with the exact taxonomy; and propose the smallest honest fix, preferring ratified enums, distincts, or markers over a new kind. A claim without a probe or `file:line` cite does not enter the report.
+For the declared target: inventory relevant kind mechanisms and fields; census phantom names; run minimal `.jet` repros through `Tools/agent/jet-env`; classify with the exact taxonomy; and propose the smallest honest fix, preferring ratified enums, distincts, or markers over a new kind. A claim without a probe or `file:line` cite does not enter the report.
 
 All three fresh-context reviews are mandatory on an authorized run: peer, adversarial, and pay-up-front. Record each material finding and resolution. Cards and ballots are created only when the owner explicitly asks; bugs map to cards, and syntax, surface, API, or feature changes map to `tower-ballot` decisions.
 
@@ -38,4 +38,4 @@ All three fresh-context reviews are mandatory on an authorized run: peer, advers
 
 Stop when the frozen target census is complete, every row has evidence or an honest `unknown`, ratification, soundness, and I8 checks are recorded, all three reviews have resolutions, and the fix-first report plus disposition marker is complete. Report completion does not implement a proposed type or fix.
 
-This is report-only by default: write one report under `docs/audits/` through the project-approved non-serve CLI, cite Tower read-only, and create no cards, decisions, ballots, or implementation edits. An explicit owner request can change that boundary; follow the shared permission contract and keep implementation separate from the report.
+This is report-only by default: write one report under `Docs/audits/` through the project-approved non-serve CLI, cite Tower read-only, and create no cards, decisions, ballots, or implementation edits. An explicit owner request can change that boundary; follow the shared permission contract and keep implementation separate from the report.

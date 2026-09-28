@@ -20,13 +20,13 @@ if [[ ! -f "$package_manifest" ]]; then
   echo "jet-bootstrap: isolated project manifest was not assembled" >&2
   exit 65
 fi
-check_command=(timeout --foreground 120 "$repo/scripts/agent/jet-env" jet check "$unit")
+check_command=(timeout --foreground 120 "$repo/Tools/agent/jet-env" jet check "$unit")
 printf -v exact_command '%q ' "${check_command[@]}"
 unit_sha="$(sha256sum "$unit" | cut -d ' ' -f1)"
 source_map_sha="$(sha256sum "$source_map" | cut -d ' ' -f1)"
 package_sha="$(sha256sum "$package_manifest" | cut -d ' ' -f1)"
 {
-  printf 'entry-command: scripts/agent/jet-env bash Compiler/Bootstrap/check.sh\n'
+  printf 'entry-command: Tools/agent/jet-env bash Compiler/Bootstrap/check.sh\n'
   printf 'working-directory: %s\n' "$project"
   printf 'command: %s\n' "${exact_command% }"
   printf 'project-root: %s\n' "$project"

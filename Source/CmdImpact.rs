@@ -23,7 +23,7 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     let (path, symbol) = match positional.as_slice() {
         [path, symbol] => (*path, *symbol),
         _ => {
-            crate::cli_error!(@fix "E2104", "`jet inspect impact` needs an entry file and a symbol name", "jet inspect impact examples/features/effects/effects.jet report");
+            crate::cli_error!(@fix "E2104", "`jet inspect impact` needs an entry file and a symbol name", "jet inspect impact Examples/features/effects/effects.jet report");
             exit(ExitCodes::USER_ERROR);
         }
     };

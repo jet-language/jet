@@ -1,6 +1,6 @@
 # Ontology report and finding taxonomy
 
-The report is a single file under `docs/audits/`, installed through the project-approved non-serve CLI. Use the shared audit-dispositions contract before publication. Report completion does not implement a proposed spelling or semantic change.
+The report is a single file under `Docs/audits/`, installed through the project-approved non-serve CLI. Use the shared audit-dispositions contract before publication. Report completion does not implement a proposed spelling or semantic change.
 
 ## Required report sections
 

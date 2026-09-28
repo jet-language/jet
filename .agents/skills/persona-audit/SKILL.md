@@ -15,7 +15,7 @@ Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-disposit
 
 At activation, freeze a finite matrix with `persona × domain × job × window target`. Include fresh beginner-through-expert personas in distinct domains, plus an unattended coding agent. If the owner declares one domain, record that narrower scope. Do not add rows during the run; record a needed row as an explicit coverage gap for the owner.
 
-For every row, define a concrete project and core loop, run representative examples with `scripts/agent/jet-env`, and record evidence, push factors, pull factors, and one verdict. Keep the first useful visual check separate from the later project loop. Window checks are conditional on the row's declared window target; their exact gates are in [`references/first-session.md`](references/first-session.md).
+For every row, define a concrete project and core loop, run representative examples with `Tools/agent/jet-env`, and record evidence, push factors, pull factors, and one verdict. Keep the first useful visual check separate from the later project loop. Window checks are conditional on the row's declared window target; their exact gates are in [`references/first-session.md`](references/first-session.md).
 
 ## Coding-agent facet
 
@@ -30,7 +30,7 @@ repair, assistance, or preference study. Ordinary persona work keeps its
 existing project loops and does not collect controlled-trial paperwork.
 
 The retained T1 fixture at
-[`docs/audits/raw/2393-r2/fixtures.json`](../../docs/audits/raw/2393-r2/fixtures.json)
+[`Docs/audits/raw/2393-r2/fixtures.json`](../../Docs/audits/raw/2393-r2/fixtures.json)
 is task data, not participant evidence. Freeze its bytes, argument vectors,
 the fresh Jet binary identity, prompt, allowlisted current documentation,
 tools, time limits, and expected results before launch. The initial pilot is
@@ -97,4 +97,4 @@ Apply only the standing-lens sections relevant to the declared matrix. Use runti
 
 ## Completion and output
 
-Stop when every frozen row has a project loop, representative evidence, push/pull factors, and a verdict; every row has a first-session result or an honest conditional `not-applicable`, `not-proven`, or `blocked`; and the report's disposition marker is complete. A report-only run writes one report under `docs/audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no board or implementation work unless the owner explicitly changes the boundary. Report completion and implementation completion remain separate.
+Stop when every frozen row has a project loop, representative evidence, push/pull factors, and a verdict; every row has a first-session result or an honest conditional `not-applicable`, `not-proven`, or `blocked`; and the report's disposition marker is complete. A report-only run writes one report under `Docs/audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no board or implementation work unless the owner explicitly changes the boundary. Report completion and implementation completion remain separate.

@@ -24,7 +24,7 @@ fn artifact_contains(artifact: &[u8], needle: &[u8]) -> bool {
 
 #[test]
 fn zed_extension_keeps_hostile_worktree_path_out_of_the_server_command() {
-    let root = repo_root().join("editors/zed");
+    let root = repo_root().join("Tools/editors/zed");
     let source = fs::read_to_string(root.join("wasm-src/src/lib.rs"))
         .expect("Zed extension source must be present");
     let manifest = fs::read_to_string(root.join("extension.toml.in"))
@@ -298,8 +298,8 @@ process.stdout.write([
         .env("WORKSPACE_BINARY", &binary)
         .env("RUN_FILE", &run_file)
         .env("VSCODE_BINARY_MARKER", &binary_marker)
-        .env("EXTENSION", repo_root().join("editors/vscode/extension.js"))
-        .env("PACKAGE", repo_root().join("editors/vscode/package.json"))
+        .env("EXTENSION", repo_root().join("Tools/editors/vscode/extension.js"))
+        .env("PACKAGE", repo_root().join("Tools/editors/vscode/package.json"))
         .env("PATH", path_env)
         .output()
         .expect("run VS Code extension with deterministic mocks");

@@ -107,7 +107,7 @@ fn bad_dep_shape(name: &str, why: &str) -> Diagnostic {
         "E1206",
         format!("dependency `{name}` has an invalid shape"),
         why.to_string(),
-        "see docs/spec/syntax-decisions.md D-JPK23 for the dependency ref forms".to_string(),
+        "see Docs/spec/syntax-decisions.md D-JPK23 for the dependency ref forms".to_string(),
         None,
     )
 }

@@ -635,16 +635,16 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_i
 
 pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolId) -> ?Func {
     if environment.registration_graph == .Val(graph) {
-        loop module in graph.modules {
-            loop function in module.functions {
+        loop module_row in graph.modules {
+            loop function in module_row.functions {
                 if function.symbol.id.key == target.key -> return Val(function.declaration)
             }
-            loop nominal in module.nominals {
+            loop nominal in module_row.nominals {
                 loop method in nominal.methods {
                     if method.symbol.id.key == target.key -> return Val(method.declaration)
                 }
             }
-            loop implementation in module.impls {
+            loop implementation in module_row.impls {
                 loop method in implementation.methods {
                     if method.symbol.id.key == target.key -> return Val(method.declaration)
                 }

@@ -109,11 +109,11 @@ fn compiler_user_visible_enums_obey_acronym_lexicon() {
 const ROOTS: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
-    "docs/spec",
-    "docs/spec/reference/syntax-surface.jet",
+    "Docs/spec",
+    "Docs/spec/reference/syntax-surface.jet",
     "Source",
     "crates",
-    "examples",
+    "Examples",
     "tests/ui",
 ];
 
@@ -122,9 +122,9 @@ const OLD_BINDING_SCAN_ROOTS: &[&str] = &[
     "crates/jet-parser/src/Parser",
     "Source/FixEngine.rs",
     "Source/LSP",
-    "docs/spec/reference/syntax-surface.jet",
-    "editors/vscode/README.md",
-    "editors/zed/README.md",
+    "Docs/spec/reference/syntax-surface.jet",
+    "Tools/editors/vscode/README.md",
+    "Tools/editors/zed/README.md",
     "tests/cli",
     "tests/lsp",
     "tests/ui",
@@ -171,17 +171,17 @@ const FORBIDDEN: &[&str] = &[
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
 const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
-    "docs/spec/syntax-decisions.md",
-    "docs/spec/encoding-decisions.md",
-    "docs/spec/reference/core-library.md",
-    "examples/features/serde/datatree_accessors.jet",
-    "examples/features/serde/encoding_breadth.jet",
-    "examples/features/serde/encoding_base.jet",
-    "examples/features/serde/encoding_base_expert/run.jet",
+    "Docs/spec/syntax-decisions.md",
+    "Docs/spec/encoding-decisions.md",
+    "Docs/spec/reference/core-library.md",
+    "Examples/features/serde/datatree_accessors.jet",
+    "Examples/features/serde/encoding_breadth.jet",
+    "Examples/features/serde/encoding_base.jet",
+    "Examples/features/serde/encoding_base_expert/run.jet",
 ];
-const ACTIVE_MATURITY_DOCS: &[&str] = &["docs/spec/reference/maturity-tags.md"];
-const MARKER_CENSUS_DOC: &str = "docs/spec/syntax-decisions.md";
-const ENVIRONMENT_REFERENCE: &str = "docs/spec/reference/environment.md";
+const ACTIVE_MATURITY_DOCS: &[&str] = &["Docs/spec/reference/maturity-tags.md"];
+const MARKER_CENSUS_DOC: &str = "Docs/spec/syntax-decisions.md";
+const ENVIRONMENT_REFERENCE: &str = "Docs/spec/reference/environment.md";
 
 #[test]
 fn live_surface_has_no_retired_spellings() {
@@ -217,7 +217,7 @@ fn live_surface_has_no_retired_spellings() {
 
 #[test]
 fn pipe_family_has_no_stale_flow_reservation() {
-    let decision = fs::read_to_string("docs/spec/syntax-decisions.md").unwrap();
+    let decision = fs::read_to_string("Docs/spec/syntax-decisions.md").unwrap();
     let decision = decision.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"));
     assert!(decision.contains("value-position `|` is bitwise OR"));
@@ -389,42 +389,42 @@ const RATIFIED_UNSHIPPED_SPELLINGS: &[(&str, &str, &str, &str, &str)] = &[
     (
         "S74",
         "Val(n) :: maybe_port() ?? return",
-        "docs/spec/syntax-decisions.md",
+        "Docs/spec/syntax-decisions.md",
         "retires S74's pattern-left refutable binding",
         "retired by D-CHOOSE-TEST1; card #1652",
     ),
     (
         "D-ONCE-UITREE1",
         ".Button.{ label: \"OK\" }",
-        "docs/spec/syntax-decisions.md",
+        "Docs/spec/syntax-decisions.md",
         "ratified-but-unbuilt `.Button.{ }` UI-tree spelling",
         "deferred to the architecture result; card #1588 via #1736",
     ),
     (
         "S56",
         "#MyTrait struct Custom",
-        "docs/spec/reference/syntax-surface.jet",
+        "Docs/spec/reference/syntax-surface.jet",
         "# RATIFIED, NOT YET IMPLEMENTED (S56)",
         "deferred to Epoch 3 typed reflection; card #756",
     ),
     (
         "D-MIGRATE2A",
         "migration ... add ...",
-        "docs/spec/reference/syntax-surface.jet",
+        "Docs/spec/reference/syntax-surface.jet",
         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
         "tracked by the imported decision ledger; card #1735",
     ),
     (
         "D-MIGRATE2D",
         "migration ... remove ...",
-        "docs/spec/reference/syntax-surface.jet",
+        "Docs/spec/reference/syntax-surface.jet",
         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
         "tracked by the imported decision ledger; card #1735",
     ),
     (
         "D-MIGRATE2E",
         "migration ... change ... via ...",
-        "docs/spec/reference/syntax-surface.jet",
+        "Docs/spec/reference/syntax-surface.jet",
         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
         "tracked by the imported decision ledger; card #1735",
     ),
@@ -441,9 +441,9 @@ fn ratified_reference_gap_ids(source: &str) -> BTreeSet<String> {
 
 #[test]
 fn ratified_unshipped_spellings_are_listed_and_triaged() {
-    let reference = fs::read_to_string("docs/spec/reference/syntax-surface.jet")
+    let reference = fs::read_to_string("Docs/spec/reference/syntax-surface.jet")
         .expect("read syntax reference");
-    let spec = fs::read_to_string("docs/spec/syntax-decisions.md")
+    let spec = fs::read_to_string("Docs/spec/syntax-decisions.md")
         .expect("read syntax decisions");
 
     let mut expected = ratified_reference_gap_ids(&reference);
@@ -463,7 +463,7 @@ fn ratified_unshipped_spellings_are_listed_and_triaged() {
     );
 
     for (id, spelling, home, anchor, disposition) in RATIFIED_UNSHIPPED_SPELLINGS {
-        let source = if *home == "docs/spec/syntax-decisions.md" {
+        let source = if *home == "Docs/spec/syntax-decisions.md" {
             &spec
         } else {
             &reference
@@ -505,7 +505,7 @@ fn ratified_unshipped_spellings_are_listed_and_triaged() {
 #[test]
 fn syntax_status_matrix_covers_unbuilt_notes() {
     // FEATURE_CLAIM: claim.syntax-law / syntax-matrix
-    let spec = fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+    let spec = fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
     assert!(spec.contains("A ratified entry may sit unbuilt **only** when gated on"));
 
     let lines: Vec<&str> = spec.lines().collect();
@@ -549,7 +549,7 @@ fn syntax_status_matrix_covers_unbuilt_notes() {
 fn environment_reference_is_canonical_and_navigable() {
     let reference = fs::read_to_string(ENVIRONMENT_REFERENCE)
         .expect("read canonical environment-variable reference");
-    let docs_index = fs::read_to_string("docs/README.md").expect("read docs index");
+    let docs_index = fs::read_to_string("Docs/README.md").expect("read docs index");
 
     assert!(
         docs_index.contains("reference/environment.md"),
@@ -574,7 +574,7 @@ fn environment_reference_is_canonical_and_navigable() {
 #[test]
 fn lexical_ledger_is_rendered_from_syntax() {
     let decisions =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
     let start = decisions
         .find("<!-- BEGIN GENERATED LEXICAL LEDGER -->")
         .expect("syntax decisions must render the lexical ledger");
@@ -584,7 +584,7 @@ fn lexical_ledger_is_rendered_from_syntax() {
     assert!(start < end, "lexical ledger markers must be ordered");
     let block = &decisions[start..end];
     assert!(
-        block.contains("Generated by `scripts/agent/lexical-ledger.mjs`"),
+        block.contains("Generated by `Tools/agent/lexical-ledger.mjs`"),
         "lexical ledger must identify its renderer"
     );
 
@@ -632,7 +632,7 @@ fn lexical_ledger_is_rendered_from_syntax() {
 fn marker_plane_matrix_covers_current_marker_families() {
     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read Syntax.rs");
     let decisions =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     assert_eq!(
         jet::Syntax::RULE_PREFIX,
@@ -761,7 +761,7 @@ fn authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
         "crates/jet-pkg-model/src/EffectBudget.rs",
         "crates/jet-devserver/src/Canvas/graph_projection.rs",
         "Source/CmdCompile.rs",
-        "docs/spec/reference/syntax-surface.jet",
+        "Docs/spec/reference/syntax-surface.jet",
         "tests/cli/man.txt",
         "tests/cli/completions_bash.txt",
         "tests/cli/completions_fish.txt",
@@ -870,7 +870,7 @@ fn card_511_census_matches_current_law() {
     let markers = fs::read_to_string("crates/jet-foundation/src/Syntax/markers.rs")
         .expect("read marker registry");
     let decisions =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     assert!(
         !core.contains("pub const KW_VIEW"),
@@ -904,7 +904,7 @@ fn module_internal_is_discovery_not_access_control() {
     let config = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs")
         .expect("read module syntax registry");
     let decisions =
-        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+        fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     assert!(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"));
     assert!(config.contains("D-SHAPE-MODULEINTERNAL1=A"));
@@ -1277,7 +1277,7 @@ fn should_skip(path: &Path) -> bool {
         || name.ends_with("_retired")
         || s.ends_with(".published.snapshot")
         || s.ends_with("tests/syntax_reconciliation.rs")
-        || s.ends_with("docs/spec/syntax-decisions.md")
+        || s.ends_with("Docs/spec/syntax-decisions.md")
 }
 
 fn scan_lines<'a>(path: &Path, text: &'a str) -> Vec<(usize, &'a str)> {
@@ -1335,7 +1335,7 @@ fn artifact_extensions_are_one_closed_kind_specific_family() {
         Some(ArtifactKind::GameReplay)
     );
 
-    for root in ["Source", "crates", "examples", "tests", "docs"] {
+    for root in ["Source", "crates", "Examples", "tests", "Docs"] {
         for path in files(Path::new(root)) {
             if path.ends_with("tests/syntax_reconciliation.rs") {
                 continue;
@@ -1364,7 +1364,7 @@ fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
         .copied()
         .filter(|needle| {
             if *needle == "pure fn" {
-                return path.starts_with("docs");
+                return path.starts_with("Docs");
             }
             if path.extension().and_then(|x| x.to_str()) != Some("rs") {
                 return true;

@@ -169,7 +169,7 @@ fn package_gc_policy_applies_once_across_imported_modules() {
 fn hosted_gc_policy_matches_all_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "memory/gc_cyclic",
-        include_str!("../examples/features/expected/memory/gc_cyclic.out"),
+        include_str!("../Examples/features/expected/memory/gc_cyclic.out"),
     );
 }
 
@@ -373,7 +373,7 @@ fn audited_gate_invocations_are_allowed_under_tightening_modes() {
 #[test]
 fn audited_gate_ladder_example_allows_and_refuses_each_marker() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/effects/audited_gate_ladder.jet");
+        .join("Examples/features/effects/audited_gate_ladder.jet");
     for key in jet::Policy::AUDITED_GATE_KEYS {
         let mut allowed = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
         let mut all = jet::Policy::GateSet::default();

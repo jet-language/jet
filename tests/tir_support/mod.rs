@@ -447,7 +447,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
     F: Fn(&str),
 {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let stem_path = root.join("examples/features").join(stem);
+    let stem_path = root.join("Examples/features").join(stem);
     let source = if stem_path.is_dir() {
         stem_path.join("run.jet")
     } else {
@@ -500,7 +500,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
             .env("JET_STORE_DIR", cache.join("cache"))
             .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1")
-            // The test itself already runs inside scripts/agent/jet-env. Mark
+            // The test itself already runs inside Tools/agent/jet-env. Mark
             // the child as active there so the project-env gate does not turn
             // this tier-parity proof into an E1355 test.
             .env("JETPACK_ENV", "1");
@@ -544,13 +544,13 @@ pub fn assert_example_cli_error_tiers_agree(
     expected_stderr: &str,
 ) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features").join(format!("{stem}.jet"));
+    let source = root.join("Examples/features").join(format!("{stem}.jet"));
     assert!(
         source.is_file(),
         "missing executable error example: {}",
         source.display()
     );
-    let relative = format!("examples/features/{stem}.jet");
+    let relative = format!("Examples/features/{stem}.jet");
     let modes = [
         ("debug", Some("--profile=debug"), false),
         ("release", Some("--release"), false),

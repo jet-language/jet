@@ -63,7 +63,7 @@ fn every_registry_row_is_one_written_declaration() {
 fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let allowed = [
-        "docs/spec/syntax-decisions.md",
+        "Docs/spec/syntax-decisions.md",
         "tests/ui/marker_decl_rejected_forms.jet",
         "tests/ui/marker_decl_rejected_forms.stderr",
     ];

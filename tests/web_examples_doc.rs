@@ -1,5 +1,5 @@
 //! Card #705: every shipped web example is indexed in docs and has proof output
-//! or an explicit harness-only suffix in `examples/features/expected/web/`.
+//! or an explicit harness-only suffix in `Examples/features/expected/web/`.
 
 mod common;
 
@@ -9,9 +9,9 @@ use std::path::Path;
 #[test]
 fn web_examples_are_documented_and_have_expected_outputs() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let web_dir = repo.join("examples/features/web");
-    let expected_dir = repo.join("examples/features/expected/web");
-    let doc = fs::read_to_string(repo.join("docs/spec/reference/web-backend-wasm.md"))
+    let web_dir = repo.join("Examples/features/web");
+    let expected_dir = repo.join("Examples/features/expected/web");
+    let doc = fs::read_to_string(repo.join("Docs/spec/reference/web-backend-wasm.md"))
         .expect("web backend doc");
 
     let mut jets: Vec<_> = fs::read_dir(&web_dir)
@@ -28,7 +28,7 @@ fn web_examples_are_documented_and_have_expected_outputs() {
         let name = jet.file_name().unwrap().to_str().unwrap();
         assert!(
             doc.contains(name),
-            "{name} missing from docs/spec/reference/web-backend-wasm.md"
+            "{name} missing from Docs/spec/reference/web-backend-wasm.md"
         );
 
         let stem = jet.file_stem().unwrap().to_str().unwrap();
@@ -37,7 +37,7 @@ fn web_examples_are_documented_and_have_expected_outputs() {
         let harness = expected_dir.join(format!("{stem}.harness.out"));
         assert!(
             native.is_file() || web.is_file() || harness.is_file(),
-            "{name} has no golden under examples/features/expected/web/"
+            "{name} has no golden under Examples/features/expected/web/"
         );
     }
 }

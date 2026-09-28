@@ -1,6 +1,6 @@
 //! `jet learn` — offline code exercises with authored answers and local checks.
 //!
-//! The four entries in `examples/learn/curriculum.json` are authored lessons.
+//! The four entries in `Examples/learn/curriculum.json` are authored lessons.
 //! They project canonical task identities; they are not a second census
 //! denominator.  The runner records prediction, checked evidence, controlled
 //! change, and structurally different transfer in one resumable progress record
@@ -23,10 +23,10 @@ use jet_foundation::Report::StatusEnvelope;
 use jet_foundation::Terminal::Theme;
 
 const LEARN_DIR: &str = ".jet/learn/feedback";
-const CURRICULUM_JSON: &str = include_str!("../examples/learn/curriculum.json");
+const CURRICULUM_JSON: &str = include_str!("../Examples/learn/curriculum.json");
 const CURRICULUM_SCHEMA: &str = "jet-learning-curriculum-v1";
 const CENSUS_RELATION: &str = "jet-learning-census-v1";
-const CENSUS_RELATION_SOURCE: &str = "examples/learn/curriculum.json";
+const CENSUS_RELATION_SOURCE: &str = "Examples/learn/curriculum.json";
 const PROGRESS_SCHEMA: &str = "jet-learn-progress-v1";
 const REVISION_RULE: &str = "source-bound observations are valid only when source_identity.digest matches; a source edit invalidates the observation until the dependent projection is regenerated and the task is re-run";
 
@@ -374,7 +374,7 @@ pub(crate) fn run(args: &[String], mode: OutputMode) -> ! {
             crate::cli_error!(
                 @fix "E2105",
                 format!("the learning curriculum is unavailable: {error}"),
-                "restore examples/learn/curriculum.json and regenerate the census projection"
+                "restore Examples/learn/curriculum.json and regenerate the census projection"
             );
             std::process::exit(ExitCodes::USER_ERROR);
         }
@@ -696,53 +696,53 @@ fn safe_fixture_path(path: &str) -> bool {
 
 fn fixture_text(path: &str) -> Option<&'static str> {
     Some(match path {
-        "loop.jet" => include_str!("../examples/learn/feedback/loop.jet"),
-        "loop.solution.jet" => include_str!("../examples/learn/feedback/loop.solution.jet"),
-        "loop.change.jet" => include_str!("../examples/learn/feedback/loop.change.jet"),
+        "loop.jet" => include_str!("../Examples/learn/feedback/loop.jet"),
+        "loop.solution.jet" => include_str!("../Examples/learn/feedback/loop.solution.jet"),
+        "loop.change.jet" => include_str!("../Examples/learn/feedback/loop.change.jet"),
         "loop.change.solution.jet" => {
-            include_str!("../examples/learn/feedback/loop.change.solution.jet")
+            include_str!("../Examples/learn/feedback/loop.change.solution.jet")
         }
-        "loop.transfer.jet" => include_str!("../examples/learn/feedback/loop.transfer.jet"),
+        "loop.transfer.jet" => include_str!("../Examples/learn/feedback/loop.transfer.jet"),
         "loop.transfer.solution.jet" => {
-            include_str!("../examples/learn/feedback/loop.transfer.solution.jet")
+            include_str!("../Examples/learn/feedback/loop.transfer.solution.jet")
         }
-        "state.jet" => include_str!("../examples/learn/feedback/state.jet"),
-        "state.solution.jet" => include_str!("../examples/learn/feedback/state.solution.jet"),
-        "state.change.jet" => include_str!("../examples/learn/feedback/state.change.jet"),
+        "state.jet" => include_str!("../Examples/learn/feedback/state.jet"),
+        "state.solution.jet" => include_str!("../Examples/learn/feedback/state.solution.jet"),
+        "state.change.jet" => include_str!("../Examples/learn/feedback/state.change.jet"),
         "state.change.solution.jet" => {
-            include_str!("../examples/learn/feedback/state.change.solution.jet")
+            include_str!("../Examples/learn/feedback/state.change.solution.jet")
         }
-        "state.transfer.jet" => include_str!("../examples/learn/feedback/state.transfer.jet"),
+        "state.transfer.jet" => include_str!("../Examples/learn/feedback/state.transfer.jet"),
         "state.transfer.solution.jet" => {
-            include_str!("../examples/learn/feedback/state.transfer.solution.jet")
+            include_str!("../Examples/learn/feedback/state.transfer.solution.jet")
         }
-        "effects.jet" => include_str!("../examples/learn/feedback/effects.jet"),
+        "effects.jet" => include_str!("../Examples/learn/feedback/effects.jet"),
         "effects.solution.jet" => {
-            include_str!("../examples/learn/feedback/effects.solution.jet")
+            include_str!("../Examples/learn/feedback/effects.solution.jet")
         }
-        "effects.change.jet" => include_str!("../examples/learn/feedback/effects.change.jet"),
+        "effects.change.jet" => include_str!("../Examples/learn/feedback/effects.change.jet"),
         "effects.change.solution.jet" => {
-            include_str!("../examples/learn/feedback/effects.change.solution.jet")
+            include_str!("../Examples/learn/feedback/effects.change.solution.jet")
         }
         "effects.transfer.jet" => {
-            include_str!("../examples/learn/feedback/effects.transfer.jet")
+            include_str!("../Examples/learn/feedback/effects.transfer.jet")
         }
         "effects.transfer.solution.jet" => {
-            include_str!("../examples/learn/feedback/effects.transfer.solution.jet")
+            include_str!("../Examples/learn/feedback/effects.transfer.solution.jet")
         }
-        "foreign.jet" => include_str!("../examples/learn/feedback/foreign.jet"),
+        "foreign.jet" => include_str!("../Examples/learn/feedback/foreign.jet"),
         "foreign.solution.jet" => {
-            include_str!("../examples/learn/feedback/foreign.solution.jet")
+            include_str!("../Examples/learn/feedback/foreign.solution.jet")
         }
-        "foreign.change.jet" => include_str!("../examples/learn/feedback/foreign.change.jet"),
+        "foreign.change.jet" => include_str!("../Examples/learn/feedback/foreign.change.jet"),
         "foreign.change.solution.jet" => {
-            include_str!("../examples/learn/feedback/foreign.change.solution.jet")
+            include_str!("../Examples/learn/feedback/foreign.change.solution.jet")
         }
         "foreign.transfer.jet" => {
-            include_str!("../examples/learn/feedback/foreign.transfer.jet")
+            include_str!("../Examples/learn/feedback/foreign.transfer.jet")
         }
         "foreign.transfer.solution.jet" => {
-            include_str!("../examples/learn/feedback/foreign.transfer.solution.jet")
+            include_str!("../Examples/learn/feedback/foreign.transfer.solution.jet")
         }
         _ => return None,
     })

@@ -222,8 +222,10 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         next_invocation_carrier_token: 1,
         jit_closure_targets: HashMap::new(),
         jit_closure_targets_by_ptr: HashMap::new(),
+        jit_closure_execution_identity: None,
         native_interface_methods: HashMap::new(),
         native_callable_methods: HashMap::new(),
+        dma_types: HashMap::new(),
         dma_transfers: HashMap::new(),
         iterable_hooks: HashMap::new(),
         hardware_host: None,
@@ -501,6 +503,9 @@ pub(crate) fn ensure_resident_module_with_roots(
                 module,
                 host,
                 main_id: compiled.entry_id,
+                program: None,
+                artifact: Some(artifact),
+                execution: program.execution_identity(Some(artifact)).ok(),
                 typed_entry_id: compiled.typed_entry_id,
                 main_returns_result,
                 main_returns_app,
@@ -589,7 +594,9 @@ fn ensure_typed_helper_adapter_in_module(
                 "Source helper adapter for {function:?} has a non-function resident symbol"
             ))
         }
-        None => compile_typed_entry_adapter(module, target, function_row)?,
+        None => compile_typed_entry_adapter(module, target, function_row)?.ok_or_else(|| {
+            format!("Source helper function {function:?} has no typed entry adapter")
+        })?,
     };
     Ok((target, typed_target))
 }
@@ -1030,6 +1037,7 @@ fn resident_run_private_helper(
             .iter()
             .find(|candidate| candidate.id == function_id)
             .ok_or_else(|| format!("Source helper function {function_id:?} is missing"))?;
+        let mut write_arguments = Vec::new();
         let words = values
             .iter()
             .zip(&function.params)
@@ -1053,7 +1061,7 @@ fn resident_run_private_helper(
                     });
                     Ok(address)
                 } else {
-                    Ok(value)
+                    Ok::<i64, String>(value)
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -4195,7 +4195,7 @@ impl<'a> Checker<'a> {
             // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
             // dynamic decode — same `DataTree !EncodingError` shape as `parse`, with
             // string→number/bool coercions surfaced as log lines
-            // (docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
+            // (Docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
             // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
             // in `is_polymorphic_core_special`, so its `core_fixed_sig` row is
             // never consulted; without this arm the call fell through to
@@ -6851,13 +6851,13 @@ impl<'a> Checker<'a> {
             // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reads a
             // decrypted repo secret and returns `String?`; it is not a raw
             // key-material operation, so the expert arm below must not
-            // claim it. `docs/spec/spec.md` § Secrets states its whole gate:
+            // claim it. `Docs/spec/spec.md` § Secrets states its whole gate:
             // the `Secret` effect (E1264, and `Secret` is the one effect
             // denied even with no declared row at all) plus unconditional
             // denial at build/comptime time (E1265, no `#Impure` escape).
             // The catch-all demanded a third gate it describes as "raw key
             // import", which this call is not, and that rejected the shipped
-            // executable spec `examples/features/crypto/vault_secret.jet`
+            // executable spec `Examples/features/crypto/vault_secret.jet`
             // — which declares `-[Secret, IO]>` exactly as the spec says
             // (I5, #2018). Empty body: fall through to the shared
             // fixed-signature check like every other gated arm here.

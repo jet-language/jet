@@ -1,0 +1,340 @@
+// Loop-expression state transitions shared by statement dispatch and inline-loop lowering.
+
+pub fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> ?TExpr {
+    frame :: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
+    target :: frame ?? return None
+    if target.kind != SemaLoopValueKind.Result -> return None
+    if target.ty == None {
+        sema_loop_value_set_result_type(context, frame_index, value.ty)
+        return Val(value)
+    }
+    expected :: target.ty ?? value.ty
+    if type_identity_equal(expected, value.ty) -> return Val(value)
+    common :: sema_expr_numeric_join(expected, value.ty) ?? {
+        diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(expected)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
+        return None
+    }
+    sema_loop_value_set_result_type(context, frame_index, common)
+    if type_identity_equal(common, value.ty) -> return Val(value)
+    if sema_expr_numeric_widening_to(value.ty, common) == (Val(true)) {
+        line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+        return sema_expr_numeric_literal_conversion(value, common, value.span, line, &diagnostics)
+    }
+    Val(value)
+}
+
+pub fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if context.collect_item_types.len() == 0 -> return None
+    expected := sema_loop_value_collecting_type(context)
+    checked_expected := expected
+    if expected == .Val(expected_type) && sema_expr_is_numeric(expected_type) -> checked_expected = None
+    checked :: sema_check_expression(value, checked_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if checked.ty == Type.Named("Unit") {
+        diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
+        return None
+    }
+    if expected == None {
+        sema_loop_value_set_collecting_type(context, checked.ty)
+        return Val(checked)
+    }
+    required :: expected ?? checked.ty
+    if type_identity_equal(required, checked.ty) -> return Val(checked)
+    common :: sema_expr_numeric_join(required, checked.ty) ?? {
+        diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is `{type_name(checked.ty)}` instead of `{type_name(required)}`", "convert every item to one type, or split the loops"))
+        return None
+    }
+    sema_loop_value_set_collecting_type(context, common)
+    if type_identity_equal(common, checked.ty) -> return Val(checked)
+    if sema_expr_numeric_widening_to(checked.ty, common) == (Val(true)) {
+        line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        return sema_expr_numeric_literal_conversion(checked, common, checked.span, line, &diagnostics)
+    }
+    Val(checked)
+}
+
+fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr {
+    sema_tir_expr(Type.List(item_type), TExprKind.Local(local), span)
+}
+
+fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt {
+    receiver :: sema_loop_value_collect_local_expr(local, item_type, span)
+    call := sema_tir_expr(Type.Named("Unit"), TExprKind.BuiltinMethod(receiver, TBuiltinOp.Push, [TExpr]{value}), span)
+    TStmt.ExprStmt(call, span)
+}
+
+fn sema_loop_value_collect_widen(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> ?TExpr {
+    if type_identity_equal(value.ty, item_type) -> return Val(value)
+    if sema_expr_numeric_widening_to(value.ty, item_type) != (Val(true)) -> return None
+    line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+    sema_expr_numeric_literal_conversion(value, item_type, value.span, line, &diagnostics)
+}
+
+fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    index := 0
+    loop index < statements.len() {
+        statement := statements[index]
+        if statement == {
+            .ExprStmt(value, span) -> {
+                if span.start == span.end {
+                    widened :: sema_loop_value_collect_widen(value, item_type, environment, &diagnostics) ?? return false
+                    statements[index] = sema_loop_value_collect_push(local, item_type, widened, span)
+                }
+            }
+            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.CountedLoop(label, init, condition, step, vectorization, body, span)
+            }
+            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ForRange(label, variable, start, end, step, exclusive, body, vectorization, span)
+            }
+            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Range(label, variable, source, start, end, step, exclusive, vectorization, body, span)
+            }
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
+            }
+            .While(label, condition, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.While(label, condition, body, span)
+            }
+            .Loop(label, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Loop(label, body, span)
+            }
+            .If(condition, then_body, else_body, else_is_elseif, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&then_body, local, item_type, environment, &diagnostics) -> return false
+                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body ?? [TStmt]{}, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.If(condition, then_body, else_body, else_is_elseif, span)
+            }
+            .Match(subject, arms, exhaustive, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                }
+                statements[index] = TStmt.Match(subject, arms, exhaustive, span)
+            }
+            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                }
+                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body ?? [TStmt]{}, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span)
+            }
+            .RangeSwitch(subject, arms, else_body, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                }
+                if !sema_loop_value_rewrite_collecting_statements(&else_body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.RangeSwitch(subject, arms, else_body, span)
+            }
+            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                }
+                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body ?? [TStmt]{}, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.MixedSwitch(subject, branch_class, arms, else_body, span)
+            }
+            .RefutableBind(pattern, init, fallback, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&fallback, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.RefutableBind(pattern, init, fallback, span)
+            }
+            .ContractScope(pre, body, post, result, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ContractScope(pre, body, post, result, span)
+            }
+            .TaskGroup(group, limit, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.TaskGroup(group, limit, body, span)
+            }
+            .Layout(handle, label, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Layout(handle, label, body, span)
+            }
+            .ContextBlock(guards, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ContextBlock(guards, body, span)
+            }
+            .GcEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+                nested_body := [TStmt]{nested}
+                if !sema_loop_value_rewrite_collecting_statements(&nested_body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.GcEdit(root, slot, edges, replace_all, index_temp, nested_body[0], span)
+            }
+            .Unsafe(gate, body) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Unsafe(gate, body)
+            }
+            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .ScopeMember(_, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                if statement == {
+                    .Inline(_, _) -> statements[index] = TStmt.Inline(body, span)
+                    .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly(body, span)
+                    .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock(gate, body, span)
+                    .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy(enabled, body, span)
+                    .Impure(_, _) -> statements[index] = TStmt.Impure(body, span)
+                    .Region(_, _) -> statements[index] = TStmt.Region(body, span)
+                    .Live(_, _) -> statements[index] = TStmt.Live(body, span)
+                    .Shield(_, _) -> statements[index] = TStmt.Shield(body, span)
+                    .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember(kind, body, span)
+                    else -> {}
+                }
+            }
+            .Transact(handle, snapshots, stm, body, span) -> {
+                if !sema_loop_value_rewrite_collecting_statements(&body, local, item_type, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Transact(handle, snapshots, stm, body, span)
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    true
+}
+
+pub fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> ?[TStmt] {
+    collector_type := Type.List(item_type)
+    local := tir_generated_local("__jet_collect_{span.start}", span)
+    local.mutable = true
+    empty := sema_tir_expr(collector_type, TExprKind.List([TExpr]{}, None), span)
+    lowered := [TStmt]{TStmt.Let(local, TLetTy.Annotated(collector_type, TLetWrapper.Plain), empty, None, false, span)}
+    loop statement in body -> lowered.push(statement)
+    if !sema_loop_value_rewrite_collecting_statements(&lowered, local, item_type, environment, &diagnostics) -> return None
+    result := sema_loop_value_collect_local_expr(local, item_type, span)
+    lowered.push(TStmt.ExprStmt(result, span))
+    Val(lowered)
+}
+fn sema_loop_value_result_exit_matches(label: ?String, root_label: ?String, allow_unlabeled: Bool) -> Bool {
+    if label == .Val(name) -> return root_label == .Val(name)
+    allow_unlabeled && root_label == None
+}
+
+fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: ?String, result_type: Type, allow_unlabeled: Bool, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    index := 0
+    loop index < statements.len() {
+        statement := statements[index]
+        if statement == {
+            .BreakValue(label, value, span) -> {
+                if sema_loop_value_result_exit_matches(label, root_label, allow_unlabeled) && !type_identity_equal(value.ty, result_type) {
+                    if sema_expr_numeric_widening_to(value.ty, result_type) != (Val(true)) {
+                        diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(result_type)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
+                        return false
+                    }
+                    line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+                    widened :: sema_expr_numeric_literal_conversion(value, result_type, value.span, line, &diagnostics) ?? return false
+                    statements[index] = TStmt.BreakValue(label, widened, span)
+                }
+            }
+            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.CountedLoop(label, init, condition, step, vectorization, body, span)
+            }
+            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ForRange(label, variable, start, end, step, exclusive, body, vectorization, span)
+            }
+            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Range(label, variable, source, start, end, step, exclusive, vectorization, span)
+            }
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
+            }
+            .While(label, condition, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.While(label, condition, body, span)
+            }
+            .Loop(label, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, false, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Loop(label, body, span)
+            }
+            .If(condition, then_body, else_body, else_is_elseif, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&then_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body ?? [TStmt]{}, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.If(condition, then_body, else_body, else_is_elseif, span)
+            }
+            .Match(subject, arms, exhaustive, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                }
+                statements[index] = TStmt.Match(subject, arms, exhaustive, span)
+            }
+            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                }
+                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body ?? [TStmt]{}, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span)
+            }
+            .RangeSwitch(subject, arms, else_body, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                }
+                if !sema_loop_value_widen_result_breaks_in(&else_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.RangeSwitch(subject, arms, else_body, span)
+            }
+            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
+                loop arm in arms {
+                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                }
+                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body ?? [TStmt]{}, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.MixedSwitch(subject, branch_class, arms, else_body, span)
+            }
+            .RefutableBind(pattern, init, fallback, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&fallback, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.RefutableBind(pattern, init, fallback, span)
+            }
+            .ContractScope(pre, body, post, result, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ContractScope(pre, body, post, result, span)
+            }
+            .TaskGroup(group, limit, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.TaskGroup(group, limit, body, span)
+            }
+            .Layout(handle, label, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Layout(handle, label, body, span)
+            }
+            .ContextBlock(guards, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.ContextBlock(guards, body, span)
+            }
+            .GcEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+                nested_body := [TStmt]{nested}
+                if !sema_loop_value_widen_result_breaks_in(&nested_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.GcEdit(root, slot, edges, replace_all, index_temp, nested_body[0], span)
+            }
+            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .ScopeMember(_, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                if statement == {
+                    .Inline(_, _) -> statements[index] = TStmt.Inline(body, span)
+                    .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly(body, span)
+                    .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock(gate, body, span)
+                    .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy(enabled, body, span)
+                    .Impure(_, _) -> statements[index] = TStmt.Impure(body, span)
+                    .Region(_, _) -> statements[index] = TStmt.Region(body, span)
+                    .Live(_, _) -> statements[index] = TStmt.Live(body, span)
+                    .Shield(_, _) -> statements[index] = TStmt.Shield(body, span)
+                    .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember(kind, body, span)
+                    else -> {}
+                }
+            }
+            .Unsafe(gate, body) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Unsafe(gate, body)
+            }
+            .Transact(handle, snapshots, stm, body, span) -> {
+                if !sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                statements[index] = TStmt.Transact(handle, snapshots, stm, body, span)
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    true
+}
+
+pub fn sema_loop_value_widen_result_breaks(body: &[TStmt], root_label: ?String, result_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, true, environment, &diagnostics)
+}

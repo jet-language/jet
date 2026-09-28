@@ -389,7 +389,7 @@ fn collect_jet_files(dir: &PathBuf) -> Vec<PathBuf> {
 #[test]
 fn fmt_is_idempotent_on_examples() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for path in collect_jet_files(&root.join("examples")) {
+    for path in collect_jet_files(&root.join("Examples")) {
         let src = fs::read_to_string(&path).unwrap();
         let once = jet::format_source(&src).unwrap_or_else(|d| {
             panic!(
@@ -3982,7 +3982,7 @@ fn fmt_preserves_int_literal_radix() {
     // author-facing spelling. fmt used to re-emit every integer literal from
     // its AST value — rewriting `0x2a` to `42` and `1_000_000` to `1000000`,
     // destroying the radix the author chose (same failure class as a dropped
-    // token; caught decimalizing examples/features/parsing/binary-reader.jet
+    // token; caught decimalizing Examples/features/parsing/binary-reader.jet
     // and the crypto examples' key material).
     let src = "fn run() {\n    packet :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
     assert_fmt_stable(src, "int literal radix");

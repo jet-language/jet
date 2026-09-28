@@ -76,6 +76,53 @@ mod web_kernel {
             include!("../../../jet-codegen/src/Prelude/LocalCell.rs");
             include!(concat!(env!("OUT_DIR"), "/web_kernel_std.rs"));
 
+            #[cfg(test)]
+            mod shared_snapshot_tests {
+                use super::JetShared;
+                use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+                #[test]
+                fn projection_moves_once_and_releases_snapshot_owner() {
+                    struct Projection(Arc<AtomicUsize>);
+                    impl Clone for Projection {
+                        fn clone(&self) -> Self {
+                            panic!("consuming a snapshot must move its projection")
+                        }
+                    }
+                    impl Drop for Projection {
+                        fn drop(&mut self) {
+                            self.0.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+
+                    let shared = JetShared::new(String::from("payload"));
+                    let drops = Arc::new(AtomicUsize::new(0));
+                    let snapshot = shared.capture_with(|_| Projection(drops.clone()));
+                    assert_eq!(shared.strong_count(), 2);
+                    let revision = snapshot.revision();
+                    let (projection, captured_revision) = snapshot.into_value_and_revision();
+                    assert_eq!(captured_revision, revision);
+                    assert_eq!(shared.strong_count(), 1);
+                    assert_eq!(drops.load(Ordering::SeqCst), 0);
+                    drop(projection);
+                    assert_eq!(drops.load(Ordering::SeqCst), 1);
+                }
+
+                #[test]
+                fn snapshot_keeps_payload_live_until_its_owner_is_released() {
+                    let shared = JetShared::new(String::from("payload"));
+                    let owner = shared.physical_owner();
+                    let snapshot = shared.capture();
+                    assert_eq!(owner.strong_count(), 2);
+                    drop(shared);
+                    assert_eq!(owner.strong_count(), 1);
+                    assert_eq!(snapshot.value(), "payload");
+                    drop(snapshot);
+                    assert_eq!(owner.strong_count(), 0);
+                    assert!(owner.upgrade().is_none());
+                }
+            }
+
             pub use jet_foundation::DataTree::DataTree;
 
             #[derive(Clone, Debug, PartialEq)]

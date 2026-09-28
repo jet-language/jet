@@ -1436,9 +1436,10 @@ impl FfiLink {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccessConvention, ExternFn, FfiCloseSource, FfiHandleFact, FfiThreadSafety, Param, ParamZone,
+        AccessConvention, ExternFn, FfiCloseSource, FfiHandleFact, FfiThreadSafety,
         Type,
     };
+    use crate::AST::{Param, ParamZone};
     use crate::Diagnostics::Span;
 
     fn param(name: &str, convention: AccessConvention, ty: Type) -> Param {

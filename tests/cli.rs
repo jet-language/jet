@@ -11,7 +11,7 @@ fn direct_launch_shebang_runs_executable_file() {
     use std::os::unix::fs::PermissionsExt;
 
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/cli/direct_launch.jet");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/cli/direct_launch.jet");
     let original_mode = fs::metadata(&path).unwrap().permissions().mode();
     let mut executable = fs::metadata(&path).unwrap().permissions();
     executable.set_mode(original_mode | 0o111);

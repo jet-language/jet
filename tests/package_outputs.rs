@@ -2,7 +2,7 @@
 //! drives entry resolution for both `jet run` (JIT) and `jet build` (AOT) —
 //! I9 tier parity for the manifest-driven build path.
 //!
-//! `examples/features/packages/outputs_build/` has no `main.jet`/`run.jet`
+//! `Examples/features/packages/outputs_build/` has no `main.jet`/`run.jet`
 //! convention file. Its `package.jet` uses a *dotted* entry —
 //! `outputs: { demo: .Executable{ entry: service.run } }` — which follows
 //! `entry.jet`'s `use "service/module" as service` file import into
@@ -26,12 +26,12 @@ use std::process::Command;
 mod common;
 
 fn example_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/outputs_build")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/outputs_build")
 }
 
 fn expected_output() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/expected/packages/outputs_build.out");
+        .join("Examples/features/expected/packages/outputs_build.out");
     fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing {}", path.display()))
 }
 
@@ -40,7 +40,7 @@ fn jet_bin() -> PathBuf {
 }
 
 fn nested_example_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/outputs_nested")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/outputs_nested")
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn nested_outputs_entry_invokes_leaf_on_every_run_tier() {
         outputs[0],
         fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples/features/expected/packages/outputs_nested.out")
+                .join("Examples/features/expected/packages/outputs_nested.out")
         )
         .unwrap()
     );
@@ -604,12 +604,12 @@ fn manifest_output_rejects_missing_ambiguous_and_escaping_nested_entries() {
 }
 
 fn typed_settings_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/typed_settings")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/typed_settings")
 }
 
 fn typed_settings_output(tls: &str) -> String {
     if tls == "on" {
-        return include_str!("../examples/features/expected/packages/typed_settings.out")
+        return include_str!("../Examples/features/expected/packages/typed_settings.out")
             .to_string();
     }
     format!("tls-{tls}\nhttps://api.example.com\n")
@@ -708,7 +708,7 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
 #[test]
 fn computed_build_contribution_records_lock_and_matches_explain_golden() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let fixture = root.join("examples/features/packages/build_contribution");
+    let fixture = root.join("Examples/features/packages/build_contribution");
     let scratch = common::Scratch::new("build-contribution");
     for file in ["package.jet", "run.jet"] {
         fs::copy(fixture.join(file), scratch.join(file))
@@ -755,7 +755,7 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
         String::from_utf8_lossy(&explain.stderr)
     );
     let expected =
-        fs::read(root.join("examples/features/expected/packages/build_contribution.explain.out"))
+        fs::read(root.join("Examples/features/expected/packages/build_contribution.explain.out"))
             .expect("read computed contribution explain golden");
     assert_eq!(explain.stdout, expected);
 

@@ -31,7 +31,7 @@ Grade the five agent quantities per finding: verdict fidelity, verdict latency, 
 
 ## Evidence and standing lens
 
-Search live specs, examples, stdlib, CLI, and package surfaces. Use the standing-lens sections relevant to the frozen domain set, including runtime probes and the micro sweep where they bear on the target. Do not force unrelated comparative work. Use `scripts/agent/jet-env` for representative jobs; cite paths, examples, commands, and output. Missing evidence is `unknown`, not permission to widen the run.
+Search live specs, examples, stdlib, CLI, and package surfaces. Use the standing-lens sections relevant to the frozen domain set, including runtime probes and the micro sweep where they bear on the target. Do not force unrelated comparative work. Use `Tools/agent/jet-env` for representative jobs; cite paths, examples, commands, and output. Missing evidence is `unknown`, not permission to widen the run.
 
 ## Attribute the complete Jet-owned path
 
@@ -81,8 +81,8 @@ silently producing a value. Record which
 Jet-owned support is available and whether a further library or compiler
 improvement is justified; do not substitute a foreign library when setup
 fails. The existing sources
-[`json_typed.jet`](../../../examples/features/serde/json_typed.jet) and
-[`json.jet`](../../../examples/features/serde/json.jet) establish the
+[`json_typed.jet`](../../../Examples/features/serde/json_typed.jet) and
+[`json.jet`](../../../Examples/features/serde/json.jet) establish the
 first-party example pattern, not a fresh execution result. Stop after this
 job's success and wrong-type dispositions, and preserve any missing execution
 or comparison as `unknown`.
@@ -97,4 +97,4 @@ performance claim remains outside this method.
 
 Stop when every frozen domain row has a concrete job and evidence or an honest `unknown`; every finding has beginner, expert, and agent paths; the friction taxonomy, defaults map, celebrated pragmatism, and required report sections are complete; and the disposition marker is ready. A clean domain or zero losses is valid when declared coverage is complete.
 
-This is report-only by default. Write one report under `docs/audits/` through the project-approved non-serve CLI, cite Tower read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion does not implement a proposed fix.
+This is report-only by default. Write one report under `Docs/audits/` through the project-approved non-serve CLI, cite Tower read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion does not implement a proposed fix.

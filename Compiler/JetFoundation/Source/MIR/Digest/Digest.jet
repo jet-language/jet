@@ -351,11 +351,14 @@ fn mir_digest_type_kind(writer: &MirCanonicalWriter, value: MirTypeKind) {
             mir_digest_tag(writer, "fn")
             mir_digest_len(writer, signature.params.len())
             loop param in signature.params -> mir_digest_type(writer, param)
-            if signature.ret == .Val(returned) {
+            if signature.ret == {
+                .Val(returned) -> {
                 mir_digest_tag(writer, "ret")
                 mir_digest_type(writer, returned)
-            } else {
+                }
+                else -> {
                 mir_digest_tag(writer, "unit-ret")
+                }
             }
             mir_digest_string(writer, mir_digest_function_signature_effect_debug(signature.effect_bound))
             mir_digest_string(writer, mir_digest_call_contracts_debug(signature.param_contract))
@@ -366,11 +369,14 @@ fn mir_digest_type_kind(writer: &MirCanonicalWriter, value: MirTypeKind) {
             mir_digest_tag(writer, "send-fn")
             mir_digest_len(writer, params.len())
             loop param in params -> mir_digest_type(writer, param)
-            if ret == .Val(returned) {
+            if ret == {
+                .Val(returned) -> {
                 mir_digest_tag(writer, "ret")
                 mir_digest_type(writer, returned)
-            } else {
+                }
+                else -> {
                 mir_digest_tag(writer, "unit-ret")
+                }
             }
             rendered :: loop convention in conventions -> mir_digest_access_debug(convention)
             mir_digest_string(writer, "[{rendered.join(", ")}]")
@@ -456,14 +462,17 @@ fn mir_digest_field_paths(writer: &MirCanonicalWriter, paths: [[MirFieldId]]) {
 }
 
 fn mir_digest_access_option(writer: &MirCanonicalWriter, access: ?MirAccess) {
-    if access == .Val(access_value) {
+    if access == {
+        .Val(access_value) -> {
         if access_value == {
             .Read -> mir_digest_u64(writer, 1)
             .Write -> mir_digest_u64(writer, 2)
             else -> mir_digest_u64(writer, 3)
         }
-    } else {
+        }
+        else -> {
         mir_digest_u64(writer, 0)
+        }
     }
 }
 
@@ -1033,12 +1042,15 @@ fn mir_digest_semantic_operation(writer: &MirCanonicalWriter, value: MirSemantic
             mir_digest_u64(writer, receiver.value)
             mir_digest_option_int(writer, receiver_place.map(row -> row.value))
             mir_digest_values(writer, args)
-            if aggregate_fields == .Val(aggregate_fields_value) {
+            if aggregate_fields == {
+                .Val(aggregate_fields_value) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_field_path(writer, aggregate_fields_value)
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
         }
         .OptionLift2(call, function, left, right) -> {
             mir_digest_tag(writer, "option-lift2")
@@ -1099,24 +1111,30 @@ fn mir_digest_semantic_operation(writer: &MirCanonicalWriter, value: MirSemantic
             mir_digest_u64(writer, call.value)
             mir_digest_u64(writer, left.value)
             mir_digest_u64(writer, right.value)
-            if location == .Val(location_value) {
+            if location == {
+                .Val(location_value) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_panic_location(writer, location_value)
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
         }
         .HandleMethod(call, receiver, args, frame_schedule, frame_schedule_derivation) -> {
             mir_digest_tag(writer, "handle-method")
             mir_digest_u64(writer, call.value)
             mir_digest_u64(writer, receiver.value)
             mir_digest_values(writer, args)
-            if frame_schedule == .Val(frame_schedule_value) {
+            if frame_schedule == {
+                .Val(frame_schedule_value) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_string(writer, mir_digest_frame_schedule_text(frame_schedule_value))
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
             mir_digest_option_string(writer, frame_schedule_derivation.map(row -> row.id))
         }
         .PluginInvoke(call, handle, export_name, signature, args) -> {
@@ -1487,12 +1505,15 @@ fn mir_digest_operation(writer: &MirCanonicalWriter, value: MirOperation) {
             mir_digest_len(writer, type_args.len())
             loop type_arg in type_args -> mir_digest_type(writer, type_arg)
             mir_digest_call_fallibility(writer, fallibility)
-            if data_plan == .Val(plan) {
+            if data_plan == {
+                .Val(plan) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_data_plan(writer, plan)
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
         }
         .AttachTag(value, tag_value) -> {
             mir_digest_tag(writer, "attach-tag")
@@ -1777,13 +1798,16 @@ fn mir_digest_constant(writer: &MirCanonicalWriter, value: MirConstant) {
         .Int(amount, width, spelling) -> {
             mir_digest_tag(writer, "int")
             mir_digest_u64(writer, amount)
-            if width == .Val(row) {
+            if width == {
+                .Val(row) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_bool(writer, row.signed)
                 mir_digest_u64(writer, row.bits)
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
             mir_digest_option_string(writer, spelling)
         }
         .Float(amount, f32, spelling) -> {
@@ -1976,7 +2000,8 @@ fn mir_digest_ownership_mode_code(value: MirOwnershipMode) -> Int {
 }
 
 fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: ?MirStructLayout) {
-    if value == .Val(layout) {
+    if value == {
+        .Val(layout) -> {
         if layout == {
             .C -> mir_digest_u64(writer, 1)
             .Columnar -> mir_digest_u64(writer, 2)
@@ -1986,15 +2011,18 @@ fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: ?MirStructLayout
                 mir_digest_bool(writer, target)
             }
         }
-    } else {
+        }
+        else -> {
         mir_digest_u64(writer, 0)
+        }
     }
 }
 
 fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: ?MirCEnumTag) {
-    if value == .Val(tag) {
+    if value == {
+        .Val(enum_tag) -> {
         mir_digest_bool(writer, true)
-        code :: if tag == {
+        code :: if enum_tag == {
             .CInt -> 1
             .U8 -> 2
             .I8 -> 3
@@ -2006,22 +2034,28 @@ fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: ?MirCEnumTag) {
             .I64 -> 9
         }
         mir_digest_u64(writer, code)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
 }
+}
 
 fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: ?LayoutFacts) {
-    if value == .Val(facts) {
+    if value == {
+        .Val(facts) -> {
         mir_digest_bool(writer, true)
-        if facts.bytes == .Val(bytes) {
+        if facts.bytes == {
+            .Val(bytes) -> {
             mir_digest_bool(writer, true)
             mir_digest_u64(writer, bytes.size)
             mir_digest_u64(writer, bytes.alignment)
             mir_digest_u64(writer, bytes.stride)
-        } else {
+        }
+        else -> {
             mir_digest_bool(writer, false)
         }
+    }
         mir_digest_len(writer, facts.fields.len())
         loop field in facts.fields {
             mir_digest_string(writer, field.name)
@@ -2030,33 +2064,41 @@ fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: ?LayoutFacts) {
             mir_digest_option_int(writer, field.alignment)
             mir_digest_option_int(writer, field.stride)
         }
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
 }
+}
 
 fn mir_digest_layout_alignment(writer: &MirCanonicalWriter, value: ?MirLayoutAlignmentFact) {
-    if value == .Val(row) {
+    if value == {
+        .Val(row) -> {
         mir_digest_bool(writer, true)
         mir_digest_u64(writer, row.requested_alignment)
         mir_digest_u64(writer, row.effective_alignment)
         mir_digest_bool(writer, row.target_mode)
         mir_digest_string(writer, row.target_profile)
         mir_digest_string(writer, row.fact_identity)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
 }
+}
 
 fn mir_digest_serde_codec(writer: &MirCanonicalWriter, value: ?MirSerdeCodec) {
-    if value == .Val(codec) {
+    if value == {
+        .Val(codec) -> {
         if codec == {
             .Encode -> mir_digest_u64(writer, 1)
             .Decode -> mir_digest_u64(writer, 2)
         }
-    } else {
+    }
+    else -> {
         mir_digest_u64(writer, 0)
     }
+}
 }
 
 fn mir_digest_serde_attribute_kind(value: MirSerdeAttributeKind) -> Int {
@@ -2226,7 +2268,8 @@ fn mir_digest_cli_input(writer: &MirCanonicalWriter, value: MirCliInput) {
             mir_digest_tag(writer, "value")
             mir_digest_u64(writer, mir_digest_cli_value_kind(kind))
             mir_digest_bool(writer, optional)
-            if default == .Val(default_value) {
+            if default == {
+                .Val(default_value) -> {
                 if default_value == {
                     .TypeDefault -> mir_digest_tag(writer, "type-default")
                     .Value(constant) -> {
@@ -2234,9 +2277,11 @@ fn mir_digest_cli_input(writer: &MirCanonicalWriter, value: MirCliInput) {
                         mir_digest_constant(writer, constant)
                     }
                 }
-            } else {
+            }
+            else -> {
                 mir_digest_tag(writer, "no-default")
             }
+        }
         }
     }
     mir_digest_option_int(writer, value.positional)
@@ -2330,11 +2375,14 @@ fn mir_digest_type_def(writer: &MirCanonicalWriter, value: MirTypeDef) {
         mir_digest_string(writer, binding.name)
         mir_digest_u64(writer, binding.function.value)
     }
-    if value.cli == .Val(cli) {
-        mir_digest_bool(writer, true)
-        mir_digest_cli_entry(writer, cli)
-    } else {
-        mir_digest_bool(writer, false)
+    if value.cli == {
+        .Val(cli) -> {
+            mir_digest_bool(writer, true)
+            mir_digest_cli_entry(writer, cli)
+        }
+        else -> {
+            mir_digest_bool(writer, false)
+        }
     }
     mir_digest_u64(writer, mir_digest_ownership_mode_code(value.ownership))
     mir_digest_len(writer, value.boxed_edges.len())
@@ -2398,13 +2446,16 @@ fn mir_digest_impl_def(writer: &MirCanonicalWriter, value: MirImplDef) {
     mir_digest_string(writer, value.key)
     mir_digest_span(writer, value.span)
     mir_digest_type(writer, value.self_type)
-    if value.trait_ref == .Val(trait_ref) {
+    if value.trait_ref == {
+        .Val(trait_ref) -> {
         mir_digest_bool(writer, true)
         mir_digest_u64(writer, trait_ref.id.value)
         mir_digest_string(writer, trait_ref.name)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     associated_types := value.associated_types
     mir_digest_sort_associated_types(&associated_types)
     mir_digest_len(writer, associated_types.len())
@@ -2420,18 +2471,24 @@ fn mir_digest_impl_def(writer: &MirCanonicalWriter, value: MirImplDef) {
     mir_digest_option_int(writer, value.delegation.map(row -> row.value))
     mir_digest_bool(writer, value.compiler_generated)
     mir_digest_serde_codec(writer, value.serde)
-    if value.operator_rhs == .Val(operator_rhs) {
+    if value.operator_rhs == {
+        .Val(operator_rhs) -> {
         mir_digest_bool(writer, true)
         mir_digest_type(writer, operator_rhs)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
-    if value.operator_marker == .Val(_) {
+}
+    if value.operator_marker == {
+        .Val(_) -> {
         mir_digest_bool(writer, true)
         mir_digest_tag(writer, "commutative")
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     mir_digest_target_applicability(writer, value.target_applicability)
 }
 
@@ -2632,7 +2689,7 @@ fn mir_digest_prelude_call(writer: &MirCanonicalWriter, value: MirPreludeCall) {
     mir_digest_string(writer, value.member)
     mir_digest_symbol(writer, value.symbol)
     mir_digest_string(writer, mir_digest_call_signature_debug(value.signature))
-    mir_digest_string(writer, mir_digest_core_effect_debug(value.effect))
+    mir_digest_string(writer, mir_digest_core_effect_debug(value.effect_kind))
     mir_digest_call_fallibility(writer, value.fallibility)
     mir_digest_u64(writer, mir_digest_prelude_abi(value.abi))
     mir_digest_authority(writer, value.authority)
@@ -2991,7 +3048,8 @@ fn mir_digest_job(writer: &MirCanonicalWriter, value: MirJob) {
     mir_digest_u64(writer, value.function.value)
     mir_digest_string(writer, value.name)
     mir_digest_u64(writer, mir_digest_job_scope(value.scope))
-    if value.schedule == .Val(schedule) {
+    if value.schedule == {
+        .Val(schedule) -> {
         if schedule == {
             .Duration(nanos) -> {
                 mir_digest_tag(writer, "duration")
@@ -3003,9 +3061,11 @@ fn mir_digest_job(writer: &MirCanonicalWriter, value: MirJob) {
                 mir_digest_u64(writer, minute)
             }
         }
-    } else {
+    }
+    else -> {
         mir_digest_tag(writer, "no-schedule")
     }
+}
     mir_digest_len(writer, value.inputs.len())
     loop input in value.inputs -> mir_digest_cli_input(writer, input)
     mir_digest_u64(writer, mir_digest_job_dispatch(value.dispatch))
@@ -3019,7 +3079,8 @@ fn mir_digest_job(writer: &MirCanonicalWriter, value: MirJob) {
     loop path in value.input_paths -> mir_digest_string(writer, path)
     mir_digest_len(writer, value.output_paths.len())
     loop path in value.output_paths -> mir_digest_string(writer, path)
-    if value.skip == .Val(skip) {
+    if value.skip == {
+        .Val(skip) -> {
         if skip == {
             .Always(reason) -> {
                 mir_digest_tag(writer, "always")
@@ -3030,9 +3091,11 @@ fn mir_digest_job(writer: &MirCanonicalWriter, value: MirJob) {
                 mir_digest_string(writer, platform)
             }
         }
-    } else {
+    }
+    else -> {
         mir_digest_tag(writer, "no-skip")
     }
+}
     mir_digest_u64(writer, mir_digest_job_cache(value.cache))
     limits := value.limits
     mir_digest_sort_job_limits(&limits)
@@ -3140,12 +3203,15 @@ fn mir_digest_entry_output(value: MirEntryOutput) -> Int {
 fn mir_digest_entry_spec(writer: &MirCanonicalWriter, value: MirEntrySpec) {
     mir_digest_u64(writer, mir_digest_entry_kind(value.kind))
     mir_digest_option_int(writer, value.function.map(row -> row.value))
-    if value.cli == .Val(cli) {
+    if value.cli == {
+        .Val(cli) -> {
         mir_digest_bool(writer, true)
         mir_digest_cli_entry(writer, cli)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     mir_digest_u64(writer, mir_digest_entry_output(value.output))
     mir_digest_bool(writer, value.initialize_environment)
     mir_digest_bool(writer, value.initialize_gc)
@@ -3185,12 +3251,15 @@ fn mir_digest_artifact(writer: &MirCanonicalWriter, value: MirArtifactPlan) {
     mir_digest_string(writer, value.provider_identity)
     mir_digest_string(writer, value.closure_identity)
     mir_digest_string(writer, value.artifact_identity)
-    if value.entry == .Val(entry) {
+    if value.entry == {
+        .Val(entry) -> {
         mir_digest_bool(writer, true)
         mir_digest_entry_spec(writer, entry)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     mir_digest_option_int(writer, value.harness.map(row -> row.value))
 }
 
@@ -3503,7 +3572,8 @@ fn mir_digest_vector_fact(writer: &MirCanonicalWriter, value: MirVectorFact) {
     mir_digest_bool(writer, value.no_early_exit)
     mir_digest_bool(writer, value.effect_free_body)
     mir_digest_bool(writer, value.no_cross_iteration_dependencies)
-    if value.fixed_reduction == .Val(reduction) {
+    if value.fixed_reduction == {
+        .Val(reduction) -> {
         mir_digest_bool(writer, true)
         mir_digest_u64(writer, reduction.accumulator.value)
         mir_digest_u64(writer, reduction.addend.value)
@@ -3515,9 +3585,11 @@ fn mir_digest_vector_fact(writer: &MirCanonicalWriter, value: MirVectorFact) {
         mir_digest_u64(writer, reduction.order.lanes)
         mir_digest_u64(writer, reduction.order.seed_lane)
         mir_digest_tag(writer, "adjacent-pairs-then-root")
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     mir_digest_span(writer, value.span)
     mir_digest_optimization_decision(writer, value.decision)
 }
@@ -3602,12 +3674,15 @@ fn mir_digest_function(writer: &MirCanonicalWriter, value: MirFunction) {
     loop param in value.params -> mir_digest_param(writer, param)
     mir_digest_option_type(writer, value.declared_return)
     mir_digest_type(writer, value.return_type)
-    if value.generator == .Val(generator) {
+    if value.generator == {
+        .Val(generator) -> {
         mir_digest_bool(writer, true)
         mir_digest_type(writer, generator.item)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
     mir_digest_failure_carrier(writer, value.failure)
     mir_digest_string(writer, mir_digest_effects_debug(value.effects))
     mir_digest_string(writer, value.captures.map(row -> mir_digest_capture_facts_debug(row)) ?? "None")
@@ -3986,7 +4061,8 @@ fn mir_digest_app_render_facts(writer: &MirCanonicalWriter, value: MirAppRenderF
     mir_digest_option_string(writer, value.form)
     mir_digest_string(writer, mir_digest_app_cache_fact(value.cache))
     mir_digest_option_string(writer, value.override_mode.map(row -> mir_digest_app_render_fact_mode(row)))
-    if value.island == .Val(island) {
+    if value.island == {
+        .Val(island) -> {
         mir_digest_bool(writer, true)
         mir_digest_string(writer, island.identity)
         mir_digest_bool(writer, island.resume_payload.serializable)
@@ -3996,13 +4072,16 @@ fn mir_digest_app_render_facts(writer: &MirCanonicalWriter, value: MirAppRenderF
             mir_digest_string(writer, capture.ty)
             mir_digest_bool(writer, capture.serializable)
         }
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
 }
+}
 
 fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: ?MirAppGraph) {
-    if value == .Val(graph) {
+    if value == {
+        .Val(graph) -> {
         mir_digest_bool(writer, true)
         mir_digest_string(writer, graph.entry_file)
         mir_digest_string(writer, graph.hydration)
@@ -4015,16 +4094,19 @@ fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: ?MirAppGraph) {
             mir_digest_app_route_fields(writer, route.path_params)
             mir_digest_app_route_fields(writer, route.search_params)
             mir_digest_string(writer, route.search_codec)
-            if route.loader == .Val(loader) {
+            if route.loader == {
+                .Val(loader) -> {
                 mir_digest_bool(writer, true)
                 mir_digest_string(writer, loader.handler)
                 mir_digest_string(writer, loader.data_type)
                 mir_digest_string(writer, loader.dependency)
                 mir_digest_bool(writer, loader.preload)
                 mir_digest_string(writer, loader.cache_identity)
-            } else {
+            }
+            else -> {
                 mir_digest_bool(writer, false)
             }
+        }
             mir_digest_option_string(writer, route.boundaries.pending)
             mir_digest_option_string(writer, route.boundaries.not_found)
             mir_digest_option_string(writer, route.boundaries.error)
@@ -4066,9 +4148,11 @@ fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: ?MirAppGraph) {
         mir_digest_app_string_list(writer, graph.policy.cache)
         mir_digest_app_string_list(writer, graph.policy.a11y)
         mir_digest_app_string_list(writer, graph.policy.adapters)
-    } else {
+    }
+    else -> {
         mir_digest_bool(writer, false)
     }
+}
 }
 
 fn mir_digest_sort_modules(rows: &[MirModule]) {
@@ -4400,12 +4484,15 @@ fn mir_program_bytes_internal(program: MirProgram) -> [U8] {
     mir_digest_app_graph(&writer, facts.web_app)
     mir_digest_hardware_setup(&writer, facts.hardware_setups)
     mir_digest_string(&writer, facts.hardware_profile_id)
-    if facts.hardware_profile == .Val(hardware_profile) {
+    if facts.hardware_profile == {
+        .Val(hardware_profile) -> {
         mir_digest_bool(&writer, true)
         mir_digest_target_hardware_facts(&writer, hardware_profile)
-    } else {
+    }
+    else -> {
         mir_digest_bool(&writer, false)
     }
+}
     mir_digest_target_hardware_use(&writer, facts.hardware_use)
     capabilities := facts.hardware_capabilities
     mir_digest_sort_strings(&capabilities)

@@ -1,0 +1,18 @@
+// Claims ported from crates/jetpack/src/provider_plan_facts.rs #[cfg(test)].
+
+#Test("provider plan facts encoding is deterministic round trippable and fail closed") {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is valid UTF-8")
+    facts :: ProviderPlanFacts.from_facts([String: String]{"action.0.argv": "cc{nul}-c{nul}main.c", "source.main": "sha256-source"}) ?? panic("non-empty fact keys")
+    encoded :: facts.render()
+    decoded :: ProviderPlanFacts.parse(encoded) ?? panic("rendered facts parse")
+    assert_eq(decoded, facts)
+    assert_eq(facts.render(), encoded)
+    if ProviderPlanFacts.parse("jet-build-plan-replay-v1\n61\t6") == {
+        .Ok(_) -> panic("a truncated field must not parse")
+        .Err(_) -> {}
+    }
+    if ProviderPlanFacts.parse("jet-build-plan-replay-v1\n61\t62\n61\t63\n") == {
+        .Ok(_) -> panic("a repeated key must not parse")
+        .Err(_) -> {}
+    }
+}

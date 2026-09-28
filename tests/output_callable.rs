@@ -116,7 +116,7 @@ fn sema_resolves_sole_executable_entry_before_codegen() {
 #[test]
 fn inspect_output_reports_selected_callable_facts() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/tooling/output_callable.jet");
+        .join("Examples/features/tooling/output_callable.jet");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "output", path.to_str().unwrap()])
         .output()

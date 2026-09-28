@@ -1,0 +1,91 @@
+// Applied-rule argument menus are projected from the specialized
+// core.compiler.lang declaration in embedded Prelude/Core.jet. The authority
+// roots and builtin taint tags remain inputs from their Source registries.
+
+fn foundation_core_menu_ascii_lower(text: String) -> String {
+    bytes := text.bytes()
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
+    }
+    String.from_bytes(bytes) ?? text
+}
+
+fn foundation_core_menu_variant(name: String, variant: String) -> ?String {
+    if name == "ABI" || name == "FfiLanguage" || name == "KernelMode" || name == "Layout" || name == "NamingCase" {
+        return Val(foundation_core_menu_ascii_lower(variant))
+    }
+    if name == "MemoBound" && variant == "Unset" -> return Val("none")
+    if name == "ObligationMode" && variant == "Unspecified" -> return Val("None")
+    if name == "PolicySetting" {
+        if variant == "Allow" || variant == "Deny" -> return None
+        if variant == "Unsafe" -> return Val("unsafe")
+        if variant == "Gc" -> return Val("gc")
+        if variant == "ExplicitUnits" -> return Val("explicit_units")
+        if variant == "Copies" -> return Val("copies")
+        if variant == "Sentries" -> return Val("sentries")
+    }
+    Val(variant)
+}
+
+fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> ?[String] {
+    if name == "Effect" {
+        return if kind == {
+            .Enum(_) -> Val(effect_roots)
+            else -> None
+        }
+    }
+    if name == "TaintKind" {
+        return if kind == {
+            .Enum(_) -> Val(builtin_tags)
+            else -> None
+        }
+    }
+    if name == "Path" || name == "State" {
+        if kind == CoreLeafKind.Plain -> return Val([String]{})
+        return None
+    }
+    if kind == {
+        .Enum(variants) -> {
+            result := [String]{}
+            loop variant in variants {
+                canonical :: foundation_core_menu_variant(name, variant)
+                if canonical == .Val(value) -> result.push(value)
+            }
+            Val(result)
+        }
+        else -> None
+    }
+}
+
+// Parse the canonical embedded Core declaration, then project its menu-shaped
+// leaf metadata for the applied-rule catalog. This intentionally does not
+// read ordinary AST.ModuleDecl fields: Core.jet's specialized types metadata
+// is the declaration source consumed by native CoreModuleExports as well.
+//
+// IntType is intentionally absent from core.compiler.lang. Its variants come
+// from the canonical Source fixed-width integer registry, which mirrors the
+// native canonical_rule_arg_variants ordering instead of maintaining a
+// menu-local width table.
+pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [String], builtin_tags: [String]) -> ?[TAppliedRuleArgumentMenu] {
+    declaration :: core_module_declaration_from_source(core_source_text, "core.compiler.lang") ?? return None
+    menus := [TAppliedRuleArgumentMenu]{}
+    loop type_export in declaration.type_exports {
+        if type_export.name != "IntType" {
+            variants :: foundation_core_menu_variants(type_export.name, type_export.kind, effect_roots, builtin_tags) ?? return None
+            menus.push(TAppliedRuleArgumentMenu{
+                name: type_export.name,
+                variants: variants,
+                first_variant_segment: type_export.name == "Effect" || type_export.name == "Target",
+            })
+        }
+    }
+    int_type_variants := [String]{}
+    loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
+    menus.push(TAppliedRuleArgumentMenu{
+        name: "IntType",
+        variants: int_type_variants,
+        first_variant_segment: false,
+    })
+    Val(menus)
+}

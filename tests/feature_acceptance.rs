@@ -176,7 +176,7 @@ fn derive_source_reentry() {
     let tir_eval = read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs");
     let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
     let diagnostics = read("crates/jet-codegen/src/Prelude/Diagnostics.jet");
-    let reflection = read("examples/features/reflection/reflect-value.jet");
+    let reflection = read("Examples/features/reflection/reflect-value.jet");
     assert!(
         parser.contains("fn derive_body_items")
             && parser.contains("DeriveBodyItem::Item")
@@ -252,7 +252,7 @@ fn audited_discard() {
         "D-MARK-DISCARD1 retired `#Suppress(MustUse)`"
     );
 
-    let example = read("examples/features/errors/discard_fallible.jet");
+    let example = read("Examples/features/errors/discard_fallible.jet");
     for fake in [
         "// value.drop(\"line comment\")",
         "/* value.drop(\"block comment\") */",
@@ -303,8 +303,8 @@ fn audited_discard() {
         has_executable_drop_with_reason(&example) && !has_active_suppress(&example),
         "I5 example must exercise the sole discard channel"
     );
-    let expected = read("examples/features/expected/errors/discard_fallible.out");
-    let got = run_example("examples/features/errors/discard_fallible.jet");
+    let expected = read("Examples/features/expected/errors/discard_fallible.out");
+    let got = run_example("Examples/features/errors/discard_fallible.jet");
     assert_eq!(
         got.trim(),
         expected.trim(),
@@ -337,7 +337,7 @@ fn prelude_opt_out() {
         "Syntax must register `#NoPrelude`"
     );
 
-    let example = read("examples/features/io/no_prelude.jet");
+    let example = read("Examples/features/io/no_prelude.jet");
     assert!(
         example.starts_with("#NoPrelude")
             || example.contains("\n#NoPrelude\n")
@@ -348,8 +348,8 @@ fn prelude_opt_out() {
         example.contains("use core.term"),
         "opt-out example must use explicit core.term"
     );
-    let expected = read("examples/features/expected/io/no_prelude.out");
-    let got = run_example("examples/features/io/no_prelude.jet");
+    let expected = read("Examples/features/expected/io/no_prelude.out");
+    let got = run_example("Examples/features/io/no_prelude.jet");
     assert_eq!(got.trim(), expected.trim(), "no_prelude golden mismatch");
 
     let bare = read("tests/ui/no_prelude_print.stderr");
@@ -368,7 +368,7 @@ fn prelude_opt_out() {
 #[test]
 fn maturity_convention() {
     // FEATURE_CLAIM: claim.maturity-tags / maturity-convention
-    let docs = read("docs/spec/reference/maturity-tags.md");
+    let docs = read("Docs/spec/reference/maturity-tags.md");
     assert!(
         docs.contains("#Meta(maturity: .Experimental)")
             && docs.contains(".Tested")
@@ -391,15 +391,15 @@ fn maturity_convention() {
         "Syntax.rs must register maturity values (I7)"
     );
 
-    let example = read("examples/features/syntax/maturity_tags.jet");
+    let example = read("Examples/features/syntax/maturity_tags.jet");
     assert!(
         example.contains("#Meta(maturity: .Experimental)")
             && example.contains("#Meta(maturity: .Tested)")
             && example.contains("#Meta(maturity: .Hardened)"),
         "I5 example must use all three maturity metadata values"
     );
-    let expected = read("examples/features/expected/syntax/maturity_tags.out");
-    let got = run_example("examples/features/syntax/maturity_tags.jet");
+    let expected = read("Examples/features/expected/syntax/maturity_tags.out");
+    let got = run_example("Examples/features/syntax/maturity_tags.jet");
     assert_eq!(got.trim(), expected.trim(), "maturity_tags golden mismatch");
 
     // Zero sema effect: no diagnostic/codegen policy keyed on maturity.
@@ -426,7 +426,7 @@ fn maturity_convention() {
 #[test]
 fn public_build_product() {
     // FEATURE_CLAIM: claim.package-build / public-build-product
-    let example = read("examples/features/tooling/programmable_build/run.jet");
+    let example = read("Examples/features/tooling/programmable_build/run.jet");
     assert!(
         example.contains("fn build(b: BuildContext)")
             && example.contains("b.generate")
@@ -435,7 +435,7 @@ fn public_build_product() {
         "I5 example must be a public root fn build graph"
     );
 
-    let entry = root().join("examples/features/tooling/programmable_build/run.jet");
+    let entry = root().join("Examples/features/tooling/programmable_build/run.jet");
     let compiled = jet::compile_programmable_build(entry.to_str().unwrap(), &[])
         .unwrap_or_else(|diags| panic!("fn build path failed: {diags:#?}"));
     assert!(
@@ -444,7 +444,7 @@ fn public_build_product() {
     );
 
     // I5 golden: execute path materializes generated Jet, then rustc runs it.
-    let expected = read("examples/features/expected/tooling/programmable_build.out");
+    let expected = read("Examples/features/expected/tooling/programmable_build.out");
     let dir = std::env::temp_dir();
     let rs = dir.join(format!("jet_cap_build_{}.rs", std::process::id()));
     let bin = dir.join(format!("jet_cap_build_{}", std::process::id()));
@@ -632,20 +632,20 @@ fn run() {
 
     // Existing verticals still ship through the same engine surface.
     assert!(
-        read("examples/features/types/refinements.jet").contains("distinct Int("),
+        read("Examples/features/types/refinements.jet").contains("distinct Int("),
         "I5 range refinements example must remain"
     );
     assert!(
-        read("examples/features/contracts/pre_post.jet").contains("#Pre"),
+        read("Examples/features/contracts/pre_post.jet").contains("#Pre"),
         "I5 contracts example must remain"
     );
     assert!(
-        read("examples/features/effects/taint.jet").contains("#Input")
-            && read("examples/features/effects/taint.jet").contains("#Scrub(Input)"),
+        read("Examples/features/effects/taint.jet").contains("#Input")
+            && read("Examples/features/effects/taint.jet").contains("#Scrub(Input)"),
         "I5 taint/IFC slice example must remain"
     );
     assert!(
-        read("examples/features/packages/effect_budget/package.jet").contains("authority:"),
+        read("Examples/features/packages/effect_budget/package.jet").contains("authority:"),
         "I5 effect-budget example must remain"
     );
     let replay_ui = read("tests/ui/replayable_reaches_io.stderr");

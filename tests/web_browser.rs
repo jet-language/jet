@@ -94,7 +94,7 @@ fn forms_table_browser_submit_reaches_typed_action() {
     let _server = NativeAppServer::start(port);
     let mut script = String::from(
         r#"
-const { CdpDriver } = await import(`file://${process.cwd()}/scripts/canvas-test/driver.mjs`);
+const { CdpDriver } = await import(`file://${process.cwd()}/Tools/canvas-test/driver.mjs`);
 
 const driver = await new CdpDriver().launch();
 try {
@@ -243,7 +243,7 @@ struct StaticServer {
 impl StaticServer {
     fn start(node: &Path, root: &Path, port: u16) -> StaticServer {
         let child = Command::new(node)
-            .arg(repo_root().join("scripts/web-test/serve.mjs"))
+            .arg(repo_root().join("Tools/web-test/serve.mjs"))
             .arg("--port")
             .arg(port.to_string())
             .arg("--root")
@@ -272,7 +272,7 @@ impl NativeAppServer {
     fn start(port: u16) -> Self {
         let mut child = Command::new(jet_bin())
             .current_dir(repo_root())
-            .args(["run", "examples/features/web/forms_table.jet"])
+            .args(["run", "Examples/features/web/forms_table.jet"])
             .env("JET_APP_PORT", port.to_string())
             .env("NO_COLOR", "1")
             .stdout(Stdio::null())
@@ -348,7 +348,7 @@ fn publish_build(case_dir: &Path, serve_name: &str, serve_root: &Path) {
 fn write_callback_source(dest: &Path) {
     let mut src = String::from("#Target(Web)\n#HTML(\"index.html\")\n");
     src.push_str(include_str!(
-        "../examples/features/web/web_wasm_callback.jet"
+        "../Examples/features/web/web_wasm_callback.jet"
     ));
     fs::write(dest, src).expect("write callback source");
 }
@@ -358,12 +358,12 @@ fn prepare_acceptance_root(root: &Path) {
     let click = root.join("click_src");
     fs::create_dir_all(&click).unwrap();
     fs::copy(
-        repo.join("examples/features/web/ui_web_click.jet"),
+        repo.join("Examples/features/web/ui_web_click.jet"),
         click.join("app.jet"),
     )
     .unwrap();
     fs::copy(
-        repo.join("examples/features/web/ui_web_click.html"),
+        repo.join("Examples/features/web/ui_web_click.html"),
         click.join("ui_web_click.html"),
     )
     .unwrap();
@@ -374,7 +374,7 @@ fn prepare_acceptance_root(root: &Path) {
     fs::create_dir_all(&reactive).unwrap();
     fs::write(
         reactive.join("app.jet"),
-        include_str!("../examples/features/web/ui_web_reactive.jet"),
+        include_str!("../Examples/features/web/ui_web_reactive.jet"),
     )
     .unwrap();
     jet_build_web(&reactive, "app.jet");
@@ -384,7 +384,7 @@ fn prepare_acceptance_root(root: &Path) {
     fs::create_dir_all(&compute).unwrap();
     fs::write(
         compute.join("app.jet"),
-        include_str!("../examples/features/web/web_compute.jet"),
+        include_str!("../Examples/features/web/web_compute.jet"),
     )
     .unwrap();
     jet_build_web(&compute, "app.jet");
@@ -538,7 +538,7 @@ fn tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("public")).unwrap();
     for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
-        let source = repo.join("examples/features/web/tanstack_start").join(path);
+        let source = repo.join("Examples/features/web/tanstack_start").join(path);
         let destination = root.join(path);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -548,11 +548,11 @@ fn tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions() {
 
     let output = Command::new(&node)
         .env("CHROMIUM", chromium)
-        .arg(repo.join("scripts/web-dev-test/reference_app.mjs"))
+        .arg(repo.join("Tools/web-dev-test/reference_app.mjs"))
         .args(["--metric", "first_run", "--manifest"])
-        .arg(repo.join("tools/agent-eval/dx/manifest.json"))
+        .arg(repo.join("Tools/agent-eval/dx/manifest.json"))
         .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"])
-        .arg(repo.join("scripts/agent/jet-env"))
+        .arg(repo.join("Tools/agent/jet-env"))
         .current_dir(&root)
         .output()
         .expect("run TanStack reference browser loop");
@@ -590,7 +590,7 @@ fn web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps() {
     let output = Command::new(&node)
         .current_dir(repo_root())
         .env("CHROMIUM", &chromium)
-        .arg("scripts/web-test/acceptance.mjs")
+        .arg("Tools/web-test/acceptance.mjs")
         .arg("--port")
         .arg(port.to_string())
         .output()
@@ -630,7 +630,7 @@ fn web_browser_source_map_cdp_jet_breakpoint() {
     let output = Command::new(&node)
         .current_dir(repo_root())
         .env("CHROMIUM", &chromium)
-        .arg("scripts/web-test/sourcemap.mjs")
+        .arg("Tools/web-test/sourcemap.mjs")
         .arg("--port")
         .arg(port.to_string())
         .arg("--prefix")

@@ -36,7 +36,7 @@ function tree(dir, base = dir, depth = 0) {
 }
 
 const ARMS = {
-  jet: { file: "candidate.jet", lang: "Jet", check: "scripts/agent/jet-env jet check candidate.jet" },
+  jet: { file: "candidate.jet", lang: "Jet", check: "Tools/agent/jet-env jet check candidate.jet" },
   node: { file: "candidate.mjs", lang: "JavaScript (Node ESM)", check: "node --check candidate.mjs" },
 };
 

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 fn impact_report_upstream_run() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args([
             "inspect",
@@ -33,7 +33,7 @@ fn impact_report_upstream_run() {
 fn impact_json_output() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args([
             "inspect",
@@ -61,7 +61,7 @@ fn impact_json_output() {
 fn impact_unknown_symbol_exits_error() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args([
             "inspect",

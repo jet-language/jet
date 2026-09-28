@@ -615,7 +615,7 @@ fn notebook_browser_matrix_uses_production_server() {
         let output = Command::new(command_path("node", "NODE"))
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .args([
-                "scripts/notebook-test/acceptance.mjs",
+                "Tools/notebook-test/acceptance.mjs",
                 "--browser",
                 browser,
                 "--port",

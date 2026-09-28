@@ -170,11 +170,11 @@ fn core_files_depth_example_runs() {
         return;
     }
     let out = Command::new(&jet)
-        .args(["run", "examples/features/io/files_depth.jet"])
+        .args(["run", "Examples/features/io/files_depth.jet"])
         .output()
         .expect("run files_depth");
     let release = Command::new(&jet)
-        .args(["run", "--release", "examples/features/io/files_depth.jet"])
+        .args(["run", "--release", "Examples/features/io/files_depth.jet"])
         .output()
         .expect("run files_depth release");
     assert!(
@@ -189,7 +189,7 @@ fn core_files_depth_example_runs() {
         String::from_utf8_lossy(&release.stdout),
         String::from_utf8_lossy(&release.stderr)
     );
-    let expected = fs::read_to_string("examples/features/expected/io/files_depth.out").unwrap();
+    let expected = fs::read_to_string("Examples/features/expected/io/files_depth.out").unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
     assert_eq!(release.stdout, out.stdout);
 }
@@ -402,7 +402,7 @@ fn core_watcher_example_runs() {
         return;
     }
     let out = Command::new(&jet)
-        .args(["run", "examples/features/io/watcher.jet"])
+        .args(["run", "Examples/features/io/watcher.jet"])
         .output()
         .expect("run watcher");
     assert!(
@@ -411,7 +411,7 @@ fn core_watcher_example_runs() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let expected = fs::read_to_string("examples/features/expected/io/watcher.out").unwrap();
+    let expected = fs::read_to_string("Examples/features/expected/io/watcher.out").unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 

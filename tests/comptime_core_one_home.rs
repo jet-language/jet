@@ -37,7 +37,7 @@ fn architecture_classifies_every_comptime_core_namespace() {
     // literal namespace arm, but `core.compute.solve` is still part of this registry.
     namespaces.insert("core.compute.solve".to_string());
 
-    let architecture = read("docs/spec/architecture.md");
+    let architecture = read("Docs/spec/architecture.md");
     for namespace in namespaces {
         assert!(
             architecture.contains(&format!("| `{namespace}` |")),
@@ -288,7 +288,7 @@ fn measurement_has_one_semantic_home() {
         );
     }
 
-    let docs = read("docs/spec/reference/core-library.md")
+    let docs = read("Docs/spec/reference/core-library.md")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");

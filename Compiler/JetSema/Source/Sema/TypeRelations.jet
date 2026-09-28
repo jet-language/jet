@@ -483,6 +483,18 @@ fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: S
     Val(resolved.symbol)
 }
 
+fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Bool {
+    resolved := implementation.trait_symbol
+    if resolved == None {
+        name :: implementation.trait_name ?? return false
+        resolved = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, name)
+    }
+    trait_symbol :: resolved ?? return false
+    if trait_symbol.kind != SymbolKind.Trait || trait_symbol.name != "CheckedText" -> return false
+    owner :: sema_name_module_index(graph, trait_symbol.module_name) ?? panic("checked trait identity has no registered owner module")
+    graph.modules[owner].module_name == "core.prelude"
+}
+
 fn sema_type_graph_impl_matches_nominal(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> ?Bool {
     if implementation.target_identity_key == nominal.identity_key -> return Val(true)
     nominal_module :: nominal.symbol.module_name
@@ -501,7 +513,9 @@ fn sema_type_graph_impl_matches_trait(graph: SemaRegistrationGraph, implementati
 
 fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> ?Bool {
     if actual_resolved == {
-        .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> return None
+        .Named(name) -> {
+            if sema_type_name_is_generic(generic_params, name) -> return None
+        }
         else -> {}
     }
     nominal :: sema_type_resolve_nominal(graph, actual_resolved, caller_module_identity) ?? return None
@@ -519,7 +533,7 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
         }
     }
     if unresolved_impl || !graph.complete -> return None
-    Val(false)
+    return Val(false)
 }
 
 pub fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> ?Bool {
@@ -535,15 +549,16 @@ pub fn sema_type_bound_satisfied(graph: SemaRegistrationGraph, actual: Type, bou
 
 fn sema_type_generic_bound_satisfied(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> ?Bool {
     actual_name :: if actual_resolved == {
-        .Named(name) -> name
-        else -> return None
+        .Named(name) -> Val(name)
+        else -> None
     }
+    name :: actual_name ?? return None
     parameter := None
     index := generic_params.len()
     loop index > 0 {
         index -= 1
         candidate :: generic_params[index]
-        if candidate.name == actual_name {
+        if candidate.name == name {
             parameter = Val(candidate)
             break
         }
@@ -553,7 +568,7 @@ fn sema_type_generic_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
     loop bound in current.bounds {
         if bound.key == trait_symbol.id.key -> return Val(true)
     }
-    Val(false)
+    return Val(false)
 }
 
 pub fn sema_type_assignable_in_graph_with_generics(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> ?Bool {

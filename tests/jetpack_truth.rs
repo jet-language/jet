@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 use jet_foundation::DataTree::DataTree;
 
-const MATRIX: &str = "docs/proposals/jetpack/truth-matrix.md";
+const MATRIX: &str = "Docs/proposals/jetpack/truth-matrix.md";
 const AUDITED: &[u64] = &[
     3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194, 195, 196, 197, 198,
     199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215, 229, 231, 232, 233, 234, 242, 330,
@@ -203,7 +203,7 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
     // stop-line must read live + history — `card list` alone is live-only.
     let mut cards = BTreeMap::new();
     let live = Command::new("node")
-        .args(["plugins/tower/tower.mjs", "card", "list", "--json"])
+        .args(["Tools/tower/tower.mjs", "card", "list", "--json"])
         .current_dir(root)
         .output()
         .unwrap();

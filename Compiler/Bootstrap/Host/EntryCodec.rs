@@ -4101,6 +4101,8 @@ fn emit_entry_helper_root_transports(
             "JetEvalSharedHostCarrier",
             "jet_eval_shared_host_carrier",
         ),
+        ("JetEvalSharedPayloadFinalizer", "jet_eval_shared_payload_finalizer"),
+        ("JetEvalSharedValueData", "jet_eval_shared_value_data"),
         ("MirProgram", "mir_program"),
         ("MirType", "mir_type"),
         ("JetEvalHostTypeShape", "jet_eval_host_type_shape"),
@@ -4161,6 +4163,7 @@ fn emit_entry_helper_root_transports(
             let expected = [
                 ("root", "JetEvalTaskRoot"),
                 ("result", "JetEvalCallbackResult"),
+                ("cleanup_root", "JetEvalOwnedRoot"),
             ];
             if fields.len() != expected.len() + 1 {
                 return Err(BootstrapHostCodecError::InvalidMetadata(
@@ -4200,8 +4203,9 @@ fn emit_entry_helper_root_transports(
                 ("registry", "JetEvalSharedRuntime"),
                 ("origin", "JetEvalSharedHostOrigin"),
                 ("physical", "JetEvalSharedHostPhysicalRoot"),
+                ("payload_shape", "JetEvalHostTypeShape"),
             ];
-            if fields.len() != expected.len() + 1 {
+            if fields.len() != expected.len() + 5 {
                 return Err(BootstrapHostCodecError::InvalidMetadata(
                     "checked JetEvalSharedHostCarrier field set changed".to_string(),
                 ));
@@ -4219,14 +4223,43 @@ fn emit_entry_helper_root_transports(
                     )));
                 }
             }
-            let index = fields.iter().find(|field| field.name == "index")
+            for field_name in ["index", "owner_alias_token"] {
+                let field = fields.iter().find(|field| field.name == field_name)
+                    .ok_or_else(|| BootstrapHostCodecError::MissingField {
+                        owner: root_name.to_string(),
+                        field: field_name.to_string(),
+                    })?;
+                if !matches!(field.ty.kind(), MirTypeKind::Option(inner) if matches!(inner.kind(), MirTypeKind::Int)) {
+                    return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                        "checked JetEvalSharedHostCarrier.{field_name} is not an optional Int"
+                    )));
+                }
+            }
+            for field_name in ["owner_alias_token_pre_adopted", "owns_root_capability"] {
+                let field = fields.iter().find(|field| field.name == field_name)
+                    .ok_or_else(|| BootstrapHostCodecError::MissingField {
+                        owner: root_name.to_string(),
+                        field: field_name.to_string(),
+                    })?;
+                if !matches!(field.ty.kind(), MirTypeKind::Bool) {
+                    return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                        "checked JetEvalSharedHostCarrier.{field_name} is not Bool"
+                    )));
+                }
+            }
+            let finalizer = fields.iter().find(|field| field.name == "payload_finalizer")
                 .ok_or_else(|| BootstrapHostCodecError::MissingField {
                     owner: root_name.to_string(),
-                    field: "index".to_string(),
+                    field: "payload_finalizer".to_string(),
                 })?;
-            if !matches!(index.ty.kind(), MirTypeKind::Option(inner) if matches!(inner.kind(), MirTypeKind::Int)) {
+            let MirTypeKind::Option(finalizer_type) = finalizer.ty.kind() else {
                 return Err(BootstrapHostCodecError::InvalidMetadata(
-                    "checked JetEvalSharedHostCarrier.index is not an optional Int".to_string(),
+                    "checked Shared payload finalizer is not optional".to_string(),
+                ));
+            };
+            if checked_nominal_definition(program, finalizer_type)?.name != "JetEvalSharedPayloadFinalizer" {
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "checked Shared payload finalizer lost its Source ticket type".to_string(),
                 ));
             }
             let physical = fields.iter().find(|field| field.name == "physical")
@@ -4426,6 +4459,7 @@ pub(crate) fn __jet_bootstrap_entry_{stem}_from_runtime<P: crate::BootstrapEntry
         program,
         symbols,
         "JetEvalTaskRoot",
+        "jet_eval_task_root",
         &[
             ("JetEvalTaskRoot", "origin", "JetEvalOwnedRoot"),
             ("JetEvalOwnedRoot", "config", "JetEvalConfig"),
@@ -4436,6 +4470,7 @@ pub(crate) fn __jet_bootstrap_entry_{stem}_from_runtime<P: crate::BootstrapEntry
         program,
         symbols,
         "JetEvalOwnedRoot",
+        "jet_eval_owned_root",
         &[("JetEvalOwnedRoot", "config", "JetEvalConfig")],
     )?;
     Ok(())
@@ -4711,6 +4746,7 @@ fn emit_entry_root_config_projection(
     program: &MirProgram,
     symbols: &BootstrapCodecSymbols<'_>,
     root_name: &str,
+    root_stem: &str,
     fields: &[(&str, &str, &str)],
 ) -> Result<(), BootstrapHostCodecError> {
     let root = program
@@ -4792,7 +4828,7 @@ fn emit_entry_root_config_projection(
     }
     writeln!(
         out,
-        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_entry_{}_config_from_runtime<P: crate::BootstrapEntryPhysicalBindings>(\n\
+        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_entry_{root_stem}_config_from_runtime<P: crate::BootstrapEntryPhysicalBindings>(\n\
              checked_type: &::jet_foundation::MIR::MirType,\n\
              runtime_value: &::jet_foundation::MIR::MirRuntimeValue,\n\
              program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\

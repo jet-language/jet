@@ -2716,6 +2716,7 @@ pub(super) fn lower_expr(
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| crate::AST::Type::Named(owner.clone()));
+                let args = lower_call_args(ctx, args)?;
                 let call_return_type = ctx
                     .function_registry
                     .method_call_return_type_for(function, type_args, &owner_ty)
@@ -5244,6 +5245,7 @@ fn lower_if_expr(
     if !ctx.is_terminated() {
         let value = ctx.lower_child(then_value)?;
         let value = ctx.trait_box_value(value, &then_value.ty, &expr.ty)?;
+        let source = ctx.current_block();
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
             incoming.push((source, value));
@@ -5779,7 +5781,6 @@ fn lower_try_failure(
                     type_args: Vec::new(),
                 },
             )?;
-[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
             if matches!(
                 target,
                 Type::Named(name) if name == crate::Syntax::TYPE_ERR
@@ -8485,7 +8486,6 @@ fn lower_direct_string_format(
             },
         );
     }
-[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
     let route = super::string_format_route(
         format,
         value_ty,
@@ -8826,7 +8826,7 @@ fn lower_numeric_method(
             | TNumericOp::CheckedIntToFloat { .. }
             | TNumericOp::CheckedIntToFixed { .. }
             | TNumericOp::TryFrom { .. }
-            | TNumericOp::ToString
+            | TNumericOp::FloatToInt { .. }
             | TNumericOp::ToShow
     );
     if conversion {
@@ -9740,7 +9740,6 @@ fn lower_serde_encode(
         Err(error) if missing_function_target(&error) => {}
         Err(error) => return Err(error),
     }
-[crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs#F536]
     if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DATA) {
         return ctx.lower_child(recv);
     }

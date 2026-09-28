@@ -103,13 +103,16 @@ fn jet_web_wasm_bridge_arguments(ctx: &JetWebEmitContext, function: MirFunction)
         loop row in function.web_param_reconstructions {
             if row.local == parameter.name -> reconstruction = Val(row)
         }
-        if reconstruction == .Val(row) {
+        if reconstruction == {
+            .Val(row) -> {
             loop field in row.fields {
                 field_value :: "({value})[{jet_web_js_quote(field.field)}]"
                 values.push(jet_web_wasm_argument(ctx, field_value, field.ty))
             }
-        } else {
+            }
+            else -> {
             values.push(jet_web_wasm_argument(ctx, value, parameter.ty))
+            }
         }
     }
     values
@@ -150,15 +153,15 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunctio
     out.push("  if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));")
     if function.failure == {
         .Result(_, _) | .Optional(_) -> {
-            out.push("  if (outcome?.tag === \"Err\") return { tag: \"Err\", values: [outcome.error] };")
-            out.push("  return { tag: \"Ok\", values: [{result}] };")
+            out.push("  if (outcome?.tag === \"Err\") return {{ tag: \"Err\", values: [outcome.error] }};")
+            out.push("  return {{ tag: \"Ok\", values: [{result}] }};")
         }
         .Infallible | .Diverges(_) -> {
             out.push("  if (outcome) return jet_web_edge_result(outcome);")
             out.push("  return {result};")
         }
     }
-    out.push("}")
+    out.push("}}")
     out.push("")
 }
 

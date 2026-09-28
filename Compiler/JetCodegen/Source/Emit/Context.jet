@@ -334,7 +334,9 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
             return ctx
         }
         symbol :: if definition.compiler_builtin == {
-            .Val(MirCompilerBuiltin.DefaultErr) -> "{ctx.config.root_prefix}JetErr"
+            .Val(builtin) -> {
+                if builtin == MirCompilerBuiltin.DefaultErr -> "{ctx.config.root_prefix}JetErr" else -> jet_rust_emit_symbol("__jet_ty_", definition.key, definition.id.value)
+            }
             else -> jet_rust_emit_symbol("__jet_ty_", definition.key, definition.id.value)
         }
         ctx.type_names.add(key, symbol)
@@ -513,8 +515,8 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.traits {
         module_key := None
-        loop module in ctx.program.modules {
-            if module.id == definition.module_id -> module_key = Val(module.key)
+        loop module_row in ctx.program.modules {
+            if module_row.id == definition.module_id -> module_key = Val(module_row.key)
         }
         key_prefix :: module_key ?? {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait module is missing", "trait method metadata keys require the canonical module key from the trait's owning module", Val(definition.span))

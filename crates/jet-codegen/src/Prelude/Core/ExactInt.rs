@@ -632,7 +632,7 @@ fn jet_wasm_int_clamp(value: JetWasmInt, low: JetWasmInt, high: JetWasmInt) -> J
 }
 
 // D-FLOORDIV1: the native and wasm Rust tiers share this trap wording verbatim
-// (docs/spec/syntax-decisions.md), so these four `JetWasmInt` boundaries name the
+// (Docs/spec/syntax-decisions.md), so these four `JetWasmInt` boundaries name the
 // one arithmetic contract constant instead of retyping it. They carried the
 // invented "division by zero" while every other tier said "divided by zero".
 fn jet_wasm_int_div(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {

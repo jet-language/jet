@@ -1,0 +1,109 @@
+// Canonical CFFI provider and import facts for MIR.
+
+fn jet_codegen_cffi_evidence_basis(basis: String) -> MirFfiEvidenceBasis {
+    if basis == {
+        "proved" -> MirFfiEvidenceBasis.Proved
+        "enforced" -> MirFfiEvidenceBasis.Enforced
+        "contained" -> MirFfiEvidenceBasis.Contained
+        "trusted" -> MirFfiEvidenceBasis.Trusted
+        "unknown" -> MirFfiEvidenceBasis.Unknown
+        else -> panic("checked CFFI boundary evidence has no MIR representation")
+    }
+}
+
+fn jet_codegen_cffi_boundary(boundary: SemaCheckedForeignBoundary) -> MirFfiBoundaryFacts {
+    obligations := [MirFfiBoundaryObligation]{}
+    loop obligation in boundary.obligations {
+        obligations.push(MirFfiBoundaryObligation{
+            name: obligation.name,
+            basis: jet_codegen_cffi_evidence_basis(obligation.basis),
+            checker: obligation.checker,
+            assumptions: obligation.assumptions,
+            coverage_digest: obligation.coverage_digest,
+        })
+    }
+    MirFfiBoundaryFacts{
+        schema: boundary.schema,
+        digest: boundary.digest,
+        language: boundary.language,
+        library: boundary.library,
+        effect_root: boundary.effect_root,
+        effects: boundary.effects,
+        source_authority: boundary.source_authority,
+        artifact_coverage_digest: boundary.artifact_coverage_digest,
+        loaded_artifact: boundary.loaded_artifact,
+        transitive_dependencies: boundary.transitive_dependencies,
+        reachable_callbacks: boundary.reachable_callbacks,
+        compiler_flags: boundary.compiler_flags,
+        target: boundary.target,
+        generator: boundary.generator,
+        obligations: obligations,
+    }
+}
+
+pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edges: [SemaRegistrationImportEdge]) -> MirCffiFacts {
+    import_links := [MirCImportLink]{}
+    loop edge in import_edges {
+        if edge.foreign_binding == {
+            .Val(binding) -> import_links.push(MirCImportLink{
+                importing_module: edge.source_module_identity,
+                scope: binding.scope,
+                alias: binding.alias,
+                target_module: edge.target_module_identity,
+            })
+            else -> {}
+        }
+    }
+
+    libs := [MirCLib]{}
+    overlay_overrides := [MirCOverlayOverride]{}
+    boundaries := [MirFfiBoundaryFacts]{}
+    direct_links := [String]{}
+    transitive_links := [String]{}
+    close_adapters := [MirCloseAdapter]{}
+    loop module_row in modules {
+        loop provider in module_row.foreign_providers {
+            libs.push(MirCLib{lib: provider.library, module_name: provider.module_identity})
+            loop override in provider.overrides {
+                overlay_overrides.push(MirCOverlayOverride{
+                    lib: provider.library,
+                    generated_symbol: override.generated_symbol,
+                    overlay_symbol: override.overlay_symbol,
+                })
+            }
+            if provider.boundary == .Val(boundary) -> boundaries.push(jet_codegen_cffi_boundary(boundary))
+            loop library in provider.direct_links -> jet_codegen_foreign_push_unique_string(&direct_links, library)
+            loop library in provider.transitive_links -> jet_codegen_foreign_push_unique_string(&transitive_links, library)
+            loop adapter in provider.close_adapters {
+                close_adapters.push(MirCloseAdapter{
+                    lib: adapter.library,
+                    handle_type: adapter.handle_type,
+                    raw_function: adapter.raw_function,
+                    adapter_function: adapter.adapter_function,
+                })
+            }
+        }
+    }
+    jet_codegen_foreign_sort_strings(&direct_links)
+    jet_codegen_foreign_sort_strings(&transitive_links)
+    write_index := 0
+    read_index := 0
+    loop read_index < transitive_links.len() {
+        library := transitive_links[read_index]
+        if !direct_links.contains(library) {
+            transitive_links[write_index] = library
+            write_index += 1
+        }
+        read_index += 1
+    }
+    loop transitive_links.len() > write_index -> _ := transitive_links.pop()
+    MirCffiFacts{
+        import_links: import_links,
+        libs: libs,
+        overlay_overrides: overlay_overrides,
+        boundaries: boundaries,
+        direct_links: direct_links,
+        transitive_links: transitive_links,
+        close_adapters: close_adapters,
+    }
+}

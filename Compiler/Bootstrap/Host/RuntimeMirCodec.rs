@@ -1385,6 +1385,7 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
         ("MirPreludeCall", "module") => "module_name".to_string(),
         ("MirCoreCall", "module") => "module_name".to_string(),
         ("MirCoreCall", "effect") => "effect_kind".to_string(),
+        ("MirPreludeCall", "effect") => "effect_kind".to_string(),
         ("MirForeign", "module") => "module_name".to_string(),
         ("MirCLib", "module") => "module_name".to_string(),
         ("MirTraitDef", "module")

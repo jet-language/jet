@@ -1584,8 +1584,8 @@ mod tests {
             .stack_size(16 * 1024 * 1024)
             .spawn(|| {
                 for file in [
-                    "examples/features/concurrency/tasks.jet",
-                    "examples/features/concurrency/scheduler_spawn.jet",
+                    "Examples/features/concurrency/tasks.jet",
+                    "Examples/features/concurrency/scheduler_spawn.jet",
                 ] {
                     let mut bundle =
                         crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));

@@ -351,7 +351,8 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MirIm
     impl_scope :: jet_rust_emit_merge_generic_params(previous_generic_params, impl_type_params)
     ctx.current_generic_params = impl_scope
     impl_generics :: jet_rust_emit_generic_params(ctx, impl_scope)
-    if implementation.trait_ref == .Val(trait_ref) {
+    if implementation.trait_ref == {
+        .Val(trait_ref) -> {
         trait_found := false
         loop definition in ctx.program.traits {
             if definition.id == trait_ref.id {
@@ -381,8 +382,10 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MirIm
         }
         if !trait_found -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "trait impl references a missing trait", "checked impl dispatch must resolve its trait declaration before source emission", Val(implementation.span))
         lines.push("impl{impl_generics} {jet_rust_emit_trait_name(ctx, trait_ref.id)} for {jet_rust_emit_type(ctx, implementation.self_type)} {{")
-    } else {
+        }
+        else -> {
         lines.push("impl{impl_generics} {jet_rust_emit_type(ctx, implementation.self_type)} {{")
+        }
     }
     loop method_id in implementation.methods {
         found := false

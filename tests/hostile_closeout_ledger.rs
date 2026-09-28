@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const LEDGER: &str = include_str!("../docs/audits/dogfood-jet-experience-5-of-5.md");
+const LEDGER: &str = include_str!("../Docs/audits/dogfood-jet-experience-5-of-5.md");
 
 struct EvidenceFile {
     path: &'static str,
@@ -30,11 +30,11 @@ const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
         code: Some("L0520"),
         finding: "F50",
         owner: "#2417",
-        raw_witness: "docs/audits/raw/2393-r1/A03/T4/jet.json",
+        raw_witness: "Docs/audits/raw/2393-r1/A03/T4/jet.json",
         fixture: "tests/ui/ioerror_display_migration.jet",
         evidence: &[
             EvidenceFile {
-                path: "docs/audits/raw/2393-r1/A03/T4/jet.json",
+                path: "Docs/audits/raw/2393-r1/A03/T4/jet.json",
                 markers: &[],
             },
             EvidenceFile {
@@ -48,11 +48,11 @@ const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
         code: Some("L0503"),
         finding: "F51",
         owner: "#2416",
-        raw_witness: "docs/audits/raw/2393-r1/A01/T2/jet.json",
+        raw_witness: "Docs/audits/raw/2393-r1/A01/T2/jet.json",
         fixture: "tests/ui_lint/prefer_compound_assign.jet",
         evidence: &[
             EvidenceFile {
-                path: "docs/audits/raw/2393-r1/A01/T2/jet.json",
+                path: "Docs/audits/raw/2393-r1/A01/T2/jet.json",
                 markers: &[],
             },
             EvidenceFile {
@@ -66,11 +66,11 @@ const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
         code: None,
         finding: "F52",
         owner: "#2415",
-        raw_witness: "docs/audits/raw/2393-r1/A01/T1/jet.json",
+        raw_witness: "Docs/audits/raw/2393-r1/A01/T1/jet.json",
         fixture: "tests/marker_declarations.rs",
         evidence: &[
             EvidenceFile {
-                path: "docs/audits/raw/2393-r1/A01/T1/jet.json",
+                path: "Docs/audits/raw/2393-r1/A01/T1/jet.json",
                 markers: &[
                     "fact registry law violation: `Scheduler` is registered twice; one table means one row per name",
                 ],
@@ -103,11 +103,11 @@ const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
         code: None,
         finding: "F53",
         owner: "#2419",
-        raw_witness: "docs/audits/raw/2393-r1/A10/T4/jet.json",
+        raw_witness: "Docs/audits/raw/2393-r1/A10/T4/jet.json",
         fixture: "tests/fixtures/fresh_agent_t4/**",
         evidence: &[
             EvidenceFile {
-                path: "docs/audits/raw/2393-r1/A10/T4/jet.json",
+                path: "Docs/audits/raw/2393-r1/A10/T4/jet.json",
                 markers: &[
                     "\"participant\": \"A10\"",
                     "\"task\": \"T4\"",
@@ -218,7 +218,7 @@ fn collect_jet_receipts(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn raw_code_counts() -> BTreeMap<String, usize> {
-    let raw_root = root().join("docs/audits/raw/2393-r1");
+    let raw_root = root().join("Docs/audits/raw/2393-r1");
     let mut files = Vec::new();
     collect_jet_receipts(&raw_root, &mut files);
     files.sort();

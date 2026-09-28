@@ -12,7 +12,7 @@
 //! | 70   | `RUNTIME_PANIC`| a built program breached or stopped at runtime (`panic`, `require`, or a program-side fault) |
 //! | 101  | `ICE`          | Jet's own compiler defect (I2: rustc rejected generated code, or the compiler itself crashed) |
 //!
-//! Documented in docs/spec/release-policy.md ("Exit-code table").
+//! Documented in Docs/spec/release-policy.md ("Exit-code table").
 
 /// Everything succeeded.
 pub const OK: i32 = 0;

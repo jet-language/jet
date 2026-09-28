@@ -205,6 +205,7 @@ pub(crate) fn try_resident_with_values_and_result(
             outcome: super::resident::resident_invocation_failure_outcome(),
             value: None,
             failure: Some(reason),
+            writebacks: Vec::new(),
         },
         Err(reason) => ResidentHelperAttempt::NotInvoked(reason),
     };
@@ -270,7 +271,7 @@ pub(crate) fn try_resident_with_function_values_and_result(
     }
     let nested = super::Concurrency::active_runtime_ptr().is_some();
     let mut invocation_started = false;
-    let run = || {
+    let mut run = || {
         resident_run_fresh_with_function_values_and_result(
             program,
             program_allocator_cap_bytes(program),
@@ -298,6 +299,7 @@ pub(crate) fn try_resident_with_function_values_and_result(
             },
             value: None,
             failure: Some(reason),
+            writebacks: Vec::new(),
         },
         Err(reason) => ResidentHelperAttempt::NotInvoked(reason),
     };

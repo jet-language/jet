@@ -171,6 +171,17 @@ pub enum AmbientMirPreludeResult {
         exit_code: i32,
     },
 }
+/// Native callback for one checked MIR Prelude route.
+///
+/// The route row and result type remain canonical MIR facts; the callback only
+/// supplies the host implementation and returns the evaluator-owned result
+/// envelope.
+pub type AmbientMirPreludeCall = fn(
+    &MirPreludeCall,
+    Vec<MirRuntimeValue>,
+    Option<crate::MIR::MirType>,
+    Span,
+) -> Option<Result<AmbientMirPreludeResult, Diagnostic>>;
 
 /// Writeback produced by a checked native MIR foreign call.
 ///

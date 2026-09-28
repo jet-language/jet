@@ -153,7 +153,7 @@ fn enter_expands_then_guides_without_hooks_instead_of_pasting() {
         "Enter without hooks should tell the user how to install prefill:\n{transcript}"
     );
     assert!(
-        !transcript.contains("examples/features/basics/hello.jet"),
+        !transcript.contains("Examples/features/basics/hello.jet"),
         "Enter selects command, not example:\n{transcript}"
     );
     assert!(

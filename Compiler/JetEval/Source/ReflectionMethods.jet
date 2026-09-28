@@ -1,0 +1,102 @@
+// Source-owned evaluation for compile-time reflection metadata predicates.
+// Metadata values are the canonical Comptime reflection structs; no native
+// Builtins callback participates in this route.
+
+fn jet_eval_reflection_metadata_member(member: String) -> ?[String] {
+    parts := member.split(".")
+    if parts.len() != 2 -> return None
+    Val(parts)
+}
+
+fn jet_eval_reflection_metadata_supported(owner: String, method: String) -> Bool {
+    if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
+    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
+    false
+}
+
+fn jet_eval_reflection_metadata_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> ?[TComptimeField] {
+    if value == {
+        .Struct(type_name, fields) -> {
+            if type_name != owner {
+                jet_eval_compiler_fail(&machine, span, "reflection metadata route received {type_name}, expected {owner}")
+                return None
+            }
+            return Val(fields)
+        }
+        else -> {}
+    }
+    jet_eval_compiler_fail(&machine, span, "reflection metadata route receiver is not {owner}")
+    None
+}
+
+fn jet_eval_reflection_metadata_field(fields: [TComptimeField], field_name: String) -> ?TComptimeValue {
+    loop field in fields {
+        if field.name == field_name -> return Val(field.value)
+    }
+    None
+}
+
+fn jet_eval_reflection_metadata_string_list_contains(fields: [TComptimeField], field_name: String, wanted: String) -> Bool {
+    list :: jet_eval_reflection_metadata_field(fields, field_name) ?? return false
+    if list == {
+        .List(values) -> {
+            loop value in values {
+                if value == .String(name) && name == wanted -> return true
+            }
+            return false
+        }
+        else -> false
+    }
+}
+
+fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], wanted: String) -> Bool {
+    list :: jet_eval_reflection_metadata_field(fields, "methods") ?? return false
+    if list == {
+        .List(values) -> {
+            loop value in values {
+                if value == .Struct(_, method_fields) {
+                    name :: jet_eval_reflection_metadata_field(method_fields, "name") ?? next
+                    if name == .String(text) && text == wanted -> return true
+                }
+            }
+            return false
+        }
+        else -> false
+    }
+}
+
+pub fn jet_eval_route_reflection_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
+        jet_eval_compiler_fail(&machine, span, "invalid reflection metadata Prelude route")
+        return None
+    }
+    if row.abi != MirPreludeAbi.Value || row.signature.arity != 2 || row.signature.max_arity != 2 || row.signature.borrow_mask != ([Bool]{true, false}) || row.fallibility != MirCallFallibility.Infallible || args.len() != 2 {
+        jet_eval_compiler_fail(&machine, span, "reflection metadata Prelude route has an invalid ABI")
+        return None
+    }
+    member_parts :: jet_eval_reflection_metadata_member(row.member) ?? {
+        jet_eval_compiler_fail(&machine, span, "reflection metadata route member is not nominal")
+        return None
+    }
+    owner := member_parts[0]
+    method := member_parts[1]
+    if !jet_eval_reflection_metadata_supported(owner, method) {
+        jet_eval_compiler_fail(&machine, span, "unsupported reflection metadata method {row.member}")
+        return None
+    }
+    wanted :: jet_eval_route_string(args[1]) ?? {
+        jet_eval_compiler_fail(&machine, span, "reflection metadata method requires a String name")
+        return None
+    }
+    receiver := args[0]
+    fields :: jet_eval_reflection_metadata_struct(receiver, owner, &machine, span) ?? return None
+    if method == "has_marker" {
+        result :: sema_comptime_reflection_has_marker(receiver, wanted) ?? {
+            jet_eval_compiler_fail(&machine, span, "reflection metadata marker receiver is not {owner}")
+            return None
+        }
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(result)))
+    }
+    result :: if method == "implements" -> jet_eval_reflection_metadata_string_list_contains(fields, "implements", wanted) else -> jet_eval_reflection_metadata_method_list_contains(fields, wanted)
+    Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(result)))
+}

@@ -1,0 +1,220 @@
+pub struct SemaMigrationFieldName {
+    pub field: String
+    pub json_key: String
+}
+
+pub struct SemaMigrationCanonicalShape {
+    pub names: [SemaMigrationFieldName]
+    pub current: [String]
+    pub historical: [[String]]
+    pub skipped: [String]
+}
+
+fn sema_migration_insert_sorted(values: [String], value: String) -> [String] {
+    result := [String]{}
+    inserted := false
+    loop current in values {
+        if current == value -> return values
+        if !inserted && current > value {
+            result.push(value)
+            inserted = true
+        }
+        result.push(current)
+    }
+    if !inserted -> result.push(value)
+    result
+}
+
+fn sema_migration_remove(values: [String], value: String) -> [String] {
+    result := [String]{}
+    loop current in values {
+        if current != value -> result.push(current)
+    }
+    result
+}
+
+fn sema_migration_rename_all(definition: StructDef) -> ?String {
+    marker := sema_checked_marker(definition.serde_markers, "RenameAll")
+    if marker == None -> return None
+    sema_checked_marker_text(marker ?? panic("checked RenameAll marker disappeared"))
+}
+
+pub fn sema_migration_wire_name(style: ?String, name: String) -> String {
+    sema_checked_wire_case(style, name)
+}
+
+fn sema_migration_json_key(definition: StructDef, style: ?String, name: String) -> String {
+    loop field in definition.fields {
+        if field.name == name {
+            names := sema_checked_field_shape_names(definition, field)
+            return names.json ?? names.text
+        }
+    }
+    sema_migration_wire_name(style, name)
+}
+
+pub fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape {
+    style := sema_migration_rename_all(definition)
+    names := [SemaMigrationFieldName]{}
+    current := [String]{}
+    skipped := [String]{}
+    loop field in definition.fields {
+        key := sema_migration_json_key(definition, style, field.name)
+        names.push(SemaMigrationFieldName{field: field.name, json_key: key})
+        if {
+            sema_checked_marker(field.serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
+            else -> current = sema_migration_insert_sorted(current, key)
+        }
+    }
+    historical_reverse := [[String]]{}
+    shape := current
+    block_index := migrations.len()
+    loop block_index > 0 {
+        block_index -= 1
+        migration := migrations[block_index]
+        loop operation in migration.ops {
+            if operation == {
+                .Add(field, _, _, _, _, _, _) -> shape = sema_migration_remove(shape, sema_migration_json_key(definition, style, field))
+                .Remove(field, _) -> shape = sema_migration_insert_sorted(shape, sema_migration_json_key(definition, style, field))
+                .Rename(from, _, to, _) -> {
+                    shape = sema_migration_remove(shape, sema_migration_json_key(definition, style, to))
+                    shape = sema_migration_insert_sorted(shape, sema_migration_json_key(definition, style, from))
+                }
+                .Change(_, _, _, _, _, _, _, _, _) -> {}
+            }
+        }
+        historical_reverse.push(shape)
+    }
+    historical := [[String]]{}
+    index := historical_reverse.len()
+    loop index > 0 {
+        index -= 1
+        historical.push(historical_reverse[index])
+    }
+    SemaMigrationCanonicalShape{names: names, current: current, historical: historical, skipped: skipped}
+}
+
+fn sema_migration_name(kind: String, type_name: String, block_index: Int, field: String) -> String {
+    "__jet_migrate_{kind}_{type_name}_{block_index}_{field}"
+}
+
+fn sema_migration_default_function(name: String, ty: Type, default: Expr, span: Span) -> Func {
+    function := ast_func(name, span, span)
+    function.return_type = Val(ty)
+    function.return_type_span = Val(span)
+    function.body = [Stmt]{Stmt.Return(value: Val(default), span: span)}
+    function
+}
+
+fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func {
+    argument := CallArg{
+        convention: AccessConvention.Move,
+        expr: Expr.Ident(name: "__old", span: span),
+        span: span,
+        flags: ast_empty_call_arg_flags(),
+        label: None,
+        spread: false,
+    }
+    call := Expr.CallValue(callee: converter, args: [CallArg]{argument}, span: span)
+    function := ast_func(name, span, span)
+    function.params = [Param]{Param{
+        convention: AccessConvention.Move,
+        root: false,
+        name: "__old",
+        name_span: span,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: old_ty,
+        ty_span: span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+    }}
+    function.return_type = Val(new_ty)
+    function.return_type_span = Val(span)
+    function.body = [Stmt]{Stmt.Return(value: Val(call), span: span)}
+    function
+}
+
+fn sema_migration_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func {
+    if converter == {
+        .Lambda(lambda) -> if lambda.params.len() == 1 {
+            parameter := lambda.params[0]
+            body := if lambda.body == {
+                .Expr(value) -> [Stmt]{Stmt.Return(value: Val(value), span: span)}
+                .Block(statements) -> statements
+            }
+            function := ast_func(name, span, span)
+            function.params = [Param]{Param{
+                convention: AccessConvention.Move,
+                root: false,
+                name: parameter.name,
+                name_span: parameter.name_span,
+                public_label: None,
+                zone: ParamZone.Either,
+                ty: old_ty,
+                ty_span: span,
+                default: None,
+                variadic: false,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+            }}
+            function.return_type = Val(new_ty)
+            function.return_type_span = Val(span)
+            function.body = body
+            return function
+        }
+        else -> {}
+    }
+    sema_migration_callable_converter_function(name, old_ty, new_ty, converter, span)
+}
+
+fn sema_migration_type_is_enabled(type_name: String, enabled_types: [String]) -> Bool {
+    loop candidate in enabled_types {
+        if candidate == type_name -> return true
+    }
+    false
+}
+
+pub fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] {
+    functions := [Func]{}
+    migration_index := 0
+    loop migration in migrations {
+        if !sema_migration_type_is_enabled(migration.type_name, enabled_types) {
+            migration_index += 1
+            next
+        }
+        block_index := 0
+        prior_index := 0
+        loop prior_index < migration_index {
+            if migrations[prior_index].type_name == migration.type_name -> block_index += 1
+            prior_index += 1
+        }
+        updated := [MigrationOp]{}
+        loop operation in migration.ops {
+            if operation == {
+                .Add(field, field_span, ty, ty_span, default, default_span, _) -> {
+                    name := sema_migration_name("add", migration.type_name, block_index, field)
+                    updated.push(MigrationOp.Add(field: field, field_span: field_span, ty: ty, ty_span: ty_span, default: default, default_span: default_span, default_fn: Val(name)))
+                    functions.push(sema_migration_default_function(name, ty, default, default_span))
+                }
+                .Change(field, field_span, from_ty, from_span, to_ty, to_span, converter, converter_span, _) -> {
+                    if converter == {
+                        .Val(value) -> {
+                            name := sema_migration_name("conv", migration.type_name, block_index, field)
+                            span := converter_span ?? migration.span
+                            updated.push(MigrationOp.Change(field: field, field_span: field_span, from_ty: from_ty, from_span: from_span, to_ty: to_ty, to_span: to_span, converter: Val(value), converter_span: converter_span, conv_fn: Val(name)))
+                            functions.push(sema_migration_converter_function(name, from_ty, to_ty, value, span))
+                        }
+                        .None -> updated.push(operation)
+                    }
+                }
+                else -> updated.push(operation)
+            }
+        }
+        migrations[migration_index].ops = updated
+        migration_index += 1
+    }
+    functions
+}

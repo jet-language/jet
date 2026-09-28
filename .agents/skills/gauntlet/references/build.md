@@ -5,7 +5,7 @@ Use this playbook only for Build/update mode. Read
 
 ## Matrix
 
-`gauntlet/matrix.json` names the full territory: personas × domains ×
+`Tools/gauntlet/matrix.json` names the full territory: personas × domains ×
 task-kinds. Task-kinds include at least application, CLI, service, web,
 embedded, data/numeric, scripting, and notebook-style exploration. Personas
 span true novice through domain expert plus the unattended agent; start from
@@ -22,7 +22,7 @@ matrix, entries, or policy changes land.
 
 ## Entries
 
-Use `gauntlet/entries/<name>/`:
+Use `Tools/gauntlet/entries/<name>/`:
 
 - `entry.json` gives behavior, inputs, expected observable output, matrix cell
 tags, tier (`micro` | `program` | `script`), language list, authoring provenance,
@@ -39,7 +39,7 @@ services, or C for embedded work.
 
 ## Harness contract
 
-`gauntlet/harness/` measures each entry and implementation on one machine and
+`Tools/gauntlet/harness/` measures each entry and implementation on one machine and
 one run:
 
 - median-of-N wall time and peak RSS;
@@ -51,10 +51,10 @@ one run:
 - Luna authoring cost.
 
 Comparisons use same-run ratios. Raw times are machine-local. A full run emits
-`gauntlet/results/<date>.json`; `--entry` and `--axis` emit
+`Tools/gauntlet/results/<date>.json`; `--entry` and `--axis` emit
 `<date>-<entry>.json` and `<date>-axis-<axis>.json`, so they do not overwrite
 the day's full report. These files are gitignored, and
-`gauntlet/harness/status.mjs --merge` folds them into `status.json`.
+`Tools/gauntlet/harness/status.mjs --merge` folds them into `status.json`.
 
 The harness measures `target/release/jet`. Run and dev tiers execute inside the
 compiler process; a debug compiler would measure itself, not Jet. Use

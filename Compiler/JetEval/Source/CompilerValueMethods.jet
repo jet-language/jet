@@ -1,0 +1,149 @@
+// Source-owned projections for compiler query values.
+// These methods consume immutable TComptimeValue packets produced by the
+// compiler service; they never re-run a checker or call native Builtins.
+
+fn jet_eval_compiler_value_method_owner(member: String) -> ?[String] {
+    parts := member.split(".")
+    if parts.len() != 2 -> return None
+    if parts[0] == "" || parts[1] == "" -> return None
+    Val(parts)
+}
+
+fn jet_eval_compiler_value_method_record(owner: String, method: String) -> Bool {
+    if owner == "CompilerLexed" -> return method == "source" || method == "tokens" || method == "diagnostics"
+    if owner == "CompilerSyntaxTree" -> return method == "source" || method == "items" || method == "diagnostics"
+    if owner == "CompilerChecked" -> return method == "source" || method == "syntax" || method == "diagnostics" || method == "functions" || method == "effects" || method == "semantic_index"
+    if owner == "CompilerSourceMap" -> return method == "sources" || method == "generated_lines"
+    if owner == "CompilerPackageError" -> return method == "code" || method == "message" || method == "file" || method == "cause"
+    if owner == "CompilerDependency" -> return method == "name" || method == "source"
+    if owner == "CompilerPackageTarget" -> return method == "name" || method == "targets"
+    if owner == "CompilerPackageOutput" -> return method == "name" || method == "kind" || method == "entry"
+    if owner == "CompilerBuildProfile" -> return method == "name" || method == "optimize" || method == "debug_info" || method == "small" || method == "panic"
+    if owner == "CompilerManifest" || owner == "CompilerPackage" -> return method == "schema_version" || method == "file" || method == "jet" || method == "edition" || method == "description" || method == "license" || method == "repository" || method == "layer" || method == "target" || method == "dependencies" || method == "packages" || method == "outputs" || method == "build_profiles"
+    if owner == "CompilerLockedPackage" -> return method == "name" || method == "version" || method == "source_kind" || method == "fingerprint" || method == "source" || method == "revision" || method == "content_hash" || method == "layer" || method == "inferred_layer" || method == "dependencies"
+    if owner == "CompilerLock" -> return method == "schema_version" || method == "version" || method == "file" || method == "root_dependencies" || method == "packages"
+    if owner == "CompilerKeyValue" -> return method == "key" || method == "value"
+    if owner == "CompilerProfile" -> return method == "name" || method == "extends" || method == "packages" || method == "sources" || method == "collisions"
+    if owner == "CompilerProfileSet" -> return method == "schema_version" || method == "file" || method == "profiles"
+    false
+}
+
+fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool {
+    if arg_count != 0 && owner != "EffectInfo" -> return false
+    if owner == "ProgramInfo" -> return method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes"
+    if jet_eval_compiler_value_method_record(owner, method) -> return true
+    if owner == "FunctionInfo" -> return method == "reaches_panic"
+    if owner == "EffectInfo" -> return method == "has" && arg_count == 1
+    false
+}
+
+fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] {
+    mask := [Bool]{}
+    loop index in 0..<arity -> mask.push(index == 0)
+    mask
+}
+
+
+fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+    loop field in fields {
+        if field.name == method -> return Val(field.value)
+    }
+    jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is missing from its checked value")
+    None
+}
+
+
+fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> ?[TComptimeField] {
+    if value == {
+        .Struct(type_name, fields) -> {
+            if type_name != owner {
+                jet_eval_compiler_fail(&machine, span, "compiler value route received {type_name}, expected {owner}")
+                return None
+            }
+            return Val(fields)
+        }
+        else -> {}
+    }
+    jet_eval_compiler_fail(&machine, span, "compiler value route receiver is not {owner}")
+    None
+}
+
+fn jet_eval_compiler_value_method_list_contains(fields: [TComptimeField], field_name: String, wanted: String, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?Bool {
+    list :: jet_eval_compiler_value_method_field(&fields, owner, field_name, &machine, span) ?? return None
+    if list == {
+        .List(values) -> {
+            loop value in values {
+                if value == {
+                    .String(text) -> {
+                        if text == wanted -> return Val(true)
+                    }
+                    else -> {
+                        jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection field {field_name} must contain only Strings")
+                        return None
+                    }
+                }
+            }
+            return Val(false)
+        }
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection field {field_name} is not a list")
+            return None
+        }
+    }
+}
+fn jet_eval_compiler_value_method_list_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
+    projected :: jet_eval_compiler_value_method_field(&fields, owner, method, &machine, span) ?? return None
+    if projected == .List(_) -> return Val(JetEvalRuntimeValue.Data(projected))
+    jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is not a list")
+    None
+}
+
+fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
+    projected :: jet_eval_compiler_value_method_field(&fields, owner, method, &machine, span) ?? return None
+    Val(JetEvalRuntimeValue.Data(projected))
+}
+
+pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+    if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
+        jet_eval_compiler_fail(&machine, span, "invalid compiler value Prelude route")
+        return None
+    }
+    if args.len() == 0 {
+        jet_eval_compiler_fail(&machine, span, "compiler value route has no receiver")
+        return None
+    }
+    member_parts :: jet_eval_compiler_value_method_owner(row.member) ?? {
+        jet_eval_compiler_fail(&machine, span, "compiler value route member is not nominal")
+        return None
+    }
+    owner := member_parts[0]
+    method := member_parts[1]
+    if !jet_eval_compiler_value_method_supported(owner, method, args.len() - 1) {
+        jet_eval_compiler_fail(&machine, span, "unsupported compiler value method {row.member}")
+        return None
+    }
+    expected_arity := args.len()
+    if row.abi != MirPreludeAbi.Value || row.fallibility != MirCallFallibility.Infallible || row.signature.arity != expected_arity || row.signature.max_arity != expected_arity || row.signature.borrow_mask != jet_eval_compiler_value_method_borrow_mask(expected_arity) {
+        jet_eval_compiler_fail(&machine, span, "compiler value Prelude route has an invalid ABI")
+        return None
+    }
+    receiver := args[0]
+    if owner == "EffectInfo" && method == "has" {
+        fields :: jet_eval_compiler_value_method_struct(receiver, owner, &machine, span) ?? return None
+        wanted :: jet_eval_route_string(args[1]) ?? {
+            jet_eval_compiler_fail(&machine, span, "EffectInfo.has requires a String argument")
+            return None
+        }
+        found :: jet_eval_compiler_value_method_list_contains(&fields, "values", wanted, owner, method, &machine, span) ?? return None
+        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(found)))
+    }
+    if owner == "FunctionInfo" && method == "reaches_panic" {
+        return jet_eval_compiler_value_method_projection(receiver, owner, method, &machine, span)
+    }
+    if owner == "ProgramInfo" -> return jet_eval_compiler_value_method_list_projection(receiver, owner, method, &machine, span)
+    if jet_eval_compiler_value_method_record(owner, method) -> return jet_eval_compiler_value_method_projection(receiver, owner, method, &machine, span)
+    jet_eval_compiler_fail(&machine, span, "compiler value route has no implementation for {row.member}")
+    None
+}

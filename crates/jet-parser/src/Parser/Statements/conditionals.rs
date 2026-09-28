@@ -2008,8 +2008,8 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod value_block_tests {
-    use crate::AST::{Expr, Item, Program, Stmt};
-    use crate::Diagnostics::Diagnostic;
+    use crate::AST::{Expr, Item, OrFallback, Program, Stmt};
+    use crate::Diagnostics::{Diagnostic, Span};
     use crate::Lexer::lex;
     use crate::Parser::parse;
 
@@ -2252,6 +2252,88 @@ fn run() {
             Expr::Ident(name, _) if name == "ok"
         ));
     }
+
+    #[test]
+    fn fallback_block_accepts_nested_control_before_bind_call_return_and_following_declaration() {
+        let source = r#"
+fn run(value: ?Int) {
+    result :: value ?? {
+        loop {
+            if done {
+                break
+            }
+        }
+        if ready {
+            observe()
+        }
+        bound :: 1
+        notify()
+        return
+    }
+    after :: 2
+}
+"#;
+        let program = parsed(source);
+        let Item::Func(function) = &program.items[0] else {
+            panic!("expected run function");
+        };
+        let [Stmt::Val(result), Stmt::Val(after)] = function.body.as_slice() else {
+            panic!("fallback must leave the following declaration in the function body");
+        };
+        assert_eq!(after.name, "after");
+        let Expr::OrFallback {
+            fallback:
+                OrFallback::Block {
+                    body,
+                    value: None,
+                    ..
+                },
+            ..
+        } = &result.init
+        else {
+            panic!("binding initializer is not a fallback block");
+        };
+        assert!(matches!(
+            body.as_slice(),
+            [
+                Stmt::Loop {
+                    body: loop_body,
+                    ..
+                },
+                Stmt::Switch { .. },
+                Stmt::Val(binding),
+                Stmt::Expr(Expr::Call(call)),
+                Stmt::Return(None, _),
+            ] if matches!(loop_body.as_slice(), [Stmt::Switch { .. }])
+                && binding.name == "bound"
+                && call.name == "notify"
+        ));
+    }
+
+    #[test]
+    fn fallback_block_rejects_authored_semicolon_after_nested_control() {
+        let source = r#"
+fn run(value: ?Int) {
+    result :: value ?? {
+        loop {
+            break
+        };
+        1
+    }
+}
+"#;
+        let diagnostics = rejected(source);
+        let semicolon = source.find("};").expect("test source has an authored semicolon");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic.span == Some(Span::new(semicolon + 1, semicolon + 2))
+                    && diagnostic.what.contains("found `;`")
+            }),
+            "authored semicolon must not be treated as a synthetic terminator: {diagnostics:?}"
+        );
+    }
+
 }
 
 #[cfg(test)]
@@ -2373,3 +2455,4 @@ mod arm_table_fix_tests {
             .expect("the chain still warns");
         assert!(lint.edit.is_none(), "a comment would be lost: {lint:?}");
     }
+}

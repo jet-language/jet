@@ -34,7 +34,7 @@ fn jet_test_example_output() {
         return;
     }
 
-    let example = root.join("examples/features/tooling/tests.jet");
+    let example = root.join("Examples/features/tooling/tests.jet");
     let cwd = isolated_test_package("jet_test_example");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -44,13 +44,13 @@ fn jet_test_example_output() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet test examples/features/tooling/tests.jet failed:\nstdout: {}\nstderr: {}",
+        "jet test Examples/features/tooling/tests.jet failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/tooling/tests.test.out"))
-            .expect("examples/features/expected/tooling/tests.test.out");
+        fs::read_to_string(root.join("Examples/features/expected/tooling/tests.test.out"))
+            .expect("Examples/features/expected/tooling/tests.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 
@@ -62,7 +62,7 @@ fn jet_test_inline_c_comparison_preserves_checked_int_declaration() {
         return;
     }
 
-    let example = root.join("examples/features/lowlevel/inline_c.jet");
+    let example = root.join("Examples/features/lowlevel/inline_c.jet");
     let cwd = isolated_test_package("jet_test_inline_c");
     let matching = Command::new(&jet)
         .args(["test", "--show-default", "--capture=all", "--serial"])
@@ -135,9 +135,9 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/expected_fail.jet");
+    let example = root.join("Examples/features/tooling/expected_fail.jet");
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/tooling/expected_fail.test.out"))
+        fs::read_to_string(root.join("Examples/features/expected/tooling/expected_fail.test.out"))
             .expect("expected_fail.test.out");
     let cwd = isolated_test_package("jet_test_expected_fail");
 
@@ -235,7 +235,7 @@ fn jet_test_package_collects_imported_module_tests() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let package = root.join("examples/features/tooling/test_package_modules");
+    let package = root.join("Examples/features/tooling/test_package_modules");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&package)
@@ -249,7 +249,7 @@ fn jet_test_package_collects_imported_module_tests() {
         String::from_utf8_lossy(&out.stderr)
     );
     let expected = fs::read_to_string(
-        root.join("examples/features/expected/tooling/test_package_modules.test.out"),
+        root.join("Examples/features/expected/tooling/test_package_modules.test.out"),
     )
     .expect("test_package_modules.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
@@ -262,7 +262,7 @@ fn concurrent_jet_test_same_file_is_process_isolated() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/tests.jet");
+    let example = root.join("Examples/features/tooling/tests.jet");
     let sandboxes: Vec<_> = (0..4)
         .map(|index| isolated_test_package(&format!("jet_test_concurrent_{index}")))
         .collect();
@@ -304,7 +304,7 @@ fn jet_test_members_example_output() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/test_members.jet");
+    let example = root.join("Examples/features/tooling/test_members.jet");
     let cwd = isolated_test_package("jet_test_members");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -319,7 +319,7 @@ fn jet_test_members_example_output() {
         String::from_utf8_lossy(&out.stderr)
     );
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/tooling/test_members.test.out"))
+        fs::read_to_string(root.join("Examples/features/expected/tooling/test_members.test.out"))
             .expect("test_members.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
@@ -584,7 +584,7 @@ fn release_test_uses_aot_tier_marker() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/property_tests.jet");
+    let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_release_property");
     let out = Command::new(&jet)
         .args(["test", "--release", "--trace-tiers", "--show-default", "--capture=all"])
@@ -965,7 +965,7 @@ fn jet_property_test_passes() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/property_tests.jet");
+    let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_property_pass");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -1064,7 +1064,7 @@ fn jet_doctest_passes() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/comptime/doctests.jet");
+    let example = root.join("Examples/features/comptime/doctests.jet");
     let cwd = isolated_test_package("jet_doctests");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -1249,7 +1249,7 @@ fn test_target_does_not_reintroduce_retired_command() {
     // D-CLAIM-BENCH1=A: the ordinary test target cannot revive the retired command.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let example = root.join("examples/features/tooling/test_target/run.jet");
+    let example = root.join("Examples/features/tooling/test_target/run.jet");
     let cwd = isolated_test_package("jet_test_target");
     let out = Command::new(&jet)
         .args(["bench", example.to_str().unwrap()])
@@ -1584,7 +1584,7 @@ fn jet_test_filter_keeps_only_matching_names() {
         return;
     }
     let cwd = isolated_test_package("jet_test_filter");
-    let example = root.join("examples/features/tooling/tests.jet");
+    let example = root.join("Examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--filter=consistent")
@@ -1621,7 +1621,7 @@ fn jet_test_shuffle_prints_the_seed_used() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/tests.jet");
+    let example = root.join("Examples/features/tooling/tests.jet");
     let cwd = isolated_test_package("jet_test_shuffle");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -1654,7 +1654,7 @@ fn jet_test_serial_flag_still_passes() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/property_tests.jet");
+    let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_test_serial");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
@@ -1680,7 +1680,7 @@ fn fuzz_corpus_dir(label: &str) -> PathBuf {
 
 #[test]
 fn jet_fuzz_example_clean_run_output() {
-    // I5: examples/features/tooling/fuzz_demo.jet is the executable spec for
+    // I5: Examples/features/tooling/fuzz_demo.jet is the executable spec for
     // generated tests — fixed `--seed`/`--iterations` so the clean-run report is
     // byte-for-byte deterministic (D-TESTKIT1=A gap #1).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1689,7 +1689,7 @@ fn jet_fuzz_example_clean_run_output() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/fuzz_demo.jet");
+    let example = root.join("Examples/features/tooling/fuzz_demo.jet");
     let cwd = isolated_test_package("jet_fuzz_example");
     let corpus = fuzz_corpus_dir("example_demo");
     let out = Command::new(&jet)
@@ -1709,8 +1709,8 @@ fn jet_fuzz_example_clean_run_output() {
         String::from_utf8_lossy(&out.stderr)
     );
     let expected =
-        fs::read_to_string(root.join("examples/features/expected/tooling/fuzz_demo.fuzz.out"))
-            .expect("examples/features/expected/tooling/fuzz_demo.fuzz.out");
+        fs::read_to_string(root.join("Examples/features/expected/tooling/fuzz_demo.fuzz.out"))
+            .expect("Examples/features/expected/tooling/fuzz_demo.fuzz.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
     let _ = fs::remove_dir_all(&corpus);
 }
@@ -1726,7 +1726,7 @@ fn jet_fuzz_ambiguous_target_names_candidates() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/property_tests.jet");
+    let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_fuzz_ambiguous");
     let out = Command::new(&jet)
         .args(["test", "--grade=generated"])
@@ -1754,7 +1754,7 @@ fn jet_fuzz_no_property_test_errors() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/tooling/tests.jet");
+    let example = root.join("Examples/features/tooling/tests.jet");
     let cwd = isolated_test_package("jet_fuzz_no_property");
     let out = Command::new(&jet)
         .args(["test", "--grade=generated"])

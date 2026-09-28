@@ -1,0 +1,246 @@
+// Lower checked TClosureOp expressions through their canonical Prelude routes.
+
+struct JetCodegenClosureRoute {
+    pub module_name: String
+    pub member: String
+    pub symbol: String
+    pub arity: Int
+    pub borrow_mask: [Bool]
+    pub effect_kind: ?Effect
+    pub abi: MirPreludeAbi
+}
+
+fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: ?Effect, abi: MirPreludeAbi) -> JetCodegenClosureRoute {
+    JetCodegenClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
+}
+
+fn jet_codegen_closure_receiver_kind(receiver: Type) -> ?String {
+    if receiver == {
+        .Tagged(_, inner) -> return jet_codegen_closure_receiver_kind(inner)
+        .List(_) | .FixedList(_, _) -> return Val("list")
+        .Option(_) -> return Val("option")
+        .Map(_, _, _) -> return Val("map")
+        .Apply(name, args) -> {
+            if args.len() == 1 && (name == "Iter" || name == "ViewIter") -> return Val("iter")
+            if args.len() == 1 && (name == "View" || name == "ViewMut" || name == "ComputeViewMut") -> return Val("view")
+            if name == "Tally" -> return Val("bag")
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type {
+    if receiver == {
+        .Tagged(marker, inner) -> {
+            if marker == {
+                .User(_) -> return jet_codegen_closure_receiver_without_user_tags(inner)
+                else -> return receiver
+            }
+        }
+        else -> return receiver
+    }
+}
+
+fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute {
+    kind :: jet_codegen_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
+    if operation == {
+        .Map -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .MapMut -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .TryMap -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "try_map", "jet_list_try_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "try_map", "jet_iter_try_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "view" -> return jet_codegen_closure_route_row("core.view", "try_map", "jet_view_try_map", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        }
+        .Filter -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "filter", "jet_list_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "filter", "jet_iter_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .FilterMap -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "filter_map", "jet_list_filter_map_iter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "filter_map", "jet_iter_filter_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .TryFilter -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "try_filter", "jet_list_try_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "try_filter", "jet_iter_try_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "view" -> return jet_codegen_closure_route_row("core.view", "try_filter", "jet_view_try_filter", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        }
+        .Each | .EachMut -> {
+            if kind == "list" || kind == "iter" {
+                if operation == TClosureOp.Each -> return jet_codegen_closure_route_row("core.list", "each", "jet_list_each", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+                return jet_codegen_closure_route_row("core.list", "each_mut", "jet_list_each_mut", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            }
+        }
+        .Find -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "find", "jet_list_find", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .Any -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "any", "jet_list_any", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .All -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "all", "jet_list_all", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .Reduce -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "reduce", "jet_list_reduce", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+        }
+        .TakeWhile -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "take_while", "jet_list_take_while_iter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "take_while", "jet_iter_take_while", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .SkipWhile -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "skip_while", "jet_list_skip_while_iter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "skip_while", "jet_iter_skip_while", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .FlatMap -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "flat_map", "jet_list_flat_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "flat_map", "jet_iter_flat_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .Position -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "position", "jet_list_position", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .MinBy -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "min_by", "jet_list_min_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .MaxBy -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "max_by", "jet_list_max_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .GroupBy -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "group_by", "jet_list_group_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .CountBy -> {
+            if kind == "list" || kind == "iter" -> return jet_codegen_closure_route_row("core.list", "count_by", "jet_list_count_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .Scan -> {
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "scan", "jet_list_scan_iter", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+            if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "scan", "jet_iter_scan", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+        }
+        .OptionMap -> {
+            if kind == "option" -> return jet_codegen_closure_route_row("core.option", "map", "jet_option_map_ref", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        }
+        .BagAny -> {
+            if kind == "bag" -> return jet_codegen_closure_route_row("core.bag", "any", "jet_bag_any", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        }
+        else -> {}
+    }
+    panic("checked closure operation has no canonical Prelude route for its receiver")
+}
+
+fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute {
+    if operation == {
+        .EditDisjoint -> return jet_codegen_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None, MirPreludeAbi.Value)
+        .EachRef -> return jet_codegen_closure_route_row("core.collections", "each_ref", "jet_list_each_ref", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .EachMap -> return jet_codegen_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .MapAny -> return jet_codegen_closure_route_row("core.map", "any", "jet_map_any", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .MapAll -> return jet_codegen_closure_route_row("core.map", "all", "jet_map_all", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .MapFilter -> return jet_codegen_closure_route_row("core.map", "filter", "jet_map_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .MapMap -> return jet_codegen_closure_route_row("core.map", "map", "jet_map_map_values", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .MapFold -> return jet_codegen_closure_route_row("core.map", "fold", "jet_map_fold", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+        .MapFlatMap -> return jet_codegen_closure_route_row("core.map", "flat_map", "jet_map_flat_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .ListBinarySearchBy -> return jet_codegen_closure_route_row("core.list", "binary_search_by", "jet_list_binary_search_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .ListMinMaxBy(_) -> return jet_codegen_closure_route_row("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Aggregate)
+        .CountWhere -> return jet_codegen_closure_route_row("core.list", "count_where", "jet_list_count_where", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .SortBy -> return jet_codegen_closure_route_row("core.list", "sort_by", "jet_list_sort_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .SortByDesc -> return jet_codegen_closure_route_row("core.list", "sort_by_desc", "jet_list_sort_by_desc", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .TrySortBy -> return jet_codegen_closure_route_row("core.list", "try_sort_by", "jet_list_try_sort_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .TrySortByDesc -> return jet_codegen_closure_route_row("core.list", "try_sort_by_desc", "jet_list_try_sort_by_desc", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .SortByCompare -> return jet_codegen_closure_route_row("core.list", "sort_by_compare", "jet_list_sort_by_compare", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .FloatAddFold(f32) -> {
+            member := if f32 -> "fold_add_fixed_f32" else -> "fold_add_fixed_f64"
+            symbol := if f32 -> "jet_list_fold_add_fixed_f32" else -> "jet_list_fold_add_fixed_f64"
+            return jet_codegen_closure_route_row("core.list", member, symbol, 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .FloatAddParaFold(f32) -> {
+            member := if f32 -> "para_fold_add_fixed_f32" else -> "para_fold_add_fixed_f64"
+            symbol := if f32 -> "jet_list_para_fold_add_fixed_f32" else -> "jet_list_para_fold_add_fixed_f64"
+            return jet_codegen_closure_route_row("core.list", member, symbol, 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        }
+        .ParaMap -> return jet_codegen_closure_route_row("core.list", "para_map", "jet_list_para_map", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+        .ParaFilter -> return jet_codegen_closure_route_row("core.list", "para_filter", "jet_list_para_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .ParaPartition(_) -> return jet_codegen_closure_route_row("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None, MirPreludeAbi.Aggregate)
+        .ParaFold -> return jet_codegen_closure_route_row("core.list", "para_fold", "jet_list_para_fold", 4, [Bool]{false, false, false, false}, None, MirPreludeAbi.Value)
+        .DedupBy -> return jet_codegen_closure_route_row("core.iter", "dedup_by", "jet_iter_dedup_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .IsSortedBy -> return jet_codegen_closure_route_row("core.iter", "is_sorted_by", "jet_iter_is_sorted_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .ChunkWhile -> return jet_codegen_closure_route_row("core.iter", "chunk_while", "jet_iter_chunk_while", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+        .Fold -> return jet_codegen_closure_route_row("core.list", "fold", "jet_list_fold", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+        .ViewFold -> return jet_codegen_closure_route_row("core.view", "fold", "jet_view_fold", 3, [Bool]{true, false, false}, None, MirPreludeAbi.Value)
+        .ViewMap -> return jet_codegen_closure_route_row("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+        .UpdateFirst -> return jet_codegen_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem), MirPreludeAbi.Value)
+        .Partition(_) -> return jet_codegen_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None, MirPreludeAbi.Aggregate)
+        .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return jet_codegen_collection_closure_route(operation, receiver)
+        else -> panic("checked TClosureOp has no canonical Prelude route")
+    }
+}
+
+fn jet_codegen_closure_method_mutates_receiver(operation: TClosureOp) -> Bool {
+    if operation == {
+        .EditDisjoint | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .UpdateFirst -> true
+        else -> false
+    }
+}
+
+fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, receiver: TExpr, mutating: Bool) -> MirValueId {
+    if !mutating {
+        if jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter")) {
+            place := jet_codegen_lower_expression_place(&builder, receiver, MirAccess.Move)
+            if place != None -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.MovePlace(place ?? panic("checked owned closure receiver place disappeared")))
+        }
+        return jet_codegen_lower_expr(&builder, receiver)
+    }
+    place := jet_codegen_lower_expression_place(&builder, receiver, MirAccess.Write)
+    if place == None -> return jet_codegen_lower_expr(&builder, receiver)
+    is_indexed_collection := false
+    if receiver.kind == {
+        .Index(_, _, _, _, _, _) | .Field(_, _) -> {
+            collection_type := jet_codegen_closure_receiver_without_user_tags(receiver.ty)
+            if collection_type == {
+                .List(_) | .Map(_, _, _) -> is_indexed_collection = true
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    if is_indexed_collection -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.ReadPlace(place ?? panic("checked indexed closure receiver place disappeared")))
+    jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.AddressOf(place ?? panic("checked mutating closure receiver place disappeared"), MirAccess.Write))
+}
+
+fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: TClosureOp, args: [TExpr]) -> MirValueId {
+    route_receiver := receiver.ty
+    if operation == TClosureOp.OptionMap {
+        if receiver.ty == {
+            .Option(_) | .Tagged(_, _) -> {}
+            else -> route_receiver = Type.Option(expression.ty)
+        }
+    }
+    route := jet_codegen_closure_route(operation, route_receiver)
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    mutating := jet_codegen_closure_method_mutates_receiver(operation)
+    lowered_receiver := jet_codegen_lower_closure_receiver(&builder, receiver, mutating)
+
+    lowered_args := [MirCallArg]{}
+    loop argument in args {
+        value := jet_codegen_lower_expr(&builder, argument)
+        lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+    }
+    if operation == TClosureOp.ParaMap && args.len() == 1 {
+        limit := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant(MirConstant.Int(9223372036854775807, None, None)))
+        lowered_args.push(jet_codegen_host_call_value_arg(limit, expression.span, MirAccess.Read, None))
+    }
+    if lowered_args.len() + 1 != route.arity -> panic("checked closure method operand count disagrees with its canonical Prelude route")
+    if route.borrow_mask.len() != route.arity -> panic("canonical closure method borrow mask disagrees with route arity")
+    index := 0
+    loop index < lowered_args.len() {
+        argument := lowered_args[index]
+        argument.access = jet_codegen_host_value_access(builder, argument.value, route.borrow_mask[index + 1])
+        lowered_args[index] = argument
+        index += 1
+    }
+    call := jet_codegen_intern_route(&builder, MirPreludeFamily.ClosureMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ClosureMethod(lowered_receiver, lowered_args, call)))
+}
+

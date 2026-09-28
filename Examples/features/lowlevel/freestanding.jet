@@ -1,0 +1,20 @@
+// E2-M15: typed no-OS target example.
+// Build with:
+//   jet build --target=board.sensor_v1 Examples/features/lowlevel/freestanding.jet
+//
+// Only core-level APIs are used: no file I/O, no network, no threads.
+// The named target profile admits only APIs supported by its typed providers.
+use core.math as math
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo -> return lo
+    if x > hi -> return hi
+    return x
+}
+
+fn run() {
+    a :: clamp(15, 0, 10)
+    b :: clamp((-3), 0, 10)
+    root :: math.sqrt(Float{16.0})
+    print("freestanding: clamp(15,0,10)={a}, clamp(-3,0,10)={b}, sqrt(16)={root}")
+}

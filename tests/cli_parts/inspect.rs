@@ -149,7 +149,7 @@ fn hardened_release_sentry_reaches_a_foreign_dependency() {
 
 #[test]
 fn release_hardened_profile_catches_a_local_wrong_unsafe_region() {
-    let source = include_str!("../../examples/features/memory/unsafe_sentries.jet");
+    let source = include_str!("../../Examples/features/memory/unsafe_sentries.jet");
     for (tag, profile, hardened) in [
         ("release_sentry_normal", "release", false),
         ("release_sentry_hardened", "hardened", true),

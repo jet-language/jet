@@ -1,0 +1,1047 @@
+// Typed source projection of the bounded core_fixed_sig_impl arms in
+// crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2812-4364.
+// Coverage begins at core.jobs.queue and ends at core.log.setup.
+
+fn core_value_fn_none(params: [Type]) -> Type {
+    Type.Fn(params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+}
+
+pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreTypedCallSignature {
+    read :: AccessConvention.Read
+    write :: AccessConvention.Write
+    moved :: AccessConvention.Move
+    unit :: core_sig_named("Unit")
+    data :: core_sig_named("DataTree")
+    io_error :: core_sig_named("IOError")
+    encoding_error :: core_sig_named("EncodingError")
+    list_u8 :: Type.List(element: Type.IntN(signed: false, bits: 8))
+    list_int :: Type.List(element: Type.Int)
+    list_float :: Type.List(element: Type.Float)
+    list_string :: Type.List(element: Type.String)
+
+    if module_name == "core.jobs" && member == "queue" {
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("JobQueue"), core_sig_named("ServiceError")))))
+    }
+    if module_name == "core.data.loader" && member == "snapshot_reusable" {
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+            core_sig_positional(core_sig_named("DataSnapshotIdentity"), read),
+            core_sig_positional(core_sig_named("DataSnapshotIdentity"), read),
+        }, Val(Type.Bool)))
+    }
+
+    if module_name == "core.data" {
+        if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "median", "variance", "stddev"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_float, read),
+            }, Val(core_sig_result(Type.Float, core_sig_named("DataError")))))
+        }
+        if member == "quantile" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_float, read), core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(Type.Float, core_sig_named("DataError")))))
+        }
+        if member == "rolling_mean" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_float, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(list_float, core_sig_named("DataError")))))
+        }
+        if member == "describe" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_float, read),
+            }, Val(core_sig_result(core_sig_named("DataSummary"), core_sig_named("DataError")))))
+        }
+        if member == "status" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List(element: core_sig_named("DataStatus")))))
+        }
+        if member == "require_bridge" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, core_sig_named("DataError")))))
+        }
+        if core_sig_one_of(member, [String]{"bar_text", "bar_svg"}) {
+            group_int :: Type.Apply(name: "Group", args: [Type]{Type.String, Type.Int})
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.List(element: group_int), read),
+            }, Val(core_sig_result(Type.String, core_sig_named("DataError")))))
+        }
+        if core_sig_one_of(member, [String]{"line_text", "line_svg"}) {
+            group_float :: Type.Apply(name: "Group", args: [Type]{Type.String, Type.Float})
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.List(element: group_float), read),
+                core_sig_positional(core_sig_named("DataLineOptions"), read),
+            }, Val(core_sig_result(Type.String, core_sig_named("DataError")))))
+        }
+    }
+
+    if module_name == "core.compute" {
+        tensor :: core_sig_named("Tensor")
+        compute_error :: core_sig_named("ComputeError")
+        compute_device :: core_sig_named("ComputeDevice")
+        compute_stream :: core_sig_named("ComputeStream")
+        sparse_tensor :: core_sig_named("SparseTensor")
+        if core_sig_one_of(member, [String]{"zeros", "ones"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_int, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "full" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_int, read), core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "from_list" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_float, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "matrix" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+                core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "vec" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if core_sig_one_of(member, [String]{"add", "mul", "matmul", "sub", "div", "maximum", "minimum", "solve", "mse_loss", "sparse_mv", "matmul_f32_tile"}) {
+            if core_sig_one_of(member, [String]{"sparse_mv"}) {
+                return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                    core_sig_positional(sparse_tensor, read), core_sig_positional(tensor, read),
+                }, Val(core_sig_result(tensor, compute_error))))
+            }
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(tensor, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "reshape" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(list_int, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "get" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(list_int, read),
+            }, Val(core_sig_result(Type.Float, compute_error))))
+        }
+        if member == "set" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, write), core_sig_positional(list_int, read),
+                core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(unit, compute_error))))
+        }
+        if member == "shape" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(list_int)))
+        }
+        if member == "to_list" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(list_float)))
+        }
+        if core_sig_one_of(member, [String]{"rank", "numel"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(Type.Int)))
+        }
+        if core_sig_one_of(member, [String]{"device", "placement"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"device_cpu", "device_auto", "device_metal", "device_cuda", "device_vulkan", "device_webgpu"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(compute_device)))
+        }
+        if member == "on_device" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(compute_device, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "broadcast_to" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(list_int, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if core_sig_one_of(member, [String]{"transpose", "negate", "abs", "exp", "log", "sqrt", "inv", "fft"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "sum_axis" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "eye" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "det" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(core_sig_result(Type.Float, compute_error))))
+        }
+        if member == "stream_new" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(compute_stream)))
+        }
+        if member == "stream_new_on" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(compute_device, read),
+            }, Val(core_sig_result(compute_stream, compute_error))))
+        }
+        if member == "stream_sync" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(compute_stream, read),
+            }, Val(core_sig_result(unit, compute_error))))
+        }
+        if member == "stream_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(compute_stream, read),
+            }, Val(Type.String)))
+        }
+        if member == "transfer_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(Type.String)))
+        }
+        if member == "transfer" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(compute_device, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "kernel_bounds_ok" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_int, read), core_sig_positional(list_int, read),
+            }, Val(core_sig_result(Type.Bool, compute_error))))
+        }
+        if member == "sparse_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(sparse_tensor, read),
+            }, Val(Type.String)))
+        }
+        if member == "serialize" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(core_sig_result(Type.String, compute_error))))
+        }
+        if member == "sgd_step" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read), core_sig_positional(tensor, read),
+                core_sig_positional(Type.Float, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "deserialize" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(tensor, compute_error))))
+        }
+        if member == "to_sparse" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(tensor, read),
+            }, Val(core_sig_result(sparse_tensor, compute_error))))
+        }
+        if member == "sparse_nnz" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(sparse_tensor, read),
+            }, Val(Type.Int)))
+        }
+        if core_sig_one_of(member, [String]{"profile_f32_strict", "profile_show"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.String)))
+        }
+    }
+
+    if module_name == "core.service" {
+        service_tree :: core_sig_named("ServiceTree")
+        service_error :: core_sig_named("ServiceError")
+        service_endpoint :: core_sig_named("ServiceEndpoint")
+        service_workflow :: core_sig_named("ServiceWorkflow")
+        task_status :: core_sig_named("TaskStatus")
+        task_outcome :: core_sig_named("TaskOutcome")
+        if member == "tree" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(service_tree)))
+        }
+        if member == "tree_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.String)))
+        }
+        if member == "runtime" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(core_sig_named("Duration"), read),
+            }, Val(core_sig_named("ServiceRuntime"))))
+        }
+        if member == "state_store" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(core_sig_named("ServiceStateStore"), service_error))))
+        }
+        if core_sig_one_of(member, [String]{"restart_one_for_one", "restart_one_for_all", "restart_rest_for_one"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("ServiceRestart"))))
+        }
+        if core_sig_one_of(member, [String]{"delivery_at_most_once", "delivery_durable"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("ServiceDelivery"))))
+        }
+        if member == "set_restart" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(core_sig_named("ServiceRestart"), read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "set_delivery" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(core_sig_named("ServiceDelivery"), read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "worker" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.String, read),
+                core_sig_positional(core_value_fn_none([Type]{}), read), core_sig_positional(Type.String, read),
+                core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(service_endpoint, service_error))))
+        }
+        if member == "group" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.String, read),
+                core_sig_positional(list_string, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"start", "stop"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "send" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(service_endpoint, read),
+                core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "send_durable" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(service_endpoint, read),
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(core_sig_named("Delivery"), service_error))))
+        }
+        if member == "receive" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(service_endpoint, read),
+            }, Val(core_sig_result(Type.String, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"mailbox_depth", "restarts"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, read), core_sig_positional(service_endpoint, read),
+            }, Val(core_sig_result(Type.Int, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"fail_worker", "drain_worker", "partition_worker", "reconcile_worker"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(service_endpoint, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"dead_letter_count", "event_count", "directory_generation"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.Int)))
+        }
+        if member == "drain_dead_letters" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(Type.Int, service_error))))
+        }
+        if member == "set_state_empty" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(unit, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"set_state_snapshot", "set_state_event_log"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(core_sig_named("ServiceStateStore"), read),
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"commit_snapshot", "append_event"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "restore_snapshot" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(core_sig_result(Type.String, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"replay_events", "observe"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.String)))
+        }
+        if member == "workflow_start" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(service_workflow, service_error))))
+        }
+        if member == "workflow_sleep" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_workflow, read), core_sig_positional(core_sig_named("Duration"), read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "workflow_activity_wait" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_workflow, read), core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(Type.String, service_error))))
+        }
+        if member == "workflow_all" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_workflow, read), core_sig_positional(list_string, read),
+            }, Val(core_sig_result(list_string, service_error))))
+        }
+        if member == "workflow_step" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "workflow_activity" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(task_status, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"workflow_activity_retry", "workflow_activity_complete"}) {
+            result :: if member == "workflow_activity_retry" -> task_status else -> task_outcome
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+                core_sig_positional(task_outcome, read),
+            }, Val(core_sig_result(result, service_error))))
+        }
+        if member == "workflow_history" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(Type.String, service_error))))
+        }
+        if member == "workflow_outcome" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_result(task_outcome, service_error))))
+        }
+        if member == "directory_register" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, write), core_sig_positional(Type.String, read), core_sig_positional(service_endpoint, read),
+            }, Val(core_sig_result(unit, service_error))))
+        }
+        if member == "directory_resolve" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(service_tree, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(service_endpoint, service_error))))
+        }
+        if core_sig_one_of(member, [String]{"handoff_generation", "rollback_generation", "chaos_fail"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(Type.Int, service_error))))
+        }
+        if member == "upgrade_receipt" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(core_sig_result(core_sig_named("ServiceUpgradeReceipt"), service_error))))
+        }
+        if member == "endpoint_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_endpoint, read)}, Val(Type.String)))
+        }
+        if member == "delivery_state_show" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DeliveryState"), read)}, Val(Type.String)))
+        }
+    }
+
+    if module_name == "core.text.fmt" {
+        if core_sig_one_of(member, [String]{"number", "bytes", "duration", "ordinal"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"decimal", "grouped", "percent", "sci"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Float, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "hex" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"bin", "oct"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
+        }
+        if member == "plural" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"pad_left", "pad_right", "pad_center", "pad"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+    }
+
+    if module_name == "core.encoding.toml" {
+        if core_sig_one_of(member, [String]{"parse", "load", "loads"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(data, encoding_error))))
+        }
+        if member == "to_string" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(Type.String)))
+        }
+    }
+    if module_name == "core.encoding.yaml" {
+        if member == "parse" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(data, encoding_error))))
+        }
+        if member == "to_string" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(Type.String)))
+        }
+    }
+    if module_name == "core.encoding.xml" {
+        xml_error :: core_sig_named("XMLError")
+        xml_parse_options :: core_sig_named("XMLParseOptions")
+        xml_render_options :: core_sig_named("XMLRenderOptions")
+        if member == "parse" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(data, xml_error))))
+        }
+        if member == "parse_with" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(xml_parse_options, read),
+            }, Val(core_sig_result(data, xml_error))))
+        }
+        if member == "parse_bytes" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_u8, read), core_sig_positional(xml_parse_options, read),
+            }, Val(core_sig_result(data, xml_error))))
+        }
+        if member == "to_string" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(Type.String)))
+        }
+        if member == "to_bytes" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(data, read), core_sig_positional(xml_render_options, read),
+            }, Val(core_sig_result(list_u8, xml_error))))
+        }
+        if member == "canonical" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(data, read), core_sig_positional(core_sig_named("XMLCanonical"), read),
+            }, Val(core_sig_result(Type.String, xml_error))))
+        }
+        if member == "root" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(data, xml_error))))
+        }
+        if member == "attribute" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(data, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(Type.Option(inner: Type.String), xml_error))))
+        }
+        if member == "content" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.List(element: data), xml_error))))
+        }
+        if member == "reader" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("FileReader"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
+                core_sig_positional(xml_parse_options, read),
+            }, Val(core_sig_result(core_sig_named("XMLReader"), encoding_error))))
+        }
+        if member == "writer" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("FileWriter"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
+                core_sig_positional(xml_render_options, read),
+            }, Val(core_sig_result(core_sig_named("XMLWriter"), encoding_error))))
+        }
+    }
+    if module_name == "core.encoding.cbor" {
+        if member == "reader" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("FileReader"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
+            }, Val(core_sig_result(core_sig_named("CBORReader"), encoding_error))))
+        }
+        if member == "writer" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("FileWriter"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
+            }, Val(core_sig_result(core_sig_named("CBORWriter"), encoding_error))))
+        }
+    }
+    if module_name == "core.files" {
+        path :: Type.Union(members: [Type]{Type.String, core_sig_named("Path")})
+        if member == "open" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(path, read)}, Val(core_sig_result(core_sig_named("FileReader"), io_error))))
+        }
+        if core_sig_one_of(member, [String]{"append", "create"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(path, read)}, Val(core_sig_result(core_sig_named("FileWriter"), io_error))))
+        }
+    }
+
+    if module_name == "core.net.url" {
+        url :: core_sig_named("URL")
+        string_pairs :: Type.List(element: list_string)
+        if member == "parse" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(url, Type.String))))
+        }
+        if member == "from_parts" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+                core_sig_positional(string_pairs, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_result(url, Type.String))))
+        }
+        if member == "file" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(url)))
+        }
+        if member == "data" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(core_sig_named("MIME"), read), core_sig_positional(Type.String, read),
+            }, Val(url)))
+        }
+        if member == "query" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string_pairs, read)}, Val(Type.String)))
+        }
+        if member == "percent_encode" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "percent_decode" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(Type.String, Type.String))))
+        }
+        if core_sig_one_of(member, [String]{"geturl", "unparse", "urlunparse", "urlunsplit"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(url, read)}, Val(Type.String)))
+        }
+        if member == "urljoin" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"parse_qsl", "parse_qs"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(string_pairs)))
+        }
+        if member == "urlencode" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string_pairs, read)}, Val(Type.String)))
+        }
+        if member == "split_fragment" {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "fragment", ty: Type.String}, TypeTupleField{name: "url", ty: Type.String},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(tuple)))
+        }
+        if core_sig_one_of(member, [String]{"quote", "quote_plus"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "quote_from_bytes" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"unquote", "unquote_plus"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(Type.String, Type.String))))
+        }
+        if member == "unquote_to_bytes" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(list_u8, Type.String))))
+        }
+        if core_sig_one_of(member, [String]{"urlparse", "urlsplit"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(url, Type.String))))
+        }
+        if member == "urldefrag" {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "url", ty: Type.String}, TypeTupleField{name: "fragment", ty: Type.String},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(tuple)))
+        }
+    }
+    if module_name == "core.net.mime" {
+        if member == "parse" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(core_sig_named("MIME"), Type.String))))
+        }
+        if core_sig_one_of(member, [String]{"from_extension", "extension"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.String))))
+        }
+    }
+
+    if module_name == "core.email" {
+        email_error :: core_sig_named("EmailError")
+        address :: core_sig_named("Address")
+        attachment :: core_sig_named("Attachment")
+        if member == "address" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(address, email_error))))
+        }
+        if member == "attachment" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(list_u8, read),
+            }, Val(core_sig_result(attachment, email_error))))
+        }
+        if member == "message" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(address, read), core_sig_positional(Type.List(element: address), read),
+                core_sig_positional(Type.List(element: address), read), core_sig_positional(Type.String, read),
+                core_sig_positional(Type.String, read), core_sig_positional(core_sig_named("HTML"), read),
+                core_sig_positional(Type.List(element: attachment), read),
+            }, Val(core_sig_result(core_sig_named("Message"), email_error))))
+        }
+        if member == "envelope" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(address, read), core_sig_positional(Type.List(element: address), read),
+            }, Val(core_sig_result(core_sig_named("Envelope"), email_error))))
+        }
+        if member == "serialize" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Message"), read)}, Val(core_sig_result(list_u8, email_error))))
+        }
+        if member == "smtp" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SMTPConfig"), read)}, Val(core_sig_result(core_sig_named("Mailer"), email_error))))
+        }
+        if member == "smtp_from_env" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("Mailer"), email_error))))
+        }
+    }
+
+    if module_name == "core.text" {
+        if core_sig_one_of(member, [String]{"scalar_count", "byte_count"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Int)))
+        }
+        if member == "is_ascii" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
+        }
+        if core_sig_one_of(member, [String]{"lower", "upper", "nfc", "nfd", "nfkc", "nfkd", "casefold", "trim", "trim_start", "trim_end"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "scalars" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_string)))
+        }
+        if core_sig_one_of(member, [String]{"graphemes", "words", "sentences", "inspect"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_string)))
+        }
+        if core_sig_one_of(member, [String]{"grapheme_views", "word_views", "line_views"}) {
+            view :: core_sig_apply("View", core_sig_named("str"))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_apply("ViewIter", view))))
+        }
+        if member == "byte_views" {
+            view :: core_sig_apply("View", list_u8)
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_apply("ViewIter", view))))
+        }
+        if core_sig_one_of(member, [String]{"is_alphabetic", "is_numeric", "is_whitespace"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
+        }
+        if core_sig_one_of(member, [String]{"splitn", "rsplitn"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(list_string)))
+        }
+        if core_sig_one_of(member, [String]{"pad_start", "pad_end", "center"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"starts_any", "ends_any"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(list_string, read),
+            }, Val(Type.Bool)))
+        }
+        if member == "char_indices" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_string)))
+        }
+    }
+
+    if module_name == "core.text.parse" {
+        if member == "parse_kv" {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "ok", ty: Type.Bool},
+                TypeTupleField{name: "value", ty: Type.String},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(tuple)))
+        }
+        if member == "rsplit" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(list_string)))
+        }
+        if member == "split_once" {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "found", ty: Type.Bool}, TypeTupleField{name: "head", ty: Type.String},
+                TypeTupleField{name: "tail", ty: Type.String},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(tuple)))
+        }
+        if core_sig_one_of(member, [String]{"partition", "rpartition"}) {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "head", ty: Type.String}, TypeTupleField{name: "sep", ty: Type.String},
+                TypeTupleField{name: "tail", ty: Type.String},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(tuple)))
+        }
+        if member == "split_ws" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_string)))
+        }
+        if member == "parse_bool" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Bool))))
+        }
+        if core_sig_one_of(member, [String]{"parse", "parse_int"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Int))))
+        }
+        if member == "parse_int_base" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.Option(inner: Type.Int))))
+        }
+        if member == "parse_float" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Float))))
+        }
+        if member == "split" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(list_string)))
+        }
+        if core_sig_one_of(member, [String]{"find", "rfind", "count", "index"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(Type.Int)))
+        }
+        if member == "replace" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+                core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "join" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(list_string, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if member == "splitlines" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Bool, read),
+            }, Val(list_string)))
+        }
+        if core_sig_one_of(member, [String]{"capwords", "lstrip", "rstrip", "strip", "escape_c", "unescape_c"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"find_from", "rfind_from"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.Int)))
+        }
+        if member == "contains" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(Type.Bool)))
+        }
+        if core_sig_one_of(member, [String]{"capitalize", "lower", "swapcase", "title", "upper"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"startswith", "endswith", "starts_with", "ends_with", "removeprefix", "removesuffix", "strip_prefix", "strip_suffix", "rindex"}) {
+            result :: if {
+                member == "rindex" -> Type.Int
+                core_sig_one_of(member, [String]{"startswith", "endswith", "starts_with", "ends_with"}) -> Type.Bool
+                else -> Type.String
+            }
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(result)))
+        }
+        if member == "encode" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_u8)))
+        }
+        if core_sig_one_of(member, [String]{"isalpha", "isdecimal", "isnumeric", "isalnum", "isascii", "is_digit", "isdigit", "is_alnum", "isidentifier", "is_identifier", "islower", "is_lower", "isspace", "is_space", "istitle", "is_title", "isprintable", "isupper", "is_upper", "is_ascii"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
+        }
+        if member == "expandtabs" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"center", "ljust", "rjust"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if member == "zfill" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+    }
+
+    if module_name == "core.text.wrap" {
+        if member == "wrap" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(list_string)))
+        }
+        if member == "fill" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "shorten" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if member == "indent" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(Type.String)))
+        }
+        if member == "dedent" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "expand_tabs" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "html_escape" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Bool, read),
+            }, Val(Type.String)))
+        }
+        if member == "html_unescape" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "indent_with" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.Bool, read),
+            }, Val(Type.String)))
+        }
+        if member == "wrap_paragraphs" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "hanging_indent" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+                core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+    }
+    if module_name == "core.text.html" {
+        if core_sig_one_of(member, [String]{"escape", "unescape", "strip_tags", "unescape_and_strip", "attr_escape", "text_escape"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.String)))
+        }
+        if member == "escape_quote" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Bool, read),
+            }, Val(Type.String)))
+        }
+    }
+
+    if module_name == "core.time.calendar" {
+        if member == "isleap" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.Bool)))
+        }
+        if member == "leapdays" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.Int)))
+        }
+        if member == "weekday" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.Int)))
+        }
+        if member == "monthrange" {
+            tuple :: Type.Tuple(fields: [TypeTupleField]{
+                TypeTupleField{name: "days", ty: Type.Int}, TypeTupleField{name: "weekday", ty: Type.Int},
+            })
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(tuple)))
+        }
+        if member == "monthcalendar" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.List(element: Type.List(element: Type.Int)))))
+        }
+        if member == "monthcalendar_start" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.List(element: Type.List(element: Type.Int)))))
+        }
+        if member == "yearcalendar" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.List(element: Type.List(element: Type.List(element: Type.Int))))))
+        }
+        if member == "weekheader" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(list_string)))
+        }
+        if member == "formatmonth" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.String)))
+        }
+        if member == "formatyear" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
+        }
+        if core_sig_one_of(member, [String]{"day_name", "day_abbr", "month_name", "month_abbr"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
+        }
+        if member == "timegm" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(Type.Int)))
+        }
+    }
+    if module_name == "core.time.expiring" {
+        if core_sig_one_of(member, [String]{"expired", "remaining_ms"}) {
+            result :: if member == "expired" -> Type.Bool else -> Type.Int
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
+            }, Val(result)))
+        }
+    }
+
+    if module_name == "core.log" {
+        if core_sig_one_of(member, [String]{"info", "warn", "error", "debug", "critical", "fatal"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if member == "field" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, Val(core_sig_named("LogField"))))
+        }
+        if member == "int" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_named("LogField"))))
+        }
+        if member == "float" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Float, read),
+            }, Val(core_sig_named("LogField"))))
+        }
+        if member == "bool" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Bool, read),
+            }, Val(core_sig_named("LogField"))))
+        }
+        if member == "redact" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("LogField"))))
+        }
+        if core_sig_one_of(member, [String]{"info_fields", "warn_fields", "error_fields", "debug_fields"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.List(element: core_sig_named("LogField")), read),
+            }, None))
+        }
+        if member == "span" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("LogSpan"))))
+        }
+        if core_sig_one_of(member, [String]{"enter", "close"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LogSpan"), read)}, None))
+        }
+        if member == "set_sink" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
+            }, None))
+        }
+        if member == "sample_every" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, None))
+        }
+        if member == "counter" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
+                core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
+            }, Val(core_sig_named("LogField"))))
+        }
+        if member == "otlp_file" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if member == "set_level" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if core_sig_one_of(member, [String]{"disable", "flush"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
+        }
+        if member == "enabled" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
+        }
+        if member == "set_trace_id" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if member == "setup" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+    }
+
+    None
+}

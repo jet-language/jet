@@ -1,6 +1,6 @@
 //! jet — compiler library.
 //!
-//! Pipeline: lex -> parse -> sema -> codegen (docs/spec/architecture.md).
+//! Pipeline: lex -> parse -> sema -> codegen (Docs/spec/architecture.md).
 //! The front end (everything before codegen) owns ALL user-facing
 //! correctness and every diagnostic. The Rust backend is a verifier and
 //! optimizer, never a source of user-facing errors.
@@ -124,6 +124,7 @@ mod NativeLinker;
 pub use jet_devserver::Canvas;
 pub use jet_driver::BudgetView;
 pub use jet_driver::ProjectParts;
+#[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 pub(crate) const BOOTSTRAP_CANONICAL_SOURCE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 #[doc(hidden)]
@@ -131,11 +132,13 @@ pub mod BootstrapBuildIdentity {
     include!("../Compiler/Bootstrap/BuildIdentity.rs");
 }
 pub mod Compiler;
+#[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(dead_code)]
 mod compiler_bootstrap_host {
     include!("../Compiler/Bootstrap/Host/Native.rs");
 }
+#[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(unused_imports)]
 pub(crate) use compiler_bootstrap_host::{
@@ -143,11 +146,13 @@ pub(crate) use compiler_bootstrap_host::{
     AuthorizedSourceSnapshot, BootstrapBindingDescriptor, BootstrapHostCodecError,
 };
 
+#[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(dead_code)]
 mod compiler_bootstrap_runner {
     include!("../Compiler/Bootstrap/Runner.rs");
 }
+#[cfg(feature = "compiler-bootstrap-host")]
 #[doc(hidden)]
 #[allow(unused_imports)]
 pub(crate) use compiler_bootstrap_runner::{
@@ -155,7 +160,7 @@ pub(crate) use compiler_bootstrap_runner::{
     prepare_bootstrap_artifact_from_aot, run_bootstrap_artifact, BootstrapArtifact,
     BootstrapRunError,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler-bootstrap-host"))]
 mod bootstrap_tests {
     include!("../Compiler/Bootstrap/Tests.rs");
 }

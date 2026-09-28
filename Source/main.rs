@@ -43,7 +43,6 @@ mod CmdExec;
 mod CmdExpand;
 mod CmdFill;
 mod CmdFlash;
-mod CmdGame;
 mod CmdGates;
 mod CmdGc;
 mod CmdImpact;
@@ -3111,7 +3110,7 @@ fn main() {
                 }
                 (_, true) | (Some("--bench"), _) => {
                     // jet self lsp --bench: run latency benchmark on a small program
-                    let src = include_str!("../examples/features/collections/wordcount.jet");
+                    let src = include_str!("../Examples/features/collections/wordcount.jet");
                     jet::LSP::run_bench(src, 10, 200);
                     return;
                 }
@@ -4742,25 +4741,6 @@ fn main() {
                 exit(ExitCodes::USAGE);
             });
             run_new_backend(kind, name, jet_argv, mode);
-        }
-        "new" if args.get(1).map(|arg| arg.as_str()) == Some("game") => {
-            let name = args.get(2).copied().unwrap_or_else(|| {
-                crate::cli_error!(
-                    @fix "E2104",
-                    "`jet new game` needs a project name",
-                    "run `jet new game my_game`"
-                );
-                exit(ExitCodes::USAGE);
-            });
-            if args.len() > 3 {
-                crate::cli_error!(
-                    @fix "E2104",
-                    "`jet new game` accepts one project name",
-                    "run `jet new game my_game`"
-                );
-                exit(ExitCodes::USAGE);
-            }
-            CmdGame::run_new_game(name, mode);
         }
         "new" => {
             let name = args.get(1).map(|arg| arg.as_str()).unwrap_or_else(|| {
@@ -7022,7 +7002,7 @@ fn machine_report_path_from_path(path: &Path) -> ReportPath {
 }
 
 /// Render a `jet`-owned toolchain diagnostic (E1249–E1252) in the standard
-/// teaching voice (docs/spec/diagnostics.md), matching the engine-dispatch
+/// teaching voice (Docs/spec/diagnostics.md), matching the engine-dispatch
 /// diagnostics. These carry no source span, so the full linked renderer isn't
 /// used.
 fn print_toolchain_diag(d: &jet::Diagnostics::Diagnostic, mode: OutputMode) {

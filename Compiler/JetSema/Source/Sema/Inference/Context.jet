@@ -94,11 +94,14 @@ pub fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evide
                 if row.param == parameter.name && row.bound == bound {
                     found = row.satisfied
                     expected :: sema_inference_binding_at(substitutions, parameter.name)
-                    if expected == .Val(binding) {
-                        concrete := sema_inference_substitute_type_bindings(binding.ty, substitutions)
-                        if !type_identity_equal(row.actual, concrete) -> found = false
-                    } else {
-                        found = false
+                    if expected == {
+                        .Val(binding) -> {
+                            concrete := sema_inference_substitute_type_bindings(binding.ty, substitutions)
+                            if !type_identity_equal(row.actual, concrete) -> found = false
+                        }
+                        else -> {
+                            found = false
+                        }
                     }
                 }
             }

@@ -1,0 +1,188 @@
+// Collect canonical MIR type instances from the completed lowered rows.
+
+fn jet_codegen_type_definition_types(definition: MirTypeDef) -> [MirType] {
+    rows := [MirType]{}
+    if definition.kind == {
+        .Struct(fields, _) -> loop field in fields -> rows.push(field.ty)
+        .Enum(variants, _) -> loop variant in variants {
+            if variant.payload == {
+                .Unit -> {}
+                .Single(value) -> rows.push(value)
+                .Named(fields) -> loop field in fields -> rows.push(field.ty)
+            }
+        }
+        .Distinct(base, _) -> rows.push(base)
+        .Alias(target) -> rows.push(target)
+        .UnitFamily(_) -> {}
+    }
+    rows
+}
+
+fn jet_codegen_function_type_rows(function: MirFunction) -> [MirType] {
+    rows := [MirType]{}
+    loop parameter in function.params -> rows.push(parameter.ty)
+    if function.declared_return != None -> rows.push(function.declared_return ?? function.return_type)
+    rows.push(function.return_type)
+    if function.failure == {
+        .Result(success, error) -> { rows.push(success); rows.push(error) }
+        .Optional(value) | .Diverges(value) -> rows.push(value)
+        .Infallible -> {}
+    }
+    loop local in function.locals -> rows.push(local.ty)
+    loop value in function.values -> rows.push(value.ty)
+    loop place in function.places -> rows.push(place.ty)
+    loop reconstruction in function.web_param_reconstructions {
+        rows.push(reconstruction.ty)
+        loop field in reconstruction.fields -> rows.push(field.ty)
+    }
+    loop capture in function.capture_params -> rows.push(capture.ty)
+    if function.generator != None {
+        generator :: function.generator ?? panic("checked MIR generator facts disappeared during type-instance collection")
+        rows.push(generator.item)
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.ty != None -> rows.push(instruction.ty ?? function.return_type)
+        }
+    }
+    rows
+}
+
+fn jet_codegen_trait_method_type_rows(method: MirTraitMethod) -> [MirType] {
+    rows := [MirType]{}
+    loop parameter in method.params -> rows.push(parameter.ty)
+    if method.declared_return != None -> rows.push(method.declared_return ?? method.return_type)
+    rows.push(method.return_type)
+    if method.failure == {
+        .Result(success, error) -> { rows.push(success); rows.push(error) }
+        .Optional(value) | .Diverges(value) -> rows.push(value)
+        .Infallible -> {}
+    }
+    rows
+}
+
+fn jet_codegen_ensure_type_instance(instances: &[MirType], instance: MirType) {
+    identity :: instance.identity ?? return
+    loop existing in instances {
+        if existing.identity == Val(identity) -> return
+    }
+    instances.push(instance)
+}
+
+fn jet_codegen_merge_nested_type_instances(instances: &[MirType], ty: MirType) {
+    if ty.kind == {
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> jet_codegen_merge_type_instance(&instances, inner)
+        .Map(key, value) | .Result(key, value) -> {
+            jet_codegen_merge_type_instance(&instances, key)
+            jet_codegen_merge_type_instance(&instances, value)
+        }
+        .Fn(signature) -> {
+            loop parameter in signature.params -> jet_codegen_merge_type_instance(&instances, parameter)
+            if signature.ret != None -> jet_codegen_merge_type_instance(&instances, signature.ret ?? ty)
+        }
+        .SendFn(params, ret, _) -> {
+            loop parameter in params -> jet_codegen_merge_type_instance(&instances, parameter)
+            if ret != None -> jet_codegen_merge_type_instance(&instances, ret ?? ty)
+        }
+        .Apply(_, args) -> loop argument in args -> jet_codegen_merge_type_instance(&instances, argument)
+        .Tuple(fields) -> loop field in fields -> jet_codegen_merge_type_instance(&instances, field.ty)
+        .Union(members) -> loop member in members -> jet_codegen_merge_type_instance(&instances, member)
+        .Quantity(base, _) -> jet_codegen_merge_type_instance(&instances, base)
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
+}
+
+fn jet_codegen_merge_type_instance(instances: &[MirType], instance: MirType) {
+    identity :: instance.identity ?? panic("checked MIR type instance has no canonical identity")
+    found := false
+    loop existing in instances {
+        if existing.identity == Val(identity) {
+            if existing != instance -> panic("conflicting canonical MIR type instance {identity.value}")
+            found = true
+        }
+    }
+    if !found -> instances.push(instance)
+    jet_codegen_merge_nested_type_instances(&instances, instance)
+}
+
+fn jet_codegen_sort_type_instances(instances: &[MirType]) {
+    index := 1
+    loop index < instances.len() {
+        current := instances[index]
+        current_identity :: current.identity ?? panic("checked MIR type instance has no canonical identity")
+        insertion := index - 1
+        loop insertion >= 0 {
+            previous_identity :: instances[insertion].identity ?? panic("checked MIR type instance has no canonical identity")
+            if previous_identity.value <= current_identity.value -> break
+            instances[insertion + 1] = instances[insertion]
+            insertion -= 1
+        }
+        instances[insertion + 1] = current
+        index += 1
+    }
+}
+
+// Inputs are completed lowered rows; constants are the runtime-only rows.
+// Pass top-level and nested functions separately, plus foreign rows, so their
+// signatures participate even when they do not appear in an instruction result.
+fn jet_codegen_collect_type_instances(types: [MirTypeDef], functions: [MirFunction], nested_functions: [MirFunction], foreign: [MirForeign], traits: [MirTraitDef], impls: [MirImplDef], constants: [MirConstantDef]) -> [MirType] {
+    instances := [MirType]{}
+    loop definition in types {
+        declared := mir_type_with_identity(jet_codegen_lower_type(Type.Named(definition.key)), definition.id)
+        instances.push(declared)
+    }
+    loop definition in types {
+        loop ty in jet_codegen_type_definition_types(definition) -> jet_codegen_merge_type_instance(&instances, ty)
+    }
+    loop function in functions {
+        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_merge_type_instance(&instances, ty)
+    }
+    loop function in nested_functions {
+        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_merge_type_instance(&instances, ty)
+    }
+    loop function in foreign {
+        loop parameter in function.params -> jet_codegen_merge_type_instance(&instances, parameter.ty)
+        if function.return_type != None {
+            return_type :: function.return_type ?? panic("checked foreign return type disappeared during type-instance collection")
+            jet_codegen_merge_type_instance(&instances, return_type)
+        }
+    }
+    loop trait_def in traits {
+        loop method in trait_def.methods {
+            loop ty in jet_codegen_trait_method_type_rows(method) -> jet_codegen_merge_type_instance(&instances, ty)
+        }
+    }
+    loop implementation in impls {
+        jet_codegen_merge_type_instance(&instances, implementation.self_type)
+        loop associated in implementation.associated_types -> jet_codegen_merge_type_instance(&instances, associated.ty)
+        if implementation.operator_rhs != None {
+            rhs :: implementation.operator_rhs ?? panic("checked implementation RHS type disappeared during type-instance collection")
+            jet_codegen_merge_type_instance(&instances, rhs)
+        }
+    }
+    loop constant in constants -> jet_codegen_merge_type_instance(&instances, constant.ty)
+
+    loop function in functions {
+        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_ensure_type_instance(&instances, ty)
+    }
+    loop function in nested_functions {
+        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_ensure_type_instance(&instances, ty)
+    }
+    loop definition in types {
+        loop ty in jet_codegen_type_definition_types(definition) -> jet_codegen_ensure_type_instance(&instances, ty)
+    }
+    loop trait_def in traits {
+        loop method in trait_def.methods {
+            loop ty in jet_codegen_trait_method_type_rows(method) -> jet_codegen_ensure_type_instance(&instances, ty)
+        }
+    }
+    loop definition in types {
+        found := false
+        loop instance in instances {
+            if instance.identity == (Val(definition.id)) -> found = true
+        }
+        if !found -> panic("missing canonical MIR type instance for `{definition.key}` ({definition.id.value})")
+    }
+    jet_codegen_sort_type_instances(&instances)
+    instances
+}

@@ -10,7 +10,7 @@ requires them.
 
 ## Scope and depth
 
-Use [Jet's priorities](../../../docs/spec/philosophy.md) to judge the requested subject. The task defines the domain, sources, workloads, and output; include dependencies needed to understand that subject, not every conceivable adjacent topic.
+Use [Jet's priorities](../../../Docs/spec/philosophy.md) to judge the requested subject. The task defines the domain, sources, workloads, and output; include dependencies needed to understand that subject, not every conceivable adjacent topic.
 
 An explicit full audit covers its entire declared corpus and required categories. A focused question stays focused. State the coverage boundary and account for unavailable evidence; do not silently sample away requested work. Record unrelated opportunities without automatically pursuing them.
 
@@ -86,7 +86,7 @@ are all evidence that someone intended a thing. None is evidence that it works.
 The highest-value findings come from running Jet's version of the mechanism
 under study.
 
-- For a claim about current executable behavior, rebuild the relevant binary, construct the smallest representative input, and run the real command through `scripts/agent/jet-env`. Read its output, exit code, and emitted paths. Reuse evidence that already proves the same claim against the same source state; do not rerun unrelated checks.
+- For a claim about current executable behavior, rebuild the relevant binary, construct the smallest representative input, and run the real command through `Tools/agent/jet-env`. Read its output, exit code, and emitted paths. Reuse evidence that already proves the same claim against the same source state; do not rerun unrelated checks.
 - Follow the code path from the emitter back to where the value is set. Fields
   that are documented, always empty, hardcoded, or derived by parsing prose are
   invisible to everyone who trusts the spec, and they are common.

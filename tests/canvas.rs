@@ -247,7 +247,7 @@ const CANVAS_COMMENT_FIXTURE: &str = r#"fn run() {
 
 #[test]
 fn canvas_parity_matrix_tracks_ast_language_forms() {
-    let matrix = fs::read_to_string("docs/spec/reference/canvas-parity.md")
+    let matrix = fs::read_to_string("Docs/spec/reference/canvas-parity.md")
         .expect("Canvas parity matrix must exist");
     for (enum_name, path) in [
         ("Item", "crates/jet-foundation/src/AST/items.rs"),
@@ -929,11 +929,11 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
         ("node_descriptor_fallible", CANVAS_RAILS_FIXTURE),
         (
             "node_descriptor_yield",
-            include_str!("../examples/features/streams/generators.jet"),
+            include_str!("../Examples/features/streams/generators.jet"),
         ),
         (
             "node_descriptor_scope",
-            include_str!("../examples/features/tooling/test_members.jet"),
+            include_str!("../Examples/features/tooling/test_members.jet"),
         ),
     ];
     let path = write_fixture(projection_fixtures[0].0, projection_fixtures[0].1);
@@ -2862,7 +2862,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"insert_callee\"",
         "\"insert_op\":\"insert_call\"",
         "\"pure\"",
-        "\"source\":\"docs/spec/reference/core-library.md\"",
+        "\"source\":\"Docs/spec/reference/core-library.md\"",
         "\"kind\":\"canvas.command\"",
         "\"kind\":\"canvas.structural\"",
         "\"action_id\":\"canvas.structural:branch\"",
@@ -3343,7 +3343,7 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"catalog_schema_version\":1",
         "\"authority\":[\"canvas.catalog:core.read\"]",
         "\"writes\":\"none\"",
-        "\"source\":\"docs/spec/reference/core-library.md\"",
+        "\"source\":\"Docs/spec/reference/core-library.md\"",
         "\"path\":\"core.http\"",
         "\"path\":\"core.http.client\"",
         "\"path\":\"core.files\"",
@@ -3474,7 +3474,7 @@ fn canvas_core_insert_synthesizes_default_alias_import_without_import() {
 #[test]
 fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = fs::read_to_string(repo.join("examples/features/ui/events.jet"))
+    let example = fs::read_to_string(repo.join("Examples/features/ui/events.jet"))
         .expect("read events Canvas example");
     let path = write_fixture("library_events_example", &example);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("project events example");
@@ -3493,7 +3493,7 @@ fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits()
         "\"insert_op\":\"insert_call\"",
         "\"engine\":\"checked-tir+jit\"",
         "\"writes\":\"source_transaction_only\"",
-        "\"source\":\"docs/spec/reference/core-library.md\"",
+        "\"source\":\"Docs/spec/reference/core-library.md\"",
     ] {
         assert!(
             actions.contains(field),
@@ -5667,7 +5667,7 @@ fn canvas_rename_receipt_rejects_symlinked_metadata_directory() {
 #[test]
 fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
     let doc_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/reference/canvas-protocol.md");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/reference/canvas-protocol.md");
     let doc = fs::read_to_string(doc_path).expect("Canvas protocol reference");
     for term in [
         "jet.canvas.project",

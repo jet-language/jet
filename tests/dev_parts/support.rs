@@ -166,14 +166,14 @@ where
     jet_jit::on_compiler_stack(f)
 }
 
-/// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
+/// c77: the differential battery covers EVERY `Examples/features/*.jet`, not a
 /// hand-curated subset — so the battery can never quietly shrink. Each example
 /// either runs in the interpreter (and its stdout/stderr/exit code must match
 /// the compiled binary; stdout also matches its golden `.out`) or stops at a named boundary
 /// (E2202 fuel, E0956 unsupported-at-runtime, or a named effect boundary). A silent skip is
 /// a test failure.
 fn example_path(stem: &str) -> String {
-    format!("examples/features/{}.jet", stem)
+    format!("Examples/features/{}.jet", stem)
 }
 
 fn host_expected_stdout(stem: &str) -> Option<&'static str> {
@@ -276,7 +276,7 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
 // link inputs — so the second caller of one key can reuse the first caller's
 // artifact instead of paying for it again.
 //
-// `scripts/agent/verify-full.sh` gives every run a fresh disk-backed root via
+// `Tools/agent/verify-full.sh` gives every run a fresh disk-backed root via
 // `JET_DEV_ORACLE_CACHE_DIR`, shared by all six battery processes and removed
 // at run end. Ad-hoc runs get a process-scoped disk root below the same
 // gitignored scratch area; no developer cache crosses runs.
@@ -1069,13 +1069,13 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
     out
 }
 
-/// All `.jet` files directly under a topic directory of `examples/features/`
-/// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
+/// All `.jet` files directly under a topic directory of `Examples/features/`
+/// (one level: `Examples/features/<topic>/<name>.jet`). Skips `expected/`
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
 /// have their own multi-file drivers and are not single-entry dev targets.
 ///
 /// A `package.jet` beside the examples is that topic's MANIFEST, not an
-/// example. `examples/features/modules/package.jet` declares the
+/// example. `Examples/features/modules/package.jet` declares the
 /// `settings: { cache_slots: … }` and `build:` profiles that
 /// `modules/fact_value_arguments.jet` reads through `@build.settings.*`, so it
 /// is load-bearing on disk and can never parse as a program — a manifest binds
@@ -1088,7 +1088,7 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
 /// resolves manifests by, so a renamed manifest cannot silently reappear as a
 /// broken example.
 fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let mut files = Vec::new();
     for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
         let topic_path = topic_entry.path();
@@ -1119,12 +1119,12 @@ fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
 
 /// The "topic/name" stem for a `.jet` file found via `topic_jet_files`.
 fn stem_of(root: &std::path::Path, path: &std::path::Path) -> String {
-    let ex_dir = root.join("examples/features");
+    let ex_dir = root.join("Examples/features");
     let rel = path.strip_prefix(&ex_dir).unwrap().with_extension("");
     rel.to_string_lossy().replace('\\', "/")
 }
 
-/// Every top-level example stem under `examples/features/<topic>/`, sorted
+/// Every top-level example stem under `Examples/features/<topic>/`, sorted
 /// for determinism. (Subdirectory examples — imports, modules, packages —
 /// have their own multi-file drivers and are not single-entry dev targets.)
 fn all_example_stems() -> Vec<String> {
@@ -1190,7 +1190,7 @@ fn core_conformance_corpus_entries() -> Vec<(String, String)> {
     entries
 }
 
-/// The same weighted LPT shard used by `tools/ci/test-shards.sh`, applied to
+/// The same weighted LPT shard used by `Tools/ci/test-shards.sh`, applied to
 /// corpus stems when the gate is split for a bounded run.
 fn corpus_gate_shard_config() -> Option<(usize, usize)> {
     let index = std::env::var("JET_CORPUS_GATE_SHARD_INDEX").ok();
@@ -1262,7 +1262,7 @@ fn corpus_gate_shard_stems(stems: Vec<String>) -> Vec<String> {
     }
 
     let mut child = Command::new("bash")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tools/ci/weighted-shards.sh"))
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/ci/weighted-shards.sh"))
         .args([index.to_string(), count.to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1456,7 +1456,7 @@ enum JitCompileVerdict {
 ///
 /// A floor, because examples get added: deleting one, or making
 /// `topic_jet_files` stop seeing one, must lower a reviewed constant. It lives
-/// here, outside `examples/features/`, so deleting an example cannot silently
+/// here, outside `Examples/features/`, so deleting an example cannot silently
 /// shrink the measured universe.
 ///
 /// #2012: every reader of `collect_jit_coverage` asserts this, not just the
@@ -1464,11 +1464,11 @@ enum JitCompileVerdict {
 /// success while the universe itself shrank.
 ///
 /// #2018 lowered it 498 -> 497 in the same diff as the deletion the rule above
-/// demands: `topic_jet_files` no longer discovers `examples/features/modules/
+/// demands: `topic_jet_files` no longer discovers `Examples/features/modules/
 /// package.jet`, because that file is the `modules` topic's MANIFEST and never
 /// was an example. It stays on disk — `modules/fact_value_arguments.jet` reads
 /// the `cache_slots` setting it declares — so this is one fewer stem measured,
-/// not one fewer example shipped. `examples/features/expected/` corroborates it:
+/// not one fewer example shipped. `Examples/features/expected/` corroborates it:
 /// 19 stems carry no golden, and every one of the other 18 is a deliberate
 /// panic/trap/abort example whose whole point is the failure path.
 /// `modules/package` is the only one that is not a program at all.
@@ -2442,7 +2442,7 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
         ("seed_data", "job_runner.seed_data"),
     ] {
         let expected = fs::read_to_string(root.join(format!(
-            "examples/features/expected/devloop/{expected_name}.out"
+            "Examples/features/expected/devloop/{expected_name}.out"
         )))
         .unwrap_or_else(|_| panic!("missing expected/devloop/{expected_name}.out"));
         let policy = common::development_policy();
@@ -2691,7 +2691,7 @@ fn assert_cli_diagnostic_snapshot(command: &str, fixture: &str, snapshot: &str) 
 
 fn golden_stdout(stem: &str) -> String {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    fs::read_to_string(root.join(format!("examples/features/expected/{stem}.out")))
+    fs::read_to_string(root.join(format!("Examples/features/expected/{stem}.out")))
         .unwrap_or_else(|e| panic!("missing golden for `{stem}`: {e}"))
 }
 
@@ -2959,7 +2959,7 @@ fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
     let expected = if stem == "concurrency/deadline_context" {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let mut stderr = fs::read_to_string(
-            root.join("examples/features/expected/concurrency/deadline_context.err.out"),
+            root.join("Examples/features/expected/concurrency/deadline_context.err.out"),
         )
         .expect("deadline_context.err.out");
         if !stderr.ends_with('\n') {
@@ -3210,7 +3210,7 @@ fn golden_program_output(stem: &str) -> ProgramOutput {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if example_has_err_golden(stem) {
         let stderr =
-            fs::read_to_string(root.join(format!("examples/features/expected/{stem}.err.out")))
+            fs::read_to_string(root.join(format!("Examples/features/expected/{stem}.err.out")))
                 .unwrap_or_else(|e| panic!("missing err golden for `{stem}`: {e}"));
         return ProgramOutput::ran(String::new(), stderr, 70);
     }
@@ -3349,7 +3349,7 @@ fn core_os_examples_match_interpreter_jit_and_aot_inner() {
 
 fn golden_stderr(stem: &str) -> String {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join(format!("examples/features/expected/{stem}.stderr.out"));
+    let path = root.join(format!("Examples/features/expected/{stem}.stderr.out"));
     if path.is_file() {
         fs::read_to_string(path).unwrap_or_else(|e| panic!("read stderr golden for `{stem}`: {e}"))
     } else {
@@ -3791,7 +3791,7 @@ fn jit_coverage_audit_inner() {
     assert!(
         corpus >= EXAMPLE_CORPUS_FLOOR,
         "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem \
-         leaving `examples/features/<topic>/` shrinks every claim this audit makes: restore \
+         leaving `Examples/features/<topic>/` shrinks every claim this audit makes: restore \
          it, or lower the floor in the same diff as the deletion."
     );
 
@@ -3915,7 +3915,7 @@ fn cranelift_three_way_differential_battery_inner() {
     let mut held_back = Vec::new();
     for stem in &resident_safe {
         if !root
-            .join(format!("examples/features/expected/{stem}.out"))
+            .join(format!("Examples/features/expected/{stem}.out"))
             .exists()
         {
             no_golden.push(stem.clone());
@@ -4022,13 +4022,13 @@ fn corpus_gate_exclusion(stem: &str) -> Option<&'static str> {
 
 fn example_has_err_golden(stem: &str) -> bool {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("examples/features/expected/{stem}.err.out"))
+        .join(format!("Examples/features/expected/{stem}.err.out"))
         .is_file()
 }
 
 fn example_has_out_golden(stem: &str) -> bool {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("examples/features/expected/{stem}.out"))
+        .join(format!("Examples/features/expected/{stem}.out"))
         .is_file()
 }
 
@@ -4071,7 +4071,7 @@ fn corpus_gate_refuse_abort(stem: &str, tier: &str, out: &ProgramOutput) {
             "`{stem}`: the {tier} run carries the abort marker `{marker}`, so a Rust \
              control transfer killed the process instead of becoming a report. An \
              abort is never an outcome and never a gate row either — fix the \
-             boundary, do not file the stem (docs/spec/architecture.md R13, \
+             boundary, do not file the stem (Docs/spec/architecture.md R13, \
              crates/jet-jit/src/host_seam.rs).\nexit: {}\nstdout:\n{}\nstderr:\n{}",
             out.exit_code, out.stdout, out.stderr
         );
@@ -4609,7 +4609,7 @@ fn corpus_gate_run_gaps(records: &[CorpusGateRecord]) -> Vec<String> {
 fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
     let mut out = String::from(
         "# c727: differential example-corpus gate manifest.\n\
-         # Every top-level examples/features/<topic>/*.jet appears in exactly one section.\n\
+         # Every top-level Examples/features/<topic>/*.jet appears in exactly one section.\n\
          # Update only for intentional ratchet moves.\n\
          # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green\n\
          # examples whose default jet run REFUSES to run. Record stem + diagnostic code only.\n\
@@ -4633,7 +4633,7 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          #\n\
          # Never hand-write a classification: a row states an OBSERVED tier. Regenerate with\n\
          #   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \\\n\
-         #     bash tools/ci/jit-aot-parity.sh\n\n",
+         #     bash Tools/ci/jit-aot-parity.sh\n\n",
     );
     for class in CORPUS_GATE_SECTION_ORDER {
         let section = corpus_gate_section_name(&class);
@@ -4736,7 +4736,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
 /// How many stems `tests/jit_corpus_gate.txt` must classify (#2013).
 ///
 /// A floor: rows may only GROW. The file states its own invariant — "Every
-/// top-level examples/features/<topic>/*.jet appears in exactly one section" —
+/// top-level Examples/features/<topic>/*.jet appears in exactly one section" —
 /// and until #2013 nothing outside the expensive gate checked it. On 2026-08-16
 /// the file held 374 rows against a 496-stem corpus: 122 stems had no row in ANY
 /// section, `tooling/data_plot` among them, while open cards cited its
@@ -4771,7 +4771,7 @@ const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
 /// AOT build per stem, and it returns green early where the host is unsupported,
 /// so the completeness of that file was only ever checked behind ~500
 /// classifications. This check reads the ledger and walks
-/// `examples/features/<topic>/`, nothing more, so a stem that falls out of every
+/// `Examples/features/<topic>/`, nothing more, so a stem that falls out of every
 /// section fails on any host in milliseconds.
 ///
 /// State the polarity plainly, because both directions are bugs:
@@ -4789,7 +4789,7 @@ const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
 ///
 /// ```text
 /// JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
-///   bash tools/ci/jit-aot-parity.sh
+///   bash Tools/ci/jit-aot-parity.sh
 /// ```
 fn assert_corpus_gate_manifest_covers_corpus() {
     let manifest = parse_corpus_gate_manifest();
@@ -4815,7 +4815,7 @@ fn assert_corpus_gate_manifest_covers_corpus() {
     assert!(
         audit.ghosts.is_empty(),
         "tests/jit_corpus_gate.txt names {} stem(s) with no \
-         examples/features/<topic>/<name>.jet file: {:?}. A nonexistent stem is a stale row to \
+         Examples/features/<topic>/<name>.jet file: {:?}. A nonexistent stem is a stale row to \
          delete, never a classification that failed.",
         audit.ghosts.len(),
         audit.ghosts
@@ -4855,7 +4855,7 @@ fn assert_corpus_gate_manifest_covers_corpus() {
     assert!(
         corpus.len() >= EXAMPLE_CORPUS_FLOOR,
         "the example corpus shrank to {} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem leaving \
-         `examples/features/<topic>/` shrinks every claim this ledger makes: restore it, or \
+         `Examples/features/<topic>/` shrinks every claim this ledger makes: restore it, or \
          lower the floor in the same diff as the deletion.",
         corpus.len()
     );

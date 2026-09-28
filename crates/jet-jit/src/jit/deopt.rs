@@ -397,6 +397,12 @@ fn record_abi_frame(function: i64, argc: i64, args: &[i64; 8]) -> Option<MirFram
         Some(snapshot)
     })
 }
+
+/// The innermost active Source-deopt callback, if any scope is open.
+fn current_source_deopt_callback() -> Option<SourceDeoptCallback> {
+    SOURCE_DEOPT_CALLBACKS.with(|stack| stack.borrow().last().cloned())
+}
+
 /// Dispatch one checked Source handoff through the innermost active callback.
 /// Planner-level entry handoffs use this callback rail. The fixed-word ABI
 /// helper below remains a strict boundary for any producer that emits it; the

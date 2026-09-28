@@ -25,8 +25,9 @@ fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaSco
 
 fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Type {
     required_resolved :: sema_call_resolved_type(required, environment)
-    if required_resolved != {
-        .TraitObject(_) -> return None
+    if required_resolved == {
+        .TraitObject(_) -> {}
+        else -> return None
     }
     offered_resolved :: sema_call_resolved_type(offered, environment)
     if offered_resolved == {

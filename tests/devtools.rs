@@ -32,7 +32,7 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 /// instead. A bare best-effort remove at the end of the test body only runs
 /// on the success path — any assertion panic in between (front end
 /// rejects the scaffold, rustc rejects it, output mismatch, …) leaves the
-/// scaffold committed to disk under `examples/` or `tests/ui/`, where a
+/// scaffold committed to disk under `Examples/` or `tests/ui/`, where a
 /// later broad `git add -A` can commit it permanently. This guard removes
 /// its paths on drop, panicking or not.
 struct ScaffoldCleanup(Vec<PathBuf>);
@@ -197,8 +197,8 @@ fn devtools_ice_report_bundles_source_rust_and_versions() {
 // ── new-example ────────────────────────────────────────────────────
 
 /// Scaffolds a real example + expected pair matching `tests/golden.rs`'s
-/// layout exactly: `examples/features/<topic>/<name>.jet` +
-/// `examples/features/expected/<topic>/<name>.out`. `new-example` writes into
+/// layout exactly: `Examples/features/<topic>/<name>.jet` +
+/// `Examples/features/expected/<topic>/<name>.out`. `new-example` writes into
 /// fixed repo-relative paths (no override flag), so this test runs at the
 /// real repo root and removes what it created afterward.
 #[test]
@@ -207,11 +207,11 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
     let topic = "tooling";
     let name = format!("devtools_test_scaffold_{}_{}", std::process::id(), line!());
     let example_path = root
-        .join("examples/features")
+        .join("Examples/features")
         .join(topic)
         .join(format!("{}.jet", name));
     let expected_path = root
-        .join("examples/features/expected")
+        .join("Examples/features/expected")
         .join(topic)
         .join(format!("{}.out", name));
     let _ = fs::remove_file(&example_path);
@@ -241,7 +241,7 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
     // (when rustc is available) it builds and its stdout matches the .out
     // fixture byte for byte.
     let src = fs::read_to_string(&example_path).unwrap();
-    let shown = format!("examples/features/{}/{}.jet", topic, name);
+    let shown = format!("Examples/features/{}/{}.jet", topic, name);
     let compiled =
         jet::compile_with_path(&src, &example_path.to_string_lossy()).unwrap_or_else(|diags| {
             panic!(
