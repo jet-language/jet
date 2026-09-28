@@ -18,7 +18,18 @@
 # Assembled units, logs and receipts stay under ~/.cache/jet-luna, never /tmp.
 set -euo pipefail
 
-bootstrap="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bootstrap="${JETPACK_BOOTSTRAP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Run from a private copy: bash reads scripts incrementally, so an edit to this
+# file while a long proof runs would otherwise corrupt the running proof.
+if [[ -z "${JETPACK_CHECK_SNAPSHOT:-}" ]]; then
+  snapshot_dir="$HOME/.cache/jet-luna/jetpack-bootstrap/scripts"
+  mkdir -p "$snapshot_dir"
+  snapshot="$snapshot_dir/check-$$.sh"
+  cp "$bootstrap/check.sh" "$snapshot"
+  JETPACK_CHECK_SNAPSHOT="$snapshot" JETPACK_BOOTSTRAP_DIR="$bootstrap" exec bash "$snapshot" "$@"
+fi
+trap 'rm -f "$JETPACK_CHECK_SNAPSHOT"' EXIT
+unset JETPACK_BOOTSTRAP_DIR
 repo="$(cd "$bootstrap/../.." && pwd)"
 source_root="${JETPACK_BOOTSTRAP_SOURCE_ROOT:-$repo}"
 with_tests=0
@@ -49,7 +60,7 @@ if (( each == 1 )); then
     [[ -n "$area" ]] || continue
     while (( $(jobs -rp | wc -l) >= parallel )); do wait -n || true; done
     (
-      JETPACK_WORKER="$base_worker-each-$area" bash "$0" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
+      JETPACK_WORKER="$base_worker-each-$area" env -u JETPACK_CHECK_SNAPSHOT bash "$bootstrap/check.sh" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
         > "$HOME/.cache/jet-luna/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1
       printf '%s %d\n' "$area" "$?" >> "$summary"
     ) &
@@ -91,6 +102,13 @@ else
 fi
 receipt="$scratch/check.receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-luna/jetpack-bootstrap/slots"
+# Pin one compiler for every stage: a hard link keeps this exact binary even if
+# cargo replaces target/debug/jet mid-proof (no extra disk; removed at exit).
+jet_pinned="$scratch/jet-pinned"
+ln -f "$jet" "$jet_pinned"
+jet_source="$jet"
+jet="$jet_pinned"
+trap 'rm -f "$JETPACK_CHECK_SNAPSHOT" "$jet_pinned"' EXIT
 
 check_mem="${JETPACK_CHECK_MEM:-6G}"
 aot_mem="${JETPACK_AOT_MEM:-10G}"
@@ -141,14 +159,16 @@ unit_record() {
 }
 
 {
-  printf 'entry-command: Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s\n' "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ -n $sorted_areas ]] && echo " --areas $sorted_areas")"
+  if [[ -n "$own_area" ]]; then selection=" --area $own_area$([[ $deps_from_head == 1 ]] && echo ' --deps-from-head')"; elif [[ -n "$sorted_areas" ]]; then selection=" --areas $sorted_areas"; else selection=""; fi
+  printf 'entry-command: JETPACK_WORKER=%s Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s\n' "$worker" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$selection"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
   printf 'proved-area: %s\n' "${own_area:-all selected}"
   printf 'input-source-root: %s\n' "$source_root"
   printf 'source-head: %s\n' "$(git -C "$source_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-  printf 'jet-binary: %s\n' "$jet"
+  printf 'jet-binary: %s (pinned as %s)\n' "$jet_source" "$jet"
   printf 'jet-binary-mtime: %s\n' "$(stat -c %y "$jet")"
+  printf 'jet-binary-sha256: %s\n' "$(sha256sum "$jet" | cut -d' ' -f1)"
   printf 'sources-list-sha256: %s\n' "$(sha256sum "$source_root/Jetpack/Bootstrap/sources.list" | cut -d' ' -f1)"
   printf 'tests-list-sha256: %s\n' "$(sha256sum "$source_root/Jetpack/Bootstrap/tests.list" | cut -d' ' -f1)"
 } > "$receipt"
