@@ -1,0 +1,22 @@
+# Jetpack areas and the areas each one may use (direct dependencies only; the harness adds the closure).
+# Each area is checked as its own unit containing only itself and its dependency closure, so an area
+# cannot reach code it did not declare. Layers mirror the Rust crates: models (L1/L2) below the engine
+# (L3) below the CLI. When cross-package enums, type imports and dependency check reuse work (Tower
+# #3673, #3661), each area becomes a package.jet with exactly these dependency edges.
+#
+# Format: `Area: Dep, Dep` (an area with no dependencies ends with `:`). Order is bottom-up.
+
+Foundation:
+Compiler front end:
+NixEval:
+PackageModel: Foundation, Compiler front end
+EnvModel: PackageModel, Compiler front end
+Nix: NixEval, PackageModel
+Store: PackageModel
+Trust: Store
+Recipe: Store
+Provider: Trust, Recipe, Nix, EnvModel
+Environment: Provider
+Services: Environment
+Image: Environment
+CLI: Services, Image

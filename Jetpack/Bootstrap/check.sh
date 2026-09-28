@@ -2,13 +2,16 @@
 # Jetpack bootstrap proof: assemble the explicit Jetpack Jet unit and run the
 # repository's supported `jet` commands on it, mirroring Compiler/Bootstrap.
 #
-#   Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh                    # jet check, every area
+#   Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh                    # jet check, one unit of every area
 #   Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests            # + AOT and default-tier tests
-#   JETPACK_WORKER=<name> ... check.sh --areas Foundation,PackageModel     # only these sections
+#   JETPACK_WORKER=<name> ... check.sh --area PackageModel [--tests]       # one area + its declared deps
+#   ... check.sh --each [--tests]                                          # every area as its own unit
+#   JETPACK_WORKER=<name> ... check.sh --areas Foundation,PackageModel     # an explicit section list
 #
-# Workers sharing one checkout pass --areas (their area plus the areas it
-# depends on) and JETPACK_WORKER, so another writer's unfinished files and
-# scratch directory never affect their proof.
+# Jetpack/Bootstrap/areas.list declares which areas each area may use. An area's
+# unit holds only itself and that closure, so code cannot reach an undeclared
+# area, and another writer's unfinished area cannot break an unrelated proof.
+# JETPACK_WORKER gives each concurrent writer its own scratch directory.
 #
 # Every jet command runs in its own cgroup scope with a hard memory cap and no
 # swap, under a wall-clock timeout; AOT builds take one of a few shared slots.
@@ -20,15 +23,43 @@ repo="$(cd "$bootstrap/../.." && pwd)"
 source_root="${JETPACK_BOOTSTRAP_SOURCE_ROOT:-$repo}"
 with_tests=0
 areas=""
+each=0
 while (( $# > 0 )); do
   case "$1" in
     --tests) with_tests=1 ;;
     --areas) areas="${2:?--areas needs a comma-separated list}"; shift ;;
     --areas=*) areas="${1#--areas=}" ;;
-    *) echo "usage: check.sh [--tests] [--areas Area,Area]" >&2; exit 64 ;;
+    --area) areas="$(node "$bootstrap/areas.mjs" closure "${2:?--area needs an area name}")"; shift ;;
+    --area=*) areas="$(node "$bootstrap/areas.mjs" closure "${1#--area=}")" ;;
+    --each) each=1 ;;
+    *) echo "usage: check.sh [--tests] [--area Area | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
   shift
 done
+if (( each == 1 )); then
+  # One unit per populated area, a few at a time; each child caps its own memory.
+  parallel="${JETPACK_EACH_PARALLEL:-4}"
+  base_worker="${JETPACK_WORKER:-lead}"
+  summary="$HOME/.cache/jet-luna/jetpack-bootstrap/$base_worker-each.summary"
+  : > "$summary"
+  while IFS= read -r area; do
+    [[ -n "$area" ]] || continue
+    while (( $(jobs -rp | wc -l) >= parallel )); do wait -n || true; done
+    (
+      JETPACK_WORKER="$base_worker-each-$area" bash "$0" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
+        > "$HOME/.cache/jet-luna/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1
+      printf '%s %d\n' "$area" "$?" >> "$summary"
+    ) &
+  done < <(node "$bootstrap/areas.mjs" populated)
+  wait
+  failed=0
+  while read -r area status; do
+    printf 'area %-14s %s (log ~/.cache/jet-luna/jetpack-bootstrap/%s-each-%s.log)\n' "$area" "$([[ $status == 0 ]] && echo OK || echo "FAILED exit $status")" "$base_worker" "$area"
+    [[ "$status" == 0 ]] || failed=1
+  done < <(sort "$summary")
+  (( failed == 0 )) && echo "JETPACK EACH OK$([[ $with_tests == 1 ]] && echo ' (check, default run, AOT test)')"
+  exit "$failed"
+fi
 worker="${JETPACK_WORKER:-lead}"
 if [[ ! "$worker" =~ ^[A-Za-z0-9_-]+$ ]]; then
   echo "jetpack-bootstrap: JETPACK_WORKER must be a plain name" >&2
