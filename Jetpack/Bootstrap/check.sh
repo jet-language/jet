@@ -23,14 +23,15 @@ repo="$(cd "$bootstrap/../.." && pwd)"
 source_root="${JETPACK_BOOTSTRAP_SOURCE_ROOT:-$repo}"
 with_tests=0
 areas=""
+own_area=""
 each=0
 while (( $# > 0 )); do
   case "$1" in
     --tests) with_tests=1 ;;
     --areas) areas="${2:?--areas needs a comma-separated list}"; shift ;;
     --areas=*) areas="${1#--areas=}" ;;
-    --area) areas="$(node "$bootstrap/areas.mjs" closure "${2:?--area needs an area name}")"; shift ;;
-    --area=*) areas="$(node "$bootstrap/areas.mjs" closure "${1#--area=}")" ;;
+    --area) own_area="${2:?--area needs an area name}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")"; shift ;;
+    --area=*) own_area="${1#--area=}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")" ;;
     --each) each=1 ;;
     *) echo "usage: check.sh [--tests] [--area Area | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
@@ -75,10 +76,11 @@ if [[ ! -x "$jet" ]]; then
   exit 69
 fi
 
-root_tag="$(printf '%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" | sha256sum | cut -c1-10)"
+root_tag="$(printf '%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" | sha256sum | cut -c1-10)"
 scratch="$HOME/.cache/jet-luna/jetpack-bootstrap/$worker-$root_tag"
 export JETPACK_BOOTSTRAP_SOURCE_ROOT="$source_root" JETPACK_BOOTSTRAP_SCRATCH="$scratch" JETPACK_WORKER="$worker"
 if [[ -n "$sorted_areas" ]]; then export JETPACK_BOOTSTRAP_AREAS="$sorted_areas"; else unset JETPACK_BOOTSTRAP_AREAS; fi
+if [[ -n "$own_area" ]]; then export JETPACK_BOOTSTRAP_OWN_AREA="$own_area"; else unset JETPACK_BOOTSTRAP_OWN_AREA; fi
 receipt="$scratch/check.receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-luna/jetpack-bootstrap/slots"
 
@@ -134,6 +136,7 @@ unit_record() {
   printf 'entry-command: Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s\n' "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ -n $sorted_areas ]] && echo " --areas $sorted_areas")"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
+  printf 'proved-area: %s\n' "${own_area:-all selected}"
   printf 'input-source-root: %s\n' "$source_root"
   printf 'source-head: %s\n' "$(git -C "$source_root" rev-parse HEAD 2>/dev/null || echo unknown)"
   printf 'jet-binary: %s\n' "$jet"
