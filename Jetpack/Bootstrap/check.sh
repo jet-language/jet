@@ -114,7 +114,7 @@ trap 'rm -f "$JETPACK_CHECK_SNAPSHOT" "$jet_pinned"' EXIT
 
 check_mem="${JETPACK_CHECK_MEM:-6G}"
 aot_mem="${JETPACK_AOT_MEM:-10G}"
-floor_mb="${JETPACK_MIN_FREE_MB:-12000}"
+floor_mb="${JETPACK_MIN_FREE_MB:-16000}"
 
 available_mb() { awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo; }
 
@@ -193,7 +193,21 @@ if (( ${syntax_only:-0} == 1 )); then
   (( overall == 0 )) && echo "JETPACK SYNTAX OK"
   exit "$overall"
 fi
+# Full type checks take a machine-wide slot (JETPACK_CHECK_SLOTS, default 2):
+# many parallel writers must not run many multi-GB checks at once.
+check_slots="${JETPACK_CHECK_SLOTS:-2}"
+exec 7>"$HOME/.cache/jet-luna/jetpack-bootstrap/slots/check-wait"
+got_slot=""
+while [[ -z "$got_slot" ]]; do
+  for slot in $(seq 1 "$check_slots"); do
+    exec 8>"$HOME/.cache/jet-luna/jetpack-bootstrap/slots/check-$slot"
+    if flock -n 8; then got_slot="$slot"; break; fi
+    exec 8>&-
+  done
+  [[ -n "$got_slot" ]] || { flock 7; sleep 5; flock -u 7; }
+done
 bounded check "$check_mem" 1200 "$scratch/check/project" "$jet" check src/jetpack.jet || overall=1
+flock -u 8; exec 8>&-
 # Per-file error summary mapped back to source paths (advisory type check).
 node "$bootstrap/locate.mjs" check "$scratch/check/jetpack.map.json" "$scratch/check.log" > "$scratch/check-errors.txt" || true
 if (( overall != 0 )); then echo "--- errors by source file ($scratch/check-errors.txt)"; grep -A200 '^errors per file:' "$scratch/check-errors.txt" || true; fi
