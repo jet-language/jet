@@ -193,8 +193,7 @@ pub fn set(tensor: &Tensor, index: [Int], value: Float) !ComputeError {
         if !value_ok -> return Err(ComputeError.Arithmetic)
     }
     o_opt :: offset_of(tensor.shape, index)
-    if o_opt == None -> return Err(ComputeError.OutOfBounds)
-    o :: o_opt
+    o :: o_opt ?? return Err(ComputeError.OutOfBounds)
     tensor.data[o] = value
     return
 

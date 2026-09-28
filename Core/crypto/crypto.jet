@@ -365,8 +365,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] !Crypt
     stanza_start :: 82 + stanza_index * 80
     wrapped :: slice_u8(~raw, stanza_start + 32, stanza_start + 80)
     file_key_opt :: xchacha_open(kek.bytes, wrap_nonce.bytes, stanza_aad, wrapped)
-    if file_key_opt == .None -> return Err(CryptoError.OpenFailed)
-    file_key :: file_key_opt
+    file_key :: file_key_opt ?? return Err(CryptoError.OpenFailed)
     if file_key.len() != 32 -> return Err(CryptoError.OpenFailed)
     payload_aad := [U8]{}
     loop b in "JETV1 payload".bytes() -> payload_aad.push(b)
