@@ -1,0 +1,241 @@
+// Provider reference selectors, ported from the selector half of
+// jet_pkg_model::ProviderFacts.
+//
+// A selector is the `#…` part of a provider reference: an exact version,
+// revision, or digest plus baseline, feature, and platform facts. Parsing
+// keeps every fact it cannot normalize losslessly so the provider-fact
+// carrier can report it instead of guessing.
+
+// The selector facts a provider reference may carry after `#`.
+pub struct ProviderSelector {
+    pub raw: String
+    pub version: String
+    pub revision: String
+    pub baseline: String
+    pub features: [String]
+    pub digest: String
+    pub platform: String
+
+    fn empty(raw: String) -> ProviderSelector !Never {
+        ProviderSelector{raw: raw, version: "", revision: "", baseline: "", features: [String]{}, digest: "", platform: ""}
+    }
+
+    fn parse(raw: String) -> ProviderSelector !Never {
+        ProviderSelectorDetails.parse(raw).selector
+    }
+
+    // At least one exact version, revision, or digest, and no inexact one.
+    fn is_exact(self) -> Bool !Never {
+        identities :: [(value: String, field: ProviderSelectorField)]{
+            (value: self.version, field: ProviderSelectorField.Version),
+            (value: self.revision, field: ProviderSelectorField.Revision),
+            (value: self.digest, field: ProviderSelectorField.Digest)
+        }
+        exact := false
+        loop identity in identities {
+            if {
+                identity.field.is_exact_value(identity.value) -> exact = true
+                identity.value != "" -> return false
+                else -> {}
+            }
+        }
+        exact
+    }
+
+    // The single-valued fact `field` holds; features are not single-valued.
+    fn value(self, field: ProviderSelectorField) -> String !Never {
+        if field == {
+            .Version -> self.version
+            .Revision -> self.revision
+            .Baseline -> self.baseline
+            .Features -> self.features.join("+")
+            .Digest -> self.digest
+            .Platform -> self.platform
+        }
+    }
+
+    fn set_value(&self, field: ProviderSelectorField, value: String) !Never {
+        if field == {
+            .Version -> self.version = value
+            .Revision -> self.revision = value
+            .Baseline -> self.baseline = value
+            .Features -> self.features = [String]{value}
+            .Digest -> self.digest = value
+            .Platform -> self.platform = value
+        }
+    }
+}
+
+// One selector fact key. `rev`, `feature`, `hash`/`sha256`, and `target` are
+// accepted spellings of their canonical keys.
+pub enum ProviderSelectorField {
+    Version
+    Revision
+    Baseline
+    Features
+    Digest
+    Platform
+
+    fn parse(key: String) -> ?ProviderSelectorField !Never {
+        if key == {
+            "version" -> Val(ProviderSelectorField.Version)
+            "revision" | "rev" -> Val(ProviderSelectorField.Revision)
+            "baseline" -> Val(ProviderSelectorField.Baseline)
+            "feature" | "features" -> Val(ProviderSelectorField.Features)
+            "digest" | "hash" | "sha256" -> Val(ProviderSelectorField.Digest)
+            "platform" | "target" -> Val(ProviderSelectorField.Platform)
+            else -> None
+        }
+    }
+
+    fn name(self) -> String !Never {
+        if self == {
+            .Version -> "version"
+            .Revision -> "revision"
+            .Baseline -> "baseline"
+            .Features -> "features"
+            .Digest -> "digest"
+            .Platform -> "platform"
+        }
+    }
+
+    // Whether `value` pins an exact identity for this fact. Only version,
+    // revision, and digest can be exact.
+    fn is_exact_value(self, input: String) -> Bool !Never {
+        value :: input.trim()
+        if value == "" -> return false
+        if self == {
+            .Version -> {
+                if value.starts_with("^") || value.starts_with("~") || value.starts_with(">") || value.starts_with("<") || value.starts_with("=") || value.starts_with("*") -> return false
+                if value.contains("||") || value.contains(",") -> return false
+                if value == {
+                    "latest" | "next" | "main" | "master" | "head" -> false
+                    else -> true
+                }
+            }
+            .Revision -> value.bytes().len() >= 6 && value.bytes().len() <= 128 && pkg_provider_is_hex(value)
+            .Digest -> pkg_provider_exact_digest(value)
+            else -> false
+        }
+    }
+}
+
+// A selector with the facts it could not normalize losslessly.
+pub struct ProviderSelectorDetails {
+    pub selector: ProviderSelector
+    pub unknown: [String]
+    pub conflicts: [(key: String, left: String, right: String)]
+    pub duplicates: [String]
+
+    // Facts separate on `&`, and on a `,` that starts another known
+    // `key=value` fact; a fact without `=` is a version.
+    fn parse(raw: String) -> ProviderSelectorDetails !Never {
+        details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [(key: String, left: String, right: String)]{}, duplicates: [String]{}}
+        body :: raw.removeprefix("#")
+        if raw != "" && body.trim() == "" {
+            details.unknown.push("empty selector")
+            return details
+        }
+        loop group in body.split("&") {
+            bytes :: group.bytes()
+            start := 0
+            loop offset in 0..<bytes.len() {
+                if Int.from_u8(bytes[offset]) == 44 && pkg_provider_is_selector_assignment(pkg_bytes_text(bytes, offset + 1, bytes.len()).trim_start()) {
+                    details.add_part(pkg_bytes_text(bytes, start, offset).trim())
+                    start = offset + 1
+                }
+            }
+            details.add_part(pkg_bytes_text(bytes, start, bytes.len()).trim())
+        }
+        details
+    }
+
+    fn add_part(&self, part: String) !Never {
+        if part == "" -> return
+        pair :: part.split_once("=")
+        key :: (pair?.before ?? "version").trim()
+        value :: (pair?.after ?? part).trim()
+        if value == "" {
+            self.unknown.push("empty selector fact `{part}`")
+            return
+        }
+        field :: ProviderSelectorField.parse(key) ?? {
+            self.unknown.push(part)
+            return
+        }
+        if field == ProviderSelectorField.Features {
+            loop piece in value.replace("+", ",").split(",") {
+                feature :: piece.trim()
+                if feature == "" -> next
+                if {
+                    self.selector.features.contains(feature) -> self.duplicates.push("{key}={feature}")
+                    else -> self.selector.features.push(feature)
+                }
+            }
+            self.selector.features.sort()
+            return
+        }
+        current :: self.selector.value(field)
+        if current == "" {
+            self.selector.set_value(field, value)
+            return
+        }
+        if {
+            current != value -> self.conflicts.push((key: field.name(), left: current, right: value))
+            else -> self.duplicates.push("{field.name()}={value}")
+        }
+    }
+}
+
+fn pkg_provider_is_selector_assignment(part: String) -> Bool !Never {
+    pair :: part.split_once("=") ?? return false
+    ProviderSelectorField.parse(pair.before.trim()) != None
+}
+
+// `sha256-`/`sha256:`/`sha512-`/`sha512:` followed by hex or base64 of the
+// algorithm's length, or bare hex of 64 or 128 digits.
+fn pkg_provider_exact_digest(input: String) -> Bool !Never {
+    value :: input.trim()
+    if pkg_provider_digest_payload(value, "sha256") == {
+        .Val(payload) -> {
+            length :: payload.bytes().len()
+            return (length == 64 && pkg_provider_is_hex(payload)) || ((length == 43 || length == 44) && pkg_provider_is_base64(payload))
+        }
+        .None -> {}
+    }
+    if pkg_provider_digest_payload(value, "sha512") == {
+        .Val(payload) -> {
+            length :: payload.bytes().len()
+            return (length == 128 && pkg_provider_is_hex(payload)) || ((length == 86 || length == 88) && pkg_provider_is_base64(payload))
+        }
+        .None -> {}
+    }
+    length :: value.bytes().len()
+    pkg_provider_is_hex(value) && (length == 64 || length == 128)
+}
+
+// The digest after `<algorithm>-` or `<algorithm>:`, if `value` has one.
+fn pkg_provider_digest_payload(value: String, algorithm: String) -> ?String !Never {
+    if value.starts_with("{algorithm}-") -> return Val(value.removeprefix("{algorithm}-"))
+    if value.starts_with("{algorithm}:") -> return Val(value.removeprefix("{algorithm}:"))
+    None
+}
+
+fn pkg_provider_is_hex(value: String) -> Bool !Never {
+    if value == "" -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// ASCII letters, digits, `_`, and `+ / = -`.
+fn pkg_provider_is_base64(value: String) -> Bool !Never {
+    if value == "" -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !pkg_bytes_is_word(code) && code != 43 && code != 47 && code != 61 && code != 45 -> return false
+    }
+    true
+}

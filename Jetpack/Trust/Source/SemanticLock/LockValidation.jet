@@ -1,0 +1,195 @@
+// Revalidation before any semantic lock write (E4-JP13): input graph
+// satisfiability, content hashes and signatures, platform domain
+// consistency, and source authority. An empty issue list means the lock may
+// be committed.
+
+pub enum ValidationIssue {
+    InputCycle(String)
+    MissingFollows(input: String, follows: String)
+    MissingHash(semantic_key: String)
+    MissingSignature(semantic_key: String)
+    DomainConflict(key: String, left: String, right: String)
+    SourceAuthority(package: String, source: String, allowed: [String])
+    OfflineIncomplete(semantic_key: String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .InputCycle(name) -> "lock input `{name}` participates in a follows cycle"
+            .MissingFollows(input, follows) -> "lock input `{input}` follows unknown input `{follows}`"
+            .MissingHash(semantic_key) -> "`{semantic_key}` has empty content hash — offline realize cannot run"
+            .MissingSignature(semantic_key) -> "`{semantic_key}` requires a signature but the slot is empty"
+            .DomainConflict(key, left, right) -> "platform domain conflict for `{key}`: `{left}` vs `{right}`"
+            .SourceAuthority(package, source, allowed) -> "package `{package}` source `{source}` is not in source map [{allowed.join(", ")}]"
+            .OfflineIncomplete(semantic_key) -> "`{semantic_key}` is not offline-complete"
+        }
+    }
+}
+
+// Every issue that blocks a write, in check order: input graph, records,
+// then source maps.
+pub fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] !Never {
+    issues := trust_lock_input_issues(lock.inputs)
+    loop issue in trust_lock_record_issues(lock) -> issues.push(issue)
+    loop issue in trust_lock_source_map_issues(lock) -> issues.push(issue)
+    issues
+}
+
+// Rust `revalidate`: the lock may be written, or `Rejected` with every issue.
+pub fn trust_revalidate_semantic_lock(lock: SemanticLockFile) !TrustError {
+    issues :: trust_semantic_lock_issues(lock)
+    if issues.len() > 0 -> return Err(TrustError.Rejected(issues))
+}
+
+// The pure half of `merge_revalidate_commit`: merge three ways, refuse
+// conflicts as domain conflicts, and revalidate the result before any write.
+pub fn trust_merge_for_commit(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> SemanticLockFile !TrustError {
+    outcome :: trust_merge_semantic_locks(base, left, right)
+    if outcome.conflicts.len() > 0 {
+        issues := [ValidationIssue]{}
+        loop conflict in outcome.conflicts {
+            issues.push(ValidationIssue.DomainConflict{key: conflict.semantic_key, left: conflict.left_identity, right: conflict.right_identity})
+        }
+        return Err(TrustError.Rejected(issues))
+    }
+    trust_revalidate_semantic_lock(outcome.merged)
+    Ok(outcome.merged)
+}
+
+fn trust_lock_input_issues(inputs: [LockInput]) -> [ValidationIssue] !Never {
+    names := [String]{}
+    loop input in inputs -> names.push(input.name)
+    names = pkg_overlay_sorted_unique(names)
+    issues := [ValidationIssue]{}
+    loop input in inputs {
+        if input.follows != "" && !names.contains(input.follows) {
+            issues.push(ValidationIssue.MissingFollows{input: input.name, follows: input.follows})
+        }
+    }
+    edges := [String: String]{}
+    loop input in inputs {
+        if input.follows != "" && names.contains(input.follows) -> edges[input.name] = input.follows
+    }
+    reported := [String]{}
+    loop name in names {
+        cycle_node :: trust_lock_cycle_from(name, edges) ?? next
+        if reported.contains(cycle_node) -> next
+        reported.push(cycle_node)
+        issues.push(ValidationIssue.InputCycle(cycle_node))
+    }
+    issues
+}
+
+// Floyd's walk along `follows` edges; the meeting node when `start`
+// reaches a cycle.
+fn trust_lock_cycle_from(start: String, edges: [String: String]) -> ?String !Never {
+    slow := start
+    fast := start
+    loop {
+        slow = edges.get(slow) ?? return None
+        fast_step :: edges.get(fast) ?? return None
+        fast = edges.get(fast_step) ?? return None
+        if slow == fast -> return Val(~slow)
+    }
+}
+
+fn trust_lock_record_issues(lock: SemanticLockFile) -> [ValidationIssue] !Never {
+    issues := [ValidationIssue]{}
+    seen_platform := [String: String]{}
+    loop record in lock.records {
+        key :: record.identity.semantic_key()
+        if record.identity.hash == "" {
+            issues.push(ValidationIssue.MissingHash{semantic_key: ~key})
+            issues.push(ValidationIssue.OfflineIncomplete{semantic_key: ~key})
+        }
+        loop rationale in record.rationales {
+            if rationale.cache_provenance.contains("signed") && rationale.signature == "" {
+                issues.push(ValidationIssue.MissingSignature{semantic_key: ~key})
+            }
+        }
+        if record.identity.platform == "" -> next
+        if seen_platform.get(key) == {
+            .Val(previous) -> {
+                if previous != record.identity.platform {
+                    issues.push(ValidationIssue.DomainConflict{key: ~key, left: previous, right: record.identity.platform})
+                }
+            }
+            .None -> seen_platform[key] = record.identity.platform
+        }
+    }
+    issues
+}
+
+fn trust_lock_source_map_issues(lock: SemanticLockFile) -> [ValidationIssue] !Never {
+    issues := [ValidationIssue]{}
+    if lock.source_maps.len() == 0 -> return issues
+    loop record in lock.records {
+        if record.identity.kind != LockRecordKind.Package -> next
+        package :: trust_lock_source_package(record.identity.key)
+        map :: trust_lock_matching_source_map(lock.source_maps, package) ?? next
+        source :: if record.rationales.len() == 0 -> "" else -> if record.rationales[0].source_ref != "" -> record.rationales[0].source_ref else -> record.rationales[0].provider
+        if source == "" -> next
+        authority :: trust_lock_source_authority(source)
+        allowed := false
+        loop candidate in map.sources {
+            if trust_lock_source_matches(candidate, source) || trust_lock_source_matches(candidate, authority) {
+                allowed = true
+                break
+            }
+        }
+        if !allowed {
+            issues.push(ValidationIssue.SourceAuthority{package: record.identity.key, source: source, allowed: map.sources})
+        }
+    }
+    issues
+}
+
+// `registry:<source>:<package>` names its package after the last `:`.
+fn trust_lock_source_package(key: String) -> String !Never {
+    if !key.starts_with("registry:") -> return ~key
+    if trust_text_split_last(key.removeprefix("registry:"), @TRUST_COLON) == {
+        .Val(parts) -> parts.after
+        .None -> ~key
+    }
+}
+
+// A `registry:` source's authority is its text before the first `;`.
+fn trust_lock_source_authority(source: String) -> String !Never {
+    if !source.starts_with("registry:") -> return ~source
+    rest :: source.removeprefix("registry:")
+    if trust_text_split_first(rest, @TRUST_SEMICOLON) == {
+        .Val(parts) -> parts.before
+        .None -> rest
+    }
+}
+
+// The most specific map for `package`: the longest literal prefix, an exact
+// pattern over a `*` pattern of the same length, and the last on a tie.
+fn trust_lock_matching_source_map(maps: [SourceMapEntry], package: String) -> ?SourceMapEntry !Never {
+    best := -1
+    best_length := -1
+    best_exact := false
+    loop index in 0..<maps.len() {
+        pattern :: maps[index].pattern
+        if !trust_lock_pattern_matches(pattern, package) -> next
+        wildcard :: pattern.ends_with("*")
+        length :: if wildcard -> pattern.removesuffix("*").bytes().len() else -> pattern.bytes().len()
+        exact :: !wildcard
+        better :: best < 0 || length > best_length || (length == best_length && (exact || !best_exact))
+        if better {
+            best = index
+            best_length = length
+            best_exact = exact
+        }
+    }
+    if best < 0 -> return None
+    Val(maps[best])
+}
+
+fn trust_lock_pattern_matches(pattern: String, package: String) -> Bool !Never {
+    if pattern.ends_with("*") -> return package.starts_with(pattern.removesuffix("*"))
+    pattern == package
+}
+
+fn trust_lock_source_matches(allowed: String, source: String) -> Bool !Never {
+    source == allowed || source.starts_with(allowed) || allowed.starts_with(source)
+}

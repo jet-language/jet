@@ -108,17 +108,17 @@ pub struct StagedPlanAction {
 
     // Validate the declaration before the sandbox is entered.
     fn validate_declaration(self) !StagedPlanError {
-        if self.name.trim() == "" || pkg_staged_has_control(self.name) -> return Err(StagedPlanError.EmptyActionName)
+        if self.name.trim() == "" || pkg_text_has_control(self.name) -> return Err(StagedPlanError.EmptyActionName)
         if self.stage_bound == 0 -> return Err(StagedPlanError.InvalidStageBound)
         if self.stage >= self.stage_bound -> return Err(StagedPlanError.StageOutOfBounds{stage: self.stage, bound: self.stage_bound})
-        if self.authority.platform.trim() == "" || pkg_staged_has_control(self.authority.platform) -> return Err(StagedPlanError.EmptyPlatform)
+        if self.authority.platform.trim() == "" || pkg_text_has_control(self.authority.platform) -> return Err(StagedPlanError.EmptyPlatform)
         declared := [String]{}
         loop input in self.inputs {
             if pkg_staged_path_problem(input.path) == {
                 .Val(reason) -> return Err(StagedPlanError.InvalidInput{path: input.path, reason: reason})
                 .None -> {}
             }
-            if input.digest.trim() == "" || pkg_staged_has_control(input.digest) -> return Err(StagedPlanError.MissingInputDigest(input.path))
+            if input.digest.trim() == "" || pkg_text_has_control(input.digest) -> return Err(StagedPlanError.MissingInputDigest(input.path))
             if declared.contains(input.path) -> return Err(StagedPlanError.DuplicateInput(input.path))
             declared.push(input.path)
         }
@@ -138,10 +138,10 @@ pub struct StagedPlanAction {
         dependencies := [String: [String]]{}
         if fragment.actions.len() == 0 -> return Err(StagedPlanError.EmptyFragment)
         loop action in fragment.actions {
-            if action.name.trim() == "" || pkg_staged_has_control(action.name) -> return Err(StagedPlanError.EmptyFragmentActionName)
+            if action.name.trim() == "" || pkg_text_has_control(action.name) -> return Err(StagedPlanError.EmptyFragmentActionName)
             if names.contains(action.name) -> return Err(StagedPlanError.DuplicateFragmentActionName(action.name))
             names.push(action.name)
-            if action.tool.trim() == "" || pkg_staged_has_control(action.tool) -> return Err(StagedPlanError.EmptyFragmentTool(action.name))
+            if action.tool.trim() == "" || pkg_text_has_control(action.tool) -> return Err(StagedPlanError.EmptyFragmentTool(action.name))
             if !authority_tools.contains(action.tool) -> return Err(StagedPlanError.UnauthorizedTool{action: action.name, tool: action.tool})
             if action.platform != self.authority.platform {
                 return Err(StagedPlanError.PlatformMismatch{action: action.name, expected: self.authority.platform, actual: action.platform})
@@ -174,10 +174,10 @@ pub struct StagedPlanAction {
             }
             dependencies[action.name] = action.dependencies
             loop entry in action.env {
-                if entry.key.trim() == "" || pkg_staged_has_control(entry.key) || pkg_staged_has_control(entry.value) -> return Err(StagedPlanError.InvalidEnvironment(action.name))
+                if entry.key.trim() == "" || pkg_text_has_control(entry.key) || pkg_text_has_control(entry.value) -> return Err(StagedPlanError.InvalidEnvironment(action.name))
             }
             loop arg in action.args {
-                if pkg_staged_has_control(arg) -> return Err(StagedPlanError.InvalidArguments(action.name))
+                if pkg_text_has_control(arg) -> return Err(StagedPlanError.InvalidArguments(action.name))
             }
         }
         loop action in pkg_staged_sorted_keys(dependencies) {
@@ -195,12 +195,12 @@ pub struct StagedPlanAction {
         writer := RecipeCanonicalWriter.new(@STAGED_PLAN_FORMAT)
         self.write_canonical(&writer)
         fragment.write_canonical(&writer)
-        Ok("staged-plan-sha256:{pkg_recipe_sha256_hex(writer.bytes)}")
+        Ok("staged-plan-sha256:{pkg_sha256_hex(writer.bytes)}")
     }
 
     fn fragment_digest(self, fragment: BuildPlanFragment) -> String !StagedPlanError {
         self.validate(fragment)
-        Ok("sha256-{pkg_recipe_sha256_hex(fragment.canonical_bytes())}")
+        Ok("sha256-{pkg_sha256_hex(fragment.canonical_bytes())}")
     }
 
     fn lock(self, fragment: BuildPlanFragment) -> StagedPlanLock !StagedPlanError {
@@ -334,7 +334,7 @@ enum StagedPlanVisit {
 fn pkg_staged_unique_tools(values: [String]) -> [String] !StagedPlanError {
     out := [String]{}
     loop value in values {
-        if value.trim() == "" || pkg_staged_has_control(value) {
+        if value.trim() == "" || pkg_text_has_control(value) {
             return Err(StagedPlanError.InvalidInput{path: value, reason: "authority name is empty or contains control characters"})
         }
         if out.contains(value) -> return Err(StagedPlanError.DuplicateTool(value))
@@ -355,25 +355,10 @@ fn pkg_staged_unique_effects(values: [BuildEffect]) -> [BuildEffect] !StagedPlan
 
 // Why `path` is not a slash-separated path below the sandbox root, or None.
 fn pkg_staged_path_problem(path: String) -> ?String !Never {
-    if path.trim() == "" || pkg_staged_has_control(path) -> return Val("path is empty or contains control characters")
+    if path.trim() == "" || pkg_text_has_control(path) -> return Val("path is empty or contains control characters")
     if path.contains("\\") -> return Val("path must use slash-separated relative names")
     if path.starts_with("/") || path.split("/").to_list().contains("..") -> return Val("path must stay below the declared sandbox root")
     None
-}
-
-// Whether `value` holds a Unicode control scalar (C0, DEL, or C1).
-fn pkg_staged_has_control(value: String) -> Bool !Never {
-    raw :: value.bytes()
-    loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
-        if code < 32 || code == 127 -> return true
-        // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
-        if code == 0xC2 && index + 1 < raw.len() {
-            next_code :: Int.from_u8(raw[index + 1])
-            if next_code >= 0x80 && next_code <= 0x9F -> return true
-        }
-    }
-    false
 }
 
 // Equal paths, or one nested under the other.

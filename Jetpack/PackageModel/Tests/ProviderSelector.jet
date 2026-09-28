@@ -1,0 +1,18 @@
+// Selector claims ported from crates/jet-pkg-model/src/ProviderFacts.rs
+// #[cfg(test)]. The provider-fact carrier claims need JSON rendering and are
+// not part of this unit.
+
+#Test("bare selector is a version and features are lossless") {
+    selector :: ProviderSelector.parse("#2.0.17&features=lua,ssl")
+    assert_eq(selector.version, "2.0.17")
+    assert_eq(selector.revision, "")
+    assert_eq(selector.features, [String]{"lua", "ssl"})
+    assert(selector.is_exact())
+}
+
+#Test("digest selector requires a real digest shape") {
+    valid :: ProviderSelector.parse("#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    assert(valid.is_exact())
+    invalid :: ProviderSelector.parse("#digest=0123456789abcdef0123456789abcdef")
+    assert(!invalid.is_exact())
+}

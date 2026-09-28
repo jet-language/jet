@@ -1,0 +1,375 @@
+// The declarative `flake.nix` subset Jet reads directly: quoted input
+// assignments, output attribute paths, and flake-parts list values. The
+// scanner is intentionally limited; arbitrary Nix stays behind the private
+// evaluator boundary and is never guessed into the graph.
+
+// One `inputs.<path>.<field> = "<value>"` declaration.
+struct FlakeAssignment {
+    path: String
+    field: String
+    value: String
+}
+
+// One `<prefix>.<system>.<attribute> = …` output declaration; `system` is
+// empty for a single-segment path.
+struct FlakeOutputAssignment {
+    prefix: String
+    system: String
+    attribute: String
+}
+
+@TRUST_FLAKE_OUTPUT_PREFIXES :: [String]{"packages.", "legacyPackages.", "devShells.", "devShell.", "apps.", "checks.", "formatter."}
+
+// Rust `is_nix_name_char`: ASCII alphanumerics, `_`, `-`, and `.`.
+fn trust_nix_is_name_byte(code: Int) -> Bool !Never {
+    trust_text_is_alphanumeric(code) || code == @TRUST_UNDERSCORE || code == @TRUST_DASH || code == @TRUST_DOT
+}
+
+// Drop `#` line comments outside double-quoted strings; the newline stays.
+fn trust_nix_strip_comments(text: String) -> String !Never {
+    raw :: text.bytes()
+    out := [U8]{}
+    quoted := false
+    escaped := false
+    index := 0
+    loop index < raw.len() {
+        byte :: raw[index]
+        code :: Int.from_u8(byte)
+        index += 1
+        if quoted {
+            out.push(byte)
+            if {
+                escaped -> escaped = false
+                code == @TRUST_BACKSLASH -> escaped = true
+                code == @TRUST_QUOTE -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if code == @TRUST_QUOTE {
+            quoted = true
+            out.push(byte)
+            next
+        }
+        if code == @TRUST_HASH {
+            newline :: trust_text_find_byte(raw, @TRUST_NEWLINE, index)
+            if newline < 0 -> break
+            out.push(raw[newline])
+            index = newline + 1
+            next
+        }
+        out.push(byte)
+    }
+    String.from_bytes(out) ?? ~text
+}
+
+// The offset just past the string whose opening quote is at `start`, or
+// the end of `raw` when it never closes.
+fn trust_nix_skip_quoted(raw: [U8], start: Int) -> Int !Never {
+    escaped := false
+    index := start + 1
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if {
+            escaped -> escaped = false
+            code == @TRUST_BACKSLASH -> escaped = true
+            code == @TRUST_QUOTE -> return index + 1
+            else -> {}
+        }
+        index += 1
+    }
+    raw.len()
+}
+
+// The offset of the delimiter closing the one opened at `open`, skipping
+// quoted strings, or -1.
+fn trust_nix_matching(raw: [U8], open: Int, opener: Int, closer: Int) -> Int !Never {
+    if pkg_bytes_code(raw, open) != opener -> return -1
+    depth := 0
+    index := open
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if {
+            code == @TRUST_QUOTE -> index = trust_nix_skip_quoted(raw, index)
+            code == opener -> {
+                depth += 1
+                index += 1
+            }
+            code == closer -> {
+                if depth == 0 -> return -1
+                depth -= 1
+                if depth == 0 -> return index
+                index += 1
+            }
+            else -> index += 1
+        }
+    }
+    -1
+}
+
+// The contents of the double-quoted string starting `value` after leading
+// whitespace, with `\x` escapes resolved to `x`; None if it never closes.
+fn trust_nix_quoted_rhs(value: String) -> ?String !Never {
+    raw :: value.bytes()
+    start :: pkg_bytes_skip_space(raw, 0)
+    if pkg_bytes_code(raw, start) != @TRUST_QUOTE -> return None
+    out := [U8]{}
+    escaped := false
+    loop index in (start + 1)..<raw.len() {
+        byte :: raw[index]
+        code :: Int.from_u8(byte)
+        if {
+            escaped -> {
+                out.push(byte)
+                escaped = false
+            }
+            code == @TRUST_BACKSLASH -> escaped = true
+            code == @TRUST_QUOTE -> return Val(String.from_bytes(out) ?? "")
+            else -> out.push(byte)
+        }
+    }
+    None
+}
+
+// The end of the Nix name run starting at `start`, with Rust's quirk that a
+// run which is empty extends to the end of the text.
+fn trust_nix_path_end(raw: [U8], start: Int) -> Int !Never {
+    index := start
+    loop index < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[index])) -> index += 1
+    if index == start -> return raw.len()
+    index
+}
+
+// Every `url`/`follows` input declaration in dotted or record form, sorted
+// and unique.
+fn trust_nix_input_assignments(text: String) -> [FlakeAssignment] !Never {
+    found := [FlakeAssignment]{}
+    loop assignment in trust_nix_assignments_after(text, "inputs.") {
+        if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
+    }
+    loop assignment in trust_nix_input_record_assignments(text) {
+        if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
+    }
+    found.sort_by(assignment -> assignment.value)
+    found.sort_by(assignment -> assignment.field)
+    found.sort_by(assignment -> assignment.path)
+    unique := [FlakeAssignment]{}
+    loop assignment in found {
+        if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
+        unique.push(assignment)
+    }
+    unique
+}
+
+// The record form `inputs = { nixpkgs.url = "…"; }`.
+fn trust_nix_input_record_assignments(text: String) -> [FlakeAssignment] !Never {
+    raw :: text.bytes()
+    keyword :: "inputs".bytes()
+    found := [FlakeAssignment]{}
+    cursor := 0
+    loop {
+        start :: trust_text_find(raw, keyword, cursor)
+        if start < 0 -> break
+        before :: pkg_bytes_code(raw, start - 1)
+        before_ok :: start == 0 || (!trust_text_is_alphanumeric(before) && before != @TRUST_UNDERSCORE)
+        equals :: pkg_bytes_skip_space(raw, start + keyword.len())
+        if before_ok && pkg_bytes_code(raw, equals) == @TRUST_EQUALS {
+            open :: pkg_bytes_skip_space(raw, equals + 1)
+            if pkg_bytes_code(raw, open) == @TRUST_OPEN_BRACE {
+                close :: trust_nix_matching(raw, open, @TRUST_OPEN_BRACE, @TRUST_CLOSE_BRACE)
+                if close >= 0 {
+                    loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, open + 1, close), "") -> found.push(assignment)
+                    cursor = close + 1
+                    next
+                }
+            }
+        }
+        cursor = start + keyword.len()
+    }
+    found
+}
+
+// Quoted assignments inside one attribute-set body; nested sets extend the
+// dotted path.
+fn trust_nix_block_assignments(text: String, parent: String) -> [FlakeAssignment] !Never {
+    raw :: text.bytes()
+    found := [FlakeAssignment]{}
+    cursor := 0
+    loop cursor < raw.len() {
+        code :: Int.from_u8(raw[cursor])
+        if code == @TRUST_QUOTE {
+            cursor = trust_nix_skip_quoted(raw, cursor)
+            next
+        }
+        if !trust_nix_is_name_byte(code) {
+            cursor += 1
+            next
+        }
+        start :: ~cursor
+        loop cursor < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[cursor])) -> cursor += 1
+        local :: pkg_bytes_text(raw, start, cursor)
+        after := trust_text_skip_ascii_space(raw, cursor)
+        if pkg_bytes_code(raw, after) != @TRUST_EQUALS -> next
+        after = trust_text_skip_ascii_space(raw, after + 1)
+        path :: if parent == "" -> local else -> "{parent}.{local}"
+        if pkg_bytes_code(raw, after) == @TRUST_OPEN_BRACE {
+            close :: trust_nix_matching(raw, after, @TRUST_OPEN_BRACE, @TRUST_CLOSE_BRACE)
+            if close >= 0 {
+                loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, after + 1, close), path) -> found.push(assignment)
+                cursor = close + 1
+                next
+            }
+        }
+        value :: trust_nix_quoted_rhs(pkg_bytes_text(raw, after, raw.len())) ?? next
+        parts :: trust_text_split_last(path, @TRUST_DOT) ?? next
+        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+    }
+    found
+}
+
+// The dotted form `<prefix><path>.<field> = "<value>"` wherever `prefix`
+// occurs.
+fn trust_nix_assignments_after(text: String, prefix: String) -> [FlakeAssignment] !Never {
+    raw :: text.bytes()
+    needle :: prefix.bytes()
+    found := [FlakeAssignment]{}
+    cursor := 0
+    loop {
+        start :: trust_text_find(raw, needle, cursor)
+        if start < 0 -> break
+        rest :: start + needle.len()
+        end :: trust_nix_path_end(raw, rest)
+        cursor = if end > rest -> end else -> rest + 1
+        parts :: trust_text_split_last(pkg_bytes_text(raw, rest, end), @TRUST_DOT) ?? next
+        equals :: trust_text_find_byte(raw, @TRUST_EQUALS, end)
+        if equals < 0 -> next
+        value :: trust_nix_quoted_rhs(pkg_bytes_text(raw, equals + 1, raw.len())) ?? next
+        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+    }
+    found
+}
+
+// Every output declaration, sorted and unique.
+fn trust_nix_output_assignments(text: String) -> [FlakeOutputAssignment] !Never {
+    found := [FlakeOutputAssignment]{}
+    loop prefix in @TRUST_FLAKE_OUTPUT_PREFIXES {
+        kind :: prefix.removesuffix(".")
+        loop path in trust_nix_assignment_paths(text, prefix) {
+            parts :: trust_text_split(path, @TRUST_DOT)
+            if {
+                parts.len() > 1 -> {
+                    attribute := [String]{}
+                    loop index in 1..<parts.len() -> attribute.push(parts[index])
+                    found.push(FlakeOutputAssignment{prefix: ~kind, system: parts[0], attribute: attribute.join(".")})
+                }
+                else -> found.push(FlakeOutputAssignment{prefix: ~kind, system: "", attribute: parts[0]})
+            }
+        }
+    }
+    found.sort_by(assignment -> assignment.attribute)
+    found.sort_by(assignment -> assignment.system)
+    found.sort_by(assignment -> assignment.prefix)
+    unique := [FlakeOutputAssignment]{}
+    loop assignment in found {
+        if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
+        unique.push(assignment)
+    }
+    unique
+}
+
+// Attribute paths assigned after a word-initial `prefix`.
+fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] !Never {
+    raw :: text.bytes()
+    needle :: prefix.bytes()
+    found := [String]{}
+    cursor := 0
+    loop {
+        start :: trust_text_find(raw, needle, cursor)
+        if start < 0 -> break
+        if start > 0 && trust_nix_is_name_byte(Int.from_u8(raw[start - 1])) {
+            cursor = start + needle.len()
+            next
+        }
+        rest :: start + needle.len()
+        end :: trust_nix_path_end(raw, rest)
+        path :: trust_nix_trim_trailing_dots(pkg_bytes_text(raw, rest, end))
+        equals :: trust_text_find_byte(raw, @TRUST_EQUALS, end)
+        if {
+            equals >= 0 -> {
+                if path != "" -> found.push(path)
+                cursor = equals + 1
+            }
+            else -> cursor = if end > rest -> end else -> rest + 1
+        }
+    }
+    found
+}
+
+fn trust_nix_trim_trailing_dots(text: String) -> String !Never {
+    trimmed := ~text
+    loop trimmed.ends_with(".") -> trimmed = trimmed.removesuffix(".")
+    trimmed
+}
+
+// Quoted strings and relative module paths inside `name = [ … ]` lists.
+fn trust_nix_list_assignment_values(text: String, name: String) -> [String] !Never {
+    raw :: text.bytes()
+    needle :: name.bytes()
+    values := [String]{}
+    cursor := 0
+    loop {
+        start :: trust_text_find(raw, needle, cursor)
+        if start < 0 -> break
+        after_name :: start + needle.len()
+        before_ok :: start == 0 || !trust_nix_is_name_byte(Int.from_u8(raw[start - 1]))
+        after_ok :: after_name >= raw.len() || !trust_nix_is_name_byte(Int.from_u8(raw[after_name]))
+        cursor = after_name
+        if !before_ok || !after_ok -> next
+        equals :: trust_text_skip_ascii_space(raw, after_name)
+        if pkg_bytes_code(raw, equals) != @TRUST_EQUALS -> next
+        open :: trust_text_skip_ascii_space(raw, equals + 1)
+        if pkg_bytes_code(raw, open) != @TRUST_OPEN_SQUARE -> next
+        close :: trust_nix_matching(raw, open, @TRUST_OPEN_SQUARE, @TRUST_CLOSE_SQUARE)
+        if close < 0 -> break
+        body :: pkg_bytes_text(raw, open + 1, close)
+        loop value in trust_nix_quoted_values(body) -> values.push(value)
+        loop word in trust_text_words(body) {
+            value :: trust_text_trim_bytes(word, [Int]{@TRUST_COMMA, @TRUST_SEMICOLON, @TRUST_OPEN_PAREN, @TRUST_CLOSE_PAREN})
+            if trust_nix_is_relative_module_path(value) -> values.push(value)
+        }
+        cursor = close + 1
+    }
+    values
+}
+
+fn trust_nix_is_relative_module_path(value: String) -> Bool !Never {
+    value == "." || value == ".." || value.starts_with("./") || value.starts_with("../")
+}
+
+// The contents of each double-quoted string. An unterminated final string
+// loses its last byte, as the reference slice does.
+fn trust_nix_quoted_values(text: String) -> [String] !Never {
+    raw :: text.bytes()
+    values := [String]{}
+    cursor := 0
+    loop cursor < raw.len() {
+        start :: trust_text_find_byte(raw, @TRUST_QUOTE, cursor)
+        if start < 0 -> break
+        end :: trust_nix_skip_quoted(raw, start)
+        if end <= raw.len() && end > start + 1 -> values.push(pkg_bytes_text(raw, start + 1, end - 1))
+        cursor = if end > start + 1 -> end else -> start + 1
+    }
+    values
+}
+
+// The flake-parts composition a `mkFlake` flake declares.
+fn trust_nix_flake_parts_composition(text: String) -> ?FlakeComposition !Never {
+    if !text.contains("flake-parts") || !text.contains("mkFlake") -> return None
+    Val(FlakeComposition{
+        framework: "flake-parts",
+        modules: pkg_overlay_sorted_unique(trust_nix_list_assignment_values(text, "imports")),
+        module_sources: [String]{},
+        systems: pkg_overlay_sorted_unique(trust_nix_list_assignment_values(text, "systems")),
+        per_system: text.contains("perSystem") || text.contains("per_system")
+    })
+}

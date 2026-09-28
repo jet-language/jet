@@ -1,0 +1,43 @@
+// Claims ported from crates/jet-pkg-model/src/MCP.rs #[cfg(test)]. The
+// initialize exchange and codec round trips carry DataTree values and are
+// not part of this unit.
+
+#Test("stable mcp peer negotiates the stable revision") {
+    peer := McpPeer.server(McpPolicy.stable())
+    selected :: peer.negotiate([String]{@MCP_PREVIEW_REVISION, @MCP_STABLE_REVISION}) ?? panic("stable negotiation")
+    assert_eq(selected.revision, McpRevision.Stable20251125)
+    assert_eq(peer.state(), McpLifecycleState.Negotiated)
+}
+
+#Test("mcp preview requires explicit opt in and uses the stateless profile") {
+    stable := McpPeer.server(McpPolicy.stable())
+    if stable.negotiate([String]{@MCP_PREVIEW_REVISION}) == {
+        .Ok(_) -> panic("preview must need opt-in")
+        .Err(error) -> assert_eq(error, McpNegotiationError.PreviewRequiresOptIn)
+    }
+    preview := McpPeer.server(McpPolicy.stable_and([McpRevision]{McpRevision.Preview20260728}))
+    selected :: preview.negotiate([String]{@MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    assert_eq(selected.lifecycle, McpLifecycleProfile.Stateless)
+    assert_eq(preview.state(), McpLifecycleState.Ready)
+    if preview.exit() == {
+        .Ok(_) -> assert_eq(preview.state(), McpLifecycleState.Closed)
+        .Err(error) -> panic(error.message())
+    }
+}
+
+#Test("mcp rejects unknown revisions and lifecycle before negotiation") {
+    peer := McpPeer.server(McpPolicy.stable())
+    if peer.negotiate([String]{"2099-01-01"}) == {
+        .Ok(_) -> panic("unknown revision must not negotiate")
+        .Err(error) -> {
+            if error == {
+                .NoCommonRevision(_, _) -> {}
+                else -> panic("expected NoCommonRevision")
+            }
+        }
+    }
+    if peer.shutdown() == {
+        .Ok(_) -> panic("shutdown needs a negotiated revision")
+        .Err(error) -> assert_eq(error, McpLifecycleError.NotNegotiated)
+    }
+}

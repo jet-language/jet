@@ -1,0 +1,44 @@
+// Claims ported from crates/jet-pkg-model/src/Variant.rs #[cfg(test)].
+
+#Test("variant defaults cover every axis") {
+    variant :: PackageVariant.defaults_for_context(PlatformKey{arch: @ARCH_ARM64, os: @OS_LINUX})
+    assert_eq(variant.role, VariantRole.Host)
+    assert_eq(variant.os, VariantOs.Linux)
+    assert_eq(variant.arch, VariantArch.Aarch64)
+    assert_eq(variant.libc, VariantLibc.Gnu)
+    assert_eq(variant.linkage, VariantLinkage.Shared)
+    assert_eq(variant.abi, VariantAbi.Sysv)
+    assert_eq(variant.artifact, ArtifactKind.Library)
+    assert(variant.features.len() == 0)
+    assert(variant.identity_key().contains("arch=aarch64"))
+}
+
+#Test("exact variant beats compatible and ambiguity names the axis") {
+    need :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)
+    first :: VariantCandidate.new("openssl-static-musl", need)
+    // Exact and unique.
+    selected :: need.select([VariantCandidate]{first}, [VariantMapEntry]{}) ?? panic("unique exact candidate")
+    assert_eq(selected.label, "openssl-static-musl")
+    // Two exact candidates tie through unmapped provider facts.
+    second :: VariantCandidate.new("openssl-b", need).with_provider_fact("conan.compiler.runtime", "libstdc++11")
+    if need.select([VariantCandidate]{first, second}, [VariantMapEntry]{}) == {
+        .Ok(_) -> panic("expected Ambiguous")
+        .Err(error) -> {
+            if error == {
+                .Ambiguous(_, axis, labels) -> {
+                    assert_eq(axis.as_str(), "provider-facts")
+                    assert_eq(labels.len(), 2)
+                }
+                else -> panic("expected Ambiguous")
+            }
+        }
+    }
+}
+
+#Test("variant map folds a provider fact into libc") {
+    need :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl)
+    candidate :: VariantCandidate.new("openssl", PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Gnu)).with_provider_fact("conan.compiler.libc", "musl")
+    maps :: [VariantMapEntry]{VariantMapEntry{provider_key: "conan.compiler.libc", axis: "libc", value: "*"}}
+    selected :: need.select([VariantCandidate]{candidate}, maps) ?? panic("mapped libc candidate")
+    assert_eq(selected.label, "openssl")
+}

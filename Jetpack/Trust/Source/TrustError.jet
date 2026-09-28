@@ -1,0 +1,37 @@
+// The Trust area's one error carrier. Flake graph failures keep the exact
+// `FlakeGraphError` text of the Rust reference; `Rejected` is a semantic lock
+// write refused by revalidation (Rust `LockCommitError` without I/O), and
+// `Io` carries boundary failures whose text is already final.
+
+#Error
+pub enum TrustError {
+    EmptyInputName
+    DuplicateInput(String)
+    ConflictingInput(input: String, field: String)
+    MissingFollows(input: String, follows: String)
+    FollowsCycle(String)
+    MissingRevision(input: String)
+    InvalidAssignment(String)
+    StaleSemanticLock(String)
+    Io(String)
+    Rejected([ValidationIssue])
+
+    fn message(self) -> String !Never {
+        if self == {
+            .EmptyInputName -> "flake input has an empty name"
+            .DuplicateInput(name) -> "flake input `{name}` is declared more than once"
+            .ConflictingInput(input, field) -> "flake input `{input}` has conflicting `{field}` assignments"
+            .MissingFollows(input, follows) -> "flake input `{input}` follows unknown input `{follows}`"
+            .FollowsCycle(name) -> "flake input `{name}` participates in a follows cycle"
+            .MissingRevision(input) -> "flake input `{input}` has no exact revision in flake.nix or flake.lock"
+            .InvalidAssignment(value) -> "unsupported flake assignment `{value}`"
+            .StaleSemanticLock(reason) -> "semantic flake lock is stale: {reason}"
+            .Io(text) -> text
+            .Rejected(issues) -> {
+                messages := [String]{}
+                loop issue in issues -> messages.push(issue.message())
+                messages.join("; ")
+            }
+        }
+    }
+}

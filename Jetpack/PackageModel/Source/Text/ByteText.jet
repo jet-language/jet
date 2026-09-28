@@ -64,3 +64,30 @@ fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int !Never {
         cursor += width
     }
 }
+
+// Whether `value` holds a Unicode control scalar (C0, DEL, or C1): Rust's
+// `char::is_control` over every scalar.
+fn pkg_text_has_control(value: String) -> Bool !Never {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 32 || code == 127 -> return true
+        // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
+        if code == 0xC2 && index + 1 < raw.len() {
+            next_code :: Int.from_u8(raw[index + 1])
+            if next_code >= 0x80 && next_code <= 0x9F -> return true
+        }
+    }
+    false
+}
+
+// ASCII-only lowercase (`str::to_ascii_lowercase`); other scalars unchanged.
+fn pkg_ascii_lower(value: String) -> String !Never {
+    raw :: value.bytes()
+    out := [U8]{}
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+    }
+    pkg_bytes_text(out, 0, out.len())
+}

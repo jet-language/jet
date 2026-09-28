@@ -1,0 +1,149 @@
+// Claims ported from crates/jetpack/src/SemanticLock.rs `flake_tests`: the
+// `flake.nix` projection and its semantic lock records. Claims that read or
+// render `flake.lock` JSON wait for the Core JSON codec (#3591); claims that
+// write project files wait for the file boundary.
+
+// The semantic lock records this unit projects for `graph` (no lock nodes,
+// registries, or composition record).
+fn trust_test_flake_lock(graph: FlakeGraph) -> SemanticLockFile {
+    records := [SemanticRecord]{graph.source_record()}
+    loop record in graph.input_records() -> records.push(record)
+    loop record in graph.output_records() -> records.push(record)
+    loop record in graph.unsupported_records() -> records.push(record)
+    SemanticLockFile{records, inputs: graph.lock_inputs(), source_maps: [SourceMapEntry]{}}
+}
+
+fn trust_test_flake(text: String) -> FlakeGraph {
+    FlakeGraph.parse("flake.nix", text) ?? panic("flake should parse")
+}
+
+fn trust_test_flake_error(text: String) -> TrustError {
+    if FlakeGraph.parse("flake.nix", text) == {
+        .Ok(_) -> panic("expected the flake to fail closed")
+        .Err(error) -> error
+    }
+}
+
+#Test("parses follows outputs and round trips through semantic lock") {
+    graph :: trust_test_flake(`
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567";
+    tools.url = "github:example/tools?rev=89abcdef0123456789abcdef0123456789abcdef";
+    tools.follows = "nixpkgs";
+  };
+  outputs = { self, nixpkgs, ... }: {
+    packages.x86_64-linux.app = 1;
+    devShells.x86_64-linux.default = 2;
+  };
+}
+`)
+    assert_eq(graph.inputs.len(), 2)
+    assert_eq(graph.inputs[1].follows, "nixpkgs")
+    assert_eq(graph.inputs[1].revision, graph.inputs[0].revision)
+    assert_eq(graph.named_dev_shells().len(), 1)
+
+    lock :: trust_test_flake_lock(graph)
+    source :: trust_flake_lock_source(lock, ".jet/lock")
+    assert_eq(source, "flake.nix")
+    assert_eq(trust_flake_lock_fingerprint(lock), graph.source_fingerprint)
+    restored_inputs :: trust_flake_lock_inputs(lock, source) ?? panic("inputs should restore")
+    assert_eq(restored_inputs, graph.inputs)
+    restored_outputs :: trust_flake_lock_outputs(lock, source) ?? panic("outputs should restore")
+    assert_eq(restored_outputs, graph.outputs)
+    assert_eq(trust_flake_lock_unsupported(lock), graph.unsupported)
+    assert(trust_flake_lock_has_facts(lock))
+    reparsed :: trust_parse_semantic_lock(trust_write_semantic_lock(lock))
+    assert_eq(trust_write_semantic_lock(reparsed), trust_write_semantic_lock(lock))
+}
+
+#Test("ignores nested package references when pinning outputs") {
+    graph :: trust_test_flake(`
+{
+  devShells.x86_64-linux.default = {
+    packages = [ (builtins.getFlake "path:./dep").packages.x86_64-linux.default ];
+  };
+  packages.x86_64-linux.fetched = pkgs.fd;
+}
+`)
+    package_outputs := [String]{}
+    loop output in graph.outputs {
+        if output.kind == FlakeOutputKind.Package -> package_outputs.push(output.attribute)
+    }
+    assert_eq(package_outputs, [String]{"fetched"})
+}
+
+#Test("floating or conflicting foreign inputs fail closed") {
+    if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs"; }`) == {
+        .MissingRevision(_) -> {}
+        else -> panic("expected MissingRevision")
+    }
+    if trust_test_flake_error(`{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=aaaaaaa"; inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=bbbbbbb"; }`) == {
+        .ConflictingInput(_, _) -> {}
+        else -> panic("expected ConflictingInput")
+    }
+}
+
+#Test("semantic lock requires every flake input record") {
+    lock := SemanticLockFile.empty()
+    lock.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs", follows: ""}}
+    if trust_flake_lock_inputs(lock, "flake.nix") == {
+        .Ok(_) -> panic("expected MissingRevision")
+        .Err(error) -> {
+            if error == {
+                .MissingRevision(input) -> assert_eq(input, "nixpkgs")
+                else -> panic("expected MissingRevision")
+            }
+        }
+    }
+}
+
+#Test("a changed flake rejects a stale semantic lock") {
+    source :: `{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567"; }`
+    graph :: trust_test_flake(source)
+    locked :: graph
+    current :: FlakeGraph.project("flake.nix", source) ?? panic("unchanged flake should project")
+    if locked.ensure_current(current) == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("an unchanged flake keeps its lock")
+    }
+    changed :: FlakeGraph.project("flake.nix", "{source}\n# changed\n") ?? panic("changed flake should project")
+    if locked.ensure_current(changed) == {
+        .Ok(_) -> panic("expected StaleSemanticLock")
+        .Err(error) -> {
+            if error == {
+                .StaleSemanticLock(_) -> {}
+                else -> panic("expected StaleSemanticLock")
+            }
+        }
+    }
+}
+
+#Test("flake parts composition is graph data") {
+    graph :: trust_test_flake(`
+{
+  inputs = {
+    flake-parts.url = "github:hercules-ci/flake-parts?rev=0123456789abcdef0123456789abcdef01234567";
+    nixpkgs.url = "github:NixOS/nixpkgs?rev=89abcdef0123456789abcdef0123456789abcdef";
+  };
+  outputs = inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ ./parts/dev.nix ];
+      systems = [ "x86_64-linux" "aarch64-darwin" ];
+      perSystem = { pkgs, ... }: {
+        packages.default = pkgs.hello;
+        devShells.default = pkgs.mkShell { };
+      };
+    };
+}
+`)
+    assert_eq(graph.composition, Val(FlakeComposition{
+        framework: "flake-parts",
+        modules: [String]{"./parts/dev.nix"},
+        module_sources: [String]{},
+        systems: [String]{"aarch64-darwin", "x86_64-linux"},
+        per_system: true
+    }))
+    assert(!graph.unsupported.contains("flake-parts"))
+    assert(!graph.unsupported.contains("perSystem"))
+}

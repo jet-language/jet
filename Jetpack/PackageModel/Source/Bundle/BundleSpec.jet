@@ -1,0 +1,510 @@
+// Package bundle inputs and their validation, ported from
+// jet_pkg_model::Bundler.
+//
+// This is the input side of desktop and game packaging: it never invokes
+// platform packers, signers, launchers, or update services. A caller supplies
+// an explicit target and executable bytes, and `BundleSpec.validate` checks
+// the spec before a plan lays out its target files. Game bundles use the same
+// model; `BundleKind` records the intent for receipts.
+
+@PACKAGE_BUNDLE_SCHEMA_VERSION :: 1
+@PACKAGE_BUNDLE_FORMAT :: "jet.package.bundle"
+@PACKAGE_BUNDLE_RECEIPT_SCHEMA :: "jet.package.receipt"
+@PACKAGE_UPDATE_MANIFEST_SCHEMA :: "jet.package.update"
+
+// Canonical bounds shared by the package receipt and the generated game
+// crash reporter. The reporter keeps these in memory and persists at most
+// one latest report; upload stays disabled until an adapter adds a transport.
+@GAME_CRASH_MAX_STACKS :: 32
+@GAME_CRASH_MAX_LOGS :: 256
+@GAME_CRASH_MAX_PERSISTED :: 1
+@GAME_CRASH_REPORTER_ABI :: "jet-game-crash-reporter-v1"
+
+// The explicit package target; nothing is inferred from the host process.
+pub enum BundleTarget {
+    LinuxAppImage
+    MacOSApp
+    WindowsMsix
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .LinuxAppImage -> "linux-appimage"
+            .MacOSApp -> "macos-app"
+            .WindowsMsix -> "windows-msix"
+        }
+    }
+
+    fn parse(value: String) -> ?BundleTarget !Never {
+        if pkg_ascii_lower(value.trim()) == {
+            "linux-appimage" | "linux" | "appimage" -> Val(BundleTarget.LinuxAppImage)
+            "macos-app" | "macos" | "mac" | "app" -> Val(BundleTarget.MacOSApp)
+            "windows-msix" | "windows" | "msix" -> Val(BundleTarget.WindowsMsix)
+            else -> None
+        }
+    }
+
+    fn artifact_suffix(self) -> String !Never {
+        if self == {
+            .LinuxAppImage -> ".AppImage"
+            .MacOSApp -> ".app"
+            .WindowsMsix -> ".msix"
+        }
+    }
+}
+
+// Whether the shared bundle is for a desktop application or a game.
+pub enum BundleKind {
+    Desktop
+    Game
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Desktop -> "desktop"
+            .Game -> "game"
+        }
+    }
+}
+
+// The executable the compiler/build adapter supplies.
+pub struct BundleExecutable {
+    // File name inside the target layout.
+    pub name: String
+    // Source path recorded in the receipt; this model never resolves it.
+    pub source: String
+    // Exact executable bytes placed in the layout.
+    pub bytes: [U8]
+
+    fn digest(self) -> String !Never {
+        pkg_sha256_hex(self.bytes)
+    }
+}
+
+pub enum IconFormat {
+    Png
+    Icns
+    Ico
+    Svg
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Png -> "png"
+            .Icns -> "icns"
+            .Ico -> "ico"
+            .Svg -> "svg"
+        }
+    }
+
+    fn parse(value: String) -> ?IconFormat !Never {
+        extension := value.trim()
+        loop extension.starts_with(".") -> extension = extension.removeprefix(".")
+        if pkg_ascii_lower(extension) == {
+            "png" -> Val(IconFormat.Png)
+            "icns" -> Val(IconFormat.Icns)
+            "ico" -> Val(IconFormat.Ico)
+            "svg" -> Val(IconFormat.Svg)
+            else -> None
+        }
+    }
+}
+
+// An icon payload. `source` is receipt provenance only; the bytes are the
+// authority for the emitted artifact.
+pub struct BundleIcon {
+    pub name: String
+    pub format: IconFormat
+    pub size: Int
+    pub source: ?String
+    pub bytes: [U8]
+
+    fn new(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon !Never {
+        BundleIcon{name: name, format: format, size: size, source: None, bytes: bytes}
+    }
+
+    fn with_source(self, source: String) -> BundleIcon !Never {
+        out := self
+        out.source = Val(source)
+        out
+    }
+
+    fn digest(self) -> String !Never {
+        pkg_sha256_hex(self.bytes)
+    }
+}
+
+// A signer or verification adapter input; the adapter owns the command.
+pub struct SigningHookInput {
+    pub path: String
+    pub digest: String
+}
+
+pub enum SigningPhase {
+    PreSign
+    PostSign
+    Verify
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .PreSign -> "pre-sign"
+            .PostSign -> "post-sign"
+            .Verify -> "verify"
+        }
+    }
+
+}
+
+// A typed signing hook declaration; this module executes none.
+pub struct SigningHook {
+    pub name: String
+    pub phase: SigningPhase
+    pub program: String
+    pub args: [String]
+    pub inputs: [SigningHookInput]
+
+    fn new(name: String, phase: SigningPhase, program: String) -> SigningHook !Never {
+        SigningHook{name: name, phase: phase, program: program, args: [String]{}, inputs: [SigningHookInput]{}}
+    }
+
+}
+
+// A user-declared updater endpoint. The checked plan fills the manifest's
+// artifact and payload facts from the exact executable payload; the receipt
+// carries the final materialized artifact digest.
+pub struct UpdaterSpec {
+    pub channel: String
+    pub url: String
+    pub signature_url: ?String
+    pub release_notes_url: ?String
+
+    fn new(channel: String, url: String) -> UpdaterSpec !Never {
+        UpdaterSpec{channel: channel, url: url, signature_url: None, release_notes_url: None}
+    }
+}
+
+// Human- and platform-facing metadata. `identifier` is the stable package
+// identity; display text may contain spaces and Unicode.
+pub struct BundleMetadata {
+    pub identifier: String
+    pub display_name: String
+    pub publisher: String
+    pub description: String
+    pub categories: [String]
+
+    fn new(identifier: String, display_name: String) -> BundleMetadata !Never {
+        BundleMetadata{identifier: identifier, display_name: display_name, publisher: "", description: "", categories: [String]{}}
+    }
+}
+
+// One deterministic asset payload carried by a game bundle plan.
+pub struct GameBundleAsset {
+    pub path: String
+    pub mode: Int
+    pub bytes: [U8]
+
+    fn digest(self) -> String !Never {
+        pkg_sha256_hex(self.bytes)
+    }
+}
+
+pub struct GameCrashReporterSpec {
+    pub installation: String
+    pub upload_policy: String
+    pub routing: String
+    pub memory_stacks: Int
+    pub memory_logs: Int
+    pub retention_mode: String
+    pub retention_path: String
+    pub retention_limit: Int
+
+    fn not_installed() -> GameCrashReporterSpec !Never {
+        GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
+    }
+
+    fn planned() -> GameCrashReporterSpec !Never {
+        GameCrashReporterSpec{installation: "planned", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
+    }
+
+    fn installed() -> GameCrashReporterSpec !Never {
+        GameCrashReporterSpec{installation: "installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
+    }
+
+    // The reporter, consent, and runtime facts agree with the canonical
+    // bounds; only an active reporter retains reports.
+    fn validate(self, reporter: String, consent: String) !BundleError {
+        if reporter == {
+            "off" | "on" | "opt-in" -> {}
+            else -> return Err(BundleError.InvalidField{field: "game.crash_reporter", reason: "must be `off`, `on`, or `opt-in`"})
+        }
+        if consent == {
+            "not-requested" | "granted" | "denied" -> {}
+            else -> return Err(BundleError.InvalidField{field: "game.crash_consent", reason: "must be `not-requested`, `granted`, or `denied`"})
+        }
+        if reporter == "on" && consent != "granted" -> return Err(BundleError.InvalidField{field: "game.crash_consent", reason: "must be `granted` when game crash reporter is `on`"})
+        if reporter == "off" && consent == "granted" -> return Err(BundleError.InvalidField{field: "game.crash_consent", reason: "cannot be `granted` when game crash reporter is `off`"})
+        if self.installation == {
+            "not-installed" | "planned" | "installed" -> {}
+            else -> return Err(BundleError.InvalidField{field: "game.crash_runtime.installation", reason: "must be `not-installed`, `planned`, or `installed`"})
+        }
+        if self.upload_policy != "never" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.upload_policy", reason: "must be `never` until an explicit upload transport is authorized"})
+        if self.routing != "local" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.routing", reason: "must be `local` until an explicit upload transport is authorized"})
+        if self.memory_stacks != @GAME_CRASH_MAX_STACKS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_stacks", reason: "must equal the canonical bound {@GAME_CRASH_MAX_STACKS}"})
+        if self.memory_logs != @GAME_CRASH_MAX_LOGS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_logs", reason: "must equal the canonical bound {@GAME_CRASH_MAX_LOGS}"})
+        if reporter != "off" && consent == "granted" {
+            if self.installation != "planned" && self.installation != "installed" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.installation", reason: "an active reporter must be planned or installed"})
+            if self.retention_mode != "bounded-persisted" || self.retention_limit != @GAME_CRASH_MAX_PERSISTED {
+                return Err(BundleError.InvalidField{field: "game.crash_runtime.retention", reason: "active reporter must persist exactly {@GAME_CRASH_MAX_PERSISTED} latest report"})
+            }
+            pkg_bundle_validate_asset_path(self.retention_path)
+            if self.retention_path != "crash-reports" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.retention_path", reason: "must use the package-local `crash-reports` directory"})
+            return
+        }
+        if self.installation == "installed" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.installation", reason: "a non-active reporter cannot be installed"})
+        if self.retention_mode != "none" || self.retention_path != "" || self.retention_limit != 0 {
+            return Err(BundleError.InvalidField{field: "game.crash_runtime.retention", reason: "non-active reporter must not retain reports"})
+        }
+    }
+}
+
+// Game-only facts attached to the shared package plan. The package command
+// computes them; the bundler owns their canonical layout and receipt.
+pub struct GameBundleSpec {
+    pub profile_name: String
+    pub export_preset: String
+    pub source_revision: String
+    pub build_identity: String
+    pub backend: String
+    pub renderer: String
+    pub cook_mode: String
+    pub development_stripping: Bool
+    pub crash_reporter: String
+    pub crash_consent: String
+    pub crash_runtime: GameCrashReporterSpec
+    pub assets: [GameBundleAsset]
+
+    fn new(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec !Never {
+        GameBundleSpec{
+            profile_name: profile_name,
+            export_preset: export_preset,
+            source_revision: source_revision,
+            build_identity: "planned",
+            backend: backend,
+            renderer: renderer,
+            cook_mode: cook_mode,
+            development_stripping: false,
+            crash_reporter: "off",
+            crash_consent: "not-requested",
+            crash_runtime: GameCrashReporterSpec.not_installed(),
+            assets: [GameBundleAsset]{}
+        }
+    }
+}
+
+// All inputs for one target-specific bundle layout.
+pub struct BundleSpec {
+    pub kind: BundleKind
+    pub target: BundleTarget
+    pub package: String
+    pub version: String
+    pub executable: BundleExecutable
+    pub metadata: BundleMetadata
+    pub icons: [BundleIcon]
+    pub signing_hooks: [SigningHook]
+    pub updater: ?UpdaterSpec
+    pub game: ?GameBundleSpec
+
+    fn new(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+        BundleSpec{kind: kind, target: target, package: package, version: version, executable: executable, metadata: metadata, icons: [BundleIcon]{}, signing_hooks: [SigningHook]{}, updater: None, game: None}
+    }
+
+    fn desktop(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+        BundleSpec.new(BundleKind.Desktop, target, package, version, executable, metadata)
+    }
+
+    fn game_bundle(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+        BundleSpec.new(BundleKind.Game, target, package, version, executable, metadata)
+    }
+
+    fn validate(self) !BundleError {
+        pkg_bundle_validate_component("package", self.package)
+        pkg_bundle_validate_component("version", self.version)
+        pkg_bundle_validate_component("executable.name", self.executable.name)
+        pkg_bundle_validate_source("executable.source", self.executable.source)
+        pkg_bundle_validate_component("metadata.identifier", self.metadata.identifier)
+        pkg_bundle_validate_text("metadata.display_name", self.metadata.display_name)
+        pkg_bundle_validate_text("metadata.publisher", self.metadata.publisher)
+        pkg_bundle_validate_text("metadata.description", self.metadata.description)
+        loop category in self.metadata.categories -> pkg_bundle_validate_text("metadata.category", category)
+        if self.target == BundleTarget.WindowsMsix {
+            if self.metadata.publisher.trim() == "" -> return Err(BundleError.EmptyField("metadata.publisher"))
+            _ := pkg_bundle_windows_version(self.version)
+        }
+        loop icon in self.icons {
+            pkg_bundle_validate_component("icon.name", icon.name)
+            if icon.size == 0 -> return Err(BundleError.InvalidField{field: "icon.size", reason: "must be greater than zero"})
+            if icon.source == {
+                .Val(source) -> pkg_bundle_validate_source("icon.source", source)
+                .None -> {}
+            }
+        }
+        self.validate_target_metadata()
+        loop hook in self.signing_hooks {
+            pkg_bundle_validate_component("signing_hook.name", hook.name)
+            pkg_bundle_validate_source("signing_hook.program", hook.program)
+            loop argument in hook.args -> pkg_bundle_validate_text("signing_hook.argument", argument)
+            loop input in hook.inputs {
+                pkg_bundle_validate_source("signing_hook.input.path", input.path)
+                pkg_bundle_validate_component("signing_hook.input.digest", input.digest)
+            }
+        }
+        if self.game == {
+            .Val(game) -> {
+                if self.kind != BundleKind.Game -> return Err(BundleError.InvalidField{field: "game", reason: "is only valid for a game bundle"})
+                pkg_bundle_validate_component("game.profile", game.profile_name)
+                pkg_bundle_validate_component("game.export_preset", game.export_preset)
+                pkg_bundle_validate_text("game.source_revision", game.source_revision)
+                pkg_bundle_validate_text("game.build_identity", game.build_identity)
+                pkg_bundle_validate_component("game.backend", game.backend)
+                pkg_bundle_validate_component("game.renderer", game.renderer)
+                pkg_bundle_validate_component("game.cook_mode", game.cook_mode)
+                pkg_bundle_validate_component("game.crash_reporter", game.crash_reporter)
+                pkg_bundle_validate_component("game.crash_consent", game.crash_consent)
+                game.crash_runtime.validate(game.crash_reporter, game.crash_consent)
+                asset_paths := [String]{}
+                loop asset in game.assets {
+                    pkg_bundle_validate_asset_path(asset.path)
+                    if asset_paths.contains(asset.path) -> return Err(BundleError.DuplicatePath(asset.path))
+                    asset_paths.push(asset.path)
+                }
+            }
+            .None -> {
+                if self.kind == BundleKind.Game -> return Err(BundleError.InvalidField{field: "game", reason: "game bundles need game profile and asset facts"})
+            }
+        }
+        if self.updater == {
+            .Val(updater) -> {
+                pkg_bundle_validate_component("updater.channel", updater.channel)
+                pkg_bundle_validate_source("updater.url", updater.url)
+                if updater.signature_url == {
+                    .Val(url) -> pkg_bundle_validate_source("updater.signature_url", url)
+                    .None -> {}
+                }
+                if updater.release_notes_url == {
+                    .Val(url) -> pkg_bundle_validate_source("updater.release_notes_url", url)
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+    }
+
+    // Target-specific icon formats and identity rules.
+    fn validate_target_metadata(self) !BundleError {
+        if self.target == {
+            .LinuxAppImage -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Png, IconFormat.Svg}, "is not supported by linux-appimage")
+            .MacOSApp -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Icns}, "macos-app requires icns icons")
+            .WindowsMsix -> {
+                if !pkg_bundle_msix_identifier(self.metadata.identifier) {
+                    return Err(BundleError.InvalidField{field: "metadata.identifier", reason: "must be an MSIX-safe identifier (ASCII letters, digits, dots, or hyphens; max 50 bytes)"})
+                }
+                if !self.metadata.publisher.trim_start().starts_with("CN=") {
+                    return Err(BundleError.InvalidField{field: "metadata.publisher", reason: "must be a distinguished name beginning with `CN=` for windows-msix"})
+                }
+                pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Png, IconFormat.Ico}, "windows-msix supports png or ico icons")
+            }
+        }
+    }
+}
+
+#Error
+pub enum BundleError {
+    EmptyField(String)
+    InvalidField(field: String, reason: String)
+    InvalidPath(field: String, path: String)
+    DuplicatePath(String)
+    InvalidWindowsVersion(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .EmptyField(field) -> "bundle field `{field}` is empty"
+            .InvalidField(field, reason) -> "bundle field `{field}` {reason}"
+            .InvalidPath(field, path) -> "bundle {field} path `{path}` is invalid"
+            .DuplicatePath(path) -> "bundle emits duplicate path `{path}`"
+            .InvalidWindowsVersion(version) -> "bundle version `{version}` is not a Windows MSIX version"
+        }
+    }
+}
+
+// Every icon uses one of the target's formats.
+fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], reason: String) !BundleError {
+    loop icon in icons {
+        if !allowed.contains(icon.format) -> return Err(BundleError.InvalidField{field: "icon.format", reason: reason})
+    }
+}
+
+// ASCII letters, digits, dots, and hyphens, starting alphanumeric, at most
+// 50 bytes.
+fn pkg_bundle_msix_identifier(identifier: String) -> Bool !Never {
+    raw :: identifier.bytes()
+    if raw.len() == 0 || raw.len() > 50 -> return false
+    first :: Int.from_u8(raw[0])
+    if !pkg_bytes_is_word(first) || first == 95 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if code == 95 || (!pkg_bytes_is_word(code) && code != 46 && code != 45) -> return false
+    }
+    true
+}
+
+// A package-relative asset path of plain `/`-separated names.
+fn pkg_bundle_validate_asset_path(path: String) !BundleError {
+    if path == "" || path.contains("\\") || pkg_text_has_control(path) -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
+    loop component in path.split("/") {
+        if component == "" || component == "." || component == ".." -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
+    }
+}
+
+// A non-blank file name component without path or control characters.
+fn pkg_bundle_validate_component(field: String, value: String) !BundleError {
+    if value.trim() == "" -> return Err(BundleError.EmptyField(field))
+    if pkg_text_has_control(value) || pkg_bundle_has_path_character(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a path or control character"})
+}
+
+fn pkg_bundle_has_path_character(value: String) -> Bool !Never {
+    loop byte in value.bytes() {
+        if Int.from_u8(byte) == {
+            47 | 92 | 58 | 60 | 62 | 34 | 124 | 63 | 42 -> return true
+            else -> {}
+        }
+    }
+    false
+}
+
+fn pkg_bundle_validate_text(field: String, value: String) !BundleError {
+    if pkg_text_has_control(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a control character"})
+}
+
+// A non-blank, control-free source path or URL.
+fn pkg_bundle_validate_source(field: String, value: String) !BundleError {
+    if value.trim() == "" -> return Err(BundleError.EmptyField(field))
+    if pkg_text_has_control(value) -> return Err(BundleError.InvalidPath{field: field, path: value})
+}
+
+// A Windows MSIX version: one to four dot-separated decimal parts, each at
+// most 65535, normalized to four parts without leading zeros.
+fn pkg_bundle_windows_version(version: String) -> String !BundleError {
+    parts :: version.split(".").to_list()
+    if parts.len() == 0 || parts.len() > 4 -> return Err(BundleError.InvalidWindowsVersion(version))
+    normalized := [String]{}
+    loop part in parts {
+        if part == "" -> return Err(BundleError.InvalidWindowsVersion(version))
+        value := 0
+        loop byte in part.bytes() {
+            code :: Int.from_u8(byte)
+            if code < 48 || code > 57 -> return Err(BundleError.InvalidWindowsVersion(version))
+            value = value * 10 + code - 48
+            if value > 65535 -> return Err(BundleError.InvalidWindowsVersion(version))
+        }
+        normalized.push("{value}")
+    }
+    loop normalized.len() < 4 -> normalized.push("0")
+    Ok(normalized.join("."))
+}

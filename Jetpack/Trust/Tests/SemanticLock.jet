@@ -1,0 +1,228 @@
+// Claims ported from tests/jetpack_semantic_lock.rs: the semantic lock text,
+// merge, revalidation, selective update, and overlay invalidation behavior.
+// File writes, the machine `Lock` module, and the Overlay.rs projections are
+// outside this unit; their claims keep only the semantic lock half.
+
+fn trust_test_pkg(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
+    rationale := LockRationale.empty()
+    rationale.owner_package = owner
+    rationale.reason = "{owner} declared {key}"
+    rationale.source_ref = "catalog:{key}"
+    rationale.provider = "core"
+    rationale.channel_input = "stable"
+    rationale.exact_output = ~exact
+    rationale.policy_fingerprint = "policy-1"
+    rationale.signature = "ed25519:sig"
+    rationale.cache_provenance = "hangar"
+    rationale.update_command = "jet update {key}"
+    SemanticRecord.new(LockIdentity{kind: LockRecordKind.Package, key, exact, hash, platform: "x86_64-linux"}, rationale)
+}
+
+// The `[[semantic_record]]` block of `text` that contains `needle`.
+fn trust_test_record_block(text: String, needle: String) -> String {
+    raw :: text.bytes()
+    header :: "[[semantic_record]]".bytes()
+    start := 0
+    loop {
+        at :: trust_text_find(raw, header, start)
+        end :: if at < 0 -> raw.len() else -> at
+        block :: pkg_bytes_text(raw, start, end)
+        if block.contains(needle) -> return block
+        if at < 0 -> panic("no semantic record block contains {needle}")
+        start = at + header.len()
+    }
+}
+
+fn trust_test_has_issue(issues: [ValidationIssue], expected: String) -> Bool {
+    loop issue in issues {
+        kind :: if issue == {
+            .InputCycle(_) -> "InputCycle"
+            .MissingFollows(_, _) -> "MissingFollows"
+            .MissingHash(_) -> "MissingHash"
+            .MissingSignature(_) -> "MissingSignature"
+            .DomainConflict(_, _, _) -> "DomainConflict"
+            .SourceAuthority(_, _, _) -> "SourceAuthority"
+            .OfflineIncomplete(_) -> "OfflineIncomplete"
+        }
+        if kind == expected -> return true
+    }
+    false
+}
+
+@TRUST_TEST_MACHINE_LOCK :: `version = 1
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { root = "." }
+fingerprint = "fp-app"
+dependencies = []
+
+[root]
+dependencies = ["app"]
+`
+
+#Test("live lock text keeps machine sections beside semantic sections") {
+    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    semantic.inputs = [LockInput]{
+        LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
+        LockInput{name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+    }
+    semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
+    assert_eq(trust_semantic_lock_issues(semantic).len(), 0)
+    raw :: "{@TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(semantic)}"
+    assert(raw.contains("[[package]]"))
+    assert(raw.contains("name = \"app\""))
+    assert(raw.contains("[[semantic_record]]"))
+    assert(raw.contains("[[lock_input]]"))
+    assert(raw.contains("[[source_map]]"))
+    assert(raw.contains("follows = \"nixpkgs\""))
+
+    loaded :: trust_parse_semantic_lock(raw)
+    assert_eq(loaded.records.len(), 1)
+    assert_eq(loaded.inputs.len(), 2)
+    assert_eq(loaded.source_maps.len(), 1)
+    assert_eq(loaded.records[0].identity.exact, "1.2.3")
+
+    machine :: trust_strip_semantic_sections(raw)
+    assert(!machine.contains("semantic_record"))
+    assert(!machine.contains("lock_input"))
+    assert(machine.contains("version = 1"))
+    assert(machine.contains("[[package]]"))
+}
+
+#Test("catalog selection records owner and source ref") {
+    lock := SemanticLockFile.empty()
+    lock.record_catalog_selection("app", "log", "core.log@1.2.3", "sha256-catalog", "x86_64-linux", "workspace selected shared logging")
+    assert_eq(lock.records.len(), 1)
+    assert_eq(lock.records[0].rationales[0].source_ref, "catalog:log")
+    assert_eq(lock.records[0].rationales[0].adapter_id, "workspace.catalog")
+    assert_eq(trust_semantic_lock_issues(lock).len(), 0)
+}
+
+#Test("selective update keeps unrelated record bytes stable") {
+    lock := SemanticLockFile.with_records([SemanticRecord]{
+        trust_test_pkg("app", "core.log", "1.2.3", "sha256-log"),
+        trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")
+    })
+    before :: trust_write_semantic_lock(lock)
+    http_block :: trust_test_record_block(before, "key = \"core.http\"")
+    lock.selective_update(trust_test_pkg("app", "core.log", "1.3.0", "sha256-log-new"))
+    after :: trust_write_semantic_lock(lock)
+    assert_eq(trust_test_record_block(after, "key = \"core.http\""), http_block)
+    assert(after.contains("exact = \"1.3.0\""))
+}
+
+#Test("input follows cycle and missing target fail revalidate") {
+    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    lock.inputs = [LockInput]{
+        LockInput{name: "a", url: "u-a", follows: "b"},
+        LockInput{name: "b", url: "u-b", follows: "a"}
+    }
+    assert(trust_test_has_issue(trust_semantic_lock_issues(lock), "InputCycle"))
+    lock.inputs = [LockInput]{LockInput{name: "home", url: "u", follows: "missing"}}
+    assert(trust_test_has_issue(trust_semantic_lock_issues(lock), "MissingFollows"))
+}
+
+#Test("source map rejects wrong authority") {
+    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "Company.Lib", "1.0.0", "sha256-lib")})
+    lock.records[0].rationales[0].source_ref = "nuget:PublicGallery"
+    lock.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Company.*", sources: [String]{"nuget:CompanyFeed"}}}
+    assert(trust_test_has_issue(trust_semantic_lock_issues(lock), "SourceAuthority"))
+}
+
+#Test("overlay change invalidates exact action keys and explains why") {
+    actions := [String: [String]]{}
+    actions["foo"] = [String]{"action:foo:build", "action:foo:check"}
+    invalidations :: trust_overlay_invalidations(
+        [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-patch-a"}},
+        [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-patch-a-b"}},
+        actions
+    )
+    assert_eq(invalidations.len(), 1)
+    assert_eq(invalidations[0].affected_action_keys, [String]{"action:foo:build", "action:foo:check"})
+    assert(invalidations[0].reason.contains("changed package `foo`"))
+    assert(invalidations[0].policy_fingerprint_before != invalidations[0].policy_fingerprint_after)
+
+    overlay_record := trust_test_pkg("app", "beta:foo", "1.0.0", "sha256-overlay")
+    overlay_record.identity.kind = LockRecordKind.PackageOverlay
+    lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "foo", "1.0.0", "sha256-foo"), overlay_record})
+    trust_apply_overlay_invalidations(&lock, invalidations)
+    loop record in lock.records {
+        assert(record.identity.kind != LockRecordKind.PackageOverlay)
+    }
+    assert_eq(lock.records.len(), 1)
+    assert_eq(lock.records[0].identity.key, "foo")
+    assert_eq(lock.records[0].identity.hash, "")
+}
+
+#Test("overlay records keep future fields and every contender through the lock text") {
+    base := LockRationale.empty()
+    base.owner_package = "app"
+    base.reason = "overlay `base` contributed `version` = `1` at priority 0"
+    force := LockRationale.empty()
+    force.owner_package = "app"
+    force.reason = "overlay `force` contributed `version` = `2` at priority 100"
+    record := SemanticRecord.new(LockIdentity{kind: LockRecordKind.PackageOverlay, key: "force:foo", exact: "2", hash: "sha256-force", platform: "x86_64-linux"}, base)
+    record.rationales.push(force)
+    record.future_fields["overlay-fact-version"] = "2"
+
+    loaded :: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records([SemanticRecord]{record})))
+    assert_eq(loaded.records.len(), 1)
+    assert_eq(loaded.records[0].future_fields.get("overlay-fact-version"), Val("2"))
+    assert_eq(loaded.records[0].rationales.len(), 2)
+    explanation :: trust_explain_semantic_lock(loaded, "package-overlay:force:foo") ?? panic("overlay explanation")
+    assert_eq(explanation.contenders.len(), 2)
+    assert(explanation.contenders[0].reason.contains("base"))
+    assert(explanation.contenders[1].reason.contains("force"))
+}
+
+#Test("merge for commit rejects conflicts before write") {
+    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-a")})
+    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.3.0", "sha256-b")})
+    if trust_merge_for_commit(SemanticLockFile.empty(), left, right) == {
+        .Ok(_) -> panic("expected a conflict")
+        .Err(error) -> {
+            if error == {
+                .Rejected(issues) -> assert(issues.len() > 0)
+                else -> panic("expected Rejected")
+            }
+        }
+    }
+}
+
+#Test("merge for commit accepts a clean merge") {
+    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")})
+    merged :: trust_merge_for_commit(SemanticLockFile.empty(), left, right) ?? panic("clean merge should commit")
+    assert_eq(merged.records.len(), 2)
+    raw :: "{@TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(merged)}"
+    assert_eq(trust_parse_semantic_lock(raw).records.len(), 2)
+    machine :: trust_strip_semantic_sections(raw)
+    assert(!machine.contains("semantic_record"))
+    assert(machine.contains("version = 1"))
+}
+
+#Test("overlay invalidations helper matches fingerprint diff") {
+    actions := [String: [String]]{}
+    actions["foo"] = [String]{"a:foo"}
+    invalidations :: trust_overlay_invalidations(
+        [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-1"}},
+        [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-2"}},
+        actions
+    )
+    assert_eq(invalidations[0].affected_action_keys, [String]{"a:foo"})
+}
+
+#Test("three way merge preserves inputs and source maps") {
+    base := SemanticLockFile.empty()
+    base.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "old", follows: ""}}
+    left := base
+    left.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Acme.*", sources: [String]{"nuget:Acme"}}}
+    right := base
+    right.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "new", follows: ""}}
+    outcome :: trust_merge_semantic_locks(base, left, right)
+    assert_eq(outcome.conflicts.len(), 0)
+    assert_eq(outcome.merged.inputs[0].url, "new")
+    assert_eq(outcome.merged.source_maps[0].pattern, "Acme.*")
+}

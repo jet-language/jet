@@ -1,0 +1,490 @@
+// Typed package variants (E4-JP15 / D-JPK-VARIANT1=D), ported from
+// jet_pkg_model::Variant.
+//
+// Closed native axes only: build/host/target role, OS, arch, runtime/libc,
+// linkage, ABI, artifact kind, and feature set. Every axis has a context-
+// derived default so beginners never write variants. Matching is
+// exact-then-compatible under one total order; an ambiguous tie is E1316.
+// Selected variants enter action keys and the semantic lock. Provider facts
+// influence selection only through explicit `variant_map` entries.
+
+// Dependency / build graph role (Nix-style build/host/target).
+pub enum VariantRole {
+    Build
+    Host
+    Target
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Build -> "build"
+            .Host -> "host"
+            .Target -> "target"
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantRole !Never {
+        if raw == {
+            "build" -> Val(VariantRole.Build)
+            "host" -> Val(VariantRole.Host)
+            "target" -> Val(VariantRole.Target)
+            else -> None
+        }
+    }
+}
+
+pub enum VariantOs {
+    Linux
+    MacOS
+    Windows
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Linux -> @OS_LINUX
+            .MacOS -> @OS_MACOS
+            .Windows -> @OS_WINDOWS
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantOs !Never {
+        if raw == {
+            @OS_LINUX | "Linux" -> Val(VariantOs.Linux)
+            @OS_MACOS | "MacOS" | "Darwin" | "darwin" -> Val(VariantOs.MacOS)
+            @OS_WINDOWS | "Windows" -> Val(VariantOs.Windows)
+            else -> None
+        }
+    }
+
+    fn from_platform_os(os: String) -> VariantOs !Never {
+        VariantOs.parse(os) ?? VariantOs.Linux
+    }
+}
+
+pub enum VariantArch {
+    X64
+    Aarch64
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .X64 -> @ARCH_X64
+            .Aarch64 -> @ARCH_ARM64
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantArch !Never {
+        if raw == {
+            @ARCH_X64 | "x64" | "amd64" -> Val(VariantArch.X64)
+            @ARCH_ARM64 | "arm64" | "Aarch64" -> Val(VariantArch.Aarch64)
+            else -> None
+        }
+    }
+
+    fn from_platform_arch(arch: String) -> VariantArch !Never {
+        VariantArch.parse(arch) ?? VariantArch.X64
+    }
+}
+
+pub enum VariantLibc {
+    Gnu
+    Musl
+    Msvc
+    NoLibc
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Gnu -> "gnu"
+            .Musl -> "musl"
+            .Msvc -> "msvc"
+            .NoLibc -> "none"
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantLibc !Never {
+        if raw == {
+            "gnu" | "glibc" -> Val(VariantLibc.Gnu)
+            "musl" -> Val(VariantLibc.Musl)
+            "msvc" -> Val(VariantLibc.Msvc)
+            "none" | "null" -> Val(VariantLibc.NoLibc)
+            else -> None
+        }
+    }
+
+    fn default_for(os: VariantOs) -> VariantLibc !Never {
+        if os == {
+            .Linux -> VariantLibc.Gnu
+            .MacOS -> VariantLibc.NoLibc
+            .Windows -> VariantLibc.Msvc
+        }
+    }
+}
+
+pub enum VariantLinkage {
+    Shared
+    Static
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Shared -> "shared"
+            .Static -> "static"
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantLinkage !Never {
+        if raw == {
+            "shared" | "dynamic" -> Val(VariantLinkage.Shared)
+            "static" -> Val(VariantLinkage.Static)
+            else -> None
+        }
+    }
+}
+
+pub enum VariantAbi {
+    Sysv
+    Ms
+    Unknown
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Sysv -> "sysv"
+            .Ms -> "ms"
+            .Unknown -> "unknown"
+        }
+    }
+
+    fn parse(raw: String) -> ?VariantAbi !Never {
+        if raw == {
+            "sysv" -> Val(VariantAbi.Sysv)
+            "ms" | "msvc" -> Val(VariantAbi.Ms)
+            "unknown" -> Val(VariantAbi.Unknown)
+            else -> None
+        }
+    }
+
+    fn default_for(os: VariantOs) -> VariantAbi !Never {
+        if os == {
+            .Windows -> VariantAbi.Ms
+            .Linux | .MacOS -> VariantAbi.Sysv
+        }
+    }
+}
+
+pub enum ArtifactKind {
+    Library
+    Executable
+    Object
+    Archive
+    Headers
+    DevTool
+    Sysroot
+    Any
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Library -> "library"
+            .Executable -> "executable"
+            .Object -> "object"
+            .Archive -> "archive"
+            .Headers -> "headers"
+            .DevTool -> "dev-tool"
+            .Sysroot -> "sysroot"
+            .Any -> "any"
+        }
+    }
+
+    fn parse(raw: String) -> ?ArtifactKind !Never {
+        if raw == {
+            "library" | "lib" -> Val(ArtifactKind.Library)
+            "executable" | "bin" -> Val(ArtifactKind.Executable)
+            "object" | "obj" -> Val(ArtifactKind.Object)
+            "archive" -> Val(ArtifactKind.Archive)
+            "headers" | "include" -> Val(ArtifactKind.Headers)
+            "dev-tool" | "tool" -> Val(ArtifactKind.DevTool)
+            "sysroot" -> Val(ArtifactKind.Sysroot)
+            "any" -> Val(ArtifactKind.Any)
+            else -> None
+        }
+    }
+}
+
+// The axes in tie-break order, plus the provider-fact tie that no mapped
+// axis separates.
+pub enum VariantAxis {
+    Role
+    Os
+    Arch
+    Libc
+    Linkage
+    Abi
+    Artifact
+    Features
+    ProviderFacts
+
+    fn as_str(self) -> String !Never {
+        if self == {
+            .Role -> "role"
+            .Os -> "os"
+            .Arch -> "arch"
+            .Libc -> "libc"
+            .Linkage -> "linkage"
+            .Abi -> "abi"
+            .Artifact -> "artifact"
+            .Features -> "features"
+            .ProviderFacts -> "provider-facts"
+        }
+    }
+
+    // A `variant_map` axis name; `runtime` is the libc axis.
+    fn parse_mapped(raw: String) -> ?VariantAxis !Never {
+        if raw == {
+            "role" -> Val(VariantAxis.Role)
+            "os" -> Val(VariantAxis.Os)
+            "arch" -> Val(VariantAxis.Arch)
+            "libc" | "runtime" -> Val(VariantAxis.Libc)
+            "linkage" -> Val(VariantAxis.Linkage)
+            "abi" -> Val(VariantAxis.Abi)
+            "artifact" -> Val(VariantAxis.Artifact)
+            "features" -> Val(VariantAxis.Features)
+            else -> None
+        }
+    }
+}
+
+// Closed typed variant (D-JPK-VARIANT1=D). `features` is a set: kept sorted
+// and unique so equal sets compare equal.
+pub struct PackageVariant {
+    pub role: VariantRole
+    pub os: VariantOs
+    pub arch: VariantArch
+    pub libc: VariantLibc
+    pub linkage: VariantLinkage
+    pub abi: VariantAbi
+    pub artifact: ArtifactKind
+    pub features: [String]
+
+    // Total defaults from the requesting context: its platform, Host role,
+    // shared linkage, library artifact, no features.
+    fn defaults_for_context(platform: PlatformKey) -> PackageVariant !Never {
+        os :: VariantOs.from_platform_os(platform.os)
+        PackageVariant{
+            role: VariantRole.Host,
+            os: ~os,
+            arch: VariantArch.from_platform_arch(platform.arch),
+            libc: VariantLibc.default_for(os),
+            linkage: VariantLinkage.Shared,
+            abi: VariantAbi.default_for(os),
+            artifact: ArtifactKind.Library,
+            features: [String]{}
+        }
+    }
+
+    // Cross-compile need: Target role on a foreign triple.
+    fn cross_target(os: VariantOs, arch: VariantArch, libc: VariantLibc) -> PackageVariant !Never {
+        PackageVariant{
+            role: VariantRole.Target,
+            os: ~os,
+            arch: arch,
+            libc: libc,
+            linkage: VariantLinkage.Shared,
+            abi: VariantAbi.default_for(os),
+            artifact: ArtifactKind.Library,
+            features: [String]{}
+        }
+    }
+
+    fn with_role(self, role: VariantRole) -> PackageVariant !Never {
+        out := self
+        out.role = role
+        out
+    }
+
+    // Changing the OS resets libc and ABI to that OS's defaults.
+    fn with_os(self, os: VariantOs) -> PackageVariant !Never {
+        out := self
+        out.libc = VariantLibc.default_for(os)
+        out.abi = VariantAbi.default_for(os)
+        out.os = os
+        out
+    }
+
+    fn with_arch(self, arch: VariantArch) -> PackageVariant !Never {
+        out := self
+        out.arch = arch
+        out
+    }
+
+    fn with_libc(self, libc: VariantLibc) -> PackageVariant !Never {
+        out := self
+        out.libc = libc
+        out
+    }
+
+    fn with_linkage(self, linkage: VariantLinkage) -> PackageVariant !Never {
+        out := self
+        out.linkage = linkage
+        out
+    }
+
+    fn with_abi(self, abi: VariantAbi) -> PackageVariant !Never {
+        out := self
+        out.abi = abi
+        out
+    }
+
+    fn with_artifact(self, artifact: ArtifactKind) -> PackageVariant !Never {
+        out := self
+        out.artifact = artifact
+        out
+    }
+
+    fn with_feature(self, feature: String) -> PackageVariant !Never {
+        out := self
+        out.add_feature(feature)
+        out
+    }
+
+    fn add_feature(&self, feature: String) !Never {
+        if self.features.contains(feature) -> return
+        self.features.push(feature)
+        self.features.sort()
+    }
+
+    // Canonical identity string for action keys and the semantic lock
+    // `platform`.
+    fn identity_key(self) -> String !Never {
+        "role={self.role.as_str()};os={self.os.as_str()};arch={self.arch.as_str()};libc={self.libc.as_str()};linkage={self.linkage.as_str()};abi={self.abi.as_str()};artifact={self.artifact.as_str()};features={self.features.join(",")}"
+    }
+
+    // Exact match: every closed axis equal and equal feature sets.
+    fn matches_exact(self, need: PackageVariant) -> Bool !Never {
+        self == need
+    }
+
+    // Compatible under the total order: the producer may carry more features
+    // and may offer `ArtifactKind.Any` for any need; every other axis must
+    // match exactly.
+    fn matches_compatible(self, need: PackageVariant) -> Bool !Never {
+        if self.role != need.role || self.os != need.os || self.arch != need.arch -> return false
+        if self.libc != need.libc || self.linkage != need.linkage || self.abi != need.abi -> return false
+        if self.artifact != need.artifact && self.artifact != ArtifactKind.Any -> return false
+        loop feature in need.features {
+            if !self.features.contains(feature) -> return false
+        }
+        true
+    }
+
+    // First axis in tie-break order where the two variants differ.
+    fn first_distinguishing_axis(left: PackageVariant, right: PackageVariant) -> VariantAxis !Never {
+        if {
+            left.role != right.role -> VariantAxis.Role
+            left.os != right.os -> VariantAxis.Os
+            left.arch != right.arch -> VariantAxis.Arch
+            left.libc != right.libc -> VariantAxis.Libc
+            left.linkage != right.linkage -> VariantAxis.Linkage
+            left.abi != right.abi -> VariantAxis.Abi
+            left.artifact != right.artifact -> VariantAxis.Artifact
+            else -> VariantAxis.Features
+        }
+    }
+
+    // Select a producer for this need: exact winners first, else compatible
+    // ones; exactly one winner. A tie is Ambiguous and names the first axis
+    // that separates the first two survivors.
+    fn select(self, candidates: [VariantCandidate], maps: [VariantMapEntry]) -> VariantCandidate !VariantSelectError {
+        mapped := [PackageVariant]{}
+        loop candidate in candidates -> mapped.push(candidate.mapped_variant(maps))
+        pool := [Int]{}
+        loop index in 0..<mapped.len() {
+            if mapped[index].matches_exact(self) -> pool.push(index)
+        }
+        if pool.len() == 0 {
+            loop index in 0..<mapped.len() {
+                if mapped[index].matches_compatible(self) -> pool.push(index)
+            }
+        }
+        if pool.len() == 0 -> return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
+        if pool.len() == 1 -> return Ok(candidates[pool[0]])
+        labels := [String]{}
+        loop index in pool -> labels.push(candidates[index].label)
+        labels.sort()
+        first :: mapped[pool[0]]
+        second :: mapped[pool[1]]
+        // Identical mapped variants differ only in provider facts that no
+        // map folded into an axis: still ambiguous.
+        axis :: if first == second -> VariantAxis.ProviderFacts else -> PackageVariant.first_distinguishing_axis(first, second)
+        Err(VariantSelectError.Ambiguous{need: self, axis: axis, labels: labels})
+    }
+
+    // Universal lock coverage: every declared supported domain must appear
+    // as a selected variant identity. The missing identity keys, in
+    // declaration order.
+    fn missing_lock_domains(declared: [PackageVariant], locked_identities: [String]) -> [String] !Never {
+        missing := [String]{}
+        loop variant in declared {
+            key :: variant.identity_key()
+            if !locked_identities.contains(key) -> missing.push(key)
+        }
+        missing
+    }
+}
+
+// A candidate offered by a package producer, with namespaced provider facts
+// that never influence native selection unless mapped.
+pub struct VariantCandidate {
+    pub label: String
+    pub variant: PackageVariant
+    pub provider_facts: [String: String]
+
+    fn new(label: String, variant: PackageVariant) -> VariantCandidate !Never {
+        VariantCandidate{label: label, variant: variant, provider_facts: [String: String]{}}
+    }
+
+    fn with_provider_fact(self, key: String, value: String) -> VariantCandidate !Never {
+        out := self
+        out.provider_facts[key] = value
+        out
+    }
+
+    // Apply `variant_map` entries onto this candidate's typed axes before
+    // matching. An entry with an empty value takes the fact's value, `*`
+    // takes it too, and any other value applies only when the fact equals
+    // it. Unparseable values and unknown axes leave the variant unchanged.
+    fn mapped_variant(self, maps: [VariantMapEntry]) -> PackageVariant !Never {
+        variant := self.variant
+        loop entry in maps {
+            fact :: self.provider_facts.get(entry.provider_key) ?? next
+            if entry.value != "" && entry.value != "*" && fact != entry.value -> next
+            value :: if entry.value == "" || entry.value == "*" -> fact else -> entry.value
+            axis :: VariantAxis.parse_mapped(entry.axis) ?? next
+            if axis == {
+                .Role -> variant.role = VariantRole.parse(value) ?? variant.role
+                .Os -> {
+                    if VariantOs.parse(value) == {
+                        .Val(os) -> variant = variant.with_os(os)
+                        .None -> {}
+                    }
+                }
+                .Arch -> variant.arch = VariantArch.parse(value) ?? variant.arch
+                .Libc -> variant.libc = VariantLibc.parse(value) ?? variant.libc
+                .Linkage -> variant.linkage = VariantLinkage.parse(value) ?? variant.linkage
+                .Abi -> variant.abi = VariantAbi.parse(value) ?? variant.abi
+                .Artifact -> variant.artifact = ArtifactKind.parse(value) ?? variant.artifact
+                .Features -> variant.add_feature(value)
+                .ProviderFacts -> {}
+            }
+        }
+        variant
+    }
+}
+
+// Explicit mapping from a provider fact key onto a closed axis value.
+// Without a map, provider facts are ignored during selection.
+pub struct VariantMapEntry {
+    pub provider_key: String
+    pub axis: String
+    pub value: String
+}
+
+#Error
+pub enum VariantSelectError {
+    NoMatch(need: PackageVariant, candidate_count: Int)
+    Ambiguous(need: PackageVariant, axis: VariantAxis, labels: [String])
+}

@@ -1,0 +1,327 @@
+// The canonical `.jet/lock` text of the semantic sections: `[[lock_input]]`,
+// `[[source_map]]`, and `[[semantic_record]]` blocks after a version line.
+// Records are written in semantic-key order, inputs and source maps in
+// field order, so equal locks always produce equal bytes.
+
+@SEMANTIC_LOCK_VERSION_KEY :: "semantic-lock-version"
+@SEMANTIC_LOCK_RECORD_HEADER :: "[[semantic_record]]"
+@SEMANTIC_LOCK_RATIONALE_HEADER :: "[[semantic_record.rationale]]"
+@SEMANTIC_LOCK_INPUT_HEADER :: "[[lock_input]]"
+@SEMANTIC_LOCK_SOURCE_MAP_HEADER :: "[[source_map]]"
+
+// The block a header line opens.
+enum SemanticLockSection {
+    Record
+    Rationale
+    Input
+    SourceMap
+
+    fn from_header(line: String) -> ?SemanticLockSection !Never {
+        if line == {
+            @SEMANTIC_LOCK_RECORD_HEADER -> Val(SemanticLockSection.Record)
+            @SEMANTIC_LOCK_RATIONALE_HEADER -> Val(SemanticLockSection.Rationale)
+            @SEMANTIC_LOCK_INPUT_HEADER -> Val(SemanticLockSection.Input)
+            @SEMANTIC_LOCK_SOURCE_MAP_HEADER -> Val(SemanticLockSection.SourceMap)
+            else -> None
+        }
+    }
+}
+
+// `key = "value"` with `\` and `"` escaped.
+fn trust_lock_line(key: String, value: String) -> String !Never {
+    "{key} = \"{trust_lock_escape(value)}\"\n"
+}
+
+fn trust_lock_escape(value: String) -> String !Never {
+    trust_text_replace_all(trust_text_replace_all(value, "\\", "\\\\"), "\"", "\\\"")
+}
+
+// Source maps in Rust's derived `Ord` order: pattern, then sources. A stable
+// insertion keeps equal entries in their given order.
+fn trust_lock_sorted_source_maps(maps: [SourceMapEntry]) -> [SourceMapEntry] !Never {
+    sorted := [SourceMapEntry]{}
+    loop map in maps {
+        at := sorted.len()
+        loop at > 0 && trust_lock_source_map_before(map, sorted[at - 1]) -> at -= 1
+        sorted.insert(at, map)
+    }
+    sorted
+}
+
+fn trust_lock_source_map_before(left: SourceMapEntry, right: SourceMapEntry) -> Bool !Never {
+    if left.pattern != right.pattern -> return left.pattern < right.pattern
+    trust_text_compare_lists(left.sources, right.sources) < 0
+}
+
+// Rust `parse_string_list`: the items of a `["a", "b"]` value.
+fn trust_lock_string_list(raw: String) -> [String] !Never {
+    inner := raw.trim()
+    loop inner.starts_with("[") -> inner = inner.removeprefix("[")
+    loop inner.ends_with("]") -> inner = inner.removesuffix("]")
+    if inner == "" -> return [String]{}
+    items := [String]{}
+    loop piece in trust_text_split(inner, @TRUST_COMMA) {
+        item :: trust_text_trim_byte(piece.trim(), @TRUST_QUOTE)
+        if item != "" -> items.push(item)
+    }
+    items
+}
+
+// Strip the semantic sections so the machine lock keeps its own bytes.
+pub fn trust_strip_semantic_sections(raw: String) -> String !Never {
+    out := [String]{}
+    skipping := false
+    loop line in trust_text_lines(raw) {
+        trimmed :: line.trim()
+        if trimmed.starts_with("[") {
+            skipping = SemanticLockSection.from_header(trimmed) != None
+            if skipping -> next
+        }
+        if skipping -> next
+        if trimmed.starts_with(@SEMANTIC_LOCK_VERSION_KEY) -> next
+        out.push("{line}\n")
+    }
+    out.join("")
+}
+
+// A record under construction; `finish` requires `kind` and `key`.
+struct PartialSemanticRecord {
+    kind: ?LockRecordKind
+    key: ?String
+    exact: ?String
+    hash: ?String
+    platform: ?String
+    rationales: [LockRationale]
+    future_fields: [String: String]
+
+    fn empty() -> PartialSemanticRecord !Never {
+        PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String: String]{}}
+    }
+
+    fn set(&self, key: String, value: String) !Never {
+        if key == {
+            "kind" -> self.kind = Val(LockRecordKind.parse(value))
+            "key" -> self.key = Val(value)
+            "exact" -> self.exact = Val(value)
+            "hash" -> self.hash = Val(value)
+            "platform" -> self.platform = Val(value)
+            @SEMANTIC_LOCK_VERSION_KEY -> {}
+            else -> self.future_fields[key] = value
+        }
+    }
+
+    fn finish(self) -> ?SemanticRecord !Never {
+        kind :: self.kind ?? return None
+        key :: self.key ?? return None
+        identity :: LockIdentity{kind, key, exact: self.exact ?? "", hash: self.hash ?? "", platform: self.platform ?? ""}
+        Val(SemanticRecord{identity, rationales: self.rationales, future_fields: self.future_fields})
+    }
+}
+
+struct PartialLockInput {
+    name: ?String
+    url: ?String
+    follows: String
+
+    fn set(&self, key: String, value: String) !Never {
+        if key == {
+            "name" -> self.name = Val(value)
+            "url" -> self.url = Val(value)
+            "follows" -> self.follows = value
+            else -> {}
+        }
+    }
+
+    fn finish(self) -> ?LockInput !Never {
+        name :: self.name ?? return None
+        Val(LockInput{name, url: self.url ?? "", follows: self.follows})
+    }
+}
+
+struct PartialSourceMap {
+    pattern: ?String
+    sources: [String]
+
+    fn set(&self, key: String, value: String) !Never {
+        if key == {
+            "pattern" -> self.pattern = Val(value)
+            "sources" -> self.sources = trust_lock_string_list(value)
+            "source" -> self.sources.push(value)
+            else -> {}
+        }
+    }
+
+    fn finish(self) -> ?SourceMapEntry !Never {
+        pattern :: self.pattern ?? return None
+        Val(SourceMapEntry{pattern, sources: self.sources})
+    }
+}
+
+// Line-driven reader state. Each `in_*` flag says whether that block is open.
+struct SemanticLockReader {
+    lock: SemanticLockFile
+    record: PartialSemanticRecord
+    in_record: Bool
+    rationale: LockRationale
+    in_rationale: Bool
+    input: PartialLockInput
+    in_input: Bool
+    source_map: PartialSourceMap
+    in_source_map: Bool
+
+    fn new() -> SemanticLockReader !Never {
+        SemanticLockReader{
+            lock: SemanticLockFile.empty(),
+            record: PartialSemanticRecord.empty(),
+            in_record: false,
+            rationale: LockRationale.empty(),
+            in_rationale: false,
+            input: PartialLockInput{name: None, url: None, follows: ""},
+            in_input: false,
+            source_map: PartialSourceMap{pattern: None, sources: [String]{}},
+            in_source_map: false
+        }
+    }
+
+    // An open rationale always closes; it attaches only to an open record.
+    fn flush_rationale(&self) !Never {
+        if self.in_record && self.in_rationale -> self.record.rationales.push(self.rationale)
+        self.in_rationale = false
+        self.rationale = LockRationale.empty()
+    }
+
+    fn flush_blocks(&self) !Never {
+        self.flush_rationale()
+        if self.in_record {
+            if self.record.finish() == {
+                .Val(record) -> self.lock.records.push(record)
+                .None -> {}
+            }
+            self.in_record = false
+            self.record = PartialSemanticRecord.empty()
+        }
+        if self.in_input {
+            if self.input.finish() == {
+                .Val(input) -> self.lock.inputs.push(input)
+                .None -> {}
+            }
+            self.in_input = false
+            self.input = PartialLockInput{name: None, url: None, follows: ""}
+        }
+        if self.in_source_map {
+            if self.source_map.finish() == {
+                .Val(map) -> self.lock.source_maps.push(map)
+                .None -> {}
+            }
+            self.in_source_map = false
+            self.source_map = PartialSourceMap{pattern: None, sources: [String]{}}
+        }
+    }
+
+    fn open(&self, section: SemanticLockSection) !Never {
+        if section == {
+            .Rationale -> {
+                self.flush_rationale()
+                self.in_rationale = true
+            }
+            .Record -> {
+                self.flush_blocks()
+                self.in_record = true
+            }
+            .Input -> {
+                self.flush_blocks()
+                self.in_input = true
+            }
+            .SourceMap -> {
+                self.flush_blocks()
+                self.in_source_map = true
+            }
+        }
+    }
+
+    // A field goes to the innermost open block: rationale, input, source
+    // map, then record.
+    fn field(&self, key: String, value: String) !Never {
+        if {
+            self.in_rationale -> self.rationale.set_field(key, value)
+            self.in_input -> self.input.set(key, value)
+            self.in_source_map -> self.source_map.set(key, value)
+            self.in_record -> self.record.set(key, value)
+            else -> {}
+        }
+    }
+}
+
+// Rust `SemanticLock::parse`: blank and `#` lines are skipped, unknown
+// lines ignored, and incomplete blocks dropped.
+pub fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile !Never {
+    reader := SemanticLockReader.new()
+    loop raw_line in trust_text_lines(raw) {
+        line :: raw_line.trim()
+        if line == "" || line.starts_with("#") -> next
+        if SemanticLockSection.from_header(line) == {
+            .Val(section) -> {
+                reader.open(section)
+                next
+            }
+            .None -> {}
+        }
+        parts :: trust_text_split_first(line, @TRUST_EQUALS) ?? next
+        key :: parts.before.trim()
+        unquoted :: trust_text_trim_byte(parts.after.trim(), @TRUST_QUOTE)
+        value :: trust_text_replace_all(trust_text_replace_all(unquoted, "\\\"", "\""), "\\\\", "\\")
+        reader.field(key, value)
+    }
+    reader.flush_blocks()
+    reader.lock
+}
+
+// Rust `SemanticLock::write`.
+pub fn trust_write_semantic_lock(lock: SemanticLockFile) -> String !Never {
+    records := lock.records
+    records.sort_by(record -> record.identity.semantic_key())
+    inputs := lock.inputs
+    inputs.sort_by((left: LockInput, right: LockInput) -> (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows))
+    source_maps :: trust_lock_sorted_source_maps(lock.source_maps)
+    out := [String]{"{@SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
+    loop input in inputs {
+        out.push("\n{@SEMANTIC_LOCK_INPUT_HEADER}\n")
+        out.push(trust_lock_line("name", input.name))
+        out.push(trust_lock_line("url", input.url))
+        out.push(trust_lock_line("follows", input.follows))
+    }
+    loop map in source_maps {
+        out.push("\n{@SEMANTIC_LOCK_SOURCE_MAP_HEADER}\n")
+        out.push(trust_lock_line("pattern", map.pattern))
+        quoted := [String]{}
+        loop source in map.sources -> quoted.push("\"{trust_lock_escape(source)}\"")
+        out.push("sources = [{quoted.join(", ")}]\n")
+    }
+    loop record in records {
+        out.push("\n{@SEMANTIC_LOCK_RECORD_HEADER}\n")
+        out.push(trust_lock_line("kind", record.identity.kind.label()))
+        out.push(trust_lock_line("key", record.identity.key))
+        out.push(trust_lock_line("exact", record.identity.exact))
+        out.push(trust_lock_line("hash", record.identity.hash))
+        out.push(trust_lock_line("platform", record.identity.platform))
+        future_keys := record.future_fields.keys().to_list()
+        future_keys.sort()
+        loop key in future_keys -> out.push(trust_lock_line(key, record.future_fields[key]))
+        loop rationale in record.rationales {
+            out.push("{@SEMANTIC_LOCK_RATIONALE_HEADER}\n")
+            out.push(trust_lock_line("owner-package", rationale.owner_package))
+            out.push(trust_lock_line("reason", rationale.reason))
+            out.push(trust_lock_line("source-ref", rationale.source_ref))
+            out.push(trust_lock_line("provider", rationale.provider))
+            out.push(trust_lock_line("channel-input", rationale.channel_input))
+            out.push(trust_lock_line("exact-output", rationale.exact_output))
+            out.push(trust_lock_line("policy-fingerprint", rationale.policy_fingerprint))
+            out.push(trust_lock_line("recipe-id", rationale.recipe_id))
+            out.push(trust_lock_line("adapter-id", rationale.adapter_id))
+            out.push(trust_lock_line("signature", rationale.signature))
+            out.push(trust_lock_line("cache-provenance", rationale.cache_provenance))
+            out.push(trust_lock_line("update-command", rationale.update_command))
+        }
+    }
+    out.join("")
+}
