@@ -4,8 +4,9 @@
 // order and `tests.list` the only test order; nothing is globbed into a unit.
 //
 // Modes:
-//   check  implementation sources only                 -> src/jetpack.jet
-//   aot    implementation + tests as `#Test` claims     -> src/jetpack.jet
+//   check  implementation + tests as `#Test` claims, for `jet check` (tests are
+//          type-checked in the fast loop, not first discovered by --tests)
+//   aot    the same unit, for `jet test`
 //   run    implementation + the same test bodies as functions, driven by one
 //          generated `fn run()` for the default `jet run` tier (I9)
 import { createHash } from "node:crypto";
@@ -225,7 +226,7 @@ if (skipped.length > 0) {
 const claimHead = /^#Test\("([^"\\{}]+)"\)\s*\{\s*$/;
 const testNames = [];
 function renderTests(text, sourcePath) {
-  if (mode === "check") return null;
+  // `check` type-checks test claims exactly as the AOT harness will see them.
   const lines = text.split("\n");
   let claims = 0;
   for (const [index, line] of lines.entries()) {
@@ -250,7 +251,7 @@ function renderTests(text, sourcePath) {
 // Proving one area runs only that area's tests; each dependency area proves its
 // own tests in its own unit.
 const unitTests = ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
-const units = mode === "check" ? sources : [...sources, ...unitTests];
+const units = [...sources, ...unitTests];
 if (units.length === 0) fail("Jetpack/Bootstrap/sources.list contains no sources");
 const testPaths = new Set(unitTests.map((entry) => entry.sourcePath));
 
