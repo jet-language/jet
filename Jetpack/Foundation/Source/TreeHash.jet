@@ -1,0 +1,359 @@
+// Source-tree identity and no-follow file publication (the parts of
+// jet_foundation::SHA256 Jetpack uses). Hashing reuses the compiler's
+// canonical SHA-256 compression (Compiler/JetFoundation/Source/Hash/
+// SHA256.jet) through a streaming hasher, so large files are never held
+// whole. Every read and write refuses links and checks the opened file's
+// identity (D-CORE-FILEOPEN1, D-CORE-FILEDIR1, D-CORE-FILESTAT1).
+//
+// The tree bounds @MAX_TREE_FILE_BYTES, @MAX_TREE_TOTAL_BYTES,
+// @MAX_TREE_FILES, and @MAX_TREE_DEPTH live in Syntax.jet.
+
+// Every directory entry a tree walk visits consumes one node.
+@MAX_TREE_NODES :: 2000000
+
+// The bytes one bounded read requests.
+@FOUNDATION_READ_CHUNK :: 65536
+
+// Big-endian byte shifts of a 64-bit length prefix.
+@FOUNDATION_U64_SHIFTS :: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
+
+// Incremental SHA-256 holding at most one partial 64-byte block, so tool
+// identities can hash large artifacts without whole-file reads.
+pub struct StreamingSha256 {
+    state: [Int]
+    block: [U8]
+    total: Int
+
+    fn new() -> StreamingSha256 Never! {
+        StreamingSha256{state: @MIR_SHA256_H0, block: [U8]{}, total: 0}
+    }
+
+    fn update(&self, data: [U8]) Never! {
+        loop byte in data {
+            &self.block.push(byte)
+            if self.block.len() == 64 {
+                mir_sha256_compress(&self.state, self.block)
+                self.block = [U8]{}
+            }
+        }
+        self.total += data.len()
+    }
+
+    // The 32-byte digest: `0x80`, zero padding, and the big-endian bit
+    // length close the final block(s).
+    fn finalize(self) -> [U8] Never! {
+        state := self.state
+        block := self.block
+        &block.push(U8{128})
+        if block.len() > 56 {
+            loop block.len() < 64 -> &block.push(U8{0})
+            mir_sha256_compress(&state, block)
+            block = [U8]{}
+        }
+        loop block.len() < 56 -> &block.push(U8{0})
+        bit_length :: (self.total * 8) & @MIR_SHA256_LENGTH_MASK
+        loop shift in @FOUNDATION_U64_SHIFTS -> &block.push(U8{(bit_length >> shift) & 255})
+        mir_sha256_compress(&state, block)
+        digest := [U8]{}
+        loop word in state {
+            &digest.push(U8{(word >> 24) & 255})
+            &digest.push(U8{(word >> 16) & 255})
+            &digest.push(U8{(word >> 8) & 255})
+            &digest.push(U8{word & 255})
+        }
+        digest
+    }
+
+    fn finalize_hex(self) -> String Never! {
+        mir_sha256_hex_bytes(self.finalize())
+    }
+}
+
+// Failure while proving a source tree's contents.
+#Error
+pub enum TreeHashError {
+    Io(path: String, detail: String)
+    Symlink(String)
+    Special(String)
+    InvalidName(String)
+    TooLarge(path: String, limit: Int)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Io(path, detail) -> "could not read `{path}`: {detail}"
+            .Symlink(path) -> "`{path}` is a symlink"
+            .Special(path) -> "`{path}` is not a regular file or directory"
+            .InvalidName(path) -> "`{path}` has a non-UTF-8 name"
+            .TooLarge(path, limit) -> "`{path}` exceeds the {limit}-byte tree hashing bound"
+        }
+    }
+}
+
+// One regular file found by a tree walk: its `/`-separated path relative to
+// the tree root and the identity observed while walking.
+struct TreeHashFile {
+    relative: String
+    path: String
+    stat: Stat
+}
+
+// The walk budget shared across one tree.
+struct TreeHashBudget {
+    nodes: Int
+}
+
+// A canonical tree hash of a source directory: every included regular file
+// in relative-path order, each as its path, NUL, its big-endian length, and
+// its bytes. Fails closed on unreadable, linked, or special entries. Every
+// visited entry consumes one @MAX_TREE_NODES unit, including empty
+// directories and entries excluded from the identity (dot entries, `build`,
+// `target`), which are still inspected before skipping.
+pub fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
+    root_stat :: if files.stat(root) == {
+        .Ok(stat) -> stat
+        .Err(error) -> { return Err(TreeHashError.Io{path: root, detail: "{error}"}) }
+    }
+    if root_stat.is_symlink -> return Err(TreeHashError.Symlink(root))
+    if !root_stat.is_dir -> return Err(TreeHashError.Special(root))
+    entries := [TreeHashFile]{}
+    budget := TreeHashBudget{nodes: 0}
+    foundation_collect_tree_files(root, "", root, &entries, 0, &budget)
+    &entries.sort_by(entry -> entry.relative)
+    hasher := StreamingSha256.new()
+    total_bytes := 0
+    loop entry in entries {
+        &hasher.update(entry.relative.bytes())
+        &hasher.update([U8]{U8{0}})
+        foundation_hash_regular_nofollow(entry.path, entry.stat, &hasher, &total_bytes)
+    }
+    Ok("sha256-{hasher.finalize_hex()}")
+}
+
+// A tree hash for a tree that must be hashable; failure is a broken
+// invariant.
+pub fn foundation_tree_hash(root: String) -[FS]> String Never! {
+    if foundation_try_tree_hash(root) == {
+        .Ok(hash) -> hash
+        .Err(error) -> panic("cannot hash source tree `{root}`: {error.message()}")
+    }
+}
+
+fn foundation_collect_tree_files(directory: String, relative_dir: String, root: String, out: &[TreeHashFile], depth: Int, budget: &TreeHashBudget) TreeHashError! -[FS]> {
+    // Internal modules stay hash inputs: D-SHAPE-MODULEINTERNAL1=A changes
+    // automatic membership, not explicit imports or source-tree identity.
+    entries :: if files.list_dir(directory) == {
+        .Ok(listed) -> listed
+        .Err(error) -> { return Err(TreeHashError.Io{path: directory, detail: "{error}"}) }
+    }
+    loop entry in entries {
+        if budget.nodes >= @MAX_TREE_NODES -> return Err(TreeHashError.TooLarge{path: entry.path, limit: @MAX_TREE_NODES})
+        budget.nodes += 1
+        stat :: if files.stat(entry.path) == {
+            .Ok(found) -> found
+            .Err(error) -> { return Err(TreeHashError.Io{path: entry.path, detail: "{error}"}) }
+        }
+        if stat.is_symlink -> return Err(TreeHashError.Symlink(entry.path))
+        if !stat.is_dir && !stat.is_file -> return Err(TreeHashError.Special(entry.path))
+        if entry.name.starts_with(".") || entry.name == "build" || entry.name == "target" -> next
+        relative :: if relative_dir == "" -> entry.name else -> "{relative_dir}/{entry.name}"
+        if {
+            stat.is_dir -> {
+                if depth >= @MAX_TREE_DEPTH -> return Err(TreeHashError.TooLarge{path: entry.path, limit: @MAX_TREE_DEPTH})
+                foundation_collect_tree_files(entry.path, relative, root, &out, depth + 1, &budget)
+            }
+            else -> {
+                if out.len() >= @MAX_TREE_FILES -> return Err(TreeHashError.TooLarge{path: root, limit: @MAX_TREE_FILES})
+                &out.push(TreeHashFile{relative: relative.replace("\\", "/"), path: entry.path, stat: stat})
+            }
+        }
+    }
+}
+
+// Whether two observations name the same unchanged file.
+fn foundation_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
+    left.id == right.id && left.size == right.size && left.modified == right.modified
+}
+
+// Fold one regular file into the tree hash through a no-follow handle whose
+// identity matches the walk's observation before and after reading.
+fn foundation_hash_regular_nofollow(path: String, expected: Stat, hasher: &StreamingSha256, total_bytes: &Int) TreeHashError! -[FS]> {
+    reader :: if files.open(path, links: .Refuse) == {
+        .Ok(opened) -> opened
+        .Err(error) -> { return Err(TreeHashError.Io{path: path, detail: "{error}"}) }
+    }
+    opened :: if reader.stat() == {
+        .Ok(stat) -> stat
+        .Err(error) -> { return Err(TreeHashError.Io{path: path, detail: "{error}"}) }
+    }
+    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(TreeHashError.Io{path: path, detail: "file changed before hashing"})
+    if opened.size > @MAX_TREE_FILE_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: @MAX_TREE_FILE_BYTES})
+    next_total :: total_bytes + opened.size
+    if next_total > @MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: @MAX_TREE_TOTAL_BYTES})
+    length := [U8]{}
+    loop shift in @FOUNDATION_U64_SHIFTS -> &length.push(U8{(opened.size >> shift) & 255})
+    &hasher.update(length)
+    actual_length := 0
+    loop {
+        chunk :: if reader.read(@FOUNDATION_READ_CHUNK) == {
+            .Ok(bytes) -> bytes
+            .Err(error) -> { return Err(TreeHashError.Io{path: path, detail: "{error}"}) }
+        }
+        if chunk.len() == 0 -> break
+        actual_length += chunk.len()
+        &hasher.update(chunk)
+        if actual_length > opened.size -> return Err(TreeHashError.Io{path: path, detail: "file grew while hashing"})
+    }
+    after :: if reader.stat() == {
+        .Ok(stat) -> stat
+        .Err(error) -> { return Err(TreeHashError.Io{path: path, detail: "{error}"}) }
+    }
+    if !foundation_same_file_identity(expected, after) || after.size != actual_length -> return Err(TreeHashError.Io{path: path, detail: "file changed while hashing"})
+    total_bytes = next_total
+}
+
+// Lowercase hex SHA-256 of one regular file, read through a no-follow
+// handle and bounded by @MAX_TREE_FILE_BYTES. The file must keep its
+// identity and length while it is read.
+pub fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
+    expected :: files.stat(path)
+    if expected.is_symlink || !expected.is_file -> return Err(foundation_io_error(.Read, path, "file is not a regular file"))
+    reader :: files.open(path, links: .Refuse)
+    opened :: reader.stat()
+    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(IOError.Other(foundation_io_context(.Read, path, "file changed before reading")))
+    if expected.size > @MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file exceeds the tree hashing bound"))
+    hasher := StreamingSha256.new()
+    actual_length := 0
+    loop {
+        chunk :: reader.read(@FOUNDATION_READ_CHUNK)
+        if chunk.len() == 0 -> break
+        actual_length += chunk.len()
+        if actual_length > @MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file grew beyond the tree hashing bound"))
+        &hasher.update(chunk)
+    }
+    after :: reader.stat()
+    path_after :: files.stat(path)
+    if actual_length != expected.size || !foundation_same_file_identity(expected, after) || !foundation_same_file_identity(expected, path_after) -> return Err(IOError.Other(foundation_io_context(.Read, path, "file changed while hashing")))
+    Ok(hasher.finalize_hex())
+}
+
+// Atomically replace `relative` below `root`. The root and every parent are
+// held as directories opened without following links, walked from the
+// file-system root so a swapped ancestor is refused. Missing parents are
+// created owner-only. The temporary write, rename, and directory syncs stay
+// handle-relative, and the published file must be the staged file.
+pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8]) IOError! -[FS, Env, Time]> {
+    components :: foundation_normal_components(relative)
+    if components.len() == 0 -> return Err(foundation_io_error(.Write, relative, "file authority publication path is empty"))
+    directories := [Directory]{foundation_open_root_directory(root)}
+    loop index in 0..<(components.len() - 1) {
+        name :: components[index]
+        parent :: directories[directories.len() - 1]
+        child :: if parent.open_directory(name) == {
+            .Ok(opened) -> opened
+            .Err(open_error) -> {
+                if open_error == {
+                    .NotFound(_) -> {}
+                    else -> { return Err(open_error) }
+                }
+                if parent.create_directory(name, mode: Val(448)) == {
+                    .Ok(_) -> parent.fsync()
+                    // A concurrent writer may have created it; the open
+                    // below decides.
+                    .Err(_) -> {}
+                }
+                parent.open_directory(name)
+            }
+        }
+        &directories.push(child)
+    }
+    parent :: directories[directories.len() - 1]
+    final_name :: components[components.len() - 1]
+    expected_destination :: foundation_inspect_destination(parent, final_name)
+    stamp :: time.unix_ms(time.now())
+    pid :: sys.pid()
+    loop attempt in 0..<128 {
+        candidate :: ".jet-lock-{pid}-{stamp}-{attempt}"
+        // O_EXCL | O_NOFOLLOW, owner-only (0o600).
+        writer :: if parent.create(candidate, if_exists: .Refuse, mode: Val(384)) == {
+            .Ok(created) -> created
+            .Err(_) -> next
+        }
+        if foundation_stage_and_rename(parent, writer, candidate, final_name, contents, expected_destination) == {
+            .Ok(staged) -> {
+                loop directory in directories -> directory.fsync()
+                current :: foundation_inspect_destination(parent, final_name)
+                published :: current ?? return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target disappeared after rename")))
+                if published != staged -> return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target changed after rename")))
+                return Ok()
+            }
+            .Err(error) -> {
+                if parent.remove(candidate) == {
+                    .Ok(_) | .Err(_) -> {}
+                }
+                return Err(error)
+            }
+        }
+    }
+    Err(foundation_io_error(.Write, relative, "could not reserve a temporary authority file"))
+}
+
+// Write, sync, and publish the staged temporary; returns its identity.
+fn foundation_stage_and_rename(parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileId?) -[FS]> FileId IOError! {
+    writer.write_all(contents)
+    writer.fsync()
+    staged :: writer.stat()
+    if staged.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links")))
+    if foundation_inspect_destination(parent, final_name) != expected_destination -> return Err(IOError.Other(foundation_io_context(.Write, final_name, "file authority publication target changed while staging")))
+    parent.rename(temporary, final_name)
+    Ok(staged.id)
+}
+
+// The identity of the publication target, None when absent. A link, a
+// non-regular file, or a multiply linked file in its place is refused.
+fn foundation_inspect_destination(parent: Directory, name: String) -[FS]> FileId? IOError! {
+    if parent.entry_stat(name) == {
+        .Ok(stat) -> {
+            if stat.is_symlink || !stat.is_file -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, name, "file authority publication target is not a regular file")))
+            if stat.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, name, "file authority publication target has multiple hard links")))
+            Ok(Val(stat.id))
+        }
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok(None)
+            else -> Err(error)
+        }
+    }
+}
+
+// Hold the root directory by opening every component from the file-system
+// root without following links.
+fn foundation_open_root_directory(root: String) -[FS, Env]> Directory IOError! {
+    absolute :: files.absolute(root)
+    directory := files.open_directory("/")
+    loop part in absolute.split("/") {
+        if part == "" || part == "." -> next
+        directory = directory.open_directory(part)
+    }
+    Ok(directory)
+}
+
+// The plain components of a relative publication path; `..` and absolute
+// paths are refused.
+fn foundation_normal_components(relative: String) -> [String] IOError! {
+    if relative.starts_with("/") -> return Err(foundation_io_error(.Write, relative, "file authority publication path must be relative"))
+    components := [String]{}
+    loop part in relative.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err(foundation_io_error(.Write, relative, "file authority publication path must stay below its root"))
+        &components.push(part)
+    }
+    Ok(components)
+}
+
+fn foundation_io_context(operation: IOOperation, resource: String, cause: String) -> IOContext Never! {
+    IOContext{operation: operation, resource: Val(resource), os_code: None, cause: Val(cause)}
+}
+
+// Rust `ErrorKind::InvalidData` / `InvalidInput` refusals.
+fn foundation_io_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
+    IOError.InvalidInput(foundation_io_context(operation, resource, cause))
+}

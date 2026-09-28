@@ -38,7 +38,7 @@ pub enum CobolFieldKind {
     NativeInt(digits: Int, signed: Bool)
     PackedDecimal(digits: Int, scale: Int, signed: Bool)
 
-    pub fn jet_type(self) -> String !Never {
+    pub fn jet_type(self) -> String Never! {
         if self == {
             .FixedText(_) -> "String"
             .NativeInt(_, _) -> "Int"
@@ -47,7 +47,7 @@ pub enum CobolFieldKind {
     }
 
     // Rust's derived `Debug` spelling, recorded in layout provenance.
-    fn debug(self) -> String !Never {
+    fn debug(self) -> String Never! {
         if self == {
             .FixedText(characters) -> "FixedText {{ characters: {characters} }}"
             .NativeInt(digits, signed) -> "NativeInt {{ digits: {digits}, signed: {signed} }}"
@@ -56,7 +56,7 @@ pub enum CobolFieldKind {
     }
 
     // The byte width the kind occupies in the record.
-    fn width(self) -> Int !ForeignBindError {
+    fn width(self) -> Int ForeignBindError! {
         if self == {
             .FixedText(characters) -> Ok(characters)
             .NativeInt(digits, _) -> {
@@ -71,14 +71,14 @@ pub enum CobolFieldKind {
         }
     }
 
-    fn is_packed(self) -> Bool !Never {
+    fn is_packed(self) -> Bool Never! {
         if self == {
             .PackedDecimal(_, _, _) -> true
             else -> false
         }
     }
 
-    fn is_native_int(self) -> Bool !Never {
+    fn is_native_int(self) -> Bool Never! {
         if self == {
             .NativeInt(_, _) -> true
             else -> false
@@ -88,13 +88,13 @@ pub enum CobolFieldKind {
 
 // Compile the program with cobc, prove the C bridge links against libcob,
 // archive both objects, and render the Jet binding with provenance.
-pub fn pkg_cobol_bind(source_path: String, source: String, copybook_path: String, copybook: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> CobolBindResult !ForeignBindError {
+pub fn pkg_cobol_bind(source_path: String, source: String, copybook_path: String, copybook: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> CobolBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     program :: pkg_cobol_parse_program_id(source)
     layout :: pkg_cobol_parse_copybook(copybook)
     packed := [CobolFieldLayout]{}
     loop field in layout.fields {
-        if field.kind.is_packed() -> packed.push(field)
+        if field.kind.is_packed() -> &packed.push(field)
     }
     if packed.len() != 1 -> return Err(ForeignBindError.Source("the callable v1 bridge requires exactly one COMP-3 field"))
     input := None
@@ -121,16 +121,16 @@ pub fn pkg_cobol_bind(source_path: String, source: String, copybook_path: String
     runtime_dir :: pkg_cobol_runtime_dir_from_flags(runtime_flags) ?? return Err(ForeignBindError.Source("cob-config did not report an absolute libcob directory"))
     pkg_binder_write(bridge_c, pkg_cobol_render_bridge(program, layout, packed[0], input, lib), "could not write the COBOL C bridge")
     compile := [String]{"cc", "-c", "-fPIC"}
-    loop flag in cflags -> compile.push(flag)
-    compile.push(bridge_c)
-    compile.push("-o")
-    compile.push(bridge_o)
+    loop flag in cflags -> &compile.push(flag)
+    &compile.push(bridge_c)
+    &compile.push("-o")
+    &compile.push(bridge_o)
     pkg_cobol_run(compile, "cc")
     pkg_binder_write(probe_c, "int main(void) {{ return 0; }}\n", "could not write the COBOL link probe")
     link := [String]{"cc", "-Wl,--no-undefined", object, bridge_o, probe_c}
-    loop flag in runtime_flags -> link.push(flag)
+    loop flag in runtime_flags -> &link.push(flag)
     tail :: [String]{"-pthread", "-ldl", "-lm", "-o", probe}
-    loop flag in tail -> link.push(flag)
+    loop flag in tail -> &link.push(flag)
     if pkg_cobol_prove_link(link) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -151,7 +151,7 @@ fn pkg_cobol_remove_scratch(paths: [String]) -[FS]> {
 
 // Parse the closed copybook subset: one level 01 record of level 05 PIC
 // fields laid out back to back.
-pub fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout !ForeignBindError {
+pub fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout ForeignBindError! {
     record := None
     fields := [CobolFieldLayout]{}
     names := [String]{}
@@ -173,15 +173,15 @@ pub fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout !ForeignBin
         if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") || foundation_is_reserved_generated_name(name) || names.contains(name) {
             return Err(ForeignBindError.Source("copybook field name `{words[1]}` is not a unique, usable Jet identifier"))
         }
-        names.push(name)
+        &names.push(name)
         if words.len() < 3 || pkg_binder_ascii_upper(words[2]) != "PIC" -> return Err(ForeignBindError.Source("copybook field `{words[1]}` must use a PIC clause"))
         if words.len() < 4 -> return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
         pic :: pkg_binder_ascii_upper(words[3])
         clauses := [String]{}
-        loop index in 4..<words.len() -> clauses.push(pkg_binder_ascii_upper(words[index]))
+        loop index in 4..<words.len() -> &clauses.push(pkg_binder_ascii_upper(words[index]))
         kind :: pkg_cobol_parse_pic(pic, clauses)
         width :: kind.width()
-        fields.push(CobolFieldLayout{name: name, offset: offset, width: width, kind: kind})
+        &fields.push(CobolFieldLayout{name: name, offset: offset, width: width, kind: kind})
         offset = offset + width
     }
     name :: record ?? return Err(ForeignBindError.Source("copybook has no level 01 record"))
@@ -190,7 +190,7 @@ pub fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout !ForeignBin
     Ok(CobolRecordLayout{name: name, width: offset, fields: fields})
 }
 
-fn pkg_cobol_parse_pic(pic: String, clauses: [String]) -> CobolFieldKind !ForeignBindError {
+fn pkg_cobol_parse_pic(pic: String, clauses: [String]) -> CobolFieldKind ForeignBindError! {
     if pic.starts_with("X(") && pic.ends_with(")") {
         if pkg_cobol_parse_count(pic.removeprefix("X(").removesuffix(")")) == {
             .Val(count) -> {
@@ -221,7 +221,7 @@ fn pkg_cobol_parse_pic(pic: String, clauses: [String]) -> CobolFieldKind !Foreig
 }
 
 // `9`, `999`, or `9(n)`; the empty shape has no digits.
-fn pkg_cobol_pic_digits(shape: String) -> ?Int !Never {
+fn pkg_cobol_pic_digits(shape: String) -> Int? Never! {
     if shape == "" -> return Val(0)
     all_nines := true
     loop byte in shape.bytes() {
@@ -233,7 +233,7 @@ fn pkg_cobol_pic_digits(shape: String) -> ?Int !Never {
 }
 
 // A non-negative decimal count (`usize::from_str`).
-fn pkg_cobol_parse_count(text: String) -> ?Int !Never {
+fn pkg_cobol_parse_count(text: String) -> Int? Never! {
     digits :: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
@@ -244,7 +244,7 @@ fn pkg_cobol_parse_count(text: String) -> ?Int !Never {
 
 // The code part of one copybook line, or None for blank lines and comments.
 // Fixed-format lines keep columns 8 onward when they hold a level number.
-fn pkg_cobol_copybook_line(raw: String) -> ?String !Never {
+fn pkg_cobol_copybook_line(raw: String) -> String? Never! {
     trimmed :: raw.trim()
     if trimmed == "" || trimmed.starts_with("*") -> return None
     bytes :: raw.bytes()
@@ -258,13 +258,13 @@ fn pkg_cobol_copybook_line(raw: String) -> ?String !Never {
     Val(pkg_cobol_code_text(trimmed))
 }
 
-fn pkg_cobol_code_text(line: String) -> String !Never {
+fn pkg_cobol_code_text(line: String) -> String Never! {
     code :: line.split_once("*>")?.before ?? line
     pkg_binder_trim_end_matches(code.trim(), ".").trim()
 }
 
 // The first `-L` search directory cob-config reports, when absolute.
-fn pkg_cobol_runtime_dir_from_flags(flags: [String]) -> ?String !Never {
+fn pkg_cobol_runtime_dir_from_flags(flags: [String]) -> String? Never! {
     loop index in 0..<flags.len() {
         flag :: flags[index]
         found := None
@@ -282,7 +282,7 @@ fn pkg_cobol_runtime_dir_from_flags(flags: [String]) -> ?String !Never {
 }
 
 // A failed link probe is an ABI mismatch, not a tool rejection.
-fn pkg_cobol_prove_link(argv: [String]) !ForeignBindError -[Exec, Time.Wait]> {
+fn pkg_cobol_prove_link(argv: [String]) ForeignBindError! -[Exec, Time.Wait]> {
     if pkg_cobol_run(argv, "cc") == {
         .Ok(_) -> Ok()
         .Err(error) -> {
@@ -294,21 +294,21 @@ fn pkg_cobol_prove_link(argv: [String]) !ForeignBindError -[Exec, Time.Wait]> {
     }
 }
 
-fn pkg_cobol_render_provenance(source_path: String, foreign_source: String, generated_source: String, copybook_path: String, copybook: String, program: String, layout: CobolRecordLayout, runtime_dir: String, archive: String, lib: String) -[FS, Env, Exec]> String !ForeignBindError {
+fn pkg_cobol_render_provenance(source_path: String, foreign_source: String, generated_source: String, copybook_path: String, copybook: String, program: String, layout: CobolRecordLayout, runtime_dir: String, archive: String, lib: String) -[FS, Env, Exec]> String ForeignBindError! {
     descriptor :: pkg_cobol_descriptor_stamp()
     program_symbol :: pkg_cobol_c_symbol(program)
     facts := [String]{}
-    loop field in layout.fields -> facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
+    loop field in layout.fields -> &facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
     layout_facts :: facts.join(",")
     identity := ForeignIdentityBuilder.new(@COBOL_BIND_SCHEMA)
-    identity.field("descriptor", descriptor.bytes())
-    identity.field("source", foreign_source.bytes())
-    identity.field("generated", generated_source.bytes())
-    identity.field("copybook", copybook.bytes())
-    identity.field("program", program.bytes())
-    identity.field("program_symbol", program_symbol.bytes())
-    identity.field("layout", layout_facts.bytes())
-    identity.field("runtime", runtime_dir.bytes())
+    &identity.field("descriptor", descriptor.bytes())
+    &identity.field("source", foreign_source.bytes())
+    &identity.field("generated", generated_source.bytes())
+    &identity.field("copybook", copybook.bytes())
+    &identity.field("program", program.bytes())
+    &identity.field("program_symbol", program_symbol.bytes())
+    &identity.field("layout", layout_facts.bytes())
+    &identity.field("runtime", runtime_dir.bytes())
     archive_bytes :: pkg_binder_read_bytes(archive, "could not read the COBOL archive for provenance")
     provenance := "schema={@COBOL_BIND_SCHEMA}\nidentity={identity.finish()}\ndescriptor={descriptor}\nabi=C\nprogram={program}\nprogram_symbol={program_symbol}\nsource_path={source_path}\nsource_sha256={pkg_sha256_hex(foreign_source.bytes())}\ngenerated_sha256={pkg_sha256_hex(generated_source.bytes())}\ncopybook_path={copybook_path}\ncopybook_sha256={pkg_sha256_hex(copybook.bytes())}\nrecord={layout.name}\nrecord_width={layout.width}\nfields={layout_facts}\nruntime={runtime_dir}\narchive_sha256={pkg_sha256_hex(archive_bytes)}\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Cobol, "COBOL", lib, source_path, archive, "cobc/cc/ar")
@@ -316,7 +316,7 @@ fn pkg_cobol_render_provenance(source_path: String, foreign_source: String, gene
 }
 
 // The first valid `PROGRAM-ID.` name, kept in GnuCOBOL's uppercase spelling.
-fn pkg_cobol_parse_program_id(source: String) -> String !ForeignBindError {
+fn pkg_cobol_parse_program_id(source: String) -> String ForeignBindError! {
     loop raw in pkg_binder_lines(source) {
         trimmed :: raw.trim()
         if trimmed == "" || trimmed.starts_with("*") -> next
@@ -333,7 +333,7 @@ fn pkg_cobol_parse_program_id(source: String) -> String !ForeignBindError {
     Err(ForeignBindError.Source("source has no valid PROGRAM-ID"))
 }
 
-fn pkg_cobol_is_program_name(name: String) -> Bool !Never {
+fn pkg_cobol_is_program_name(name: String) -> Bool Never! {
     loop scalar in name.chars() {
         bytes :: "{scalar}".bytes()
         if bytes.len() != 1 -> return false
@@ -343,7 +343,7 @@ fn pkg_cobol_is_program_name(name: String) -> Bool !Never {
     true
 }
 
-fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: ?CobolFieldLayout) -> String !Never {
+fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: CobolFieldLayout?) -> String Never! {
     abi :: "jet_cobol_{lib}"
     descriptor :: pkg_cobol_descriptor_stamp()
     out := "// jet-ffi-descriptor={descriptor}\n// cobol-layout {layout.name}: {layout.width} bytes\n"
@@ -388,13 +388,13 @@ fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFie
 }
 
 // `10^digits - 1`, the largest magnitude a field of `digits` digits holds.
-fn pkg_cobol_max_digits(digits: Int) -> Int !Never {
+fn pkg_cobol_max_digits(digits: Int) -> Int Never! {
     value := 1
     loop index in 0..<digits -> value = value * 10
     value - 1
 }
 
-fn pkg_cobol_render_bridge(program: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: ?CobolFieldLayout, lib: String) -> String !Never {
+fn pkg_cobol_render_bridge(program: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: CobolFieldLayout?, lib: String) -> String Never! {
     args :: if input != None -> "int64_t record_id, int64_t minor" else -> "int64_t minor"
     program_symbol :: pkg_cobol_c_symbol(program)
     pre := ""
@@ -436,18 +436,18 @@ fn pkg_cobol_render_bridge(program: String, layout: CobolRecordLayout, packed: C
     "{lines.join("\n")}\n"
 }
 
-fn pkg_cobol_run(argv: [String], tool: String) !ForeignBindError -[Exec, Time.Wait]> {
+fn pkg_cobol_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     pkg_cobol_checked_output(argv, tool)
     Ok()
 }
 
-fn pkg_cobol_checked_output(argv: [String], tool: String) -[Exec, Time.Wait]> BinderToolOutput !ForeignBindError {
+fn pkg_cobol_checked_output(argv: [String], tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output :: pkg_binder_capture(argv, None, tool, @COBOL_TOOL_ACTION)
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: @COBOL_TOOL_ACTION, detail: pkg_cobol_launder(output.stderr)})
     Ok(output)
 }
 
-fn pkg_cobol_launder(stderr: [U8]) -> String !Never {
+fn pkg_cobol_launder(stderr: [U8]) -> String Never! {
     loop raw in pkg_binder_lines(String.from_bytes_lossy(stderr)) {
         line :: raw.trim()
         if line == "" -> next
@@ -465,16 +465,16 @@ fn pkg_cobol_launder(stderr: [U8]) -> String !Never {
 }
 
 // GnuCOBOL's C entry symbol: `-` becomes `__`.
-fn pkg_cobol_c_symbol(program: String) -> String !Never {
-    program.replace("-", "__")
+fn pkg_cobol_c_symbol(program: String) -> String Never! {
+    &program.replace("-", "__")
 }
 
-fn pkg_cobol_jet_name(word: String) -> String !Never {
+fn pkg_cobol_jet_name(word: String) -> String Never! {
     pkg_ascii_lower(pkg_binder_trim_end_matches(word, ".")).replace("-", "_")
 }
 
 // Each `_`-separated part with its first character ASCII-uppercased.
-fn pkg_cobol_upper_camel(name: String) -> String !Never {
+fn pkg_cobol_upper_camel(name: String) -> String Never! {
     parts := [String]{}
     loop part in name.split("_") {
         if part == "" -> next
@@ -483,15 +483,15 @@ fn pkg_cobol_upper_camel(name: String) -> String !Never {
         loop scalar in part.chars() {
             if {
                 first == "" && rest.len() == 0 -> first = pkg_binder_ascii_upper("{scalar}")
-                else -> rest.push("{scalar}")
+                else -> &rest.push("{scalar}")
             }
         }
-        parts.push("{first}{rest.join("")}")
+        &parts.push("{first}{rest.join("")}")
     }
     parts.join("")
 }
 
-fn pkg_cobol_descriptor_stamp() -> String !Never {
+fn pkg_cobol_descriptor_stamp() -> String Never! {
     descriptor :: pkg_binder_descriptor(ForeignLanguage.Cobol) ?? panic("COBOL binder descriptor")
     descriptor.stamp()
 }

@@ -1,0 +1,555 @@
+// `fn build` co-location in `package.jet` (D-BUILDSCOPE1) and the contextual
+// leading `package { … }` carrier (D-ECO-INLINEPACKAGE1=A) (Package/Blocks.rs).
+// Both keep every byte offset: masked text is blanked with spaces while line
+// endings stay, so later compiler diagnostics still point at the user's file.
+
+// The manifest blocks masked out of `package.jet` before looking for `fn build`.
+@PKG_MANIFEST_BLOCKS :: [String]{"deps", "packages", "services", "outputs", "environments", "defaults", "settings", @MANIFEST_BLOCK_BUILD, @MANIFEST_BLOCK_EFFECTS, @MANIFEST_BLOCK_GRANTS, @MANIFEST_BLOCK_AUTHORITY, @MANIFEST_BLOCK_POLICY, @MANIFEST_BLOCK_BOUNDARIES, "dev_deps", "patch", "workspace"}
+
+// D-CONF-NAME1: bare top-level identity/metadata fields with no `{ … }` body.
+@PKG_MANIFEST_SCALAR_FIELDS :: [String]{@MANIFEST_FIELD_NAME, @MANIFEST_FIELD_VERSION, "jet", "source", "edition", "description", "license", "repository", "target", "runtime", "allocator", "members", "configs"}
+
+// The Jet declarations beside the manifest blocks in `package.jet`, with every
+// manifest block blanked, or None when no top-level `fn build` remains.
+pub fn pkg_build_entry_source(text: String) -> String? Never! {
+    masked := text.bytes()
+    pkg_mask_manifest_blocks(text.bytes(), &masked)
+    source :: String.from_bytes(masked) ?? return None
+    if !pkg_has_top_level_build_function(source.bytes()) -> return None
+    Val(source)
+}
+
+fn pkg_mask_manifest_blocks(bytes: [U8], masked: &[U8]) Never! {
+    i := 0
+    brace_depth := 0
+    bracket_depth := 0
+    paren_depth := 0
+    in_string := false
+    escaped := false
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        if in_string {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> in_string = false
+                else -> {}
+            }
+            i += 1
+            next
+        }
+        if code == 34 {
+            in_string = true
+            i += 1
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
+            i += 2
+            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            next
+        }
+        if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
+            if pkg_manifest_block_start(bytes, i) == .Val(block) {
+                if pkg_balanced_block_end(bytes, block.end) == .Val(end) {
+                    pkg_blank_range(&masked, block.start, end)
+                    i = end
+                    next
+                }
+            }
+            if pkg_manifest_scalar_start(bytes, i) == .Val(scalar) {
+                pkg_blank_range(&masked, scalar.start, scalar.end)
+                i = scalar.end
+                next
+            }
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            i = pkg_skip_block_comment(bytes, i)
+            next
+        }
+        if code == {
+            123 -> brace_depth += 1
+            125 -> {
+                if brace_depth > 0 -> brace_depth -= 1
+            }
+            91 -> bracket_depth += 1
+            93 -> {
+                if bracket_depth > 0 -> bracket_depth -= 1
+            }
+            40 -> paren_depth += 1
+            41 -> {
+                if paren_depth > 0 -> paren_depth -= 1
+            }
+            else -> {}
+        }
+        i += 1
+    }
+}
+
+fn pkg_is_ascii_space_code(code: Int) -> Bool Never! {
+    code == 32 || code == 9 || code == 10 || code == 12 || code == 13
+}
+
+fn pkg_skip_ascii_space(bytes: [U8], at: Int) -> Int Never! {
+    cursor := at
+    loop pkg_is_ascii_space_code(pkg_bytes_code(bytes, cursor)) -> cursor += 1
+    cursor
+}
+
+// A whole-word `key` at `at`, not preceded or followed by an identifier byte.
+fn pkg_key_at(bytes: [U8], at: Int, key: String) -> Int? Never! {
+    word :: key.bytes()
+    if !pkg_bytes_starts_with(bytes, at, word) -> return None
+    end :: at + word.len()
+    if at > 0 && pkg_bytes_is_word(Int.from_u8(bytes[at - 1])) -> return None
+    if end < bytes.len() && pkg_bytes_is_word(Int.from_u8(bytes[end])) -> return None
+    Val(end)
+}
+
+// `key:` (optionally `.`) followed by `{`: the key start and the brace.
+fn pkg_manifest_block_start(bytes: [U8], at: Int) -> EditSpan? Never! {
+    loop key in @PKG_MANIFEST_BLOCKS {
+        end :: pkg_key_at(bytes, at, key) ?? next
+        cursor := pkg_skip_ascii_space(bytes, end)
+        if pkg_bytes_code(bytes, cursor) != 58 -> next
+        cursor = pkg_skip_ascii_space(bytes, cursor + 1)
+        if pkg_bytes_code(bytes, cursor) == 46 -> cursor = pkg_skip_ascii_space(bytes, cursor + 1)
+        if pkg_bytes_code(bytes, cursor) == 123 -> return Val(EditSpan{start: at, end: cursor})
+    }
+    None
+}
+
+// A bare `field: value` entry: its start and the next top-level `,`/newline.
+fn pkg_manifest_scalar_start(bytes: [U8], at: Int) -> EditSpan? Never! {
+    loop key in @PKG_MANIFEST_SCALAR_FIELDS {
+        end :: pkg_key_at(bytes, at, key) ?? next
+        cursor :: pkg_skip_ascii_space(bytes, end)
+        if pkg_bytes_code(bytes, cursor) != 58 -> next
+        value_start :: pkg_skip_ascii_space(bytes, cursor + 1)
+        peek :: pkg_bytes_code(bytes, value_start)
+        if peek == 123 -> next
+        if peek == 46 && pkg_bytes_code(bytes, pkg_skip_ascii_space(bytes, value_start + 1)) == 123 -> next
+        i := value_start
+        depth := 0
+        quoted := false
+        escaped := false
+        loop i < bytes.len() {
+            code :: Int.from_u8(bytes[i])
+            if quoted {
+                if {
+                    escaped -> escaped = false
+                    code == 92 -> escaped = true
+                    code == 34 -> quoted = false
+                    else -> {}
+                }
+                i += 1
+                next
+            }
+            if code == {
+                34 -> quoted = true
+                123 | 91 | 40 -> depth += 1
+                125 | 93 | 41 -> depth -= 1
+                44 | 10 -> {
+                    if depth == 0 -> return Val(EditSpan{start: at, end: i})
+                }
+                else -> {}
+            }
+            i += 1
+        }
+        return Val(EditSpan{start: at, end: bytes.len()})
+    }
+    None
+}
+
+// The byte after the `}` matching the `{` at `open`, skipping strings
+// (including `"""` and `'…'`) and comments.
+fn pkg_balanced_block_end(bytes: [U8], open: Int) -> Int? Never! {
+    depth := 0
+    i := open
+    quote := -1
+    triple := false
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        if quote >= 0 {
+            if code == 92 {
+                i += 2
+                next
+            }
+            if triple {
+                if pkg_bytes_starts_with(bytes, i, "\"\"\"".bytes()) {
+                    quote = -1
+                    triple = false
+                    i += 3
+                    next
+                }
+            } else if code == quote {
+                quote = -1
+            }
+            i += 1
+            next
+        }
+        if code == 34 {
+            quote = 34
+            if pkg_bytes_starts_with(bytes, i, "\"\"\"".bytes()) {
+                triple = true
+                i += 3
+            } else {
+                i += 1
+            }
+            next
+        }
+        if code == 39 {
+            quote = 39
+            i += 1
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
+            i += 2
+            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            i = pkg_skip_block_comment(bytes, i)
+            next
+        }
+        if code == 123 {
+            depth += 1
+        } else if code == 125 {
+            if depth == 0 -> return None
+            depth -= 1
+            if depth == 0 -> return Val(i + 1)
+        }
+        i += 1
+    }
+    None
+}
+
+// Blank `[start, end)` with spaces, keeping CR and LF.
+fn pkg_blank_range(masked: &[U8], start: Int, end: Int) Never! {
+    limit :: if end < masked.len() -> end else -> masked.len()
+    loop index in start..<limit {
+        code :: Int.from_u8(masked[index])
+        if code != 10 && code != 13 -> masked[index] = U8{32}
+    }
+}
+
+fn pkg_has_top_level_build_function(bytes: [U8]) -> Bool Never! {
+    i := 0
+    depth := 0
+    in_string := false
+    escaped := false
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        if in_string {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> in_string = false
+                else -> {}
+            }
+            i += 1
+            next
+        }
+        if code == 34 {
+            in_string = true
+            i += 1
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
+            i += 2
+            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            i = pkg_skip_block_comment(bytes, i)
+            next
+        }
+        if depth == 0 && pkg_key_at(bytes, i, "fn") != None {
+            cursor :: pkg_skip_ascii_space(bytes, i + 2)
+            if pkg_key_at(bytes, cursor, @BUILD_ENTRY_FN) != None -> return true
+        }
+        if code == 123 {
+            depth += 1
+        } else if code == 125 && depth > 0 {
+            depth -= 1
+        }
+        i += 1
+    }
+    false
+}
+
+// The offset just past the nested `/* … */` comment opening at `start`.
+fn pkg_skip_block_comment(bytes: [U8], start: Int) -> Int Never! {
+    depth := 1
+    i := start + 2
+    loop i < bytes.len() {
+        if Int.from_u8(bytes[i]) == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            depth += 1
+            i += 2
+        } else if Int.from_u8(bytes[i]) == 42 && pkg_bytes_code(bytes, i + 1) == 47 {
+            depth -= 1
+            i += 2
+            if depth == 0 -> return i
+        } else {
+            i += 1
+        }
+    }
+    bytes.len()
+}
+
+// The exact source spans of one contextual leading `package { … }` block.
+pub struct InlinePackageBlock {
+    // `package { … }`, including the keyword and braces.
+    pub span: Span
+    pub keyword_span: Span
+    pub open_span: Span
+    // Only the bytes between the braces.
+    pub body_span: Span
+    pub close_span: Span
+
+    // The exact package body from the original source.
+    fn body(self, source: String) -> String Never! {
+        pkg_binder_slice(source, self.body_span.start, self.body_span.end)
+    }
+
+    // The exact source carrier from the original source.
+    fn source(self, source: String) -> String Never! {
+        pkg_binder_slice(source, self.span.start, self.span.end)
+    }
+
+    // The source with the carrier blanked, every offset and line ending kept.
+    fn mask_source(self, source: String) -> String Never! {
+        masked := source.bytes()
+        pkg_blank_range(&masked, self.span.start, self.span.end)
+        String.from_bytes(masked) ?? source
+    }
+}
+
+// Structural failures of the contextual package carrier; package field
+// failures stay `PackageParseError`.
+#Error
+pub enum InlinePackageError {
+    // A package declaration appears after another top-level declaration.
+    NotFirst(span: Span)
+    // More than one top-level package declaration.
+    Duplicate(first: Span, duplicate: Span)
+    // The leading carrier has no balanced closing brace.
+    Unbalanced(span: Span)
+    // A structural shape that cannot be masked safely.
+    Malformed(span: Span, detail: String)
+
+    // The registered diagnostic for this structural failure.
+    fn diagnostic(self) -> Diagnostic Never! {
+        if self == {
+            .NotFirst(span) -> pkg_manifest_diagnostic_from_row("E1360", [ManifestEntry]{}, Val(span))
+            .Duplicate(_, duplicate) -> pkg_manifest_diagnostic_from_row("E1361", [ManifestEntry]{}, Val(duplicate))
+            .Unbalanced(span) -> pkg_manifest_diagnostic_from_row("E1362", [ManifestEntry]{}, Val(span))
+            .Malformed(span, _) -> pkg_manifest_diagnostic_from_row("E1362", [ManifestEntry]{}, Val(span))
+        }
+    }
+
+    fn message(self) -> String Never! {
+        if self == {
+            .NotFirst(_) -> "the inline Package declaration must be first"
+            .Duplicate(_, _) -> "only one inline Package declaration is allowed"
+            .Unbalanced(_) -> "the inline Package declaration is missing its closing `}}`"
+            .Malformed(_, detail) -> detail
+        }
+    }
+}
+
+// Find the one contextual leading package block. Only whitespace and Jet
+// comments may precede it; a `package` word in a string, comment, nested
+// delimiter, or function body is not a declaration.
+pub fn pkg_extract_inline_package(source: String) -> InlinePackageBlock? InlinePackageError! {
+    bytes :: source.bytes()
+    first :: pkg_skip_inline_trivia(bytes, 0)
+    if pkg_inline_package_start(bytes, first) == .Val(start) {
+        end :: pkg_balanced_block_end(bytes, start.end) ?? return Err(InlinePackageError.Unbalanced(Span{start: start.start, end: bytes.len()}))
+        block :: pkg_inline_package_block(start.start, start.end, end)
+        if pkg_find_top_level_inline_package(bytes, end) == .Val(duplicate) {
+            duplicate_end :: pkg_balanced_block_end(bytes, duplicate.end) ?? bytes.len()
+            return Err(InlinePackageError.Duplicate{first: block.span, duplicate: Span{start: duplicate.start, end: duplicate_end}})
+        }
+        return Ok(Val(block))
+    }
+    if pkg_find_top_level_inline_package(bytes, first) == .Val(found) {
+        end :: pkg_balanced_block_end(bytes, found.end) ?? bytes.len()
+        return Err(InlinePackageError.NotFirst(Span{start: found.start, end: end}))
+    }
+    Ok(None)
+}
+
+// Source for the ordinary lexer/parser plus the preserved carrier.
+pub struct MaskedInlineSource {
+    pub source: String
+    pub block: InlinePackageBlock?
+}
+
+pub fn pkg_mask_inline_package_source(source: String) -> MaskedInlineSource InlinePackageError! {
+    block :: pkg_extract_inline_package(source)
+    masked :: if block == {
+        .Val(found) -> found.mask_source(source)
+        .None -> source
+    }
+    Ok(MaskedInlineSource{source: masked, block: block})
+}
+
+// The byte where a new leading `package { … }` carrier goes: after the
+// byte-zero launch header and leading comments, before any `///` doc lines
+// of the first declaration.
+pub fn pkg_inline_package_insertion_offset(source: String) -> Int Never! {
+    bytes :: source.bytes()
+    first :: pkg_skip_inline_trivia(bytes, 0)
+    at := pkg_line_start(bytes, first)
+    loop index in at..<first {
+        if !pkg_is_ascii_space_code(Int.from_u8(bytes[index])) -> return first
+    }
+    loop at > 0 {
+        previous :: pkg_line_start(bytes, at - 1)
+        if !pkg_bytes_text(bytes, previous, at).trim_start().starts_with("///") -> break
+        at = previous
+    }
+    at
+}
+
+fn pkg_line_start(bytes: [U8], at: Int) -> Int Never! {
+    index := at - 1
+    loop index >= 0 {
+        if Int.from_u8(bytes[index]) == 10 -> return index + 1
+        index -= 1
+    }
+    0
+}
+
+fn pkg_inline_package_block(keyword: Int, open: Int, end: Int) -> InlinePackageBlock Never! {
+    close :: if end > 0 -> end - 1 else -> 0
+    InlinePackageBlock{
+        span: Span{start: keyword, end: end},
+        keyword_span: Span{start: keyword, end: keyword + @INLINE_PACKAGE_DECL.bytes().len()},
+        open_span: Span{start: open, end: open + 1},
+        body_span: Span{start: open + 1, end: close},
+        close_span: Span{start: close, end: end},
+    }
+}
+
+// `package` at `at`, then trivia, then `{`: the keyword and the brace.
+fn pkg_inline_package_start(bytes: [U8], at: Int) -> EditSpan? Never! {
+    end :: pkg_key_at(bytes, at, @INLINE_PACKAGE_DECL) ?? return None
+    cursor :: pkg_skip_inline_trivia(bytes, end)
+    if pkg_bytes_code(bytes, cursor) != 123 -> return None
+    Val(EditSpan{start: at, end: cursor})
+}
+
+fn pkg_find_top_level_inline_package(bytes: [U8], from: Int) -> EditSpan? Never! {
+    i := from
+    braces := 0
+    brackets := 0
+    parens := 0
+    item_position := true
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        if code == 34 || code == 39 {
+            i = pkg_skip_inline_string(bytes, i)
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
+            i = pkg_skip_inline_line_comment(bytes, i)
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            i = pkg_skip_block_comment(bytes, i)
+            next
+        }
+        top :: braces == 0 && brackets == 0 && parens == 0
+        if top && item_position {
+            if pkg_inline_package_start(bytes, i) == .Val(found) -> return Val(found)
+        }
+        if code == {
+            123 -> {
+                braces += 1
+                item_position = false
+            }
+            125 -> {
+                if braces > 0 -> braces -= 1
+                if braces == 0 && brackets == 0 && parens == 0 -> item_position = true
+            }
+            91 -> {
+                brackets += 1
+                item_position = false
+            }
+            93 -> {
+                if brackets > 0 -> brackets -= 1
+            }
+            40 -> {
+                parens += 1
+                item_position = false
+            }
+            41 -> {
+                if parens > 0 -> parens -= 1
+            }
+            59 -> {
+                if top -> item_position = true
+            }
+            else -> {
+                if top && !pkg_is_ascii_space_code(code) -> item_position = false
+            }
+        }
+        i += 1
+    }
+    None
+}
+
+fn pkg_skip_inline_trivia(bytes: [U8], from: Int) -> Int Never! {
+    at := from
+    loop {
+        if at == 0 && pkg_bytes_starts_with(bytes, 0, "#!/".bytes()) {
+            at = pkg_skip_inline_line_comment(bytes, at)
+            next
+        }
+        at = pkg_skip_ascii_space(bytes, at)
+        if pkg_bytes_starts_with(bytes, at, "//".bytes()) {
+            at = pkg_skip_inline_line_comment(bytes, at)
+            next
+        }
+        if pkg_bytes_starts_with(bytes, at, "/*".bytes()) {
+            following :: pkg_skip_block_comment(bytes, at)
+            if following == at -> return at
+            at = following
+            next
+        }
+        return at
+    }
+}
+
+fn pkg_skip_inline_line_comment(bytes: [U8], from: Int) -> Int Never! {
+    at := from + 2
+    loop at < bytes.len() && Int.from_u8(bytes[at]) != 10 -> at += 1
+    at
+}
+
+fn pkg_skip_inline_string(bytes: [U8], start: Int) -> Int Never! {
+    triple :: pkg_bytes_starts_with(bytes, start, "\"\"\"".bytes())
+    quote :: Int.from_u8(bytes[start])
+    i := start + (if triple -> 3 else -> 1)
+    escaped := false
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        if escaped {
+            escaped = false
+            i += 1
+            next
+        }
+        if code == 92 {
+            escaped = true
+            i += 1
+            next
+        }
+        if triple {
+            if pkg_bytes_starts_with(bytes, i, "\"\"\"".bytes()) -> return i + 3
+        } else if code == quote {
+            return i + 1
+        }
+        i += 1
+    }
+    bytes.len()
+}

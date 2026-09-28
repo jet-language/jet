@@ -7,7 +7,7 @@
 @NIXEVAL_JSON_INTEGER_BOUND :: 9223372036854775808
 
 impl NixEvaluator {
-    fn encode_json(&self, value: NixEvalValue, depth: Int) -> String !NixEvalError {
+    fn encode_json(&self, value: NixEvalValue, depth: Int) -> String NixEvalError! {
         if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         if value == {
             .Null -> return Ok("null")
@@ -17,8 +17,8 @@ impl NixEvaluator {
             .List(items) -> {
                 parts := [String]{}
                 loop item in items {
-                    forced :: self.force(item)
-                    parts.push(self.encode_json(forced, depth + 1))
+                    forced :: &self.force(item)
+                    &parts.push(&self.encode_json(forced, depth + 1))
                 }
                 joined :: parts.join(",")
                 return Ok("[{joined}]")
@@ -26,9 +26,9 @@ impl NixEvaluator {
             .AttrSet(fields) -> {
                 parts := [String]{}
                 loop name in nixeval_sorted(fields.keys().to_list()) {
-                    forced :: self.force(fields[name])
-                    encoded :: self.encode_json(forced, depth + 1)
-                    parts.push("{nixeval_json_quote(name)}:{encoded}")
+                    forced :: &self.force(fields[name])
+                    encoded :: &self.encode_json(forced, depth + 1)
+                    &parts.push("{nixeval_json_quote(name)}:{encoded}")
                 }
                 joined :: parts.join(",")
                 return Ok("{{{joined}}}")
@@ -38,7 +38,7 @@ impl NixEvaluator {
         Err(NixEvalError.Unsupported("value of type {value.type_name()} cannot be encoded as JSON"))
     }
 
-    fn json_to_value(&self, document: NixEvalJson, index: Int, depth: Int) -> NixEvalValue !NixEvalError {
+    fn json_to_value(&self, document: NixEvalJson, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
         if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         if document.node(index) == {
             .Null -> NixEvalValue.Null
@@ -48,16 +48,16 @@ impl NixEvaluator {
             .Array(items) -> {
                 values := [Int]{}
                 loop item in items {
-                    converted :: self.json_to_value(document, item, depth + 1)
-                    values.push(self.value_thunk(converted))
+                    converted :: &self.json_to_value(document, item, depth + 1)
+                    &values.push(&self.value_thunk(converted))
                 }
                 NixEvalValue.List(values)
             }
             .Object(members) -> {
                 fields := [String: Int]{}
                 loop entry in members {
-                    converted :: self.json_to_value(document, entry.value, depth + 1)
-                    fields[entry.key] = self.value_thunk(converted)
+                    converted :: &self.json_to_value(document, entry.value, depth + 1)
+                    fields[entry.key] = &self.value_thunk(converted)
                 }
                 NixEvalValue.AttrSet(fields)
             }
@@ -67,7 +67,7 @@ impl NixEvaluator {
 
 // A JSON number as a Nix integer. The reference conversion saturates 2^63 to
 // the largest integer and rejects fractions and anything out of range.
-fn nixeval_json_integer(number: NixEvalJsonNumber) -> Int !NixEvalError {
+fn nixeval_json_integer(number: NixEvalJsonNumber) -> Int NixEvalError! {
     integer :: number.integer() ?? return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
     if integer < -@NIXEVAL_JSON_INTEGER_BOUND || integer > @NIXEVAL_JSON_INTEGER_BOUND {
         return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
@@ -77,12 +77,12 @@ fn nixeval_json_integer(number: NixEvalJsonNumber) -> Int !NixEvalError {
 }
 
 // Decimal text of the binary64 rounding of an integer.
-fn nixeval_json_integer_text(value: Int) -> String !Never {
+fn nixeval_json_integer_text(value: Int) -> String Never! {
     number :: NixEvalJsonNumber.from_int(value)
     "{number.integer() ?? 0}"
 }
 
-fn nixeval_json_quote(text: String) -> String !Never {
+fn nixeval_json_quote(text: String) -> String Never! {
     out := [U8]{}
     nixeval_push_byte(&out, 34)
     hex :: "0123456789abcdef".bytes()
@@ -100,10 +100,10 @@ fn nixeval_json_quote(text: String) -> String !Never {
                 if {
                     value < 32 -> {
                         nixeval_push_text(&out, "\\u00")
-                        out.push(hex[value /% 16])
-                        out.push(hex[value % 16])
+                        &out.push(hex[value /% 16])
+                        &out.push(hex[value % 16])
                     }
-                    else -> out.push(byte)
+                    else -> &out.push(byte)
                 }
             }
         }

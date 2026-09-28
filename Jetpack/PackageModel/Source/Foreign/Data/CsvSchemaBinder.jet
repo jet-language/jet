@@ -4,37 +4,37 @@
 // Quoted fields keep commas, doubled quotes, and line breaks; CR, LF, and
 // CRLF all end a record.
 
-fn pkg_data_bind_csv(input: String, root_name: String) -> SchemaBuilder !DataBindError {
+fn pkg_data_bind_csv(input: String, root_name: String) -> SchemaBuilder DataBindError! {
     rows :: pkg_data_parse_csv(input)
     headers :: rows[0]
     seen := [String]{}
     loop header in headers {
         if header.trim() == "" -> return Err(DataBindError{message: "CSV has a missing header"})
         if seen.contains(header) -> return Err(DataBindError{message: "CSV has a duplicate header {header}"})
-        seen.push(header)
+        &seen.push(header)
     }
     width :: headers.len()
     columns := [[String]]{}
-    loop _ in 0..<width -> columns.push([String]{})
+    loop _ in 0..<width -> &columns.push([String]{})
     loop row_index in 1..<rows.len() {
         row :: rows[row_index]
         if row.len() != width -> return Err(DataBindError{message: "CSV row has {row.len()} fields but header has {width}"})
-        loop index in 0..<width -> columns[index].push(row[index])
+        loop index in 0..<width -> &columns[index].push(row[index])
     }
     builder := SchemaBuilder.new()
-    record :: builder.begin_record(root_name)
+    record :: &builder.begin_record(root_name)
     fields := [FieldSeed]{}
     loop index in 0..<width {
         inferred :: pkg_data_csv_type(columns[index])
-        fields.push(FieldSeed{wire_name: headers[index], ty: inferred.ty, optional: inferred.optional, note: None})
+        &fields.push(FieldSeed{wire_name: headers[index], ty: inferred.ty, optional: inferred.optional, note: None})
     }
-    builder.set_fields(record.index, fields)
+    &builder.set_fields(record.index, fields)
     Ok(builder)
 }
 
 // Records of fields; trailing empty records are dropped and at least a header
 // and one data row must remain.
-fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
+fn pkg_data_parse_csv(input: String) -> [[String]] DataBindError! {
     if input == "" -> return Err(DataBindError{message: "CSV input is empty"})
     bytes :: input.bytes()
     rows := [[String]]{}
@@ -48,7 +48,7 @@ fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
         if quoted {
             if code == 34 {
                 if pkg_bytes_code(bytes, index + 1) == 34 {
-                    field.push(bytes[index])
+                    &field.push(bytes[index])
                     index += 2
                 } else {
                     quoted = false
@@ -56,7 +56,7 @@ fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
                     index += 1
                 }
             } else {
-                field.push(bytes[index])
+                &field.push(bytes[index])
                 index += 1
             }
             next
@@ -64,15 +64,15 @@ fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
         if after_quote {
             if code == {
                 44 -> {
-                    row.push(pkg_bytes_text(field, 0, field.len()))
+                    &row.push(pkg_bytes_text(field, 0, field.len()))
                     field = [U8]{}
                     after_quote = false
                     index += 1
                 }
                 10 | 13 -> {
-                    row.push(pkg_bytes_text(field, 0, field.len()))
+                    &row.push(pkg_bytes_text(field, 0, field.len()))
                     field = [U8]{}
-                    rows.push(row)
+                    &rows.push(row)
                     row = [String]{}
                     after_quote = false
                     index += 1
@@ -89,31 +89,31 @@ fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
                 index += 1
             }
             44 -> {
-                row.push(pkg_bytes_text(field, 0, field.len()))
+                &row.push(pkg_bytes_text(field, 0, field.len()))
                 field = [U8]{}
                 index += 1
             }
             10 | 13 -> {
-                row.push(pkg_bytes_text(field, 0, field.len()))
+                &row.push(pkg_bytes_text(field, 0, field.len()))
                 field = [U8]{}
-                rows.push(row)
+                &rows.push(row)
                 row = [String]{}
                 index += 1
                 if code == 13 && pkg_bytes_code(bytes, index) == 10 -> index += 1
             }
             else -> {
-                field.push(bytes[index])
+                &field.push(bytes[index])
                 index += 1
             }
         }
     }
     if quoted -> return Err(DataBindError{message: "CSV has an unterminated quoted field"})
     if after_quote || row.len() != 0 || field.len() != 0 {
-        row.push(pkg_bytes_text(field, 0, field.len()))
-        rows.push(row)
+        &row.push(pkg_bytes_text(field, 0, field.len()))
+        &rows.push(row)
     }
     loop rows.len() > 0 && rows[rows.len() - 1].len() == 0 {
-        _ :: rows.pop()
+        _ :: &rows.pop()
     }
     if rows.len() < 2 -> return Err(DataBindError{message: "CSV needs a header and at least one data row"})
     Ok(rows)
@@ -121,14 +121,14 @@ fn pkg_data_parse_csv(input: String) -> [[String]] !DataBindError {
 
 // Bool, then Int, then Float when every non-empty cell parses as one;
 // otherwise String. Any empty cell makes the field optional.
-fn pkg_data_csv_type(values: [String]) -> (ty: BoundType, optional: Bool) !Never {
+fn pkg_data_csv_type(values: [String]) -> (ty: BoundType, optional: Bool) Never! {
     optional := false
     nonempty := [String]{}
     loop value in values {
         if value == "" {
             optional = true
         } else {
-            nonempty.push(value)
+            &nonempty.push(value)
         }
     }
     if nonempty.len() == 0 -> return (ty: BoundType.Scalar("String"), optional: optional)

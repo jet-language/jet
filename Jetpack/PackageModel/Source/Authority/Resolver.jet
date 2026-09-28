@@ -22,7 +22,7 @@ pub struct AuthorityResolver {
     // Open a directory only when it can be a project/workspace authority.
     // Upward discovery crosses unrelated parents; they are discovery space,
     // and shared directories such as `/tmp` are never pinned.
-    fn open_for_authority_walk(root: String) -[FS, Env]> ?AuthorityResolver !AuthorityError {
+    fn open_for_authority_walk(root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
         effective :: pkg_authority_effective_root(root)
         info :: pkg_authority_inspect_root(effective)
         if pkg_authority_is_shared_directory(info) || !pkg_authority_has_candidate(effective) -> return Ok(None)
@@ -30,7 +30,7 @@ pub struct AuthorityResolver {
     }
 
     // Validate and canonicalize a walk start without pinning it.
-    fn authority_walk_root(root: String) -[FS, Env]> String !AuthorityError {
+    fn authority_walk_root(root: String) -[FS, Env]> String AuthorityError! {
         effective :: pkg_authority_effective_root(root)
         pkg_authority_inspect_root(effective)
         pkg_authority_canonicalize_root(effective)
@@ -38,7 +38,7 @@ pub struct AuthorityResolver {
 
     // The next parent that may participate in authority discovery. Shared
     // directories are never authority roots.
-    fn authority_walk_parent(path: String) -[FS, Env]> ?String !Never {
+    fn authority_walk_parent(path: String) -[FS, Env]> String? Never! {
         if pkg_authority_is_shared_directory_path(path) -> return None
         if path == "/" || path == "" -> return None
         parent :: files.dirname(path)
@@ -47,17 +47,17 @@ pub struct AuthorityResolver {
     }
 
     // Open and pin a regular authority root directory (single-link files only).
-    fn open(root: String) -[FS, Env]> AuthorityResolver !AuthorityError {
+    fn open(root: String) -[FS, Env]> AuthorityResolver AuthorityError! {
         AuthorityResolver.open_with_hardlink_policy(root, false)
     }
 
     // Open an immutable store object whose payload files may be shared by
     // hardlink. The caller must have verified the store object first.
-    fn open_store(root: String) -[FS, Env]> AuthorityResolver !AuthorityError {
+    fn open_store(root: String) -[FS, Env]> AuthorityResolver AuthorityError! {
         AuthorityResolver.open_with_hardlink_policy(root, true)
     }
 
-    fn open_with_hardlink_policy(root: String, allow_hardlinks: Bool) -[FS, Env]> AuthorityResolver !AuthorityError {
+    fn open_with_hardlink_policy(root: String, allow_hardlinks: Bool) -[FS, Env]> AuthorityResolver AuthorityError! {
         effective :: pkg_authority_effective_root(root)
         info :: pkg_authority_inspect_root(effective)
         expected :: FileIdentity.from_stat(info, AuthorityKind.Directory)
@@ -77,13 +77,13 @@ pub struct AuthorityResolver {
         Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: handle, allow_hardlinks: allow_hardlinks})
     }
 
-    fn root(self) -> String !Never {
+    fn root(self) -> String Never! {
         self.root
     }
 
     // Scope a resolver to an already-open checked directory, carrying its
     // handle and identity forward without reopening its path.
-    fn from_checked_directory(directory: CheckedDirectory) -> AuthorityResolver !Never {
+    fn from_checked_directory(directory: CheckedDirectory) -> AuthorityResolver Never! {
         AuthorityResolver{
             root: directory.path,
             root_identity: directory.identity,
@@ -94,7 +94,7 @@ pub struct AuthorityResolver {
 
     // Open one regular file below the pinned root and read its bytes from the
     // same opened object.
-    fn checked_file(self, path: String) -[FS, Env]> CheckedFile !AuthorityError {
+    fn checked_file(self, path: String) -[FS, Env]> CheckedFile AuthorityError! {
         relative :: self.relative_path(path)
         full :: pkg_authority_join(self.root, relative)
         if relative == "" {
@@ -114,7 +114,7 @@ pub struct AuthorityResolver {
         loop {
             chunk :: handle.read(@AUTHORITY_READ_CHUNK) ?? return Err(AuthorityError.Io{path: full, operation: "read", detail: "{err}"})
             if chunk.len() == 0 -> break
-            loop byte in chunk -> bytes.push(byte)
+            loop byte in chunk -> &bytes.push(byte)
             if bytes.len() > @PKG_MAX_TREE_FILE_BYTES {
                 return Err(pkg_authority_limit_error(full, "authority file exceeds the {@PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
             }
@@ -130,7 +130,7 @@ pub struct AuthorityResolver {
     }
 
     // Open one directory below the pinned root without following links.
-    fn checked_directory(self, path: String) -[FS, Env]> CheckedDirectory !AuthorityError {
+    fn checked_directory(self, path: String) -[FS, Env]> CheckedDirectory AuthorityError! {
         relative :: self.relative_path(path)
         full :: pkg_authority_join(self.root, relative)
         handle := ~self.root_handle
@@ -153,7 +153,7 @@ pub struct AuthorityResolver {
     }
 
     // Open and parse the only accepted manifest, `package.jet`.
-    fn checked_manifest(self, directory: String) -[FS, Env]> CheckedManifest !AuthorityError {
+    fn checked_manifest(self, directory: String) -[FS, Env]> CheckedManifest AuthorityError! {
         relative :: self.relative_path(directory)
         canonical :: self.probe_file(pkg_authority_relative_join(relative, @PACKAGE_FILE))
         retired :: self.probe_file(pkg_authority_relative_join(relative, @PAYLOAD_FILE))
@@ -174,7 +174,7 @@ pub struct AuthorityResolver {
     }
 
     // Open and parse one package member directory.
-    fn checked_member(self, path: String) -[FS, Env]> CheckedMember !AuthorityError {
+    fn checked_member(self, path: String) -[FS, Env]> CheckedMember AuthorityError! {
         directory :: self.checked_directory(path)
         manifest :: self.checked_manifest(directory.relative)
         member :: CheckedMember{directory: directory, manifest: manifest}
@@ -183,14 +183,14 @@ pub struct AuthorityResolver {
     }
 
     // Compose one checked Package without reopening its authority paths.
-    fn checked_package(self, path: String) -[FS, Env]> CheckedPackage !AuthorityError {
+    fn checked_package(self, path: String) -[FS, Env]> CheckedPackage AuthorityError! {
         member :: self.checked_member(path)
         self.complete_checked_package(member)
     }
 
     // Compose only the package rooted at this resolver: no `members:` walk
     // and no sibling inspection. Compiler/tool views use this boundary.
-    fn checked_root_package(self) -[FS, Env]> CheckedPackage !AuthorityError {
+    fn checked_root_package(self) -[FS, Env]> CheckedPackage AuthorityError! {
         member :: self.checked_member(".")
         package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
         facts := member.manifest.facts
@@ -205,7 +205,7 @@ pub struct AuthorityResolver {
     // Complete a member from an already-open checked directory and manifest.
     // Config paths and a Package's own membership are relative to that
     // Package root; the checked directory carries its opened handle.
-    fn complete_checked_package(self, member: CheckedMember) -[FS, Env]> CheckedPackage !AuthorityError {
+    fn complete_checked_package(self, member: CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
         package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
         facts := member.manifest.facts
         manifest_path :: member.manifest.file.path
@@ -218,7 +218,7 @@ pub struct AuthorityResolver {
 
     // Discover immediate package member directories. Symlink entries are
     // rejected, even when their target would stay inside the root.
-    fn discover_members(self, path: String) -[FS, Env]> [CheckedMember] !AuthorityError {
+    fn discover_members(self, path: String) -[FS, Env]> [CheckedMember] AuthorityError! {
         scan :: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
         entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
@@ -230,7 +230,7 @@ pub struct AuthorityResolver {
             if self.checked_member(relative) == {
                 .Ok(member) -> {
                     self.revalidate_member(member)
-                    members.push(member)
+                    &members.push(member)
                 }
                 .Err(error) -> {
                     if !error.is_missing() -> return Err(error)
@@ -243,7 +243,7 @@ pub struct AuthorityResolver {
 
     // Discover regular files in one checked directory without following
     // candidate links; each returned file is opened and revalidated here.
-    fn discover_files(self, path: String, extension: ?String) -[FS, Env]> [CheckedFile] !AuthorityError {
+    fn discover_files(self, path: String, extension: String?) -[FS, Env]> [CheckedFile] AuthorityError! {
         scan :: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
         entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
@@ -262,8 +262,8 @@ pub struct AuthorityResolver {
             }
             file :: self.checked_file(relative)
             self.revalidate_file(file)
-            budget.record_file(file.path, file.bytes.len())
-            found.push(file)
+            &budget.record_file(file.path, file.bytes.len())
+            &found.push(file)
         }
         self.revalidate_directory(scan)
         Ok(found)
@@ -271,33 +271,33 @@ pub struct AuthorityResolver {
 
     // Discover source files below the pinned root; traversal and every
     // returned file stay inside this descriptor-relative resolver.
-    fn discover_source_files(self) -[FS, Env]> [CheckedFile] !AuthorityError {
+    fn discover_source_files(self) -[FS, Env]> [CheckedFile] AuthorityError! {
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
         self.discover_source_files_from(".", &found, &budget, 0)
-        found.sort_by(file -> file.relative)
+        &found.sort_by(file -> file.relative)
         self.revalidate_root()
         Ok(found)
     }
 
     // Hash every checked `.jet` file below one checked directory with the
     // package tree identity's path/content shape.
-    fn source_tree_hash(self, directory: CheckedDirectory) -[FS, Env]> String !AuthorityError {
+    fn source_tree_hash(self, directory: CheckedDirectory) -[FS, Env]> String AuthorityError! {
         self.revalidate_directory(directory)
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
         self.discover_source_files_from(directory.relative, &found, &budget, 0)
-        found.sort_by(file -> file.relative)
+        &found.sort_by(file -> file.relative)
         hasher := crypto.Hasher.new()
         loop file in found {
             relative :: if directory.relative == "" -> file.relative else -> {
                 if !file.relative.starts_with("{directory.relative}/") -> return Err(AuthorityError.Escapes(file.path))
                 file.relative.removeprefix("{directory.relative}/")
             }
-            hasher.update(relative.replace("\\", "/").bytes())
-            hasher.update([U8]{U8{0}})
-            hasher.update(pkg_u64_be_bytes(file.bytes.len()))
-            hasher.update(file.bytes)
+            &hasher.update(relative.replace("\\", "/").bytes())
+            &hasher.update([U8]{U8{0}})
+            &hasher.update(pkg_u64_be_bytes(file.bytes.len()))
+            &hasher.update(file.bytes)
             self.revalidate_file(file)
         }
         self.revalidate_directory(directory)
@@ -308,7 +308,7 @@ pub struct AuthorityResolver {
     // D-ECO-FILEROOT1/D-ECO-GRAPH1: a Package root with `members:` owns
     // membership; the declaration-resolved workspace source remains below
     // only while a root still waits for its list to fold into package.jet.
-    fn resolve_workspace_source(self) -[FS, Env]> ?WorkspaceSource !AuthorityError {
+    fn resolve_workspace_source(self) -[FS, Env]> WorkspaceSource? AuthorityError! {
         self.revalidate_root()
         if self.checked_manifest(".") == {
             .Ok(manifest) -> {
@@ -330,13 +330,13 @@ pub struct AuthorityResolver {
         loop entry in entries {
             if pkg_authority_extension(entry.name) != Val(@FILE_EXT) -> next
             file :: self.checked_file(entry.name)
-            budget.record_file(file.path, file.bytes.len())
+            &budget.record_file(file.path, file.bytes.len())
             source :: file.text()
             if pkg_declares_workspace_module(source) {
                 role :: if entry.name == @WORKSPACE_FILE || pkg_declares_workspace_members(source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
                 candidate :: WorkspaceSource{path: file.path, source: source, role: role, checked: file}
                 self.revalidate_source(candidate)
-                if role == WorkspaceSourceRole.Index -> indexes.push(candidate) else -> authorities.push(candidate)
+                if role == WorkspaceSourceRole.Index -> &indexes.push(candidate) else -> &authorities.push(candidate)
             } else if entry.name == @WORKSPACE_FILE {
                 malformed_canonical = true
             }
@@ -347,7 +347,7 @@ pub struct AuthorityResolver {
             index :: indexes[indexes.len() - 1]
             if authorities.len() == 0 -> return Ok(Val(index))
             paths := [String]{index.path}
-            loop source in authorities -> paths.push(source.path)
+            loop source in authorities -> &paths.push(source.path)
             return Err(AuthorityError.WorkspaceAmbiguous(paths))
         }
         if authorities.len() == {
@@ -355,35 +355,35 @@ pub struct AuthorityResolver {
             1 -> Ok(Val(authorities[0]))
             else -> {
                 paths := [String]{}
-                loop source in authorities -> paths.push(source.path)
+                loop source in authorities -> &paths.push(source.path)
                 Err(AuthorityError.WorkspaceAmbiguous(paths))
             }
         }
     }
 
     // Revalidate the root and one checked file before using its bytes.
-    fn revalidate_file(self, file: CheckedFile) !AuthorityError -[FS, Env]> {
+    fn revalidate_file(self, file: CheckedFile) AuthorityError! -[FS, Env]> {
         self.validate_checked_path(file.path, file.relative)
         self.revalidate_root()
         self.revalidate_file_handle(file.path, file.identity, file.handle)
     }
 
     // Revalidate the root and one checked directory before using it.
-    fn revalidate_directory(self, directory: CheckedDirectory) !AuthorityError -[FS, Env]> {
+    fn revalidate_directory(self, directory: CheckedDirectory) AuthorityError! -[FS, Env]> {
         self.validate_checked_path(directory.path, directory.relative)
         self.revalidate_root()
         self.revalidate_directory_handle(directory.path, directory.identity, directory.handle)
     }
 
     // Revalidate a complete member snapshot before realizing it.
-    fn revalidate_member(self, member: CheckedMember) !AuthorityError -[FS, Env]> {
+    fn revalidate_member(self, member: CheckedMember) AuthorityError! -[FS, Env]> {
         self.revalidate_directory(member.directory)
         self.revalidate_file(member.manifest.file)
         self.revalidate_root()
     }
 
     // Revalidate a workspace source snapshot before realizing it.
-    fn revalidate_source(self, source: WorkspaceSource) !AuthorityError -[FS, Env]> {
+    fn revalidate_source(self, source: WorkspaceSource) AuthorityError! -[FS, Env]> {
         if source.path != source.checked.path || source.source.bytes() != source.checked.bytes {
             return Err(AuthorityError.Changed(source.path))
         }
@@ -391,34 +391,33 @@ pub struct AuthorityResolver {
     }
 
     // The checkout-relative physical identity for a checked path.
-    fn relative_identity(self, directory: CheckedDirectory) -[FS, Env]> String !AuthorityError {
+    fn relative_identity(self, directory: CheckedDirectory) -[FS, Env]> String AuthorityError! {
         self.revalidate_directory(directory)
         if directory.relative == "" -> return Ok(".")
         canonical :: files.join(self.root, directory.relative)
         if !pkg_authority_path_within(canonical, self.root) -> return Err(AuthorityError.Escapes(directory.path))
-        Ok(directory.relative.replace("\\", "/"))
+        Ok(&directory.relative.replace("\\", "/"))
     }
 
-    fn revalidate_root(self) !AuthorityError -[FS, Env]> {
+    fn revalidate_root(self) AuthorityError! -[FS, Env]> {
         self.revalidate_directory_handle(self.root, self.root_identity, self.root_handle)
     }
 
     // Whether `relative` holds its own project boundary marker. A symlinked
     // marker still identifies a nested project; it is never followed.
-    fn has_nested_project_boundary(self, relative: String) -[FS, Env]> Bool !AuthorityError {
-        loop candidate in [String]{@PACKAGE_FILE, @PAYLOAD_FILE, @WORKSPACE_FILE, @UNIFIED_LOCK_FILE} {
-            if self.probe_file(pkg_authority_relative_join(relative, candidate)) == {
-                .Ok(found) -> {
-                    if found != None -> return Ok(true)
-                }
-                .Err(.Symlink(_)) -> return Ok(true)
-                .Err(error) -> return Err(error)
+    fn has_nested_project_boundary(self, relative: String) -[FS, Env]> Bool AuthorityError! {
+        candidate_values :: [String]{@PACKAGE_FILE, @PAYLOAD_FILE, @WORKSPACE_FILE, @UNIFIED_LOCK_FILE}
+        loop candidate in candidate_values {
+            probed :: self.probe_file(pkg_authority_relative_join(relative, candidate)) ? found -> found ! error -> {
+                if pkg_authority_is_symlink(error) -> return Ok(true)
+                return Err(error)
             }
+            if probed != None -> return Ok(true)
         }
         Ok(false)
     }
 
-    fn discover_source_files_from(self, path: String, found: &[CheckedFile], budget: &AuthorityWalkBudget, depth: Int) !AuthorityError -[FS, Env]> {
+    fn discover_source_files_from(self, path: String, found: &[CheckedFile], budget: &AuthorityWalkBudget, depth: Int) AuthorityError! -[FS, Env]> {
         if depth > @PKG_MAX_TREE_DEPTH {
             return Err(pkg_authority_limit_error(pkg_authority_join(self.root, path), "authority source walk exceeds the {@PKG_MAX_TREE_DEPTH}-level depth bound"))
         }
@@ -445,14 +444,14 @@ pub struct AuthorityResolver {
                 budget.ensure_file(files.join(self.root, relative), entry.info.size)
                 file :: self.checked_file(relative)
                 self.revalidate_file(file)
-                budget.record_file(file.path, file.bytes.len())
-                found.push(file)
+                &budget.record_file(file.path, file.bytes.len())
+                &found.push(file)
             }
         }
         self.revalidate_directory(scan)
     }
 
-    fn probe_file(self, path: String) -[FS, Env]> ?CheckedFile !AuthorityError {
+    fn probe_file(self, path: String) -[FS, Env]> CheckedFile? AuthorityError! {
         if self.checked_file(path) == {
             .Ok(file) -> Ok(Val(file))
             .Err(error) -> {
@@ -464,7 +463,7 @@ pub struct AuthorityResolver {
 
     // The normalized root-relative spelling of `path`; `.`, `..`, and an
     // absolute path outside the root are refused.
-    fn relative_path(self, path: String) -> String !AuthorityError {
+    fn relative_path(self, path: String) -> String AuthorityError! {
         relative := path
         if files.is_abs(path) {
             if !pkg_authority_path_within(path, self.root) -> return Err(AuthorityError.Escapes(path))
@@ -476,41 +475,42 @@ pub struct AuthorityResolver {
             if part == {
                 "" | "." -> next
                 ".." -> return Err(AuthorityError.Escapes(path))
-                else -> parts.push(part)
+                else -> {
+                    &parts.push(part)
+                }
             }
         }
         Ok(parts.join("/"))
     }
 
-    fn revalidate_file_handle(self, path: String, expected: FileIdentity, handle: FileReader) !AuthorityError -[FS, Env]> {
+    fn revalidate_file_handle(self, path: String, expected: FileIdentity, handle: FileReader) AuthorityError! -[FS, Env]> {
         info :: handle.stat() ?? return Err(AuthorityError.Io{path: path, operation: "revalidate", detail: "{err}"})
         self.revalidate_identity(path, AuthorityKind.File, expected, info)
         self.check_file_links(path, info)
     }
 
-    fn revalidate_directory_handle(self, path: String, expected: FileIdentity, handle: Directory) !AuthorityError -[FS, Env]> {
+    fn revalidate_directory_handle(self, path: String, expected: FileIdentity, handle: Directory) AuthorityError! -[FS, Env]> {
         info :: handle.stat() ?? return Err(AuthorityError.Io{path: path, operation: "revalidate", detail: "{err}"})
         self.revalidate_identity(path, AuthorityKind.Directory, expected, info)
     }
 
-    fn revalidate_identity(self, path: String, kind: AuthorityKind, expected: FileIdentity, info: Stat) !AuthorityError {
-        actual_kind :: if {
-            info.is_dir -> AuthorityKind.Directory
-            info.is_file -> AuthorityKind.File
-            else -> return Err(AuthorityError.WrongKind{path: path, expected: kind.name(), actual: pkg_authority_kind_name(info)})
+    fn revalidate_identity(self, path: String, kind: AuthorityKind, expected: FileIdentity, info: Stat) AuthorityError! {
+        if !info.is_dir && !info.is_file {
+            return Err(AuthorityError.WrongKind{path: path, expected: kind.name(), actual: pkg_authority_kind_name(info)})
         }
+        actual_kind :: if info.is_dir -> AuthorityKind.Directory else -> AuthorityKind.File
         if actual_kind != kind || FileIdentity.from_stat(info, actual_kind) != expected {
             return Err(AuthorityError.Changed(path))
         }
         Ok()
     }
 
-    fn check_file_links(self, path: String, info: Stat) !AuthorityError {
+    fn check_file_links(self, path: String, info: Stat) AuthorityError! {
         if self.allow_hardlinks -> return Ok()
         pkg_authority_require_single_link(path, info)
     }
 
-    fn validate_checked_path(self, path: String, relative: String) !AuthorityError {
+    fn validate_checked_path(self, path: String, relative: String) AuthorityError! {
         if files.is_abs(relative) || path != pkg_authority_join(self.root, relative) || !pkg_authority_path_within(path, self.root) {
             return Err(AuthorityError.Escapes(path))
         }
@@ -520,16 +520,15 @@ pub struct AuthorityResolver {
 
 // `Path::parent()` of a bare relative name is empty, which the OS rejects;
 // callers walking up from an entry file mean the current directory.
-fn pkg_authority_effective_root(root: String) -> String !Never {
+fn pkg_authority_effective_root(root: String) -> String Never! {
     if root == "" -> return "."
     root
 }
 
-fn pkg_authority_inspect_root(root: String) -[FS]> Stat !AuthorityError {
-    info :: if files.stat(root) == {
-        .Ok(found) -> found
-        .Err(.NotFound(_)) -> return Err(AuthorityError.Missing(root))
-        .Err(error) -> return Err(AuthorityError.Io{path: root, operation: "inspect", detail: "{error}"})
+fn pkg_authority_inspect_root(root: String) -[FS]> Stat AuthorityError! {
+    info :: files.stat(root) ? found -> found ! error -> {
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(root))
+        return Err(AuthorityError.Io{path: root, operation: "inspect", detail: "{error}"})
     }
     if info.is_symlink -> return Err(AuthorityError.Symlink(root))
     if !info.is_dir {
@@ -538,30 +537,38 @@ fn pkg_authority_inspect_root(root: String) -[FS]> Stat !AuthorityError {
     Ok(info)
 }
 
-fn pkg_authority_canonicalize_root(root: String) -[FS, Env]> String !AuthorityError {
-    if files.canonicalize(root) == {
-        .Ok(canonical) -> Ok(canonical)
-        .Err(.NotFound(_)) -> Err(AuthorityError.Missing(root))
-        .Err(error) -> Err(AuthorityError.Io{path: root, operation: "resolve", detail: "{error}"})
+fn pkg_authority_canonicalize_root(root: String) -[FS, Env]> String AuthorityError! {
+    canonical :: files.canonicalize(root) ? resolved -> resolved ! error -> {
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(root))
+        return Err(AuthorityError.Io{path: root, operation: "resolve", detail: "{error}"})
     }
+    Ok(canonical)
 }
 
-fn pkg_authority_is_retired_manifest(error: AuthorityError) -> Bool !Never {
+fn pkg_authority_is_retired_manifest(error: AuthorityError) -> Bool Never! {
     if error == {
         .RetiredManifest(_) -> true
         else -> false
     }
 }
 
+fn pkg_authority_is_symlink(error: AuthorityError) -> Bool Never! {
+    if error == {
+        .Symlink(_) -> true
+        else -> false
+    }
+}
+
 // Join a root-relative directory and a name (`PathBuf::join` on `""`).
-fn pkg_authority_relative_join(relative: String, name: String) -> String !Never {
+fn pkg_authority_relative_join(relative: String, name: String) -> String Never! {
     if relative == "" -> return name
     "{relative}/{name}"
 }
 
 // A u64 length as eight big-endian bytes.
-fn pkg_u64_be_bytes(value: Int) -> [U8] !Never {
+fn pkg_u64_be_bytes(value: Int) -> [U8] Never! {
     out := [U8]{}
-    loop shift in [Int]{56, 48, 40, 32, 24, 16, 8, 0} -> out.push(U8{(value >> shift) & 0xFF})
+    shift_values :: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
+    loop shift in shift_values -> &out.push(U8{(value >> shift) & 0xFF})
     out
 }

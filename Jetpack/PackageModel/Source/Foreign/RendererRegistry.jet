@@ -13,7 +13,7 @@ pub enum DecoderProtocol {
 }
 
 // The one response decoder a generated binding uses.
-pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String !Never {
+pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
     lines :: if protocol == {
         .StandardEnvelope -> [String]{
             "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
@@ -43,7 +43,7 @@ pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> S
 }
 
 // The Lua status adapter shared by response and table-view calls.
-pub fn pkg_render_lua_decode_status(error: String) -> String !Never {
+pub fn pkg_render_lua_decode_status(error: String) -> String Never! {
     lines :: [String]{
         "fn decode_status(code: Int) -> Bool !{error} {{",
         "    if code == 1 -> return Err({error}.NotRunning)",
@@ -83,7 +83,7 @@ pub struct RendererDescriptor {
 // The response renderer for one canonical binder descriptor. The descriptor
 // table is the denominator; the registry supplies the renderer-owned probe and
 // protocol without a second match list.
-fn pkg_renderer_for(descriptor: BinderDescriptor) -> ?RendererDescriptor !Never {
+fn pkg_renderer_for(descriptor: BinderDescriptor) -> RendererDescriptor? Never! {
     if descriptor.status != BinderStatus.Active -> return None
     loop renderer in @PKG_GENERATOR_REGISTRY {
         if renderer.language == descriptor.language && renderer.stub_kind == descriptor.stub_kind -> return Val(renderer)
@@ -93,10 +93,10 @@ fn pkg_renderer_for(descriptor: BinderDescriptor) -> ?RendererDescriptor !Never 
 
 // The single active canonical descriptor a renderer entry names, if exactly
 // one matches.
-fn pkg_renderer_canonical_for(renderer: RendererDescriptor) -> ?BinderDescriptor !Never {
+fn pkg_renderer_canonical_for(renderer: RendererDescriptor) -> BinderDescriptor? Never! {
     found := [BinderDescriptor]{}
     loop descriptor in pkg_foreign_binders() {
-        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> found.push(descriptor)
+        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> &found.push(descriptor)
     }
     if found.len() != 1 -> return None
     Val(found[0])

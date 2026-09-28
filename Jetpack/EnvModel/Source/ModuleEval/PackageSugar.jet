@@ -1,0 +1,301 @@
+// U6/U20: the `packages: [ … ]` Pkg sugar. The field's exact source text is
+// sliced and parsed as static sugar (`default.ripgrep`, `"mine@hello"`,
+// `Pkg.adapt(...)` adapters with their finite recipes), not re-derived from
+// comptime values.
+
+// The packages and adapter packages one `packages:` field declares.
+pub struct ExtractedPackages {
+    pub packages: [Pkg]
+    pub adapters: [AdapterPlan]
+}
+
+// One `name: value` argument of a sugar call, both halves trimmed.
+struct SugarField {
+    name: String
+    value: String
+}
+
+// Pull the package list out of a `packages: [ … ]` field by slicing its
+// source text and reusing the tested sugar parser.
+pub fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
+    span :: if value == {
+        .ListLit(_, span) -> span
+        else -> { return Err(envmodel_packages_not_a_list(expr_span(value))) }
+    }
+    text :: pkg_bytes_text(src.bytes(), span.start, span.end)
+    body :: if text.starts_with("[") && text.ends_with("]") -> text.removeprefix("[").removesuffix("]") else -> text
+    out := ExtractedPackages{packages: [Pkg]{}, adapters: [AdapterPlan]{}}
+    plain := [String]{}
+    loop piece in envmodel_sugar_split_top_level(body) {
+        item :: piece.trim()
+        if item == "" -> next
+        if item.starts_with(@PKG_ADAPT) {
+            &out.adapters.push(envmodel_parse_adapter(item))
+        } else {
+            &plain.push(item)
+        }
+    }
+    out.packages = Pkg.parse_list(plain.join(", "))
+    Ok(out)
+}
+
+// Split on commas not nested inside `()`/`[]`/`{}` or a string literal.
+// Returns the raw, untrimmed pieces; a trailing comma adds no piece.
+fn envmodel_sugar_split_top_level(body: String) -> [String] Never! {
+    raw :: body.bytes()
+    out := [String]{}
+    depth := 0
+    start := 0
+    in_string := false
+    escape := false
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            escape = code == 92 && !escape
+            if code == 34 && !escape {
+                in_string = false
+            } else if code != 92 {
+                escape = false
+            }
+            next
+        }
+        if code == {
+            34 -> in_string = true
+            40 | 91 | 123 -> depth += 1
+            41 | 93 | 125 -> depth -= 1
+            44 -> {
+                if depth == 0 {
+                    &out.push(pkg_bytes_text(raw, start, index))
+                    start = index + 1
+                }
+            }
+            else -> {}
+        }
+    }
+    if start < raw.len() -> &out.push(pkg_bytes_text(raw, start, raw.len()))
+    out
+}
+
+fn envmodel_parse_adapter(item: String) -> AdapterPlan EnvModelEvalError! {
+    args :: envmodel_sugar_call_args(item, @PKG_ADAPT) ?? return Err(envmodel_adapter_shape())
+    envmodel_sugar_validate_fields(args, [String]{@ADAPTER_FIELD_NAME, @ADAPTER_FIELD_SOURCE, @ADAPTER_FIELD_DEPS, @ADAPTER_FIELD_RECIPE})
+    name :: envmodel_sugar_named_string(args, @ADAPTER_FIELD_NAME) ?? return Err(envmodel_adapter_shape())
+    written_source :: envmodel_sugar_named_raw(args, @ADAPTER_FIELD_SOURCE) ?? return Err(envmodel_adapter_shape())
+    source :: envmodel_sugar_unquote(written_source.trim()) ?? written_source
+    ProviderRef.classify(source) ?? return Err(envmodel_adapter_shape())
+    deps := [Pkg]{}
+    if envmodel_sugar_named_raw(args, @ADAPTER_FIELD_DEPS) == {
+        .Val(raw) -> {
+            trimmed :: raw.trim()
+            body :: if trimmed.starts_with("[") && trimmed.ends_with("]") -> trimmed.removeprefix("[").removesuffix("]") else -> trimmed
+            deps = Pkg.parse_list(body)
+        }
+        .None -> {}
+    }
+    recipe_raw :: envmodel_sugar_named_raw(args, @ADAPTER_FIELD_RECIPE) ?? return Err(envmodel_adapter_shape())
+    Ok(AdapterPlan{name: name, source: source, deps: deps, recipe: envmodel_parse_recipe(recipe_raw)})
+}
+
+fn envmodel_parse_recipe(written: String) -> AdapterRecipe EnvModelEvalError! {
+    raw :: written.trim()
+    if envmodel_sugar_call_args(raw, @RECIPE_BUILD) == {
+        .Val(args) -> {
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_FIELD_STEPS})
+            return Ok(AdapterRecipe.Build(BuildRecipe{steps: envmodel_parse_build_steps(args)}))
+        }
+        .None -> {}
+    }
+    if envmodel_sugar_call_args(raw, @RECIPE_COPY) == {
+        .Val(args) -> {
+            if args.trim() == "" -> return Ok(AdapterRecipe.Copy)
+            return Err(envmodel_adapter_shape())
+        }
+        .None -> {}
+    }
+    if envmodel_sugar_call_args(raw, @RECIPE_PREBUILT) == {
+        .Val(args) -> {
+            if args.trim() == "" -> return Err(envmodel_adapter_shape())
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_FIELD_BIN, @RECIPE_FIELD_AS, @RECIPE_FIELD_AS_NAME})
+            bin :: envmodel_sugar_named_string(args, @RECIPE_FIELD_BIN) ?? return Err(envmodel_adapter_shape())
+            as_name :: envmodel_sugar_named_string(args, @RECIPE_FIELD_AS) ?? envmodel_sugar_named_string(args, @RECIPE_FIELD_AS_NAME) ?? envmodel_sugar_file_name(bin)
+            return Ok(AdapterRecipe.Prebuilt{bin: bin, as_name: as_name})
+        }
+        .None -> {}
+    }
+    Err(envmodel_adapter_shape())
+}
+
+// Rust `Path::file_name` of a `/`-separated path, or the path itself.
+fn envmodel_sugar_file_name(path: String) -> String Never! {
+    name :: files.basename(path)
+    if name == "" || name == "." || name == ".." -> return path
+    name
+}
+
+fn envmodel_parse_build_steps(args: String) -> [BuildStep] EnvModelEvalError! {
+    raw :: envmodel_sugar_named_field(args, @RECIPE_FIELD_STEPS) ?? return Err(envmodel_adapter_shape())
+    trimmed :: raw.trim()
+    if !trimmed.starts_with("[") || !trimmed.ends_with("]") -> return Err(envmodel_adapter_shape())
+    body :: trimmed.removeprefix("[").removesuffix("]")
+    steps := [BuildStep]{}
+    loop piece in envmodel_sugar_split_top_level(body) {
+        item :: piece.trim()
+        if item == "" -> next
+        &steps.push(envmodel_parse_build_step(item))
+    }
+    if steps.len() == 0 -> return Err(envmodel_adapter_shape())
+    Ok(steps)
+}
+
+fn envmodel_parse_build_step(raw: String) -> BuildStep EnvModelEvalError! {
+    if envmodel_sugar_call_args(raw, @RECIPE_STEP_FETCH) == {
+        .Val(args) -> {
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_URL, @RECIPE_STEP_FIELD_SHA256})
+            return Ok(BuildStep.Fetch{url: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_URL), sha256: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SHA256)})
+        }
+        .None -> {}
+    }
+    if envmodel_sugar_call_args(raw, @RECIPE_STEP_EXEC) == {
+        .Val(args) -> {
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_TOOL, @RECIPE_STEP_FIELD_ARGS})
+            return Ok(BuildStep.Exec{tool: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_TOOL), args: envmodel_sugar_required_strings(args, @RECIPE_STEP_FIELD_ARGS)})
+        }
+        .None -> {}
+    }
+    if envmodel_sugar_call_args(raw, @RECIPE_STEP_INSTALL) == {
+        .Val(args) -> {
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_SRC, @RECIPE_STEP_FIELD_DEST})
+            return Ok(BuildStep.Install{src: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_DEST)})
+        }
+        .None -> {}
+    }
+    if envmodel_sugar_call_args(raw, @RECIPE_STEP_INSTALL_TREE) == {
+        .Val(args) -> {
+            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_SRC, @RECIPE_STEP_FIELD_DEST})
+            return Ok(BuildStep.InstallTree{src: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_DEST)})
+        }
+        .None -> {}
+    }
+    Err(envmodel_adapter_shape())
+}
+
+// The value of the one `key:` argument; None when absent, repeated, or when
+// any argument is not a `name: value` pair.
+fn envmodel_sugar_named_field(args: String, key: String) -> String? Never! {
+    fields :: envmodel_sugar_named_fields(args) ?? return None
+    found := None
+    loop field in fields {
+        if field.name == key {
+            if found != None -> return None
+            found = Val(field.value)
+        }
+    }
+    found
+}
+
+fn envmodel_sugar_named_fields(args: String) -> [SugarField]? Never! {
+    fields := [SugarField]{}
+    loop piece in envmodel_sugar_split_top_level(args) {
+        item :: piece.trim()
+        if item == "" -> next
+        halves :: item.split_once(":") ?? return None
+        name :: halves.before.trim()
+        value :: halves.after.trim()
+        if name == "" || value == "" -> return None
+        &fields.push(SugarField{name: name, value: value})
+    }
+    Val(fields)
+}
+
+// Every argument is a known `name: value` pair, each named at most once.
+fn envmodel_sugar_validate_fields(args: String, allowed: [String]) EnvModelEvalError! {
+    fields :: envmodel_sugar_named_fields(args) ?? return Err(envmodel_adapter_shape())
+    seen := [String]{}
+    loop field in fields {
+        if !allowed.contains(field.name) || seen.contains(field.name) -> return Err(envmodel_adapter_shape())
+        &seen.push(field.name)
+    }
+}
+
+fn envmodel_sugar_required_string(args: String, key: String) -> String EnvModelEvalError! {
+    value :: envmodel_sugar_named_field(args, key) ?? return Err(envmodel_adapter_shape())
+    text :: envmodel_sugar_unquote(value.trim()) ?? return Err(envmodel_adapter_shape())
+    Ok(text)
+}
+
+fn envmodel_sugar_required_strings(args: String, key: String) -> [String] EnvModelEvalError! {
+    value :: envmodel_sugar_named_field(args, key) ?? return Err(envmodel_adapter_shape())
+    trimmed :: value.trim()
+    if !trimmed.starts_with("[") || !trimmed.ends_with("]") -> return Err(envmodel_adapter_shape())
+    strings := [String]{}
+    loop piece in envmodel_sugar_split_top_level(trimmed.removeprefix("[").removesuffix("]")) {
+        text :: envmodel_sugar_unquote(piece.trim()) ?? return Err(envmodel_adapter_shape())
+        &strings.push(text)
+    }
+    Ok(strings)
+}
+
+// The argument text of `prefix(…)`.
+fn envmodel_sugar_call_args(raw: String, prefix: String) -> String? Never! {
+    trimmed :: raw.trim()
+    if !trimmed.starts_with(prefix) -> return None
+    rest :: trimmed.removeprefix(prefix).trim_start()
+    if !rest.starts_with("(") || !rest.ends_with(")") -> return None
+    Val(rest.removeprefix("(").removesuffix(")"))
+}
+
+// The raw text after the first `key:` argument, trailing commas dropped.
+fn envmodel_sugar_named_raw(args: String, key: String) -> String? Never! {
+    needle :: "{key}:"
+    loop piece in envmodel_sugar_split_top_level(args) {
+        item :: piece.trim()
+        if item.starts_with(needle) {
+            rest := item.removeprefix(needle).trim()
+            loop rest.ends_with(",") -> rest = rest.removesuffix(",")
+            return Val(rest)
+        }
+    }
+    None
+}
+
+fn envmodel_sugar_named_string(args: String, key: String) -> String? Never! {
+    raw :: envmodel_sugar_named_raw(args, key) ?? return None
+    envmodel_sugar_unquote(raw.trim())
+}
+
+// Decode a double-quoted Jet string literal: the registered escapes and
+// `{{`/`}}` literal braces. None when it is not one quoted literal or uses
+// an unknown escape.
+fn envmodel_sugar_unquote(raw: String) -> String? Never! {
+    if !raw.starts_with("\"") || !raw.ends_with("\"") || raw.len() < 2 -> return None
+    characters :: raw.removeprefix("\"").removesuffix("\"").chars().to_list()
+    out := ""
+    index := 0
+    loop index < characters.len() {
+        character :: "{characters[index]}"
+        index += 1
+        if character == "\\" {
+            if index >= characters.len() -> return None
+            marker :: "{characters[index]}"
+            index += 1
+            decoded := None
+            loop escape in @ESCAPES {
+                if escape.marker == marker {
+                    decoded = Val(escape.decoded)
+                    break
+                }
+            }
+            out = "{out}{decoded ?? return None}"
+        } else if (character == "{{" || character == "}}") && index < characters.len() && "{characters[index]}" == character {
+            index += 1
+            out = "{out}{character}"
+        } else {
+            out = "{out}{character}"
+        }
+    }
+    Val(out)
+}
+
+fn envmodel_adapter_shape() -> EnvModelEvalError Never! {
+    envmodel_error("E1270", "adapter package declaration is not complete", "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; recipes are `Recipe.copy()`, `Recipe.prebuilt(bin:, as:)`, or a finite `Recipe.build(steps: […])`.", "write `Pkg.adapt(name: \"tool\", source: \"./vendor/tool\", recipe: Recipe.copy())`.", None)
+}

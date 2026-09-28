@@ -27,18 +27,18 @@
 @STORE_BROKER_PRIVATE_OWNER :: "private-owner"
 
 // Rust `invalid`: every broker refusal is InvalidData with this exact text.
-fn store_broker_invalid(message: String) -> StoreError !Never {
+fn store_broker_invalid(message: String) -> StoreError Never! {
     StoreError.InvalidData(message)
 }
 
 // A Core network failure as a Store failure, keeping the provider's text.
-fn store_broker_net_error(error: NetError) -> StoreError !Never {
+fn store_broker_net_error(error: NetError) -> StoreError Never! {
     StoreError.Other(net.error_message(error))
 }
 
 // Rust `str::parse::<u64>` / `<usize>`: optional `+`, then only ASCII digits,
 // within the Int range.
-fn store_broker_parse_unsigned(text: String) -> ?Int !Never {
+fn store_broker_parse_unsigned(text: String) -> Int? Never! {
     raw :: text.bytes()
     start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
     if start >= raw.len() || raw.len() - start > 19 -> return None
@@ -50,7 +50,7 @@ fn store_broker_parse_unsigned(text: String) -> ?Int !Never {
 }
 
 // Rust `decode_hex`: even length, ASCII hex digits of either case.
-fn store_broker_decode_hex(value: String) -> [U8] !StoreError {
+fn store_broker_decode_hex(value: String) -> [U8] StoreError! {
     raw :: value.bytes()
     if raw.len() % 2 != 0 -> return Err(store_broker_invalid("shared-store field is not valid hexadecimal"))
     loop byte in raw {
@@ -62,21 +62,21 @@ fn store_broker_decode_hex(value: String) -> [U8] !StoreError {
 }
 
 // Non-empty, at most 4096 bytes, and free of control scalars.
-fn store_broker_validate_text_field(value: String, label: String) !StoreError {
+fn store_broker_validate_text_field(value: String, label: String) StoreError! {
     if value == "" || value.bytes().len() > @STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES || pkg_text_has_control(value) {
         return Err(store_broker_invalid("{label} is invalid"))
     }
     Ok()
 }
 
-fn store_broker_decode_text_field(value: String, label: String) -> String !StoreError {
+fn store_broker_decode_text_field(value: String, label: String) -> String StoreError! {
     text :: String.from_bytes(store_broker_decode_hex(value)) ?? return Err(store_broker_invalid("{label} is not UTF-8"))
     store_broker_validate_text_field(text, "shared-store {label}")
     Ok(text)
 }
 
 // A shared-store reference: non-empty, bounded, and control-free.
-fn store_broker_valid_reference(reference: String) -> Bool !Never {
+fn store_broker_valid_reference(reference: String) -> Bool Never! {
     reference != "" && reference.bytes().len() <= @STORE_BROKER_MAX_REFERENCE_BYTES && !pkg_text_has_control(reference)
 }
 
@@ -99,7 +99,7 @@ pub struct ProvenanceBinding {
     pub policy: String
 
     // Wire order of the binding fields.
-    fn fields(self) -> [BrokerField] !Never {
+    fn fields(self) -> [BrokerField] Never! {
         [BrokerField]{
             BrokerField{key: "reference", value: self.reference},
             BrokerField{key: "source", value: self.source},
@@ -112,7 +112,7 @@ pub struct ProvenanceBinding {
         }
     }
 
-    fn validate(self) !StoreError {
+    fn validate(self) StoreError! {
         loop field in self.fields() -> store_broker_validate_text_field(field.value, "shared-store provenance {field.key}")
         Ok()
     }
@@ -145,20 +145,20 @@ pub enum BrokerRequest {
 // The byte source of one broker exchange: an accepted or connected Unix
 // stream, or in-memory bytes for protocol checks.
 pub struct BrokerWireReader {
-    stream: ?UnixStream
+    stream: UnixStream?
     bytes: [U8]
     position: Int
 
-    fn memory(bytes: [U8]) -> BrokerWireReader !Never {
+    fn memory(bytes: [U8]) -> BrokerWireReader Never! {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
     }
 
-    fn socket(stream: UnixStream) -> BrokerWireReader !Never {
+    fn socket(stream: UnixStream) -> BrokerWireReader Never! {
         BrokerWireReader{stream: Val(stream), bytes: [U8]{}, position: 0}
     }
 
     // Up to `limit` bytes; an empty list is end of input.
-    fn read_some(&self, limit: Int) -> [U8] !StoreError {
+    fn read_some(&self, limit: Int) -> [U8] StoreError! {
         if self.stream == {
             .Val(stream) -> Ok(net.unix_read_bytes(stream, limit) ?? return Err(store_broker_net_error(err)))
             .None -> {
@@ -171,22 +171,22 @@ pub struct BrokerWireReader {
     }
 
     // Rust `read_exact`: exactly `count` bytes or UnexpectedEof.
-    fn read_exact(&self, count: Int) -> [U8] !StoreError {
+    fn read_exact(&self, count: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < count {
-            chunk :: self.read_some(count - out.len())
+            chunk :: &self.read_some(count - out.len())
             if chunk.len() == 0 -> return Err(StoreError.Other("failed to fill whole buffer"))
-            loop byte in chunk -> out.push(byte)
+            loop byte in chunk -> &out.push(byte)
         }
         Ok(out)
     }
 
     // A header read one byte at a time through its terminating blank line.
-    fn read_header(&self, label: String) -> [U8] !StoreError {
+    fn read_header(&self, label: String) -> [U8] StoreError! {
         header := [U8]{}
         loop {
-            byte :: self.read_exact(1)
-            header.push(byte[0])
+            byte :: &self.read_exact(1)
+            &header.push(byte[0])
             count :: header.len()
             if count >= 2 && Int.from_u8(header[count - 1]) == 10 && Int.from_u8(header[count - 2]) == 10 -> break
             if count > @STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("{label} header is too large"))
@@ -195,23 +195,23 @@ pub struct BrokerWireReader {
     }
 
     // Rust `take(limit).read_to_end`: at most `limit` bytes, to end of input.
-    fn read_bounded(&self, limit: Int) -> [U8] !StoreError {
+    fn read_bounded(&self, limit: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < limit {
-            chunk :: self.read_some(limit - out.len())
+            chunk :: &self.read_some(limit - out.len())
             if chunk.len() == 0 -> break
-            loop byte in chunk -> out.push(byte)
+            loop byte in chunk -> &out.push(byte)
         }
         Ok(out)
     }
 }
 
-fn store_broker_append(out: &[U8], bytes: [U8]) !Never {
-    loop byte in bytes -> out.push(byte)
+fn store_broker_append(out: &[U8], bytes: [U8]) Never! {
+    loop byte in bytes -> &out.push(byte)
 }
 
 // Rust `write_request`: a provenance-bound write of one unsigned archive.
-pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] !StoreError {
+pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] StoreError! {
     if archive.len() > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
     binding.validate()
     store_broker_validate_text_field(credential, "shared-store writer credential")
@@ -224,14 +224,14 @@ pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential:
 }
 
 // Rust `write_read_request`.
-pub fn store_broker_encode_read_request(reference: String) -> [U8] !StoreError {
+pub fn store_broker_encode_read_request(reference: String) -> [U8] StoreError! {
     if !store_broker_valid_reference(reference) -> return Err(store_broker_invalid("shared-store reference is invalid"))
     Ok("{@STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes(reference.bytes())}\n\n".bytes())
 }
 
 // The fields of one bounded header after its magic line. `allowed` names
 // every accepted key; an unknown or repeated key is refused as `prefix`.
-fn store_broker_header_fields(header: [U8], label: String, magic: String, allowed: [String]) -> [String: String] !StoreError {
+fn store_broker_header_fields(header: [U8], label: String, magic: String, allowed: [String]) -> [String: String] StoreError! {
     text :: String.from_bytes(header) ?? return Err(store_broker_invalid("{label} header is not UTF-8"))
     lines :: store_text_lines(text)
     if lines.len() == 0 || lines[0] != magic -> return Err(store_broker_invalid("{label} has an unknown format"))
@@ -249,8 +249,8 @@ fn store_broker_header_fields(header: [U8], label: String, magic: String, allowe
 }
 
 // Rust `read_request_header`.
-pub fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHeader !StoreError {
-    header :: reader.read_header("shared-store request")
+pub fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
+    header :: &reader.read_header("shared-store request")
     fields :: store_broker_header_fields(header, "shared-store request", @STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
     op :: fields.get("op") ?? return Err(store_broker_invalid("shared-store request has no operation"))
     if op == {
@@ -285,16 +285,16 @@ pub fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHead
     }
 }
 
-fn store_broker_write_field(fields: [String: String], key: String) -> String !StoreError {
+fn store_broker_write_field(fields: [String: String], key: String) -> String StoreError! {
     value :: fields.get(key) ?? return Err(store_broker_invalid("shared-store write request has no `{key}`"))
     store_broker_decode_text_field(value, key)
 }
 
 // Rust `read_request` (the test-facing whole request).
-pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest !StoreError {
+pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest StoreError! {
     if store_broker_read_request_header(&reader) == {
         .Write(header) -> {
-            archive :: reader.read_exact(header.length)
+            archive :: &reader.read_exact(header.length)
             Ok(BrokerRequest.Write(BrokerWriteRequest{archive: archive, binding: header.binding, credential: header.credential}))
         }
         .Read(reference) -> Ok(BrokerRequest.Read(reference))
@@ -302,12 +302,12 @@ pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest !St
 }
 
 // Rust `write_response`.
-pub fn store_broker_encode_response(status: String) -> [U8] !Never {
+pub fn store_broker_encode_response(status: String) -> [U8] Never! {
     "{@STORE_BROKER_RESPONSE_MAGIC}\nstatus={status}\n\n".bytes()
 }
 
 // Rust `write_archive_response`.
-pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] !StoreError {
+pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
     if archive.len() > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
     out := "{@STORE_BROKER_RESPONSE_MAGIC}\nstatus=ok\nbytes={archive.len()}\n\n".bytes()
     store_broker_append(&out, archive)
@@ -316,13 +316,13 @@ pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] !StoreError {
 
 // Rust `read_response`: a status-only response to a write. `ok` is true,
 // `missing` false.
-pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool !StoreError {
-    bytes :: reader.read_bounded(@STORE_BROKER_MAX_HEADER_BYTES + 1)
+pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError! {
+    bytes :: &reader.read_bounded(@STORE_BROKER_MAX_HEADER_BYTES + 1)
     if bytes.len() > @STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("shared-store response is too large"))
     text :: String.from_bytes(bytes) ?? return Err(store_broker_invalid("shared-store response is not UTF-8"))
     lines :: store_text_lines(text)
     if lines.len() == 0 || lines[0] != @STORE_BROKER_RESPONSE_MAGIC -> return Err(store_broker_invalid("shared-store response has an unknown format"))
-    status := ?String{None}
+    status := String?{None}
     loop index in 1..<lines.len() {
         line :: lines[index]
         if line == "" -> next
@@ -339,8 +339,8 @@ pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool !StoreError
 }
 
 // Rust `read_archive_response`: the archive of a read, or None for missing.
-pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> ?[U8] !StoreError {
-    header :: reader.read_header("shared-store response")
+pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? StoreError! {
+    header :: &reader.read_header("shared-store response")
     fields :: store_broker_header_fields(header, "shared-store response", @STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
     status :: fields.get("status") ?? return Err(store_broker_invalid("shared-store response has no status"))
     if status == {
@@ -352,7 +352,7 @@ pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> ?[U8] !S
             raw_length :: fields.get("bytes") ?? return Err(store_broker_invalid("shared-store response has no archive length"))
             length :: store_broker_parse_unsigned(raw_length) ?? return Err(store_broker_invalid("shared-store response archive length is invalid"))
             if length > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
-            Ok(Val(reader.read_exact(length)))
+            Ok(Val(&reader.read_exact(length)))
         }
         else -> Err(store_broker_invalid("shared-store response has an unknown status"))
     }
@@ -363,8 +363,8 @@ pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> ?[U8] !S
 pub struct WriterGrant {
     pub read: Bool
     pub write: Bool
-    pub expires: ?Int
-    pub credential: ?String
+    pub expires: Int?
+    pub credential: String?
     pub sources: [String]
     pub builders: [String]
     pub actions: [String]
@@ -373,13 +373,13 @@ pub struct WriterGrant {
     pub sandboxes: [String]
     pub policies: [String]
 
-    fn empty() -> WriterGrant !Never {
+    fn empty() -> WriterGrant Never! {
         WriterGrant{read: false, write: false, expires: None, credential: None, sources: [String]{}, builders: [String]{}, actions: [String]{}, outputs: [String]{}, platforms: [String]{}, sandboxes: [String]{}, policies: [String]{}}
     }
 
     // The rootless owner of a private shared root: full authority, no
     // shared-namespace allowlists.
-    fn private_owner() -> WriterGrant !Never {
+    fn private_owner() -> WriterGrant Never! {
         grant := WriterGrant.empty()
         grant.read = true
         grant.write = true
@@ -388,7 +388,7 @@ pub struct WriterGrant {
     }
 
     // Add one allowlisted value for `key`; a repeat is refused.
-    fn allow(&self, key: String, value: String) !StoreError {
+    fn allow(&self, key: String, value: String) StoreError! {
         store_broker_validate_text_field(value, "shared-store writer {key}")
         repeated :: if key == {
             "source" -> self.sources.contains(value)
@@ -401,19 +401,33 @@ pub struct WriterGrant {
         }
         if repeated -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{key}`"))
         if key == {
-            "source" -> self.sources.push(value)
-            "builder" -> self.builders.push(value)
-            "action" -> self.actions.push(value)
-            "output" -> self.outputs.push(value)
-            "platform" -> self.platforms.push(value)
-            "sandbox" -> self.sandboxes.push(value)
-            else -> self.policies.push(value)
+            "source" -> {
+                &self.sources.push(value)
+            }
+            "builder" -> {
+                &self.builders.push(value)
+            }
+            "action" -> {
+                &self.actions.push(value)
+            }
+            "output" -> {
+                &self.outputs.push(value)
+            }
+            "platform" -> {
+                &self.platforms.push(value)
+            }
+            "sandbox" -> {
+                &self.sandboxes.push(value)
+            }
+            else -> {
+                &self.policies.push(value)
+            }
         }
         Ok()
     }
 
     // Allowlist and binding value per provenance label, in check order.
-    fn allowlists(self) -> [BrokerAllowlist] !Never {
+    fn allowlists(self) -> [BrokerAllowlist] Never! {
         [BrokerAllowlist]{
             BrokerAllowlist{label: "source", allowed: self.sources},
             BrokerAllowlist{label: "builder", allowed: self.builders},
@@ -432,7 +446,7 @@ struct BrokerAllowlist {
 }
 
 // Rust `parse_writer_grant`.
-pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant !StoreError {
+pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! {
     lines :: store_text_lines(text)
     if lines.len() == 0 || lines[0] != @STORE_BROKER_GRANT_MAGIC -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown format"))
     seen := [String]{}
@@ -443,7 +457,7 @@ pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant !StoreError 
         if line == {
             "read" | "write" -> {
                 if seen.contains(line) -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{line}`"))
-                seen.push(line)
+                &seen.push(line)
                 if line == "read" {
                     grant.read = true
                 } else {
@@ -455,16 +469,18 @@ pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant !StoreError 
                 if pair.before == {
                     "expires" -> {
                         if seen.contains("expires") -> return Err(store_broker_invalid("shared-store peer enrollment repeats `expires`"))
-                        seen.push("expires")
+                        &seen.push("expires")
                         grant.expires = Val(store_broker_parse_unsigned(pair.after) ?? return Err(store_broker_invalid("shared-store peer enrollment expiry is invalid")))
                     }
                     "credential" -> {
                         if seen.contains("credential") -> return Err(store_broker_invalid("shared-store peer enrollment repeats `credential`"))
-                        seen.push("credential")
+                        &seen.push("credential")
                         store_broker_validate_text_field(pair.after, "shared-store writer credential")
                         grant.credential = Val(pair.after)
                     }
-                    "source" | "builder" | "action" | "output" | "platform" | "sandbox" | "policy" -> grant.allow(pair.before, pair.after)
+                    "source" | "builder" | "action" | "output" | "platform" | "sandbox" | "policy" -> {
+                        &grant.allow(pair.before, pair.after)
+                    }
                     else -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown field"))
                 }
             }
@@ -475,7 +491,7 @@ pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant !StoreError 
 }
 
 // Rust `authorize_grant` at time `now` (Unix seconds).
-pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) !StoreError {
+pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) StoreError! {
     if !grant.read -> return Err(store_broker_invalid("shared-store peer has no read authority"))
     if !write -> return Ok()
     if !grant.write -> return Err(store_broker_invalid("shared-store peer has no write authority"))
@@ -498,7 +514,7 @@ pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: Pr
 }
 
 // Rust `now_secs`: Unix seconds, saturating at zero before the epoch.
-fn store_broker_now_secs() -> Int !Never {
+fn store_broker_now_secs() -> Int Never! {
     seconds :: time.instant().unix_ns /% 1000000000
     if seconds < 0 -> return 0
     seconds

@@ -15,7 +15,7 @@ impl ProviderFactReport {
     // single referenced package, else a `nuget-lock` set; licenses, target
     // frameworks, dependencies, repository, signatures, advisories, and
     // `tools/` files as hooks. Inexact versions and namespaced XML are losses.
-    fn nuget_xml_document(document: String) -> ProviderFactReport !Never {
+    fn nuget_xml_document(document: String) -> ProviderFactReport Never! {
         if provider_xml_has_namespace(document) {
             return ProviderFactReport.unreadable(ProviderFamily.NuGet, "nuget", "NuGet XML uses a namespaced vocabulary that this provider cannot normalize").retaining("xml", document)
         }
@@ -28,31 +28,31 @@ impl ProviderFactReport {
         loop opening in provider_xml_opening_tags(document, "PackageReference") {
             version :: provider_xml_attribute(opening, "Version") ?? ""
             name :: provider_xml_first_attribute(opening, [String]{"Include", "Update"}) ?? {
-                losses.push("NuGet `PackageReference` has no Include or Update identity")
+                &losses.push("NuGet `PackageReference` has no Include or Update identity")
                 next
             }
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet PackageReference `{name}` has no resolved exact version")
-            references.push(NuGetReference{name: name, version: version, opening: opening})
+            if version == "" || !provider_exact_version(version) -> &losses.push("NuGet PackageReference `{name}` has no resolved exact version")
+            &references.push(NuGetReference{name: name, version: version, opening: opening})
         }
         loop opening in provider_xml_opening_tags(document, "package") {
             name :: provider_xml_attribute(opening, "id") ?? next
             version :: provider_xml_attribute(opening, "version") ?? ""
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet package `{name}` has no resolved exact version")
-            references.push(NuGetReference{name: name, version: version, opening: opening})
+            if version == "" || !provider_exact_version(version) -> &losses.push("NuGet package `{name}` has no resolved exact version")
+            &references.push(NuGetReference{name: name, version: version, opening: opening})
         }
         dependency_tags :: provider_xml_opening_tags(document, "dependency")
         dependency_values := [String]{}
         loop opening in dependency_tags {
             name :: provider_xml_first_attribute(opening, [String]{"id", "name"}) ?? {
-                losses.push("NuGet dependency has no id or name")
+                &losses.push("NuGet dependency has no id or name")
                 next
             }
             version :: provider_xml_attribute(opening, "version") ?? ""
-            dependency_values.push(provider_format_dependency(name, version))
-            if version == "" || !provider_exact_version(version) -> losses.push("NuGet dependency `{name}` has no resolved exact version")
+            &dependency_values.push(provider_format_dependency(name, version))
+            if version == "" || !provider_exact_version(version) -> &losses.push("NuGet dependency `{name}` has no resolved exact version")
         }
         reference_values := [String]{}
-        loop reference in references -> reference_values.push(provider_format_dependency(reference.name, reference.version))
+        loop reference in references -> &reference_values.push(provider_format_dependency(reference.name, reference.version))
         if {
             has_root -> {
                 facts.name = root_name ?? ""
@@ -65,20 +65,20 @@ impl ProviderFactReport {
             else -> {
                 facts.name = "nuget-lock"
                 facts.version = "set"
-                if references.len() == 0 -> losses.push("NuGet metadata has no package identity")
+                if references.len() == 0 -> &losses.push("NuGet metadata has no package identity")
             }
         }
         facts.license = provider_xml_first_tag(document, [String]{"license", "licenseExpression", "licenseUrl"}) ?? ""
         group_tags :: provider_xml_opening_tags(document, "group")
         loop opening in group_tags {
             if provider_xml_attribute(opening, "targetFramework") == {
-                .Val(target) -> facts.platforms.push(target)
+                .Val(target) -> &facts.platforms.push(target)
                 .None -> {}
             }
         }
         loop reference in references {
             if provider_xml_attribute(reference.opening, "targetFramework") == {
-                .Val(target) -> facts.platforms.push(target)
+                .Val(target) -> &facts.platforms.push(target)
                 .None -> {}
             }
         }
@@ -91,10 +91,10 @@ impl ProviderFactReport {
         }
         reference_keys :: [String]{"Condition", "PrivateAssets", "IncludeAssets", "ExcludeAssets"}
         loop index in 0..<references.len() {
-            facts.add_typed_text("provider.nuget.dependency.reference.{index}", reference_values[index])
+            &facts.add_typed_text("provider.nuget.dependency.reference.{index}", reference_values[index])
             loop key in reference_keys {
                 if provider_xml_attribute(references[index].opening, key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.dependency.reference.{index}.{key}", value)
+                    .Val(value) -> &facts.add_typed_text("provider.nuget.dependency.reference.{index}.{key}", value)
                     .None -> {}
                 }
             }
@@ -103,7 +103,7 @@ impl ProviderFactReport {
         loop index in 0..<dependency_tags.len() {
             loop key in dependency_keys {
                 if provider_xml_attribute(dependency_tags[index], key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.dependency.nuspec.{index}.{key}", value)
+                    .Val(value) -> &facts.add_typed_text("provider.nuget.dependency.nuspec.{index}.{key}", value)
                     .None -> {}
                 }
             }
@@ -121,11 +121,11 @@ impl ProviderFactReport {
         }
         loop entry in metadata_elements {
             values :: provider_xml_tag_values(document, entry.element)
-            loop index in 0..<values.len() -> facts.add_typed_text("provider.nuget.metadata.{entry.key}.{index}", values[index])
+            loop index in 0..<values.len() -> &facts.add_typed_text("provider.nuget.metadata.{entry.key}.{index}", values[index])
         }
         loop index in 0..<group_tags.len() {
             if provider_xml_attribute(group_tags[index], "targetFramework") == {
-                .Val(target) -> facts.add_typed_text("provider.nuget.platform.group.{index}", target)
+                .Val(target) -> &facts.add_typed_text("provider.nuget.platform.group.{index}", target)
                 .None -> {}
             }
         }
@@ -134,7 +134,7 @@ impl ProviderFactReport {
         loop index in 0..<repository_tags.len() {
             loop key in repository_keys {
                 if provider_xml_attribute(repository_tags[index], key) == {
-                    .Val(value) -> facts.add_typed_text("provider.nuget.source.repository.{index}.{key}", value)
+                    .Val(value) -> &facts.add_typed_text("provider.nuget.source.repository.{index}.{key}", value)
                     .None -> {}
                 }
             }
@@ -142,14 +142,14 @@ impl ProviderFactReport {
         opening_facts :: [String]{"signature", "signatures", "deprecation", "vulnerability", "advisory"}
         loop fact_name in opening_facts {
             openings :: provider_xml_opening_tags(document, fact_name)
-            loop index in 0..<openings.len() -> facts.add_typed_text("provider.nuget.metadata.{fact_name}.opening.{index}", openings[index])
+            loop index in 0..<openings.len() -> &facts.add_typed_text("provider.nuget.metadata.{fact_name}.opening.{index}", openings[index])
         }
         file_tags :: provider_xml_opening_tags(document, "file")
         loop index in 0..<file_tags.len() {
             if provider_xml_attribute(file_tags[index], "src") == {
                 .Val(source) -> {
-                    facts.add_typed_text("provider.nuget.hook.file.{index}", source)
-                    if source.contains("tools/") || source.contains("tools\\") -> facts.scripts.push(source)
+                    &facts.add_typed_text("provider.nuget.hook.file.{index}", source)
+                    if source.contains("tools/") || source.contains("tools\\") -> &facts.scripts.push(source)
                 }
                 .None -> {}
             }
@@ -157,7 +157,7 @@ impl ProviderFactReport {
         loop opening in repository_tags {
             if provider_xml_attribute(opening, "url") == {
                 .Val(url) -> {
-                    facts.add_typed_text("provider.repository", url)
+                    &facts.add_typed_text("provider.repository", url)
                     break
                 }
                 .None -> {}
@@ -166,17 +166,17 @@ impl ProviderFactReport {
         facts.integrity_hash = provider_xml_tag(document, "contentHash") ?? ""
         facts.source_identity = "nuget:{facts.name}@{facts.version}"
         report := ProviderFactReport.with_identity(facts)
-        loop loss in losses -> report.losses.push(loss)
-        if multiple_references -> report.losses.push("NuGet metadata contains multiple packages; lock each package identity separately")
+        loop loss in losses -> &report.losses.push(loss)
+        if multiple_references -> &report.losses.push("NuGet metadata contains multiple packages; lock each package identity separately")
         if report.facts.version != "set" && report.facts.version != "" && !provider_exact_version(report.facts.version) {
-            report.losses.push("NuGet package version is a range or mutable selector, not an exact identity")
+            &report.losses.push("NuGet package version is a range or mutable selector, not an exact identity")
         }
         report.retaining("xml", document)
     }
 }
 
 // The first of `elements` present as a tag, in order.
-fn provider_xml_first_tag(document: String, elements: [String]) -> ?String !Never {
+fn provider_xml_first_tag(document: String, elements: [String]) -> String? Never! {
     loop element in elements {
         value :: provider_xml_tag(document, element) ?? next
         return Val(value)
@@ -185,7 +185,7 @@ fn provider_xml_first_tag(document: String, elements: [String]) -> ?String !Neve
 }
 
 // The first of `keys` present as an attribute of `opening`, in order.
-fn provider_xml_first_attribute(opening: String, keys: [String]) -> ?String !Never {
+fn provider_xml_first_attribute(opening: String, keys: [String]) -> String? Never! {
     loop key in keys {
         value :: provider_xml_attribute(opening, key) ?? next
         return Val(value)
@@ -194,14 +194,14 @@ fn provider_xml_first_attribute(opening: String, keys: [String]) -> ?String !Nev
 }
 
 // Each `<element …>` opening tag's text.
-fn provider_xml_opening_tags(document: String, element: String) -> [String] !Never {
+fn provider_xml_opening_tags(document: String, element: String) -> [String] Never! {
     tags := [String]{}
-    loop opening in provider_xml_openings(document, element) -> tags.push(opening.text)
+    loop opening in provider_xml_openings(document, element) -> &tags.push(opening.text)
     tags
 }
 
 // Whether any namespace declaration or `prefix:name` element appears.
-fn provider_xml_has_namespace(document: String) -> Bool !Never {
+fn provider_xml_has_namespace(document: String) -> Bool Never! {
     if document.contains("xmlns:") || document.contains("xmlns=") -> return true
     bytes :: document.bytes()
     cursor := 0

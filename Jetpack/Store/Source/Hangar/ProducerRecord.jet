@@ -16,13 +16,13 @@ pub struct ProducerRecord {
     pub policy_facts: String
     pub facts: [String: String]
 
-    fn new(provider: String, immutable_source: String, source_digest: String, plan: ProviderPlanFacts, toolchain_facts: String, policy_facts: String, facts: [String: String]) -> ProducerRecord !StoreError {
+    fn new(provider: String, immutable_source: String, source_digest: String, plan: ProviderPlanFacts, toolchain_facts: String, policy_facts: String, facts: [String: String]) -> ProducerRecord StoreError! {
         record :: ProducerRecord{provider, immutable_source, source_digest, plan, toolchain_facts, policy_facts, facts}
         record.validate()
         Ok(record)
     }
 
-    fn encode(self) -> String !Never {
+    fn encode(self) -> String Never! {
         fields := [String: String]{
             "provider": self.provider,
             "immutable_source": self.immutable_source,
@@ -41,7 +41,7 @@ pub struct ProducerRecord {
     // Bind the producer record to the exact cache admission facts. These
     // values are part of the immutable record, so a cache hit can rederive
     // the action, builder, policy, and output identity before using bytes.
-    fn bind_cache_provenance(&self, reference: String, output: String, identity: CacheIdentity, references: [String]) !Never {
+    fn bind_cache_provenance(&self, reference: String, output: String, identity: CacheIdentity, references: [String]) Never! {
         // Providers keep the detailed recipe in the replay plan. The cache
         // admission fact is the stable recipe fingerprint shared by the
         // expectation, local proof, and signed narinfo.
@@ -57,7 +57,7 @@ pub struct ProducerRecord {
         if !self.facts.has_key("cache.reproducibility") -> self.facts["cache.reproducibility"] = "attested-v1"
     }
 
-    fn decode(raw: String) -> ProducerRecord !StoreError {
+    fn decode(raw: String) -> ProducerRecord StoreError! {
         if !raw.ends_with("\n") -> return Err(StoreError.Other("producer record is truncated"))
         stripped :: pkg_bytes_text(raw.bytes(), 0, raw.bytes().len() - 1)
         halves :: store_text_split_last(stripped, "checksum\t") ?? return Err(StoreError.Other("producer record is truncated"))
@@ -98,7 +98,7 @@ pub struct ProducerRecord {
         ProducerRecord.new(provider, immutable_source, source_digest, plan, toolchain_facts, policy_facts, facts)
     }
 
-    fn validate(self) !StoreError {
+    fn validate(self) StoreError! {
         named :: [(name: String, value: String)]{
             (name: "provider", value: self.provider),
             (name: "immutable_source", value: self.immutable_source),
@@ -114,13 +114,13 @@ pub struct ProducerRecord {
 }
 
 // Rust `take`: a named required field of a decoded producer record.
-fn store_producer_take(fields: [String: String], key: String) -> String !StoreError {
+fn store_producer_take(fields: [String: String], key: String) -> String StoreError! {
     value :: fields.get(key) ?? return Err(StoreError.Other("producer record misses `{key}`"))
     Ok(value)
 }
 
 // Rust `unhex` with the producer record's error texts.
-fn store_producer_unhex(value: String) -> String !StoreError {
+fn store_producer_unhex(value: String) -> String StoreError! {
     if store_unhex_text(value) == {
         .Text(text) -> Ok(text)
         .OddLength -> Err(StoreError.Other("producer record field is truncated"))
@@ -130,7 +130,7 @@ fn store_producer_unhex(value: String) -> String !StoreError {
 }
 
 // Build the canonical producer record shared by every store ingestion phase.
-pub fn store_canonical_producer(provider: String, immutable_source: String, source_digest: String, identity: CacheIdentity, facts: [String: String]) -> String !StoreError {
+pub fn store_canonical_producer(provider: String, immutable_source: String, source_digest: String, identity: CacheIdentity, facts: [String: String]) -> String StoreError! {
     recorded := ~facts
     recorded["action.recipe"] = identity.recipe_fingerprint
     recorded["closure.authority"] = "hangar-cas"
@@ -141,14 +141,14 @@ pub fn store_canonical_producer(provider: String, immutable_source: String, sour
 }
 
 // Whether a producer was built as a private untrusted build.
-pub fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool !Never {
+pub fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool Never! {
     producer.facts.get("build.trust") == Val(@STORE_PRIVATE_UNTRUSTED_BUILD)
 }
 
 // The signed SLSA-style action identity of one cache admission.
-pub fn store_cache_action_identity(producer: ProducerRecord, reference: String, identity: CacheIdentity, references: [String]) -> String !Never {
+pub fn store_cache_action_identity(producer: ProducerRecord, reference: String, identity: CacheIdentity, references: [String]) -> String Never! {
     canonical := "jet-slsa-action-v2".bytes()
-    canonical.push(U8{0})
+    &canonical.push(U8{0})
     plan :: producer.plan.render()
     values :: [String]{
         reference,
@@ -174,7 +174,7 @@ pub fn store_cache_action_identity(producer: ProducerRecord, reference: String, 
 // realization it just recorded in the project lock. The lock digest is part
 // of the action key, so leaving the pre-publication digest in the closure
 // record would let a later replay accept stale provenance.
-pub fn store_refresh_lock_digest(roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry !StoreError {
+pub fn store_refresh_lock_digest(roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
     if lock_digest == "" -> return Err(StoreError.InvalidData("cannot refresh a producer with an empty project lock digest"))
     producer := ProducerRecord.decode(entry.producer_record)
     if producer.provider == {
@@ -194,7 +194,7 @@ pub fn store_refresh_lock_digest(roots: HangarRoots, entry: StoreEntry, lock_dig
     }
     replay_facts["nix.lock.digest"] = lock_digest
     producer.plan = ProviderPlanFacts.from_facts(replay_facts)
-    producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
+    &producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
     provider_refresh_provider_facts(&producer, entry.reference) ?? return Err(StoreError.Other("{err}"))
 
     refreshed := ~entry
@@ -213,19 +213,19 @@ pub fn store_refresh_lock_digest(roots: HangarRoots, entry: StoreEntry, lock_dig
     Ok(batch[0])
 }
 
-fn store_hook_fact_mismatch(name: String, expected: String, actual: ?String) -> StoreError !Never {
+fn store_hook_fact_mismatch(name: String, expected: String, actual: String?) -> StoreError Never! {
     shown :: actual ?? "<missing>"
     StoreError.InvalidData("adapter build hook provenance mismatch for `{name}`: expected `{expected}`, got `{shown}`")
 }
 
-fn store_validate_adapter_hook_producer(producer: ProducerRecord, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) !StoreError {
+fn store_validate_adapter_hook_producer(producer: ProducerRecord, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) StoreError! {
     if plan.recipe == {
         .Build(recipe) -> store_validate_build_hook_producer(producer, plan, recipe, table, expectation, require_current_backend)
         else -> Ok()
     }
 }
 
-fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPlan, recipe: BuildRecipe, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) !StoreError {
+fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPlan, recipe: BuildRecipe, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) StoreError! {
     plan_facts :: producer.plan.facts()
     recorded_sandbox :: producer.facts.get("build.sandbox")
     planned_sandbox :: plan_facts.get("adapter.build.sandbox")
@@ -242,14 +242,15 @@ fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPla
     }
     if {
         !executes -> {
-            checks :: [(name: String, expected: String, actual: ?String)]{
+            checks :: [(name: String, expected: String, actual: String?)]{
                 (name: "build.sandbox", expected: "non-executing", actual: recorded_sandbox),
                 (name: "adapter.build.sandbox", expected: "non-executing", actual: planned_sandbox),
                 (name: "build.sandbox_policy", expected: "no child launched", actual: producer_policy),
                 (name: "adapter.build.sandbox_policy", expected: "no child launched", actual: plan_policy),
             }
             loop check in checks {
-                if check.actual != Val(check.expected) -> return Err(store_hook_fact_mismatch(check.name, check.expected, check.actual))
+                expected_value :: check.expected
+                if check.actual != Val(expected_value) -> return Err(store_hook_fact_mismatch(check.name, check.expected, check.actual))
             }
         }
         require_current_backend -> {
@@ -293,7 +294,8 @@ fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPla
     if producer.source_digest != expectation.identity.source_fingerprint {
         return Err(store_hook_fact_mismatch("source-digest", expectation.identity.source_fingerprint, Val(producer.source_digest)))
     }
-    if producer.facts.get("adapter.source") != Val(plan.source) {
+    plan_source :: plan.source
+    if producer.facts.get("adapter.source") != Val(plan_source) {
         return Err(store_hook_fact_mismatch("provider-source", plan.source, producer.facts.get("adapter.source")))
     }
     identity :: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
@@ -320,7 +322,7 @@ fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPla
     }
 }
 
-pub fn store_validate_cached_adapter_hook(entry: StoreEntry, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation) !StoreError {
+pub fn store_validate_cached_adapter_hook(entry: StoreEntry, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation) StoreError! {
     if plan.recipe == {
         .Build(_) -> {}
         else -> return Ok()
@@ -332,7 +334,7 @@ pub fn store_validate_cached_adapter_hook(entry: StoreEntry, plan: AdapterPlan, 
     store_validate_adapter_hook_producer(producer, plan, table, expectation, false)
 }
 
-pub fn store_bind_adapter_hook_identity(realized: &Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) !StoreError {
+pub fn store_bind_adapter_hook_identity(realized: &Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) StoreError! {
     if plan.recipe == {
         .Build(_) -> {}
         else -> return Ok()

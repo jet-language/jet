@@ -24,7 +24,7 @@ pub struct MetadataFacts {
     pub replacement_candidates: [ReplacementCandidate]
     pub conflicts: [String]
 
-    fn empty(family: ProviderFamily, name: String) -> MetadataFacts !Never {
+    fn empty(family: ProviderFamily, name: String) -> MetadataFacts Never! {
         MetadataFacts{
             family: family,
             name: name,
@@ -48,28 +48,28 @@ pub struct MetadataFacts {
 
     // Name, version, license, and dependency keys from a flat Cargo.toml read
     // (`normalize_cargo`); a `build =` line records a build script.
-    fn from_cargo_manifest(cargo_toml: String) -> MetadataFacts !Never {
+    fn from_cargo_manifest(cargo_toml: String) -> MetadataFacts Never! {
         facts := MetadataFacts.empty(ProviderFamily.Cargo, provider_toml_string(cargo_toml, "name") ?? "")
         facts.version = provider_toml_string(cargo_toml, "version") ?? ""
         facts.license = provider_toml_string(cargo_toml, "license") ?? ""
         facts.dependencies = provider_toml_dependency_keys(cargo_toml, "[dependencies]")
         facts.build_dependencies = provider_toml_dependency_keys(cargo_toml, "[build-dependencies]")
-        if cargo_toml.contains("build =") -> facts.scripts.push("build.rs")
+        if cargo_toml.contains("build =") -> &facts.scripts.push("build.rs")
         facts.source_identity = "cargo:{facts.name}@{facts.version}"
         facts
     }
 
     // A PyPI distribution (`normalize_pypi`); dynamic metadata is a todo.
-    fn from_pypi(name: String, version: String, dynamic_metadata: Bool) -> MetadataFacts !Never {
+    fn from_pypi(name: String, version: String, dynamic_metadata: Bool) -> MetadataFacts Never! {
         facts := MetadataFacts.empty(ProviderFamily.PyPI, name)
         facts.version = version
         facts.source_identity = "pypi:{name}@{version}"
-        if dynamic_metadata -> facts.todos.push("dynamic metadata must be resolved before build execution")
+        if dynamic_metadata -> &facts.todos.push("dynamic metadata must be resolved before build execution")
         facts
     }
 
     // A SwiftPM package pinned by revision (`normalize_swiftpm`).
-    fn from_swiftpm(name: String, revision: String) -> MetadataFacts !Never {
+    fn from_swiftpm(name: String, revision: String) -> MetadataFacts Never! {
         facts := MetadataFacts.empty(ProviderFamily.SwiftPM, name)
         facts.version = revision
         facts.source_identity = "swiftpm:{name}@{revision}"
@@ -79,11 +79,11 @@ pub struct MetadataFacts {
     }
 
     // Record one typed text fact, replacing any earlier value.
-    fn add_typed_text(&self, key: String, value: String) !Never {
+    fn add_typed_text(&self, key: String, value: String) Never! {
         self.typed[key] = [String]{value}
     }
 
-    fn first_typed(self, key: String) -> ?String !Never {
+    fn first_typed(self, key: String) -> String? Never! {
         values :: self.typed.get(key) ?? return None
         values.get(0)
     }
@@ -91,7 +91,7 @@ pub struct MetadataFacts {
     // The selector key and value that identify this package exactly: a
     // binary's digest, a SwiftPM revision, a GitHub release revision when
     // unversioned, else the version, else the digest. Empty when none.
-    fn identity_selector(self) -> (key: String, value: String) !Never {
+    fn identity_selector(self) -> (key: String, value: String) Never! {
         if self.family == ProviderFamily.Binary -> return (key: "digest", value: self.integrity_hash)
         if self.family == ProviderFamily.SwiftPM {
             if self.first_typed("provider.revision") == {
@@ -126,21 +126,21 @@ pub struct ProviderFactReport {
 
     // A report over `facts` that loses the package name or exact identity
     // when either is missing; the facts' conflicts carry over.
-    fn with_identity(facts: MetadataFacts) -> ProviderFactReport !Never {
+    fn with_identity(facts: MetadataFacts) -> ProviderFactReport Never! {
         losses := [String]{}
-        if facts.name == "" -> losses.push("provider metadata has no package name")
-        if facts.identity_selector().value == "" -> losses.push("provider metadata has no exact version, revision, or digest")
+        if facts.name == "" -> &losses.push("provider metadata has no package name")
+        if facts.identity_selector().value == "" -> &losses.push("provider metadata has no exact version, revision, or digest")
         conflicts :: facts.conflicts
         ProviderFactReport{facts: facts, losses: losses, conflicts: conflicts, native_format: "", native_document: ""}
     }
 
     // A report that could not read the document at all.
-    fn unreadable(family: ProviderFamily, name: String, loss: String) -> ProviderFactReport !Never {
+    fn unreadable(family: ProviderFamily, name: String, loss: String) -> ProviderFactReport Never! {
         ProviderFactReport{facts: MetadataFacts.empty(family, name), losses: [String]{loss}, conflicts: [String]{}, native_format: "", native_document: ""}
     }
 
     // Keep the native document and its format beside the typed facts.
-    fn retaining(self, native_format: String, document: String) -> ProviderFactReport !Never {
+    fn retaining(self, native_format: String, document: String) -> ProviderFactReport Never! {
         out := self
         out.native_format = native_format
         out.native_document = document
@@ -149,7 +149,7 @@ pub struct ProviderFactReport {
 }
 
 // The first `key = value` line's value with its quotes trimmed.
-fn provider_toml_string(raw: String, key: String) -> ?String !Never {
+fn provider_toml_string(raw: String, key: String) -> String? Never! {
     loop line in provider_lines(raw) {
         pair :: line.trim().split_once("=") ?? next
         if pair.before.trim() == key -> return Val(provider_trim_quotes(pair.after.trim()))
@@ -158,7 +158,7 @@ fn provider_toml_string(raw: String, key: String) -> ?String !Never {
 }
 
 // Every leading `"` trimmed from both ends (`trim_matches('"')`).
-fn provider_trim_quotes(value: String) -> String !Never {
+fn provider_trim_quotes(value: String) -> String Never! {
     out := value
     loop out.starts_with("\"") -> out = out.removeprefix("\"")
     loop out.ends_with("\"") -> out = out.removesuffix("\"")
@@ -166,7 +166,7 @@ fn provider_trim_quotes(value: String) -> String !Never {
 }
 
 // Keys assigned under the exact `section` header.
-fn provider_toml_dependency_keys(raw: String, section: String) -> [String] !Never {
+fn provider_toml_dependency_keys(raw: String, section: String) -> [String] Never! {
     keys := [String]{}
     inside := false
     loop raw_line in provider_lines(raw) {
@@ -177,22 +177,22 @@ fn provider_toml_dependency_keys(raw: String, section: String) -> [String] !Neve
         }
         if !inside -> next
         pair :: line.split_once("=") ?? next
-        keys.push(pair.before.trim())
+        &keys.push(pair.before.trim())
     }
     keys
 }
 
 // Values in first-seen order without repeats.
-fn provider_distinct_values(values: [String]) -> [String] !Never {
+fn provider_distinct_values(values: [String]) -> [String] Never! {
     distinct := [String]{}
     loop value in values {
-        if !distinct.contains(value) -> distinct.push(value)
+        if !distinct.contains(value) -> &distinct.push(value)
     }
     distinct
 }
 
 // `name@version`, or whichever half is present.
-fn provider_format_dependency(raw_name: String, raw_version: String) -> String !Never {
+fn provider_format_dependency(raw_name: String, raw_version: String) -> String Never! {
     name :: raw_name.trim()
     version :: raw_version.trim()
     if name == "" -> return version
@@ -201,8 +201,8 @@ fn provider_format_dependency(raw_name: String, raw_version: String) -> String !
 }
 
 // Sorted without repeats (`sort` then `dedup`).
-fn provider_sorted_unique(values: [String]) -> [String] !Never {
+fn provider_sorted_unique(values: [String]) -> [String] Never! {
     out := provider_distinct_values(values)
-    out.sort()
+    &out.sort()
     out
 }

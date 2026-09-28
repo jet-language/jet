@@ -1,0 +1,161 @@
+// Claims ported from the Lock.rs `a4_envelope_tests` module: the realized
+// envelope and toolchain lock schema (D-JPK-CACHE1=A / D-JPK-TOOLCHAIN1=A)
+// and the helpers the lock claims share.
+
+fn pkg_lock_test_env(hash: String, platform: String, signature: String, provenance: String) -> LockEnvelope Never! {
+    LockEnvelope{output_hash: hash, platform: platform, signature: signature, provenance: provenance, catalog_tier: "", catalog_trust: ""}
+}
+
+// `count` copies of `text`.
+fn pkg_lock_test_repeat(text: String, count: Int) -> String Never! {
+    bytes := [U8]{}
+    unit :: text.bytes()
+    loop _ in 0..<count {
+        loop byte in unit -> &bytes.push(byte)
+    }
+    String.from_bytes(bytes) ?? panic("repeated text stays UTF-8")
+}
+
+// `sha256-` and 64 copies of `fill`.
+fn pkg_lock_test_nix_digest(fill: String) -> String Never! {
+    "sha256-{pkg_lock_test_repeat(fill, 64)}"
+}
+
+fn pkg_lock_test_nix_closure(output: String) -> NixClosureRecord Never! {
+    NixClosureRecord{
+        channel: "nixpkgs-unstable",
+        revision: pkg_lock_test_repeat("a", 40),
+        system: "x86_64-linux",
+        index_authority: pkg_lock_test_repeat("b", 64),
+        derivation: pkg_lock_test_repeat("c", 64),
+        output: output,
+        nar_hash: "sha256:{pkg_lock_test_repeat("d", 64)}",
+        size: 42,
+        compression: "zstd",
+        references: [String]{},
+        upstream_proof: pkg_lock_test_nix_digest("e"),
+        cache_key: pkg_lock_test_repeat("f", 64),
+        project_cas_bundle: pkg_lock_test_nix_digest("0")
+    }
+}
+
+fn pkg_lock_test_pkg(name: String, envelope: LockEnvelope?) -> LockedPackage Never! {
+    LockedPackage{name: name, version: "1.0.0", source: LockSource.Root, fingerprint: "sha256-abc", envelope: envelope}
+}
+
+fn pkg_lock_test_base_lock(packages: [LockedPackage], toolchains: [LockedToolchain]) -> LockFile Never! {
+    lock := LockFile.empty()
+    lock.packages = packages
+    lock.toolchains = toolchains
+    lock
+}
+
+// A fresh scratch project root with a `.jet` managed folder; the handle
+// removes it at scope exit.
+fn pkg_lock_test_project(tag: String) -[FS]> TempDir Never! {
+    scratch :: files.temp_dir("jet-lock-{tag}") ?? panic("scratch directory")
+    files.create_dir_all(files.join(scratch.path, ".jet")) ?? panic("managed folder")
+    scratch
+}
+
+// A realized package's envelope round-trips through write and parse
+// unchanged; the empty signature slot stays implicit in the file.
+#Test("lock roundtrips envelope") {
+    envelope :: pkg_lock_test_env("sha256-deadbeef", "x86_64-linux", "", "hello@mine via core-source")
+    lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", Val(envelope))}, [LockedToolchain]{})
+    text :: pkg_lock_write(lock)
+    assert(text.contains("output-hash = \"sha256-deadbeef\""))
+    assert(text.contains("platform = \"x86_64-linux\""))
+    assert(text.contains("provenance = \"hello@mine via core-source\""))
+    assert(!text.contains("signature ="))
+    back :: pkg_lock_parse(text) ?? panic("parse")
+    assert_eq(back.packages[0].envelope, Val(envelope))
+}
+
+// A filled signature slot round-trips explicitly.
+#Test("lock roundtrips filled signature") {
+    envelope :: pkg_lock_test_env("sha256-aa", "aarch64-macos", "ed25519:sigbytes", "ref via nix")
+    lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("p", Val(envelope))}, [LockedToolchain]{})
+    back :: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("parse")
+    assert_eq(back.packages[0].envelope, Val(envelope))
+}
+
+// A legacy lock with no envelope lines parses to None and round-trips
+// unchanged: no forced migration.
+#Test("legacy lock without envelope roundtrips none") {
+    lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("old", None)}, [LockedToolchain]{})
+    text :: pkg_lock_write(lock)
+    assert(!text.contains("output-hash"))
+    back :: pkg_lock_parse(text) ?? panic("parse")
+    assert_eq(back.packages[0].envelope, None)
+}
+
+// A `[[toolchain]]` block carries the same envelope and round-trips; its
+// `version` key is not mistaken for the lockfile version.
+#Test("lock roundtrips toolchain record") {
+    toolchain :: LockedToolchain{id: "toolchain-1.79.0", channel: "1.79", version: "1.79.0", envelope: pkg_lock_test_env("sha256-tc", "x86_64-linux", "", "rust-1.79.0 via toolchain")}
+    lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", None)}, [LockedToolchain]{toolchain})
+    text :: pkg_lock_write(lock)
+    assert(text.contains("[[toolchain]]"))
+    assert(text.contains("id = \"toolchain-1.79.0\""))
+    assert(text.contains("channel = \"1.79\""))
+    back :: pkg_lock_parse(text) ?? panic("parse")
+    assert_eq(back.toolchains, [LockedToolchain]{toolchain})
+    assert_eq(back.version, @PKG_LOCK_VERSION)
+}
+
+#Test("receipt roundtrips without changing other packages") {
+    receipt :: "sha256-{pkg_lock_test_repeat("a", 64)}"
+    lock := pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", Val(pkg_lock_test_env("sha256-output", "x86_64-linux", "", "hello"))), pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
+    lock.packages[0].receipt = Val(receipt)
+    reloaded :: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("parse")
+    assert_eq(reloaded.packages[0].receipt, Val(receipt))
+    assert_eq(reloaded.packages[1].receipt, None)
+}
+
+// The envelope coexists with the older per-package fields (effects,
+// content-hash); the canonical writer sorts effect rows.
+#Test("envelope coexists with effects and content hash") {
+    package := pkg_lock_test_pkg("p", Val(pkg_lock_test_env("sha256-x", "x86_64-linux", "", "r via core-source")))
+    package.content_hash = Val("sha256-tree")
+    package.effects = [String]{"Net", "FS"}
+    package.required_effects = package.effects
+    back :: pkg_lock_parse(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{}))) ?? panic("parse")
+    package.effects = [String]{"FS", "Net"}
+    package.required_effects = [String]{"FS", "Net"}
+    assert_eq(back.packages[0], package)
+}
+
+#Test("lock writer migrates legacy ref spellings") {
+    legacy :: "#auto can1357/oh-my-pi#v18.0.4@github"
+    package := pkg_lock_test_pkg("omp", None)
+    package.source = LockSource.Nix{reference: legacy, output: pkg_lock_test_nix_digest("a")}
+    package.nix_closure = Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a")))
+    lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
+    &lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: legacy})
+    text :: pkg_lock_write(lock)
+    assert(text.contains("can1357/oh-my-pi@github#v18.0.4"))
+    assert(!text.contains(legacy))
+    assert(!text.contains("can1357/oh-my-pi#v18.0.4@github"))
+    back :: pkg_lock_parse(text) ?? panic("migrated lock parses")
+    if back.packages[0].source == {
+        .Nix(reference, _) -> assert_eq(reference, "can1357/oh-my-pi@github#v18.0.4")
+        else -> panic("migrated package stays a Nix record")
+    }
+    assert_eq(back.source_channels[0].exact, "can1357/oh-my-pi@github#v18.0.4")
+}
+
+// `pkg_lock_record_envelope` backfills a realized object's envelope into an
+// existing on-disk lock, leaving other packages untouched.
+#Test("record envelope backfills lock on disk") {
+    scratch :: pkg_lock_test_project("a4-record")
+    lock :: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", None), pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
+    files.write(files.join(scratch.path, @UNIFIED_LOCK_FILE), pkg_lock_write(lock)) ?? panic("seed lock")
+    envelope :: pkg_lock_test_env("sha256-real", "x86_64-linux", "", "hello via core-source")
+    pkg_lock_record_envelope(scratch.path, "hello", envelope)
+    reloaded :: pkg_lock_load(scratch.path) ?? panic("reload")
+    hello :: reloaded.find_package("hello") ?? panic("hello")
+    other :: reloaded.find_package("other") ?? panic("other")
+    assert_eq(hello.envelope, Val(envelope))
+    assert_eq(other.envelope, None)
+}

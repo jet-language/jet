@@ -45,9 +45,9 @@ pub struct PackageProfileFact {
     pub raw: String
     pub target: String
     pub source: String
-    pub upstream: ?String{None}
+    pub upstream: String?{None}
     pub provider: String
-    pub channel: ?String{None}
+    pub channel: String?{None}
     pub declared_by: [String]{[String]{}}
     // The provider identity, selector, typed facts, and native provenance
     // carried with this package. Consumers must not reconstruct it from `raw`
@@ -70,26 +70,26 @@ pub struct PackageProfilePlan {
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
-    fn finalize(^self) -> PackageProfilePlan !Never {
+    fn finalize(^self) -> PackageProfilePlan Never! {
         updated := self
         lines := [String]{"jet-package-profile-plan-v1\n"}
-        envmodel_fingerprint_field(&lines, "name", updated.name)
-        loop value in updated.selected_profiles -> envmodel_fingerprint_field(&lines, "selected", value)
-        loop value in updated.applied -> envmodel_fingerprint_field(&lines, "applied", value)
-        loop value in updated.sources -> envmodel_fingerprint_field(&lines, "source", value)
+        &lines.push(envmodel_fingerprint_line("name", updated.name))
+        loop value in updated.selected_profiles -> &lines.push(envmodel_fingerprint_line("selected", value))
+        loop value in updated.applied -> &lines.push(envmodel_fingerprint_line("applied", value))
+        loop value in updated.sources -> &lines.push(envmodel_fingerprint_line("source", value))
         loop package in updated.packages {
-            envmodel_fingerprint_field(&lines, "package.raw", package.raw)
-            envmodel_fingerprint_field(&lines, "package.target", package.target)
-            envmodel_fingerprint_field(&lines, "package.source", package.source)
-            envmodel_fingerprint_field(&lines, "package.upstream", package.upstream ?? "<none>")
-            envmodel_fingerprint_field(&lines, "package.provider", package.provider)
-            envmodel_fingerprint_field(&lines, "package.channel", package.channel ?? "<none>")
-            loop owner in package.declared_by -> envmodel_fingerprint_field(&lines, "package.declared_by", owner)
-            envmodel_fingerprint_field(&lines, "package.provider_facts", package.provider_facts.digest())
+            &lines.push(envmodel_fingerprint_line("package.raw", package.raw))
+            &lines.push(envmodel_fingerprint_line("package.target", package.target))
+            &lines.push(envmodel_fingerprint_line("package.source", package.source))
+            &lines.push(envmodel_fingerprint_line("package.upstream", package.upstream ?? "<none>"))
+            &lines.push(envmodel_fingerprint_line("package.provider", package.provider))
+            &lines.push(envmodel_fingerprint_line("package.channel", package.channel ?? "<none>"))
+            loop owner in package.declared_by -> &lines.push(envmodel_fingerprint_line("package.declared_by", owner))
+            &lines.push(envmodel_fingerprint_line("package.provider_facts", package.provider_facts.digest()))
         }
         loop path in envmodel_sorted_keys(updated.collisions) {
-            envmodel_fingerprint_field(&lines, "collision.path", path)
-            envmodel_fingerprint_field(&lines, "collision.provider", updated.collisions[path])
+            &lines.push(envmodel_fingerprint_line("collision.path", path))
+            &lines.push(envmodel_fingerprint_line("collision.provider", updated.collisions[path]))
         }
         updated.fingerprint = "sha256-{pkg_sha256_hex(lines.join("").bytes())}"
         facts := [String: ProviderFacts]{}
@@ -99,8 +99,8 @@ pub struct PackageProfilePlan {
     }
 }
 
-fn envmodel_fingerprint_field(lines: &[String], key: String, value: String) {
-    lines.push("{key}\t{value.bytes().len()}\t{value}\n")
+fn envmodel_fingerprint_line(key: String, value: String) -> String Never! {
+    "{key}\t{value.bytes().len()}\t{value}\n"
 }
 
 #Error
@@ -109,17 +109,19 @@ pub enum PackageProfileError {
     Cycle([String])
     Conflict(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Missing(name) -> "package generation '{name}' does not exist"
             .Cycle(names) -> "package generation inheritance cycle: {names.join(" -> ")}"
-            .Conflict(name) && name.starts_with(@ENVMODEL_RESOLVER_BUDGET_NAME) -> "package generation resolver exceeds {name.removeprefix(@ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
-            .Conflict(name) -> "package generation fact '{name}' conflicts"
+            .Conflict(name) -> {
+                if name.starts_with(@ENVMODEL_RESOLVER_BUDGET_NAME) -> return "package generation resolver exceeds {name.removeprefix(@ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
+                "package generation fact '{name}' conflicts"
+            }
         }
     }
 }
 
-fn envmodel_resolver_budget_error() -> PackageProfileError !Never {
+fn envmodel_resolver_budget_error() -> PackageProfileError Never! {
     PackageProfileError.Conflict("{@ENVMODEL_RESOLVER_BUDGET_NAME}{@ENVMODEL_MAX_RESOLVER_NODES}")
 }
 
@@ -132,14 +134,14 @@ pub struct PackageProfileSet {
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.
-    fn insert_checked(&self, profile: PackageProfileSpec) !PackageProfileError {
+    fn insert_checked(&self, profile: PackageProfileSpec) PackageProfileError! {
         if self.profiles.get(profile.name) == .Val(existing) {
             if existing.extends != profile.extends || existing.packages != profile.packages || existing.collisions != profile.collisions {
                 return Err(PackageProfileError.Conflict(profile.name))
             }
             merged := existing
             loop source in profile.sources {
-                if !merged.sources.contains(source) -> merged.sources.push(source)
+                if !merged.sources.contains(source) -> &merged.sources.push(source)
             }
             self.profiles[profile.name] = merged
             return Ok()
@@ -148,20 +150,20 @@ pub struct PackageProfileSet {
         self.profiles[profile.name] = profile
     }
 
-    fn resolve(self, name: String) -> ResolvedPackageProfile !PackageProfileError {
+    fn resolve(self, name: String) -> ResolvedPackageProfile PackageProfileError! {
         self.resolve_many([String]{name})
     }
 
     // Parent-first, iterative depth-first composition. Iteration keeps the
     // full resolver budget within a bounded native stack.
-    fn resolve_many(self, names: [String]) -> ResolvedPackageProfile !PackageProfileError {
+    fn resolve_many(self, names: [String]) -> ResolvedPackageProfile PackageProfileError! {
         selected := [String]{}
         selected_seen := [String: Bool]{}
         loop name in names {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
                 if selected.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                selected.push(name)
+                &selected.push(name)
             }
         }
         resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
@@ -174,8 +176,8 @@ pub struct PackageProfileSet {
         package_indices := [String: Int]{}
         loop name in selected {
             if (state.get(name) ?? 0) == @ENVMODEL_PROFILE_FINISHED -> next
-            frame_names.push(name)
-            frame_next.push(0)
+            &frame_names.push(name)
+            &frame_next.push(0)
             loop frame_names.len() > 0 {
                 top :: frame_names.len() - 1
                 current :: frame_names[top]
@@ -183,22 +185,22 @@ pub struct PackageProfileSet {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                     state[current] = @ENVMODEL_PROFILE_ENTERED
-                    stack.push(current)
+                    &stack.push(current)
                 }
                 profile :: self.profiles[current]
                 parent_index :: frame_next[top]
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
-                    _ := frame_names.pop()
-                    _ := frame_next.pop()
-                    _ := stack.pop()
+                    _ := &frame_names.pop()
+                    _ := &frame_next.pop()
+                    _ := &stack.pop()
                     state[current] = @ENVMODEL_PROFILE_FINISHED
-                    resolved.applied.push(current)
+                    &resolved.applied.push(current)
                     loop source in profile.sources {
                         if source_seen.get(source) == None {
                             source_seen[source] = true
                             if resolved.sources.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                            resolved.sources.push(source)
+                            &resolved.sources.push(source)
                         }
                     }
                     loop raw in profile.packages {
@@ -208,7 +210,7 @@ pub struct PackageProfileSet {
                                 if resolved.packages.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                                 index :: resolved.packages.len()
                                 package_indices[raw] = index
-                                resolved.packages.push(PackageProfilePackage{raw: raw})
+                                &resolved.packages.push(PackageProfilePackage{raw: raw})
                                 index
                             }
                         }
@@ -216,7 +218,7 @@ pub struct PackageProfileSet {
                         owner_key :: "{raw.bytes().len()}:{raw}{current}"
                         if declared_by_seen.get(owner_key) == None {
                             declared_by_seen[owner_key] = true
-                            resolved.packages[package_index].declared_by.push(current)
+                            &resolved.packages[package_index].declared_by.push(current)
                         }
                     }
                     loop path in envmodel_sorted_keys(profile.collisions) {
@@ -241,15 +243,15 @@ pub struct PackageProfileSet {
                         started := false
                         loop item in stack {
                             if item == parent -> started = true
-                            if started -> cycle.push(item)
+                            if started -> &cycle.push(item)
                         }
-                        cycle.push(parent)
+                        &cycle.push(parent)
                         return Err(PackageProfileError.Cycle(cycle))
                     }
                     @ENVMODEL_PROFILE_FINISHED -> {}
                     else -> {
-                        frame_names.push(parent)
-                        frame_next.push(0)
+                        &frame_names.push(parent)
+                        &frame_next.push(0)
                     }
                 }
             }

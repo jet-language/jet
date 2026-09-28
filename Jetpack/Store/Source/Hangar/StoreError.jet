@@ -16,10 +16,10 @@ pub enum StoreError {
     Interrupted(String)
     // Rust `Lifecycle::CasConflict` (io kind AlreadyExists), recognized by
     // external-root callers the way Rust downcasts it.
-    LifecycleConflict(expected: ?String, current: ?String)
+    LifecycleConflict(expected: String?, current: String?)
     Other(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Io(error) -> "{error}"
             .NotFound(text) -> text
@@ -35,7 +35,7 @@ pub enum StoreError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound`.
-    fn is_not_found(self) -> Bool !Never {
+    fn is_not_found(self) -> Bool Never! {
         if self == {
             .NotFound(_) -> true
             .Io(error) -> if error == {
@@ -47,7 +47,7 @@ pub enum StoreError {
     }
 
     // Rust `error.kind() == ErrorKind::AlreadyExists`.
-    fn is_already_exists(self) -> Bool !Never {
+    fn is_already_exists(self) -> Bool Never! {
         if self == {
             .AlreadyExists(_) -> true
             .LifecycleConflict(_, _) -> true
@@ -61,7 +61,7 @@ pub enum StoreError {
 
     // Rust `io::Error::new(error.kind(), text)`: keep the kind, replace the
     // message.
-    fn with_message(self, text: String) -> StoreError !Never {
+    fn with_message(self, text: String) -> StoreError Never! {
         if self == {
             .NotFound(_) -> StoreError.NotFound(text)
             .InvalidData(_) -> StoreError.InvalidData(text)

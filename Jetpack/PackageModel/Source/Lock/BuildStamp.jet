@@ -7,12 +7,12 @@
 @PKG_BUILD_STAMP_TOOLCHAIN :: "0.1.0"
 
 pub struct BuildStamp {
-    pub git: ?String
+    pub git: String?
     pub dirty: Bool
     pub toolchain: String
     pub at: String
 
-    fn default() -> BuildStamp !Never {
+    fn default() -> BuildStamp Never! {
         BuildStamp{git: None, dirty: false, toolchain: @PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
     }
 }
@@ -20,10 +20,10 @@ pub struct BuildStamp {
 // Return the lock-pinned provenance, or capture one stamp for the
 // lock-writing operation. A locked build may not fall back to the wall
 // clock: a missing stamp is a stale lock input.
-pub fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time, Time.Wait]> BuildStamp !LockError {
+pub fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time, Time.Wait]> BuildStamp LockError! {
     if pkg_lock_load(project_root) == {
         .Val(lock) -> if lock.build_stamp == {
-            .Val(stamp) -> return Ok(stamp)
+            .Val(stamp) -> { return Ok(stamp) }
             .None -> {}
         }
         .None -> {}
@@ -49,9 +49,9 @@ fn pkg_lock_capture_build_stamp(project_root: String) -[Exec, Time, Time.Wait]> 
 }
 
 // Trimmed stdout of `git -C <root> <args>` when it succeeds.
-fn pkg_lock_git_output(project_root: String, args: [String]) -[Exec, Time.Wait]> ?String {
+fn pkg_lock_git_output(project_root: String, args: [String]) -[Exec, Time.Wait]> String? {
     argv := [String]{"git", "-C", project_root}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> &argv.push(arg)
     spec :: process.cmd(argv).stdout(.Capture).stderr(.Capture)
     receipt :: process.run_spec(spec) ?? return None
     if !receipt.success -> return None
@@ -66,7 +66,7 @@ fn pkg_lock_timestamp_now() -[Time]> String {
 }
 
 // `value` in decimal, zero-padded to `width` digits.
-fn pkg_lock_pad(value: Int, width: Int) -> String !Never {
+fn pkg_lock_pad(value: Int, width: Int) -> String Never! {
     text := "{value}"
     loop text.bytes().len() < width -> text = "0{text}"
     text

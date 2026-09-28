@@ -1,0 +1,259 @@
+// Comment-preserving in-place edits of `package.jet` (Package/Edit.rs): add,
+// update, or remove `deps:` entries and add authority holds. Every edit keeps
+// comments and unrelated lines byte-for-byte; callers reparse the result.
+
+// Render a `DepSpec` back into `package.jet` dependency-value syntax.
+fn pkg_render_dep_spec(name: String, spec: DepSpec) -> String Never! {
+    if spec == {
+        .Registry(version) -> "{name}#{version}"
+        .Path(path) -> path
+        .Git(url, selector) -> "{{ git: \"{url}\", {selector.field()}: \"{selector.value()}\" }}"
+        .Foreign(language, reference) -> "{language.root()}@{pkg_debug_str(reference)}"
+    }
+}
+
+// Insert or update a dependency in `deps: { … }`, creating the block when it
+// is absent.
+pub fn pkg_add_dep(raw: String, name: String, spec: DepSpec) -> String Never! {
+    pkg_edit_insert_or_replace_in_block(raw, "deps", name, "    {name}: {pkg_render_dep_spec(name, spec)},")
+}
+
+// Remove a dependency from `deps: { … }`.
+pub fn pkg_remove_dep(raw: String, name: String) -> String Never! {
+    pkg_edit_remove_from_block(raw, "deps", name)
+}
+
+// Add one effect root to `authority.holds.allow`.
+pub fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
+    right :: input.trim()
+    if right == "" -> return raw
+    lines :: pkg_binder_lines(raw)
+    authority_line := -1
+    loop index in 0..<lines.len() {
+        if lines[index].trim_start().starts_with("authority:") {
+            authority_line = index
+            break
+        }
+    }
+    if authority_line < 0 -> return pkg_edit_append_authority_hold(raw, right)
+    authority :: pkg_edit_block_line_range(lines, "authority") ?? return raw
+    authority_inline :: pkg_edit_inline_block_bounds(lines[authority_line], "authority")
+    holds_line := -1
+    if authority_inline != None {
+        holds_line = authority_line
+    } else {
+        loop index in authority.start..<authority.end {
+            if lines[index].trim_start().starts_with("holds:") {
+                holds_line = index
+                break
+            }
+        }
+    }
+    out := lines
+    if holds_line < 0 {
+        if authority_inline == .Val(bounds) {
+            out[authority_line] = pkg_edit_insert_inline_field(out[authority_line], bounds.start, bounds.end, "holds: {{ allow: [", right)
+        } else {
+            indent :: pkg_edit_body_indent(out, authority.start, authority.end, out[authority_line])
+            out = pkg_edit_insert_line(out, authority.end, "{indent}holds: {{ allow: [{right}] }},")
+        }
+        return pkg_edit_restore_newline(raw, out)
+    }
+    if pkg_edit_add_to_inline_list(out[holds_line], "allow", right) == .Val(updated) {
+        out[holds_line] = updated
+        return pkg_edit_restore_newline(raw, out)
+    }
+    if pkg_edit_inline_block_bounds(out[holds_line], "holds") == .Val(bounds) {
+        out[holds_line] = pkg_edit_insert_inline_field(out[holds_line], bounds.start, bounds.end, "allow: [", right)
+        return pkg_edit_restore_newline(raw, out)
+    }
+    holds :: pkg_edit_block_line_range_between(out, "holds", authority.start, authority.end) ?? return raw
+    indent :: pkg_edit_body_indent(out, holds.start, holds.end, out[holds_line])
+    pkg_edit_restore_newline(raw, pkg_edit_insert_line(out, holds.end, "{indent}allow: [{right}],"))
+}
+
+fn pkg_edit_append_authority_hold(raw: String, right: String) -> String Never! {
+    out := pkg_binder_lines(raw)
+    if raw != "" && !raw.ends_with("\n") -> &out.push("")
+    &out.push("authority: {{")
+    &out.push("    holds: {{ allow: [{right}] }},")
+    &out.push("}}")
+    pkg_edit_restore_newline(raw, out)
+}
+
+fn pkg_edit_restore_newline(raw: String, out: [String]) -> String Never! {
+    result :: out.join("\n")
+    if raw.ends_with("\n") && !result.ends_with("\n") -> return "{result}\n"
+    result
+}
+
+// `lines` with `value` inserted before index `at` (`Vec::insert`).
+fn pkg_edit_insert_line(lines: [String], at: Int, value: String) -> [String] Never! {
+    out := [String]{}
+    loop index in 0..<lines.len() {
+        if index == at -> &out.push(value)
+        &out.push(lines[index])
+    }
+    if at >= lines.len() -> &out.push(value)
+    out
+}
+
+fn pkg_edit_body_indent(lines: [String], start: Int, end: Int, header: String) -> String Never! {
+    if start <= end && end <= lines.len() {
+        loop index in start..<end {
+            if lines[index].trim() != "" -> return pkg_edit_leading_whitespace(lines[index])
+        }
+    }
+    "{pkg_edit_leading_whitespace(header)}    "
+}
+
+// A `[start, end)` byte range.
+struct EditSpan {
+    start: Int
+    end: Int
+}
+
+fn pkg_edit_inline_block_bounds(line: String, key: String) -> EditSpan? Never! {
+    marker :: "{key}:"
+    field :: pkg_binder_find(line, marker, 0)
+    if field < 0 -> return None
+    after :: field + marker.bytes().len()
+    open_offset :: pkg_text_find_byte(pkg_binder_tail(line, after), 123) ?? return None
+    open :: after + open_offset
+    close_offset :: pkg_text_rfind_byte(pkg_binder_tail(line, open + 1), 125) ?? return None
+    close :: open + 1 + close_offset
+    if close <= open -> return None
+    Val(EditSpan{start: open, end: close})
+}
+
+fn pkg_edit_add_to_inline_list(line: String, field: String, right: String) -> String? Never! {
+    marker :: "{field}:"
+    field_start :: pkg_binder_find(line, marker, 0)
+    if field_start < 0 -> return None
+    after :: field_start + marker.bytes().len()
+    open :: after + (pkg_text_find_byte(pkg_binder_tail(line, after), 91) ?? return None)
+    close :: open + 1 + (pkg_text_find_byte(pkg_binder_tail(line, open + 1), 93) ?? return None)
+    body :: pkg_binder_slice(line, open + 1, close)
+    loop entry in body.split(",") {
+        if pkg_edit_normalized_effect(entry) == right -> return Val(line)
+    }
+    addition :: if body.trim() == "" -> right else -> ", {right}"
+    Val("{pkg_binder_slice(line, 0, close)}{addition}{pkg_binder_tail(line, close)}")
+}
+
+fn pkg_edit_insert_inline_field(line: String, open: Int, close: Int, field_prefix: String, right: String) -> String Never! {
+    body :: pkg_binder_slice(line, open + 1, close)
+    separator :: if body.trim() == "" || body.trim_end().ends_with(",") -> "" else -> ", "
+    "{pkg_binder_slice(line, 0, close)}{separator}{field_prefix}{right}]{pkg_binder_tail(line, close)}"
+}
+
+fn pkg_edit_normalized_effect(value: String) -> String Never! {
+    pkg_trim_start_matches(pkg_binder_trim_matches(value.trim(), "\""), ".")
+}
+
+// The `[start, end)` line range of `key: { … }`'s body, tracking brace depth
+// so nested records do not confuse the boundary.
+fn pkg_edit_block_line_range(lines: [String], key: String) -> EditSpan? Never! {
+    pkg_edit_block_line_range_between(lines, key, 0, lines.len())
+}
+
+fn pkg_edit_block_line_range_between(lines: [String], key: String, range_start: Int, range_end: Int) -> EditSpan? Never! {
+    header :: "{key}:"
+    start := -1
+    depth := 0
+    loop index in range_start..<range_end {
+        line :: lines[index]
+        if start < 0 {
+            trimmed :: line.trim_start()
+            if trimmed.starts_with(header) {
+                rest :: trimmed.removeprefix(header).trim_start()
+                after_dot :: if rest.starts_with(".") -> rest.removeprefix(".").trim_start() else -> rest
+                if after_dot.starts_with("{{") {
+                    depth = pkg_edit_brace_delta(line)
+                    start = index + 1
+                    if depth <= 0 -> return Val(EditSpan{start: index + 1, end: index + 1})
+                }
+            }
+            next
+        }
+        depth += pkg_edit_brace_delta(line)
+        if depth <= 0 -> return Val(EditSpan{start: start, end: index})
+    }
+    None
+}
+
+fn pkg_edit_brace_delta(line: String) -> Int Never! {
+    pkg_text_count(line, "{{") - pkg_text_count(line, "}}")
+}
+
+// Insert or replace a `name: …` entry inside `key: { … }`, creating the
+// block at the end of the file when it does not exist yet.
+fn pkg_edit_insert_or_replace_in_block(raw: String, key: String, name: String, new_line: String) -> String Never! {
+    lines :: pkg_binder_lines(raw)
+    out := lines
+    empty_inline := -1
+    loop index in 0..<lines.len() {
+        if pkg_edit_is_empty_inline_block(lines[index], key) {
+            empty_inline = index
+            break
+        }
+    }
+    if empty_inline >= 0 {
+        out[empty_inline] = "{pkg_edit_leading_whitespace(lines[empty_inline])}{key}: .{{"
+        out = pkg_edit_insert_line(out, empty_inline + 1, new_line)
+        out = pkg_edit_insert_line(out, empty_inline + 2, "}}")
+    } else if pkg_edit_block_line_range(lines, key) == .Val(block) {
+        existing := -1
+        loop index in block.start..<block.end {
+            if lines[index].trim_start().split_once(":") == .Val(parts) {
+                if parts.before.trim() == name {
+                    existing = index
+                    break
+                }
+            }
+        }
+        if existing >= 0 {
+            out[existing] = new_line
+        } else {
+            out = pkg_edit_insert_line(out, block.end, new_line)
+        }
+    } else {
+        if raw != "" && !raw.ends_with("\n") -> &out.push("")
+        &out.push("")
+        &out.push("{key}: .{{")
+        &out.push(new_line)
+        &out.push("}}")
+    }
+    pkg_edit_restore_newline(raw, out)
+}
+
+fn pkg_edit_is_empty_inline_block(line: String, key: String) -> Bool Never! {
+    trimmed :: line.trim_start()
+    header :: "{key}:"
+    if !trimmed.starts_with(header) -> return false
+    rest :: trimmed.removeprefix(header).trim_start()
+    body :: if rest.starts_with(".") -> rest.removeprefix(".") else -> rest
+    body.trim() == "{{}}"
+}
+
+fn pkg_edit_leading_whitespace(line: String) -> String Never! {
+    raw :: line.bytes()
+    pkg_bytes_text(raw, 0, pkg_bytes_skip_space(raw, 0))
+}
+
+// Remove a `name: …` entry from the `key: { … }` block.
+fn pkg_edit_remove_from_block(raw: String, key: String, name: String) -> String Never! {
+    lines :: pkg_binder_lines(raw)
+    block :: pkg_edit_block_line_range(lines, key) ?? return raw
+    out := [String]{}
+    loop index in 0..<lines.len() {
+        line :: lines[index]
+        if index >= block.start && index < block.end {
+            if line.trim_start().split_once(":") == .Val(parts) {
+                if parts.before.trim() == name -> next
+            }
+        }
+        &out.push(line)
+    }
+    pkg_edit_restore_newline(raw, out)
+}

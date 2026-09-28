@@ -3,7 +3,7 @@
 #Test("projects powershell names without changing foreign lookup") {
     functions :: pkg_powershell_parse_function_names("Get-Stateful\nFail\n".bytes()) ?? panic("PowerShell names parse")
     projected := [String]{}
-    loop function in functions -> projected.push(function.jet)
+    loop function in functions -> &projected.push(function.jet)
     assert_eq(projected, [String]{"get_stateful", "fail"})
     jet :: pkg_powershell_render_jet("ops", functions)
     worker :: pkg_powershell_render_worker(functions)

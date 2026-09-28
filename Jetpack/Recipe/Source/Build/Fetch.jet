@@ -21,7 +21,7 @@
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
 pub struct RecipeTransport {
-    pub fetch: fn(String) -[Net]> [U8] !RecipeError
+    pub fetch: fn(String) -[Net]> [U8] RecipeError!
 }
 
 // A locked source fetch recorded for `.jet/lock` provenance.
@@ -31,7 +31,7 @@ pub struct FetchRecord {
 }
 
 // Perform one locked fetch step into the content-addressed fetch cache.
-fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transport: ?RecipeTransport, report: &RunReport) !RecipeDiagnostic -[FS, Env, Net, Rand]> {
+fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport) RecipeDiagnostic! -[FS, Env, Net, Rand]> {
     if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
     // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
     // validate too, defensively). An unchecked lock value never selects a
@@ -47,7 +47,7 @@ fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transpo
             // Offline-satisfiable only after re-verifying the immutable key. A
             // corrupt or stale cache entry never becomes trusted input.
             if pkg_sha256_hex(cached_bytes) == sha256 {
-                report.fetches.push(FetchRecord{url, sha256})
+                &report.fetches.push(FetchRecord{url, sha256})
                 report.add_effect("net.fetch")
                 return Ok()
             }
@@ -100,12 +100,12 @@ fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transpo
         .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "syncing fetch cache: {error.message()}"))
         else -> {}
     }
-    report.fetches.push(FetchRecord{url, sha256})
+    &report.fetches.push(FetchRecord{url, sha256})
     report.add_effect("net.fetch")
 }
 
 // Exactly 64 ASCII hexadecimal characters.
-fn recipe_valid_sha256(value: String) -> Bool !Never {
+fn recipe_valid_sha256(value: String) -> Bool Never! {
     raw :: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
@@ -114,13 +114,13 @@ fn recipe_valid_sha256(value: String) -> Bool !Never {
     true
 }
 
-fn recipe_is_hex_digit(code: Int) -> Bool !Never {
+fn recipe_is_hex_digit(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
 }
 
 // A declared input digest names `actual_hex` bare or with a `sha256-` /
 // `sha256:` prefix.
-fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool !Never {
+fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool Never! {
     if declared == actual_hex -> return true
     if declared.starts_with("sha256-") && declared.removeprefix("sha256-") == actual_hex -> return true
     declared.starts_with("sha256:") && declared.removeprefix("sha256:") == actual_hex
@@ -129,7 +129,7 @@ fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool !Never {
 // Build hooks cannot receive a credential provider. URL userinfo and
 // credential query or fragment fields are refused at the recipe boundary so
 // the secret never reaches transport, cache metadata, diagnostics, or logs.
-fn recipe_credentialed_fetch_url(url: String) -> Bool !Never {
+fn recipe_credentialed_fetch_url(url: String) -> Bool Never! {
     if pkg_text_has_control(url) -> return true
     scheme :: url.split_once("://") ?? return false
     rest :: scheme.after
@@ -151,7 +151,7 @@ fn recipe_credentialed_fetch_url(url: String) -> Bool !Never {
 }
 
 // The prefix of `text` before the first byte listed in `stops`.
-fn recipe_until_any(text: String, stops: String) -> String !Never {
+fn recipe_until_any(text: String, stops: String) -> String Never! {
     raw :: text.bytes()
     stop_bytes :: stops.bytes()
     loop index in 0..<raw.len() {
@@ -161,7 +161,7 @@ fn recipe_until_any(text: String, stops: String) -> String !Never {
 }
 
 // `&`/`;`-separated fields, any of whose keys is credential-shaped.
-fn recipe_credential_fields(fields: String) -> Bool !Never {
+fn recipe_credential_fields(fields: String) -> Bool Never! {
     loop group in fields.split("&") {
         loop field in group.split(";") {
             key :: field.split_once("=")?.before ?? field
@@ -171,7 +171,7 @@ fn recipe_credential_fields(fields: String) -> Bool !Never {
     false
 }
 
-fn recipe_credential_field_key(raw: String) -> Bool !Never {
+fn recipe_credential_field_key(raw: String) -> Bool Never! {
     key :: pkg_ascii_lower(recipe_percent_decode_ascii(raw.trim())).replace("-", "_")
     if @RECIPE_CREDENTIAL_KEYS.contains(key) -> return true
     loop suffix in @RECIPE_CREDENTIAL_SUFFIXES {
@@ -182,7 +182,7 @@ fn recipe_credential_field_key(raw: String) -> Bool !Never {
 
 // Decode `%XX` escapes byte by byte; each decoded byte becomes the scalar of
 // the same value (Rust `byte as char`), undecodable escapes stay literal.
-fn recipe_percent_decode_ascii(value: String) -> String !Never {
+fn recipe_percent_decode_ascii(value: String) -> String Never! {
     bytes :: value.bytes()
     decoded := [U8]{}
     index := 0
@@ -203,17 +203,17 @@ fn recipe_percent_decode_ascii(value: String) -> String !Never {
 }
 
 // Append the UTF-8 encoding of the scalar U+0000..U+00FF with value `code`.
-fn recipe_push_latin1(out: &[U8], code: Int) !Never {
+fn recipe_push_latin1(out: &[U8], code: Int) Never! {
     if code < 128 {
-        out.push(U8{code})
+        &out.push(U8{code})
         return
     }
-    out.push(U8{192 + code /% 64})
-    out.push(U8{128 + code % 64})
+    &out.push(U8{192 + code /% 64})
+    &out.push(U8{128 + code % 64})
 }
 
 // The value of one hexadecimal digit, or -1.
-fn recipe_hex_value(code: Int) -> Int !Never {
+fn recipe_hex_value(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
         code >= 97 && code <= 102 -> code - 87
@@ -225,7 +225,7 @@ fn recipe_hex_value(code: Int) -> Int !Never {
 // The only environment a recipe tool may observe. The native backend clears
 // the inherited environment and maps `JET_BUILD_OUTPUT` to the private output
 // mount; this map carries only declared deterministic values, in key order.
-fn recipe_build_env() -> [String: String] !Never {
+fn recipe_build_env() -> [String: String] Never! {
     env := [String: String]{}
     env["JET_PROFILE"] = "default"
     env["SOURCE_DATE_EPOCH"] = "0"

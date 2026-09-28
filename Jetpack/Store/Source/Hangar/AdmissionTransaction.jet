@@ -1,0 +1,509 @@
+// The one Hangar commit boundary (Rust `jetpack::Store::Transaction`)
+// shared by native ingest, Nix admission, and realized-package publication.
+// Adapters stage and certify format-specific input, then hand this type
+// canonical object identities and candidate records. It owns the durable
+// publication order and the rollback state. Rust rolled back from `Drop`;
+// here `commit` rolls back its own failures and a caller that abandons a
+// transaction before `commit` calls `rollback` on that path.
+
+store_transaction_sequence := 0
+
+// Test seam (Rust thread-local ADMISSION_FAILURE): 0 = none, else the
+// 1-based `AdmissionFailurePoint` tag that fails after that step.
+store_admission_failure := 0
+
+// A verified object supplied by a format adapter. The adapter owns how the
+// bytes were fetched and hashed; the transaction owns their durable
+// publication.
+pub struct AdmissionObject {
+    pub source: String
+    pub digest: String
+    pub bytes: Int
+    pub allow_semantic_xattrs: Bool
+    pub repair_corrupt: Bool
+}
+
+// A format-specific receipt whose atomic publication is shared with package
+// receipts. Nix builds the closure receipt bytes; Hangar publishes them.
+pub struct AdmissionReceipt {
+    pub digest: String
+    pub bytes: [U8]
+}
+
+pub enum AdmissionFailurePoint {
+    AfterObjectPublication
+    AfterReceiptPublication
+    AfterClosureRegistration
+
+    fn tag(self) -> Int Never! {
+        if self == {
+            .AfterObjectPublication -> 1
+            .AfterReceiptPublication -> 2
+            .AfterClosureRegistration -> 3
+        }
+    }
+
+    fn name(self) -> String Never! {
+        if self == {
+            .AfterObjectPublication -> "AfterObjectPublication"
+            .AfterReceiptPublication -> "AfterReceiptPublication"
+            .AfterClosureRegistration -> "AfterClosureRegistration"
+        }
+    }
+}
+
+// Arm the injected failure for the admissions that follow; returns the
+// previous setting for `store_end_admission_failure`.
+pub fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
+    previous :: store_admission_failure
+    store_admission_failure = point.tag()
+    previous
+}
+
+pub fn store_end_admission_failure(previous: Int) Never! {
+    store_admission_failure = previous
+}
+
+fn store_injected_failure(point: AdmissionFailurePoint) StoreError! {
+    if store_admission_failure == point.tag() {
+        return Err(StoreError.Other("injected Hangar admission failure after {point.name()}"))
+    }
+}
+
+struct PublishedObject {
+    destination: String
+    original_source: String?
+    held_source: String?
+    backup: String?
+    pending: String?
+    created: Bool
+}
+
+pub struct AdmissionTransaction {
+    roots: HangarRoots
+    stage: String
+    objects: [AdmissionObject]
+    published: [PublishedObject]
+    receipts: [String]
+    committed: Bool
+
+    fn new(roots: HangarRoots) -> AdmissionTransaction StoreError! {
+        hangar :: roots.hangar_dir()
+        store_ensure_real_directory(hangar, "Hangar root")
+        stage_parent :: files.join(hangar, @STORE_STAGE_DIR)
+        store_ensure_real_directory(stage_parent, "Hangar admission staging")
+        loop {
+            sequence :: store_transaction_sequence
+            store_transaction_sequence = store_transaction_sequence + 1
+            candidate :: files.join(stage_parent, "admission-{process.current_pid()}-{sequence}")
+            if files.create_dir(candidate) == {
+                .Ok(_) -> return Ok(AdmissionTransaction{roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
+                .Err(error) -> {
+                    if !StoreError.Io(error).is_already_exists() -> return Err(StoreError.Io(error))
+                }
+            }
+        }
+    }
+
+    // Recover the shared object staging surface before any adapter starts a
+    // new admission. Nix's live-pid fetch staging remains its adapter-owned
+    // surface and is swept by the Nix adapter.
+    fn recover_unlocked(roots: HangarRoots) -> Int StoreError! {
+        hangar :: roots.hangar_dir()
+        swept := store_recover_seals(hangar)
+        swept += store_sweep_abandoned_directory(files.join(hangar, @STORE_STAGE_DIR), "Hangar admission staging")
+        objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+        metadata :: if files.stat(objects) == {
+            .Ok(metadata) -> metadata
+            .Err(error) -> {
+                if StoreError.Io(error).is_not_found() -> return Ok(swept)
+                return Err(StoreError.Io(error))
+            }
+        }
+        if metadata.is_symlink || !metadata.is_dir {
+            return Err(StoreError.InvalidData("Hangar object pool is not a real directory; repair the path before recovery"))
+        }
+        loop entry in files.list_dir(objects) {
+            if !entry.name.ends_with(@STORE_PARTIAL_SUFFIX) -> next
+            node :: files.stat(entry.path)
+            if {
+                node.is_symlink || node.is_file -> files.remove(entry.path)
+                node.is_dir -> store_transaction_remove_node(entry.path)
+                else -> return Err(StoreError.InvalidData("Hangar partial object `{entry.path}` is not removable"))
+            }
+            swept += 1
+        }
+        Ok(swept)
+    }
+
+    // Queue one adapter-verified object and return its deterministic CAS
+    // path. No bytes become visible until `commit`.
+    fn stage_object(&self, object: AdmissionObject) -> String StoreError! {
+        store_transaction_validate_digest(object.digest)
+        files.stat(object.source) ?? return Err(StoreError.Io(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.Io(err).message()}"))
+        destination :: files.join(files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR), object.digest)
+        &self.objects.push(object)
+        Ok(destination)
+    }
+
+    // Publish staged objects, extra format receipts, package receipts, and
+    // the closure delta in one shared order. The adapter supplies only the
+    // representation-specific registration mode and already-built entries.
+    fn commit(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+        if self.committed -> return Err(StoreError.Other("Hangar admission transaction already committed"))
+        registered := false
+        if &self.commit_steps(&entries, extra_receipts, excluded, mode, fresh_action_key) == {
+            .Ok(value) -> registered = value
+            .Err(error) -> {
+                &self.rollback()
+                return Err(error)
+            }
+        }
+        store_injected_failure(AdmissionFailurePoint.AfterClosureRegistration)
+        Ok(registered)
+    }
+
+    fn commit_steps(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+        &self.publish_objects(excluded)
+        store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
+        receipts_dir :: files.join(self.roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+        loop receipt in extra_receipts {
+            if self.publish_receipt(receipt) -> &self.receipts.push(files.join(receipts_dir, receipt.digest))
+        }
+        loop index in 0..<entries.len() {
+            entry := entries[index]
+            wrote :: store_prepare_entry_receipt_with_status(self.roots, &entry)
+            entries[index] = entry
+            if wrote -> &self.receipts.push(files.join(receipts_dir, entry.receipt))
+        }
+        store_injected_failure(AdmissionFailurePoint.AfterReceiptPublication)
+        registered :: store_register_entries_unlocked_with_mode(self.roots, entries, mode, fresh_action_key)
+        self.committed = true
+        if !registered -> &self.remove_new_receipts()
+        &self.finish()
+        Ok(registered)
+    }
+
+    // Compatibility seam for the projection claim helpers: the same object
+    // publication and rollback without package metadata to register.
+    fn commit_objects(&self, excluded: String?) -> [String] StoreError! {
+        if &self.commit_objects_steps(excluded) == {
+            .Ok(published) -> Ok(published)
+            .Err(error) -> {
+                &self.rollback()
+                Err(error)
+            }
+        }
+    }
+
+    fn commit_objects_steps(&self, excluded: String?) -> [String] StoreError! {
+        &self.publish_objects(excluded)
+        store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
+        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        destinations := [String]{}
+        loop object in self.objects -> &destinations.push(files.join(objects_dir, object.digest))
+        self.committed = true
+        &self.finish()
+        Ok(destinations)
+    }
+
+    fn publish_objects(&self, excluded: String?) StoreError! {
+        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        store_ensure_real_directory(objects_dir, "Hangar object pool")
+        incoming := 0
+        already_counted := 0
+        counted := [String: Bool]{}
+        loop object in self.objects {
+            if object.repair_corrupt -> store_invalidate_verified_digest(files.join(objects_dir, object.digest))
+            if counted.has_key(object.digest) -> next
+            counted[object.digest] = true
+            destination :: files.join(objects_dir, object.digest)
+            if !self.object_is_verified(destination, object) {
+                if incoming > @STORE_INT_MAX - object.bytes -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                incoming += object.bytes
+            }
+            source_excluded :: if excluded == {
+                .Val(path) -> store_path_starts_with(object.source, path)
+                .None -> false
+            }
+            if object.source != destination && self.source_is_internal(object.source) && !source_excluded {
+                size :: store_admission_size(object.source)
+                if already_counted > @STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar admission size overflowed"))
+                already_counted += size
+            }
+        }
+        incoming = if incoming > already_counted -> incoming - already_counted else -> 0
+        store_ensure_hangar_capacity(self.roots, store_admission_reservation(incoming), excluded)
+        loop index in 0..<self.objects.len() -> &self.publish_object(index)
+        if self.published.len() > 0 -> store_sync_store_directory(objects_dir)
+    }
+
+    fn object_is_verified(self, destination: String, object: AdmissionObject) -> Bool StoreError! {
+        if files.stat(destination) == {
+            .Ok(_) -> {
+                actual :: store_verified_output_hash_persistent(destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
+                Ok(actual == object.digest)
+            }
+            .Err(error) -> {
+                if StoreError.Io(error).is_not_found() -> return Ok(false)
+                Err(StoreError.Io(error))
+            }
+        }
+    }
+
+    // A symlink is an input node, not a tree owned by Hangar. Do not
+    // canonicalize it: that would follow a symlink-root (including a
+    // dangling one) and either misclassify it or reject valid no-follow
+    // input before the adapter can publish the link itself.
+    fn source_is_internal(self, source: String) -> Bool StoreError! {
+        if files.stat(source).is_symlink -> return Ok(false)
+        hangar :: files.canonicalize(self.roots.hangar_dir())
+        Ok(store_path_starts_with(files.canonicalize(source), hangar))
+    }
+
+    fn publish_object(&self, index: Int) StoreError! {
+        object :: self.objects[index]
+        objects_dir :: files.join(self.roots.hangar_dir(), @STORE_OBJECTS_DIR)
+        destination :: files.join(objects_dir, object.digest)
+        internal :: self.source_is_internal(object.source)
+
+        if object.source == destination {
+            if self.object_is_verified(destination, object) -> return Ok()
+            return Err(StoreError.InvalidData("canonical Hangar object `{destination}` does not match its digest"))
+        }
+
+        existing :: if files.stat(destination) == {
+            .Ok(_) -> true
+            .Err(error) -> {
+                if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+                false
+            }
+        }
+        if existing && self.object_is_verified(destination, object) {
+            if internal {
+                held :: files.join(files.join(self.stage, "consumed"), "{index}")
+                files.create_dir_all(files.dirname(held))
+                store_make_tree_writable_for_removal(object.source)
+                files.rename(object.source, held)
+                store_sync_store_directory(files.dirname(object.source))
+                &self.published.push(PublishedObject{destination: destination, original_source: Val(object.source), held_source: Val(held), backup: None, pending: None, created: false})
+            }
+            return Ok()
+        }
+        if existing && !object.repair_corrupt {
+            return Err(StoreError.InvalidData("existing Hangar object `{destination}` does not match its digest"))
+        }
+
+        backup := String?{None}
+        if existing {
+            moved :: files.join(files.join(self.stage, "replaced"), "{index}")
+            files.create_dir_all(files.dirname(moved))
+            store_make_tree_writable_for_removal(destination)
+            files.rename(destination, moved)
+            backup = Val(moved)
+        }
+        original_source :: if internal -> Val(object.source) else -> None
+        record_index :: self.published.len()
+        &self.published.push(PublishedObject{destination: destination, original_source: original_source, held_source: None, backup: backup, pending: None, created: false})
+        if backup != None -> store_sync_store_directory(objects_dir)
+
+        partial :: files.join(objects_dir, "{object.digest}{@STORE_PARTIAL_SUFFIX}")
+        if files.lexists(partial) -> store_transaction_remove_node(partial)
+        self.published[record_index].pending = Val(partial)
+
+        if {
+            internal -> {
+                store_make_tree_writable_for_removal(object.source)
+                files.rename(object.source, partial)
+                store_sync_store_directory(files.dirname(object.source))
+            }
+            else -> store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
+        }
+        store_seal_node(partial)
+        actual :: store_verified_output_hash(partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
+        if actual != object.digest -> return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
+        store_fsync_tree(partial)
+        store_sync_store_directory(objects_dir)
+        files.rename(partial, destination)
+        self.published[record_index].pending = None
+        self.published[record_index].created = true
+        store_write_seal(destination, self.roots.hangar_dir(), object.digest)
+        store_refresh_verified_digest(destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
+        store_sync_store_directory(objects_dir)
+    }
+
+    fn publish_receipt(self, receipt: AdmissionReceipt) -> Bool StoreError! {
+        expected :: "sha256-{store_sha256_hex(receipt.bytes)}"
+        if expected != receipt.digest {
+            return Err(StoreError.InvalidData("Hangar admission receipt digest is `{receipt.digest}`, expected `{expected}`"))
+        }
+        receipts :: files.join(self.roots.hangar_dir(), @STORE_RECEIPTS_DIR)
+        store_ensure_real_directory(receipts, "Hangar receipt directory")
+        path :: files.join(receipts, receipt.digest)
+        if files.stat(path) == {
+            .Ok(metadata) -> {
+                if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is not a regular file"))
+                if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` is corrupt"))
+                return Ok(false)
+            }
+            .Err(error) -> {
+                if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+            }
+        }
+        sequence :: store_transaction_sequence
+        store_transaction_sequence = store_transaction_sequence + 1
+        partial :: files.join(receipts, ".{receipt.digest}-{process.current_pid()}-{sequence}.partial")
+        published :: store_transaction_publish_receipt(partial, path, receipts, receipt) ? value -> value ! error -> {
+            files.remove(partial).drop("the receipt partial may never have been created")
+            return Err(error)
+        }
+        Ok(published)
+    }
+
+    fn remove_new_receipts(&self) Never! {
+        loop path in self.receipts -> files.remove(path).drop("an unregistered receipt is swept by the next cleanup")
+        self.receipts = [String]{}
+    }
+
+    fn finish(&self) Never! {
+        loop published in self.published {
+            if published.held_source == {
+                .Val(path) -> store_transaction_remove_node(path).drop("a consumed source is swept by staging recovery")
+                .None -> {}
+            }
+            if published.backup == {
+                .Val(path) -> store_transaction_remove_node(path).drop("a replaced object is swept by staging recovery")
+                .None -> {}
+            }
+        }
+        self.published = [PublishedObject]{}
+        store_transaction_remove_node(self.stage).drop("the stage is swept by the next admission recovery")
+    }
+
+    // Undo every publication step in reverse order. Rust ran this from
+    // `Drop` for an uncommitted transaction.
+    fn rollback(&self) Never! {
+        if self.committed -> return
+        index := self.published.len() - 1
+        loop index >= 0 {
+            store_transaction_undo(self.roots.hangar_dir(), self.published[index])
+            index -= 1
+        }
+        self.published = [PublishedObject]{}
+        &self.remove_new_receipts()
+        store_transaction_remove_node(self.stage).drop("the stage is swept by the next admission recovery")
+        self.committed = true
+    }
+}
+
+// Reverse one publication step, best effort.
+fn store_transaction_undo(hangar: String, published: PublishedObject) Never! {
+    if published.pending == {
+        .Val(pending) -> {
+            if files.lexists(pending) {
+                if {
+                    published.original_source != None && !files.lexists(published.original_source ?? "") -> files.rename(pending, published.original_source ?? "").drop("rollback restores what it can")
+                    else -> store_transaction_remove_node(pending).drop("rollback restores what it can")
+                }
+            }
+        }
+        .None -> {}
+    }
+    if published.created {
+        store_remove_seal(published.destination, hangar).drop("rollback restores what it can")
+        restorable :: published.original_source != None && files.lexists(published.destination) && !files.lexists(published.original_source ?? "")
+        if {
+            restorable -> {
+                store_make_tree_writable_for_removal(published.destination).drop("rollback restores what it can")
+                files.rename(published.destination, published.original_source ?? "").drop("rollback restores what it can")
+            }
+            else -> store_transaction_remove_node(published.destination).drop("rollback restores what it can")
+        }
+    }
+    if published.held_source == {
+        .Val(held) -> {
+            if {
+                published.original_source != None && files.lexists(held) && !files.lexists(published.original_source ?? "") -> files.rename(held, published.original_source ?? "").drop("rollback restores what it can")
+                else -> store_transaction_remove_node(held).drop("rollback restores what it can")
+            }
+        }
+        .None -> {}
+    }
+    if published.backup == {
+        .Val(backup) -> {
+            if {
+                !files.lexists(published.destination) -> files.rename(backup, published.destination).drop("rollback restores what it can")
+                else -> store_transaction_remove_node(backup).drop("rollback restores what it can")
+            }
+        }
+        .None -> {}
+    }
+}
+
+// Exclusive-create the receipt partial, make it durable, and publish it.
+fn store_transaction_publish_receipt(partial: String, path: String, receipts: String, receipt: AdmissionReceipt) -> Bool StoreError! {
+    file :: files.create(partial, if_exists: .Refuse)
+    file.write_all(receipt.bytes)
+    file.fsync()
+    files.rename(partial, path) ?? {
+        if err == {
+            .AlreadyExists(_) -> {
+                files.remove(partial).drop("the receipt partial is disposable")
+                if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` changed during publication"))
+                return Ok(false)
+            }
+            else -> return Err(StoreError.Io(err))
+        }
+    }
+    store_sync_store_directory(receipts)
+    Ok(true)
+}
+
+// One normal path component (Rust `Component::Normal` exactly once).
+fn store_transaction_validate_digest(digest: String) StoreError! {
+    if digest == "" || digest == "." || digest == ".." || digest.contains("/") {
+        return Err(StoreError.InvalidInput("invalid Hangar object digest `{digest}`"))
+    }
+}
+
+fn store_transaction_remove_node(path: String) StoreError! {
+    metadata :: if files.stat(path) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if StoreError.Io(error).is_not_found() -> return Ok()
+            return Err(StoreError.Io(error))
+        }
+    }
+    if metadata.is_dir && !metadata.is_symlink {
+        store_make_tree_writable_for_removal(path)
+        return files.remove_all(path)
+    }
+    files.remove(path)
+}
+
+// Remove only abandoned children from a staging directory. The directory
+// itself must be a real directory; a symlink is a path-escape repair stop,
+// not permission to walk or remove the target it names.
+pub fn store_sweep_abandoned_directory(path: String, label: String) -> Int StoreError! {
+    metadata :: if files.stat(path) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if StoreError.Io(error).is_not_found() -> return Ok(0)
+            return Err(StoreError.Io(error))
+        }
+    }
+    if metadata.is_symlink || !metadata.is_dir {
+        return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before recovery"))
+    }
+    swept := 0
+    loop entry in files.list_dir(path) {
+        node :: files.stat(entry.path)
+        if {
+            node.is_symlink || node.is_file -> files.remove(entry.path)
+            node.is_dir -> store_transaction_remove_node(entry.path)
+            else -> return Err(StoreError.InvalidData("{label} contains an unsupported entry `{entry.path}`"))
+        }
+        swept += 1
+    }
+    Ok(swept)
+}

@@ -15,7 +15,7 @@ enum TrustRootExportOption {
     CacheKey
     ToolchainKey
 
-    fn parse(flag: String) -> ?TrustRootExportOption !Never {
+    fn parse(flag: String) -> TrustRootExportOption? Never! {
         if flag == {
             "--output" -> Val(TrustRootExportOption.Output)
             "--bootstrap" -> Val(TrustRootExportOption.Bootstrap)
@@ -26,7 +26,7 @@ enum TrustRootExportOption {
         }
     }
 
-    fn flag(self) -> String !Never {
+    fn flag(self) -> String Never! {
         if self == {
             .Output -> "--output"
             .Bootstrap -> "--bootstrap"
@@ -39,13 +39,13 @@ enum TrustRootExportOption {
 
 // The parsed `export` request. Every slot keeps the last value given.
 struct TrustRootExportRequest {
-    output: ?String
-    bootstrap: ?String
-    index_key: ?String
-    cache_key: ?String
-    toolchain_key: ?String
+    output: String?
+    bootstrap: String?
+    index_key: String?
+    cache_key: String?
+    toolchain_key: String?
 
-    fn parse(args: [String]) -> TrustRootExportRequest !CliToolError {
+    fn parse(args: [String]) -> TrustRootExportRequest CliToolError! {
         if (args.get(0) ?? "") != "export" -> return Err(CliToolError.new(cli_trust_root_usage()))
         request := TrustRootExportRequest{output: None, bootstrap: None, index_key: None, cache_key: None, toolchain_key: None}
         i := 1
@@ -66,11 +66,11 @@ struct TrustRootExportRequest {
     }
 
     // The requested key files in role order: index, cache, toolchain.
-    fn key_paths(self) -> [(role: String, path: String)] !Never {
+    fn key_paths(self) -> [(role: String, path: String)] Never! {
         paths := [(role: String, path: String)]{}
-        if self.index_key == .Val(path) -> paths.push((role: "index", path: path))
-        if self.cache_key == .Val(path) -> paths.push((role: "cache", path: path))
-        if self.toolchain_key == .Val(path) -> paths.push((role: "toolchain", path: path))
+        if self.index_key == .Val(path) -> &paths.push((role: "index", path: path))
+        if self.cache_key == .Val(path) -> &paths.push((role: "cache", path: path))
+        if self.toolchain_key == .Val(path) -> &paths.push((role: "toolchain", path: path))
         paths
     }
 }
@@ -87,14 +87,14 @@ pub fn cli_trust_root_main(args: [String]) -[FS, IO]> Int {
     }
 }
 
-fn cli_trust_root_run(args: [String]) !CliToolError -[FS, IO]> {
+fn cli_trust_root_run(args: [String]) CliToolError! -[FS, IO]> {
     request :: TrustRootExportRequest.parse(args)
     output :: request.output ?? return Err(CliToolError.new("--output is required\n\n{cli_trust_root_usage()}"))
     keys := [PublicTrustKey]{}
     loop entry in request.key_paths() {
         value :: cli_trust_root_read_public_key(entry.path) ?? return Err(CliToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
         key :: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CliToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
-        keys.push(key)
+        &keys.push(key)
     }
     bootstrap :: if request.bootstrap == {
         .Val(path) -> Val(RootBootstrap.load(path) ?? return Err(CliToolError.new("load trusted-root bootstrap: {err.message()}")))
@@ -111,12 +111,12 @@ fn cli_trust_root_run(args: [String]) !CliToolError -[FS, IO]> {
     Ok()
 }
 
-fn cli_trust_root_usage() -> String !Never {
+fn cli_trust_root_usage() -> String Never! {
     "usage: jetpack-trust-root export --output <dir> [--bootstrap <jetpack-root>] [--index-key <file>] [--cache-key <file>] [--toolchain-key <file>]"
 }
 
 // The trimmed text of one regular, bounded, UTF-8 public-key file.
-fn cli_trust_root_read_public_key(path: String) -[FS]> String !CliToolError {
+fn cli_trust_root_read_public_key(path: String) -[FS]> String CliToolError! {
     metadata :: files.stat(path) ?? return Err(CliToolError.new("{err}"))
     if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("public trust key is not a regular file"))
     if metadata.size > @TRUST_ROOT_MAX_PUBLIC_KEY_BYTES -> return Err(CliToolError.new("public trust key is too large"))
@@ -127,7 +127,7 @@ fn cli_trust_root_read_public_key(path: String) -[FS]> String !CliToolError {
 
 // Publish `body` at `path` exactly once. An existing regular file with the
 // same bytes is accepted; any other existing entry is refused.
-fn cli_trust_root_write_immutable(path: String, body: [U8]) !CliToolError -[FS]> {
+fn cli_trust_root_write_immutable(path: String, body: [U8]) CliToolError! -[FS]> {
     parent :: files.dirname(path)
     if parent != "" {
         files.create_dir_all(parent) ?? return Err(CliToolError.new("create {parent}: {err}"))
@@ -151,7 +151,7 @@ fn cli_trust_root_write_immutable(path: String, body: [U8]) !CliToolError -[FS]>
 
 // The publication README. The prose is byte-identical to the Rust reference,
 // whose line continuations join some words without a space.
-fn cli_trust_root_readme(keys: [PublicTrustKey]) -> String !Never {
+fn cli_trust_root_readme(keys: [PublicTrustKey]) -> String Never! {
     out := "# Jet public trust root\n\nThis directory contains publication-safe trust metadata. It contains publickeys only. `TrustKey` HMAC secrets and signing keys stay in the offlinepublisher or host trust stores and must never be copied here.\n\nThe stable index public-key document is published at\n`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\nvalue, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\nThe signed index URL is configured separately in\n`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\ntrusted automatically.\n\n## Files\n\n- `trust-manifest.json` records the domain, root pin, role, algorithm, key id,and exact client trust-file path.\n"
     loop key in keys {
         out = "{out}- `{key.path_for_publication()}` is the `{key.role}` role's public key.\n"

@@ -21,11 +21,11 @@ pub struct OverlayInvalidation {
 
 // Every `(overlay, package)` whose fingerprint changed, in (overlay, package)
 // order. A package without declared actions invalidates `action:<package>`.
-pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String: [String]]) -> [OverlayInvalidation] !Never {
+pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String: [String]]) -> [OverlayInvalidation] Never! {
     keys := [OverlayFingerprint]{}
-    loop entry in before -> keys.push(entry)
-    loop entry in after -> keys.push(entry)
-    keys.sort_by((left: OverlayFingerprint, right: OverlayFingerprint) -> (left.overlay <=> right.overlay).then(left.package <=> right.package))
+    loop entry in before -> &keys.push(entry)
+    loop entry in after -> &keys.push(entry)
+    &keys.sort_by((left: OverlayFingerprint, right: OverlayFingerprint) -> (left.overlay <=> right.overlay).then(left.package <=> right.package))
     out := [OverlayInvalidation]{}
     previous_overlay := ""
     previous_package := ""
@@ -44,14 +44,14 @@ pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [Overlay
             fingerprint_after == "" -> "overlay `{overlay}` removed package `{package}`"
             else -> "overlay `{overlay}` changed package `{package}` policy ({fingerprint_before} → {fingerprint_after})"
         }
-        out.push(OverlayInvalidation{overlay, package, policy_fingerprint_before: fingerprint_before, policy_fingerprint_after: fingerprint_after, affected_action_keys: affected, reason})
+        &out.push(OverlayInvalidation{overlay, package, policy_fingerprint_before: fingerprint_before, policy_fingerprint_after: fingerprint_after, affected_action_keys: affected, reason})
     }
     out
 }
 
 // The fingerprint recorded for `(overlay, package)`, the last one when
 // repeated, or "" when absent.
-fn trust_overlay_fingerprint(entries: [OverlayFingerprint], overlay: String, package: String) -> String !Never {
+fn trust_overlay_fingerprint(entries: [OverlayFingerprint], overlay: String, package: String) -> String Never! {
     found := ""
     loop entry in entries {
         if entry.overlay == overlay && entry.package == package -> found = entry.fingerprint
@@ -61,9 +61,9 @@ fn trust_overlay_fingerprint(entries: [OverlayFingerprint], overlay: String, pac
 
 // Drop each invalidated `package-overlay` record and clear the hash of
 // every record the invalidation names by package or action key.
-pub fn trust_apply_overlay_invalidations(lock: &SemanticLockFile, invalidations: [OverlayInvalidation]) !Never {
+pub fn trust_apply_overlay_invalidations(lock: &SemanticLockFile, invalidations: [OverlayInvalidation]) Never! {
     loop invalidation in invalidations {
-        lock.remove_records(LockRecordKind.PackageOverlay, "{invalidation.overlay}:{invalidation.package}")
+        &lock.remove_records(LockRecordKind.PackageOverlay, "{invalidation.overlay}:{invalidation.package}")
         loop index in 0..<lock.records.len() {
             key :: lock.records[index].identity.key
             affected := key == invalidation.package

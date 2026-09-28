@@ -17,7 +17,7 @@
 pub struct ReportError {
     pub message: String
 
-    fn new(message: String) -> ReportError !Never {
+    fn new(message: String) -> ReportError Never! {
         ReportError{message: message}
     }
 }
@@ -25,7 +25,7 @@ pub struct ReportError {
 // Rust `char::is_control` over every scalar: C0, DEL, or C1 (U+0080..U+009F,
 // encoded 0xC2 0x80..0x9F). Foundation sits below every area, so the report
 // validators carry their own copy of this check.
-fn foundation_text_has_control(value: String) -> Bool !Never {
+fn foundation_text_has_control(value: String) -> Bool Never! {
     raw :: value.bytes()
     loop index in 0..<raw.len() {
         code :: Int.from_u8(raw[index])
@@ -39,27 +39,27 @@ fn foundation_text_has_control(value: String) -> Bool !Never {
 }
 
 // Compact JSON of one tree. Rendering a finite tree cannot fail.
-fn report_json(value: DataTree) -> String !Never {
+fn report_json(value: DataTree) -> String Never! {
     json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
 }
 
-fn report_optional_text(value: ?String) -> DataTree !Never {
+fn report_optional_text(value: String?) -> DataTree Never! {
     if value == {
         .Val(text) -> DataTree.Text(text)
         .None -> DataTree.Null
     }
 }
 
-fn report_optional_int(value: ?Int) -> DataTree !Never {
+fn report_optional_int(value: Int?) -> DataTree Never! {
     if value == {
         .Val(number) -> DataTree.Int(number)
         .None -> DataTree.Null
     }
 }
 
-fn report_texts(values: [String]) -> DataTree !Never {
+fn report_texts(values: [String]) -> DataTree Never! {
     items := [DataTree]{}
-    loop value in values -> items.push(DataTree.Text(value))
+    loop value in values -> &items.push(DataTree.Text(value))
     DataTree.Array(items)
 }
 
@@ -70,7 +70,7 @@ pub enum NoFixReasonKind {
     Design
     Ambiguous
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Behavior -> "behavior"
             .Design -> "design"
@@ -78,7 +78,7 @@ pub enum NoFixReasonKind {
         }
     }
 
-    fn parse(value: String) -> NoFixReasonKind !ReportError {
+    fn parse(value: String) -> NoFixReasonKind ReportError! {
         if value == {
             "behavior" -> Ok(NoFixReasonKind.Behavior)
             "design" -> Ok(NoFixReasonKind.Design)
@@ -93,17 +93,17 @@ pub struct NoFixReason {
     pub kind: NoFixReasonKind
     pub next: String
 
-    fn new(kind: NoFixReasonKind, next: String) -> NoFixReason !Never {
+    fn new(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
         NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
     }
 
-    fn try_new(kind: NoFixReasonKind, next: String) -> NoFixReason !ReportError {
+    fn try_new(kind: NoFixReasonKind, next: String) -> NoFixReason ReportError! {
         reason :: NoFixReason{kind: kind, next: next}
         reason.validate()
         Ok(reason)
     }
 
-    fn validate(self) !ReportError {
+    fn validate(self) ReportError! {
         if self.next.trim() == "" -> return Err(ReportError.new("no-fix reason next action must not be empty"))
         if foundation_text_has_control(self.next) -> return Err(ReportError.new("no-fix reason next action must not contain control characters"))
         Ok()
@@ -120,49 +120,49 @@ pub struct StatusField {
 pub struct StatusFields {
     pub entries: [StatusField]
 
-    fn new() -> StatusFields !Never {
+    fn new() -> StatusFields Never! {
         StatusFields{entries: [StatusField]{}}
     }
 
-    fn with(self, name: String, value: DataTree) -> StatusFields !Never {
+    fn with(self, name: String, value: DataTree) -> StatusFields Never! {
         self.try_with(name, value) ?? panic("status fields must have unique, non-empty names")
     }
 
-    fn try_with(self, name: String, value: DataTree) -> StatusFields !ReportError {
+    fn try_with(self, name: String, value: DataTree) -> StatusFields ReportError! {
         fields := self
-        fields.insert(name, value)
+        &fields.insert(name, value)
         Ok(fields)
     }
 
-    fn insert(&self, name: String, value: DataTree) !ReportError {
+    fn insert(&self, name: String, value: DataTree) ReportError! {
         if name == "" || foundation_text_has_control(name) -> return Err(ReportError.new("status field names must be non-empty and printable"))
         loop entry in self.entries {
             if entry.name == name -> return Err(ReportError.new("duplicate status field `{name}`"))
         }
-        self.entries.push(StatusField{name: name, value: value})
+        &self.entries.push(StatusField{name: name, value: value})
         Ok()
     }
 
-    fn extend(&self, fields: StatusFields) !ReportError {
-        loop entry in fields.entries -> self.insert(entry.name, entry.value)
+    fn extend(&self, fields: StatusFields) ReportError! {
+        loop entry in fields.entries -> &self.insert(entry.name, entry.value)
         Ok()
     }
 
-    fn is_empty(self) -> Bool !Never {
+    fn is_empty(self) -> Bool Never! {
         self.entries.len() == 0
     }
 
     // Rust `StatusValue::parse`: status fields refuse duplicate names, so an
     // object is re-inserted field by field in document order.
-    fn from_data_tree_object(value: [String: DataTree]) -> StatusFields !ReportError {
+    fn from_data_tree_object(value: [String: DataTree]) -> StatusFields ReportError! {
         fields := StatusFields.new()
-        loop entry in value -> fields.insert(entry.key, entry.value)
+        loop entry in value -> &fields.insert(entry.key, entry.value)
         Ok(fields)
     }
 }
 
 // Rust `StatusValue::parse`: a JSON text as a status field value.
-pub fn report_status_value_parse(text: String) -> DataTree !ReportError {
+pub fn report_status_value_parse(text: String) -> DataTree ReportError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(ReportError.new(error.reason))
@@ -170,7 +170,7 @@ pub fn report_status_value_parse(text: String) -> DataTree !ReportError {
 }
 
 // Rust `StatusValue::object`.
-pub fn report_status_object(fields: StatusFields) -> DataTree !Never {
+pub fn report_status_object(fields: StatusFields) -> DataTree Never! {
     object := [String: DataTree]{}
     loop entry in fields.entries -> object[entry.name] = entry.value
     DataTree.Object(object)
@@ -183,39 +183,39 @@ pub struct StatusEnvelope {
     pub reports: [ReportEnvelope]
     pub fields: StatusFields
 
-    fn new(action: String, ok: Bool) -> StatusEnvelope !Never {
+    fn new(action: String, ok: Bool) -> StatusEnvelope Never! {
         StatusEnvelope{action: action, ok: ok, reports: [ReportEnvelope]{}, fields: StatusFields.new()}
     }
 
-    fn with_report(self, report: ReportEnvelope) -> StatusEnvelope !Never {
+    fn with_report(self, report: ReportEnvelope) -> StatusEnvelope Never! {
         envelope := self
-        envelope.reports.push(report)
+        &envelope.reports.push(report)
         envelope
     }
 
-    fn with_reports(self, reports: [ReportEnvelope]) -> StatusEnvelope !Never {
+    fn with_reports(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
         envelope := self
-        loop report in reports -> envelope.reports.push(report)
+        loop report in reports -> &envelope.reports.push(report)
         envelope
     }
 
-    fn with_field(self, name: String, value: DataTree) -> StatusEnvelope !Never {
+    fn with_field(self, name: String, value: DataTree) -> StatusEnvelope Never! {
         envelope := self
         envelope.fields = envelope.fields.with(name, value)
         envelope
     }
 
-    fn with_fields(self, fields: StatusFields) -> StatusEnvelope !Never {
+    fn with_fields(self, fields: StatusFields) -> StatusEnvelope Never! {
         self.try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     }
 
-    fn try_with_fields(self, fields: StatusFields) -> StatusEnvelope !ReportError {
+    fn try_with_fields(self, fields: StatusFields) -> StatusEnvelope ReportError! {
         envelope := self
-        envelope.fields.extend(fields)
+        &envelope.fields.extend(fields)
         Ok(envelope)
     }
 
-    fn validate(self) !ReportError {
+    fn validate(self) ReportError! {
         if self.action == "" -> return Err(ReportError.new("status action must not be empty"))
         if foundation_text_has_control(self.action) -> return Err(ReportError.new("status action must not contain control characters"))
         loop entry in self.fields.entries {
@@ -228,37 +228,37 @@ pub struct StatusEnvelope {
         Ok()
     }
 
-    fn to_tree(self) -> DataTree !Never {
+    fn to_tree(self) -> DataTree Never! {
         self.validate() ?? panic("invalid jet.status/v1 envelope")
         object := [String: DataTree]{}
         object["schema"] = DataTree.Text(@STATUS_SCHEMA)
         object["action"] = DataTree.Text(self.action)
         object["ok"] = DataTree.Bool(self.ok)
         reports := [DataTree]{}
-        loop report in self.reports -> reports.push(report.to_tree())
+        loop report in self.reports -> &reports.push(report.to_tree())
         object["reports"] = DataTree.Array(reports)
         loop entry in self.fields.entries -> object[entry.name] = entry.value
         DataTree.Object(object)
     }
 
-    fn json(self) -> String !Never {
+    fn json(self) -> String Never! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String !Never {
+    fn json_line(self) -> String Never! {
         "{self.json()}\n"
     }
 }
 
 // Render a typed status envelope; reserved keys fail through the one
 // validator every producer shares.
-pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String !Never {
+pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String Never! {
     envelope :: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // Render one status object with typed report children.
-pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String !Never {
+pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String Never! {
     envelope :: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
@@ -271,7 +271,7 @@ pub enum FixSafety {
     TargetChanging
     NeedsReview
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Formatting -> "formatting"
             .BehaviorPreserving -> "behavior-preserving"
@@ -281,7 +281,7 @@ pub enum FixSafety {
         }
     }
 
-    fn auto_apply(self) -> Bool !Never {
+    fn auto_apply(self) -> Bool Never! {
         if self == {
             .Formatting | .BehaviorPreserving -> true
             else -> false
@@ -296,7 +296,7 @@ pub enum FixApplicability {
     // Useful to show, but a person must choose whether to apply it.
     Suggested
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Safe -> "safe"
             .Suggested -> "suggested"
@@ -310,12 +310,12 @@ pub enum FixApplicability {
 pub struct ReportPath {
     value: String
 
-    fn from_process(value: String) -[FS, Env]> ReportPath !Never {
+    fn from_process(value: String) -[FS, Env]> ReportPath Never! {
         if value == "" || value.starts_with("<") -> return ReportPath{value: value}
         ReportPath.from_path(value)
     }
 
-    fn from_path(path: String) -[FS, Env]> ReportPath !Never {
+    fn from_path(path: String) -[FS, Env]> ReportPath Never! {
         if path == "" || path.starts_with("<") -> return ReportPath{value: path}
         if files.is_abs(path) -> return ReportPath{value: report_lexically_normalize(path)}
         if sys.current_dir() == {
@@ -324,26 +324,30 @@ pub struct ReportPath {
         }
     }
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         self.value
     }
 
-    fn is_empty(self) -> Bool !Never {
+    fn is_empty(self) -> Bool Never! {
         self.value == ""
     }
 }
 
 // Rust `lexically_normalize`: drop `.`, pop on `..` (never above the root).
-fn report_lexically_normalize(path: String) -> String !Never {
+fn report_lexically_normalize(path: String) -> String Never! {
     absolute :: path.starts_with("/")
     parts := [String]{}
     loop part in path.split("/") {
         if part == {
             "" | "." -> {}
             ".." -> {
-                if parts.len() > 0 -> parts.pop()
+                if parts.len() > 0 {
+                    &parts.pop()
+                }
             }
-            else -> parts.push(part)
+            else -> {
+                &parts.push(part)
+            }
         }
     }
     joined :: parts.join("/")
@@ -355,11 +359,11 @@ pub struct ReportSpan {
     pub start: Int
     pub end: Int
 
-    fn new(start: Int, end: Int) -> ReportSpan !Never {
+    fn new(start: Int, end: Int) -> ReportSpan Never! {
         ReportSpan{start: start, end: end}
     }
 
-    fn to_tree(self) -> DataTree !Never {
+    fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
         object["start"] = DataTree.Int(self.start)
         object["end"] = DataTree.Int(self.end)
@@ -367,14 +371,14 @@ pub struct ReportSpan {
     }
 }
 
-fn report_optional_span(span: ?ReportSpan) -> DataTree !Never {
+fn report_optional_span(span: ReportSpan?) -> DataTree Never! {
     if span == {
         .Val(value) -> value.to_tree()
         .None -> DataTree.Null
     }
 }
 
-fn report_optional_path(path: ?ReportPath) -> DataTree !Never {
+fn report_optional_path(path: ReportPath?) -> DataTree Never! {
     if path == {
         .Val(file) -> {
             if file.is_empty() -> return DataTree.Null
@@ -388,21 +392,21 @@ fn report_optional_path(path: ?ReportPath) -> DataTree !Never {
 // independent; an unknown one stays unknown instead of inheriting the root's.
 pub struct ReportCause {
     pub code: String
-    pub file: ?ReportPath
-    pub line: ?Int
-    pub col: ?Int
-    pub span: ?ReportSpan
+    pub file: ReportPath?
+    pub line: Int?
+    pub col: Int?
+    pub span: ReportSpan?
 
-    fn new(code: String) -> ReportCause !Never {
+    fn new(code: String) -> ReportCause Never! {
         ReportCause{code: code, file: None, line: None, col: None, span: None}
     }
 
     // Code-only access for non-report status projections.
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         self.code
     }
 
-    fn to_tree(self) -> DataTree !Never {
+    fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
         object["code"] = DataTree.Text(self.code)
         object["file"] = report_optional_path(self.file)
@@ -419,11 +423,11 @@ pub struct ReportEdit {
     pub new_text: String
     pub safety: FixSafety
 
-    fn new(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit !Never {
+    fn new(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
         ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
     }
 
-    fn to_tree(self) -> DataTree !Never {
+    fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
         object["file"] = DataTree.Text(self.file.as_str())
         object["span"] = self.span.to_tree()
@@ -437,8 +441,8 @@ pub struct ReportEdit {
 pub struct ReportCryptoExtension {
     pub reason: String
     pub operation: String
-    pub expected: ?String
-    pub actual: ?Int
+    pub expected: String?
+    pub actual: Int?
 }
 
 pub enum ReportExtension {
@@ -457,23 +461,23 @@ pub struct ReportEnvelope {
     pub what: String
     pub why: String
     pub fix: String
-    pub applicability: ?FixApplicability
-    pub detail: ?String
-    pub file: ?ReportPath
-    pub line: ?Int
-    pub col: ?Int
-    pub span: ?ReportSpan
+    pub applicability: FixApplicability?
+    pub detail: String?
+    pub file: ReportPath?
+    pub line: Int?
+    pub col: Int?
+    pub span: ReportSpan?
     fix_edits: [ReportEdit]
     pub cause: [ReportCause]
     pub clears: Int
-    pub extension: ?ReportExtension
-    no_fix_reason: ?NoFixReason
-    pub denial_kind: ?String
+    pub extension: ReportExtension?
+    no_fix_reason: NoFixReason?
+    pub denial_kind: String?
     pub call_chain: [String]
     pub scope_chain: [String]
-    pub nearest_granting_scope: ?String
+    pub nearest_granting_scope: String?
 
-    fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope !Never {
+    fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{
             schema_name: @REPORT_NAME,
             schema_version: @REPORT_VERSION,
@@ -501,40 +505,40 @@ pub struct ReportEnvelope {
         }
     }
 
-    fn fix_edits(self) -> [ReportEdit] !Never {
+    fn fix_edits(self) -> [ReportEdit] Never! {
         self.fix_edits
     }
 
-    fn no_fix_reason(self) -> ?NoFixReason !Never {
+    fn no_fix_reason(self) -> NoFixReason? Never! {
         self.no_fix_reason
     }
 
-    fn push_fix_edit(&self, edit: ReportEdit) !ReportError {
+    fn push_fix_edit(&self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
-        self.fix_edits.push(edit)
+        &self.fix_edits.push(edit)
         Ok()
     }
 
-    fn with_fix_edits(self, edits: [ReportEdit]) -> ReportEnvelope !ReportError {
+    fn with_fix_edits(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
         report := self
-        loop edit in edits -> report.push_fix_edit(edit)
+        loop edit in edits -> &report.push_fix_edit(edit)
         Ok(report)
     }
 
-    fn set_no_fix_reason(&self, reason: NoFixReason) !ReportError {
+    fn set_no_fix_reason(&self, reason: NoFixReason) ReportError! {
         reason.validate()
         if self.fix_edits.len() > 0 -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         self.no_fix_reason = Val(reason)
         Ok()
     }
 
-    fn with_no_fix_reason(self, reason: NoFixReason) -> ReportEnvelope !ReportError {
+    fn with_no_fix_reason(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
         report := self
-        report.set_no_fix_reason(reason)
+        &report.set_no_fix_reason(reason)
         Ok(report)
     }
 
-    fn validate(self) !ReportError {
+    fn validate(self) ReportError! {
         if self.schema_name != @REPORT_NAME || self.schema_version != @REPORT_VERSION {
             return Err(ReportError.new("report envelope has an unsupported schema identity"))
         }
@@ -548,7 +552,7 @@ pub struct ReportEnvelope {
         Ok()
     }
 
-    fn to_tree(self) -> DataTree !Never {
+    fn to_tree(self) -> DataTree Never! {
         self.validate() ?? panic("invalid jet.report/v3 envelope")
         object := [String: DataTree]{}
         object["schema"] = DataTree.Text("{self.schema_name}/v{self.schema_version}")
@@ -573,7 +577,7 @@ pub struct ReportEnvelope {
         object["span"] = report_optional_span(self.span)
         if self.fix_edits.len() > 0 {
             edits := [DataTree]{}
-            loop edit in self.fix_edits -> edits.push(edit.to_tree())
+            loop edit in self.fix_edits -> &edits.push(edit.to_tree())
             object["fix_edits"] = DataTree.Array(edits)
         } else {
             if self.no_fix_reason == {
@@ -587,35 +591,42 @@ pub struct ReportEnvelope {
             }
         }
         causes := [DataTree]{}
-        loop cause in self.cause -> causes.push(cause.to_tree())
+        loop cause in self.cause -> &causes.push(cause.to_tree())
         object["cause"] = DataTree.Array(causes)
         object["clears"] = DataTree.Int(self.clears)
         if self.extension == {
-            .Val(.Crypto(crypto)) -> {
-                object["reason"] = DataTree.Text(crypto.reason)
-                object["operation"] = DataTree.Text(crypto.operation)
-                if crypto.expected == {
-                    .Val(expected) -> object["expected"] = DataTree.Text(expected)
-                    .None -> {}
-                }
-                if crypto.actual == {
-                    .Val(actual) -> object["actual"] = DataTree.Int(actual)
-                    .None -> {}
-                }
-            }
-            .Val(.BuildError(report)) -> {
-                object["build_error"] = report_status_value_parse(report) ?? panic("a build-error extension is a rendered JSON document")
-            }
+            .Val(extension) -> report_extension_fields(&object, extension)
             .None -> {}
         }
         DataTree.Object(object)
     }
 
-    fn json(self) -> String !Never {
+    fn json(self) -> String Never! {
         report_json(self.to_tree())
     }
 
-    fn json_line(self) -> String !Never {
+    fn json_line(self) -> String Never! {
         "{self.json()}\n"
+    }
+}
+
+// The extension's fields, appended after `clears`.
+fn report_extension_fields(object: &[String: DataTree], extension: ReportExtension) Never! {
+    if extension == {
+        .Crypto(crypto) -> {
+            object["reason"] = DataTree.Text(crypto.reason)
+            object["operation"] = DataTree.Text(crypto.operation)
+            if crypto.expected == {
+                .Val(expected) -> object["expected"] = DataTree.Text(expected)
+                .None -> {}
+            }
+            if crypto.actual == {
+                .Val(actual) -> object["actual"] = DataTree.Int(actual)
+                .None -> {}
+            }
+        }
+        .BuildError(report) -> {
+            object["build_error"] = report_status_value_parse(report) ?? panic("a build-error extension is a rendered JSON document")
+        }
     }
 }

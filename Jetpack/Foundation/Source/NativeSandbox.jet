@@ -1,0 +1,287 @@
+// The one native child-isolation substrate shared by Jetpack build actions and
+// adapter recipes (Rust jet_comptime Comptime::Build `native_sandbox_status` /
+// `run_native_sandboxed` over the Prelude ProcessSandbox backend). The policy
+// is a receipt, never a claim inferred from user namespaces or an exit status.
+// Linux runs the action under Bubblewrap and macOS under Seatbelt, both through
+// core.process. There is no Core process-isolation API for the Windows
+// AppContainer backend, so Windows reports the sandbox unavailable and every
+// sandboxed action fails closed.
+
+@NATIVE_SANDBOX_FAKE_ENV :: "JETPACK_FAKE_SANDBOX"
+@NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: 67108864
+@NATIVE_SANDBOX_MACOS_EXEC :: "/usr/bin/sandbox-exec"
+@NATIVE_SANDBOX_NOT_ENFORCED :: "not-enforced"
+
+pub struct NativeSandboxStatus {
+    pub available: Bool
+    pub mechanism: String
+    pub policy: String
+    pub reason: String
+
+    fn unavailable(mechanism: String, reason: String) -> NativeSandboxStatus Never! {
+        NativeSandboxStatus{available: false, mechanism, policy: @NATIVE_SANDBOX_NOT_ENFORCED, reason}
+    }
+}
+
+#Error
+pub enum NativeSandboxError {
+    Unsupported(String)
+    Io(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Unsupported(detail) -> detail
+            .Io(detail) -> detail
+        }
+    }
+}
+
+// One sandboxed action's captured result and the boundary it ran under.
+pub struct NativeSandboxOutput {
+    pub receipt: ProcessReceipt
+    pub mechanism: String
+    pub policy: String
+}
+
+// The filesystem, process, network and resource policy text of the backend.
+pub fn foundation_native_sandbox_policy(output_is_separate: Bool, share_network: Bool) -[Env]> String Never! {
+    if sys.is_linux() {
+        filesystem :: if output_is_separate -> "source-readonly,output-private-copy" else -> "private-workspace-readwrite"
+        network :: if share_network -> "declared-shared" else -> "isolated"
+        return "filesystem={filesystem};process=private-pid,parent-death;network={network};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
+    }
+    filesystem :: if output_is_separate -> "source-readonly,output-readwrite" else -> "private-workspace-readwrite"
+    network :: if share_network -> "declared-shared" else -> "denied"
+    "filesystem={filesystem};process=declared-tool-and-fork;network={network};environment=clear;devices=denied;resources=none-declared"
+}
+
+// Probe the exact native backend before a build claims strong isolation.
+pub fn foundation_native_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
+    if sys.get(@NATIVE_SANDBOX_FAKE_ENV) != None {
+        return NativeSandboxStatus.unavailable("test-sandbox-unavailable", "test sandbox override prevents the native backend probe")
+    }
+    if {
+        sys.is_linux() -> foundation_linux_sandbox_status()
+        sys.is_macos() -> foundation_macos_sandbox_status()
+        sys.is_windows() -> NativeSandboxStatus.unavailable("windows-appcontainer-unavailable", "the native Windows AppContainer backend has no Core process-isolation API")
+        else -> NativeSandboxStatus.unavailable("unsupported", "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows")
+    }
+}
+
+fn foundation_linux_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
+    bwrap :: foundation_sandbox_program("bwrap") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap (`bwrap`) is not available on PATH")
+    probe :: foundation_sandbox_program("sh") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap is present but no immutable shell probe is available")
+    argv := foundation_linux_sandbox_argv(bwrap, None, None, [String: String]{}, false, false, false, None)
+    &argv.push(probe)
+    &argv.push("-c")
+    &argv.push("exit 0")
+    receipt :: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe failed: {err}")
+    if !receipt.success -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe exited with exit status: {receipt.code}")
+    NativeSandboxStatus{available: true, mechanism: "linux-bwrap", policy: foundation_native_sandbox_policy(false, false), reason: "bubblewrap completed the isolated backend probe"}
+}
+
+fn foundation_macos_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
+    if !files.is_file(@NATIVE_SANDBOX_MACOS_EXEC) {
+        return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS backend `{@NATIVE_SANDBOX_MACOS_EXEC}` is unavailable")
+    }
+    probe_profile :: "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec (literal \"/usr/bin/true\"))\n(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n"
+    receipt :: process.cmd([String]{@NATIVE_SANDBOX_MACOS_EXEC, "-p", probe_profile, "/usr/bin/true"}).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe failed: {err}")
+    if !receipt.success -> return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe exited with exit status: {receipt.code}")
+    NativeSandboxStatus{available: true, mechanism: "macos-seatbelt", policy: foundation_native_sandbox_policy(true, false), reason: "native macOS Seatbelt completed the isolated backend probe"}
+}
+
+// Run one executable action through the shared native sandbox. `source_dir`
+// is read-only when `output_dir` is present, and only that output directory
+// is writable; without one the private work tree is writable. Captured output
+// is bounded at 64 MiB.
+pub fn foundation_run_native_sandboxed(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+    if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
+    if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
+    if sys.get(@NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
+    status :: foundation_native_sandbox_status()
+    if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
+    program :: files.canonicalize(executable) ?? return Err(NativeSandboxError.Unsupported("sandbox executable is unavailable: {err}"))
+    if !files.is_file(program) -> return Err(NativeSandboxError.Unsupported("sandbox executable `{program}` is not a file"))
+    source :: foundation_sandbox_real_directory(source_dir)
+    output := None
+    if output_dir == {
+        .Val(path) -> output = Val(foundation_sandbox_real_directory(path))
+        else -> {}
+    }
+    output_is_separate :: output != None
+    // The source is always readable, and writable only as the private tree.
+    source_writable :: !output_is_separate
+
+    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, program, args)
+    receipt :: spec.stdout(.Capture).stderr(.Capture).output_limit(@NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.Io("{err}"))
+    if receipt.limit_hit != None -> return Err(NativeSandboxError.Io("sandbox process output exceeded {@NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
+    mechanism :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
+    Ok(NativeSandboxOutput{receipt, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
+}
+
+fn foundation_linux_sandbox_spec(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {
+    bwrap :: foundation_sandbox_program("bwrap") ?? return Err(NativeSandboxError.Unsupported("bubblewrap (`bwrap`) is not available on PATH"))
+    argv := foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, Val(files.basename(program)))
+    &argv.push(program)
+    loop arg in args -> &argv.push(arg)
+    Ok(process.cmd(argv).env_clear())
+}
+
+fn foundation_macos_sandbox_spec(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, program: String, args: [String]) -[Exec]> ProcessSpec NativeSandboxError! {
+    profile :: foundation_seatbelt_profile(program, source, output, share_network, true, source_writable)
+    // The profile is passed inline: a temporary `-f` profile could be
+    // replaced between spawn and Seatbelt reading it.
+    argv := [String]{@NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
+    loop arg in args -> &argv.push(arg)
+    spec := process.cmd(argv).env_clear().cwd(source)
+    if output == {
+        .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
+        else -> {}
+    }
+    loop name in foundation_sandbox_sorted_names(env) -> spec = spec.env(name, env[name])
+    Ok(spec)
+}
+
+// The Bubblewrap argument vector up to and including the `--` that ends
+// options; the caller appends the executable and its arguments.
+fn foundation_linux_sandbox_argv(bwrap: String, source: String?, output: String?, env: [String: String], share_network: Bool, source_readable: Bool, source_writable: Bool, argv0: String?) -> [String] Never! {
+    argv := [String]{
+        bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled",
+        "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev",
+        "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv",
+        "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter",
+    }
+    source_bind :: if {
+        source_writable -> "--bind"
+        source_readable -> "--ro-bind"
+        else -> ""
+    }
+    if source == {
+        .Val(source_path) -> {
+            if output == {
+                .Val(output_path) -> {
+                    &argv.push("--dir")
+                    &argv.push("/work")
+                    if source_bind == "" {
+                        &argv.push("--dir")
+                        &argv.push("/work/source")
+                    } else {
+                        &argv.push(source_bind)
+                        &argv.push(source_path)
+                        &argv.push("/work/source")
+                    }
+                    loop part in [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"} -> &argv.push(part)
+                }
+                else -> {
+                    if source_bind == "" {
+                        &argv.push("--dir")
+                        &argv.push("/work")
+                    } else {
+                        &argv.push(source_bind)
+                        &argv.push(source_path)
+                        &argv.push("/work")
+                    }
+                    &argv.push("--chdir")
+                    &argv.push("/work")
+                }
+            }
+        }
+        else -> {
+            if output == {
+                .Val(output_path) -> {
+                    loop part in [String]{"--bind", output_path, "/work", "--chdir", "/work"} -> &argv.push(part)
+                }
+                else -> {
+                    loop part in [String]{"--dir", "/work", "--chdir", "/work"} -> &argv.push(part)
+                }
+            }
+        }
+    }
+    if share_network -> &argv.push("--share-net")
+    loop name in foundation_sandbox_sorted_names(env) {
+        &argv.push("--setenv")
+        &argv.push(name)
+        &argv.push(env[name])
+    }
+    if argv0 == {
+        .Val(name) -> {
+            &argv.push("--argv0")
+            &argv.push(name)
+        }
+        else -> {}
+    }
+    // Options end here, so an executable or argument starting with a dash
+    // stays in the command position.
+    &argv.push("--")
+    argv
+}
+
+// The Seatbelt profile for one action.
+fn foundation_seatbelt_profile(executable: String, source: String, output: String?, share_network: Bool, source_readable: Bool, source_writable: Bool) -> String NativeSandboxError! {
+    program :: foundation_sbpl_path(executable)
+    source_path :: foundation_sbpl_path(source)
+    output_path := None
+    if output == {
+        .Val(path) -> output_path = Val(foundation_sbpl_path(path))
+        else -> {}
+    }
+    lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")", ")", "(allow file-read*"}
+    if source_readable -> &lines.push("  (subpath \"{source_path}\")")
+    if output_path == {
+        .Val(path) -> &lines.push("  (subpath \"{path}\")")
+        else -> {}
+    }
+    loop line in [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"} -> &lines.push(line)
+    &lines.push("  (subpath \"/nix/store\")")
+    profile := "{lines.join("\n")}\n)"
+    if output_path == {
+        .Val(path) -> profile = "{profile}(allow file-write* (subpath \"{path}\"))\n"
+        else -> {
+            if source_writable -> profile = "{profile}(allow file-write* (subpath \"{source_path}\"))\n"
+        }
+    }
+    profile = if share_network -> "{profile}(allow network*)\n" else -> "{profile}(deny network*)\n"
+    Ok("{profile}(deny device*)\n")
+}
+
+// A path quoted for Seatbelt's profile language.
+fn foundation_sbpl_path(path: String) -> String NativeSandboxError! {
+    if foundation_sandbox_has_control(path) -> return Err(NativeSandboxError.Unsupported("sandbox path contains a control character"))
+    Ok(path.replace("\\", "\\\\").replace("\"", "\\\""))
+}
+
+fn foundation_sandbox_real_directory(path: String) -[FS, Env]> String NativeSandboxError! {
+    canonical :: files.canonicalize(path) ?? return Err(NativeSandboxError.Io("sandbox directory `{path}`: {err}"))
+    if !files.is_dir(canonical) -> return Err(NativeSandboxError.Io("sandbox path `{path}` is not a directory"))
+    Ok(canonical)
+}
+
+// The canonical path of `program`: a path with a separator directly, else the
+// first regular file of that name on PATH.
+fn foundation_sandbox_program(program: String) -[FS, Env]> String? Never! {
+    candidate := program
+    if !program.contains("/") {
+        candidate = files.which(program) ?? return None
+    }
+    if !files.is_file(candidate) -> return None
+    canonical :: files.canonicalize(candidate) ?? return None
+    Val(canonical)
+}
+
+// Environment names in key order, the order Rust's `BTreeMap` iterates.
+fn foundation_sandbox_sorted_names(env: [String: String]) -> [String] Never! {
+    names := env.keys().to_list()
+    &names.sort()
+    names
+}
+
+// Rust `char::is_control` over every scalar: C0, DEL and C1 controls.
+fn foundation_sandbox_has_control(text: String) -> Bool Never! {
+    loop scalar in text.chars() {
+        code :: "{scalar}".bytes()
+        first :: Int.from_u8(code[0])
+        if first < 32 || first == 127 -> return true
+        if code.len() == 2 && first == 194 && Int.from_u8(code[1]) < 160 -> return true
+    }
+    false
+}

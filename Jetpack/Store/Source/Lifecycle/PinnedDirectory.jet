@@ -20,7 +20,7 @@ pub struct PinnedLifecycleDirectory {
     // Open `path`, creating missing components as private directories. A
     // relative path is taken from the current directory; `.` and `..`
     // components are refused; a component that is a link is never followed.
-    fn open_or_create(path: String) -[FS, Env]> PinnedLifecycleDirectory !StoreError {
+    fn open_or_create(path: String) -[FS, Env]> PinnedLifecycleDirectory StoreError! {
         absolute :: store_pinned_absolute(path)
         parts :: store_pinned_components(absolute)
         directory := files.open_directory(parts.anchor)
@@ -42,33 +42,33 @@ pub struct PinnedLifecycleDirectory {
         Ok(PinnedLifecycleDirectory{directory, path: absolute})
     }
 
-    fn path(self) -> String !Never {
+    fn path(self) -> String Never! {
         self.path
     }
 
     // The member path used in diagnostics (`path().join(name)`).
-    fn member_path(self, name: String) -> String !Never {
+    fn member_path(self, name: String) -> String Never! {
         files.join(self.path, name)
     }
 
     // At most `maximum` member names of the held directory.
-    fn names(self, maximum: Int) -[FS]> [String] !StoreError {
+    fn names(self, maximum: Int) -[FS]> [String] StoreError! {
         names := [String]{}
-        loop entry in self.directory.list() {
+        loop entry in &self.directory.list() {
             if names.len() >= maximum -> break
-            names.push(entry.name)
+            &names.push(entry.name)
         }
         Ok(names)
     }
 
     // Open a regular-file member for reading without following a link.
-    fn open_read(self, name: String) -[FS]> FileReader !StoreError {
+    fn open_read(self, name: String) -[FS]> FileReader StoreError! {
         store_pinned_valid_name(name)
         Ok(self.directory.open(name))
     }
 
     // Exclusively create a private regular-file member.
-    fn create_new(self, name: String) -[FS]> FileWriter !StoreError {
+    fn create_new(self, name: String) -[FS]> FileWriter StoreError! {
         store_pinned_valid_name(name)
         Ok(self.directory.create(name, if_exists: .Refuse, mode: @STORE_PINNED_FILE_MODE))
     }
@@ -76,7 +76,7 @@ pub struct PinnedLifecycleDirectory {
     // Rename the member `old_name`, which must still be the file behind
     // `source`, to `new_name`. Without `replace` an existing destination fails
     // with AlreadyExists and both names are left as they were.
-    fn rename_open(self, source: FileWriter, old_name: String, new_name: String, replace: Bool) !StoreError -[FS]> {
+    fn rename_open(self, source: FileWriter, old_name: String, new_name: String, replace: Bool) StoreError! -[FS]> {
         store_pinned_valid_name(old_name)
         store_pinned_valid_name(new_name)
         opened :: source.stat()
@@ -90,19 +90,19 @@ pub struct PinnedLifecycleDirectory {
     // file just opened. Lifecycle mutations are cooperative under the Hangar
     // lock; an external writer that ignores that ownership law is corruption,
     // not a supported concurrent mutator.
-    fn remove_file(self, name: String) !StoreError -[FS]> {
+    fn remove_file(self, name: String) StoreError! -[FS]> {
         file :: self.open_read(name)
         self.validate_open_name(file.stat(), name)
         self.directory.remove(name)
     }
 
     // Make earlier member creations, renames and removals durable.
-    fn sync(self) !StoreError -[FS]> {
+    fn sync(self) StoreError! -[FS]> {
         self.directory.fsync()
     }
 
     // The member `name` is still a regular file with the identity of `opened`.
-    fn validate_open_name(self, opened: Stat, name: String) !StoreError -[FS]> {
+    fn validate_open_name(self, opened: Stat, name: String) StoreError! -[FS]> {
         current :: self.directory.entry_stat(name)
         if !current.is_file || current.id != opened.id {
             return Err(StoreError.Other("pinned directory member was replaced"))
@@ -118,7 +118,7 @@ struct PinnedPathParts {
 
 // Directory.rs `absolute`: join a relative path to the current directory and
 // refuse any `.` or `..` component.
-fn store_pinned_absolute(path: String) -[FS, Env]> String !StoreError {
+fn store_pinned_absolute(path: String) -[FS, Env]> String StoreError! {
     absolute :: if files.is_abs(path) -> path else -> files.join(files.cwd(), path)
     loop part in files.split_slash(absolute) {
         if part == "." || part == ".." -> return Err(StoreError.InvalidInput("pinned directory path contains traversal"))
@@ -128,35 +128,35 @@ fn store_pinned_absolute(path: String) -[FS, Env]> String !StoreError {
 
 // Split an absolute path into its root anchor (`/`, or a Windows drive root)
 // and the normal components below it.
-fn store_pinned_components(absolute: String) -> PinnedPathParts !StoreError {
+fn store_pinned_components(absolute: String) -> PinnedPathParts StoreError! {
     parts := [String]{}
     loop part in files.split_slash(absolute) {
-        if part != "" -> parts.push(part)
+        if part != "" -> &parts.push(part)
     }
     if absolute.starts_with("/") -> return Ok(PinnedPathParts{anchor: "/", names: parts})
     if parts.len() == 0 -> return Err(StoreError.InvalidInput("pinned directory has no normal component"))
     anchor :: "{parts[0]}/"
     names := [String]{}
-    loop index in 1..<parts.len() -> names.push(parts[index])
+    loop index in 1..<parts.len() -> &names.push(parts[index])
     Ok(PinnedPathParts{anchor, names})
 }
 
 // Directory.rs `valid_name`: one plain member name.
-fn store_pinned_valid_name(name: String) !StoreError {
+fn store_pinned_valid_name(name: String) StoreError! {
     invalid :: name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.bytes().contains(U8{0})
     if invalid -> return Err(StoreError.InvalidInput("invalid pinned-directory member name"))
 }
 
 // The Core error kinds lifecycle recovery branches on (D-CORE-FILEERROR1
 // names AlreadyExists; NotFound is in the IOError tree today).
-fn store_io_is_not_found(error: IOError) -> Bool !Never {
+fn store_io_is_not_found(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
     }
 }
 
-fn store_io_is_already_exists(error: IOError) -> Bool !Never {
+fn store_io_is_already_exists(error: IOError) -> Bool Never! {
     if error == {
         .AlreadyExists(_) -> true
         else -> false

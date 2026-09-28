@@ -1,0 +1,264 @@
+// Closure disk usage (D-JPK-GC1 / U22): honest root-inclusive usage per
+// project and machine. Every live package owns the union of its named-output
+// closures; physical allocation is counted once per filesystem identity
+// (`FileId`, D-CORE-FILESTAT1) and never inferred from logical length.
+
+pub struct DuEntry {
+    pub id: String
+    pub unique_bytes: Int?
+    pub shared_bytes: Int?
+    // True when the A4 provenance shows a first-party source build.
+    pub source_built: Bool
+}
+
+pub struct DuReport {
+    pub objects: Int
+    pub packages: Int
+    pub built: Int
+    pub unique_bytes: Int?
+    pub shared_bytes: Int?
+    pub closure_physical_bytes: Int?
+    pub entries: [DuEntry]
+}
+
+pub struct MachineDuEntry {
+    pub root: String
+    pub hangar: String
+    pub bytes: Int
+}
+
+pub struct MachineDuPool {
+    pub path: String
+    pub bytes: Int
+}
+
+pub struct MachineDuReport {
+    pub shared_cas: MachineDuPool?
+    pub roots: [MachineDuEntry]
+    pub total_bytes: Int
+}
+
+struct PhysicalMeasurement {
+    unique_bytes: Int
+    shared_bytes: Int
+    per_object: [String: Int]
+}
+
+// One physical node: its allocation and the packages that reach it.
+struct PhysicalNode {
+    bytes: Int
+    owners: [String]
+}
+
+pub fn store_du(roots: HangarRoots) -> DuReport StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    // Do not migrate here: a damaged metadata path must be compared with the
+    // committed journal, not promoted into a new projection.
+    graph :: store_recover_closure_journal_graph_unlocked(roots).graph
+    entries :: store_list_unlocked(roots)
+    entry_ids := [String: Bool]{}
+    loop entry in entries -> entry_ids[entry.id] = true
+    loop record in graph.sorted_records() {
+        if !entry_ids.has_key(record.id) {
+            return Err(StoreError.InvalidData("closure graph has package record `{record.id}` but its metadata projection is missing"))
+        }
+    }
+    hangar :: roots.hangar_dir()
+    package_closures := [String: [String]]{}
+    object_paths := [String: String]{}
+    object_owners := [String: [String]]{}
+    loop entry in entries {
+        record :: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
+        expected_outputs := ~entry.named_outputs
+        expected_outputs["out"] = entry.envelope.output_hash
+        if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs {
+            return Err(StoreError.InvalidData("closure graph outputs for `{entry.id}` disagree with its metadata projection"))
+        }
+        members := [String]{}
+        loop output in record.outputs {
+            loop digest in graph.closure(output.value) -> &members.push(digest)
+        }
+        closure :: store_sorted_unique(members)
+        loop digest in closure {
+            object :: graph.objects.get(digest) ?? return Err(StoreError.InvalidData("closure graph has no object `{digest}` for `{entry.id}`"))
+            if object.external -> return Err(StoreError.InvalidData("closure object `{digest}` for `{entry.id}` is external to Hangar"))
+            if !store_path_starts_with(object.path, hangar) -> return Err(StoreError.InvalidData("closure object `{digest}` is outside Hangar"))
+            metadata :: files.stat(object.path)
+            if !metadata.is_symlink && !metadata.is_dir && !metadata.is_file {
+                return Err(StoreError.InvalidData("closure object `{digest}` is not a supported filesystem node"))
+            }
+            if object_paths.get(digest) == {
+                .Val(existing) -> {
+                    if existing != object.path -> return Err(StoreError.InvalidData("closure object `{digest}` has conflicting Hangar paths"))
+                }
+                .None -> object_paths[digest] = object.path
+            }
+            owners := object_owners.get(digest) ?? [String]{}
+            &owners.push(entry.id)
+            object_owners[digest] = store_sorted_unique(owners)
+        }
+        package_closures[entry.id] = closure
+    }
+
+    physical :: store_measure_physical(object_paths, object_owners)
+    built := 0
+    loop entry in entries {
+        if entry.envelope.provenance.contains("core-") -> built += 1
+    }
+    rows := [DuEntry]{}
+    loop entry in entries {
+        unique := 0
+        shared := 0
+        closure :: package_closures.get(entry.id) ?? [String]{}
+        loop digest in closure {
+            bytes :: physical.per_object.get(digest) ?? 0
+            owners :: object_owners.get(digest) ?? [String]{}
+            if {
+                owners.len() > 1 -> shared = store_du_checked_add(shared, bytes, "Hangar shared disk usage overflowed")
+                else -> unique = store_du_checked_add(unique, bytes, "Hangar unique disk usage overflowed")
+            }
+        }
+        &rows.push(DuEntry{id: entry.id, unique_bytes: Val(unique), shared_bytes: Val(shared), source_built: entry.envelope.provenance.contains("core-")})
+    }
+    closure_physical :: store_du_checked_add(physical.unique_bytes, physical.shared_bytes, "Hangar physical disk usage overflowed")
+    Ok(DuReport{
+        objects: object_paths.len(),
+        packages: rows.len(),
+        built: built,
+        unique_bytes: Val(physical.unique_bytes),
+        shared_bytes: Val(physical.shared_bytes),
+        closure_physical_bytes: Val(closure_physical),
+        entries: rows,
+    })
+}
+
+fn store_du_checked_add(total: Int, bytes: Int, message: String) -> Int StoreError! {
+    if total > @STORE_INT_MAX - bytes -> return Err(StoreError.InvalidData(message))
+    Ok(total + bytes)
+}
+
+// Report the physical Hangar footprint across every discovered machine
+// root. One identity set spans all roots, so cross-root hardlinks are
+// counted once.
+pub fn store_du_all() -> MachineDuReport StoreError! {
+    seen := [FileId: Bool]{}
+    shared_cas_path :: pkg_shared_cas_dir()
+    shared_cas :: if files.stat(shared_cas_path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_dir {
+                return Err(StoreError.InvalidData("shared CAS pool is not a real directory: {shared_cas_path}"))
+            }
+            Val(MachineDuPool{path: shared_cas_path, bytes: store_measure_machine_tree(shared_cas_path, &seen)})
+        }
+        .Err(error) -> {
+            if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+            None
+        }
+    }
+    total := 0
+    if shared_cas == {
+        .Val(pool) -> total = pool.bytes
+        .None -> {}
+    }
+    roots_found := [MachineDuEntry]{}
+    loop roots in HangarRoots.machine_roots() {
+        hangar :: roots.hangar_dir()
+        metadata :: if files.stat(hangar) == {
+            .Ok(metadata) -> metadata
+            .Err(error) -> {
+                if StoreError.Io(error).is_not_found() -> next
+                return Err(StoreError.Io(error))
+            }
+        }
+        if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar root is not a real directory: {hangar}"))
+        bytes :: store_measure_machine_tree(hangar, &seen)
+        total = store_du_checked_add(total, bytes, "machine Hangar disk usage overflowed")
+        &roots_found.push(MachineDuEntry{root: roots.root, hangar: hangar, bytes: bytes})
+    }
+    &roots_found.sort_by(entry -> entry.root)
+    Ok(MachineDuReport{shared_cas: shared_cas, roots: roots_found, total_bytes: total})
+}
+
+fn store_measure_machine_tree(path: String, seen: &[FileId: Bool]) -> Int StoreError! {
+    metadata :: files.stat(path)
+    if seen.has_key(metadata.id) -> return Ok(0)
+    seen[metadata.id] = true
+    total := metadata.size_on_disk
+    if metadata.is_dir {
+        loop child in files.list_dir(path) {
+            total = store_du_checked_add(total, store_measure_machine_tree(child.path, &seen), "machine Hangar disk usage overflowed")
+        }
+    }
+    Ok(total)
+}
+
+fn store_measure_physical(object_paths: [String: String], object_owners: [String: [String]]) -> PhysicalMeasurement StoreError! {
+    nodes := [FileId: PhysicalNode]{}
+    object_nodes := [String: [FileId]]{}
+    expanded := [FileId: Bool]{}
+    loop digest in store_sorted_keys(object_paths) {
+        owners :: object_owners.get(digest) ?? return Err(StoreError.InvalidData("closure object `{digest}` has no package owner"))
+        store_measure_physical_walk(digest, object_paths[digest], owners, &nodes, &object_nodes, &expanded)
+    }
+    measurement := PhysicalMeasurement{unique_bytes: 0, shared_bytes: 0, per_object: [String: Int]{}}
+    loop object in object_nodes {
+        bytes := 0
+        loop key in object.value {
+            node_bytes :: if nodes.get(key) == {
+                .Val(node) -> node.bytes
+                .None -> 0
+            }
+            bytes = store_du_checked_add(bytes, node_bytes, "physical allocation for `{object.key}` overflowed")
+        }
+        measurement.per_object[object.key] = bytes
+    }
+    loop node in nodes {
+        if {
+            node.value.owners.len() > 1 -> measurement.shared_bytes = store_du_checked_add(measurement.shared_bytes, node.value.bytes, "Hangar physical disk usage overflowed")
+            else -> measurement.unique_bytes = store_du_checked_add(measurement.unique_bytes, node.value.bytes, "Hangar physical disk usage overflowed")
+        }
+    }
+    Ok(measurement)
+}
+
+fn store_measure_physical_walk(digest: String, path: String, owners: [String], nodes: &[FileId: PhysicalNode], object_nodes: &[String: [FileId]], expanded: &[FileId: Bool]) StoreError! {
+    metadata :: files.stat(path)
+    if !metadata.is_symlink && !metadata.is_dir && !metadata.is_file {
+        return Err(StoreError.InvalidData("closure node `{path}` is not a supported filesystem node"))
+    }
+    key :: metadata.id
+    bytes :: metadata.size_on_disk
+    node := nodes.get(key) ?? PhysicalNode{bytes: bytes, owners: [String]{}}
+    if node.bytes != bytes -> return Err(StoreError.InvalidData("filesystem allocation changed while measuring `{path}`"))
+    all_owners := ~node.owners
+    loop owner in owners -> &all_owners.push(owner)
+    node.owners = store_sorted_unique(all_owners)
+    nodes[key] = node
+    keys := object_nodes.get(digest) ?? [FileId]{}
+    if !keys.contains(key) -> &keys.push(key)
+    object_nodes[digest] = keys
+    if metadata.is_dir && !expanded.has_key(key) {
+        expanded[key] = true
+        loop child in files.list_dir(path) -> store_measure_physical_walk(digest, child.path, owners, &nodes, &object_nodes, &expanded)
+    }
+}
+
+// Total bytes on disk of a local output tree or regular-file root.
+pub fn store_dir_size(path: String) -> Int Never! {
+    metadata :: files.stat(path) ?? return 0
+    if metadata.is_symlink -> return 0
+    if metadata.is_file -> return metadata.size
+    if !metadata.is_dir -> return 0
+    total := 0
+    entries :: files.list_dir(path) ?? return 0
+    loop entry in entries {
+        child :: files.stat(entry.path) ?? next
+        if child.is_symlink -> next
+        if {
+            child.is_dir -> total += store_dir_size(entry.path)
+            child.is_file -> total += child.size
+            else -> {}
+        }
+    }
+    total
+}

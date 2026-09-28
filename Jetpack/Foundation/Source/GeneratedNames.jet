@@ -53,7 +53,7 @@
 // Whether generated source may not use `name`. This applies the keyword,
 // built-in, reserved, and Prelude type tables; Core module type exports
 // (`CoreModuleExports::is_core_type_name`) are not part of this check.
-pub fn foundation_is_reserved_generated_name(name: String) -> Bool !Never {
+pub fn foundation_is_reserved_generated_name(name: String) -> Bool Never! {
     (@GENERATED_NAME_KEYWORDS.contains(name) && name != @GENERATED_NAME_CONTEXTUAL_STATE)
         || @GENERATED_NAME_RETIRED_WORDS.contains(name)
         || @GENERATED_NAME_BUILTIN_TYPES.contains(name)
@@ -63,7 +63,7 @@ pub fn foundation_is_reserved_generated_name(name: String) -> Bool !Never {
 
 // `canonical_name_case(name, NameCase::Pascal)`: every `_`-separated word
 // capitalized and joined, keeping one leading `_` and a leading `@`.
-pub fn foundation_pascal_name_case(name: String) -> String !Never {
+pub fn foundation_pascal_name_case(name: String) -> String Never! {
     if name.starts_with(@GENERATED_NAME_COMPTIME_MARK) {
         return "{@GENERATED_NAME_COMPTIME_MARK}{foundation_pascal_name_case(name.removeprefix(@GENERATED_NAME_COMPTIME_MARK))}"
     }
@@ -73,18 +73,18 @@ pub fn foundation_pascal_name_case(name: String) -> String !Never {
     words := [String]{}
     loop word in body.split("_") {
         if word == "" -> next
-        words.push(foundation_capitalize_first(word))
+        &words.push(foundation_capitalize_first(word))
     }
     joined :: words.join("")
     if leading -> return "_{joined}"
     joined
 }
 
-fn foundation_capitalize_first(word: String) -> String !Never {
+fn foundation_capitalize_first(word: String) -> String Never! {
     out := [String]{}
     loop scalar in word.chars() {
         text :: "{scalar}"
-        out.push(if out.len() == 0 -> text.to_upper() else -> text)
+        &out.push(if out.len() == 0 -> text.to_upper() else -> text)
     }
     out.join("")
 }
@@ -92,7 +92,7 @@ fn foundation_capitalize_first(word: String) -> String !Never {
 // `sanitize_generated_name(raw, NameCase::Pascal, fallback)`: turn an
 // external name into a legal Pascal-case Jet type name, repairing every
 // reserved result by appending `Type`.
-pub fn foundation_generated_type_name(input: String, fallback: String) -> String !Never {
+pub fn foundation_generated_type_name(input: String, fallback: String) -> String Never! {
     // Clark-expanded names use `{uri}local`; the opening delimiter is
     // namespace syntax, not part of the identifier.
     raw := input
@@ -129,7 +129,7 @@ pub fn foundation_generated_type_name(input: String, fallback: String) -> String
     result
 }
 
-fn foundation_starts_alphabetic(text: String) -> Bool !Never {
+fn foundation_starts_alphabetic(text: String) -> Bool Never! {
     loop scalar in text.chars() -> return "{scalar}".is_alphabetic()
     false
 }
@@ -137,13 +137,13 @@ fn foundation_starts_alphabetic(text: String) -> Bool !Never {
 // `sanitize_crate_name(raw)`: a generated Rust crate name from a stem, every
 // byte outside ASCII word characters replaced by `_`, `out` when empty, and a
 // leading digit guarded by `_`.
-pub fn foundation_sanitize_crate_name(raw: String) -> String !Never {
+pub fn foundation_sanitize_crate_name(raw: String) -> String Never! {
     out := [String]{}
     loop scalar in raw.chars() {
         text :: "{scalar}"
         bytes :: text.bytes()
         word :: bytes.len() == 1 && foundation_ascii_word(Int.from_u8(bytes[0]))
-        out.push(if word -> text else -> "_")
+        &out.push(if word -> text else -> "_")
     }
     name := out.join("")
     if name == "" -> name = "out"
@@ -152,7 +152,7 @@ pub fn foundation_sanitize_crate_name(raw: String) -> String !Never {
     name
 }
 
-fn foundation_ascii_word(code: Int) -> Bool !Never {
+fn foundation_ascii_word(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
@@ -160,7 +160,7 @@ fn foundation_ascii_word(code: Int) -> Bool !Never {
 // name into a legal snake-case Jet field, function, or parameter name. An
 // upper-case letter after a lower-case letter or digit starts a new `_` word,
 // every letter is lower-cased, and a reserved result gains `_field`.
-pub fn foundation_generated_snake_name(input: String, fallback: String) -> String !Never {
+pub fn foundation_generated_snake_name(input: String, fallback: String) -> String Never! {
     raw := input
     loop raw.starts_with("@") || raw.starts_with("$") {
         raw = raw.removeprefix("@").removeprefix("$")
@@ -210,7 +210,7 @@ pub fn foundation_generated_snake_name(input: String, fallback: String) -> Strin
 }
 
 // The first Unicode scalar of `text` (`to_lowercase().take(1)`).
-fn foundation_first_scalar(text: String) -> String !Never {
+fn foundation_first_scalar(text: String) -> String Never! {
     loop scalar in text.chars() -> return "{scalar}"
     ""
 }

@@ -18,7 +18,7 @@ pub struct EnvironmentRead {
 // for it.
 pub struct SecretSpec {
     pub name: String
-    pub description: ?String{None}
+    pub description: String?{None}
     pub required: Bool{true}
     pub allowed_environments: [String]{[String]{}}
     pub rotation: SecretRotationPolicy{SecretRotationPolicy.Unset}
@@ -29,15 +29,15 @@ pub struct SecretSpec {
     // not a second author spelling; an explicit map entry replaces it.
     pub implicit: Bool{false}
 
-    fn stored(name: String) -> SecretSpec !Never {
+    fn stored(name: String) -> SecretSpec Never! {
         SecretSpec{name: name}
     }
 
-    fn implicit_source(name: String) -> SecretSpec !Never {
+    fn implicit_source(name: String) -> SecretSpec Never! {
         SecretSpec{name: name, implicit: true}
     }
 
-    fn is_composed(self) -> Bool !Never {
+    fn is_composed(self) -> Bool Never! {
         if self.declaration == {
             .Compose(_, _) -> true
             .Stored -> false
@@ -46,17 +46,17 @@ pub struct SecretSpec {
 
     // Stable trust identity. Secret defaults and generator recipes can carry
     // sensitive material, so only their non-value shape enters the hash.
-    fn trust_fingerprint(self) -> String !Never {
+    fn trust_fingerprint(self) -> String Never! {
         declaration :: if self.declaration == {
             .Stored -> "stored"
             .Compose(_, from) -> {
                 sorted := from
-                sorted.sort()
+                &sorted.sort()
                 "compose:{sorted.join(",")}"
             }
         }
         allowed := self.allowed_environments
-        allowed.sort()
+        &allowed.sort()
         rotation :: if self.rotation == {
             .Unset -> "none"
             .MaxAge(seconds) -> "max_age:{seconds}"
@@ -236,21 +236,21 @@ pub struct DevServicePlan {
     // `run: ["program", "arg", …]` — the executable and argv that start the
     // service. Falls back to the built-in catalog when the name matches a
     // known service and this is unset.
-    pub run: ?[String]{None}
+    pub run: [String]?{None}
     // `shutdown: .Term(...)`/`.Kill` — typed process shutdown policy. Falls
     // back to a bounded TERM-then-KILL sequence when unset.
-    pub shutdown: ?ShutdownPolicy{None}
+    pub shutdown: ShutdownPolicy?{None}
     // `data_dir: "…"` — override for the persisted-state directory, which
     // otherwise defaults to `.jet/services/<name>/data`.
-    pub data_dir: ?String{None}
+    pub data_dir: String?{None}
     // `ready: "…"` — a shell command polled until it exits 0; the readiness
     // contract. Falls back to a TCP connect on `ports[0]` when unset and
     // `ports` is non-empty, else to a bare process-alive check.
-    pub ready: ?String{None}
+    pub ready: String?{None}
     // D-JPK-SERVICEDEPTH1: typed readiness without shell-command parsing.
-    pub ready_probe: ?ReadyProbe{None}
+    pub ready_probe: ReadyProbe?{None}
     // D-JPK-SERVICEDEPTH1: bounded restart behavior.
-    pub restart: ?RestartPolicy{None}
+    pub restart: RestartPolicy?{None}
     // Files whose changes may trigger a bounded restart.
     pub watch: [String]{[String]{}}
     // Service names that must be healthy before this service starts.
@@ -274,7 +274,7 @@ pub struct DevServiceExtra {
 
 pub enum ReadyProbe {
     Exec(command: String)
-    Http(url: String, status: ?Int)
+    Http(url: String, status: Int?)
     Notify(path: String)
     Tcp(host: String, port: Int)
 }
@@ -316,7 +316,7 @@ pub struct ImagePlan {
     pub from_environment: Bool
     // An explicit target platform, if any. Only environment images may carry
     // one; OCI records it for the image realization path.
-    pub target: ?String
+    pub target: String?
     // `expose: [Int]` — TCP ports recorded as `ExposedPorts` in the OCI image
     // config. Sorted + deduped for reproducibility.
     pub expose: [Int]
@@ -330,14 +330,14 @@ pub struct ImagePlan {
     // `base: oci("<ref>")` — a base-image escape hatch (D-JPK-IMAGE1 option A).
     // Local `file://` layouts are admitted by digest; remote refs stay
     // explicit until a verified registry transport is configured.
-    pub base: ?String
+    pub base: String?
     // D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
     // default for an environment image. Cache, signing, and provenance stay
     // on Hangar and `.jet/lock`; this record does not duplicate those stores.
     pub services: [String]
-    pub health: ?String
-    pub entrypoint: ?String
-    pub user: ?Int
+    pub health: String?
+    pub entrypoint: String?
+    pub user: Int?
 }
 
 // One `env_vars:` entry of an OCI image.
@@ -356,7 +356,7 @@ pub struct EnvPlan {
     pub source_files: [String]
     // The semantic identity of the Package graph that produced this plan.
     // Legacy environment plans have no Package authority and keep this None.
-    pub graph_identity: ?String
+    pub graph_identity: String?
     // Every typed environment read in the selected environment's root and
     // discovered module contributions, in source/discovery order.
     pub environment_reads: [EnvironmentRead]
@@ -364,7 +364,7 @@ pub struct EnvPlan {
     // U20 adapter packages declared in `packages:`. Kept separate from refs
     // because they have inline build identity and no provider selector.
     pub adapters: [AdapterPlan]
-    pub prompt: ?String
+    pub prompt: String?
     pub prompt_path: PromptPathMode
     pub prompt_strip: PromptStripMode
     // U14: every captured `Image`, validated so each `from` names a known
@@ -388,7 +388,7 @@ pub struct EnvPlan {
     // catalog expansion.
     pub languages: [LanguageSpec]
     // The preset selected by the evaluator/runtime, if one was requested.
-    pub selected_preset: ?ResolvedPreset
+    pub selected_preset: ResolvedPreset?
     // One evaluator-owned expansion shared by realization and trust. The
     // `language_packs` field remains as a compatibility view for existing
     // environment consumers; it is populated from this expansion.
@@ -412,14 +412,14 @@ pub struct EnvPlan {
     pub environment_names: [String]
     // The one environment module whose packages/settings are active for this
     // plan. `dev` is the deterministic beginner default when present.
-    pub active_environment: ?String
+    pub active_environment: String?
     // Module names that contributed the selected environment module, in source order.
     pub active_environment_provenance: [String]
 }
 
 pub struct EnvironmentFacts {
     pub environment_names: [String]{[String]{}}
-    pub active_environment: ?String{None}
+    pub active_environment: String?{None}
     pub active_environment_provenance: [String]{[String]{}}
     pub source_files: [String]{[String]{}}
     // Every typed environment read retained for discovery and reporting from
@@ -430,7 +430,7 @@ pub struct EnvironmentFacts {
     pub lifecycle: EnvironmentLifecycle{EnvironmentLifecycle{}}
     pub presets: [PresetSpec]{[PresetSpec]{}}
     pub languages: [LanguageSpec]{[LanguageSpec]{}}
-    pub selected_preset: ?ResolvedPreset{None}
+    pub selected_preset: ResolvedPreset?{None}
     pub language_expansion: LanguageExpansion{LanguageExpansion{}}
     pub language_packs: [LanguagePack]{[LanguagePack]{}}
     pub language_projections: [LanguageProjection]{[LanguageProjection]{}}
@@ -441,8 +441,8 @@ pub struct EnvironmentFacts {
 }
 
 // The keys of a string map in byte order (Rust `BTreeMap` key order).
-fn envmodel_sorted_keys_of(values: [String: String]) -> [String] !Never {
+fn envmodel_sorted_keys_of(values: [String: String]) -> [String] Never! {
     keys := values.keys().to_list()
-    keys.sort()
+    &keys.sort()
     keys
 }

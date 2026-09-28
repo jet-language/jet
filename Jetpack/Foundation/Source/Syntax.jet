@@ -554,7 +554,7 @@
 @UI_CAPABILITY_NAMES :: [String]{"UI.FileDialog", "UI.Clipboard", "UI.Ime", "UI.DragDrop", "UI.Shortcuts", "UI.Accessibility", "UI.FontShaping"}
 
 // D-CMDOVERRIDE1=A: the role home a bare command resolves to (`command_role_file`).
-fn syntax_command_role_file(command: String) -> ?String !Never {
+fn syntax_command_role_file(command: String) -> String? Never! {
     if command == {
         "run" -> Val(@COMMAND_FILE_RUN)
         "build" -> Val(@COMMAND_FILE_BUILD)
@@ -565,7 +565,7 @@ fn syntax_command_role_file(command: String) -> ?String !Never {
 }
 
 // `Syntax::is_ui_capability`.
-fn syntax_is_ui_capability(name: String) -> Bool !Never {
+fn syntax_is_ui_capability(name: String) -> Bool Never! {
     @UI_CAPABILITY_NAMES.contains(name)
 }
 
@@ -574,3 +574,13 @@ fn syntax_is_ui_capability(name: String) -> Bool !Never {
 // D-ECO-HANGARPATH1: the pre-resolver machine Hangar path, read only as a
 // legacy migration source.
 @HANGAR_DIR :: "/etc/jet/hangar"
+
+// ── Trust (jet_foundation::Syntax, jetpack_config.rs, effects_surface.rs, predicates.rs) ──
+
+// U19: the trust store file under `~/.jet` (`CONFIG_DEFAULT_DIR`).
+@TRUST_FILE :: "trust"
+// `jet trust grant --scope user|repo`.
+@TRUST_SCOPE_USER :: "user"
+@TRUST_SCOPE_REPO :: "repo"
+// D-JPK-TOOLCHAIN1=A (#179): re-exec guard marker set to the pinned version.
+@TOOLCHAIN_EXEC_MARKER_ENV :: "JET_TOOLCHAIN_EXEC"

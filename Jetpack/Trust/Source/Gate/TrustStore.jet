@@ -1,0 +1,340 @@
+// U19 env/dev trust store (D-JPK-DEVCOMPOSE1=D). `~/.jet/trust` holds plain
+// newline-separated records: `hash:<sha256>` env grants, `pattern:<glob or
+// prefix>` project authorizations, and typed `grant:<scope>:<authority>:
+// <subject>` grants with `%`/`:` escaped. `Recipe` build trust uses the same
+// store and record format through these helpers.
+
+@TRUST_HASH_PREFIX :: "hash:"
+@TRUST_PATTERN_PREFIX :: "pattern:"
+@TRUST_GRANT_PREFIX :: "grant:"
+
+// The authority a typed grant carries. JetOS fleet/activation authorities
+// are not part of this port.
+pub enum TrustAuthority {
+    Package
+    Build
+    Env
+    Service
+    Image
+    VaultWrite
+    Integration
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Package -> "package"
+            .Build -> "build"
+            .Env -> "env"
+            .Service -> "service"
+            .Image -> "image"
+            .VaultWrite -> "vault.write"
+            .Integration -> "integration"
+        }
+    }
+
+    fn parse(raw: String) -> TrustAuthority? Never! {
+        if raw == {
+            "package" -> Val(TrustAuthority.Package)
+            "build" -> Val(TrustAuthority.Build)
+            "env" -> Val(TrustAuthority.Env)
+            "service" -> Val(TrustAuthority.Service)
+            "image" -> Val(TrustAuthority.Image)
+            "vault.write" -> Val(TrustAuthority.VaultWrite)
+            "integration" -> Val(TrustAuthority.Integration)
+            else -> None
+        }
+    }
+
+    // The authority a bare selector implies (`env.x`, `image.x`,
+    // `*.service`, build identities, else a package).
+    fn infer(selector: String) -> TrustAuthority Never! {
+        if {
+            selector.ends_with(".service") -> TrustAuthority.Service
+            selector.starts_with("image.") -> TrustAuthority.Image
+            selector.starts_with("env.") -> TrustAuthority.Env
+            selector.starts_with("build-sha256:") || selector.contains("@ci") || selector.starts_with("cache@") -> TrustAuthority.Build
+            else -> TrustAuthority.Package
+        }
+    }
+}
+
+pub struct TrustGrant {
+    // Kept as written: a stored grant may name an authority this build
+    // does not know, and must still round-trip and revoke.
+    pub authority: String
+    pub subject: String
+    pub scope: String
+
+    fn key(self) -> String Never! {
+        "{self.authority}:{self.subject}"
+    }
+
+    fn line(self) -> String Never! {
+        "{@TRUST_GRANT_PREFIX}{trust_escape_component(self.scope)}:{trust_escape_component(self.authority)}:{trust_escape_component(self.subject)}"
+    }
+
+    fn is(self, authority: TrustAuthority) -> Bool Never! {
+        self.authority == authority.label()
+    }
+}
+
+pub enum TrustRecord {
+    Hash(hash: String)
+    Pattern(pattern: String)
+    Grant(TrustGrant)
+    Raw(line: String)
+
+    fn parse(line: String) -> TrustRecord Never! {
+        if line.starts_with(@TRUST_HASH_PREFIX) -> return TrustRecord.Hash(line.removeprefix(@TRUST_HASH_PREFIX))
+        if line.starts_with(@TRUST_PATTERN_PREFIX) -> return TrustRecord.Pattern(line.removeprefix(@TRUST_PATTERN_PREFIX))
+        if !line.starts_with(@TRUST_GRANT_PREFIX) -> return TrustRecord.Raw(~line)
+        rest :: line.removeprefix(@TRUST_GRANT_PREFIX)
+        scope :: trust_text_split_first(rest, @TRUST_COLON) ?? return TrustRecord.Raw(~line)
+        authority :: trust_text_split_first(scope.after, @TRUST_COLON) ?? return TrustRecord.Raw(~line)
+        TrustRecord.Grant(TrustGrant{scope: trust_unescape_component(scope.before), authority: trust_unescape_component(authority.before), subject: trust_unescape_component(authority.after)})
+    }
+
+    // Rust `record_json`.
+    fn json(self) -> String Never! {
+        if self == {
+            .Hash(hash) -> trust_json_object_text([TrustJsonField]{
+                TrustJsonField{key: "type", value: DataTree.Text("hash")},
+                TrustJsonField{key: "hash", value: DataTree.Text(~hash)},
+                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_HASH_PREFIX}{hash}")}
+            })
+            .Pattern(pattern) -> trust_json_object_text([TrustJsonField]{
+                TrustJsonField{key: "type", value: DataTree.Text("pattern")},
+                TrustJsonField{key: "pattern", value: DataTree.Text(~pattern)},
+                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_PATTERN_PREFIX}{pattern}")}
+            })
+            .Grant(grant) -> trust_json_object_text([TrustJsonField]{
+                TrustJsonField{key: "type", value: DataTree.Text("grant")},
+                TrustJsonField{key: "authority", value: DataTree.Text(~grant.authority)},
+                TrustJsonField{key: "subject", value: DataTree.Text(~grant.subject)},
+                TrustJsonField{key: "scope", value: DataTree.Text(~grant.scope)},
+                TrustJsonField{key: "revocationKey", value: DataTree.Text(grant.key())}
+            })
+            .Raw(line) -> trust_json_object_text([TrustJsonField]{
+                TrustJsonField{key: "type", value: DataTree.Text("raw")},
+                TrustJsonField{key: "line", value: DataTree.Text(~line)},
+                TrustJsonField{key: "revocationKey", value: DataTree.Text(~line)}
+            })
+        }
+    }
+}
+
+// Rust `records_json`: `{"grants":[...]}`.
+pub fn trust_records_json(records: [TrustRecord]) -> String Never! {
+    rendered := [String]{}
+    loop record in records -> &rendered.push(record.json())
+    "{{\"grants\":[{rendered.join(",")}]}}"
+}
+
+// `jet trust grant <selector> [--scope user|repo]`: an explicit
+// `authority:subject` selector, or a bare subject whose authority is
+// inferred.
+pub fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
+    trimmed :: selector.trim()
+    if trimmed == "" -> return Err(TrustError.Grant("grant selector is empty"))
+    if trust_text_split_first(trimmed, @TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None && parts.after.trim() == "" -> return Err(TrustError.Grant("trust grant `{parts.before}:` needs a subject"))
+        }
+        .None -> {}
+    }
+    if scope != @TRUST_SCOPE_USER && scope != @TRUST_SCOPE_REPO -> return Err(TrustError.Grant("unknown trust scope `{scope}`"))
+    if trust_text_split_first(trimmed, @TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None -> return Ok(TrustGrant{authority: parts.before, subject: parts.after, scope})
+        }
+        .None -> {}
+    }
+    Ok(TrustGrant{authority: TrustAuthority.infer(trimmed).label(), subject: trimmed, scope})
+}
+
+// `%` and `:` are escaped; line breaks are dropped.
+fn trust_escape_component(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) == {
+            37 -> loop escaped in "%25".bytes() -> &out.push(escaped)
+            58 -> loop escaped in "%3A".bytes() -> &out.push(escaped)
+            @TRUST_NEWLINE | @TRUST_CARRIAGE_RETURN -> {}
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? ~text
+}
+
+// `%XX` hex escapes decoded; anything else is kept byte for byte.
+fn trust_unescape_component(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        if Int.from_u8(raw[index]) == 37 && index + 2 < raw.len() {
+            high :: trust_hex_value(Int.from_u8(raw[index + 1]))
+            low :: trust_hex_value(Int.from_u8(raw[index + 2]))
+            if high >= 0 && low >= 0 {
+                &out.push(U8{high * 16 + low})
+                index += 3
+                next
+            }
+        }
+        &out.push(raw[index])
+        index += 1
+    }
+    String.from_bytes_lossy(out)
+}
+
+fn trust_hex_value(code: Int) -> Int Never! {
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 97 && code <= 102 -> code - 87
+        code >= 65 && code <= 70 -> code - 55
+        else -> -1
+    }
+}
+
+// `~/.jet/trust`; `HOME`, then `USERPROFILE`, then the working directory.
+pub fn trust_store_path() -[Env]> String {
+    home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
+    files.join(files.join(home, @CONFIG_DEFAULT_DIR), @TRUST_FILE)
+}
+
+// Trimmed non-empty store lines; an unreadable store is empty.
+fn trust_store_lines(store: String) -[FS]> [String] {
+    text :: files.read(store) ?? ""
+    lines := [String]{}
+    loop line in trust_text_lines(text) {
+        trimmed :: line.trim()
+        if trimmed != "" -> &lines.push(trimmed)
+    }
+    lines
+}
+
+// Append one line, creating the parent directory; write failures are
+// ignored as in the reference.
+fn trust_store_append(store: String, line: String) -[FS]> {
+    _ :: files.create_dir_all(files.dirname(store))
+    existing := files.read(store) ?? ""
+    if existing != "" && !existing.ends_with("\n") -> existing = "{existing}\n"
+    _ :: files.write(store, "{existing}{line}\n")
+}
+
+fn trust_store_add_line(store: String, line: String) -[FS]> Bool {
+    if trust_store_lines(store).contains(line) -> return false
+    trust_store_append(store, line)
+    true
+}
+
+// Persist a hash grant (the interactive "yes"); false when already stored.
+pub fn trust_grant_hash(store: String, hash: String) -[FS]> Bool {
+    trust_store_add_line(store, "{@TRUST_HASH_PREFIX}{hash}")
+}
+
+// `jetpack config trust add <pattern>`; false when already present.
+pub fn trust_add_pattern(store: String, pattern: String) -[FS]> Bool {
+    trust_store_add_line(store, "{@TRUST_PATTERN_PREFIX}{pattern}")
+}
+
+// `jet trust grant`; false when the exact grant already exists.
+pub fn trust_add_grant(store: String, grant: TrustGrant) -[FS]> Bool {
+    trust_store_add_line(store, grant.line())
+}
+
+// `jetpack config trust list`: every stored line.
+pub fn trust_list_entries(store: String) -[FS]> [String] {
+    trust_store_lines(store)
+}
+
+// The typed view of the store.
+pub fn trust_list_records(store: String) -[FS]> [TrustRecord] {
+    records := [TrustRecord]{}
+    loop line in trust_store_lines(store) -> &records.push(TrustRecord.parse(line))
+    records
+}
+
+// `jetpack config trust remove <pattern>`; false when absent.
+pub fn trust_remove_pattern(store: String, pattern: String) -[FS]> Bool {
+    target :: "{@TRUST_PATTERN_PREFIX}{pattern}"
+    lines :: trust_store_lines(store)
+    if !lines.contains(target) -> return false
+    kept := [String]{}
+    loop line in lines {
+        if line != target -> &kept.push("{line}\n")
+    }
+    _ :: files.write(store, kept.join(""))
+    true
+}
+
+// Remove every hash, pattern, grant, or raw line the selector names by exact
+// text, bare value, or grant key (`service:postgres.service`, with or
+// without its scope).
+pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
+    removed := false
+    kept := [String]{}
+    loop line in trust_store_lines(store) {
+        matches :: if TrustRecord.parse(line) == {
+            .Hash(hash) -> selector == line || selector == hash || selector == "{@TRUST_HASH_PREFIX}{hash}"
+            .Pattern(pattern) -> selector == line || selector == pattern || selector == "{@TRUST_PATTERN_PREFIX}{pattern}"
+            .Grant(grant) -> selector == line || selector == grant.subject || selector == grant.key() || selector == "{grant.scope}:{grant.key()}"
+            .Raw(raw) -> selector == raw
+        }
+        if matches {
+            removed = true
+            next
+        }
+        &kept.push("{line}\n")
+    }
+    if removed -> _ :: files.write(store, kept.join(""))
+    removed
+}
+
+// Already trusted: an exact hash grant, or a pattern matching the project
+// by its spelled or canonical path.
+pub fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
+    canonical :: files.canonicalize(project_dir) ?? ""
+    target :: "{@TRUST_HASH_PREFIX}{hash}"
+    loop line in trust_store_lines(store) {
+        if line == target -> return true
+        if !line.starts_with(@TRUST_PATTERN_PREFIX) -> next
+        pattern :: line.removeprefix(@TRUST_PATTERN_PREFIX)
+        if trust_matches_pattern(pattern, project_dir) || (canonical != "" && trust_matches_pattern(pattern, canonical)) -> return true
+        if trust_matches_canonical_pattern(pattern, project_dir) || (canonical != "" && trust_matches_canonical_pattern(pattern, canonical)) -> return true
+    }
+    false
+}
+
+// A typed env grant names the project (pattern) or the exact hash.
+fn trust_grant_matches_project_or_hash(grant: TrustGrant, project_dir: String, hash: String) -[FS, Env]> Bool {
+    if grant.subject == hash || grant.subject == "{@TRUST_HASH_PREFIX}{hash}" -> return true
+    if trust_matches_pattern(grant.subject, project_dir) || trust_matches_canonical_pattern(grant.subject, project_dir) -> return true
+    canonical :: files.canonicalize(project_dir) ?? return false
+    trust_matches_pattern(grant.subject, canonical) || trust_matches_canonical_pattern(grant.subject, canonical)
+}
+
+// Glob/prefix match: a trailing `*` is a prefix wildcard, otherwise an exact
+// or component-prefix match.
+fn trust_matches_pattern(pattern: String, subject: String) -> Bool Never! {
+    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> ~pattern
+    trust_component_prefix_matches(prefix, subject)
+}
+
+// The same match against the pattern's canonical path.
+fn trust_matches_canonical_pattern(pattern: String, subject: String) -[FS, Env]> Bool {
+    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> ~pattern
+    canonical :: files.canonicalize(prefix) ?? return false
+    trust_component_prefix_matches(canonical, subject)
+}
+
+// `prefix` names `subject` or one of its ancestors by whole components.
+fn trust_component_prefix_matches(prefix: String, subject: String) -> Bool Never! {
+    if prefix == "" -> return true
+    trimmed := ~prefix
+    loop trimmed.ends_with("/") || trimmed.ends_with("\\") -> trimmed = trimmed.removesuffix("/").removesuffix("\\")
+    if trimmed == "" -> return subject.starts_with("/") || subject.starts_with("\\")
+    if subject == trimmed -> return true
+    if !subject.starts_with(trimmed) -> return false
+    remainder :: subject.removeprefix(trimmed)
+    remainder.starts_with("/") || remainder.starts_with("\\")
+}

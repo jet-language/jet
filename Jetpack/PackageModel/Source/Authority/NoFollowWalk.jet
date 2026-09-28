@@ -25,11 +25,11 @@ pub struct AuthorityWalkBudget {
     files: Int
     bytes: Int
 
-    fn new() -> AuthorityWalkBudget !Never {
+    fn new() -> AuthorityWalkBudget Never! {
         AuthorityWalkBudget{entries: 0, files: 0, bytes: 0}
     }
 
-    fn note_entry(&self, path: String) !AuthorityError {
+    fn note_entry(&self, path: String) AuthorityError! {
         if self.entries >= @PKG_MAX_TREE_FILES {
             return Err(pkg_authority_limit_error(path, "authority directory walk exceeds the {@PKG_MAX_TREE_FILES}-entry bound"))
         }
@@ -37,7 +37,7 @@ pub struct AuthorityWalkBudget {
         Ok()
     }
 
-    fn ensure_file(self, path: String, length: Int) !AuthorityError {
+    fn ensure_file(self, path: String, length: Int) AuthorityError! {
         if length > @PKG_MAX_TREE_FILE_BYTES {
             return Err(pkg_authority_limit_error(path, "authority file exceeds the {@PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
         }
@@ -50,7 +50,7 @@ pub struct AuthorityWalkBudget {
         Ok()
     }
 
-    fn record_file(&self, path: String, length: Int) !AuthorityError {
+    fn record_file(&self, path: String, length: Int) AuthorityError! {
         self.ensure_file(path, length)
         self.files += 1
         self.bytes += length
@@ -60,21 +60,21 @@ pub struct AuthorityWalkBudget {
 
 // Every entry of the held `directory` (displayed as `path`), sorted by name,
 // each observed with a no-follow Stat and counted against `budget`.
-fn pkg_authority_read_sorted_entries(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] !AuthorityError {
-    listed :: directory.list() ?? return Err(AuthorityError.Io{path: path, operation: "read", detail: "{err}"})
+fn pkg_authority_read_sorted_entries(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
+    listed :: &directory.list() ?? return Err(AuthorityError.Io{path: path, operation: "read", detail: "{err}"})
     entries := [AuthorityEntry]{}
     loop entry in listed {
         info :: directory.entry_stat(entry.name) ?? return Err(AuthorityError.Io{path: path, operation: "inspect", detail: "{err}"})
-        budget.note_entry(path)
-        entries.push(AuthorityEntry{name: entry.name, path: files.join(path, entry.name), info: info})
+        &budget.note_entry(path)
+        &entries.push(AuthorityEntry{name: entry.name, path: files.join(path, entry.name), info: info})
     }
-    entries.sort_by(entry -> entry.name)
+    &entries.sort_by(entry -> entry.name)
     Ok(entries)
 }
 
 // Whether `root` directly holds Jet source or a retired manifest name, the
 // only directories that may become authority roots during upward discovery.
-fn pkg_authority_has_candidate(root: String) -[FS, Env]> Bool !AuthorityError {
+fn pkg_authority_has_candidate(root: String) -[FS, Env]> Bool AuthorityError! {
     listed :: files.list_dir(root) ?? return Err(pkg_authority_map_io(root, err, true))
     loop entry in listed {
         is_source :: pkg_authority_extension(entry.name) == Val(@FILE_EXT)
@@ -84,17 +84,17 @@ fn pkg_authority_has_candidate(root: String) -[FS, Env]> Bool !AuthorityError {
 }
 
 // A world-writable directory is shared discovery space, never an authority.
-fn pkg_authority_is_shared_directory(info: Stat) -[Env]> Bool !Never {
+fn pkg_authority_is_shared_directory(info: Stat) -[Env]> Bool Never! {
     if !sys.is_unix() -> return false
     (info.mode & 0o002) != 0
 }
 
-fn pkg_authority_is_shared_directory_path(path: String) -[FS, Env]> Bool !Never {
+fn pkg_authority_is_shared_directory_path(path: String) -[FS, Env]> Bool Never! {
     info :: files.stat(path) ?? return false
     pkg_authority_is_shared_directory(info)
 }
 
 // Whether a source walk skips the entry `name` outright.
-fn pkg_authority_source_walk_skips(name: String) -> Bool !Never {
+fn pkg_authority_source_walk_skips(name: String) -> Bool Never! {
     name.starts_with(".") || @AUTHORITY_SOURCE_WALK_SKIPPED.contains(name)
 }

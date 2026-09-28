@@ -73,6 +73,9 @@ Jetpack/Foundation/Source/BuildEffect.jet
 Jetpack/Foundation/Source/GeneratedNames.jet
 Jetpack/Foundation/Source/ProjectLock.jet
 Jetpack/Foundation/Source/Report.jet
+Jetpack/Foundation/Source/TreeHash.jet
+Jetpack/Foundation/Source/Authority.jet
+Jetpack/Foundation/Source/NativeSandbox.jet
 
 # == PackageModel ==
 Jetpack/PackageModel/Source/Text/ByteText.jet
@@ -92,11 +95,13 @@ Jetpack/PackageModel/Source/Provider/ProviderSelector.jet
 Jetpack/PackageModel/Source/Provider/ProviderFacts.jet
 Jetpack/PackageModel/Source/Mcp/McpProtocol.jet
 Jetpack/PackageModel/Source/Mcp/McpMessages.jet
+Jetpack/PackageModel/Source/Bundle/BundlePlan.jet
 Jetpack/PackageModel/Source/Foreign/OpaqueHandleBinder.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BridgeIdentity.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BoundaryContract.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BridgeProvenance.jet
+Jetpack/PackageModel/Source/Foreign/Bridge/ScalarSidecar.jet
 Jetpack/PackageModel/Source/Foreign/BindingPlan.jet
 Jetpack/PackageModel/Source/Foreign/RendererRegistry.jet
 Jetpack/PackageModel/Source/Foreign/C/HeaderParser.jet
@@ -106,6 +111,8 @@ Jetpack/PackageModel/Source/Foreign/Data/DataSourceRender.jet
 Jetpack/PackageModel/Source/Foreign/Data/JsonSchemaBinder.jet
 Jetpack/PackageModel/Source/Foreign/Data/CsvSchemaBinder.jet
 Jetpack/PackageModel/Source/Foreign/Data/SqlSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/XmlSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/ProtoSchemaBinder.jet
 Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet
 Jetpack/PackageModel/Source/Foreign/Binders/BinderRender.jet
 Jetpack/PackageModel/Source/Foreign/WorkerSupervisor.jet
@@ -115,6 +122,31 @@ Jetpack/PackageModel/Source/Foreign/Binders/Ada.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Cobol.jet
 Jetpack/PackageModel/Source/Bundle/BundleSpec.jet
 Jetpack/PackageModel/Source/Manifest/ManifestText.jet
+Jetpack/PackageModel/Source/Lock/Schema.jet
+Jetpack/PackageModel/Source/Lock/Provenance.jet
+Jetpack/PackageModel/Source/Lock/BuildStamp.jet
+Jetpack/PackageModel/Source/Lock/Write.jet
+Jetpack/PackageModel/Source/Lock/Parse.jet
+Jetpack/PackageModel/Source/Lock/Verify.jet
+Jetpack/PackageModel/Source/Lock/Record.jet
+Jetpack/PackageModel/Source/Workspace/WorkspacePlan.jet
+Jetpack/PackageModel/Source/Workspace/WorkspaceLockRead.jet
+Jetpack/PackageModel/Source/Scripts/InlineDeps.jet
+Jetpack/PackageModel/Source/Authority/CheckedEntries.jet
+Jetpack/PackageModel/Source/Authority/NoFollowWalk.jet
+Jetpack/PackageModel/Source/Authority/Resolver.jet
+Jetpack/PackageModel/Source/Authority/SandboxAuthority.jet
+Jetpack/PackageModel/Source/Envelope/PathLaw.jet
+Jetpack/PackageModel/Source/Envelope/Envelope.jet
+Jetpack/PackageModel/Source/Envelope/Xattrs.jet
+Jetpack/PackageModel/Source/Envelope/OutputHash.jet
+Jetpack/PackageModel/Source/Store/HangarRoots.jet
+Jetpack/PackageModel/Source/Store/SealTupleWalk.jet
+Jetpack/PackageModel/Source/Policy/LintPolicy.jet
+Jetpack/PackageModel/Source/Policy/EffectProjection.jet
+Jetpack/PackageModel/Source/Policy/EffectBudget.jet
+Jetpack/PackageModel/Source/Artifacts/JetLibStamp.jet
+Jetpack/PackageModel/Source/Artifacts/JetLibTrust.jet
 
 # == EnvModel ==
 Jetpack/EnvModel/Source/Environment/FactReaders.jet
@@ -127,6 +159,17 @@ Jetpack/EnvModel/Source/Environment/Lifecycle.jet
 Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet
 Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet
 Jetpack/EnvModel/Source/ModuleEval/Plans.jet
+Jetpack/EnvModel/Source/ModuleEval/ComputedFields.jet
+Jetpack/EnvModel/Source/ModuleEval/DevServiceEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ImageEval.jet
+Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet
+Jetpack/EnvModel/Source/ModuleEval/SecretSpecs.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet
+Jetpack/EnvModel/Source/ModuleEval/IntegrationImports.jet
+Jetpack/EnvModel/Source/ModuleEval/ProfileEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet
+Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet
 
 # == NixEval ==
 Jetpack/NixEval/Source/Boundary/EvaluatorApi.jet
@@ -146,6 +189,7 @@ Jetpack/NixEval/Source/Boundary/InternalStage.jet
 
 # == Nix ==
 Jetpack/Nix/Source/NixError.jet
+Jetpack/Nix/Source/NixText.jet
 Jetpack/Nix/Source/Derivation/StorePaths.jet
 Jetpack/Nix/Source/Derivation/ATerm.jet
 Jetpack/Nix/Source/Derivation/HashModulo.jet
@@ -153,6 +197,8 @@ Jetpack/Nix/Source/Boundary/DerivationBoundary.jet
 Jetpack/Nix/Source/Boundary/NixEvalEntry.jet
 Jetpack/Nix/Source/Boundary/ImportAuthority.jet
 Jetpack/Nix/Source/Fallback/FallbackImport.jet
+Jetpack/Nix/Source/Fallback/FallbackIdentity.jet
+Jetpack/Nix/Source/Fallback/FallbackPolicy.jet
 
 # == Store ==
 Jetpack/Store/Source/Hangar/StoreError.jet
@@ -169,16 +215,20 @@ Jetpack/Store/Source/Lifecycle/PinnedDirectory.jet
 Jetpack/Store/Source/Lifecycle/RootModel.jet
 Jetpack/Store/Source/Lifecycle/RootWireFormat.jet
 Jetpack/Store/Source/Lifecycle/RootJournal.jet
+Jetpack/Store/Source/Lifecycle/ExternalRoots.jet
+Jetpack/Store/Source/Lifecycle/LegacyHangarMigration.jet
 Jetpack/Store/Source/Archive/HangarArchiveFormat.jet
 Jetpack/Store/Source/Archive/ArchiveTransfer.jet
 Jetpack/Store/Source/Archive/NixCasBundle.jet
-Jetpack/Store/Source/Ingest/TreeIngest.jet
-Jetpack/Store/Source/Ingest/SharedCas.jet
+Jetpack/Store/Source/Cache/CacheEndpoints.jet
+Jetpack/Store/Source/Cache/CacheBindings.jet
+Jetpack/Store/Source/Cache/CachePublication.jet
 Jetpack/Store/Source/NixCache/NixCacheTransport.jet
 Jetpack/Store/Source/NixCache/NixDownloadPlan.jet
-Jetpack/Store/Source/NixCache/NixClosureAdmission.jet
 Jetpack/Store/Source/Reproducibility/OutputSnapshot.jet
-Jetpack/Store/Source/Reproducibility/Certification.jet
+Jetpack/Store/Source/Broker/BrokerProtocol.jet
+Jetpack/Store/Source/Broker/SharedStoreInstall.jet
+Jetpack/Store/Source/Broker/BrokerService.jet
 
 # == Trust ==
 Jetpack/Trust/Source/Text/TrustText.jet
@@ -191,6 +241,8 @@ Jetpack/Trust/Source/SemanticLock/FlakeModel.jet
 Jetpack/Trust/Source/SemanticLock/FlakeScan.jet
 Jetpack/Trust/Source/SemanticLock/FlakeLock.jet
 Jetpack/Trust/Source/SemanticLock/FlakeGraph.jet
+Jetpack/Trust/Source/SemanticLock/LockStore.jet
+Jetpack/Trust/Source/Gate/TrustStore.jet
 Jetpack/Trust/Source/TrustError.jet
 
 # == Provider ==

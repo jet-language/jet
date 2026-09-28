@@ -26,7 +26,7 @@ pub enum LockRecordKind {
     // A kind this reader does not know, kept verbatim for round trips.
     Future(String)
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Package -> "package"
             .SourceRef -> "source-ref"
@@ -48,7 +48,7 @@ pub enum LockRecordKind {
         }
     }
 
-    fn parse(raw: String) -> LockRecordKind !Never {
+    fn parse(raw: String) -> LockRecordKind Never! {
         if raw == {
             "package" -> LockRecordKind.Package
             "source-ref" -> LockRecordKind.SourceRef
@@ -79,12 +79,12 @@ pub struct LockIdentity {
     pub platform: String
 
     // `kind:key`: the merge and explain key.
-    fn semantic_key(self) -> String !Never {
+    fn semantic_key(self) -> String Never! {
         "{self.kind.label()}:{self.key}"
     }
 
     // Every machine fact; two records agree exactly when these agree.
-    fn machine_identity(self) -> String !Never {
+    fn machine_identity(self) -> String Never! {
         "{self.kind.label()}:{self.key}:{self.exact}:{self.hash}:{self.platform}"
     }
 }
@@ -104,12 +104,12 @@ pub struct LockRationale {
     pub cache_provenance: String
     pub update_command: String
 
-    fn empty() -> LockRationale !Never {
+    fn empty() -> LockRationale Never! {
         LockRationale{owner_package: "", reason: "", source_ref: "", provider: "", channel_input: "", exact_output: "", policy_fingerprint: "", recipe_id: "", adapter_id: "", signature: "", cache_provenance: "", update_command: ""}
     }
 
     // Set one `.jet/lock` rationale field by its key; unknown keys are ignored.
-    fn set_field(&self, key: String, value: String) !Never {
+    fn set_field(&self, key: String, value: String) Never! {
         if key == {
             "owner-package" -> self.owner_package = value
             "reason" -> self.reason = value
@@ -134,7 +134,7 @@ pub struct SemanticRecord {
     // Fields written by a newer lock, kept by key for round trips.
     pub future_fields: [String: String]
 
-    fn new(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord !Never {
+    fn new(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
         SemanticRecord{identity, rationales: [LockRationale]{rationale}, future_fields: [String: String]{}}
     }
 }
@@ -157,27 +157,27 @@ pub struct SemanticLockFile {
     pub inputs: [LockInput]
     pub source_maps: [SourceMapEntry]
 
-    fn empty() -> SemanticLockFile !Never {
+    fn empty() -> SemanticLockFile Never! {
         SemanticLockFile{records: [SemanticRecord]{}, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
     }
 
-    fn with_records(records: [SemanticRecord]) -> SemanticLockFile !Never {
+    fn with_records(records: [SemanticRecord]) -> SemanticLockFile Never! {
         SemanticLockFile{records, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
     }
 
     // Drop every record of `kind` whose key is `key`.
-    fn remove_records(&self, kind: LockRecordKind, key: String) !Never {
+    fn remove_records(&self, kind: LockRecordKind, key: String) Never! {
         kept := [SemanticRecord]{}
         loop record in self.records {
             if record.identity.kind == kind && record.identity.key == key -> next
-            kept.push(record)
+            &kept.push(record)
         }
         self.records = kept
     }
 
     // Selective update: replace one semantic key; unrelated records keep
     // their bytes. Returns the replaced record.
-    fn selective_update(&self, new_record: SemanticRecord) -> ?SemanticRecord !Never {
+    fn selective_update(&self, new_record: SemanticRecord) -> SemanticRecord? Never! {
         key :: new_record.identity.semantic_key()
         found := -1
         loop index in 0..<self.records.len() {
@@ -187,43 +187,43 @@ pub struct SemanticLockFile {
             }
         }
         if found < 0 {
-            self.records.push(new_record)
+            &self.records.push(new_record)
             return None
         }
         previous :: ~self.records[found]
         kept := [SemanticRecord]{}
         loop index in 0..<self.records.len() {
-            if index != found -> kept.push(self.records[index])
+            if index != found -> &kept.push(self.records[index])
         }
-        kept.push(new_record)
+        &kept.push(new_record)
         self.records = kept
         Val(previous)
     }
 
     // Record a selected typed variant (E4-JP15). `platform` holds the
     // canonical `PackageVariant::identity_key()`.
-    fn record_selected_variant(&self, package: String, variant_identity: String, hash: String, reason: String) !Never {
+    fn record_selected_variant(&self, package: String, variant_identity: String, hash: String, reason: String) Never! {
         identity :: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash, platform: variant_identity}
         rationale := LockRationale.empty()
         rationale.owner_package = package
         rationale.reason = reason
         rationale.provider = "native"
         rationale.exact_output = variant_identity
-        self.remove_records(LockRecordKind.Variant, package)
-        self.records.push(SemanticRecord.new(identity, rationale))
+        &self.remove_records(LockRecordKind.Variant, package)
+        &self.records.push(SemanticRecord.new(identity, rationale))
     }
 
     // Identity keys of every locked variant domain, sorted and unique.
-    fn locked_variant_domains(self) -> [String] !Never {
+    fn locked_variant_domains(self) -> [String] Never! {
         domains := [String]{}
         loop record in self.records {
-            if record.identity.kind == LockRecordKind.Variant -> domains.push(record.identity.exact)
+            if record.identity.kind == LockRecordKind.Variant -> &domains.push(record.identity.exact)
         }
         pkg_overlay_sorted_unique(domains)
     }
 
     // Record a workspace catalog selection (E4-JP13).
-    fn record_catalog_selection(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) !Never {
+    fn record_catalog_selection(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
         identity :: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
         provider :: if trust_text_split_first(provider_ref, @TRUST_COLON) == {
             .Val(parts) -> parts.before
@@ -237,7 +237,7 @@ pub struct SemanticLockFile {
         why.exact_output = provider_ref
         why.adapter_id = "workspace.catalog"
         why.update_command = "jet update {logical_name}"
-        self.remove_records(LockRecordKind.Package, logical_name)
-        self.records.push(SemanticRecord.new(identity, why))
+        &self.remove_records(LockRecordKind.Package, logical_name)
+        &self.records.push(SemanticRecord.new(identity, why))
     }
 }

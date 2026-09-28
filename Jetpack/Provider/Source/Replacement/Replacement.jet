@@ -10,12 +10,12 @@ pub struct PackageIdentity {
     pub name: String
     pub version: String
 
-    fn new(provider: String, name: String, version: String) -> PackageIdentity !Never {
+    fn new(provider: String, name: String, version: String) -> PackageIdentity Never! {
         PackageIdentity{provider: provider, name: name, version: version}
     }
 
     // `provider:name`, or `provider:name@version` when versioned.
-    fn ref_string(self) -> String !Never {
+    fn ref_string(self) -> String Never! {
         if self.version == "" -> return "{self.provider}:{self.name}"
         "{self.provider}:{self.name}@{self.version}"
     }
@@ -41,13 +41,13 @@ pub struct ReplacementCandidate {
     pub proof_inputs: [String]
 
     // A candidate that is listed but has no proof yet.
-    fn visible_but_inactive(foreign_identity: PackageIdentity, native_identity: PackageIdentity) -> ReplacementCandidate !Never {
+    fn visible_but_inactive(foreign_identity: PackageIdentity, native_identity: PackageIdentity) -> ReplacementCandidate Never! {
         ReplacementCandidate{foreign_identity: foreign_identity, native_identity: native_identity, covered_public_symbols: [String]{}, unsupported_symbols: [String]{}, license: "", platforms: [String]{}, proof_status: ProofStatus.Missing, proof_digest: "", proof_inputs: [String]{}}
     }
 
     // Activate this candidate for `owner_package` on `platform` when its proof
     // passed, it covers the platform, and policy allows or prefers it.
-    fn resolve(self, policy: ReplacementPolicy, owner_package: String, platform: String) -> ReplacementDecision !Never {
+    fn resolve(self, policy: ReplacementPolicy, owner_package: String, platform: String) -> ReplacementDecision Never! {
         if self.proof_status != ProofStatus.Passed -> return ReplacementDecision.Inactive{reason: "compatibility proof has not passed"}
         if self.platforms.len() > 0 && !self.platforms.contains(platform) -> return ReplacementDecision.Inactive{reason: "replacement proof does not cover platform `{platform}`"}
         rule :: policy.rule_for(self)
@@ -65,7 +65,7 @@ pub struct ReplacementCandidate {
 
     // The semantic-lock record for this overlay; the proof inputs and covered
     // symbols ride along as future fields.
-    fn lock_record(self, owner_package: String, platform: String, policy_fingerprint: String) -> SemanticRecord !Never {
+    fn lock_record(self, owner_package: String, platform: String, policy_fingerprint: String) -> SemanticRecord Never! {
         foreign :: self.foreign_identity.ref_string()
         native :: self.native_identity.ref_string()
         identity :: LockIdentity{kind: LockRecordKind.ReplacementOverlay, key: "{foreign}@{platform}", exact: ~native, hash: self.proof_digest, platform: platform}
@@ -97,17 +97,17 @@ pub struct PublicSymbol {
     pub effects: [String]
     pub errors: [String]
 
-    fn new(name: String, signature: String) -> PublicSymbol !Never {
+    fn new(name: String, signature: String) -> PublicSymbol Never! {
         PublicSymbol{name: name, signature: signature, effects: [String]{}, errors: [String]{}}
     }
 
-    fn with_effects(self, effects: [String]) -> PublicSymbol !Never {
+    fn with_effects(self, effects: [String]) -> PublicSymbol Never! {
         out := self
         out.effects = effects
         out
     }
 
-    fn with_errors(self, errors: [String]) -> PublicSymbol !Never {
+    fn with_errors(self, errors: [String]) -> PublicSymbol Never! {
         out := self
         out.errors = errors
         out
@@ -123,15 +123,15 @@ pub struct GoldenFixture {
     pub files: [(path: String, content: String)]
     pub side_effects: [String]
 
-    fn new(name: String, stdout: String) -> GoldenFixture !Never {
+    fn new(name: String, stdout: String) -> GoldenFixture Never! {
         GoldenFixture{name: name, stdout: stdout, stderr: "", exit_code: 0, files: [(path: String, content: String)]{}, side_effects: [String]{}}
     }
 
     // Digest of every observed output.
-    fn fingerprint(self) -> String !Never {
+    fn fingerprint(self) -> String Never! {
         parts := [String]{self.stdout, self.stderr, "{self.exit_code}"}
-        loop file in self.files -> parts.push("{file.path}={file.content}")
-        loop side_effect in self.side_effects -> parts.push("effect={side_effect}")
+        loop file in self.files -> &parts.push("{file.path}={file.content}")
+        loop side_effect in self.side_effects -> &parts.push("effect={side_effect}")
         provider_replacement_digest(parts)
     }
 }
@@ -144,60 +144,60 @@ pub struct CompatibilitySurface {
     pub goldens: [GoldenFixture]
     pub platforms: [String]
 
-    fn new(identity: PackageIdentity) -> CompatibilitySurface !Never {
+    fn new(identity: PackageIdentity) -> CompatibilitySurface Never! {
         CompatibilitySurface{identity: identity, public_symbols: [PublicSymbol]{}, examples: [String]{}, goldens: [GoldenFixture]{}, platforms: [String]{}}
     }
 
     // Prove this native surface against `foreign` on `platform`: platform
     // availability, then every foreign public symbol by signature, effects,
     // and errors, then every foreign golden fixture.
-    fn prove_against(self, foreign: CompatibilitySurface, platform: String) -> ProofReport !Never {
+    fn prove_against(self, foreign: CompatibilitySurface, platform: String) -> ProofReport Never! {
         failures := [ProofFailure]{}
         if foreign.platforms.len() > 0 && !foreign.platforms.contains(platform) {
-            failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
+            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
         }
         if self.platforms.len() > 0 && !self.platforms.contains(platform) {
-            failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: self.platforms.join(","), found: "native surface unavailable"})
+            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: self.platforms.join(","), found: "native surface unavailable"})
         }
         covered := [String]{}
         foreign_symbols :: provider_replacement_by_name(foreign.public_symbols)
         native_symbols :: provider_replacement_by_name(self.public_symbols)
         foreign_names := foreign_symbols.keys().to_list()
-        foreign_names.sort()
+        &foreign_names.sort()
         loop name in foreign_names {
             expected :: foreign_symbols[name]
             found :: native_symbols.get(name) ?? {
-                failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: ~name, expected: expected.signature, found: "missing"})
+                &failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: ~name, expected: expected.signature, found: "missing"})
                 next
             }
             if expected.signature != found.signature {
-                failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: ~name, expected: expected.signature, found: found.signature})
+                &failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: ~name, expected: expected.signature, found: found.signature})
                 next
             }
             expected_effects :: provider_replacement_sorted_set(expected.effects)
             found_effects :: provider_replacement_sorted_set(found.effects)
             if expected_effects != found_effects {
-                failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: ~name, expected: expected_effects.join(","), found: found_effects.join(",")})
+                &failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: ~name, expected: expected_effects.join(","), found: found_effects.join(",")})
                 next
             }
             expected_errors :: provider_replacement_sorted_set(expected.errors)
             found_errors :: provider_replacement_sorted_set(found.errors)
             if expected_errors != found_errors {
-                failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: ~name, expected: expected_errors.join(","), found: found_errors.join(",")})
+                &failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: ~name, expected: expected_errors.join(","), found: found_errors.join(",")})
                 next
             }
-            covered.push(name)
+            &covered.push(name)
         }
         native_goldens :: provider_replacement_goldens_by_name(self.goldens)
         loop golden in foreign.goldens {
             if native_goldens.get(golden.name) == {
                 .Val(native) -> {
-                    if native != golden -> failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: native.fingerprint()})
+                    if native != golden -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: native.fingerprint()})
                 }
-                .None -> failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: "missing"})
+                .None -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: "missing"})
             }
         }
-        covered.sort()
+        &covered.sort()
         inputs :: provider_replacement_proof_inputs(foreign, self, platform)
         digest :: provider_replacement_digest(inputs)
         ProofReport{foreign_identity: foreign.identity, native_identity: self.identity, platform: platform, inputs: inputs, covered_public_symbols: covered, failures: failures, digest: digest}
@@ -229,21 +229,21 @@ pub struct ProofReport {
     pub failures: [ProofFailure]
     pub digest: String
 
-    fn passed(self) -> Bool !Never {
+    fn passed(self) -> Bool Never! {
         self.failures.len() == 0
     }
 
-    fn status(self) -> ProofStatus !Never {
+    fn status(self) -> ProofStatus Never! {
         if self.passed() -> return ProofStatus.Passed
         ProofStatus.Failed
     }
 
     // The candidate this proof yields; missing public symbols become its
     // unsupported symbols.
-    fn candidate(self, license: String, platforms: [String]) -> ReplacementCandidate !Never {
+    fn candidate(self, license: String, platforms: [String]) -> ReplacementCandidate Never! {
         unsupported := [String]{}
         loop failure in self.failures {
-            if failure.kind == ProofFailureKind.MissingPublicSymbol -> unsupported.push(failure.name)
+            if failure.kind == ProofFailureKind.MissingPublicSymbol -> &unsupported.push(failure.name)
         }
         ReplacementCandidate{
             foreign_identity: self.foreign_identity,
@@ -264,7 +264,7 @@ pub enum ReplacementPolicyMode {
     Deny
     Prefer
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Allow -> "allow"
             .Deny -> "deny"
@@ -287,26 +287,26 @@ pub struct ReplacementPolicy {
     pub rules: [ReplacementPolicyRule]
 
     // Deny everything.
-    fn deny_all() -> ReplacementPolicy !Never {
+    fn deny_all() -> ReplacementPolicy Never! {
         ReplacementPolicy{default_mode: ReplacementPolicyMode.Deny, rules: [ReplacementPolicyRule]{}}
     }
 
-    fn allow(foreign: PackageIdentity, native: PackageIdentity, owner_package: String) -> ReplacementPolicy !Never {
+    fn allow(foreign: PackageIdentity, native: PackageIdentity, owner_package: String) -> ReplacementPolicy Never! {
         ReplacementPolicy.single(foreign, native, owner_package, ReplacementPolicyMode.Allow)
     }
 
-    fn prefer(foreign: PackageIdentity, native: PackageIdentity, owner_package: String) -> ReplacementPolicy !Never {
+    fn prefer(foreign: PackageIdentity, native: PackageIdentity, owner_package: String) -> ReplacementPolicy Never! {
         ReplacementPolicy.single(foreign, native, owner_package, ReplacementPolicyMode.Prefer)
     }
 
-    fn single(foreign: PackageIdentity, native: PackageIdentity, owner_package: String, mode: ReplacementPolicyMode) -> ReplacementPolicy !Never {
+    fn single(foreign: PackageIdentity, native: PackageIdentity, owner_package: String, mode: ReplacementPolicyMode) -> ReplacementPolicy Never! {
         fingerprint :: "policy.replacements:{foreign.ref_string()}=>{native.ref_string()}:{mode.label()}"
         rule :: ReplacementPolicyRule{foreign_identity: foreign.ref_string(), native_identity: native.ref_string(), mode: mode, owner_package: owner_package, fingerprint: fingerprint}
         ReplacementPolicy{default_mode: ReplacementPolicyMode.Deny, rules: [ReplacementPolicyRule]{rule}}
     }
 
     // The rule for the candidate's exact foreign/native pair.
-    fn rule_for(self, candidate: ReplacementCandidate) -> ?ReplacementPolicyRule !Never {
+    fn rule_for(self, candidate: ReplacementCandidate) -> ReplacementPolicyRule? Never! {
         foreign :: candidate.foreign_identity.ref_string()
         native :: candidate.native_identity.ref_string()
         loop rule in self.rules {
@@ -340,16 +340,16 @@ pub enum ImporterReplacementStatus {
 // One importer progress line about a package's native replacement.
 pub struct ImporterProgressFact {
     pub foreign_identity: PackageIdentity
-    pub native_identity: ?PackageIdentity
+    pub native_identity: PackageIdentity?
     pub status: ImporterReplacementStatus
     pub proof_digest: String
     pub detail: String
 
-    fn no_candidate(foreign_identity: PackageIdentity) -> ImporterProgressFact !Never {
+    fn no_candidate(foreign_identity: PackageIdentity) -> ImporterProgressFact Never! {
         ImporterProgressFact{foreign_identity: foreign_identity, native_identity: None, status: ImporterReplacementStatus.NoCandidate, proof_digest: "", detail: "no native replacement candidate found"}
     }
 
-    fn from_candidate(candidate: ReplacementCandidate) -> ImporterProgressFact !Never {
+    fn from_candidate(candidate: ReplacementCandidate) -> ImporterProgressFact Never! {
         status :: if candidate.proof_status == {
             .Missing -> ImporterReplacementStatus.CandidateFound
             .Failed -> ImporterReplacementStatus.ProofFailed
@@ -358,13 +358,13 @@ pub struct ImporterProgressFact {
         ImporterProgressFact{foreign_identity: candidate.foreign_identity, native_identity: Val(candidate.native_identity), status: status, proof_digest: candidate.proof_digest, detail: candidate.covered_public_symbols.join(",")}
     }
 
-    fn active(candidate: ReplacementCandidate) -> ImporterProgressFact !Never {
+    fn active(candidate: ReplacementCandidate) -> ImporterProgressFact Never! {
         ImporterProgressFact{foreign_identity: candidate.foreign_identity, native_identity: Val(candidate.native_identity), status: ImporterReplacementStatus.ReplacementActive, proof_digest: candidate.proof_digest, detail: "policy enabled replacement"}
     }
 }
 
 // Symbols by name; a later symbol with the same name wins.
-fn provider_replacement_by_name(symbols: [PublicSymbol]) -> [String: PublicSymbol] !Never {
+fn provider_replacement_by_name(symbols: [PublicSymbol]) -> [String: PublicSymbol] Never! {
     out := [String: PublicSymbol]{}
     loop symbol in symbols {
         name :: ~symbol.name
@@ -373,7 +373,7 @@ fn provider_replacement_by_name(symbols: [PublicSymbol]) -> [String: PublicSymbo
     out
 }
 
-fn provider_replacement_goldens_by_name(goldens: [GoldenFixture]) -> [String: GoldenFixture] !Never {
+fn provider_replacement_goldens_by_name(goldens: [GoldenFixture]) -> [String: GoldenFixture] Never! {
     out := [String: GoldenFixture]{}
     loop golden in goldens {
         name :: ~golden.name
@@ -383,37 +383,37 @@ fn provider_replacement_goldens_by_name(goldens: [GoldenFixture]) -> [String: Go
 }
 
 // The values sorted without repeats.
-fn provider_replacement_sorted_set(values: [String]) -> [String] !Never {
+fn provider_replacement_sorted_set(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
-        if !out.contains(value) -> out.push(value)
+        if !out.contains(value) -> &out.push(value)
     }
-    out.sort()
+    &out.sort()
     out
 }
 
 // Every fact the proof read, sorted: identities, platform, symbols,
 // examples, and golden fixture fingerprints of both surfaces.
-fn provider_replacement_proof_inputs(foreign: CompatibilitySurface, native: CompatibilitySurface, platform: String) -> [String] !Never {
+fn provider_replacement_proof_inputs(foreign: CompatibilitySurface, native: CompatibilitySurface, platform: String) -> [String] Never! {
     inputs := [String]{"foreign={foreign.identity.ref_string()}", "native={native.identity.ref_string()}", "platform={platform}"}
     surfaces :: [CompatibilitySurface]{foreign, native}
     loop surface in surfaces {
         loop symbol in surface.public_symbols {
-            inputs.push("symbol={symbol.name}:{symbol.signature}:{provider_replacement_sorted_set(symbol.effects).join(",")}:{provider_replacement_sorted_set(symbol.errors).join(",")}")
+            &inputs.push("symbol={symbol.name}:{symbol.signature}:{provider_replacement_sorted_set(symbol.effects).join(",")}:{provider_replacement_sorted_set(symbol.errors).join(",")}")
         }
     }
     loop surface in surfaces {
-        loop example in surface.examples -> inputs.push("example={example}")
+        loop example in surface.examples -> &inputs.push("example={example}")
     }
     loop surface in surfaces {
-        loop golden in surface.goldens -> inputs.push("golden={golden.name}:{golden.fingerprint()}")
+        loop golden in surface.goldens -> &inputs.push("golden={golden.name}:{golden.fingerprint()}")
     }
-    inputs.sort()
+    &inputs.sort()
     inputs
 }
 
 // `proof-fnv64-<16 hex>`: FNV-1a 64 over each part's bytes followed by LF.
-fn provider_replacement_digest(parts: [String]) -> String !Never {
+fn provider_replacement_digest(parts: [String]) -> String Never! {
     prime :: U64{0x100000001b3}
     hash := U64{0xcbf29ce484222325}
     loop part in parts {
@@ -428,7 +428,7 @@ fn provider_replacement_digest(parts: [String]) -> String !Never {
     out := [U8]{}
     shift := 60
     loop shift >= 0 {
-        out.push(digits[Int{(hash >> shift) & U64{15}}])
+        &out.push(digits[Int{(hash >> shift) & U64{15}}])
         shift -= 4
     }
     "proof-fnv64-{pkg_bytes_text(out, 0, out.len())}"

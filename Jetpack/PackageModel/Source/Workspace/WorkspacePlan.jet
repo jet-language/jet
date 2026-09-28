@@ -36,7 +36,7 @@ pub struct WorkspacePlan {
     // reusable only while the source bytes keep this identity.
     pub source_digest: String
 
-    fn empty() -> WorkspacePlan !Never {
+    fn empty() -> WorkspacePlan Never! {
         WorkspacePlan{members: [WorkspacePlanMember]{}, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: ""}
     }
 }
@@ -58,7 +58,7 @@ pub struct WorkspacePlanMember {
 pub struct WorkspaceSourceError {
     pub diagnostic: Diagnostic
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         self.diagnostic.what
     }
 }
@@ -71,7 +71,7 @@ pub struct WorkspaceSourceError {
 // declaration is E1239, and any discovery I/O failure is an error rather
 // than an absent workspace, so callers never fall through to an outer
 // authority or a stale lock. A missing directory is no workspace.
-pub fn pkg_resolve_workspace_source(dir: String) -[FS]> ?WorkspaceSource !WorkspaceSourceError {
+pub fn pkg_resolve_workspace_source(dir: String) -[FS]> WorkspaceSource? WorkspaceSourceError! {
     resolver :: if AuthorityResolver.open(dir) == {
         .Ok(opened) -> opened
         .Err(error) -> {
@@ -87,7 +87,7 @@ pub fn pkg_resolve_workspace_source(dir: String) -[FS]> ?WorkspaceSource !Worksp
 
 // E0995: the canonical workspace source is present but has no workspace
 // declaration. Shared so discovery and evaluation cannot drift.
-pub fn pkg_e0995_no_workspace_module() -> Diagnostic !Never {
+pub fn pkg_e0995_no_workspace_module() -> Diagnostic Never! {
     diagnostic_from_registry(
         "E0995",
         None,
@@ -98,19 +98,19 @@ pub fn pkg_e0995_no_workspace_module() -> Diagnostic !Never {
 }
 
 // The lexed tokens of `src` without comments.
-fn pkg_workspace_code_tokens(src: String) -> [Token] !Never {
+fn pkg_workspace_code_tokens(src: String) -> [Token] Never! {
     lexed :: lex(src.bytes())
     tokens := [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
-        tokens.push(token)
+        &tokens.push(token)
     }
     tokens
 }
 
 // Cheap token probe for a top-level `module workspace` declaration. Full
 // parsing stays in the EnvModel workspace evaluator.
-pub fn pkg_declares_workspace_module(src: String) -> Bool !Never {
+pub fn pkg_declares_workspace_module(src: String) -> Bool Never! {
     tokens :: pkg_workspace_code_tokens(src)
     depth := 0
     loop index in 0..<(tokens.len() - 1) {
@@ -132,7 +132,7 @@ pub fn pkg_declares_workspace_module(src: String) -> Bool !Never {
 // True when a workspace declaration also supplies a `members:` index field.
 // A top-level `.jet` file that lists members is an index, not
 // authority-only metadata (D-JPK-FILENAME2=B).
-pub fn pkg_declares_workspace_members(src: String) -> Bool !Never {
+pub fn pkg_declares_workspace_members(src: String) -> Bool Never! {
     if !pkg_declares_workspace_module(src) -> return false
     loop token in pkg_workspace_code_tokens(src) {
         if token.kind == TOKEN_IDENT && token.payload.text == @MODULE_FIELD_MEMBERS -> return true
@@ -142,11 +142,11 @@ pub fn pkg_declares_workspace_members(src: String) -> Bool !Never {
 
 // E1239: the workspace authority must have one declaration source. Each
 // path is shown by its file name.
-pub fn pkg_e1239_ambiguous_workspace(paths: [String]) -> Diagnostic !Never {
+pub fn pkg_e1239_ambiguous_workspace(paths: [String]) -> Diagnostic Never! {
     names := [String]{}
     loop path in paths {
         name :: files.basename(path)
-        names.push(if name == "" -> path else -> name)
+        &names.push(if name == "" -> path else -> name)
     }
     diagnostic_from_registry(
         "E1239",

@@ -1,10 +1,14 @@
-// The Trust area's one error carrier. Flake graph failures keep the exact
-// `FlakeGraphError` text of the Rust reference; `Rejected` is a semantic lock
-// write refused by revalidation (Rust `LockCommitError` without I/O), and
-// `Io` carries boundary failures whose text is already final.
+// The Trust area's one error carrier. Every variant keeps the exact message
+// text of its Rust source: `FlakeGraphError` (SemanticLock), the string
+// errors of Trust.rs and Secrets.rs, the JetPin diagnostics, and
+// `TrustRoot::TrustError`. `Rejected` is a semantic lock write refused by
+// revalidation (Rust `LockCommitError` without I/O); `Io` carries boundary
+// failures whose text is already final (Rust `LockCommitError::io`,
+// `FlakeGraphError::Io`, `TrustRoot::TrustError::IO`).
 
 #Error
 pub enum TrustError {
+    // ── SemanticLock flake graph ──
     EmptyInputName
     DuplicateInput(String)
     ConflictingInput(input: String, field: String)
@@ -15,8 +19,37 @@ pub enum TrustError {
     StaleSemanticLock(String)
     Io(String)
     Rejected([ValidationIssue])
+    // ── Trust store grants (Trust.rs `Result<_, String>`) ──
+    Grant(String)
+    // ── Repository secrets (Secrets.rs `Result<_, String>`) ──
+    Secret(String)
+    // ── Self-toolchain pin diagnostics (JetPin.rs `Diagnostic`) ──
+    Coded(TrustDiagnostic)
+    // ── TUF trust root (TrustRoot.rs `TrustError`) ──
+    BootstrapPinMismatch(expected: String, actual: String)
+    BootstrapMissing
+    SignatureStripped(role: MetadataRole)
+    SignatureInvalid(role: MetadataRole, detail: String)
+    ThresholdUnmet(role: MetadataRole, have: Int, need: Int)
+    Rollback(role: MetadataRole, current: Int, incoming: Int)
+    Expired(role: MetadataRole, expires_unix: Int, now_unix: Int)
+    BadClock(skew_secs: Int, max_secs: Int)
+    MetadataTooLarge(role: MetadataRole, size: Int, max: Int)
+    ConsistentSnapshotMismatch(role: String, detail: String)
+    DelegationDenied(path: String, detail: String)
+    UnknownKey(key_id: String)
+    InvalidKey(detail: String)
+    InvalidThreshold(detail: String)
+    InvalidPublisher(detail: String)
+    IdentityKindMismatch(kind: IdentityKind, detail: String)
+    RotationRejected(detail: String)
+    CacheReceiptExpired(expires_unix: Int, now_unix: Int)
+    CacheReceiptInvalid(detail: String)
+    CacheKeyChanged(role: String, expected: String, actual: String)
+    CacheKeyMissing(role: String)
+    CacheBuilderRevoked(builder: String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .EmptyInputName -> "flake input has an empty name"
             .DuplicateInput(name) -> "flake input `{name}` is declared more than once"
@@ -29,9 +62,38 @@ pub enum TrustError {
             .Io(text) -> text
             .Rejected(issues) -> {
                 messages := [String]{}
-                loop issue in issues -> messages.push(issue.message())
+                loop issue in issues -> &messages.push(issue.message())
                 messages.join("; ")
             }
+            .Grant(text) -> text
+            .Secret(text) -> text
+            .Coded(diagnostic) -> diagnostic.what
+            .BootstrapPinMismatch(expected, actual) -> "trusted-root bootstrap pin mismatch: expected {expected}, got {actual}"
+            .BootstrapMissing -> "trusted-root bootstrap pin is missing"
+            .SignatureStripped(role) -> "{role.label()} metadata has no signatures (signature stripping rejected)"
+            .SignatureInvalid(role, detail) -> "{role.label()} signature invalid: {detail}"
+            .ThresholdUnmet(role, have, need) -> "{role.label()} threshold unmet: have {have}, need {need}"
+            .Rollback(role, current, incoming) -> "{role.label()} version rollback rejected: current {current}, incoming {incoming}"
+            .Expired(role, expires_unix, now_unix) -> "{role.label()} metadata expired at {expires_unix} (trusted now {now_unix})"
+            .BadClock(skew_secs, max_secs) -> "bad clock: skew {skew_secs}s exceeds max {max_secs}s"
+            .MetadataTooLarge(role, size, max) -> "{role.label()} metadata too large: {size} > {max}"
+            .ConsistentSnapshotMismatch(role, detail) -> "consistent snapshot mismatch for `{role}`: {detail}"
+            .DelegationDenied(path, detail) -> "delegation denied for `{path}`: {detail}"
+            .UnknownKey(key_id) -> "unknown trust key `{key_id}`"
+            .InvalidKey(detail) -> detail
+            .InvalidThreshold(detail) -> detail
+            .InvalidPublisher(detail) -> detail
+            .IdentityKindMismatch(kind, detail) -> "identity kind {kind.label()}: {detail}"
+            .RotationRejected(detail) -> detail
+            .CacheReceiptExpired(expires_unix, now_unix) -> "cache receipt expired at {expires_unix} (trusted now {now_unix})"
+            .CacheReceiptInvalid(detail) -> detail
+            .CacheKeyChanged(role, expected, actual) -> "cache key for `{role}` changed: expected {expected}, got {actual}"
+            .CacheKeyMissing(role) -> "cache key pin for `{role}` is missing"
+            .CacheBuilderRevoked(builder) -> "cache builder `{builder}` is revoked"
         }
     }
 }
+
+impl IOError -> TrustError { TrustError.Io("{self}") }
+
+impl LockError -> TrustError { TrustError.Io(self.message()) }

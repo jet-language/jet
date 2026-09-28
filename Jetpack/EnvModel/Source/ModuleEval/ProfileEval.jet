@@ -1,0 +1,162 @@
+// D-JPK-PROFILE1=D: evaluate one `profile.<name>` package-generation
+// declaration (`extends`, `packages`, `collisions`) into a source-backed
+// `PackageProfileSpec`.
+
+// The closed fields of a package generation.
+enum ProfileField {
+    Extends
+    Packages
+    Collisions
+
+    fn parse(name: String) -> ProfileField? Never! {
+        if name == {
+            @PROFILE_FIELD_EXTENDS -> Val(ProfileField.Extends)
+            @PROFILE_FIELD_PACKAGES -> Val(ProfileField.Packages)
+            @PROFILE_FIELD_COLLISIONS -> Val(ProfileField.Collisions)
+            else -> None
+        }
+    }
+}
+
+// A `profile.<name>: Profile{ … }` contribution written as an expression.
+pub fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+    if value == {
+        .StructLit(type_name, _, _, _, fields, _, _) -> {
+            if type_name != "" && type_name != @TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(@TYPE_PROFILE, type_name, expr_span(value)))
+            named := [NamedExpr]{}
+            loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            Ok(envmodel_evaluate_package_profile_fields(name, named, src, scope, globals, module_name))
+        }
+        else -> Err(envmodel_not_a_namespace_literal(@TYPE_PROFILE, expr_span(value)))
+    }
+}
+
+pub fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+    seen := [String]{}
+    loop field in fields {
+        if ProfileField.parse(field.name) == None {
+            return Err(envmodel_error("E1333", "package generation `{name}` has unknown field `{field.name}`", "a source-backed package generation has only `extends`, `packages`, and `collisions` facts", "remove the field or move user/environment settings into a declared `user.<name>` generation", Val(field.name_span)))
+        }
+        if seen.contains(field.name) {
+            return Err(envmodel_error("E1332", "package generation `{name}` repeats field `{field.name}`", "one package generation must have one value for each typed fact", "keep one declaration for the field, or split the generations and compose them with `extends`", Val(field.name_span)))
+        }
+        &seen.push(field.name)
+    }
+    field_map := [String: NamedFieldExpr]{}
+    loop field in fields {
+        if ProfileField.parse(field.name) == Val(ProfileField.Extends) -> field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
+    }
+    computed :: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "package generation fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one generation field a literal or by moving the shared computation into a pure function")
+    resolved :: computed.values
+    packages := [String]{}
+    extends := [String]{}
+    collisions := [String: String]{}
+    loop field in fields {
+        if ProfileField.parse(field.name) != Val(ProfileField.Packages) -> next
+        extracted :: envmodel_extract_packages(field.value, src)
+        loop package in extracted.packages {
+            raw :: envmodel_pkg_ref(package)
+            if !packages.contains(raw) -> &packages.push(raw)
+        }
+        if extracted.adapters.len() > 0 {
+            return Err(envmodel_error("E1335", "package generation `{name}` contains an adapter package", "generation packages must retain provider identity and cannot hide a build recipe inside the generation declaration", "realize the adapter as a named package, then reference its exact package identity", Val(expr_span(field.value))))
+        }
+    }
+    if resolved.get(@PROFILE_FIELD_EXTENDS) == {
+        .Val(value) -> {
+            extends = envmodel_string_names_from(value) ?? return Err(envmodel_error("E1333", "package generation `{name}` has invalid `extends`", "generation inheritance is a deterministic list of generation names", "write `extends: [\"base\"]`", Val(envmodel_value_span(fields, @PROFILE_FIELD_EXTENDS))))
+        }
+        .None -> {}
+    }
+    loop field in fields {
+        if ProfileField.parse(field.name) == Val(ProfileField.Collisions) {
+            collisions = envmodel_package_profile_collisions_source(src, name, expr_span(field.value))
+            break
+        }
+    }
+    Ok(PackageProfileSpec{name: name, extends: extends, packages: packages, collisions: collisions, sources: [String]{module_name}})
+}
+
+// The name span of field `name`, or an empty span at 0.
+fn envmodel_value_span(fields: [NamedExpr], name: String) -> Span Never! {
+    loop field in fields {
+        if field.name == name -> return field.name_span
+    }
+    Span{start: 0, end: 0}
+}
+
+// Lower a general `[String]` value (package-generation inheritance).
+fn envmodel_string_names_from(value: CtValue) -> [String]? Never! {
+    envmodel_strings_from(value)
+}
+
+fn envmodel_invalid_collisions(name: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E1333", "package generation `{name}` has invalid `collisions`", "collision policy is an exact string path-to-provider map", "write `collisions: {{ \"bin/editor\": \"editor@nixpkgs\" }}`", Val(span))
+}
+
+// `collisions: { "path": "provider", … }` read from its exact source text, so
+// the paths and provider identities stay byte-exact.
+fn envmodel_package_profile_collisions_source(src: String, name: String, span: Span) -> [String: String] EnvModelEvalError! {
+    source_bytes :: src.bytes()
+    if span.start < 0 || span.end > source_bytes.len() || span.start > span.end -> return Err(envmodel_invalid_collisions(name, span))
+    fragment :: String.from_bytes(source_bytes[span.start..<span.end]) ?? return Err(envmodel_invalid_collisions(name, span))
+    values :: envmodel_quoted_collision_values(fragment)
+    if values.len() == 0 || values.len() % 2 != 0 -> return Err(envmodel_invalid_collisions(name, span))
+    out := [String: String]{}
+    index := 0
+    loop index + 1 < values.len() {
+        path :: values[index]
+        provider :: values[index + 1]
+        index += 2
+        if path.trim() == "" || provider.trim() == "" || path.bytes().contains(U8{0}) {
+            return Err(envmodel_error("E1333", "package generation `{name}` has an invalid collision entry", "exact collision paths and provider identities cannot be empty or contain NUL", "name the path and the exact package provider", Val(span)))
+        }
+        if out.has_key(path) {
+            return Err(envmodel_error("E1332", "package generation `{name}` repeats collision path `{path}`", "one generation cannot choose two providers for one exact path", "keep one collision selection for the path", Val(span)))
+        }
+        out[path] = provider
+    }
+    Ok(out)
+}
+
+// Every double-quoted string in `fragment`, decoded; empty when a string is
+// left unterminated.
+fn envmodel_quoted_collision_values(fragment: String) -> [String] Never! {
+    values := [String]{}
+    characters :: fragment.chars().to_list()
+    index := 0
+    loop index < characters.len() {
+        character :: characters[index]
+        index += 1
+        if character != '"' -> next
+        value := ""
+        escaped := false
+        closed := false
+        loop index < characters.len() {
+            next_character :: characters[index]
+            index += 1
+            if escaped {
+                decoded :: if next_character == {
+                    'n' -> "\n"
+                    'r' -> String.from_bytes([U8]{U8{13}}) ?? ""
+                    't' -> "\t"
+                    '\\' -> "\\"
+                    '"' -> "\""
+                    else -> "{next_character}"
+                }
+                value = "{value}{decoded}"
+                escaped = false
+            } else if next_character == '\\' {
+                escaped = true
+            } else if next_character == '"' {
+                closed = true
+                break
+            } else {
+                value = "{value}{next_character}"
+            }
+        }
+        if !closed -> return [String]{}
+        &values.push(value)
+    }
+    values
+}

@@ -1,0 +1,311 @@
+// Claims ported from crates/jet-env-model/src/WorkspaceFile.rs #[cfg(test)].
+
+fn envmodel_test_workspace_dir(label: String) -[FS]> String {
+    files.tmpdir("workspace-{label}-") ?? panic("scratch directory")
+}
+
+// Write `package.jet` with `text` under `root/relative`.
+fn envmodel_test_write_package(root: String, relative: String, text: String) -[FS]> {
+    directory :: if relative == "" -> root else -> files.join(root, relative)
+    files.create_dir_all(directory) ?? panic("package directory")
+    files.write(files.join(directory, @PACKAGE_FILE), text) ?? panic("package manifest")
+}
+
+fn envmodel_test_eval(src: String) -[FS, Env]> WorkspacePlan {
+    envmodel_workspace_evaluate(src, sys.temp_dir()) ?? panic("evaluation should succeed")
+}
+
+fn envmodel_test_eval_in(src: String, base_dir: String) -[FS]> WorkspacePlan {
+    envmodel_workspace_evaluate(src, base_dir) ?? panic("evaluation should succeed")
+}
+
+fn envmodel_test_eval_error_in(src: String, base_dir: String) -[FS]> Diagnostic {
+    if envmodel_workspace_evaluate(src, base_dir) == {
+        .Ok(_) -> panic("evaluation should fail")
+        .Err(error) -> error.diagnostic
+    }
+}
+
+fn envmodel_test_eval_error(src: String) -[FS, Env]> Diagnostic {
+    envmodel_test_eval_error_in(src, sys.temp_dir())
+}
+
+// The diagnostic of a present-but-failing `load`.
+fn envmodel_test_load_error(dir: String) -[FS]> Diagnostic {
+    if envmodel_workspace_load(dir) == {
+        .Ok(_) -> panic("the workspace source must be surfaced as an error")
+        .Err(error) -> error.diagnostic
+    }
+}
+
+fn envmodel_test_load_is_none(dir: String) -[FS]> Bool {
+    loaded :: envmodel_workspace_load(dir) ?? panic("load must not fail")
+    loaded == None
+}
+
+fn envmodel_test_member_names(plan: WorkspacePlan) -> [String] {
+    names := [String]{}
+    loop member in plan.members -> &names.push(member.name)
+    names
+}
+
+fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
+    paths := [String]{}
+    loop member in plan.members -> &paths.push(member.path)
+    paths
+}
+
+#Test("empty members list") {
+    plan :: envmodel_test_eval("module workspace {{\n    members: []\n}}\n")
+    assert_eq(plan.members.len(), 0)
+}
+
+#Test("overlay policy survives workspace eval") {
+    src :: "\nmodule workspace {{\n    members: []\n    overlay plasma_beta {{\n        provider: Provider.nixpkgs(channel: \"plasma-beta\")\n        package(\"foo\").patches += [patch(\"patches/foo.patch\")]\n    }}\n    policy.allowUnfree: [\"discord\"]\n}}\n"
+    plan :: envmodel_test_eval(src)
+    assert_eq(plan.members.len(), 0)
+    assert_eq(plan.overlay_policy.allow_unfree, [String]{"discord"})
+    patches :: plan.overlay_policy.package_override("plasma_beta", "foo") ?? panic("the overlay package override survives")
+    assert_eq(patches.patches, [String]{"patches/foo.patch"})
+}
+
+#Test("explicit string list") {
+    tmp :: envmodel_test_workspace_dir("explicit-list")
+    envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
+    envmodel_test_write_package(tmp, "packages/ranker", "name: \"ranker\"\n")
+    plan :: envmodel_test_eval_in("module workspace {{\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}}\n", tmp)
+    assert_eq(plan.members.len(), 2)
+    assert_eq(plan.members[0].path, "./packages/hello")
+    assert_eq(plan.members[0].name, "hello")
+    assert_eq(plan.members[1].path, "./packages/ranker")
+    assert_eq(plan.members[1].name, "ranker")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("member can be the workspace root") {
+    tmp :: envmodel_test_workspace_dir("member-root")
+    envmodel_test_write_package(tmp, "", "name: \"root\"\n")
+    plan :: envmodel_workspace_evaluate("module workspace {{ members: [\".\"] }}\n", tmp) ?? panic("the workspace root may be an explicit member")
+    assert_eq(plan.members.len(), 1)
+    assert_eq(plan.members[0].path, ".")
+    assert_eq(plan.members[0].name, "root")
+    assert_eq(plan.members[0].canonical_path, ".")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("member paths cannot duplicate one physical directory") {
+    tmp :: envmodel_test_workspace_dir("member-physical-duplicate")
+    envmodel_test_write_package(tmp, "packages/app", "name: \"app\"\n")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/app\", \"./packages/app/.\"] }}\n", tmp)
+    assert_eq(error.code, "E1324")
+    assert(error.span != None)
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("member names are unique") {
+    tmp :: envmodel_test_workspace_dir("member-name-duplicate")
+    envmodel_test_write_package(tmp, "packages/one", "name: \"same\"\n")
+    envmodel_test_write_package(tmp, "packages/two", "name: \"same\"\n")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/one\", \"./packages/two\"] }}\n", tmp)
+    assert_eq(error.code, "E1325")
+    assert(error.span != None)
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("member package cannot declare nested members") {
+    tmp :: envmodel_test_workspace_dir("member-nested")
+    envmodel_test_write_package(tmp, "packages/app", "name: \"app\"\nmembers: [\"./child\"]\n")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/app\"] }}\n", tmp)
+    assert_eq(error.code, "E1323")
+    assert(error.what.contains(files.join(files.join(tmp, "packages/app"), @PACKAGE_FILE)))
+    assert(error.span != None)
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("malformed member metadata is not replaced by path name") {
+    tmp :: envmodel_test_workspace_dir("member-malformed-metadata")
+    envmodel_test_write_package(tmp, "packages/app", "not package metadata\n")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/app\"] }}\n", tmp)
+    assert_eq(error.code, "E1206")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("member symlink cannot escape workspace root") {
+    if sys.family() == "windows" -> return
+    tmp :: envmodel_test_workspace_dir("member-symlink-escape")
+    outside :: envmodel_test_workspace_dir("member-symlink-target")
+    envmodel_test_write_package(outside, "", "name: \"outside\"\n")
+    files.create_dir_all(files.join(tmp, "packages")) ?? panic("packages directory")
+    files.symlink(outside, files.join(tmp, "packages/escape")) ?? panic("escaping symlink")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/escape\"] }}\n", tmp)
+    assert_eq(error.code, "E1334")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+    files.remove_all(outside) ?? panic("scratch cleanup")
+}
+
+#Test("members references sibling comptime const") {
+    // A `members:` expression can name a top-level `comptime` binding declared
+    // in the same file, not just inline literals.
+    tmp :: envmodel_test_workspace_dir("comptime-list")
+    envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
+    envmodel_test_write_package(tmp, "packages/ranker", "name: \"ranker\"\n")
+    plan :: envmodel_test_eval_in("@PKGS :: [\"./packages/hello\", \"./packages/ranker\"]\nmodule workspace {{\n    members: PKGS\n}}\n", tmp)
+    assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("members composes comptime const with string ops") {
+    // A binding can be composed inside the list expression.
+    tmp :: envmodel_test_workspace_dir("comptime-strings")
+    envmodel_test_write_package(tmp, "workspace-packages/a", "name: \"a\"\n")
+    envmodel_test_write_package(tmp, "workspace-packages/b", "name: \"b\"\n")
+    plan :: envmodel_test_eval_in("@BASE :: \"./workspace-packages\"\nmodule workspace {{\n    members: [\"{{BASE}}/a\", \"{{BASE}}/b\"]\n}}\n", tmp)
+    assert_eq(envmodel_test_member_paths(plan), [String]{"./workspace-packages/a", "./workspace-packages/b"})
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("members calls top level fn") {
+    // A `members:` expression can call a top-level helper `fn`.
+    tmp :: envmodel_test_workspace_dir("comptime-function")
+    envmodel_test_write_package(tmp, "pkgs/hello", "name: \"hello\"\n")
+    envmodel_test_write_package(tmp, "pkgs/ranker", "name: \"ranker\"\n")
+    plan :: envmodel_test_eval_in("fn member(name: String) -> String {{ return \"./pkgs/{{name}}\" }}\nmodule workspace {{\n    members: [member(\"hello\"), member(\"ranker\")]\n}}\n", tmp)
+    assert_eq(envmodel_test_member_paths(plan), [String]{"./pkgs/hello", "./pkgs/ranker"})
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("e0995 no workspace module") {
+    assert_eq(envmodel_test_eval_error("module dev {{ env.dev: Env{{ packages: [] }} }}\n").code, "E0995")
+}
+
+#Test("e0996 members not a list") {
+    assert_eq(envmodel_test_eval_error("module workspace {{ members: 42 }}\n").code, "E0996")
+}
+
+#Test("e0996 members list non string") {
+    assert_eq(envmodel_test_eval_error("module workspace {{ members: [1, 2] }}\n").code, "E0996")
+}
+
+#Test("e0997 find missing dir") {
+    assert_eq(envmodel_test_eval_error("module workspace {{ members: find(\"./no-such-packages\") }}\n").code, "E0997")
+}
+
+#Test("internal workspace module is skipped by discovery") {
+    // An internal module doesn't count as the discovered workspace declaration.
+    assert_eq(envmodel_test_eval_error("module _workspace {{ members: [] }}\n").code, "E0995")
+}
+
+#Test("find discovers package jet directories") {
+    tmp :: envmodel_test_workspace_dir("workspace-find")
+    envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
+    envmodel_test_write_package(tmp, "packages/ranker", "name: \"ranker\"\n")
+    // packages/lib has no package.jet and is ignored.
+    files.create_dir_all(files.join(tmp, "packages/lib")) ?? panic("lib directory")
+    plan :: envmodel_workspace_evaluate("module workspace {{ members: find(\"./packages\") }}\n", tmp) ?? panic("should succeed")
+    assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
+    paths :: envmodel_test_member_paths(plan)
+    has_hello := false
+    has_ranker := false
+    loop path in paths {
+        if path.contains("hello") -> has_hello = true
+        if path.contains("ranker") -> has_ranker = true
+    }
+    assert(has_hello, "paths: {paths}")
+    assert(has_ranker, "paths: {paths}")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("find does not skip unreadable member metadata") {
+    if sys.family() == "windows" -> return
+    tmp :: envmodel_test_workspace_dir("workspace-find-bad-metadata")
+    package :: files.join(tmp, "packages/app")
+    files.create_dir_all(package) ?? panic("package directory")
+    files.symlink("missing-package.jet", files.join(package, @PACKAGE_FILE)) ?? panic("dangling manifest symlink")
+    error :: envmodel_test_eval_error_in("module workspace {{ members: find(\"./packages\") }}\n", tmp)
+    assert_eq(error.code, "E1334")
+    files.remove_all(tmp) ?? panic("scratch cleanup")
+}
+
+#Test("workspace metadata must be regular and not symlinked") {
+    if sys.family() == "windows" -> return
+    symlinked :: envmodel_test_workspace_dir("workspace-source-symlink")
+    target :: files.join(symlinked, "workspace-source.txt")
+    files.write(target, "module workspace {{ members: [] }}\n") ?? panic("workspace source")
+    files.symlink(target, files.join(symlinked, @WORKSPACE_FILE)) ?? panic("workspace symlink")
+    assert_eq(envmodel_test_load_error(symlinked).code, "E1334")
+    files.remove_all(symlinked) ?? panic("scratch cleanup")
+
+    nonregular :: envmodel_test_workspace_dir("workspace-source-directory")
+    files.create_dir_all(files.join(nonregular, @WORKSPACE_FILE)) ?? panic("workspace directory")
+    assert_eq(envmodel_test_load_error(nonregular).code, "E1239")
+    files.remove_all(nonregular) ?? panic("scratch cleanup")
+}
+
+#Test("committed workspace example evaluates clean") {
+    // I5: a workspace.jet with find() discovers package members.
+    dir :: envmodel_test_workspace_dir("ws-example")
+    envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
+    envmodel_test_write_package(dir, "packages/ranker", "name: \"ranker\"\n")
+    workspace_path :: files.join(dir, @WORKSPACE_FILE)
+    files.write(workspace_path, "module workspace {{\n    members: find(\"./packages\")\n}}\n") ?? panic("workspace source")
+    src :: files.read(workspace_path) ?? panic("workspace source readable")
+    plan :: envmodel_workspace_evaluate(src, dir) ?? panic("workspace fixture should evaluate clean")
+    names :: envmodel_test_member_names(plan)
+    assert(names.contains("hello"))
+    assert(names.contains("ranker"))
+}
+
+// D-JPK-FILENAME2=B (A2): an arbitrary top-level declaration may provide
+// authority, while only `workspace.jet` provides the member index.
+
+#Test("workspace module discovered in arbitrary filename") {
+    dir :: envmodel_test_workspace_dir("ws-arbitrary")
+    files.write(files.join(dir, "repo-index.jet"), "module workspace {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("authority source")
+    assert(envmodel_test_load_is_none(dir), "authority metadata is not the index")
+    // An arbitrary authority cannot repair a malformed reserved index.
+    files.write(files.join(dir, @WORKSPACE_FILE), "module env {{}}\n") ?? panic("malformed index")
+    assert_eq(envmodel_test_load_error(dir).code, "E0995")
+}
+
+#Test("malformed arbitrary workspace declaration is not absent") {
+    dir :: envmodel_test_workspace_dir("ws-arbitrary-malformed")
+    files.write(files.join(dir, "repo-index.jet"), "module workspace {{ members: [ }}\n") ?? panic("malformed declaration")
+    failed :: if envmodel_workspace_load(dir) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(failed, "a workspace declaration candidate must be surfaced")
+}
+
+#Test("workspace module discovered in pkg jet") {
+    dir :: envmodel_test_workspace_dir("ws-in-pkg")
+    files.write(files.join(dir, @PAYLOAD_FILE), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("payload source")
+    assert(envmodel_test_load_is_none(dir), "authority metadata is not the index")
+}
+
+#Test("workspace jet and discovered file are e1239") {
+    dir :: envmodel_test_workspace_dir("ws-canonical-wins")
+    envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
+    files.write(files.join(dir, @WORKSPACE_FILE), "module workspace {{ members: find(\"./packages\") }}\n") ?? panic("workspace source")
+    // A canonical filename never shadows another declaration.
+    files.write(files.join(dir, "other.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("other declaration")
+    diagnostic :: envmodel_test_load_error(dir)
+    assert_eq(diagnostic.code, "E1239")
+    assert(diagnostic.what.contains(@WORKSPACE_FILE))
+    assert(diagnostic.what.contains("other.jet"))
+}
+
+#Test("two discovered workspace declarations are e1239") {
+    dir :: envmodel_test_workspace_dir("ws-ambiguous")
+    files.write(files.join(dir, "a.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("first declaration")
+    files.write(files.join(dir, "b.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("second declaration")
+    diagnostic :: envmodel_test_load_error(dir)
+    assert_eq(diagnostic.code, "E1239")
+    assert(diagnostic.what.contains("a.jet") && diagnostic.what.contains("b.jet"))
+}
+
+#Test("no workspace anywhere is none") {
+    dir :: envmodel_test_workspace_dir("ws-none")
+    files.write(files.join(dir, "env.jet"), "module env.dev {{ }}\n") ?? panic("env source")
+    assert(envmodel_test_load_is_none(dir))
+}

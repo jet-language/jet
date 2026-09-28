@@ -10,7 +10,7 @@
 pub struct ArtifactEntryStatus {
     pub kind: ArtifactEntryKind
     pub key: String
-    pub namespace: ?String
+    pub namespace: String?
     pub size_bytes: Int
     pub last_use: Int
     pub pinned: Bool
@@ -23,9 +23,9 @@ pub struct ArtifactStoreStatus {
     pub footprint_bytes: Int
     pub limit_bytes: Int
     pub reserve_bytes: Int
-    pub available_bytes: ?Int
+    pub available_bytes: Int?
     pub live_leases: Int
-    pub host_limit_bytes: ?Int
+    pub host_limit_bytes: Int?
     pub entries: [ArtifactEntryStatus]
     pub tiers: [String]
 }
@@ -71,7 +71,7 @@ struct ArtifactStoredEntry {
     last_use: Int
     pinned: Bool
 
-    fn status(self) -> ArtifactEntryStatus !Never {
+    fn status(self) -> ArtifactEntryStatus Never! {
         namespace :: if self.key == {
             .Lto(namespace, _) -> Val(namespace)
             else -> None
@@ -92,20 +92,20 @@ struct ArtifactStoredEntry {
     }
 }
 
-fn store_artifact_sort_entries(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] !Never {
+fn store_artifact_sort_entries(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] Never! {
     out := entries
-    out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.key.kind().rank() <=> right.key.kind().rank()).then(left.key.primary() <=> right.key.primary()).then(left.key.secondary() <=> right.key.secondary()))
+    &out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.key.kind().rank() <=> right.key.kind().rank()).then(left.key.primary() <=> right.key.primary()).then(left.key.secondary() <=> right.key.secondary()))
     out
 }
 
-fn store_artifact_footprint(entries: [ArtifactStoredEntry]) -> Int !Never {
+fn store_artifact_footprint(entries: [ArtifactStoredEntry]) -> Int Never! {
     total := 0
     loop entry in entries -> total = store_artifact_saturating_add(total, entry.size_bytes)
     total
 }
 
 // Multiplication clamped at the largest Int (Rust `saturating_mul` on u64).
-fn store_artifact_saturating_mul(left: Int, right: Int) -> Int !Never {
+fn store_artifact_saturating_mul(left: Int, right: Int) -> Int Never! {
     if left != 0 && right > @STORE_ARTIFACT_INT_MAX /% left -> return @STORE_ARTIFACT_INT_MAX
     left * right
 }
@@ -117,30 +117,30 @@ pub struct ArtifactStore {
     config: ArtifactStoreConfig
     owner: ArtifactProcessIdentity
 
-    fn open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+    fn open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         if config.root() == "" -> return Err(ArtifactStoreError.Config("store root cannot be empty"))
         store :: ArtifactStore{config, owner: ArtifactProcessIdentity.current()}
         store.ensure_layout()
         Ok(store)
     }
 
-    fn new(root: String) -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+    fn new(root: String) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         ArtifactStore.open(ArtifactStoreConfig.new(root))
     }
 
-    fn from_env() -[FS, Env, Rand]> ArtifactStore !ArtifactStoreError {
+    fn from_env() -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         ArtifactStore.open(ArtifactStoreConfig.from_env())
     }
 
-    fn config(self) -> ArtifactStoreConfig !Never { self.config }
+    fn config(self) -> ArtifactStoreConfig Never! { self.config }
 
-    fn root(self) -> String !Never { self.config.root() }
+    fn root(self) -> String Never! { self.config.root() }
 
-    fn owner(self) -> ArtifactProcessIdentity !Never { self.owner }
+    fn owner(self) -> ArtifactProcessIdentity Never! { self.owner }
 
     // The effective capacity: the explicit cap, else a tenth of the volume
     // capped at 20 GiB, never above the persisted host limit.
-    fn limit(self) -[FS, Exec, Time]> Int !Never {
+    fn limit(self) -[FS, Exec, Time]> Int Never! {
         total :: if store_artifact_filesystem_stats(self.root()) == {
             .Val(stats) -> Val(stats.total_bytes)
             else -> None
@@ -148,27 +148,27 @@ pub struct ArtifactStore {
         self.limit_with_disk(total)
     }
 
-    fn effective_limit(self) -[FS, Exec, Time]> Int !Never { self.limit() }
+    fn effective_limit(self) -[FS, Exec, Time]> Int Never! { self.limit() }
 
-    fn object_path(self, object: ObjectHandle) -> String !Never {
+    fn object_path(self, object: ObjectHandle) -> String Never! {
         files.join(files.join(self.root(), "cas"), object.key())
     }
 
-    fn action_path(self, action: ActionHandle) -> String !Never {
+    fn action_path(self, action: ActionHandle) -> String Never! {
         files.join(files.join(self.root(), "ac"), action.key())
     }
 
-    fn lto_path(self, namespace: String, object: ObjectHandle) -> String !Never {
+    fn lto_path(self, namespace: String, object: ObjectHandle) -> String Never! {
         files.join(files.join(files.join(self.root(), "lto"), namespace), object.key())
     }
 
-    fn publish_blob(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+    fn publish_blob(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
         object :: ObjectHandle.from_bytes(bytes)
         self.publish_object(object, bytes)
         Ok(object)
     }
 
-    fn publish_object(self, object: ObjectHandle, bytes: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+    fn publish_object(self, object: ObjectHandle, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         actual :: ObjectHandle.from_bytes(bytes)
         if actual != object {
             return Err(ArtifactStoreError.Corrupt{path: self.object_path(object), reason: "published bytes are {actual.text()}, expected {object.text()}"})
@@ -176,7 +176,7 @@ pub struct ArtifactStore {
         self.publish_data(ArtifactEntryKey.Blob(object.key()), self.object_path(object), bytes)
     }
 
-    fn get_blob(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+    fn get_blob(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         key :: ArtifactEntryKey.Blob(object.key())
         path :: self.object_path(object)
         if store_artifact_read_file(path) == {
@@ -198,7 +198,7 @@ pub struct ArtifactStore {
 
     // Read a blob when only its digest is available. This is the lookup used
     // by build-record pointers; the bytes remain verified before returning.
-    fn blob_by_digest(self, digest: ArtifactDigest) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+    fn blob_by_digest(self, digest: ArtifactDigest) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         key :: ArtifactEntryKey.Blob(digest.to_hex())
         path :: files.join(files.join(self.root(), "cas"), digest.to_hex())
         if store_artifact_read_file(path) == {
@@ -221,7 +221,7 @@ pub struct ArtifactStore {
     // Publish one immutable build record through the ordinary blob CAS.
     // `key` is the caller's content key. The small index pointer is mutable
     // only so `latest_build_record` can find the newest content key.
-    fn publish_build_record(self, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+    fn publish_build_record(self, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
         object :: self.publish_blob(record.to_json().bytes())
         self.ensure_layout()
         pointer :: self.build_record_pointer_path(key)
@@ -242,7 +242,7 @@ pub struct ArtifactStore {
     }
 
     // Load an immutable build record addressed by its content key.
-    fn build_record(self, key: String) -[FS, Env, Exec, Time, Rand]> ?BuildRecord !ArtifactStoreError {
+    fn build_record(self, key: String) -[FS, Env, Exec, Time, Rand]> BuildRecord? ArtifactStoreError! {
         pointer :: self.build_record_pointer_path(key)
         object :: self.read_build_pointer(pointer) ?? return Ok(None)
         bytes :: self.get_blob(object) ?? return Ok(None)
@@ -254,7 +254,7 @@ pub struct ArtifactStore {
     }
 
     // Load the most recent record for a logical program path.
-    fn latest_build_record(self, program: String) -[FS, Env, Exec, Time, Rand]> ?BuildRecord !ArtifactStoreError {
+    fn latest_build_record(self, program: String) -[FS, Env, Exec, Time, Rand]> BuildRecord? ArtifactStoreError! {
         path :: self.latest_build_record_pointer_path(program)
         key :: if store_artifact_read_file(path) == {
             .Missing -> {
@@ -271,15 +271,15 @@ pub struct ArtifactStore {
         self.build_record(key)
     }
 
-    fn build_record_pointer_path(self, key: String) -> String !Never {
+    fn build_record_pointer_path(self, key: String) -> String Never! {
         files.join(files.join(files.join(self.root(), "build-records"), "records"), ArtifactDigest.hash(key.bytes()).to_hex())
     }
 
-    fn latest_build_record_pointer_path(self, program: String) -> String !Never {
+    fn latest_build_record_pointer_path(self, program: String) -> String Never! {
         files.join(files.join(files.join(self.root(), "build-records"), "latest"), ArtifactDigest.hash(program.bytes()).to_hex())
     }
 
-    fn read_build_pointer(self, path: String) -[FS]> ?ObjectHandle !ArtifactStoreError {
+    fn read_build_pointer(self, path: String) -[FS]> ObjectHandle? ArtifactStoreError! {
         bytes :: if store_artifact_read_file(path) == {
             .Missing -> {
                 return Ok(None)
@@ -296,16 +296,16 @@ pub struct ArtifactStore {
         Ok(Val(ObjectHandle.new(digest, length)))
     }
 
-    fn get_object(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+    fn get_object(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         self.get_blob(object)
     }
 
-    fn contains(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> Bool !ArtifactStoreError {
+    fn contains(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> Bool ArtifactStoreError! {
         found :: self.get_blob(object)
         Ok(found != None)
     }
 
-    fn publish_action(self, action: ActionHandle, record: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+    fn publish_action(self, action: ActionHandle, record: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         path :: self.action_path(action)
         key :: ArtifactEntryKey.Action(action.key())
         encoded :: store_artifact_encode_action(action, record)
@@ -330,7 +330,7 @@ pub struct ArtifactStore {
         self.append_journal_locked("put", key, encoded.len())
     }
 
-    fn get_action(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+    fn get_action(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         key :: ArtifactEntryKey.Action(action.key())
         path :: self.action_path(action)
         if store_artifact_read_file(path) == {
@@ -355,9 +355,9 @@ pub struct ArtifactStore {
         }
     }
 
-    fn action(self, key: String) -> ActionHandle !Never { ActionHandle.from_key(key) }
+    fn action(self, key: String) -> ActionHandle Never! { ActionHandle.from_key(key) }
 
-    fn publish_lto(self, namespace: String, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle !ArtifactStoreError {
+    fn publish_lto(self, namespace: String, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
         valid :: LtoNamespace.new(namespace)
         object :: ObjectHandle.from_bytes(bytes)
         key :: ArtifactEntryKey.Lto{namespace: valid.name(), key: object.key()}
@@ -365,7 +365,7 @@ pub struct ArtifactStore {
         Ok(object)
     }
 
-    fn get_lto(self, namespace: String, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ?[U8] !ArtifactStoreError {
+    fn get_lto(self, namespace: String, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         valid :: LtoNamespace.new(namespace)
         key :: ArtifactEntryKey.Lto{namespace: valid.name(), key: object.key()}
         path :: self.lto_path(valid.name(), object)
@@ -386,29 +386,29 @@ pub struct ArtifactStore {
         }
     }
 
-    fn lto_namespace(self, namespace: String) -> LtoNamespace !ArtifactStoreError {
+    fn lto_namespace(self, namespace: String) -> LtoNamespace ArtifactStoreError! {
         LtoNamespace.new(namespace)
     }
 
-    fn acquire_lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+    fn acquire_lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         targets := [LeaseTarget]{}
-        loop object in objects -> targets.push(LeaseTarget.Blob(object))
+        loop object in objects -> &targets.push(LeaseTarget.Blob(object))
         self.acquire_artifact_lease(targets)
     }
 
-    fn lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+    fn lease(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         self.acquire_lease(objects)
     }
 
     // Pin `targets` from pruning until the returned lease is closed.
-    fn acquire_artifact_lease(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease !ArtifactStoreError {
+    fn acquire_artifact_lease(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         self.ensure_layout()
         lock :: self.acquire_lock()
         defer close(^lock)
         directory :: files.join(self.root(), "leases")
         path :: files.join(directory, "lease-{self.owner.pid()}-{store_artifact_unique_token()}")
         keys := [ArtifactEntryKey]{}
-        loop target in targets -> keys.push(target.entry_key())
+        loop target in targets -> &keys.push(target.entry_key())
         text := self.owner.owner_line("lease")
         loop key in store_artifact_unique_keys(keys) -> text = "{text}{key.kind_name()}|{key.wire_value()}\n"
         store_artifact_create_new_synced(path, text.bytes())
@@ -416,7 +416,7 @@ pub struct ArtifactStore {
         Ok(ArtifactLease{path, owner: self.owner})
     }
 
-    fn status(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus !ArtifactStoreError {
+    fn status(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         self.ensure_layout()
         lock :: self.acquire_lock()
         defer close(^lock)
@@ -424,7 +424,7 @@ pub struct ArtifactStore {
     }
 
     // The persisted machine-level cap, if one was configured.
-    fn host_limit(self) -[FS]> ?Int !ArtifactStoreError {
+    fn host_limit(self) -[FS]> Int? ArtifactStoreError! {
         path :: self.host_limit_path()
         bytes :: if files.read_bytes(path) == {
             .Ok(read) -> read
@@ -440,7 +440,7 @@ pub struct ArtifactStore {
     }
 
     // Persist or clear the stricter machine-level cap.
-    fn set_host_limit(self, limit_bytes: ?Int) !ArtifactStoreError -[FS, Env, Time, Rand]> {
+    fn set_host_limit(self, limit_bytes: Int?) ArtifactStoreError! -[FS, Env, Time, Rand]> {
         self.ensure_layout()
         lock :: self.acquire_lock()
         defer close(^lock)
@@ -459,7 +459,7 @@ pub struct ArtifactStore {
         }
     }
 
-    fn prune(self, target_bytes: ?Int) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport !ArtifactStoreError {
+    fn prune(self, target_bytes: Int?) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport ArtifactStoreError! {
         self.ensure_layout()
         lock :: self.acquire_lock()
         defer close(^lock)
@@ -470,13 +470,13 @@ pub struct ArtifactStore {
         self.prune_locked(target)
     }
 
-    fn prune_to(self, target_bytes: Int) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport !ArtifactStoreError {
+    fn prune_to(self, target_bytes: Int) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport ArtifactStoreError! {
         self.prune(Val(target_bytes))
     }
 
     // Publish a file as one CAS blob and an immutable action record keyed by
     // the caller's already-computed lower-case SHA-256 build key.
-    fn publish_file(self, key: String, source: String) -[FS, Env, Exec, Time, Rand]> StoredArtifact !ArtifactStoreError {
+    fn publish_file(self, key: String, source: String) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
         action :: store_artifact_action_for_key(key)
         metadata :: files.stat(source)
         if metadata.is_symlink || !metadata.is_file {
@@ -493,7 +493,7 @@ pub struct ArtifactStore {
     }
 
     // Verify and locate a named artifact without copying it.
-    fn lookup_artifact(self, key: String) -[FS, Env, Exec, Time, Rand]> ArtifactLookup !ArtifactStoreError {
+    fn lookup_artifact(self, key: String) -[FS, Env, Exec, Time, Rand]> ArtifactLookup ArtifactStoreError! {
         action :: store_artifact_action_for_key(key)
         action_key :: ArtifactEntryKey.Action(action.key())
         action_path :: self.action_path(action)
@@ -551,7 +551,7 @@ pub struct ArtifactStore {
 
     // Verify and copy a named artifact to `destination`, preserving its
     // executable bit. Corrupt entries are removed from the active namespace.
-    fn restore_file(self, key: String, destination: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore !ArtifactStoreError {
+    fn restore_file(self, key: String, destination: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore ArtifactStoreError! {
         if self.lookup_artifact(key) == {
             .Missing -> Ok(ArtifactRestore.Missing)
             .Corrupt -> Ok(ArtifactRestore.Corrupt)
@@ -566,7 +566,7 @@ pub struct ArtifactStore {
         }
     }
 
-    fn publish_data(self, key: ArtifactEntryKey, path: String, bytes: [U8]) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+    fn publish_data(self, key: ArtifactEntryKey, path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.ensure_layout()
         lock :: self.acquire_lock()
         defer close(^lock)
@@ -584,7 +584,7 @@ pub struct ArtifactStore {
     }
 
     // Scanned entries with their last use and whether a live lease pins them.
-    fn annotated_entries(self, journal: ArtifactJournalState, pinned: [String]) -[FS]> [ArtifactStoredEntry] !ArtifactStoreError {
+    fn annotated_entries(self, journal: ArtifactJournalState, pinned: [String]) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
         entries := self.scan_entries()
         loop index in 0..<entries.len() {
             entries[index].last_use = journal.last_use_of(entries[index].key)
@@ -593,18 +593,18 @@ pub struct ArtifactStore {
         Ok(entries)
     }
 
-    fn pinned_identities(self, leases: [ArtifactLeaseRecord]) -> [String] !Never {
+    fn pinned_identities(self, leases: [ArtifactLeaseRecord]) -> [String] Never! {
         pinned := [String]{}
         loop lease in leases {
             loop target in lease.targets {
                 identity :: target.identity()
-                if !pinned.contains(identity) -> pinned.push(identity)
+                if !pinned.contains(identity) -> &pinned.push(identity)
             }
         }
         pinned
     }
 
-    fn status_locked(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus !ArtifactStoreError {
+    fn status_locked(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         journal_path :: files.join(self.root(), "journal")
         journal := store_artifact_read_journal(journal_path)
         if !journal.valid {
@@ -624,7 +624,7 @@ pub struct ArtifactStore {
             else -> None
         }
         statuses := [ArtifactEntryStatus]{}
-        loop entry in entries -> statuses.push(entry.status())
+        loop entry in entries -> &statuses.push(entry.status())
         Ok(ArtifactStoreStatus{
             root: self.root(),
             footprint_bytes: footprint,
@@ -640,7 +640,7 @@ pub struct ArtifactStore {
 
     // Remove unpinned entries, least recently used first (ties by key), until
     // the footprint fits `target_bytes`.
-    fn prune_locked(self, target_bytes: Int) -[FS, Env, Rand]> ArtifactPruneReport !ArtifactStoreError {
+    fn prune_locked(self, target_bytes: Int) -[FS, Env, Rand]> ArtifactPruneReport ArtifactStoreError! {
         journal :: store_artifact_read_journal(files.join(self.root(), "journal"))
         leases :: self.read_leases_locked(true)
         entries :: self.annotated_entries(journal, self.pinned_identities(leases))
@@ -650,7 +650,7 @@ pub struct ArtifactStore {
             if entry.pinned -> pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
         }
         order := store_artifact_sort_entries(entries)
-        order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use))
+        &order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use))
         after := before
         removed := [ArtifactEntryStatus]{}
         loop entry in order {
@@ -661,7 +661,7 @@ pub struct ArtifactStore {
                     store_artifact_sync_dir(files.dirname(entry.path))
                     after = store_artifact_saturating_sub(after, entry.size_bytes)
                     self.append_journal_locked("remove", entry.key, entry.size_bytes)
-                    removed.push(entry.status())
+                    &removed.push(entry.status())
                 }
                 .Err(error) -> {
                     if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.Io(error))
@@ -681,7 +681,7 @@ pub struct ArtifactStore {
 
     // Admit `incoming` bytes for `path`: within the limit after pruning, and
     // leaving twice the payload plus the reserve free on disk.
-    fn ensure_capacity_locked(self, incoming: Int, path: String) !ArtifactStoreError -[FS, Env, Exec, Time, Rand]> {
+    fn ensure_capacity_locked(self, incoming: Int, path: String) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         disk :: store_artifact_filesystem_stats(self.root())
         total :: if disk == {
             .Val(stats) -> Val(stats.total_bytes)
@@ -710,7 +710,7 @@ pub struct ArtifactStore {
         }
     }
 
-    fn limit_with_disk(self, total_bytes: ?Int) -[FS]> Int !Never {
+    fn limit_with_disk(self, total_bytes: Int?) -[FS]> Int Never! {
         adaptive :: if total_bytes == {
             .Val(total) -> {
                 tenth :: total /% 10
@@ -727,9 +727,9 @@ pub struct ArtifactStore {
         }
     }
 
-    fn host_limit_path(self) -> String !Never { files.join(self.root(), "host-limit") }
+    fn host_limit_path(self) -> String Never! { files.join(self.root(), "host-limit") }
 
-    fn ensure_layout(self) !ArtifactStoreError -[FS]> {
+    fn ensure_layout(self) ArtifactStoreError! -[FS]> {
         files.create_dir_all(self.root())
         layout :: [String]{"cas", "ac", "lto", "locks", "leases", "quarantine", "build-records"}
         loop name in layout {
@@ -755,7 +755,7 @@ pub struct ArtifactStore {
         self.append_journal_locked("touch", key, length).drop("recency is advisory; the verified bytes are returned regardless")
     }
 
-    fn quarantine_locked(self, key: ArtifactEntryKey, path: String, reason: String) !ArtifactStoreError -[FS, Env, Rand]> {
+    fn quarantine_locked(self, key: ArtifactEntryKey, path: String, reason: String) ArtifactStoreError! -[FS, Env, Rand]> {
         if !files.lexists(path) -> return Ok()
         quarantine :: files.join(self.root(), "quarantine")
         store_artifact_ensure_dir(quarantine)
@@ -777,7 +777,7 @@ pub struct ArtifactStore {
         }
     }
 
-    fn append_journal_locked(self, operation: String, key: ArtifactEntryKey, length: Int) !ArtifactStoreError -[FS, Env, Rand]> {
+    fn append_journal_locked(self, operation: String, key: ArtifactEntryKey, length: Int) ArtifactStoreError! -[FS, Env, Rand]> {
         journal_path :: files.join(self.root(), "journal")
         state := store_artifact_read_journal(journal_path)
         if !state.valid {
@@ -789,12 +789,12 @@ pub struct ArtifactStore {
     }
 
     // Rewrite the journal as one `put` per present entry, oldest use first.
-    fn compact_journal_locked(self) !ArtifactStoreError -[FS, Env, Rand]> {
+    fn compact_journal_locked(self) ArtifactStoreError! -[FS, Env, Rand]> {
         journal_path :: files.join(self.root(), "journal")
         journal :: store_artifact_read_journal(journal_path)
         entries := self.annotated_entries(journal, [String]{})
         entries = store_artifact_sort_entries(entries)
-        entries.sort_by(entry -> entry.last_use)
+        &entries.sort_by(entry -> entry.last_use)
         contents := ""
         loop index in 0..<entries.len() {
             contents = "{contents}{store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1)}"
@@ -804,7 +804,7 @@ pub struct ArtifactStore {
 
     // The parsed leases whose owners may still be running. Leases of dead
     // owners are removed when `clean_stale` is set.
-    fn read_leases_locked(self, clean_stale: Bool) -[FS, Env]> [ArtifactLeaseRecord] !ArtifactStoreError {
+    fn read_leases_locked(self, clean_stale: Bool) -[FS, Env]> [ArtifactLeaseRecord] ArtifactStoreError! {
         directory :: files.join(self.root(), "leases")
         live := [ArtifactLeaseRecord]{}
         loop path in store_artifact_sorted_children(directory) {
@@ -819,16 +819,16 @@ pub struct ArtifactStore {
             record :: store_artifact_parse_lease(bytes) ?? next
             if store_artifact_owner_liveness(record.owner, self.owner) == {
                 .Val(alive) -> {
-                    if alive -> live.push(record)
+                    if alive -> &live.push(record)
                     if !alive && clean_stale && store_artifact_try_remove(path) -> store_artifact_sync_dir(directory)
                 }
-                else -> live.push(record)
+                else -> &live.push(record)
             }
         }
         Ok(live)
     }
 
-    fn scan_entries(self) -[FS]> [ArtifactStoredEntry] !ArtifactStoreError {
+    fn scan_entries(self) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
         entries := [ArtifactStoredEntry]{}
         store_artifact_scan_flat_namespace(files.join(self.root(), "cas"), .Blob, None, &entries)
         store_artifact_scan_flat_namespace(files.join(self.root(), "ac"), .Action, None, &entries)
@@ -852,7 +852,7 @@ pub struct ArtifactStore {
     // Take the machine-wide store lock, reclaiming it from a dead owner and
     // waiting for a live one with capped exponential backoff up to the
     // configured bound.
-    fn acquire_lock(self) -[FS, Env, Time]> ArtifactStoreLock !ArtifactStoreError {
+    fn acquire_lock(self) -[FS, Env, Time]> ArtifactStoreLock ArtifactStoreError! {
         locks :: files.join(self.root(), "locks")
         path :: files.join(locks, "store.lock")
         owner_line :: self.owner.owner_line("lock")
@@ -902,7 +902,7 @@ pub struct ArtifactStore {
 }
 
 // Append the regular, digest-named files of one namespace directory.
-fn store_artifact_scan_flat_namespace(directory: String, kind: ArtifactEntryKind, namespace: ?String, output: &[ArtifactStoredEntry]) !ArtifactStoreError -[FS]> {
+fn store_artifact_scan_flat_namespace(directory: String, kind: ArtifactEntryKind, namespace: String?, output: &[ArtifactStoredEntry]) ArtifactStoreError! -[FS]> {
     loop path in store_artifact_sorted_children(directory) {
         metadata :: if files.stat(path) == {
             .Ok(info) -> info
@@ -919,12 +919,12 @@ fn store_artifact_scan_flat_namespace(directory: String, kind: ArtifactEntryKind
             .Action -> ArtifactEntryKey.Action(name)
             .Lto -> ArtifactEntryKey.Lto{namespace: namespace ?? panic("an LTO scan always names its namespace"), key: name}
         }
-        output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
+        &output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
     }
 }
 
 // Remove one file; whether it was removed.
-fn store_artifact_try_remove(path: String) -[FS]> Bool !Never {
+fn store_artifact_try_remove(path: String) -[FS]> Bool Never! {
     if files.remove(path) == {
         .Ok(_) -> true
         else -> false

@@ -17,9 +17,9 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 
 #Test("provider facts round trip identity provenance and native bytes") {
     facts := ProviderFacts.for_reference("npm", "left-pad@npm#2.0.17")
-    facts.set_resolved_source("npm:left-pad@2.0.17")
-    facts.set_native_document("package.json", "{{\"name\":\"left-pad\"}}\n")
-    facts.add_fact("package.version", ProviderFactValue.Text("2.0.17"), "package.json.version")
+    &facts.set_resolved_source("npm:left-pad@2.0.17")
+    &facts.set_native_document("package.json", "{{\"name\":\"left-pad\"}}\n")
+    &facts.add_fact("package.version", ProviderFactValue.Text("2.0.17"), "package.json.version")
     facts.validate() ?? panic("lossless provider facts")
     assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@npm")
     round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("provider facts JSON")
@@ -65,8 +65,8 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 
 #Test("resolved selector makes an unpinned source explicit") {
     facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
-    facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
-    facts.set_resolved_source("left-pad#version=2.0.17@npm")
+    &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    &facts.set_resolved_source("left-pad#version=2.0.17@npm")
     facts.validate() ?? panic("resolved source selector is lossless")
     assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@catalog")
     round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("carrier round trip")
@@ -80,8 +80,8 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 
 #Test("conflicting native documents are reported") {
     facts := ProviderFacts.for_reference("npm", "left-pad@npm#1.0.0")
-    facts.set_native_document("package.json", "one")
-    facts.set_native_document("package.json", "two")
+    &facts.set_native_document("package.json", "one")
+    &facts.set_native_document("package.json", "two")
     keyed := false
     loop conflict in facts.conflicts {
         if conflict.key == "provider.native_document" -> keyed = true
@@ -92,7 +92,7 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 
 #Test("resolved selector does not hide unsupported requested facts") {
     facts := ProviderFacts.for_reference("npm", "left-pad#channel=next@catalog")
-    facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
     assert(pkg_test_has_loss(facts, "unsupported selector fact"))
     _ :: pkg_test_validate_error(facts)
 }
@@ -108,7 +108,7 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 
 #Test("resolved selector rejects unsupported facts") {
     facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
-    facts.set_resolved_selector("#version=2.0.17&channel=next", "policy.providers.catalog")
+    &facts.set_resolved_selector("#version=2.0.17&channel=next", "policy.providers.catalog")
     assert(pkg_test_has_loss(facts, "unsupported resolved selector fact"))
     _ :: pkg_test_validate_error(facts)
 }

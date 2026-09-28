@@ -1,0 +1,522 @@
+// The `env.jet` -> `EnvPlan` driver: route the typed `module { … }` surface,
+// discover `imports: find(…)` files, lower typed integration imports, build
+// the merged source table, select one environment, and fold every module's
+// contributions into the runnable plan.
+
+// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
+// the Phase-1 `pkg.*` directive surface. A file that declares the `module`
+// keyword stays on this path even when its later syntax is malformed; only
+// the legacy directive surface uses the tolerant fallback scanner.
+pub fn envmodel_is_module_surface(src: String) -> Bool Never! {
+    source :: src.bytes()
+    lexed :: lex_config(source)
+    has_module := false
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_KW_MODULE -> has_module = true
+    }
+    if lexed.diagnostics.len() > 0 -> return has_module
+    parsed :: parse_lexed(lexed)
+    if envmodel_first_error(parsed.diagnostics) != None -> return has_module
+    loop item in parsed.program.items {
+        if item == {
+            .Module(_) -> { return true }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Evaluate a typed `env.jet` into an `EnvPlan`. Sources merge across modules
+// by key (U5); package sugar resolves to `package@source` refs; the `prompt`
+// fact becomes the label.
+pub fn envmodel_evaluate_env(src: String, base_dir: String) -[FS, Env]> EnvPlan EnvModelEvalError! {
+    Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, None))
+}
+
+// Evaluate a typed environment with one authoritative preset selection. An
+// explicit CLI choice is resolved before ambient hostname/user matching, so
+// an unrelated ambient preset cannot reject or augment the requested plan.
+pub fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+    Ok(envmodel_evaluate_env_with_selections(src, base_dir, requested_preset, None))
+}
+
+// Evaluate an environment while explicitly selecting one `env.<name>` module.
+// The ordinary CLI uses the deterministic default (`dev`, then `default`,
+// then lexical order) when it has no selector.
+pub fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+    Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, requested_environment))
+}
+
+fn envmodel_unresolved_root(base_dir: String, cause: IOError) -> EnvModelEvalError Never! {
+    envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {cause}", "one environment graph must resolve from a real project directory before it follows imports or path-backed facts", "run the command from an existing project directory", None)
+}
+
+pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+    environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
+    loader := FileSystemSourceLoader{root: environment_root}
+    Ok(envmodel_evaluate_env_with_source_loader(src, environment_root, &loader, requested_preset, requested_environment))
+}
+
+// Evaluate one source-backed package generation without realizing or mutating
+// the store. This is the production path for `jet profile plan`: provider
+// identity, source provenance, and collision selections come from the same
+// graph used by environment evaluation.
+pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -[FS, Env]> PackageProfilePlan EnvModelEvalError! {
+    env :: envmodel_evaluate_env(src, base_dir)
+    profiles := PackageProfileSet{}
+    loop profile in env.package_profiles {
+        &profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
+    }
+    resolved :: profiles.resolve(name) ?? return Err(envmodel_error("E1332", "package generation `{name}` could not be resolved: {err.message()}", "generation inheritance is resolved parent-first and must remain acyclic", "fix the generation name, parent reference, or inheritance cycle", None))
+    package_names := [String]{}
+    loop package in resolved.packages -> &package_names.push(package.raw)
+    loop path in envmodel_sorted_keys_of(resolved.collisions) {
+        provider :: resolved.collisions[path]
+        if !package_names.contains(provider) {
+            return Err(envmodel_error("E1335", "package generation `{name}` selects `{provider}` for `{path}`, but that provider is not in the generation", "a collision selection must name one exact package contender retained by the source-backed generation", "add the selected package ref to `packages`, or select one of the existing contenders", None))
+        }
+    }
+    packages := [PackageProfileFact]{}
+    loop package in resolved.packages {
+        spec :: envmodel_classify_profile_ref(package.raw, env.table) ?? return Err(envmodel_error("E1335", "package generation `{name}` contains unsupported ref `{package.raw}`: {err:Debug}", "generation package facts must retain one lossless package and provider identity", "use `package@source` with a built-in or declared source", None))
+        split :: pkg_split_channel_ref(spec.package)
+        target :: split.base
+        channel :: split.channel
+        // Keep the source token from the declaration. `default` is the
+        // package-sugar spelling for nixpkgs, but changing it to `nixpkgs`
+        // here would erase source identity from the plan and later lock views.
+        source :: package.raw.cut_last(@REF_PROVIDER_AT)?.after ?? spec.source.label()
+        provider :: envmodel_profile_provider_label(spec.source, source, env.table)
+        upstream :: env.table.upstream(source)
+        facts := ProviderFacts.for_reference(provider, package.raw)
+        &facts.set_profile(resolved.name, package.declared_by.join(","))
+        &facts.add_fact("package.target", ProviderFactValue.Text(target), "profile.declaration")
+        &facts.add_fact("package.source", ProviderFactValue.Text(source), "profile.declaration")
+        if channel == {
+            .Val(value) -> &facts.add_fact("package.channel", ProviderFactValue.Text(value.as_str()), "profile.declaration")
+            .None -> {}
+        }
+        if pkg_provider_is_external(provider) && channel != None {
+            &facts.add_loss("provider.selector", "external provider references must retain an exact version, revision, or digest", "profile.declaration")
+        }
+        if upstream == {
+            .Val(resolved_upstream) -> {
+                &facts.set_resolved_source(resolved_upstream)
+                &facts.add_fact("provider.upstream", ProviderFactValue.Text(resolved_upstream), "env.source")
+                resolved_reference :: envmodel_provider_reference_from_upstream(resolved_upstream, provider)
+                resolved_facts :: ProviderFacts.for_reference(provider, resolved_reference)
+                if resolved_facts.selector.is_exact() {
+                    &facts.set_resolved_selector(resolved_facts.selector.raw, "env.source")
+                } else if pkg_provider_is_external(provider) {
+                    &facts.add_loss("provider.upstream", "ambiguous provider fact: unresolved inference for source `{source}` from `{resolved_upstream}`", "env.source")
+                }
+            }
+            .None -> &facts.set_resolved_source(source)
+        }
+        if !facts.is_lossless() {
+            ambiguous := false
+            details := [String]{}
+            loop loss in facts.losses {
+                if loss.reason.contains("ambiguous provider fact") -> ambiguous = true
+                &details.push(loss.reason)
+            }
+            loop conflict in facts.conflicts -> &details.push(conflict.right)
+            message :: if ambiguous -> "package generation `{name}` has ambiguous provider fact: {details.join("; ")}" else -> "package generation `{name}` has lossy or conflicting provider fact: {details.join("; ")}"
+            return Err(envmodel_error("E1335", message, "provider identity, selector, and native meaning must remain explicit across planning and locking", "pin the provider with an exact version, revision, or digest, or declare a lossless built-in source", None))
+        }
+        channel_text :: if channel == {
+            .Val(value) -> Val(value.as_str())
+            .None -> None
+        }
+        &packages.push(PackageProfileFact{raw: package.raw, target: target, source: source, upstream: upstream, provider: provider, channel: channel_text, declared_by: package.declared_by, provider_facts: facts})
+    }
+    plan :: PackageProfilePlan{
+        name: resolved.name,
+        selected_profiles: resolved.selected_profiles,
+        applied: resolved.applied,
+        packages: packages,
+        collisions: resolved.collisions,
+        sources: resolved.sources,
+    }
+    Ok(^plan.finalize())
+}
+
+fn envmodel_profile_provider_label(source: RefSource, source_name: String, table: SourceTable) -> String Never! {
+    if source == {
+        .Jetpack | .Nixpkgs -> "nix"
+        .Github -> "github"
+        .Path -> "core"
+        .Cran -> "cran"
+        .LuaRocks -> "luarocks"
+        .RubyGems -> "ruby"
+        .Cpan -> "perl"
+        .Packagist -> "php"
+        .JetRegistry -> "jet-registry"
+        .Npm -> "npm"
+        .Cargo -> "cargo"
+        .PyPI -> "pypi"
+        .SwiftPM -> "swiftpm"
+        .Releases -> "jetpackage"
+        .Named(_) -> {
+            if table.upstream(source_name) == {
+                .Val(upstream) -> {
+                    provider :: upstream.cut_last("@")?.after ?? ""
+                    if provider != "" -> return provider
+                }
+                .None -> {}
+            }
+            table.provider(source_name).label()
+        }
+    }
+}
+
+// Convert the source table's provider-first upstream back to the shared
+// package-reference shape before extracting selector facts. The table keeps
+// `provider:target` so the resolver can pass it to its native backend; the
+// shared carrier uses `target@provider#selector` so identity and selectors
+// remain parseable and comparable.
+fn envmodel_provider_reference_from_upstream(upstream: String, provider: String) -> String Never! {
+    halves :: upstream.split_once(@REF_SEPARATOR) ?? return upstream
+    MigratedRef.persisted("{halves.after}{@REF_PROVIDER_AT}{provider}").canonical
+}
+
+fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec RefError! {
+    if raw.cut_last(@REF_PROVIDER_AT) == {
+        .Val(halves) -> {
+            package :: halves.before
+            source_with_selector :: halves.after
+            selector_split :: source_with_selector.split_once(@REF_CHANNEL_MARKER)
+            source :: selector_split?.before ?? source_with_selector
+            if source == @DEFAULT_SOURCE && !package.contains(@REF_CHANNEL_MARKER) {
+                qualified :: if selector_split == {
+                    .Val(parts) -> "{package}{@REF_CHANNEL_MARKER}{parts.after}"
+                    .None -> package
+                }
+                return Ok(RefSpec{source: RefSource.Jetpack, package: qualified, raw: pkg_with_default_source(qualified)})
+            }
+        }
+        .None -> {}
+    }
+    Ok(RefSpec.classify_in(raw, table))
+}
+
+// Evaluate an environment with caller-owned, authority-checked source access.
+// This is the same graph evaluator as `envmodel_evaluate_env_with_selections`;
+// only the file and directory boundary changes. Package tooling uses it to
+// keep every imported profile source inside the already-pinned package root.
+pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+    program :: envmodel_parse_program(src)
+    environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
+    // The root `env.jet` plus every file reachable through `imports: find(…)`
+    // (U4). Each unit owns its source text (spans index into it) and the dir
+    // its relative refs / `embed_file` resolve against.
+    units := [EvalUnit]{EvalUnit{items: program.items, src: src, base_dir: environment_root, source_path: files.join(environment_root, @ENV_FILE)}}
+    loop unit in envmodel_discover_imports(units[0], environment_root, &loader) -> &units.push(unit)
+    source_files := [String]{}
+    loop unit in units {
+        if envmodel_path_within(unit.source_path, environment_root) && unit.source_path != environment_root -> &source_files.push(unit.source_path.removeprefix("{environment_root}/"))
+    }
+    table :: envmodel_build_source_table(units)
+    // Evaluate every unit's modules (each against its own source + base dir),
+    // then merge all contributions through the §6 engine as one pass — so a
+    // discovered module's `env.dev` packages combine with the root's, and a
+    // cross-file source conflict still surfaces as E0967.
+    modules := [EvaluatedModule]{}
+    loop unit in units {
+        loop module in envmodel_evaluate_modules(unit.items, unit.src, unit.base_dir) -> &modules.push(module)
+    }
+    images := [ImagePlan]{}
+    env_reads := [EnvironmentRead]{}
+    dev_services := [DevServicePlan]{}
+    secrets := [SecretSpec]{}
+    adapters := [AdapterPlan]{}
+    lifecycle := EnvironmentLifecycle{}
+    presets := PresetSet{}
+    package_profiles := PackageProfileSet{}
+    languages := [LanguageSpec]{}
+    managed_files := [ManagedFile]{}
+    integrations := [EnvironmentIntegration]{}
+    integration_facts := IntegrationFactProjection{}
+    integration_packages := [String]{}
+    environment_names := [String]{}
+    loop module in modules {
+        loop keyed in module.entries {
+            if keyed.key.namespace == Namespace.Env && !environment_names.contains(keyed.key.path) -> &environment_names.push(keyed.key.path)
+        }
+    }
+    &environment_names.sort()
+    // Select exactly one environment before projecting any non-entry facts:
+    // services, lifecycle, files, integrations, and variable disclosure
+    // follow the same boundary as packages and settings.
+    active_environment :: envmodel_select_active_environment(environment_names, requested_environment)
+    loop module in modules {
+        loop image in module.images -> &images.push(image)
+        loop profile in module.package_profiles {
+            &package_profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
+        }
+        active_name :: active_environment ?? next
+        contributes := false
+        loop contribution in module.environment_contributions {
+            if contribution.name == active_name -> contributes = true
+        }
+        if !contributes -> next
+        loop contribution in module.environment_contributions {
+            if contribution.name != active_name -> next
+            loop read in contribution.environment_reads {
+                seen := false
+                loop existing in env_reads {
+                    if existing.name == read.name -> seen = true
+                }
+                if !seen -> &env_reads.push(read)
+            }
+            loop service in contribution.dev_services {
+                loop existing in dev_services {
+                    if existing.name == service.name {
+                        return Err(envmodel_error("E1262", "service `{service.name}` is declared more than once", "one environment supervisor owns each service name and cannot choose between different process facts", "merge the service records or give them distinct names", None))
+                    }
+                }
+                &dev_services.push(service)
+            }
+            loop secret in contribution.secrets -> envmodel_merge_secret_spec(&secrets, secret)
+            loop adapter in contribution.adapters -> &adapters.push(adapter)
+            envmodel_lifecycle_merge(&lifecycle, contribution.lifecycle, module.name)
+            loop preset in contribution.presets {
+                &presets.insert_checked(preset) ?? return Err(envmodel_error("E1332", "environment preset composition failed: {err.message()}", "one environment graph cannot silently choose between different facts for the same preset", "merge the preset declarations so they are identical, or give them different names", None))
+            }
+            loop language in contribution.languages {
+                existing := None
+                loop candidate in languages {
+                    if candidate.key() == language.key() -> existing = Val(candidate)
+                }
+                if existing == {
+                    .Val(candidate) -> {
+                        if !candidate.same_selection(language) {
+                            return Err(envmodel_error("E1333", "language pack `{language.name}` has conflicting selection facts", "one environment graph cannot silently choose a version, channel, venv, or extra-package selection", "merge the language records so their typed facts agree", None))
+                        }
+                    }
+                    .None -> &languages.push(language)
+                }
+            }
+            loop file in contribution.files -> envmodel_merge_managed_file(&managed_files, file)
+        }
+        loop integration in module.integrations {
+            existing := None
+            loop candidate in integrations {
+                if candidate.name == integration.name -> existing = Val(candidate)
+            }
+            if existing == {
+                .Val(candidate) -> {
+                    if candidate != integration {
+                        return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", None))
+                    }
+                }
+                .None -> &integrations.push(integration)
+            }
+            loop secret_name in integration.secrets {
+                declared := false
+                loop existing_secret in secrets {
+                    if existing_secret.name == secret_name -> declared = true
+                }
+                if !declared -> &secrets.push(SecretSpec.implicit_source(secret_name))
+            }
+            loop package in integration.packages -> envmodel_push_unique(&integration_packages, package)
+            loop file in integration.files -> envmodel_merge_managed_file(&managed_files, file)
+            loop task_name in integration.tasks {
+                envmodel_push_unique(&integration_facts.tasks, task_name)
+                fact :: IntegrationTaskFact{name: task_name, integration: integration.kind, packages: integration.packages, secrets: integration.secrets, providers: integration.providers, host_checks: integration.host_checks, grants: integration.grants}
+                if !integration_facts.task_facts.contains(fact) -> &integration_facts.task_facts.push(fact)
+            }
+            loop provider in integration.providers -> envmodel_push_unique(&integration_facts.providers, provider)
+            loop host_check in integration.host_checks -> envmodel_push_unique(&integration_facts.host_checks, host_check)
+            loop grant in integration.grants -> envmodel_push_unique(&integration_facts.grants, grant)
+            loop loss in integration.losses -> envmodel_push_unique(&integration_facts.losses, loss)
+        }
+    }
+    integration_facts.validate() ?? return Err(envmodel_error("E1335", "environment integration lowering was lossy", err.message, "use named secret references and supported typed integration arguments", None))
+    // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks
+    // against this project's own package manifest (E1267) — a different
+    // manifest than the environment this pass evaluates, so it is loaded here
+    // rather than threaded through as a plan field.
+    needs_package_facts := false
+    loop image in images {
+        if !image.from_environment -> needs_package_facts = true
+    }
+    manifest :: if needs_package_facts -> &loader.package_facts() else -> None
+    loop image in images {
+        if image.from_environment {
+            if !environment_names.contains(image.from) {
+                return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
+            }
+            next
+        }
+        kind :: manifest?.package_kind(image.from)
+        if kind != Val(PackageKind.Executable) {
+            return Err(envmodel_oci_from_non_executable(image.name, image.from, kind == Val(PackageKind.Library)))
+        }
+    }
+    envmodel_validate_secret_graph(secrets, Span{start: 0, end: 0})
+    if requested_environment != None {
+        loop secret in secrets {
+            loop environment in secret.allowed_environments {
+                if !environment_names.contains(environment) {
+                    return Err(envmodel_error("E1333", "secret `{secret.name}` names undeclared environment `{environment}`", "a known active profile can validate every allowed-environment label before activation", "declare that `env.<name>` profile or defer selection with a dynamic profile", None))
+                }
+            }
+        }
+    }
+    merged :: envmodel_merge_all(modules) ?? return Err(envmodel_merge_error_to_diagnostic(err))
+    // The selected name is explicit when a host asks for it; otherwise `dev`,
+    // then `default`, then lexical order gives one stable beginner path
+    // instead of silently merging sibling modules.
+    active_environment_provenance := [String]{}
+    package_refs := integration_packages
+    prompt := None
+    prompt_path := PromptPathMode.Short
+    prompt_strip := PromptStripMode.Off
+    if active_environment == {
+        .Val(active_name) -> {
+            key :: ModuleEntryKey{namespace: Namespace.Env, path: active_name}
+            loop module in modules {
+                contributed := false
+                loop keyed in module.entries {
+                    if keyed.key == key -> contributed = true
+                }
+                if contributed -> &active_environment_provenance.push(module.name)
+            }
+            entry :: envmodel_merged_entry(merged, key) ?? panic("the active environment is a merged entry key")
+            loop pkg in entry.packages -> envmodel_push_unique(&package_refs, envmodel_pkg_ref(pkg))
+            if entry.settings.get(@ENV_FIELD_PROMPT) == {
+                .Val(label) -> prompt = Val(label)
+                .None -> {}
+            }
+            if entry.settings.get(@PROMPT_SETTING_PATH) == {
+                .Val(path) -> prompt_path = envmodel_prompt_path_mode(path)
+                .None -> {}
+            }
+            if entry.settings.get(@PROMPT_SETTING_STRIP) == {
+                .Val(strip) -> prompt_strip = envmodel_prompt_strip_mode(strip)
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    selected_names :: if requested_preset == {
+        .Val(name) -> [String]{name}
+        .None -> presets.auto_select_many(sys.get("HOSTNAME") ?? "", sys.get("USER") ?? (sys.get("USERNAME") ?? ""))
+    }
+    selected_preset := None
+    if selected_names.len() > 0 {
+        resolved :: presets.resolve_many(selected_names) ?? return Err(envmodel_error("E1332", "environment preset could not be resolved: {err.message()}", "preset inheritance is resolved parent-first and must remain acyclic", "fix the preset name, parent reference, or inheritance cycle", None))
+        loop package in resolved.packages -> envmodel_push_unique(&package_refs, package)
+        selected_preset = Val(resolved)
+    }
+    language_expansion :: LanguagePackCatalog.builtin().expand(languages) ?? return Err(envmodel_error("E1333", "environment language pack could not be expanded: {err.message}", "language packs expand through one closed catalog into ordinary package refs", "choose a language name from the catalog exposed by `jet env info`", None))
+    loop package in language_expansion.packages -> envmodel_push_unique(&package_refs, package)
+    preset_list := [PresetSpec]{}
+    loop preset_name in envmodel_sorted_preset_names(presets) -> &preset_list.push(presets.presets[preset_name])
+    profile_list := [PackageProfileSpec]{}
+    loop profile_name in envmodel_sorted_profile_names(package_profiles) -> &profile_list.push(package_profiles.profiles[profile_name])
+    Ok(EnvPlan{
+        table: table,
+        source_files: source_files,
+        graph_identity: None,
+        environment_reads: env_reads,
+        package_refs: package_refs,
+        adapters: adapters,
+        prompt: prompt,
+        prompt_path: prompt_path,
+        prompt_strip: prompt_strip,
+        images: images,
+        dev_services: dev_services,
+        secrets: secrets,
+        lifecycle: lifecycle,
+        presets: preset_list,
+        languages: languages,
+        selected_preset: selected_preset,
+        language_expansion: language_expansion,
+        language_packs: language_expansion.packs,
+        language_projections: language_expansion.projections,
+        files: managed_files,
+        integrations: integrations,
+        integration_facts: integration_facts,
+        package_profiles: profile_list,
+        environment_names: environment_names,
+        active_environment: active_environment,
+        active_environment_provenance: active_environment_provenance,
+    })
+}
+
+fn envmodel_sorted_preset_names(presets: PresetSet) -> [String] Never! {
+    names := presets.presets.keys().to_list()
+    &names.sort()
+    names
+}
+
+fn envmodel_sorted_profile_names(profiles: PackageProfileSet) -> [String] Never! {
+    names := profiles.profiles.keys().to_list()
+    &names.sort()
+    names
+}
+
+// One managed file per destination; a second, different owner conflicts.
+fn envmodel_merge_managed_file(managed_files: &[ManagedFile], file: ManagedFile) EnvModelEvalError! {
+    loop existing in managed_files {
+        if existing.destination == file.destination {
+            if existing != file {
+                return Err(envmodel_error("E1326", "managed file `{file.destination}` has conflicting declarations", "one environment graph cannot apply two different owners to the same destination", "merge the file declarations or choose distinct destinations", None))
+            }
+            return
+        }
+    }
+    &managed_files.push(file)
+}
+
+// `names` is sorted: the requested module if declared, else `dev`, then
+// `default`, then the first name.
+fn envmodel_select_active_environment(names: [String], requested_environment: String?) -> String? EnvModelEvalError! {
+    if requested_environment == {
+        .Val(name) -> {
+            if names.contains(name) -> return Ok(Val(name))
+            return Err(envmodel_error("E1337", "environment module `{name}` is not declared", "one environment plan activates one declared `env.<name>` module; siblings stay available for explicit selection", "choose one of the declared `env.<name>` module names", None))
+        }
+        .None -> {}
+    }
+    if names.contains("dev") -> return Ok(Val("dev"))
+    if names.contains("default") -> return Ok(Val("default"))
+    if names.len() == 0 -> return Ok(None)
+    Ok(Val(names[0]))
+}
+
+fn envmodel_push_unique(values: &[String], value: String) Never! {
+    if !values.contains(value) -> &values.push(value)
+}
+
+// An explicit declaration replaces an integration's implicit source name;
+// any other repeated declaration conflicts.
+fn envmodel_merge_secret_spec(specs: &[SecretSpec], incoming: SecretSpec) EnvModelEvalError! {
+    loop index in 0..<specs.len() {
+        existing :: specs[index]
+        if existing.name != incoming.name -> next
+        if existing.implicit && !incoming.implicit {
+            specs[index] = incoming
+            return
+        }
+        if incoming.implicit -> return
+        return Err(envmodel_error("E1333", "secret `{incoming.name}` is declared more than once", "one selected environment has one declaration for each secret name", "merge the metadata into one map entry or give the declarations different names", None))
+    }
+    &specs.push(incoming)
+}
+
+fn envmodel_prompt_path_mode(value: String) -> PromptPathMode Never! {
+    if value == {
+        @PROMPT_PATH_FULL -> PromptPathMode.Full
+        else -> PromptPathMode.Short
+    }
+}
+
+fn envmodel_prompt_strip_mode(value: String) -> PromptStripMode Never! {
+    if value == {
+        @PROMPT_STRIP_ON -> PromptStripMode.On
+        else -> PromptStripMode.Off
+    }
+}

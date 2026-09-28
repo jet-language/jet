@@ -20,7 +20,7 @@ pub enum NixFallbackProjection {
     Proof
 
     // Accepted field spellings, in lookup order.
-    fn fields(self) -> [String] !Never {
+    fn fields(self) -> [String] Never! {
         if self == {
             .Graph -> [String]{"closedGraph", "derivationGraph", "graph", "closure"}
             .SelectedOutputs -> [String]{"selectedOutputs", "outputs"}
@@ -32,7 +32,7 @@ pub enum NixFallbackProjection {
         }
     }
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Graph -> "closed derivation graph"
             .SelectedOutputs -> "selected outputs"
@@ -47,7 +47,7 @@ pub enum NixFallbackProjection {
     // Whether a field of this projection marks a document as a fallback
     // record. `outputs` is also the pinned `nix build --json` shape, so
     // selected outputs alone do not.
-    fn marks_fallback(self) -> Bool !Never {
+    fn marks_fallback(self) -> Bool Never! {
         if self == {
             .SelectedOutputs -> false
             else -> true
@@ -55,7 +55,7 @@ pub enum NixFallbackProjection {
     }
 
     // The one field of `keys` that holds this projection.
-    fn select(self, keys: [String]) -> String !NixError {
+    fn select(self, keys: [String]) -> String NixError! {
         found := ""
         loop field in self.fields() {
             if !keys.contains(field) -> next
@@ -68,13 +68,13 @@ pub enum NixFallbackProjection {
 }
 
 // Every required projection, in the reference's lookup order.
-pub fn nix_fallback_projections() -> [NixFallbackProjection] !Never {
+pub fn nix_fallback_projections() -> [NixFallbackProjection] Never! {
     [NixFallbackProjection]{.Graph, .SelectedOutputs, .Dependencies, .Sources, .Hashes, .Losses, .Proof}
 }
 
 // The root field holding the import object (`jetpackImport`, then
 // `jetpack`); None when the root object is the import object itself.
-pub fn nix_fallback_import_field(root_keys: [String]) -> ?String !Never {
+pub fn nix_fallback_import_field(root_keys: [String]) -> String? Never! {
     wrappers :: [String]{"jetpackImport", "jetpack"}
     loop field in wrappers {
         if root_keys.contains(field) -> return Val(field)
@@ -84,7 +84,7 @@ pub fn nix_fallback_import_field(root_keys: [String]) -> ?String !Never {
 
 // Whether a record carries fallback projections; a record without any is the
 // old pinned `nix build --json` shape and retains nothing.
-pub fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool !Never {
+pub fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool Never! {
     markers :: [String]{"jetpackImport", "jetpack", "fallback"}
     loop field in markers {
         if root_keys.contains(field) -> return true
@@ -109,11 +109,11 @@ pub struct NixFallbackCanonical {
     pub hashes: String
     pub losses: String
     pub proof: String
-    pub recipe: ?String
-    pub lock: ?String
+    pub recipe: String?
+    pub lock: String?
 
     // The facts retained in the producer record, key-ordered.
-    fn imported(self) -> NixImportedState !Never {
+    fn imported(self) -> NixImportedState Never! {
         facts := [String: String]{}
         facts["nix.fallback.schema"] = @NIX_FALLBACK_IMPORT_SCHEMA
         facts["nix.fallback.document"] = self.document
@@ -146,7 +146,7 @@ pub struct NixImportedState {
 
 // Import a rich fallback record. None means the record is the old pinned
 // `nix build --json` shape with no fallback projections to retain.
-pub fn nix_fallback_import_record(record: DataTree) -> ?NixImportedState !NixError {
+pub fn nix_fallback_import_record(record: DataTree) -> NixImportedState? NixError! {
     root :: nix_fallback_object(record)
     import :: nix_fallback_import_object(root)
     if !nix_fallback_detect(root.keys().to_list(), import.keys().to_list()) -> return Ok(None)
@@ -174,7 +174,7 @@ pub fn nix_fallback_import_record(record: DataTree) -> ?NixImportedState !NixErr
     Ok(Val(canonical.imported()))
 }
 
-fn nix_fallback_object(value: DataTree) -> [String: DataTree] !NixError {
+fn nix_fallback_object(value: DataTree) -> [String: DataTree] NixError! {
     if value == {
         .Object(entries) -> return Ok(entries)
         else -> return Err(NixError.FallbackNotObject)
@@ -183,7 +183,7 @@ fn nix_fallback_object(value: DataTree) -> [String: DataTree] !NixError {
 
 // The import object: the `jetpackImport` or `jetpack` field of the root, or
 // the root itself.
-fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] !NixError {
+fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] NixError! {
     if nix_fallback_import_field(root.keys().to_list()) == {
         .Val(field) -> return nix_fallback_object(root[field])
         else -> {}
@@ -192,32 +192,32 @@ fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] !N
 }
 
 // The compact JSON of `projection`'s one field of `object`.
-fn nix_fallback_render(object: [String: DataTree], projection: NixFallbackProjection) -> String !NixError {
+fn nix_fallback_render(object: [String: DataTree], projection: NixFallbackProjection) -> String NixError! {
     field :: projection.select(object.keys().to_list())
     Ok(nix_fallback_json(object[field]))
 }
 
-fn nix_fallback_optional(object: [String: DataTree], field: String) -> ?String !Never {
+fn nix_fallback_optional(object: [String: DataTree], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     Val(nix_fallback_json(value))
 }
 
 // Compact, insertion-ordered JSON. `json.to_string` declares no failure
 // contract, so it carries an implicit one; rendering a tree cannot fail.
-fn nix_fallback_json(value: DataTree) -> String !Never {
+fn nix_fallback_json(value: DataTree) -> String Never! {
     json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
 }
 
 // Whether every number in `value` is finite (JSON has no NaN or infinity).
-fn nix_fallback_is_finite(value: DataTree) -> Bool !Never {
+fn nix_fallback_is_finite(value: DataTree) -> Bool Never! {
     children := [DataTree]{}
     if value == {
         .Float(number) -> return number - number == 0.0
         .Array(items) -> {
-            loop item in items -> children.push(item)
+            loop item in items -> &children.push(item)
         }
         .Object(entries) -> {
-            loop entry in entries -> children.push(entry.value)
+            loop entry in entries -> &children.push(entry.value)
         }
         else -> {}
     }

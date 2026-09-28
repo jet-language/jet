@@ -30,20 +30,20 @@ pub struct LinkClosure {
     pub transitive: [String]
 
     // The overlay's libraries without the primary or repeats, sorted.
-    fn new(primary: String, transitive: [String]) -> LinkClosure !Never {
+    fn new(primary: String, transitive: [String]) -> LinkClosure Never! {
         links := [String]{}
         loop link in transitive {
             if link == primary || links.contains(link) -> next
-            links.push(link)
+            &links.push(link)
         }
-        links.sort()
+        &links.sort()
         LinkClosure{primary: primary, transitive: links}
     }
 
     // The complete deterministic link list, primary first.
-    fn libraries(self) -> [String] !Never {
+    fn libraries(self) -> [String] Never! {
         out := [String]{self.primary}
-        loop link in self.transitive -> out.push(link)
+        loop link in self.transitive -> &out.push(link)
         out
     }
 }
@@ -59,30 +59,30 @@ pub struct HandleOverlay {
     // Explicit transitive libraries this binding needs.
     pub links: [String]
 
-    fn empty() -> HandleOverlay !Never {
+    fn empty() -> HandleOverlay Never! {
         HandleOverlay{close_functions: [String: String]{}, thread_safety: [String: ThreadSafety]{}, links: [String]{}}
     }
 
-    fn with_close(self, handle: String, symbol: String) -> HandleOverlay !Never {
+    fn with_close(self, handle: String, symbol: String) -> HandleOverlay Never! {
         out := self
         out.close_functions[handle] = symbol
         out
     }
 
-    fn with_thread_safety(self, handle: String, safety: ThreadSafety) -> HandleOverlay !Never {
+    fn with_thread_safety(self, handle: String, safety: ThreadSafety) -> HandleOverlay Never! {
         out := self
         out.thread_safety[handle] = safety
         out
     }
 
-    fn with_link(self, library: String) -> HandleOverlay !Never {
+    fn with_link(self, library: String) -> HandleOverlay Never! {
         out := self
-        out.links.push(library)
+        &out.links.push(library)
         out
     }
 
     // The first close mapping for the typedef, its Jet name, or its tag.
-    fn close_for(self, typedef_name: String, jet_name: String, struct_tag: String) -> ?String !Never {
+    fn close_for(self, typedef_name: String, jet_name: String, struct_tag: String) -> String? Never! {
         keys :: [String]{typedef_name, jet_name, struct_tag}
         loop key in keys {
             if self.close_functions.get(key) == {
@@ -93,7 +93,7 @@ pub struct HandleOverlay {
         None
     }
 
-    fn thread_safety_for(self, typedef_name: String, jet_name: String, struct_tag: String) -> ThreadSafety !Never {
+    fn thread_safety_for(self, typedef_name: String, jet_name: String, struct_tag: String) -> ThreadSafety Never! {
         keys :: [String]{typedef_name, jet_name, struct_tag}
         loop key in keys {
             if self.thread_safety.get(key) == {
@@ -145,8 +145,8 @@ struct OpaqueCPrototype {
 }
 
 struct OpaqueCTypeShape {
-    base: ?String
-    struct_tag: ?String
+    base: String?
+    struct_tag: String?
     pointer_depth: Int
 }
 
@@ -163,7 +163,7 @@ pub struct OpaqueHandleDiscovery {
     // Discover opaque struct-pointer typedefs and resolve their ownership
     // facts. `source` is the original header or the binder's cleaned
     // declaration stream; unsupported declarations are left to the binder.
-    fn discover(source: String, lib: String, overlay: HandleOverlay) -> OpaqueHandleDiscovery !Never {
+    fn discover(source: String, lib: String, overlay: HandleOverlay) -> OpaqueHandleDiscovery Never! {
         declarations :: pkg_opaque_split_declarations(pkg_opaque_strip_comments_and_directives(source))
         complete_tags :: pkg_opaque_complete_struct_tags(declarations)
         alias_decls := [String: OpaqueAliasDecl]{}
@@ -181,7 +181,7 @@ pub struct OpaqueHandleDiscovery {
         prototypes := [OpaqueCPrototype]{}
         loop declaration in declarations {
             if pkg_opaque_parse_prototype(declaration) == {
-                .Val(prototype) -> prototypes.push(prototype)
+                .Val(prototype) -> &prototypes.push(prototype)
                 .None -> {}
             }
         }
@@ -195,7 +195,7 @@ pub struct OpaqueHandleDiscovery {
             loop prototype in prototypes {
                 if prototype.params.len() != 1 -> next
                 if !pkg_opaque_matches_shape(prototype.params[0], typedef_name, shape) -> next
-                if pkg_opaque_conventional_close_name(prototype.name, typedef_name, shape.struct_tag) -> candidates.push(prototype.name)
+                if pkg_opaque_conventional_close_name(prototype.name, typedef_name, shape.struct_tag) -> &candidates.push(prototype.name)
             }
             jet_name :: pkg_opaque_unique_name(&used_names, foundation_generated_type_name(pkg_opaque_handle_name_seed(typedef_name), "Handle"))
             close := ""
@@ -203,7 +203,7 @@ pub struct OpaqueHandleDiscovery {
             if overlay.close_for(typedef_name, jet_name, shape.struct_tag) == {
                 .Val(symbol) -> {
                     if !pkg_opaque_is_ident(symbol) {
-                        unresolved.push((typedef_name: ~typedef_name, reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
+                        &unresolved.push((typedef_name: ~typedef_name, reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
                         next
                     }
                     close = symbol
@@ -211,18 +211,18 @@ pub struct OpaqueHandleDiscovery {
                 }
                 .None -> {
                     if candidates.len() == 0 {
-                        unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
                         next
                     }
                     if candidates.len() > 1 {
-                        unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
                         next
                     }
                     close = candidates[0]
                 }
             }
             safety :: overlay.thread_safety_for(typedef_name, jet_name, shape.struct_tag)
-            handles.push(HandleFact{
+            &handles.push(HandleFact{
                 typedef_name: typedef_name,
                 jet_name: jet_name,
                 close: close,
@@ -237,7 +237,7 @@ pub struct OpaqueHandleDiscovery {
     }
 
     // The owned handle a C parameter or return type spells, if any.
-    fn handle_for_type(self, c_type: String) -> ?HandleFact !Never {
+    fn handle_for_type(self, c_type: String) -> HandleFact? Never! {
         loop alias in pkg_opaque_sorted_keys(self.opaque.keys().to_list()) {
             if !pkg_opaque_matches_shape(c_type, alias, self.opaque[alias]) -> next
             index :: self.handle_indices.get(alias) ?? next
@@ -247,7 +247,7 @@ pub struct OpaqueHandleDiscovery {
     }
 
     // Why the opaque typedef a C type spells could not become a handle.
-    fn unresolved_reason_for_type(self, c_type: String) -> ?String !Never {
+    fn unresolved_reason_for_type(self, c_type: String) -> String? Never! {
         loop alias in pkg_opaque_sorted_keys(self.opaque.keys().to_list()) {
             if !pkg_opaque_matches_shape(c_type, alias, self.opaque[alias]) -> next
             loop entry in self.unresolved {
@@ -257,28 +257,28 @@ pub struct OpaqueHandleDiscovery {
         None
     }
 
-    fn is_close_function(self, function: String, c_type: String) -> Bool !Never {
+    fn is_close_function(self, function: String, c_type: String) -> Bool Never! {
         handle :: self.handle_for_type(c_type) ?? return false
         handle.close == function
     }
 
     // One empty nominal struct per handle, then a blank line.
-    fn render_type_declarations(self) -> String !Never {
+    fn render_type_declarations(self) -> String Never! {
         lines := [String]{}
-        loop handle in self.handles -> lines.push("pub struct {handle.jet_name} {{}}\n")
+        loop handle in self.handles -> &lines.push("pub struct {handle.jet_name} {{}}\n")
         if lines.len() == 0 -> return ""
         "{lines.join("")}\n"
     }
 }
 
-fn pkg_opaque_sorted_keys(keys: [String]) -> [String] !Never {
+fn pkg_opaque_sorted_keys(keys: [String]) -> [String] Never! {
     out := keys
-    out.sort()
+    &out.sort()
     out
 }
 
 // `name_t` names its handle `name`.
-fn pkg_opaque_handle_name_seed(typedef_name: String) -> String !Never {
+fn pkg_opaque_handle_name_seed(typedef_name: String) -> String Never! {
     if typedef_name.ends_with("_t") && typedef_name != "_t" -> return typedef_name.removesuffix("_t")
     ~typedef_name
 }
@@ -286,7 +286,7 @@ fn pkg_opaque_handle_name_seed(typedef_name: String) -> String !Never {
 // Whether `function` is `<stem><verb>`, `<stem>_<verb>`, or `<verb>_<stem>`
 // for a close verb and a stem of the typedef or struct tag (lowercase, snake,
 // or any leading run of snake words).
-fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, struct_tag: String) -> Bool !Never {
+fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, struct_tag: String) -> Bool Never! {
     stems := [String]{}
     spellings :: [String]{typedef_name, struct_tag}
     loop spelling in spellings {
@@ -294,14 +294,14 @@ fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, st
         loop raw.starts_with("_") -> raw = raw.removeprefix("_")
         loop raw.ends_with("_t") -> raw = raw.removesuffix("_t")
         if raw == "" -> next
-        stems.push(raw.to_lower())
+        &stems.push(raw.to_lower())
         snake :: pkg_opaque_camel_to_snake(raw)
-        stems.push(snake)
+        &stems.push(snake)
         parts :: snake.split("_").to_list()
         prefix := ""
         loop index in 0..<parts.len() {
             prefix = if index == 0 -> parts[index] else -> "{prefix}_{parts[index]}"
-            stems.push(prefix)
+            &stems.push(prefix)
         }
     }
     wanted :: function.to_lower()
@@ -315,7 +315,7 @@ fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, st
 }
 
 // ASCII camel case to snake case; every other non-alphanumeric run is one `_`.
-fn pkg_opaque_camel_to_snake(raw: String) -> String !Never {
+fn pkg_opaque_camel_to_snake(raw: String) -> String Never! {
     out := [U8]{}
     previous_lower := false
     loop byte in raw.bytes() {
@@ -324,14 +324,14 @@ fn pkg_opaque_camel_to_snake(raw: String) -> String !Never {
         lower :: code >= 97 && code <= 122
         digit :: code >= 48 && code <= 57
         ends_underscore :: out.len() > 0 && Int.from_u8(out[out.len() - 1]) == 95
-        if upper && previous_lower && !ends_underscore -> out.push(U8{95})
+        if upper && previous_lower && !ends_underscore -> &out.push(U8{95})
         if {
             upper || lower || digit -> {
-                out.push(if upper -> U8{code + 32} else -> byte)
+                &out.push(if upper -> U8{code + 32} else -> byte)
                 previous_lower = lower || digit
             }
             else -> {
-                if !(out.len() > 0 && Int.from_u8(out[out.len() - 1]) == 95) -> out.push(U8{95})
+                if !(out.len() > 0 && Int.from_u8(out[out.len() - 1]) == 95) -> &out.push(U8{95})
                 previous_lower = false
             }
         }
@@ -344,7 +344,7 @@ fn pkg_opaque_camel_to_snake(raw: String) -> String !Never {
 // Whether a C type spells the opaque typedef `alias`: through its struct tag
 // with exactly one `*`, or through the alias with the `*` the typedef itself
 // does not carry.
-fn pkg_opaque_matches_shape(raw: String, alias: String, shape: OpaqueHandleShape) -> Bool !Never {
+fn pkg_opaque_matches_shape(raw: String, alias: String, shape: OpaqueHandleShape) -> Bool Never! {
     actual :: pkg_opaque_parse_type_shape(pkg_opaque_parameter_type(raw))
     base :: actual.base ?? return false
     if actual.struct_tag == {
@@ -362,7 +362,7 @@ fn pkg_opaque_matches_shape(raw: String, alias: String, shape: OpaqueHandleShape
 
 // A prototype parameter's C type without its declarator name, so `gzFile
 // file` is the type `gzFile`, not a type named `file`.
-fn pkg_opaque_parameter_type(input: String) -> String !Never {
+fn pkg_opaque_parameter_type(input: String) -> String Never! {
     raw :: input.trim()
     bytes :: raw.bytes()
     position := bytes.len() - 1
@@ -380,7 +380,7 @@ fn pkg_opaque_parameter_type(input: String) -> String !Never {
 
 // Resolve a typedef through alias chains to its opaque shape; `path` holds
 // the aliases already on this chain so a cycle resolves to nothing.
-fn pkg_opaque_resolve_alias(name: String, aliases: [String: OpaqueAliasDecl], complete_tags: [String], path: [String]) -> ?OpaqueHandleShape !Never {
+fn pkg_opaque_resolve_alias(name: String, aliases: [String: OpaqueAliasDecl], complete_tags: [String], path: [String]) -> OpaqueHandleShape? Never! {
     if path.contains(name) -> return None
     decl :: aliases.get(name) ?? return None
     if decl.base == {
@@ -389,7 +389,7 @@ fn pkg_opaque_resolve_alias(name: String, aliases: [String: OpaqueAliasDecl], co
         .Other -> None
         .Alias(other) -> {
             chain := path
-            chain.push(name)
+            &chain.push(name)
             inner :: pkg_opaque_resolve_alias(other, aliases, complete_tags, chain) ?? return None
             Val(OpaqueHandleShape{struct_tag: inner.struct_tag, pointer_depth: inner.pointer_depth + decl.pointer_depth})
         }
@@ -397,7 +397,7 @@ fn pkg_opaque_resolve_alias(name: String, aliases: [String: OpaqueAliasDecl], co
 }
 
 // Struct tags some declaration defines with a body.
-fn pkg_opaque_complete_struct_tags(declarations: [String]) -> [String] !Never {
+fn pkg_opaque_complete_struct_tags(declarations: [String]) -> [String] Never! {
     complete := [String]{}
     loop declaration in declarations {
         tokens :: pkg_opaque_tokenize(declaration)
@@ -408,7 +408,7 @@ fn pkg_opaque_complete_struct_tags(declarations: [String]) -> [String] !Never {
         }
         loop index in 0..<(tokens.len() - 2) {
             if tokens[index] != "struct" || !pkg_opaque_is_ident(tokens[index + 1]) -> next
-            if last_brace >= index + 2 && !complete.contains(tokens[index + 1]) -> complete.push(tokens[index + 1])
+            if last_brace >= index + 2 && !complete.contains(tokens[index + 1]) -> &complete.push(tokens[index + 1])
         }
     }
     complete
@@ -416,7 +416,7 @@ fn pkg_opaque_complete_struct_tags(declarations: [String]) -> [String] !Never {
 
 // `typedef <type> name`; function-pointer typedefs need a declarator parser
 // and are never guessed as handles.
-fn pkg_opaque_parse_typedef(declaration: String) -> ?(name: String, decl: OpaqueAliasDecl) !Never {
+fn pkg_opaque_parse_typedef(declaration: String) -> (name: String, decl: OpaqueAliasDecl)? Never! {
     tokens :: pkg_opaque_tokenize(declaration)
     if tokens.len() == 0 || tokens[0] != "typedef" -> return None
     if tokens[1..<tokens.len()].contains("(") -> return None
@@ -424,7 +424,7 @@ fn pkg_opaque_parse_typedef(declaration: String) -> ?(name: String, decl: Opaque
     loop alias_position >= 0 && !pkg_opaque_is_ident(tokens[alias_position]) -> alias_position -= 1
     if alias_position <= 0 -> return None
     type_tokens := [String]{}
-    loop index in 1..<alias_position -> type_tokens.push(tokens[index])
+    loop index in 1..<alias_position -> &type_tokens.push(tokens[index])
     pointer_depth := 0
     loop token in type_tokens {
         if token == "*" -> pointer_depth += 1
@@ -448,7 +448,7 @@ fn pkg_opaque_parse_typedef(declaration: String) -> ?(name: String, decl: Opaque
     Val((name: tokens[alias_position], decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}))
 }
 
-fn pkg_opaque_only_void_pointer(tokens: [String]) -> Bool !Never {
+fn pkg_opaque_only_void_pointer(tokens: [String]) -> Bool Never! {
     loop token in tokens {
         if token == {
             "void" | "const" | "volatile" | "restrict" | "*" -> {}
@@ -459,7 +459,7 @@ fn pkg_opaque_only_void_pointer(tokens: [String]) -> Bool !Never {
 }
 
 // `<return type> name(<params>)` with nothing after the closing paren.
-fn pkg_opaque_parse_prototype(declaration: String) -> ?OpaqueCPrototype !Never {
+fn pkg_opaque_parse_prototype(declaration: String) -> OpaqueCPrototype? Never! {
     if declaration.contains("{{") || declaration.trim_start().starts_with("typedef") -> return None
     bytes :: declaration.bytes()
     open := -1
@@ -485,7 +485,7 @@ fn pkg_opaque_parse_prototype(declaration: String) -> ?OpaqueCPrototype !Never {
 
 // Top-level comma-separated parameters; `void` or nothing is none, and an
 // empty or unbalanced parameter rejects the prototype.
-fn pkg_opaque_split_params(text: String) -> ?[String] !Never {
+fn pkg_opaque_split_params(text: String) -> [String]? Never! {
     if text == "" || text == "void" -> return Val([String]{})
     bytes :: text.bytes()
     params := [String]{}
@@ -503,7 +503,7 @@ fn pkg_opaque_split_params(text: String) -> ?[String] !Never {
                 if depth == 0 {
                     param :: pkg_bytes_text(bytes, start, index)
                     if param.trim() == "" -> return None
-                    params.push(param)
+                    &params.push(param)
                     start = index + 1
                 }
             }
@@ -512,13 +512,13 @@ fn pkg_opaque_split_params(text: String) -> ?[String] !Never {
     }
     last :: pkg_bytes_text(bytes, start, bytes.len())
     if depth != 0 || last.trim() == "" -> return None
-    params.push(last)
+    &params.push(last)
     Val(params)
 }
 
 // The base type name, struct tag, and pointer depth a C type spells;
 // qualifiers and integer modifiers are ignored.
-fn pkg_opaque_parse_type_shape(raw: String) -> OpaqueCTypeShape !Never {
+fn pkg_opaque_parse_type_shape(raw: String) -> OpaqueCTypeShape Never! {
     shape := OpaqueCTypeShape{base: None, struct_tag: None, pointer_depth: 0}
     previous_struct := false
     loop token in pkg_opaque_tokenize(raw) {
@@ -541,7 +541,7 @@ fn pkg_opaque_parse_type_shape(raw: String) -> OpaqueCTypeShape !Never {
 }
 
 // ASCII identifier runs plus `* ( ) { } [ ]`; everything else separates.
-fn pkg_opaque_tokenize(text: String) -> [String] !Never {
+fn pkg_opaque_tokenize(text: String) -> [String] Never! {
     bytes :: text.bytes()
     tokens := [String]{}
     start := -1
@@ -552,21 +552,21 @@ fn pkg_opaque_tokenize(text: String) -> [String] !Never {
             next
         }
         if start >= 0 {
-            tokens.push(pkg_bytes_text(bytes, start, index))
+            &tokens.push(pkg_bytes_text(bytes, start, index))
             start = -1
         }
         if code == {
-            42 | 40 | 41 | 123 | 125 | 91 | 93 -> tokens.push(pkg_bytes_text(bytes, index, index + 1))
+            42 | 40 | 41 | 123 | 125 | 91 | 93 -> &tokens.push(pkg_bytes_text(bytes, index, index + 1))
             else -> {}
         }
     }
-    if start >= 0 -> tokens.push(pkg_bytes_text(bytes, start, bytes.len()))
+    if start >= 0 -> &tokens.push(pkg_bytes_text(bytes, start, bytes.len()))
     tokens
 }
 
 // Declarations end at a `;` outside braces; text after the last one is
 // dropped.
-fn pkg_opaque_split_declarations(text: String) -> [String] !Never {
+fn pkg_opaque_split_declarations(text: String) -> [String] Never! {
     bytes :: text.bytes()
     declarations := [String]{}
     start := 0
@@ -578,7 +578,7 @@ fn pkg_opaque_split_declarations(text: String) -> [String] !Never {
             125 -> depth -= 1
             59 -> {
                 if depth == 0 {
-                    declarations.push(pkg_bytes_text(bytes, start, index))
+                    &declarations.push(pkg_bytes_text(bytes, start, index))
                     start = index + 1
                 }
             }
@@ -591,7 +591,7 @@ fn pkg_opaque_split_declarations(text: String) -> [String] !Never {
 // Drop block comments (each becomes one space), line comments, and
 // preprocessor directives with their `\` continuation lines. Kept lines end
 // in LF.
-fn pkg_opaque_strip_comments_and_directives(text: String) -> String !Never {
+fn pkg_opaque_strip_comments_and_directives(text: String) -> String Never! {
     bytes :: text.bytes()
     kept := [U8]{}
     index := 0
@@ -603,14 +603,14 @@ fn pkg_opaque_strip_comments_and_directives(text: String) -> String !Never {
                 index += 2
                 loop index + 1 < bytes.len() && !(Int.from_u8(bytes[index]) == 42 && Int.from_u8(bytes[index + 1]) == 47) -> index += 1
                 index = if index + 2 < bytes.len() -> index + 2 else -> bytes.len()
-                kept.push(U8{32})
+                &kept.push(U8{32})
             }
             code == 47 && next_code == 47 -> {
                 index += 2
                 loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
             }
             else -> {
-                kept.push(bytes[index])
+                &kept.push(bytes[index])
                 index += 1
             }
         }
@@ -629,28 +629,28 @@ fn pkg_opaque_strip_comments_and_directives(text: String) -> String !Never {
             continued = line.trim_end().ends_with("\\")
             next
         }
-        out.push("{line}\n")
+        &out.push("{line}\n")
     }
     out.join("")
 }
 
-fn pkg_opaque_without_trailing_cr(line: String) -> String !Never {
+fn pkg_opaque_without_trailing_cr(line: String) -> String Never! {
     bytes :: line.bytes()
     if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
     ~line
 }
 
 // `preferred`, or `preferred_2`, `preferred_3`, … when taken.
-fn pkg_opaque_unique_name(used: &[String], preferred: String) -> String !Never {
+fn pkg_opaque_unique_name(used: &[String], preferred: String) -> String Never! {
     if !used.contains(preferred) {
-        used.push(~preferred)
+        &used.push(~preferred)
         return ~preferred
     }
     suffix := 2
     loop {
         candidate :: "{preferred}_{suffix}"
         if !used.contains(candidate) {
-            used.push(~candidate)
+            &used.push(~candidate)
             return candidate
         }
         suffix += 1
@@ -658,7 +658,7 @@ fn pkg_opaque_unique_name(used: &[String], preferred: String) -> String !Never {
 }
 
 // An ASCII C identifier.
-fn pkg_opaque_is_ident(value: String) -> Bool !Never {
+fn pkg_opaque_is_ident(value: String) -> Bool Never! {
     bytes :: value.bytes()
     if bytes.len() == 0 -> return false
     first :: Int.from_u8(bytes[0])

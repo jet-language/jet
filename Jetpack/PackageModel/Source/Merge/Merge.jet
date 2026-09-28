@@ -17,7 +17,7 @@ pub struct Pkg {
     pub source: String
     pub name: String
 
-    fn new(source: String, name: String) -> Pkg !Never {
+    fn new(source: String, name: String) -> Pkg Never! {
         Pkg{source: source, name: name}
     }
 
@@ -33,15 +33,15 @@ pub struct Pkg {
     //
     // Lenient: empty items are skipped. The split is bracket-aware, so a nested
     // list value never splits mid-item.
-    fn parse_list(body: String) -> [Pkg] !Never {
+    fn parse_list(body: String) -> [Pkg] Never! {
         out := [Pkg]{}
         loop item in pkg_merge_split_top_level(body) {
-            loop pkg in Pkg.parse_item(item.trim()) -> out.push(pkg)
+            loop pkg in Pkg.parse_item(item.trim()) -> &out.push(pkg)
         }
         out
     }
 
-    fn parse_item(item: String) -> [Pkg] !Never {
+    fn parse_item(item: String) -> [Pkg] Never! {
         if item == "" -> return [Pkg]{}
         // Escape-hatch quoted string: keep verbatim, source unresolved.
         if item.starts_with("\"") {
@@ -58,7 +58,7 @@ pub struct Pkg {
                     members := [Pkg]{}
                     loop name in rest.removeprefix("[").removesuffix("]").split(",") {
                         member :: name.trim()
-                        if member != "" -> members.push(Pkg.new(parts.before, member))
+                        if member != "" -> &members.push(Pkg.new(parts.before, member))
                     }
                     return members
                 }
@@ -80,7 +80,7 @@ pub enum MergeError {
 
 // Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
 // item). Returns the raw, untrimmed pieces; a trailing comma adds no piece.
-fn pkg_merge_split_top_level(body: String) -> [String] !Never {
+fn pkg_merge_split_top_level(body: String) -> [String] Never! {
     raw :: body.bytes()
     out := [String]{}
     depth := 0
@@ -92,20 +92,20 @@ fn pkg_merge_split_top_level(body: String) -> [String] !Never {
             41 | 93 | 125 -> depth -= 1
             44 -> {
                 if depth == 0 {
-                    out.push(pkg_bytes_text(raw, start, index))
+                    &out.push(pkg_bytes_text(raw, start, index))
                     start = index + 1
                 }
             }
             else -> {}
         }
     }
-    if start < raw.len() -> out.push(pkg_bytes_text(raw, start, raw.len()))
+    if start < raw.len() -> &out.push(pkg_bytes_text(raw, start, raw.len()))
     out
 }
 
 // Merge `sources` maps by key: identical refs de-duplicate; the same name with
 // different refs is a conflict (§6). Each map is read in key order.
-pub fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] !MergeError {
+pub fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] MergeError! {
     out := [String: String]{}
     loop map in contribs {
         loop name in pkg_merge_sorted_names(map) {
@@ -121,19 +121,19 @@ pub fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] !Merg
     Ok(out)
 }
 
-fn pkg_merge_sorted_names(map: [String: String]) -> [String] !Never {
+fn pkg_merge_sorted_names(map: [String: String]) -> [String] Never! {
     names := map.keys().to_list()
-    names.sort()
+    &names.sort()
     names
 }
 
 // Concatenate package lists, de-duplicate while preserving source identity,
 // and keep first-seen order (§6).
-pub fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] !Never {
+pub fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
     out := [Pkg]{}
     loop list in lists {
         loop pkg in list {
-            if !out.contains(pkg) -> out.push(pkg)
+            if !out.contains(pkg) -> &out.push(pkg)
         }
     }
     out

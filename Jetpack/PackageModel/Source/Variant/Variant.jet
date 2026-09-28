@@ -14,7 +14,7 @@ pub enum VariantRole {
     Host
     Target
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Build -> "build"
             .Host -> "host"
@@ -22,7 +22,7 @@ pub enum VariantRole {
         }
     }
 
-    fn parse(raw: String) -> ?VariantRole !Never {
+    fn parse(raw: String) -> VariantRole? Never! {
         if raw == {
             "build" -> Val(VariantRole.Build)
             "host" -> Val(VariantRole.Host)
@@ -37,7 +37,7 @@ pub enum VariantOs {
     MacOS
     Windows
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Linux -> @OS_LINUX
             .MacOS -> @OS_MACOS
@@ -45,7 +45,7 @@ pub enum VariantOs {
         }
     }
 
-    fn parse(raw: String) -> ?VariantOs !Never {
+    fn parse(raw: String) -> VariantOs? Never! {
         if raw == {
             @OS_LINUX | "Linux" -> Val(VariantOs.Linux)
             @OS_MACOS | "MacOS" | "Darwin" | "darwin" -> Val(VariantOs.MacOS)
@@ -54,7 +54,7 @@ pub enum VariantOs {
         }
     }
 
-    fn from_platform_os(os: String) -> VariantOs !Never {
+    fn from_platform_os(os: String) -> VariantOs Never! {
         VariantOs.parse(os) ?? VariantOs.Linux
     }
 }
@@ -63,14 +63,14 @@ pub enum VariantArch {
     X64
     Aarch64
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .X64 -> @ARCH_X64
             .Aarch64 -> @ARCH_ARM64
         }
     }
 
-    fn parse(raw: String) -> ?VariantArch !Never {
+    fn parse(raw: String) -> VariantArch? Never! {
         if raw == {
             @ARCH_X64 | "x64" | "amd64" -> Val(VariantArch.X64)
             @ARCH_ARM64 | "arm64" | "Aarch64" -> Val(VariantArch.Aarch64)
@@ -78,7 +78,7 @@ pub enum VariantArch {
         }
     }
 
-    fn from_platform_arch(arch: String) -> VariantArch !Never {
+    fn from_platform_arch(arch: String) -> VariantArch Never! {
         VariantArch.parse(arch) ?? VariantArch.X64
     }
 }
@@ -89,7 +89,7 @@ pub enum VariantLibc {
     Msvc
     NoLibc
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Gnu -> "gnu"
             .Musl -> "musl"
@@ -98,7 +98,7 @@ pub enum VariantLibc {
         }
     }
 
-    fn parse(raw: String) -> ?VariantLibc !Never {
+    fn parse(raw: String) -> VariantLibc? Never! {
         if raw == {
             "gnu" | "glibc" -> Val(VariantLibc.Gnu)
             "musl" -> Val(VariantLibc.Musl)
@@ -108,7 +108,7 @@ pub enum VariantLibc {
         }
     }
 
-    fn default_for(os: VariantOs) -> VariantLibc !Never {
+    fn default_for(os: VariantOs) -> VariantLibc Never! {
         if os == {
             .Linux -> VariantLibc.Gnu
             .MacOS -> VariantLibc.NoLibc
@@ -121,14 +121,14 @@ pub enum VariantLinkage {
     Shared
     Static
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Shared -> "shared"
             .Static -> "static"
         }
     }
 
-    fn parse(raw: String) -> ?VariantLinkage !Never {
+    fn parse(raw: String) -> VariantLinkage? Never! {
         if raw == {
             "shared" | "dynamic" -> Val(VariantLinkage.Shared)
             "static" -> Val(VariantLinkage.Static)
@@ -142,7 +142,7 @@ pub enum VariantAbi {
     Ms
     Unknown
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Sysv -> "sysv"
             .Ms -> "ms"
@@ -150,7 +150,7 @@ pub enum VariantAbi {
         }
     }
 
-    fn parse(raw: String) -> ?VariantAbi !Never {
+    fn parse(raw: String) -> VariantAbi? Never! {
         if raw == {
             "sysv" -> Val(VariantAbi.Sysv)
             "ms" | "msvc" -> Val(VariantAbi.Ms)
@@ -159,7 +159,7 @@ pub enum VariantAbi {
         }
     }
 
-    fn default_for(os: VariantOs) -> VariantAbi !Never {
+    fn default_for(os: VariantOs) -> VariantAbi Never! {
         if os == {
             .Windows -> VariantAbi.Ms
             .Linux | .MacOS -> VariantAbi.Sysv
@@ -177,7 +177,7 @@ pub enum ArtifactKind {
     Sysroot
     Any
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Library -> "library"
             .Executable -> "executable"
@@ -190,7 +190,7 @@ pub enum ArtifactKind {
         }
     }
 
-    fn parse(raw: String) -> ?ArtifactKind !Never {
+    fn parse(raw: String) -> ArtifactKind? Never! {
         if raw == {
             "library" | "lib" -> Val(ArtifactKind.Library)
             "executable" | "bin" -> Val(ArtifactKind.Executable)
@@ -218,7 +218,7 @@ pub enum VariantAxis {
     Features
     ProviderFacts
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Role -> "role"
             .Os -> "os"
@@ -233,7 +233,7 @@ pub enum VariantAxis {
     }
 
     // A `variant_map` axis name; `runtime` is the libc axis.
-    fn parse_mapped(raw: String) -> ?VariantAxis !Never {
+    fn parse_mapped(raw: String) -> VariantAxis? Never! {
         if raw == {
             "role" -> Val(VariantAxis.Role)
             "os" -> Val(VariantAxis.Os)
@@ -262,7 +262,7 @@ pub struct PackageVariant {
 
     // Total defaults from the requesting context: its platform, Host role,
     // shared linkage, library artifact, no features.
-    fn defaults_for_context(platform: PlatformKey) -> PackageVariant !Never {
+    fn defaults_for_context(platform: PlatformKey) -> PackageVariant Never! {
         os :: VariantOs.from_platform_os(platform.os)
         PackageVariant{
             role: VariantRole.Host,
@@ -277,7 +277,7 @@ pub struct PackageVariant {
     }
 
     // Cross-compile need: Target role on a foreign triple.
-    fn cross_target(os: VariantOs, arch: VariantArch, libc: VariantLibc) -> PackageVariant !Never {
+    fn cross_target(os: VariantOs, arch: VariantArch, libc: VariantLibc) -> PackageVariant Never! {
         PackageVariant{
             role: VariantRole.Target,
             os: ~os,
@@ -290,14 +290,14 @@ pub struct PackageVariant {
         }
     }
 
-    fn with_role(self, role: VariantRole) -> PackageVariant !Never {
+    fn with_role(self, role: VariantRole) -> PackageVariant Never! {
         out := self
         out.role = role
         out
     }
 
     // Changing the OS resets libc and ABI to that OS's defaults.
-    fn with_os(self, os: VariantOs) -> PackageVariant !Never {
+    fn with_os(self, os: VariantOs) -> PackageVariant Never! {
         out := self
         out.libc = VariantLibc.default_for(os)
         out.abi = VariantAbi.default_for(os)
@@ -305,63 +305,63 @@ pub struct PackageVariant {
         out
     }
 
-    fn with_arch(self, arch: VariantArch) -> PackageVariant !Never {
+    fn with_arch(self, arch: VariantArch) -> PackageVariant Never! {
         out := self
         out.arch = arch
         out
     }
 
-    fn with_libc(self, libc: VariantLibc) -> PackageVariant !Never {
+    fn with_libc(self, libc: VariantLibc) -> PackageVariant Never! {
         out := self
         out.libc = libc
         out
     }
 
-    fn with_linkage(self, linkage: VariantLinkage) -> PackageVariant !Never {
+    fn with_linkage(self, linkage: VariantLinkage) -> PackageVariant Never! {
         out := self
         out.linkage = linkage
         out
     }
 
-    fn with_abi(self, abi: VariantAbi) -> PackageVariant !Never {
+    fn with_abi(self, abi: VariantAbi) -> PackageVariant Never! {
         out := self
         out.abi = abi
         out
     }
 
-    fn with_artifact(self, artifact: ArtifactKind) -> PackageVariant !Never {
+    fn with_artifact(self, artifact: ArtifactKind) -> PackageVariant Never! {
         out := self
         out.artifact = artifact
         out
     }
 
-    fn with_feature(self, feature: String) -> PackageVariant !Never {
+    fn with_feature(self, feature: String) -> PackageVariant Never! {
         out := self
-        out.add_feature(feature)
+        &out.add_feature(feature)
         out
     }
 
-    fn add_feature(&self, feature: String) !Never {
+    fn add_feature(&self, feature: String) Never! {
         if self.features.contains(feature) -> return
-        self.features.push(feature)
-        self.features.sort()
+        &self.features.push(feature)
+        &self.features.sort()
     }
 
     // Canonical identity string for action keys and the semantic lock
     // `platform`.
-    fn identity_key(self) -> String !Never {
+    fn identity_key(self) -> String Never! {
         "role={self.role.as_str()};os={self.os.as_str()};arch={self.arch.as_str()};libc={self.libc.as_str()};linkage={self.linkage.as_str()};abi={self.abi.as_str()};artifact={self.artifact.as_str()};features={self.features.join(",")}"
     }
 
     // Exact match: every closed axis equal and equal feature sets.
-    fn matches_exact(self, need: PackageVariant) -> Bool !Never {
+    fn matches_exact(self, need: PackageVariant) -> Bool Never! {
         self == need
     }
 
     // Compatible under the total order: the producer may carry more features
     // and may offer `ArtifactKind.Any` for any need; every other axis must
     // match exactly.
-    fn matches_compatible(self, need: PackageVariant) -> Bool !Never {
+    fn matches_compatible(self, need: PackageVariant) -> Bool Never! {
         if self.role != need.role || self.os != need.os || self.arch != need.arch -> return false
         if self.libc != need.libc || self.linkage != need.linkage || self.abi != need.abi -> return false
         if self.artifact != need.artifact && self.artifact != ArtifactKind.Any -> return false
@@ -372,7 +372,7 @@ pub struct PackageVariant {
     }
 
     // First axis in tie-break order where the two variants differ.
-    fn first_distinguishing_axis(left: PackageVariant, right: PackageVariant) -> VariantAxis !Never {
+    fn first_distinguishing_axis(left: PackageVariant, right: PackageVariant) -> VariantAxis Never! {
         if {
             left.role != right.role -> VariantAxis.Role
             left.os != right.os -> VariantAxis.Os
@@ -388,23 +388,23 @@ pub struct PackageVariant {
     // Select a producer for this need: exact winners first, else compatible
     // ones; exactly one winner. A tie is Ambiguous and names the first axis
     // that separates the first two survivors.
-    fn select(self, candidates: [VariantCandidate], maps: [VariantMapEntry]) -> VariantCandidate !VariantSelectError {
+    fn select(self, candidates: [VariantCandidate], maps: [VariantMapEntry]) -> VariantCandidate VariantSelectError! {
         mapped := [PackageVariant]{}
-        loop candidate in candidates -> mapped.push(candidate.mapped_variant(maps))
+        loop candidate in candidates -> &mapped.push(candidate.mapped_variant(maps))
         pool := [Int]{}
         loop index in 0..<mapped.len() {
-            if mapped[index].matches_exact(self) -> pool.push(index)
+            if mapped[index].matches_exact(self) -> &pool.push(index)
         }
         if pool.len() == 0 {
             loop index in 0..<mapped.len() {
-                if mapped[index].matches_compatible(self) -> pool.push(index)
+                if mapped[index].matches_compatible(self) -> &pool.push(index)
             }
         }
         if pool.len() == 0 -> return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
         if pool.len() == 1 -> return Ok(candidates[pool[0]])
         labels := [String]{}
-        loop index in pool -> labels.push(candidates[index].label)
-        labels.sort()
+        loop index in pool -> &labels.push(candidates[index].label)
+        &labels.sort()
         first :: mapped[pool[0]]
         second :: mapped[pool[1]]
         // Identical mapped variants differ only in provider facts that no
@@ -416,11 +416,11 @@ pub struct PackageVariant {
     // Universal lock coverage: every declared supported domain must appear
     // as a selected variant identity. The missing identity keys, in
     // declaration order.
-    fn missing_lock_domains(declared: [PackageVariant], locked_identities: [String]) -> [String] !Never {
+    fn missing_lock_domains(declared: [PackageVariant], locked_identities: [String]) -> [String] Never! {
         missing := [String]{}
         loop variant in declared {
             key :: variant.identity_key()
-            if !locked_identities.contains(key) -> missing.push(key)
+            if !locked_identities.contains(key) -> &missing.push(key)
         }
         missing
     }
@@ -433,11 +433,11 @@ pub struct VariantCandidate {
     pub variant: PackageVariant
     pub provider_facts: [String: String]
 
-    fn new(label: String, variant: PackageVariant) -> VariantCandidate !Never {
+    fn new(label: String, variant: PackageVariant) -> VariantCandidate Never! {
         VariantCandidate{label: label, variant: variant, provider_facts: [String: String]{}}
     }
 
-    fn with_provider_fact(self, key: String, value: String) -> VariantCandidate !Never {
+    fn with_provider_fact(self, key: String, value: String) -> VariantCandidate Never! {
         out := self
         out.provider_facts[key] = value
         out
@@ -447,7 +447,7 @@ pub struct VariantCandidate {
     // matching. An entry with an empty value takes the fact's value, `*`
     // takes it too, and any other value applies only when the fact equals
     // it. Unparseable values and unknown axes leave the variant unchanged.
-    fn mapped_variant(self, maps: [VariantMapEntry]) -> PackageVariant !Never {
+    fn mapped_variant(self, maps: [VariantMapEntry]) -> PackageVariant Never! {
         variant := self.variant
         loop entry in maps {
             fact :: self.provider_facts.get(entry.provider_key) ?? next
@@ -467,7 +467,7 @@ pub struct VariantCandidate {
                 .Linkage -> variant.linkage = VariantLinkage.parse(value) ?? variant.linkage
                 .Abi -> variant.abi = VariantAbi.parse(value) ?? variant.abi
                 .Artifact -> variant.artifact = ArtifactKind.parse(value) ?? variant.artifact
-                .Features -> variant.add_feature(value)
+                .Features -> &variant.add_feature(value)
                 .ProviderFacts -> {}
             }
         }

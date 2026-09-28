@@ -11,15 +11,15 @@ pub struct NixDerivationOutput {
     pub method_algo: String
     pub hash_hex: String
 
-    fn is_fixed(self) -> Bool !Never {
+    fn is_fixed(self) -> Bool Never! {
         self.method_algo != "" && self.hash_hex != "impure" && self.hash_hex != ""
     }
 
-    fn is_floating(self) -> Bool !Never {
+    fn is_floating(self) -> Bool Never! {
         self.path == "" && self.method_algo != "" && self.hash_hex == ""
     }
 
-    fn is_impure(self) -> Bool !Never {
+    fn is_impure(self) -> Bool Never! {
         self.hash_hex == "impure"
     }
 }
@@ -43,74 +43,74 @@ pub struct NixDerivation {
 
     // Parse a stable `Derive(...)` ATerm; `DrvWithVersion` (dynamic
     // derivations) is unsupported.
-    fn parse(aterm: String) -> NixDerivation !NixError {
+    fn parse(aterm: String) -> NixDerivation NixError! {
         if aterm.starts_with("DrvWithVersion(") -> return Err(NixError.DrvUnsupported("DrvWithVersion / dynamic-derivations (JP21 staged)"))
         if !aterm.starts_with("Derive(") -> return Err(NixError.DrvParse("expected Derive("))
         cursor := NixATermCursor{bytes: aterm.bytes(), position: "Derive(".bytes().len()}
 
         outputs := [String: NixDerivationOutput]{}
-        if cursor.list_open() {
+        if &cursor.list_open() {
             loop {
-                cursor.consume("(")
-                name :: cursor.raw_string()
-                cursor.consume(",")
-                path :: cursor.raw_string()
-                cursor.consume(",")
-                method_algo :: cursor.raw_string()
-                cursor.consume(",")
-                hash_hex :: cursor.raw_string()
-                cursor.consume(")")
+                &cursor.consume("(")
+                name :: &cursor.raw_string()
+                &cursor.consume(",")
+                path :: &cursor.raw_string()
+                &cursor.consume(",")
+                method_algo :: &cursor.raw_string()
+                &cursor.consume(",")
+                hash_hex :: &cursor.raw_string()
+                &cursor.consume(")")
                 outputs[name] = NixDerivationOutput{name: ~name, path, method_algo, hash_hex}
-                if !cursor.list_next() -> break
+                if !&cursor.list_next() -> break
             }
         }
-        cursor.consume(",")
+        &cursor.consume(",")
 
         input_drvs := [NixInputDrv]{}
-        if cursor.list_open() {
+        if &cursor.list_open() {
             loop {
-                cursor.consume("(")
-                path :: cursor.raw_string()
-                cursor.consume(",")
+                &cursor.consume("(")
+                path :: &cursor.raw_string()
+                &cursor.consume(",")
                 if (cursor.peek() ?? "") == "(" -> return Err(NixError.DrvUnsupported("dynamic derivation input childMap (xp-dyn-drv)"))
-                input_drvs.push(NixInputDrv{path, outputs: nixeval_sorted_unique(cursor.raw_strings())})
-                cursor.consume(")")
-                if !cursor.list_next() -> break
+                &input_drvs.push(NixInputDrv{path, outputs: nixeval_sorted_unique(&cursor.raw_strings())})
+                &cursor.consume(")")
+                if !&cursor.list_next() -> break
             }
         }
-        cursor.consume(",")
-        input_srcs :: nixeval_sorted_unique(cursor.raw_strings())
-        cursor.consume(",")
-        platform :: cursor.raw_string()
-        cursor.consume(",")
-        builder :: cursor.escaped_string()
-        cursor.consume(",")
-        args :: cursor.escaped_strings()
-        cursor.consume(",")
+        &cursor.consume(",")
+        input_srcs :: nixeval_sorted_unique(&cursor.raw_strings())
+        &cursor.consume(",")
+        platform :: &cursor.raw_string()
+        &cursor.consume(",")
+        builder :: &cursor.escaped_string()
+        &cursor.consume(",")
+        args :: &cursor.escaped_strings()
+        &cursor.consume(",")
         env := [String: String]{}
-        if cursor.list_open() {
+        if &cursor.list_open() {
             loop {
-                cursor.consume("(")
-                key :: cursor.escaped_string()
-                cursor.consume(",")
-                value :: cursor.escaped_string()
-                cursor.consume(")")
+                &cursor.consume("(")
+                key :: &cursor.escaped_string()
+                &cursor.consume(",")
+                value :: &cursor.escaped_string()
+                &cursor.consume(")")
                 env[key] = value
-                if !cursor.list_next() -> break
+                if !&cursor.list_next() -> break
             }
         }
-        cursor.consume(")")
+        &cursor.consume(")")
 
         // Store-path order matches Nix's map iteration for a byte-exact encode.
-        input_drvs.sort_by(input -> input.path)
+        &input_drvs.sort_by(input -> input.path)
         Ok(NixDerivation{outputs, input_drvs, input_srcs, platform, builder, args, env: nixeval_key_ordered(env)})
     }
 
-    fn output_names(self) -> [String] !Never {
+    fn output_names(self) -> [String] Never! {
         nixeval_sorted(self.outputs.keys().to_list())
     }
 
-    fn is_fixed(self) -> Bool !Never {
+    fn is_fixed(self) -> Bool Never! {
         loop name in self.output_names() {
             if self.outputs[name].is_fixed() -> return true
         }
@@ -118,51 +118,51 @@ pub struct NixDerivation {
     }
 
     // Input sources plus input derivation paths, sorted and unique.
-    fn references_for_drv_path(self) -> [String] !Never {
+    fn references_for_drv_path(self) -> [String] Never! {
         references := ~self.input_srcs
-        loop input in self.input_drvs -> references.push(input.path)
+        loop input in self.input_drvs -> &references.push(input.path)
         nixeval_sorted_unique(references)
     }
 
     // The ATerm encoding. `mask_outputs` blanks output paths and output
     // environment values; `actual_inputs` replaces the input derivations by
     // modulo-hash hex keys (the `hashDerivationModulo` serialization).
-    fn unparse(self, mask_outputs: Bool, actual_inputs: ?[String: [String]]) -> String !Never {
+    fn unparse(self, mask_outputs: Bool, actual_inputs: [String: [String]]?) -> String Never! {
         outputs := [String]{}
         loop name in self.output_names() {
             output :: self.outputs[name]
             path :: if mask_outputs -> "" else -> output.path
-            outputs.push("({nix_aterm_raw(name)},{nix_aterm_raw(path)},{nix_aterm_raw(output.method_algo)},{nix_aterm_raw(output.hash_hex)})")
+            &outputs.push("({nix_aterm_raw(name)},{nix_aterm_raw(path)},{nix_aterm_raw(output.method_algo)},{nix_aterm_raw(output.hash_hex)})")
         }
         inputs := [String]{}
         if actual_inputs == {
             .Val(hashes) -> {
-                loop hash_hex in nixeval_sorted(hashes.keys().to_list()) -> inputs.push(nix_aterm_input(hash_hex, hashes[hash_hex]))
+                loop hash_hex in nixeval_sorted(hashes.keys().to_list()) -> &inputs.push(nix_aterm_input(hash_hex, hashes[hash_hex]))
             }
             else -> {
-                loop input in self.input_drvs -> inputs.push(nix_aterm_input(input.path, input.outputs))
+                loop input in self.input_drvs -> &inputs.push(nix_aterm_input(input.path, input.outputs))
             }
         }
         sources := [String]{}
-        loop source in self.input_srcs -> sources.push(nix_aterm_raw(source))
+        loop source in self.input_srcs -> &sources.push(nix_aterm_raw(source))
         args := [String]{}
-        loop arg in self.args -> args.push(nix_aterm_escaped(arg))
+        loop arg in self.args -> &args.push(nix_aterm_escaped(arg))
         env := [String]{}
         loop key in nixeval_sorted(self.env.keys().to_list()) {
             value :: if mask_outputs && self.outputs.get(key) != None -> "" else -> self.env[key]
-            env.push("({nix_aterm_escaped(key)},{nix_aterm_escaped(value)})")
+            &env.push("({nix_aterm_escaped(key)},{nix_aterm_escaped(value)})")
         }
         "Derive([{outputs.join(",")}],[{inputs.join(",")}],[{sources.join(",")}],{nix_aterm_raw(self.platform)},{nix_aterm_escaped(self.builder)},[{args.join(",")}],[{env.join(",")}])"
     }
 }
 
 // Unquoted ATerm string: no escape processing (Nix `printUnquotedString`).
-fn nix_aterm_raw(text: String) -> String !Never {
+fn nix_aterm_raw(text: String) -> String Never! {
     "\"{text}\""
 }
 
 // Escaped ATerm string (Nix `printString`): `\\`, `\"`, `\n`, `\r`, `\t`.
-fn nix_aterm_escaped(text: String) -> String !Never {
+fn nix_aterm_escaped(text: String) -> String Never! {
     out := [U8]{}
     nixeval_push_byte(&out, 34)
     loop byte in text.bytes() {
@@ -172,16 +172,16 @@ fn nix_aterm_escaped(text: String) -> String !Never {
             10 -> nixeval_push_text(&out, "\\n")
             13 -> nixeval_push_text(&out, "\\r")
             9 -> nixeval_push_text(&out, "\\t")
-            else -> out.push(byte)
+            else -> &out.push(byte)
         }
     }
     nixeval_push_byte(&out, 34)
     String.from_bytes(out) ?? panic("escaping keeps UTF-8 text UTF-8")
 }
 
-fn nix_aterm_input(path: String, outputs: [String]) -> String !Never {
+fn nix_aterm_input(path: String, outputs: [String]) -> String Never! {
     names := [String]{}
-    loop name in outputs -> names.push(nix_aterm_raw(name))
+    loop name in outputs -> &names.push(nix_aterm_raw(name))
     "({nix_aterm_raw(path)},[{names.join(",")}])"
 }
 
@@ -191,27 +191,27 @@ struct NixATermCursor {
     bytes: [U8]
     position: Int
 
-    fn peek(self) -> ?String !Never {
+    fn peek(self) -> String? Never! {
         if self.position >= self.bytes.len() -> return None
         width :: nixeval_scalar_width(self.bytes, self.position)
         Val(nixeval_slice(self.bytes, self.position, self.position + width))
     }
 
-    fn bump(&self) -> ?String !Never {
+    fn bump(&self) -> String? Never! {
         scalar :: self.peek() ?? return None
         self.position += scalar.bytes().len()
         Val(scalar)
     }
 
-    fn consume(&self, want: String) !NixError {
+    fn consume(&self, want: String) NixError! {
         got :: self.bump()
         if (got ?? "") != want {
             return Err(NixError.DrvParse("expected {nix_debug_scalar(want)} at {self.position}, got {nix_debug_optional_scalar(got)}"))
         }
     }
 
-    fn raw_string(&self) -> String !NixError {
-        self.consume("\"")
+    fn raw_string(&self) -> String NixError! {
+        &self.consume("\"")
         start :: self.position
         loop self.position < self.bytes.len() {
             if Int.from_u8(self.bytes[self.position]) == 34 {
@@ -224,8 +224,8 @@ struct NixATermCursor {
         Err(NixError.DrvParse("unterminated raw string"))
     }
 
-    fn escaped_string(&self) -> String !NixError {
-        self.consume("\"")
+    fn escaped_string(&self) -> String NixError! {
+        &self.consume("\"")
         out := [U8]{}
         loop self.position < self.bytes.len() {
             scalar :: self.bump() ?? return Err(NixError.DrvParse("unterminated escaped string"))
@@ -247,8 +247,8 @@ struct NixATermCursor {
     }
 
     // Consume `[`; true when list items follow, false after an empty `[]`.
-    fn list_open(&self) -> Bool !NixError {
-        self.consume("[")
+    fn list_open(&self) -> Bool NixError! {
+        &self.consume("[")
         if (self.peek() ?? "") == "]" {
             self.position += 1
             return Ok(false)
@@ -257,7 +257,7 @@ struct NixATermCursor {
     }
 
     // After one item: true on `,` (another item follows), false on `]`.
-    fn list_next(&self) -> Bool !NixError {
+    fn list_next(&self) -> Bool NixError! {
         separator :: self.peek() ?? ""
         if separator == {
             "]" -> {
@@ -273,23 +273,23 @@ struct NixATermCursor {
         Err(NixError.DrvParse("expected ',' or ']' in list at {self.position}, got {nix_debug_optional_scalar(self.peek())}"))
     }
 
-    fn raw_strings(&self) -> [String] !NixError {
+    fn raw_strings(&self) -> [String] NixError! {
         items := [String]{}
-        if self.list_open() {
+        if &self.list_open() {
             loop {
-                items.push(self.raw_string())
-                if !self.list_next() -> break
+                &items.push(&self.raw_string())
+                if !&self.list_next() -> break
             }
         }
         Ok(items)
     }
 
-    fn escaped_strings(&self) -> [String] !NixError {
+    fn escaped_strings(&self) -> [String] NixError! {
         items := [String]{}
-        if self.list_open() {
+        if &self.list_open() {
             loop {
-                items.push(self.escaped_string())
-                if !self.list_next() -> break
+                &items.push(&self.escaped_string())
+                if !&self.list_next() -> break
             }
         }
         Ok(items)

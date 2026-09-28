@@ -15,13 +15,13 @@
 // Workspace facts from `.jet/lock` in `workspace_root`. None when the file
 // is absent, malformed, stale, or missing the identity fields a safe
 // workspace index needs; callers must not treat that as an empty workspace.
-pub fn pkg_workspace_lock_load(workspace_root: String) -[FS]> ?WorkspacePlan {
+pub fn pkg_workspace_lock_load(workspace_root: String) -[FS]> WorkspacePlan? {
     resolver :: AuthorityResolver.open(workspace_root) ?? return None
     pkg_workspace_lock_load_with_resolver(resolver)
 }
 
 // Workspace facts through an already-open authority root.
-pub fn pkg_workspace_lock_load_with_resolver(resolver: AuthorityResolver) -[FS]> ?WorkspacePlan {
+pub fn pkg_workspace_lock_load_with_resolver(resolver: AuthorityResolver) -[FS]> WorkspacePlan? {
     lock_file :: resolver.checked_file(@PKG_WORKSPACE_LOCK) ?? return None
     pkg_workspace_lock_load_checked_file(resolver, lock_file)
 }
@@ -29,16 +29,16 @@ pub fn pkg_workspace_lock_load_with_resolver(resolver: AuthorityResolver) -[FS]>
 // Consume one checked lock file without reopening it by pathname. Every
 // authority snapshot is revalidated around each read so a swapped file or
 // member cannot supply facts.
-pub fn pkg_workspace_lock_load_checked_file(resolver: AuthorityResolver, lock_file: CheckedFile) -[FS]> ?WorkspacePlan {
+pub fn pkg_workspace_lock_load_checked_file(resolver: AuthorityResolver, lock_file: CheckedFile) -[FS]> WorkspacePlan? {
     raw :: lock_file.text() ?? return None
     resolver.revalidate_file(lock_file) ?? return None
     lock :: pkg_lock_parse(raw) ?? return None
     resolver.revalidate_file(lock_file) ?? return None
+    recorded_digest :: lock.workspace_source_digest ?? return None
     source :: if resolver.resolve_workspace_source() == {
         .Ok(found) -> found
-        .Err(_) -> return None
+        .Err(_) -> { return None }
     }
-    source :: resolver.resolve_workspace_source() ?? return None
     if source == {
         .Val(present) -> {
             resolver.revalidate_source(present) ?? return None
@@ -65,7 +65,7 @@ pub fn pkg_workspace_lock_load_checked_file(resolver: AuthorityResolver, lock_fi
             resolver.revalidate_source(present) ?? return None
             checked :: resolver.checked_package(member.path) ?? return None
             resolver.revalidate_member(checked.member) ?? return None
-            checked_members.push(checked.member)
+            &checked_members.push(checked.member)
             physical_path :: checked.member.directory.path
             canonical_relative :: resolver.relative_identity(checked.member.directory) ?? return None
             if canonical_relative != member.canonical_path -> return None
@@ -73,8 +73,8 @@ pub fn pkg_workspace_lock_load_checked_file(resolver: AuthorityResolver, lock_fi
             if package.name != member.name || package.members.len() > 0 -> return None
             if member.package_digest == "" || package.semantic_digest() != member.package_digest -> return None
             if physical_paths.contains(physical_path) || names.contains(member.name) -> return None
-            physical_paths.push(physical_path)
-            names.push(member.name)
+            &physical_paths.push(physical_path)
+            &names.push(member.name)
             resolver.revalidate_source(present) ?? return None
         }
         loop checked_member in checked_members {
@@ -85,17 +85,15 @@ pub fn pkg_workspace_lock_load_checked_file(resolver: AuthorityResolver, lock_fi
     plan_source_digest :: if lock.workspace_members.len() > 0 -> lock.workspace_members[0].source_digest else -> source_digest
     members := [WorkspacePlanMember]{}
     if is_index {
-// Whether a relative member path has a `..` component.
-fn pkg_workspace_path_has_parent(path: String) -> Bool !Never {
-    loop part in path.split("/") {
-        if part == ".." -> return true
+        loop member in lock.workspace_members -> &members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})
     }
-    false
+    resolver.revalidate_file(lock_file) ?? return None
+    Val(WorkspacePlan{members: members, comptime_inputs: lock.comptime_inputs, overlay_policy: lock.workspace_overlay_policy, source_digest: plan_source_digest})
 }
 
-// Whether a relative member path has a `..` component (either separator).
-fn pkg_workspace_path_has_parent(path: String) -> Bool !Never {
-    loop part in path.replace("\\", "/").split("/") {
+// Whether a relative member path has a `..` component.
+fn pkg_workspace_path_has_parent(path: String) -> Bool Never! {
+    loop part in path.split("/") {
         if part == ".." -> return true
     }
     false

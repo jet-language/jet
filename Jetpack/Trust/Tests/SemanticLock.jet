@@ -93,7 +93,7 @@ dependencies = ["app"]
 
 #Test("catalog selection records owner and source ref") {
     lock := SemanticLockFile.empty()
-    lock.record_catalog_selection("app", "log", "core.log@1.2.3", "sha256-catalog", "x86_64-linux", "workspace selected shared logging")
+    &lock.record_catalog_selection("app", "log", "core.log@1.2.3", "sha256-catalog", "x86_64-linux", "workspace selected shared logging")
     assert_eq(lock.records.len(), 1)
     assert_eq(lock.records[0].rationales[0].source_ref, "catalog:log")
     assert_eq(lock.records[0].rationales[0].adapter_id, "workspace.catalog")
@@ -107,7 +107,7 @@ dependencies = ["app"]
     })
     before :: trust_write_semantic_lock(lock)
     http_block :: trust_test_record_block(before, "key = \"core.http\"")
-    previous :: lock.selective_update(trust_test_pkg("app", "core.log", "1.3.0", "sha256-log-new")) ?? panic("core.log should be replaced")
+    previous :: &lock.selective_update(trust_test_pkg("app", "core.log", "1.3.0", "sha256-log-new")) ?? panic("core.log should be replaced")
     assert_eq(previous.identity.exact, "1.2.3")
     after :: trust_write_semantic_lock(lock)
     assert_eq(trust_test_record_block(after, "key = \"core.http\""), http_block)
@@ -165,7 +165,7 @@ dependencies = ["app"]
     force.owner_package = "app"
     force.reason = "overlay `force` contributed `version` = `2` at priority 100"
     record := SemanticRecord.new(LockIdentity{kind: LockRecordKind.PackageOverlay, key: "force:foo", exact: "2", hash: "sha256-force", platform: "x86_64-linux"}, base)
-    record.rationales.push(force)
+    &record.rationales.push(force)
     record.future_fields["overlay-fact-version"] = "2"
 
     loaded :: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records([SemanticRecord]{record})))

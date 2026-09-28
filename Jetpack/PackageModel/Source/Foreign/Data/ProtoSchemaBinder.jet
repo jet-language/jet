@@ -1,0 +1,960 @@
+// Protocol Buffers schema inference for the data binder, ported from
+// jet_pkg_model::CBind (`lex_proto`, `ProtoParser`, `bind_proto`). The strict
+// proto2/proto3 reader validates declarations, names, field numbers,
+// reserved ranges, and options; messages become records, scalar types use
+// Jet core types, enums map to Int, repeated fields become lists, and each
+// field number stays in a comment.
+
+@PROTO_MAX_FIELD_NUMBER :: 536870911
+@PROTO_INT32_MIN :: -2147483648
+@PROTO_INT32_MAX :: 2147483647
+@PROTO_SYMBOLS :: "{{}}[]()=;,.<>:+-"
+
+@PROTO_KEYWORDS :: [String]{
+    "syntax", "package", "import", "option", "message", "enum", "service", "rpc", "returns", "stream",
+    "reserved", "extensions", "extend", "oneof", "group", "required", "optional", "repeated", "double",
+    "float", "int32", "sint32", "sfixed32", "int64", "sint64", "sfixed64", "uint32", "uint64", "fixed32",
+    "fixed64", "bool", "string", "bytes", "to", "max", "public", "weak"
+}
+
+fn pkg_data_bind_proto(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
+    parser := ProtoParser.new(input)
+    schema :: &parser.parse()
+    messages :: schema.messages
+    enum_names := [String]{}
+    loop item in schema.enums {
+        if !enum_names.contains(item.source_name) -> &enum_names.push(item.source_name)
+    }
+    &enum_names.sort()
+    builder := SchemaBuilder.new()
+    use_root :: messages.len() == 1
+    source_names := [String: String]{}
+    leaf_names := [String: String]{}
+    ambiguous_leaves := [String]{}
+    enum_leaf_names := [String: String]{}
+    ambiguous_enum_leaves := [String]{}
+    loop enum_name in enum_names {
+        leaf :: pkg_data_proto_leaf(enum_name)
+        if enum_leaf_names.get(leaf) != None -> &ambiguous_enum_leaves.push(leaf)
+        enum_leaf_names[leaf] = enum_name
+    }
+    loop index in 0..<messages.len() {
+        message :: messages[index]
+        preferred :: if use_root && index == 0 -> root_name ?? message.short_name else -> message.short_name
+        record :: &builder.begin_record(preferred)
+        source_names[message.source_name] = record.name
+        leaf :: pkg_data_proto_leaf(message.source_name)
+        if leaf_names.get(leaf) != None -> &ambiguous_leaves.push(leaf)
+        leaf_names[leaf] = record.name
+    }
+    loop index in 0..<messages.len() {
+        fields := [FieldSeed]{}
+        loop field in messages[index].fields {
+            base := BoundType.Dynamic
+            if pkg_data_proto_scalar(field.type_name) == {
+                .Val(scalar) -> base = pkg_data_bound_scalar(scalar)
+                .None -> {
+                    reference :: pkg_data_proto_trim_dots(field.type_name)
+                    leaf :: pkg_data_proto_leaf(reference)
+                    if enum_names.contains(reference) || (!ambiguous_enum_leaves.contains(leaf) && enum_leaf_names.get(leaf) != None) {
+                        base = BoundType.Scalar("Int")
+                    } else {
+                        by_leaf :: if ambiguous_leaves.contains(leaf) -> None else -> leaf_names.get(leaf)
+                        resolved :: source_names.get(reference) ?? (by_leaf ?? return Err(DataBindError{message: "proto field {field.wire_name} references unknown message or enum type {field.type_name}"}))
+                        base = BoundType.Named(resolved)
+                    }
+                }
+            }
+            ty :: if field.repeated -> BoundType.Array(base) else -> base
+            &fields.push(FieldSeed{wire_name: field.wire_name, ty: ty, optional: field.optional, note: Val("proto field number: {field.number}")})
+        }
+        &builder.set_fields(index, fields)
+    }
+    Ok(builder)
+}
+
+// The last `.`-separated segment of a proto name.
+fn pkg_data_proto_leaf(name: String) -> String Never! {
+    parts :: name.split(".").to_list()
+    parts[parts.len() - 1]
+}
+
+// A type name without its leading `.` qualifiers.
+fn pkg_data_proto_trim_dots(name: String) -> String Never! {
+    out := name
+    loop out.starts_with(".") -> out = out.removeprefix(".")
+    out
+}
+
+// One proto token.
+enum ProtoToken {
+    Word(String)
+    Number(String)
+    StringLiteral(String)
+    Symbol(String)
+}
+
+// Words, numbers (decimal, hexadecimal, fraction, exponent), quoted strings
+// with C-style escapes, and punctuation; comments are skipped.
+fn pkg_data_lex_proto(input: String) -> [ProtoToken] DataBindError! {
+    chars :: pkg_data_scalars(input)
+    tokens := [ProtoToken]{}
+    index := 0
+    loop index < chars.len() {
+        ch :: chars[index]
+        if pkg_data_is_ascii_whitespace(ch) {
+            index += 1
+            next
+        }
+        if ch == "/" && pkg_data_at(chars, index + 1) == "/" {
+            index += 2
+            loop index < chars.len() && chars[index] != "\n" -> index += 1
+            next
+        }
+        if ch == "/" && pkg_data_at(chars, index + 1) == "*" {
+            index += 2
+            loop index + 1 < chars.len() && !(chars[index] == "*" && chars[index + 1] == "/") -> index += 1
+            if index + 1 >= chars.len() -> return Err(DataBindError{message: "proto block comment is not closed"})
+            index += 2
+            next
+        }
+        if pkg_data_is_ascii_alphabetic(ch) || ch == "_" {
+            start :: index
+            index += 1
+            loop index < chars.len() && (pkg_data_is_ascii_alphanumeric(chars[index]) || chars[index] == "_") -> index += 1
+            &tokens.push(ProtoToken.Word(pkg_data_slice(chars, start, index)))
+            next
+        }
+        if pkg_data_is_ascii_digit(ch) {
+            start :: index
+            index += 1
+            if ch == "0" && (pkg_data_at(chars, index) == "x" || pkg_data_at(chars, index) == "X") {
+                index += 1
+                digits :: index
+                loop index < chars.len() && pkg_data_is_ascii_hexdigit(chars[index]) -> index += 1
+                if digits == index -> return Err(DataBindError{message: "proto hexadecimal number has no digits"})
+            } else {
+                loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                if pkg_data_at(chars, index) == "." && pkg_data_is_ascii_digit(pkg_data_at(chars, index + 1)) {
+                    index += 1
+                    loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                }
+                if pkg_data_at(chars, index) == "e" || pkg_data_at(chars, index) == "E" {
+                    index += 1
+                    if pkg_data_at(chars, index) == "+" || pkg_data_at(chars, index) == "-" -> index += 1
+                    digits :: index
+                    loop index < chars.len() && pkg_data_is_ascii_digit(chars[index]) -> index += 1
+                    if digits == index -> return Err(DataBindError{message: "proto numeric exponent has no digits"})
+                }
+            }
+            &tokens.push(ProtoToken.Number(pkg_data_slice(chars, start, index)))
+            next
+        }
+        if ch == "\"" || ch == "'" {
+            literal :: pkg_data_lex_proto_string(chars, index)
+            index = literal.next_index
+            &tokens.push(ProtoToken.StringLiteral(literal.value))
+            next
+        }
+        if @PROTO_SYMBOLS.contains(ch) {
+            &tokens.push(ProtoToken.Symbol(ch))
+            index += 1
+            next
+        }
+        return Err(DataBindError{message: "proto has unsupported character {ch}"})
+    }
+    Ok(tokens)
+}
+
+// A quoted proto string starting at `open`: its decoded value and the index
+// after the closing quote.
+fn pkg_data_lex_proto_string(chars: [String], open: Int) -> (value: String, next_index: Int) DataBindError! {
+    quote :: chars[open]
+    index := open + 1
+    value := [String]{}
+    loop index < chars.len() {
+        current :: chars[index]
+        if current == quote -> return Ok((value: value.join(""), next_index: index + 1))
+        if current == "\\" {
+            index += 1
+            if index >= chars.len() -> return Err(DataBindError{message: "proto string ends after an escape"})
+            escaped :: chars[index]
+            decoded := ""
+            if escaped == {
+                "a" -> decoded = pkg_data_scalar_of(7)
+                "b" -> decoded = pkg_data_scalar_of(8)
+                "f" -> decoded = pkg_data_scalar_of(12)
+                "n" -> decoded = "\n"
+                "r" -> decoded = pkg_data_scalar_of(13)
+                "t" -> decoded = "\t"
+                "v" -> decoded = pkg_data_scalar_of(11)
+                "\\" | "'" | "\"" | "?" -> decoded = escaped
+                "x" -> {
+                    if index + 2 >= chars.len() -> return Err(DataBindError{message: "proto hex escape needs two digits"})
+                    first :: chars[index + 1]
+                    second :: chars[index + 2]
+                    if !pkg_data_is_ascii_hexdigit(first) || !pkg_data_is_ascii_hexdigit(second) -> return Err(DataBindError{message: "proto hex escape needs two hexadecimal digits"})
+                    index += 2
+                    decoded = pkg_data_scalar_of(pkg_data_parse_radix("{first}{second}", 16) ?? 0)
+                }
+                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" -> {
+                    start :: index
+                    end := index + 1
+                    loop end < chars.len() && end < start + 3 && pkg_data_proto_is_octal(chars[end]) -> end += 1
+                    index = end - 1
+                    decoded = pkg_data_scalar_of(pkg_data_proto_octal(pkg_data_slice(chars, start, end)))
+                }
+                else -> return Err(DataBindError{message: "proto escape \\{escaped} is unsupported"})
+            }
+            if pkg_data_code(decoded) == 0 -> return Err(DataBindError{message: "proto string contains a NUL escape"})
+            &value.push(decoded)
+            index += 1
+            next
+        }
+        if current == "\n" || pkg_data_code(current) == 13 -> return Err(DataBindError{message: "proto string contains a newline"})
+        if pkg_data_is_control(current) -> return Err(DataBindError{message: "proto string contains a control character"})
+        &value.push(current)
+        index += 1
+    }
+    Err(DataBindError{message: "proto string is not closed"})
+}
+
+fn pkg_data_proto_is_octal(scalar: String) -> Bool Never! {
+    code :: pkg_data_code(scalar)
+    code >= 48 && code <= 55
+}
+
+fn pkg_data_proto_octal(digits: String) -> Int Never! {
+    total := 0
+    loop byte in digits.bytes() -> total = total * 8 + (Int.from_u8(byte) - 48)
+    total
+}
+
+// A decimal or `0x` hexadecimal integer literal within the Int range.
+fn pkg_data_parse_proto_integer_literal(value: String) -> Int? Never! {
+    if value.starts_with("0x") || value.starts_with("0X") {
+        hex :: if value.starts_with("0x") -> value.removeprefix("0x") else -> value.removeprefix("0X")
+        raw :: hex.bytes()
+        if raw.len() == 0 -> return None
+        total := 0
+        loop byte in raw {
+            code :: Int.from_u8(byte)
+            digit :: if {
+                code >= 48 && code <= 57 -> code - 48
+                code >= 65 && code <= 70 -> code - 55
+                code >= 97 && code <= 102 -> code - 87
+                else -> -1
+            }
+            if digit < 0 -> return None
+            if total > (9223372036854775807 - digit) / 16 -> return None
+            total = total * 16 + digit
+        }
+        return Val(total)
+    }
+    pkg_data_parse_digits(value)
+}
+
+fn pkg_data_proto_ranges_overlap(left: (start: Int, end: Int), right: (start: Int, end: Int)) -> Bool Never! {
+    left.start <= right.end && right.start <= left.end
+}
+
+// Field numbers 19000..=19999 are reserved by the protobuf implementation.
+fn pkg_data_proto_range_has_prohibited_number(range: (start: Int, end: Int)) -> Bool Never! {
+    range.start <= 19999 && range.end >= 19000
+}
+
+fn pkg_data_is_proto_identifier(value: String) -> Bool Never! {
+    scalars :: pkg_data_scalars(value)
+    if scalars.len() == 0 -> return false
+    if !(pkg_data_is_ascii_alphabetic(scalars[0]) || scalars[0] == "_") -> return false
+    loop scalar in scalars {
+        if !(pkg_data_is_ascii_alphanumeric(scalar) || scalar == "_") -> return false
+    }
+    true
+}
+
+fn pkg_data_is_proto_keyword(value: String) -> Bool Never! {
+    @PROTO_KEYWORDS.contains(value)
+}
+
+// The Jet type a proto scalar or well-known wrapper type maps to.
+fn pkg_data_proto_scalar(type_name: String) -> String? Never! {
+    if pkg_ascii_lower(pkg_data_proto_trim_dots(type_name)) == {
+        "double" | "float" -> Val("Float")
+        "int32" | "sint32" | "sfixed32" | "int64" | "sint64" | "sfixed64" | "uint32" | "uint64" | "fixed32" | "fixed64" -> Val("Int")
+        "bool" -> Val("Bool")
+        "string" -> Val("String")
+        "bytes" -> Val("[U8]")
+        "google.protobuf.timestamp" -> Val("DateTime")
+        "google.protobuf.duration" -> Val("Duration")
+        "google.protobuf.stringvalue" -> Val("String")
+        "google.protobuf.bytesvalue" -> Val("[U8]")
+        "google.protobuf.int32value" | "google.protobuf.int64value" -> Val("Int")
+        "google.protobuf.boolvalue" -> Val("Bool")
+        "google.protobuf.doublevalue" | "google.protobuf.floatvalue" -> Val("Float")
+        else -> None
+    }
+}
+
+struct ProtoField {
+    wire_name: String
+    type_name: String
+    repeated: Bool
+    optional: Bool
+    number: Int
+}
+
+struct ProtoReserved {
+    names: [String]
+    ranges: [(start: Int, end: Int)]
+
+    fn empty() -> ProtoReserved Never! {
+        ProtoReserved{names: [String]{}, ranges: [(start: Int, end: Int)]{}}
+    }
+
+    fn covers(self, name: String, number: Int) -> Bool Never! {
+        if self.names.contains(name) -> return true
+        loop range in self.ranges {
+            if number >= range.start && number <= range.end -> return true
+        }
+        false
+    }
+}
+
+struct ProtoMessage {
+    source_name: String
+    short_name: String
+    fields: [ProtoField]
+}
+
+struct ProtoEnum {
+    source_name: String
+}
+
+struct ProtoSchema {
+    messages: [ProtoMessage]
+    enums: [ProtoEnum]
+}
+
+// What an option value was; only booleans are inspected (`allow_alias`).
+enum ProtoOptionValue {
+    Flag(Bool)
+    Text
+    Number
+    Identifier
+    Aggregate
+}
+
+struct ProtoParser {
+    tokens: [ProtoToken]
+    pos: Int
+    messages: [ProtoMessage]
+    enums: [ProtoEnum]
+    message_names: [String]
+    enum_names: [String]
+    package: String?
+    syntax_seen: Bool
+    body_started: Bool
+    lex_error: String?
+
+    fn new(input: String) -> ProtoParser Never! {
+        parser := ProtoParser{
+            tokens: [ProtoToken]{},
+            pos: 0,
+            messages: [ProtoMessage]{},
+            enums: [ProtoEnum]{},
+            message_names: [String]{},
+            enum_names: [String]{},
+            package: None,
+            syntax_seen: false,
+            body_started: false,
+            lex_error: None
+        }
+        if pkg_data_lex_proto(input) == {
+            .Ok(tokens) -> parser.tokens = tokens
+            .Err(error) -> parser.lex_error = Val(error.message)
+        }
+        parser
+    }
+
+    fn token_at(self, offset: Int) -> ProtoToken? Never! {
+        at :: self.pos + offset
+        if at < 0 || at >= self.tokens.len() -> return None
+        Val(self.tokens[at])
+    }
+
+    fn word_at(self, offset: Int) -> String? Never! {
+        token :: self.token_at(offset) ?? return None
+        if token == {
+            .Word(word) -> Val(word)
+            else -> None
+        }
+    }
+
+    fn is_word(self, offset: Int, expected: String) -> Bool Never! {
+        word :: self.word_at(offset) ?? return false
+        word == expected
+    }
+
+    fn symbol_at(self, offset: Int, expected: String) -> Bool Never! {
+        token :: self.token_at(offset) ?? return false
+        if token == {
+            .Symbol(symbol) -> symbol == expected
+            else -> false
+        }
+    }
+
+    fn take_word(&self, what: String) -> String DataBindError! {
+        word :: self.word_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
+        self.pos += 1
+        Ok(word)
+    }
+
+    fn take_string(&self, what: String) -> String DataBindError! {
+        token :: self.token_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
+        if token == {
+            .StringLiteral(value) -> {
+                self.pos += 1
+                Ok(value)
+            }
+            else -> Err(DataBindError{message: "proto expected {what}"})
+        }
+    }
+
+    fn expect_symbol(&self, expected: String, what: String) DataBindError! {
+        if !self.symbol_at(0, expected) -> return Err(DataBindError{message: "proto expected {what}"})
+        self.pos += 1
+    }
+
+    // `[.]segment(.segment)*`; a keyword segment is allowed only when it is
+    // a scalar type name.
+    fn parse_type_name(&self) -> String DataBindError! {
+        name := ""
+        if self.symbol_at(0, ".") {
+            name = "."
+            self.pos += 1
+        }
+        first :: &self.take_word("a field type")
+        if !pkg_data_is_proto_identifier(first) || (pkg_data_is_proto_keyword(first) && pkg_data_proto_scalar(first) == None) {
+            return Err(DataBindError{message: "proto type name {first} is invalid"})
+        }
+        name = "{name}{first}"
+        loop self.symbol_at(0, ".") {
+            self.pos += 1
+            segment :: &self.take_word("a type segment")
+            if !pkg_data_is_proto_identifier(segment) || (pkg_data_is_proto_keyword(segment) && pkg_data_proto_scalar(segment) == None) {
+                return Err(DataBindError{message: "proto type name segment {segment} is invalid"})
+            }
+            name = "{name}.{segment}"
+        }
+        Ok(name)
+    }
+
+    fn parse_qualified_name(&self, what: String) -> String DataBindError! {
+        first :: &self.take_word(what)
+        if !pkg_data_is_proto_identifier(first) -> return Err(DataBindError{message: "proto name {first} is invalid"})
+        name := first
+        loop self.symbol_at(0, ".") {
+            self.pos += 1
+            segment :: &self.take_word(what)
+            if !pkg_data_is_proto_identifier(segment) -> return Err(DataBindError{message: "proto name segment {segment} is invalid"})
+            name = "{name}.{segment}"
+        }
+        Ok(name)
+    }
+
+    // `name` or `(custom.name).field...`.
+    fn parse_option_name(&self) -> String DataBindError! {
+        if !self.symbol_at(0, "(") -> return &self.parse_qualified_name("an option name")
+        self.pos += 1
+        qualified :: &self.parse_qualified_name("an option name")
+        name := "({qualified})"
+        &self.expect_symbol(")", "the end of a custom option name")
+        loop self.symbol_at(0, ".") {
+            self.pos += 1
+            segment :: &self.take_word("an option name segment")
+            if !pkg_data_is_proto_identifier(segment) -> return Err(DataBindError{message: "proto option name segment {segment} is invalid"})
+            name = "{name}.{segment}"
+        }
+        Ok(name)
+    }
+
+    fn parse_option_value(&self) -> ProtoOptionValue DataBindError! {
+        if self.symbol_at(0, "{{") {
+            self.pos += 1
+            loop !self.symbol_at(0, "}}") {
+                if self.pos >= self.tokens.len() -> return Err(DataBindError{message: "proto option aggregate is not closed"})
+                _ :: &self.parse_option_name()
+                if !(self.symbol_at(0, ":") || self.symbol_at(0, "=")) -> return Err(DataBindError{message: "proto option aggregate field needs a colon"})
+                self.pos += 1
+                _ :: &self.parse_option_value()
+                if self.symbol_at(0, ",") || self.symbol_at(0, ";") {
+                    self.pos += 1
+                } else {
+                    if !self.symbol_at(0, "}}") -> return Err(DataBindError{message: "proto option aggregate needs a separator"})
+                }
+            }
+            self.pos += 1
+            return Ok(ProtoOptionValue.Aggregate)
+        }
+        token :: self.token_at(0) ?? return Err(DataBindError{message: "proto option value is missing"})
+        if token == {
+            .StringLiteral(_) -> {
+                self.pos += 1
+                loop self.token_at(0) != None && pkg_data_proto_is_string(self.token_at(0) ?? ProtoToken.Symbol("")) -> self.pos += 1
+                Ok(ProtoOptionValue.Text)
+            }
+            .Number(_) -> {
+                self.pos += 1
+                Ok(ProtoOptionValue.Number)
+            }
+            .Word(value) -> {
+                self.pos += 1
+                if self.symbol_at(0, ".") {
+                    loop self.symbol_at(0, ".") {
+                        self.pos += 1
+                        _ :: &self.take_word("an option value segment")
+                    }
+                    return Ok(ProtoOptionValue.Identifier)
+                }
+                if pkg_data_eq_ignore_case(value, "true") -> return Ok(ProtoOptionValue.Flag(true))
+                if pkg_data_eq_ignore_case(value, "false") -> return Ok(ProtoOptionValue.Flag(false))
+                Ok(ProtoOptionValue.Identifier)
+            }
+            .Symbol(symbol) -> {
+                if symbol == "+" || symbol == "-" {
+                    self.pos += 1
+                    following :: self.token_at(0) ?? return Err(DataBindError{message: "proto option sign needs a number"})
+                    if !pkg_data_proto_is_number(following) -> return Err(DataBindError{message: "proto option sign needs a number"})
+                    self.pos += 1
+                    return Ok(ProtoOptionValue.Number)
+                }
+                if symbol == "." {
+                    _ :: &self.parse_type_name()
+                    return Ok(ProtoOptionValue.Identifier)
+                }
+                Err(DataBindError{message: "proto option value is malformed"})
+            }
+        }
+    }
+
+    fn parse_option_assignment(&self) -> (name: String, value: ProtoOptionValue) DataBindError! {
+        name :: &self.parse_option_name()
+        &self.expect_symbol("=", "an option equals sign")
+        value :: &self.parse_option_value()
+        Ok((name: name, value: value))
+    }
+
+    fn parse_option_statement(&self) -> (name: String, value: ProtoOptionValue) DataBindError! {
+        _ :: &self.take_word("option")
+        assignment :: &self.parse_option_assignment()
+        &self.expect_symbol(";", "an option semicolon")
+        Ok(assignment)
+    }
+
+    fn parse_field_options(&self) DataBindError! {
+        &self.expect_symbol("[", "field options")
+        if self.symbol_at(0, "]") -> return Err(DataBindError{message: "proto field options cannot be empty"})
+        loop {
+            _ :: &self.parse_option_assignment()
+            if self.symbol_at(0, ",") {
+                self.pos += 1
+                if self.symbol_at(0, "]") -> return Err(DataBindError{message: "proto field options cannot end with a comma"})
+                next
+            }
+            &self.expect_symbol("]", "the end of field options")
+            return Ok()
+        }
+    }
+
+    fn parse_integer(&self, what: String, signed: Bool) -> Int DataBindError! {
+        sign := 1
+        if signed && (self.symbol_at(0, "+") || self.symbol_at(0, "-")) {
+            if self.symbol_at(0, "-") -> sign = -1
+            self.pos += 1
+        }
+        token :: self.token_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
+        number := ""
+        if token == {
+            .Number(text) -> number = text
+            else -> return Err(DataBindError{message: "proto expected {what}"})
+        }
+        if number.contains(".") || number.contains("e") || number.contains("E") -> return Err(DataBindError{message: "proto {what} must be an integer"})
+        self.pos += 1
+        value :: pkg_data_parse_proto_integer_literal(number) ?? return Err(DataBindError{message: "proto {what} is out of range"})
+        Ok(value * sign)
+    }
+
+    fn parse_reserved(&self, signed: Bool, maximum: Int) -> ProtoReserved DataBindError! {
+        _ :: &self.take_word("reserved")
+        reserved := ProtoReserved.empty()
+        loop {
+            literal := None
+            if self.token_at(0) == {
+                .Val(token) -> {
+                    if token == {
+                        .StringLiteral(name) -> literal = Val(name)
+                        else -> {}
+                    }
+                }
+                .None -> {}
+            }
+            if literal == {
+                .Val(name) -> {
+                    self.pos += 1
+                    if !pkg_data_proto_reserved_name_valid(name) -> return Err(DataBindError{message: "proto reserved name {pkg_cbind_debug_quote(name)} is invalid"})
+                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto reserved name {name} is repeated"})
+                    &reserved.names.push(name)
+                }
+                .None -> {
+                    start :: &self.parse_integer("a reserved number", signed)
+                    end := start
+                    if self.is_word(0, "to") {
+                        self.pos += 1
+                        if self.is_word(0, "max") {
+                            self.pos += 1
+                            end = maximum
+                        } else {
+                            end = &self.parse_integer("a reserved range end", signed)
+                        }
+                    }
+                    minimum :: if signed -> @PROTO_INT32_MIN else -> 1
+                    if start < minimum || end < minimum || start > end || end > maximum -> return Err(DataBindError{message: "proto reserved range is out of range"})
+                    if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
+                    loop old in reserved.ranges {
+                        if pkg_data_proto_ranges_overlap((start: start, end: end), old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
+                    }
+                    &reserved.ranges.push((start: start, end: end))
+                }
+            }
+            if self.symbol_at(0, ",") {
+                self.pos += 1
+                if self.symbol_at(0, ";") -> return Err(DataBindError{message: "proto reserved list cannot end with a comma"})
+                next
+            }
+            &self.expect_symbol(";", "a reserved semicolon")
+            return Ok(reserved)
+        }
+    }
+
+    fn parse_extensions(&self) DataBindError! {
+        _ :: &self.take_word("extensions")
+        loop {
+            start :: &self.parse_integer("an extension number", false)
+            end := start
+            if self.is_word(0, "to") {
+                self.pos += 1
+                if self.is_word(0, "max") {
+                    self.pos += 1
+                    end = @PROTO_MAX_FIELD_NUMBER
+                } else {
+                    end = &self.parse_integer("an extension range end", false)
+                }
+            }
+            if start == 0 || start > end || end > @PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto extension range is out of range"})
+            if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
+            if self.symbol_at(0, ",") {
+                self.pos += 1
+                next
+            }
+            &self.expect_symbol(";", "an extensions semicolon")
+            return Ok()
+        }
+    }
+
+    fn parse_field(&self) -> ProtoField DataBindError! {
+        label :: pkg_ascii_lower(self.word_at(0) ?? "")
+        repeated := false
+        optional := false
+        if label == {
+            "repeated" -> {
+                self.pos += 1
+                repeated = true
+            }
+            "optional" -> {
+                self.pos += 1
+                optional = true
+            }
+            "required" -> self.pos += 1
+            else -> {}
+        }
+        type_name :: &self.parse_type_name()
+        if self.word_at(0) == None -> return Err(DataBindError{message: "proto field has no name"})
+        wire_name :: &self.take_word("a field name")
+        if !pkg_data_is_proto_identifier(wire_name) || pkg_data_is_proto_keyword(wire_name) -> return Err(DataBindError{message: "proto field name {wire_name} is invalid"})
+        &self.expect_symbol("=", "an equals sign")
+        token :: self.token_at(0) ?? return Err(DataBindError{message: "proto field number is missing"})
+        literal := ""
+        if token == {
+            .Number(text) -> literal = text
+            else -> return Err(DataBindError{message: "proto field number is missing"})
+        }
+        self.pos += 1
+        if literal.contains(".") || literal.contains("e") || literal.contains("E") -> return Err(DataBindError{message: "proto field number must be an integer"})
+        number :: pkg_data_parse_proto_integer_literal(literal) ?? return Err(DataBindError{message: "proto field number is invalid"})
+        if number > 4294967295 -> return Err(DataBindError{message: "proto field number is invalid"})
+        if number == 0 || number > @PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto field number {number} is out of range"})
+        if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto field number {number} is prohibited"})
+        if self.symbol_at(0, "[") -> &self.parse_field_options()
+        &self.expect_symbol(";", "a field semicolon")
+        Ok(ProtoField{wire_name: wire_name, type_name: type_name, repeated: repeated, optional: optional, number: number})
+    }
+
+    fn declare_message(&self, source_name: String) DataBindError! {
+        if self.enum_names.contains(source_name) || self.message_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        &self.message_names.push(source_name)
+    }
+
+    fn declare_enum(&self, source_name: String) DataBindError! {
+        if self.message_names.contains(source_name) || self.enum_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
+        &self.enum_names.push(source_name)
+    }
+
+    fn full_name(self, parent: String?, short_name: String) -> String Never! {
+        if parent == {
+            .Val(outer) -> return "{outer}.{short_name}"
+            .None -> {}
+        }
+        if self.package == {
+            .Val(package) -> "{package}.{short_name}"
+            .None -> short_name
+        }
+    }
+
+    fn parse_message(&self, parent: String?) -> String DataBindError! {
+        _ :: &self.take_word("message")
+        short_name :: &self.take_word("a message name")
+        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) -> return Err(DataBindError{message: "proto message name {short_name} is invalid"})
+        source_name :: self.full_name(parent, short_name)
+        &self.declare_message(source_name)
+        &self.expect_symbol("{{", "a message block")
+        fields := [ProtoField]{}
+        field_names := [String]{}
+        field_numbers := [Int]{}
+        nested_names := [String]{}
+        reserved := ProtoReserved.empty()
+        loop self.pos < self.tokens.len() {
+            if self.symbol_at(0, "}}") {
+                self.pos += 1
+                loop name in field_names {
+                    if nested_names.contains(name) -> return Err(DataBindError{message: "proto field collides with a nested message or enum"})
+                }
+                loop field in fields {
+                    if reserved.covers(field.wire_name, field.number) -> return Err(DataBindError{message: "proto field uses a reserved name or number"})
+                }
+                &self.messages.push(ProtoMessage{source_name: source_name, short_name: short_name, fields: fields})
+                return Ok(source_name)
+            }
+            if self.is_word(0, "message") {
+                nested :: &self.parse_message(Val(source_name))
+                &nested_names.push(pkg_data_proto_leaf(nested))
+                next
+            }
+            if self.is_word(0, "enum") {
+                nested :: &self.parse_enum(Val(source_name))
+                &nested_names.push(pkg_data_proto_leaf(nested))
+                next
+            }
+            if self.is_word(0, "reserved") {
+                parsed :: &self.parse_reserved(false, @PROTO_MAX_FIELD_NUMBER)
+                loop name in parsed.names {
+                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto reserved name is repeated"})
+                    &reserved.names.push(name)
+                }
+                loop range in parsed.ranges {
+                    loop old in reserved.ranges {
+                        if pkg_data_proto_ranges_overlap(range, old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
+                    }
+                    &reserved.ranges.push(range)
+                }
+                next
+            }
+            if self.is_word(0, "extensions") {
+                &self.parse_extensions()
+                next
+            }
+            if self.is_word(0, "option") {
+                _ :: &self.parse_option_statement()
+                next
+            }
+            if self.symbol_at(0, ";") {
+                self.pos += 1
+                next
+            }
+            if self.is_word(0, "oneof") || self.is_word(0, "group") || self.is_word(0, "extend") -> return Err(DataBindError{message: "proto oneof, group, and extend declarations are unsupported"})
+            field :: &self.parse_field()
+            if field_names.contains(field.wire_name) -> return Err(DataBindError{message: "proto has duplicate field {field.wire_name}"})
+            &field_names.push(field.wire_name)
+            if field_numbers.contains(field.number) -> return Err(DataBindError{message: "proto has duplicate field number {field.number}"})
+            &field_numbers.push(field.number)
+            &fields.push(field)
+        }
+        Err(DataBindError{message: "proto message {source_name} is not closed"})
+    }
+
+    fn parse_enum(&self, parent: String?) -> String DataBindError! {
+        _ :: &self.take_word("enum")
+        short_name :: &self.take_word("an enum name")
+        if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) -> return Err(DataBindError{message: "proto enum name {short_name} is invalid"})
+        source_name :: self.full_name(parent, short_name)
+        &self.declare_enum(source_name)
+        &self.expect_symbol("{{", "an enum block")
+        names := [String]{}
+        numbers := [Int]{}
+        reserved := ProtoReserved.empty()
+        allow_alias := false
+        values := [(name: String, number: Int)]{}
+        loop self.pos < self.tokens.len() {
+            if self.symbol_at(0, "}}") {
+                self.pos += 1
+                if values.len() == 0 -> return Err(DataBindError{message: "proto enum {source_name} has no values"})
+                loop value in values {
+                    if reserved.covers(value.name, value.number) -> return Err(DataBindError{message: "proto enum value uses a reserved name or number"})
+                }
+                &self.enums.push(ProtoEnum{source_name: source_name})
+                return Ok(source_name)
+            }
+            if self.is_word(0, "option") {
+                option :: &self.parse_option_statement()
+                if option.name == "allow_alias" {
+                    if option.value == {
+                        .Flag(flag) -> allow_alias = flag
+                        else -> return Err(DataBindError{message: "proto enum allow_alias must be true or false"})
+                    }
+                }
+                next
+            }
+            if self.is_word(0, "reserved") {
+                parsed :: &self.parse_reserved(true, @PROTO_INT32_MAX)
+                loop name in parsed.names {
+                    if reserved.names.contains(name) -> return Err(DataBindError{message: "proto enum reserved name is repeated"})
+                    &reserved.names.push(name)
+                }
+                loop range in parsed.ranges {
+                    loop old in reserved.ranges {
+                        if pkg_data_proto_ranges_overlap(range, old) -> return Err(DataBindError{message: "proto enum reserved ranges overlap"})
+                    }
+                    &reserved.ranges.push(range)
+                }
+                next
+            }
+            if self.symbol_at(0, ";") {
+                self.pos += 1
+                next
+            }
+            value_name :: &self.take_word("an enum value name")
+            if !pkg_data_is_proto_identifier(value_name) || pkg_data_is_proto_keyword(value_name) -> return Err(DataBindError{message: "proto enum value name {value_name} is invalid"})
+            if value_name == short_name || names.contains(value_name) -> return Err(DataBindError{message: "proto enum has a duplicate or colliding value {value_name}"})
+            &names.push(value_name)
+            &self.expect_symbol("=", "an enum value equals sign")
+            number :: &self.parse_integer("an enum value number", true)
+            if number < @PROTO_INT32_MIN || number > @PROTO_INT32_MAX -> return Err(DataBindError{message: "proto enum value number is out of int32 range"})
+            if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto enum value uses a prohibited number"})
+            if !allow_alias {
+                if numbers.contains(number) -> return Err(DataBindError{message: "proto enum has duplicate value number {number}"})
+                &numbers.push(number)
+            }
+            if self.symbol_at(0, "[") -> &self.parse_field_options()
+            &self.expect_symbol(";", "an enum value semicolon")
+            &values.push((name: value_name, number: number))
+        }
+        Err(DataBindError{message: "proto enum {source_name} is not closed"})
+    }
+
+    fn parse_syntax(&self) DataBindError! {
+        _ :: &self.take_word("syntax")
+        if self.syntax_seen -> return Err(DataBindError{message: "proto has more than one syntax declaration"})
+        &self.expect_symbol("=", "a syntax equals sign")
+        syntax :: &self.take_string("a syntax string")
+        if syntax != "proto2" && syntax != "proto3" -> return Err(DataBindError{message: "proto syntax {pkg_cbind_debug_quote(syntax)} is unsupported"})
+        &self.expect_symbol(";", "a syntax semicolon")
+        self.syntax_seen = true
+    }
+
+    fn parse_package(&self) DataBindError! {
+        _ :: &self.take_word("package")
+        if self.package != None -> return Err(DataBindError{message: "proto has more than one package declaration"})
+        package :: &self.parse_qualified_name("a package name")
+        loop part in package.split(".") {
+            if !pkg_data_is_proto_identifier(part) -> return Err(DataBindError{message: "proto package name {package} is invalid"})
+        }
+        &self.expect_symbol(";", "a package semicolon")
+        self.package = Val(package)
+    }
+
+    fn parse_import(&self) DataBindError! {
+        _ :: &self.take_word("import")
+        if self.is_word(0, "public") || self.is_word(0, "weak") -> self.pos += 1
+        path :: &self.take_string("an import path")
+        if path == "" || pkg_data_proto_has_control(path) -> return Err(DataBindError{message: "proto import path is invalid"})
+        &self.expect_symbol(";", "an import semicolon")
+    }
+
+    // Header declarations (syntax, package, imports, file options) precede
+    // the first message or enum; at least one message is required.
+    fn parse(&self) -> ProtoSchema DataBindError! {
+        if self.lex_error == {
+            .Val(message) -> return Err(DataBindError{message: message})
+            .None -> {}
+        }
+        loop self.pos < self.tokens.len() {
+            if {
+                self.is_word(0, "syntax") -> {
+                    if self.body_started -> return Err(DataBindError{message: "proto syntax declaration must precede messages and enums"})
+                    &self.parse_syntax()
+                }
+                self.is_word(0, "package") -> {
+                    if self.body_started -> return Err(DataBindError{message: "proto package declaration must precede messages and enums"})
+                    &self.parse_package()
+                }
+                self.is_word(0, "import") -> {
+                    if self.body_started -> return Err(DataBindError{message: "proto import declaration must precede messages and enums"})
+                    &self.parse_import()
+                }
+                self.is_word(0, "option") -> {
+                    if self.body_started -> return Err(DataBindError{message: "proto file options must precede messages and enums"})
+                    _ :: &self.parse_option_statement()
+                }
+                self.is_word(0, "message") -> {
+                    self.body_started = true
+                    _ :: &self.parse_message(None)
+                }
+                self.is_word(0, "enum") -> {
+                    self.body_started = true
+                    _ :: &self.parse_enum(None)
+                }
+                self.symbol_at(0, ";") -> self.pos += 1
+                else -> return Err(DataBindError{message: "proto has unsupported top-level declaration {self.word_at(0) ?? "unknown"}"})
+            }
+        }
+        if self.messages.len() == 0 -> return Err(DataBindError{message: "proto input has no message block"})
+        Ok(ProtoSchema{messages: self.messages, enums: self.enums})
+    }
+}
+
+fn pkg_data_proto_is_string(token: ProtoToken) -> Bool Never! {
+    if token == {
+        .StringLiteral(_) -> true
+        else -> false
+    }
+}
+
+fn pkg_data_proto_is_number(token: ProtoToken) -> Bool Never! {
+    if token == {
+        .Number(_) -> true
+        else -> false
+    }
+}
+
+// A reserved name is one identifier that is not a proto keyword.
+fn pkg_data_proto_reserved_name_valid(name: String) -> Bool Never! {
+    if name == "" || name.contains(".") -> return false
+    pkg_data_is_proto_identifier(name) && !pkg_data_is_proto_keyword(name)
+}
+
+fn pkg_data_proto_has_control(value: String) -> Bool Never! {
+    loop scalar in pkg_data_scalars(value) {
+        if pkg_data_is_control(scalar) -> return true
+    }
+    false
+}

@@ -35,7 +35,7 @@
 ``
 
 // Replace the first occurrence of `needle` (Rust `replacen(needle, with, 1)`).
-fn nixeval_replace_first(text: String, needle: String, replacement: String) -> String !Never {
+fn nixeval_replace_first(text: String, needle: String, replacement: String) -> String Never! {
     bytes :: text.bytes()
     at :: nixeval_find(bytes, needle.bytes(), 0)
     if at < 0 -> return ~text
@@ -43,7 +43,7 @@ fn nixeval_replace_first(text: String, needle: String, replacement: String) -> S
 }
 
 // Replace every non-overlapping occurrence of `needle` (Rust `replace`).
-fn nixeval_replace_all(text: String, needle: String, replacement: String) -> String !Never {
+fn nixeval_replace_all(text: String, needle: String, replacement: String) -> String Never! {
     bytes :: text.bytes()
     pattern :: needle.bytes()
     if pattern.len() == 0 -> return ~text
@@ -55,7 +55,7 @@ fn nixeval_replace_all(text: String, needle: String, replacement: String) -> Str
             index += pattern.len()
             next
         }
-        out.push(bytes[index])
+        &out.push(bytes[index])
         index += 1
     }
     String.from_bytes(out) ?? ~text

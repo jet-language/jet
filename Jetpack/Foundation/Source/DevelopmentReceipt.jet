@@ -1,0 +1,119 @@
+// The connected development receipt record (D-DEVR-LAW1=A / D-ECO-RECEIPT2=A),
+// ported once from jet_codegen::development_receipt. Hosts own the durable
+// filesystem transaction; this home owns the record bytes.
+
+@JET_DEVELOPMENT_RECEIPT_HEADER :: "jet-development-receipt-v1"
+
+pub struct JetDevelopmentReceiptInput {
+    pub name: String
+    pub digest: String
+}
+
+pub struct JetDevelopmentReceiptPath {
+    pub code: String
+    pub file: String
+    pub line: Int
+    pub function: String
+}
+
+pub struct JetDevelopmentReceipt {
+    pub act: String
+    pub locked_closure: String
+    pub inputs: [JetDevelopmentReceiptInput]
+    pub planned_action: String
+    pub outputs: [JetDevelopmentReceiptInput]
+    pub activation_proof: String
+    pub parent_generation: String
+    pub witness: String
+    pub outcome: String
+    pub failure_path: JetDevelopmentReceiptPath?
+
+    fn render(self) -> String Never! {
+        out := "{@JET_DEVELOPMENT_RECEIPT_HEADER}\n"
+        out = "{out}{jet_receipt_line("act", "", self.act)}"
+        out = "{out}{jet_receipt_line("closure", "", self.locked_closure)}"
+        loop input in jet_receipt_sorted_pairs(self.inputs) -> out = "{out}{jet_receipt_line("input", input.name, input.digest)}"
+        out = "{out}{jet_receipt_line("action", "planned", self.planned_action)}"
+        loop output in jet_receipt_sorted_pairs(self.outputs) -> out = "{out}{jet_receipt_line("output", output.name, output.digest)}"
+        out = "{out}{jet_receipt_line("activation-proof", "", self.activation_proof)}"
+        out = "{out}{jet_receipt_line("parent-generation", "", self.parent_generation)}"
+        out = "{out}{jet_receipt_line("witness", "", self.witness)}"
+        if self.failure_path == {
+            .Val(path) -> {
+                out = "{out}{jet_receipt_line("failure-path", "code", path.code)}"
+                out = "{out}{jet_receipt_line("failure-path", "file", path.file)}"
+                out = "{out}{jet_receipt_line("failure-path", "line", "{path.line}")}"
+                out = "{out}{jet_receipt_line("failure-path", "function", path.function)}"
+            }
+            .None -> {}
+        }
+        "{out}{jet_receipt_line("outcome", "", self.outcome)}"
+    }
+
+    // The stable identity of an act, independent of its witness and result.
+    // Inputs are sorted so callers cannot manufacture a second identity by
+    // presenting the same locked closure in a different order.
+    fn identity_bytes(self) -> [U8] Never! {
+        out := "jet-development-act-v1".bytes()
+        &out.push(U8{0})
+        jet_receipt_frame(&out, self.act)
+        jet_receipt_frame(&out, self.locked_closure)
+        loop input in jet_receipt_sorted_pairs(self.inputs) {
+            jet_receipt_frame(&out, input.name)
+            jet_receipt_frame(&out, input.digest)
+        }
+        jet_receipt_frame(&out, self.planned_action)
+        out
+    }
+}
+
+// The shared symbol hosts use to serialize a receipt.
+pub fn jet_development_receipt_render(receipt: JetDevelopmentReceipt) -> String Never! {
+    receipt.render()
+}
+
+// Whether `value` is a `sha256-<64 lowercase hex>` content address.
+pub fn jet_receipt_is_content_address(value: String) -> Bool Never! {
+    if !value.starts_with("sha256-") -> return false
+    hex :: value.removeprefix("sha256-").bytes()
+    if hex.len() != 64 -> return false
+    loop byte in hex {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// Inputs ordered by (name, digest).
+fn jet_receipt_sorted_pairs(values: [JetDevelopmentReceiptInput]) -> [JetDevelopmentReceiptInput] Never! {
+    sorted := ~values
+    &sorted.sort_by((left: JetDevelopmentReceiptInput, right: JetDevelopmentReceiptInput) -> (left.name <=> right.name).then(left.digest <=> right.digest))
+    sorted
+}
+
+// One `kind\thex(name)\thex(value)\n` record line.
+fn jet_receipt_line(kind: String, name: String, value: String) -> String Never! {
+    "{kind}\t{jet_receipt_hex(name)}\t{jet_receipt_hex(value)}\n"
+}
+
+fn jet_receipt_hex(value: String) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        &out.push(digits[code >> 4])
+        &out.push(digits[code & 15])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// An 8-byte big-endian length followed by the UTF-8 bytes.
+fn jet_receipt_frame(out: &[U8], value: String) Never! {
+    bytes :: value.bytes()
+    shift := 56
+    loop shift >= 0 {
+        &out.push(U8{(bytes.len() >> shift) & 255})
+        shift -= 8
+    }
+    loop byte in bytes -> &out.push(byte)
+}

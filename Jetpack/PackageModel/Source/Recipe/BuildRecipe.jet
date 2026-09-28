@@ -23,7 +23,7 @@ pub enum BuildStep {
     InstallTree(src: String, dest: String)
 
     // The authority this step requests.
-    fn capability(self) -> String !Never {
+    fn capability(self) -> String Never! {
         if self == {
             .Fetch(_, _) -> "net.fetch"
             .Exec(tool, _) -> "exec:{tool}"
@@ -32,27 +32,27 @@ pub enum BuildStep {
     }
 
     // Frame the step's tag and fields into a recipe identity.
-    fn write_canonical(self, writer: &RecipeCanonicalWriter) !Never {
+    fn write_canonical(self, writer: &RecipeCanonicalWriter) Never! {
         if self == {
             .Fetch(url, sha256) -> {
-                writer.push_text("fetch")
-                writer.push_text(url)
-                writer.push_text(sha256)
+                &writer.push_text("fetch")
+                &writer.push_text(url)
+                &writer.push_text(sha256)
             }
             .Exec(tool, args) -> {
-                writer.push_text("exec")
-                writer.push_text(tool)
-                writer.push_texts(args)
+                &writer.push_text("exec")
+                &writer.push_text(tool)
+                &writer.push_texts(args)
             }
             .Install(src, dest) -> {
-                writer.push_text("install")
-                writer.push_text(src)
-                writer.push_text(dest)
+                &writer.push_text("install")
+                &writer.push_text(src)
+                &writer.push_text(dest)
             }
             .InstallTree(src, dest) -> {
-                writer.push_text("install-tree")
-                writer.push_text(src)
-                writer.push_text(dest)
+                &writer.push_text("install-tree")
+                &writer.push_text(src)
+                &writer.push_text(dest)
             }
         }
     }
@@ -63,11 +63,11 @@ pub struct BuildRecipe {
     pub steps: [BuildStep]
 
     // A stable content hash of the recipe, used by the trust gate.
-    fn recipe_hash(self) -> String !Never {
+    fn recipe_hash(self) -> String Never! {
         writer := RecipeCanonicalWriter.new("jet.build-recipe.v2")
-        writer.push_count(self.steps.len())
+        &writer.push_count(self.steps.len())
         loop index in 0..<self.steps.len() {
-            writer.push_count(index)
+            &writer.push_count(index)
             self.steps[index].write_canonical(&writer)
         }
         "sha256-{pkg_sha256_hex(writer.bytes)}"
@@ -76,13 +76,13 @@ pub struct BuildRecipe {
     // The exact authority requested by this recipe, sorted. It is derived
     // from the finite step graph, never from a host environment or a
     // caller-supplied label.
-    fn declared_capabilities(self) -> [String] !Never {
+    fn declared_capabilities(self) -> [String] Never! {
         capabilities := [String]{}
         loop step in self.steps {
             capability :: step.capability()
-            if !capabilities.contains(capability) -> capabilities.push(capability)
+            if !capabilities.contains(capability) -> &capabilities.push(capability)
         }
-        capabilities.sort()
+        &capabilities.sort()
         capabilities
     }
 
@@ -90,13 +90,13 @@ pub struct BuildRecipe {
     // result: package, staged source, platform, recipe, and the complete
     // declared capability set. Suitable for both the action-cache key and a
     // reviewed trust grant.
-    fn build_identity(self, package: String, source_digest: String, platform: String) -> String !Never {
+    fn build_identity(self, package: String, source_digest: String, platform: String) -> String Never! {
         self.build_identity_for_source(package, "", source_digest, platform)
     }
 
     // The identity a provider-backed hook uses: `build_identity` bound to the
     // provider/source label. Production providers use this source-bound form.
-    fn build_identity_for_source(self, package: String, provider_source: String, source_digest: String, platform: String) -> String !Never {
+    fn build_identity_for_source(self, package: String, provider_source: String, source_digest: String, platform: String) -> String Never! {
         self.build_identity_for_source_with_dependencies(package, provider_source, source_digest, platform, [String]{})
     }
 
@@ -104,17 +104,17 @@ pub struct BuildRecipe {
     // plan declares. Dependency refs are authority: changing a tool's
     // provider/source invalidates both the cache identity and the exact trust
     // grant even when the recipe bytes stay unchanged. Their order is not.
-    fn build_identity_for_source_with_dependencies(self, package: String, provider_source: String, source_digest: String, platform: String, dependencies: [String]) -> String !Never {
+    fn build_identity_for_source_with_dependencies(self, package: String, provider_source: String, source_digest: String, platform: String, dependencies: [String]) -> String Never! {
         sorted_dependencies := dependencies
-        sorted_dependencies.sort()
+        &sorted_dependencies.sort()
         writer := RecipeCanonicalWriter.new("jet-build-hook.v3")
-        writer.push_text(package)
-        writer.push_text(provider_source)
-        writer.push_text(source_digest)
-        writer.push_text(platform)
-        writer.push_text(self.recipe_hash())
-        writer.push_texts(self.declared_capabilities())
-        writer.push_texts(sorted_dependencies)
+        &writer.push_text(package)
+        &writer.push_text(provider_source)
+        &writer.push_text(source_digest)
+        &writer.push_text(platform)
+        &writer.push_text(self.recipe_hash())
+        &writer.push_texts(self.declared_capabilities())
+        &writer.push_texts(sorted_dependencies)
         "build-sha256:{pkg_sha256_hex(writer.bytes)}"
     }
 }
@@ -124,32 +124,32 @@ pub struct BuildRecipe {
 struct RecipeCanonicalWriter {
     bytes: [U8]
 
-    fn new(domain: String) -> RecipeCanonicalWriter !Never {
+    fn new(domain: String) -> RecipeCanonicalWriter Never! {
         writer := RecipeCanonicalWriter{bytes: [U8]{}}
-        writer.push_text(domain)
+        &writer.push_text(domain)
         writer
     }
 
     // A count or index as eight big-endian bytes.
-    fn push_count(&self, value: Int) !Never {
+    fn push_count(&self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
             byte :: (value >> shift) & 255
-            self.bytes.push(U8{byte})
+            &self.bytes.push(U8{byte})
             shift -= 8
         }
     }
 
     // A UTF-8 string framed by its byte length.
-    fn push_text(&self, value: String) !Never {
+    fn push_text(&self, value: String) Never! {
         raw :: value.bytes()
-        self.push_count(raw.len())
-        loop byte in raw -> self.bytes.push(byte)
+        &self.push_count(raw.len())
+        loop byte in raw -> &self.bytes.push(byte)
     }
 
     // A counted list of framed strings.
-    fn push_texts(&self, values: [String]) !Never {
-        self.push_count(values.len())
-        loop value in values -> self.push_text(value)
+    fn push_texts(&self, values: [String]) Never! {
+        &self.push_count(values.len())
+        loop value in values -> &self.push_text(value)
     }
 }

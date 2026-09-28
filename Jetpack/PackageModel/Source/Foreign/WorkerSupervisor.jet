@@ -49,14 +49,14 @@ void @@abi@@_close(int64_t h){failed=0;int idx,input,output;pid_t pid;if(!snapsh
 @@wrappers@@```
 
 // The persistent-worker supervisor without a scratch directory.
-pub fn pkg_worker_render_supervisor_c(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String) -> String !Never {
+pub fn pkg_worker_render_supervisor_c(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String) -> String Never! {
     pkg_worker_render_supervisor_c_with_temp(abi, executable, worker, script, wrappers, exec_args, None)
 }
 
 // Variant for workers needing a private scratch directory. The supervisor
 // creates it after fork, exports it as `JET_BIND_TEMP`, and removes its one
 // declared artifact on every reap path, including timeout and cancellation.
-pub fn pkg_worker_render_supervisor_c_with_temp(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String, temp_prefix: ?String) -> String !Never {
+pub fn pkg_worker_render_supervisor_c_with_temp(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String, temp_prefix: String?) -> String Never! {
     pkg_binder_fill_template(@PKG_WORKER_SUPERVISOR_C, [String: String]{
         "abi": abi,
         "executable": pkg_binder_c_escape(executable),
@@ -70,7 +70,7 @@ pub fn pkg_worker_render_supervisor_c_with_temp(abi: String, executable: String,
 
 // One exported invoke entry point: `<abi>_invoke_<suffix>` forwards to the
 // supervisor's `call` (`invoke`, or PHP's `pool_invoke`) with `command`.
-pub fn pkg_worker_invoke_wrapper(abi: String, suffix: String, call: String, command: String) -> String !Never {
+pub fn pkg_worker_invoke_wrapper(abi: String, suffix: String, call: String, command: String) -> String Never! {
     "const char* {abi}_invoke_{suffix}(int64_t h,const char*input,int64_t deadline){{return {call}(h,\"{command}\",input,deadline);}}\n"
 }
 
@@ -84,7 +84,7 @@ pub enum WorkerLanguage {
     Octave
     Php
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .PowerShell -> "PowerShell"
             .Perl -> "Perl"
@@ -96,13 +96,13 @@ pub enum WorkerLanguage {
     }
 
     // The `ToolFailed` verb phrase: "`perl` rejected the Perl binding input".
-    fn action(self) -> String !Never {
+    fn action(self) -> String Never! {
         "rejected the {self.label()} binding input"
     }
 
     // Why a failed tool run failed, from the captured streams. `stderr_only`
     // is the capture form that never falls back to stdout.
-    fn launder(self, output: BinderToolOutput, stderr_only: Bool) -> String !Never {
+    fn launder(self, output: BinderToolOutput, stderr_only: Bool) -> String Never! {
         detail :: if stderr_only || output.stderr.len() > 0 -> output.stderr else -> output.stdout
         text :: String.from_bytes_lossy(detail)
         if self == {
@@ -122,14 +122,14 @@ pub enum WorkerLanguage {
 }
 
 // Persistent bindings need the POSIX supervisor above.
-pub fn pkg_worker_require_supported_host(language: WorkerLanguage, unix: Bool) !ForeignBindError {
+pub fn pkg_worker_require_supported_host(language: WorkerLanguage, unix: Bool) ForeignBindError! {
     if unix -> return Ok()
     Err(ForeignBindError.Source("persistent {language.label()} bindings require a POSIX host process supervisor"))
 }
 
 // Run one tool for a worker binder and return its stdout; a failing status is
 // `ToolFailed` with the language's laundered detail.
-pub fn pkg_worker_run_tool(argv: [String], tool: String, language: WorkerLanguage, stderr_only: Bool) -[Exec, Time.Wait]> [U8] !ForeignBindError {
+pub fn pkg_worker_run_tool(argv: [String], tool: String, language: WorkerLanguage, stderr_only: Bool) -[Exec, Time.Wait]> [U8] ForeignBindError! {
     output :: pkg_binder_capture(argv, None, tool, language.action())
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: language.action(), detail: language.launder(output, stderr_only)})
     Ok(output.stdout)
@@ -138,7 +138,7 @@ pub fn pkg_worker_run_tool(argv: [String], tool: String, language: WorkerLanguag
 // Compile a rendered bridge into `<cache>/lib<abi>.a`: the C source and
 // object live in the private `build` directory; `write_context` names the
 // bridge in a write failure. Returns the archive path.
-pub fn pkg_worker_build_archive(language: WorkerLanguage, abi: String, build: String, cache: String, bridge: String, write_context: String) -[FS, Exec, Time.Wait]> String !ForeignBindError {
+pub fn pkg_worker_build_archive(language: WorkerLanguage, abi: String, build: String, cache: String, bridge: String, write_context: String) -[FS, Exec, Time.Wait]> String ForeignBindError! {
     c :: files.join(build, "{abi}.c")
     object :: files.join(build, "{abi}.o")
     pkg_binder_write(c, bridge, write_context)
@@ -151,7 +151,7 @@ pub fn pkg_worker_build_archive(language: WorkerLanguage, abi: String, build: St
 
 // A fresh private build directory `<cache>/.<stem>-build-<lib>` under a
 // created cache; `label` names the language in a failure.
-pub fn pkg_worker_prepare_build(cache: String, stem: String, lib: String, label: String) -[FS]> String !ForeignBindError {
+pub fn pkg_worker_prepare_build(cache: String, stem: String, lib: String, label: String) -[FS]> String ForeignBindError! {
     pkg_binder_create_dir_all(cache, "could not create {label} binding cache")
     build :: files.join(cache, ".{stem}-build-{lib}")
     pkg_binder_remove_tree_quiet(build)
@@ -160,7 +160,7 @@ pub fn pkg_worker_prepare_build(cache: String, stem: String, lib: String, label:
 }
 
 // Validate the library name every binder accepts.
-pub fn pkg_binder_require_lib_name(lib: String) !ForeignBindError {
+pub fn pkg_binder_require_lib_name(lib: String) ForeignBindError! {
     if pkg_binder_is_ident(lib) -> return Ok()
     Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
 }

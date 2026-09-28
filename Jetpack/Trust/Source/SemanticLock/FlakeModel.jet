@@ -44,7 +44,7 @@ pub enum FlakeOutputKind {
     Formatter
     Other(String)
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Package -> "packages"
             .DevShell -> "devShells"
@@ -57,7 +57,7 @@ pub enum FlakeOutputKind {
 
     // The kind an output assignment prefix declares (`legacyPackages` and
     // `devShell` are the older spellings).
-    fn from_prefix(prefix: String) -> FlakeOutputKind !Never {
+    fn from_prefix(prefix: String) -> FlakeOutputKind Never! {
         if prefix == {
             "packages" | "legacyPackages" -> FlakeOutputKind.Package
             "devShells" | "devShell" -> FlakeOutputKind.DevShell
@@ -70,7 +70,7 @@ pub enum FlakeOutputKind {
 
     // The kind a lock record's `kind:system:attribute` names; an empty
     // label names none.
-    fn from_label(label: String) -> ?FlakeOutputKind !Never {
+    fn from_label(label: String) -> FlakeOutputKind? Never! {
         if label == {
             "packages" -> Val(FlakeOutputKind.Package)
             "devShells" -> Val(FlakeOutputKind.DevShell)
@@ -83,7 +83,7 @@ pub enum FlakeOutputKind {
     }
 
     // Position in declaration order, the order Rust's derived `Ord` uses.
-    fn rank(self) -> Int !Never {
+    fn rank(self) -> Int Never! {
         if self == {
             .Package -> 0
             .DevShell -> 1
@@ -95,7 +95,7 @@ pub enum FlakeOutputKind {
     }
 
     // The payload that orders two `Other` kinds.
-    fn other_text(self) -> String !Never {
+    fn other_text(self) -> String Never! {
         if self == {
             .Other(value) -> value
             else -> ""
@@ -111,13 +111,13 @@ pub struct FlakeOutput {
     pub provenance: String
 
     // `kind:system:attribute`, or the bare attribute of a system-less output.
-    fn declared(kind: FlakeOutputKind, system: String, attribute: String, provenance: String) -> FlakeOutput !Never {
+    fn declared(kind: FlakeOutputKind, system: String, attribute: String, provenance: String) -> FlakeOutput Never! {
         name :: if system == "" -> ~attribute else -> "{kind.label()}:{system}:{attribute}"
         FlakeOutput{name, kind, system, attribute, provenance}
     }
 
     // The facts a lock must agree with; provenance is not part of them.
-    fn same_shape(self, other: FlakeOutput) -> Bool !Never {
+    fn same_shape(self, other: FlakeOutput) -> Bool Never! {
         self.name == other.name && self.kind == other.kind && self.system == other.system && self.attribute == other.attribute
     }
 }
@@ -151,12 +151,12 @@ pub enum FlakeSourceIdentity {
 
 // The ref and revision a flake URL pins through its path or query.
 pub struct FlakeSourcePin {
-    pub reference: ?String
-    pub revision: ?String
+    pub reference: String?
+    pub revision: String?
 
     // This pin with `ref=`/`rev=` query fields applied; None when a query
     // field disagrees with the path.
-    fn with_query(self, query: [FlakeQueryField]) -> ?FlakeSourcePin !Never {
+    fn with_query(self, query: [FlakeQueryField]) -> FlakeSourcePin? Never! {
         pinned := self
         if trust_flake_query_value(query, "ref") == {
             .Val(value) -> {
@@ -178,30 +178,30 @@ pub struct FlakeSourcePin {
 
 // Outputs in Rust's derived `Ord` order: name, kind, system, attribute,
 // provenance.
-fn trust_flake_sorted_outputs(outputs: [FlakeOutput]) -> [FlakeOutput] !Never {
+fn trust_flake_sorted_outputs(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
     sorted := outputs
     // Stable passes from the least significant field.
-    sorted.sort_by(output -> output.provenance)
-    sorted.sort_by(output -> output.attribute)
-    sorted.sort_by(output -> output.system)
-    sorted.sort_by(output -> output.kind.other_text())
-    sorted.sort_by(output -> output.kind.rank())
-    sorted.sort_by(output -> output.name)
+    &sorted.sort_by(output -> output.provenance)
+    &sorted.sort_by(output -> output.attribute)
+    &sorted.sort_by(output -> output.system)
+    &sorted.sort_by(output -> output.kind.other_text())
+    &sorted.sort_by(output -> output.kind.rank())
+    &sorted.sort_by(output -> output.name)
     sorted
 }
 
 // Sorted outputs with exact duplicates removed, as a `BTreeSet` holds them.
-fn trust_flake_output_set(outputs: [FlakeOutput]) -> [FlakeOutput] !Never {
+fn trust_flake_output_set(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
     unique := [FlakeOutput]{}
     loop output in trust_flake_sorted_outputs(outputs) {
         if unique.len() > 0 && unique[unique.len() - 1] == output -> next
-        unique.push(output)
+        &unique.push(output)
     }
     unique
 }
 
 // Rust `is_flake_revision`: at least seven ASCII hex digits.
-fn trust_flake_is_revision(value: String) -> Bool !Never {
+fn trust_flake_is_revision(value: String) -> Bool Never! {
     raw :: value.bytes()
     if raw.len() < 7 -> return false
     loop byte in raw {
@@ -212,19 +212,19 @@ fn trust_flake_is_revision(value: String) -> Bool !Never {
 
 // The fields of a URL query, sorted by key; None when a field has no `=`,
 // an empty key, or a repeated key.
-fn trust_flake_query_fields(query: String) -> ?[FlakeQueryField] !Never {
+fn trust_flake_query_fields(query: String) -> [FlakeQueryField]? Never! {
     fields := [FlakeQueryField]{}
     if query == "" -> return Val(fields)
     loop field in trust_text_split(query, @TRUST_AMPERSAND) {
         parts :: trust_text_split_first(field, @TRUST_EQUALS) ?? return None
         if parts.before == "" || trust_flake_query_value(fields, parts.before) != None -> return None
-        fields.push(FlakeQueryField{key: parts.before, value: parts.after})
+        &fields.push(FlakeQueryField{key: parts.before, value: parts.after})
     }
-    fields.sort_by(field -> field.key)
+    &fields.sort_by(field -> field.key)
     Val(fields)
 }
 
-fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> ?String !Never {
+fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> String? Never! {
     loop field in fields {
         if field.key == key -> return Val(field.value)
     }
@@ -233,7 +233,7 @@ fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> ?String !N
 
 // The exact revision a flake URL pins: a `rev=` query field, else a
 // hex-looking last path segment, else "".
-pub fn trust_flake_revision(url: String) -> String !Never {
+pub fn trust_flake_revision(url: String) -> String Never! {
     base := ~url
     if trust_text_split_first(url, @TRUST_QUESTION) == {
         .Val(parts) -> {
@@ -260,7 +260,7 @@ pub fn trust_flake_revision(url: String) -> String !Never {
 
 // Rust `flake_source_identity`: the typed source a flake URL names, or None
 // for URL forms that only compare textually.
-pub fn trust_flake_source_identity(url: String) -> ?FlakeSourceIdentity !Never {
+pub fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
     base := ~url
     query_text := ""
     if trust_text_split_first(url, @TRUST_QUESTION) == {
@@ -274,18 +274,18 @@ pub fn trust_flake_source_identity(url: String) -> ?FlakeSourceIdentity !Never {
     direct :: trust_flake_direct_source(base) ?? return trust_flake_indirect_identity(base, query)
     segments := [String]{}
     loop part in trust_text_split(direct.after, @TRUST_SLASH) {
-        if part != "" -> segments.push(part)
+        if part != "" -> &segments.push(part)
     }
     if segments.len() < 2 -> return None
     tail := [String]{}
-    loop index in 2..<segments.len() -> tail.push(segments[index])
+    loop index in 2..<segments.len() -> &tail.push(segments[index])
     pin := FlakeSourcePin{reference: None, revision: None}
     if tail.len() > 0 {
         last :: tail[tail.len() - 1]
         if {
             trust_flake_is_revision(last) -> {
                 head := [String]{}
-                loop index in 0..<(tail.len() - 1) -> head.push(tail[index])
+                loop index in 0..<(tail.len() - 1) -> &head.push(tail[index])
                 if head.len() > 0 -> pin.reference = Val(head.join("/"))
                 pin.revision = Val(last)
             }
@@ -298,7 +298,7 @@ pub fn trust_flake_source_identity(url: String) -> ?FlakeSourceIdentity !Never {
 
 // `kind` and the path after a direct source prefix, or None for an
 // indirect (registry) reference.
-fn trust_flake_direct_source(base: String) -> ?TrustTextSplit !Never {
+fn trust_flake_direct_source(base: String) -> TrustTextSplit? Never! {
     prefixes :: [TrustTextSplit]{
         TrustTextSplit{before: "github", after: "github:"},
         TrustTextSplit{before: "gitlab", after: "gitlab:"},
@@ -313,7 +313,7 @@ fn trust_flake_direct_source(base: String) -> ?TrustTextSplit !Never {
 }
 
 // An indirect `[flake:]alias[/ref][/rev]` reference.
-fn trust_flake_indirect_identity(base: String, query: [FlakeQueryField]) -> ?FlakeSourceIdentity !Never {
+fn trust_flake_indirect_identity(base: String, query: [FlakeQueryField]) -> FlakeSourceIdentity? Never! {
     path :: if base.starts_with("flake:") -> base.removeprefix("flake:") else -> ~base
     if path == "" || path.starts_with(".") || path.starts_with("/") || path.contains(":") -> return None
     parts :: trust_text_split(path, @TRUST_SLASH)
@@ -322,7 +322,7 @@ fn trust_flake_indirect_identity(base: String, query: [FlakeQueryField]) -> ?Fla
     tail := [String]{}
     loop index in 1..<parts.len() {
         if parts[index] == "" -> return None
-        tail.push(parts[index])
+        &tail.push(parts[index])
     }
     pin := FlakeSourcePin{reference: None, revision: None}
     if tail.len() == {

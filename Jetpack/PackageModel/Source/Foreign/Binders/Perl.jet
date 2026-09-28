@@ -71,7 +71,7 @@ struct PerlBoundFunction {
 }
 
 // Bind the named top-level subs of the Perl script at `path`.
-pub fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult !ForeignBindError {
+pub fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     language :: WorkerLanguage.Perl
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
@@ -89,21 +89,21 @@ pub fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -
     worker :: pkg_binder_canonicalize(worker_file, "could not resolve the Perl worker")
     abi :: "jet_perl_{lib}"
     wrappers := [String]{}
-    loop function in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.perl))
+    loop function in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.perl))
     bridge :: pkg_worker_render_supervisor_c(abi, perl, worker, script, wrappers.join(""), "worker_path,script_path")
     archive :: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Perl process bridge")
     digest :: pkg_binder_identity_digest([String]{"jet-perl-bind-v1", source, script, perl, worker_source})
     provenance := "schema=jet-perl-bind-v1\nsha256={digest}\nperl={perl}\nscript={script}\nworker={worker}\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Perl, "Perl", lib, script, archive, "perl={perl};{pkg_binder_cc_ar_identity()}")
     bound := [String]{}
-    loop function in functions -> bound.push(function.jet)
+    loop function in functions -> &bound.push(function.jet)
     result :: ForeignBindResult{source: pkg_perl_render_jet(lib, functions), bound: bound, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
 }
 
 // Source-only discovery of `sub Name` declarations; never runs Perl.
-fn pkg_perl_parse_function_names(bytes: [U8]) -> [PerlBoundFunction] !ForeignBindError {
+fn pkg_perl_parse_function_names(bytes: [U8]) -> [PerlBoundFunction] ForeignBindError! {
     text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("Perl source is not UTF-8"))
     pkg_perl_validate_structure(text)
     out := [PerlBoundFunction]{}
@@ -128,14 +128,14 @@ fn pkg_perl_parse_function_names(bytes: [U8]) -> [PerlBoundFunction] !ForeignBin
         loop existing in out {
             if existing.jet == jet -> return Err(ForeignBindError.Source("Perl function `{name}` collides with another generated Jet function `{jet}`"))
         }
-        out.push(PerlBoundFunction{perl: name, jet: jet})
+        &out.push(PerlBoundFunction{perl: name, jet: jet})
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named Perl functions were found"))
     Ok(out)
 }
 
 // Balanced brackets outside quotes and `#` comments.
-fn pkg_perl_validate_structure(source: String) !ForeignBindError {
+fn pkg_perl_validate_structure(source: String) ForeignBindError! {
     stack := [Int]{}
     quote := 0
     escaped := false
@@ -158,14 +158,14 @@ fn pkg_perl_validate_structure(source: String) !ForeignBindError {
         if code == {
             35 -> comment = true
             39 | 34 | 96 -> quote = code
-            40 | 91 | 123 -> stack.push(code)
+            40 | 91 | 123 -> &stack.push(code)
             41 | 93 | 125 -> {
                 expected :: if code == {
                     41 -> 40
                     93 -> 91
                     else -> 123
                 }
-                if stack.len() == 0 || stack.pop() != expected -> return Err(ForeignBindError.Source("the script has a Perl parse error"))
+                if stack.len() == 0 || &stack.pop() != expected -> return Err(ForeignBindError.Source("the script has a Perl parse error"))
             }
             else -> {}
         }
@@ -174,47 +174,47 @@ fn pkg_perl_validate_structure(source: String) !ForeignBindError {
     Ok()
 }
 
-fn pkg_perl_render_worker(functions: [PerlBoundFunction]) -> String !Never {
+fn pkg_perl_render_worker(functions: [PerlBoundFunction]) -> String Never! {
     allowed := [String]{}
-    loop function in functions -> allowed.push("    '{function.perl.replace("'", "\\'")}' => 1")
+    loop function in functions -> &allowed.push("    '{function.perl.replace("'", "\\'")}' => 1")
     pkg_binder_fill_template(@PKG_PERL_WORKER, [String: String]{"allowed": allowed.join(",\n")})
 }
 
-fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String !Never {
+fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String Never! {
     abi :: "jet_perl_{lib}"
     out := [String]{"#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n"}
     loop function in functions {
         name :: function.jet
-        out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session !PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
-    out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session !PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
+    &out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name :: function.jet
-        out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree !PerlError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree !PerlError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_perl_render_probe() -> String !Never {
+pub fn pkg_perl_render_probe() -> String Never! {
     pkg_perl_render_jet("registry", [PerlBoundFunction]{PerlBoundFunction{perl: "Transform", jet: "transform"}})
 }
 
 // `FooBar` -> `foo_bar`: an `_` before every non-leading ASCII capital.
-fn pkg_perl_snake(value: String) -> String !Never {
+fn pkg_perl_snake(value: String) -> String Never! {
     out := [String]{}
     index := 0
     loop scalar in value.chars() {
         text :: "{scalar}"
         code :: pkg_bytes_code(text.bytes(), 0)
-        if code >= 65 && code <= 90 && index > 0 -> out.push("_")
-        out.push(pkg_ascii_lower(text))
+        if code >= 65 && code <= 90 && index > 0 -> &out.push("_")
+        &out.push(pkg_ascii_lower(text))
         index += 1
     }
     out.join("")
 }
 
-fn pkg_perl_reserved(value: String) -> Bool !Never {
+fn pkg_perl_reserved(value: String) -> Bool Never! {
     @PKG_PERL_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
 }

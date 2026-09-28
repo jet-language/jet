@@ -14,7 +14,7 @@ pub struct ProviderObject {
 
     // A binary artifact: its hash and platform are its identity, and it runs
     // no build.
-    fn binary(name: String, hash: String, platform: String, signature: String) -> ProviderObject !ProviderGraphError {
+    fn binary(name: String, hash: String, platform: String, signature: String) -> ProviderObject ProviderGraphError! {
         if hash.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a hash"})
         if platform.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a platform"})
         exact_identity :: "binary:{name}:{platform}:{hash}"
@@ -56,18 +56,18 @@ pub struct ProviderGraphError {
 pub struct AuthorityGraph {
     pub locked_objects: [ProviderObject]
 
-    fn empty() -> AuthorityGraph !Never {
+    fn empty() -> AuthorityGraph Never! {
         AuthorityGraph{locked_objects: [ProviderObject]{}}
     }
 
-    fn add_locked(&self, object: ProviderObject) !Never {
-        self.locked_objects.push(object)
+    fn add_locked(&self, object: ProviderObject) Never! {
+        &self.locked_objects.push(object)
     }
 
     // Offline, a request is satisfied only by a locked object with the same
     // family, ref, identity, hash, and platform; online it needs the family's
     // fetch grant.
-    fn fetch_allowed(self, request: ProviderRequest) -> FetchDecision !Never {
+    fn fetch_allowed(self, request: ProviderRequest) -> FetchDecision Never! {
         if !request.offline -> return FetchDecision.AllowedNetworkWithGrant{authority: "provider.fetch.{request.family.label()}"}
         loop object in self.locked_objects {
             if object.family == request.family && object.ref_key == request.ref_key && object.exact_identity == request.exact_identity && object.hash == request.hash && object.platform == request.platform {

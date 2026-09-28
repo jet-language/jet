@@ -11,7 +11,7 @@ pub enum HookAction {
 pub struct HookSpec {
     pub name: String
     pub action: HookAction
-    pub cwd: ?String{None}
+    pub cwd: String?{None}
     pub trusted: Bool{false}
 }
 
@@ -24,7 +24,7 @@ pub struct DotenvSpec {
     pub allow: [String]{[String]{}}
     pub secrets: [String]{[String]{}}
 
-    fn fingerprint(self) -> String !Never {
+    fn fingerprint(self) -> String Never! {
         "{self.file}\t{self.allow.join(",")}\t{self.secrets.join(",")}"
     }
 }
@@ -47,38 +47,40 @@ pub struct EnvironmentLifecycle {
     pub on_enter: [HookSpec]{[HookSpec]{}}
     pub checks: [HookSpec]{[HookSpec]{}}
     // D-ECO12=A: external formatter package for non-`.jet` files.
-    pub formatter: ?FormatterSpec{None}
+    pub formatter: FormatterSpec?{None}
     // D-ECO6=A: project-relative Git hook directory used by native Git.
-    pub git_hooks_path: ?String{None}
+    pub git_hooks_path: String?{None}
     pub reload: ReloadPolicy{ReloadPolicy.Prompt}
     // Distinguish the default policy from an author-provided policy when
     // several imported modules are merged.
     pub reload_explicit: Bool{false}
 
-    fn fingerprint(self) -> String !Never {
+    fn fingerprint(self) -> String Never! {
         lines := [String]{}
-        if self.formatter == .Val(formatter) -> lines.push("formatter\t{formatter.package}\n")
-        loop dotenv in self.dotenv -> lines.push("dotenv\t{dotenv.fingerprint()}\n")
-        loop name in self.unset -> lines.push("unset\t{name}\n")
+        if self.formatter == .Val(formatter) -> &lines.push("formatter\t{formatter.package}\n")
+        loop dotenv in self.dotenv -> &lines.push("dotenv\t{dotenv.fingerprint()}\n")
+        loop name in self.unset -> &lines.push("unset\t{name}\n")
         hooks := [HookSpec]{}
-        hooks.extend(self.on_enter)
-        hooks.extend(self.checks)
+        &hooks.extend(self.on_enter)
+        &hooks.extend(self.checks)
         loop hook in hooks {
             action :: if hook.action == {
-                .Task(task) -> "task:{task}"
+                .Task(job) -> "task:{job}"
                 .Command(command) -> "command:{command}"
             }
             cwd :: hook.cwd ?? ""
             trust :: if hook.trusted -> "trusted" else -> "untrusted"
-            lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
+            &lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
         }
-        if self.git_hooks_path == .Val(path) -> lines.push("git-hooks-path\t{path}\n")
-        lines.push(if self.reload == {
+        if self.git_hooks_path == .Val(path) -> &lines.push("git-hooks-path\t{path}\n")
+        reload :: if self.reload == {
             .Never -> "reload\tnever\n"
             .Prompt -> "reload\tprompt\n"
             .Watch(paths, debounce_ms) -> "reload\twatch\t{paths.join(",")}\t{debounce_ms}\n"
-        })
-        lines.push(if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n")
+        }
+        &lines.push(reload)
+        explicit :: if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n"
+        &lines.push(explicit)
         lines.join("")
     }
 }

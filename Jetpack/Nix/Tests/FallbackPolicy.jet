@@ -35,8 +35,8 @@
     assert_eq(receipt.invocations, 1)
     facts :: receipt.facts()
     parsed :: json.parse(facts.get("nix.fallback.policy.receipt") ?? panic("policy receipt fact")) ?? panic("machine-readable policy receipt")
-    assert_eq(parsed.field("schema") ?? panic("schema"), DataTree.Text(@NIX_FALLBACK_RECEIPT_SCHEMA))
-    assert_eq(parsed.field("allowed") ?? panic("allowed"), DataTree.Bool(true))
+    assert_eq(&parsed.field("schema") ?? panic("schema"), DataTree.Text(@NIX_FALLBACK_RECEIPT_SCHEMA))
+    assert_eq(&parsed.field("allowed") ?? panic("allowed"), DataTree.Bool(true))
 }
 
 #Test("nix explicit refusal is not overridden by interactive mode") {

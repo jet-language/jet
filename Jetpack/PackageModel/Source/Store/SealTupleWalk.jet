@@ -22,48 +22,37 @@ pub struct SealTupleTable {
 }
 
 // Stat-walk `path` and hash the sorted identity-tuple table.
-pub fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable !IOError {
+pub fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable IOError! {
     tuples := [SealTuple]{}
     pkg_seal_collect_tuples(path, "", &tuples)
     // Stable passes from the least significant key: (relative, kind).
-    tuples.sort_by(tuple -> tuple.kind)
-    tuples.sort_by(tuple -> tuple.relative)
+    &tuples.sort_by(tuple -> tuple.kind)
+    &tuples.sort_by(tuple -> tuple.relative)
     table := [U8]{}
     loop tuple in tuples {
-        table.push(tuple.kind)
-        table.push(U8{9})
-        loop byte in pkg_seal_hex(tuple.relative.bytes()).bytes() -> table.push(byte)
-        loop byte in "\t{tuple.inode}\t{tuple.size}\t{tuple.mtime_ns}\n".bytes() -> table.push(byte)
+        &table.push(tuple.kind)
+        &table.push(U8{9})
+        loop byte in pkg_hex_bytes(tuple.relative.bytes()).bytes() -> &table.push(byte)
+        loop byte in "\t{tuple.inode}\t{tuple.size}\t{tuple.mtime_ns}\n".bytes() -> &table.push(byte)
     }
     Ok(SealTupleTable{node_count: tuples.len(), digest: "sha256-{pkg_sha256_hex(table)}"})
 }
 
-fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple]) !IOError -[FS]> {
+fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple]) IOError! -[FS]> {
     info :: files.stat(path)
     if info.is_symlink || info.is_file {
         kind :: if info.is_symlink -> U8{108} else -> U8{102}
-        tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.unix_ns})
+        &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.unix_ns})
         return Ok()
     }
     if !info.is_dir {
-        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("Hangar object contains an unsupported node: {path}")}))
+        return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("Hangar object contains an unsupported node: {path}")}))
     }
     entries := files.list_dir(path)
-    entries.sort_by(entry -> entry.name)
+    &entries.sort_by(entry -> entry.name)
     loop entry in entries {
         child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         pkg_seal_collect_tuples(entry.path, child, &tuples)
     }
     Ok()
-}
-
-fn pkg_seal_hex(bytes: [U8]) -> String !Never {
-    digits :: "0123456789abcdef".bytes()
-    out := [U8]{}
-    loop byte in bytes {
-        value :: Int.from_u8(byte)
-        out.push(digits[value >> 4])
-        out.push(digits[value & 15])
-    }
-    String.from_bytes(out) ?? ""
 }

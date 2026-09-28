@@ -6,28 +6,28 @@
 @PKG_JSON_NOT_ARRAY :: "expected a DataTree array"
 @PKG_JSON_NOT_STRING :: "expected a DataTree string"
 
-fn pkg_json_object(value: DataTree) -> ?[String: DataTree] !Never {
+fn pkg_json_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None
     }
 }
 
-fn pkg_json_array(value: DataTree) -> ?[DataTree] !Never {
+fn pkg_json_array(value: DataTree) -> [DataTree]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
     }
 }
 
-fn pkg_json_text(value: DataTree) -> ?String !Never {
+fn pkg_json_text(value: DataTree) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
     }
 }
 
-fn pkg_json_bool(value: DataTree) -> ?Bool !Never {
+fn pkg_json_bool(value: DataTree) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
         else -> None
@@ -35,13 +35,13 @@ fn pkg_json_bool(value: DataTree) -> ?Bool !Never {
 }
 
 // Compact JSON with object keys in insertion order.
-fn pkg_json_render(value: DataTree) -> String !Never {
+fn pkg_json_render(value: DataTree) -> String Never! {
     json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
 }
 
 // A string array of `values`.
-fn pkg_json_texts(values: [String]) -> DataTree !Never {
+fn pkg_json_texts(values: [String]) -> DataTree Never! {
     items := [DataTree]{}
-    loop value in values -> items.push(DataTree.Text(value))
+    loop value in values -> &items.push(DataTree.Text(value))
     DataTree.Array(items)
 }

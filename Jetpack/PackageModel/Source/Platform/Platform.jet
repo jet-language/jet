@@ -22,21 +22,21 @@ pub struct PlatformKey {
     pub os: String
 
     // A tier-one key, or None when either half is outside tier one.
-    fn new(arch: String, os: String) -> ?PlatformKey !Never {
+    fn new(arch: String, os: String) -> PlatformKey? Never! {
         if !pkg_is_tier_one(arch, os) -> return None
         Val(PlatformKey{arch: arch, os: os})
     }
 
-    fn envelope_key(self) -> String !Never {
+    fn envelope_key(self) -> String Never! {
         "{self.arch}-{self.os}"
     }
 
-    fn is_tier_one(self) -> Bool !Never {
+    fn is_tier_one(self) -> Bool Never! {
         pkg_is_tier_one(self.arch, self.os)
     }
 }
 
-fn pkg_is_tier_one(arch: String, os: String) -> Bool !Never {
+fn pkg_is_tier_one(arch: String, os: String) -> Bool Never! {
     arch_ok :: if arch == {
         @ARCH_X64 | @ARCH_ARM64 -> true
         else -> false
@@ -48,12 +48,12 @@ fn pkg_is_tier_one(arch: String, os: String) -> Bool !Never {
     arch_ok && os_ok
 }
 
-pub fn pkg_path_separator_for_os(os: String) -> String !Never {
+pub fn pkg_path_separator_for_os(os: String) -> String Never! {
     if os == @OS_WINDOWS -> return ";"
     ":"
 }
 
-pub fn pkg_exe_suffix_for_os(os: String) -> String !Never {
+pub fn pkg_exe_suffix_for_os(os: String) -> String Never! {
     if os == @OS_WINDOWS -> return ".exe"
     ""
 }

@@ -1,0 +1,43 @@
+// D-JPK-CACHE1=A (U24): the A4 hangar-object envelope (jet-pkg-model
+// Envelope.rs `Envelope`). Every realized hangar object carries the content
+// hash of its output tree, the platform it was built for, a detached-
+// signature slot (filled by package signing, card #13), and provenance. A
+// build-from-source output is an envelope-carrying object exactly like a
+// substituted one, so the resolver never cares which path produced it.
+
+pub struct Envelope {
+    // Content hash of the realized output tree (`sha256-…`): the cache key.
+    pub output_hash: String
+    // Target platform key (`<arch>-<os>`, e.g. `x86_64-linux`).
+    pub platform: String
+    // Detached-signature slot; empty until package signing fills it.
+    pub signature: String
+    // How this output was produced: the resolved source ref + build recipe id.
+    pub provenance: String
+
+    // The empty envelope of legacy records and providers that predate it.
+    fn empty() -> Envelope Never! {
+        Envelope{output_hash: "", platform: "", signature: "", provenance: ""}
+    }
+
+    // True when no envelope field is populated.
+    fn is_empty(self) -> Bool Never! {
+        self.output_hash == "" && self.platform == "" && self.signature == "" && self.provenance == ""
+    }
+
+    // The envelope of a freshly realized output rooted at `out`. `recipe_id`
+    // names the build path (`core-source`, `core-cargo-rlib`, `nix`, …).
+    fn for_output(out: String, reference: String, recipe_id: String) -[FS, Env]> Envelope Never! {
+        Envelope{
+            output_hash: pkg_output_hash_of(out),
+            platform: pkg_host_platform(),
+            signature: "",
+            provenance: "{reference} via {recipe_id}"
+        }
+    }
+}
+
+// The platform key of the host build target (`<arch>-<os>`).
+pub fn pkg_host_platform() -[Env]> String Never! {
+    pkg_host_key()
+}

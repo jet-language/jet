@@ -8,7 +8,7 @@ pub enum NixEvalInventoryStatus {
 }
 
 impl NixEvalInventoryStatus {
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Covered -> "covered"
             .Skipped -> "skipped"
@@ -23,7 +23,7 @@ pub enum NixEvalInventoryClass {
 }
 
 impl NixEvalInventoryClass {
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Evaluable -> "evaluable"
             .Buildable -> "buildable"
@@ -39,11 +39,11 @@ pub struct NixEvalInventoryEntry {
     pub reason: String
 }
 
-fn nixeval_inventory_entry(surface: String, status: NixEvalInventoryStatus, class: NixEvalInventoryClass, reason: String) -> NixEvalInventoryEntry !Never {
+fn nixeval_inventory_entry(surface: String, status: NixEvalInventoryStatus, class: NixEvalInventoryClass, reason: String) -> NixEvalInventoryEntry Never! {
     NixEvalInventoryEntry{surface, status, class, reason}
 }
 
-pub fn nixeval_pinned_inventory() -> [NixEvalInventoryEntry] !Never {
+pub fn nixeval_pinned_inventory() -> [NixEvalInventoryEntry] Never! {
     [NixEvalInventoryEntry]{
         nixeval_inventory_entry("stage-a-values", .Covered, .Evaluable, "pinned literal and value fixtures"),
         nixeval_inventory_entry("stage-a-errors", .Covered, .Evaluable, "pinned rejection and diagnostic fixtures"),

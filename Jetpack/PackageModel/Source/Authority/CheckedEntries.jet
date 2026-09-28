@@ -17,7 +17,7 @@ pub enum AuthorityKind {
     File
     Directory
 
-    fn name(self) -> String !Never {
+    fn name(self) -> String Never! {
         if self == {
             .File -> @AUTHORITY_KIND_FILE
             .Directory -> @AUTHORITY_KIND_DIRECTORY
@@ -36,11 +36,11 @@ pub enum AuthorityKind {
 pub struct FileIdentity {
     pub kind: AuthorityKind
     pub length: Int
-    pub modified_ns: ?Int
+    pub modified_ns: Int?
     pub device: Int
     pub inode: Int
 
-    fn from_stat(info: Stat, kind: AuthorityKind) -> FileIdentity !Never {
+    fn from_stat(info: Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
             return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
         }
@@ -57,7 +57,7 @@ pub struct CheckedFile {
     pub bytes: [U8]
 
     // Decode the bytes that were read from the opened object.
-    fn text(self) -> String !AuthorityError {
+    fn text(self) -> String AuthorityError! {
         text :: String.from_bytes(self.bytes) ?? return Err(AuthorityError.Invalid{path: self.path, detail: "authority file is not valid UTF-8: {pkg_authority_utf8_error(self.bytes)}"})
         Ok(text)
     }
@@ -110,7 +110,7 @@ pub enum AuthorityError {
     Changed(String)
     Unsupported(String)
 
-    fn is_missing(self) -> Bool !Never {
+    fn is_missing(self) -> Bool Never! {
         if self == {
             .Missing(_) -> true
             else -> false
@@ -118,26 +118,26 @@ pub enum AuthorityError {
     }
 
     // The Rust `Display` text.
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Missing(path) -> "authority path `{path}` is missing"
-            .Io{path, operation, detail} -> "couldn't {operation} `{path}`: {detail}"
+            .Io(path, operation, detail) -> "couldn't {operation} `{path}`: {detail}"
             .Symlink(path) -> "authority path `{path}` is a symlink"
-            .WrongKind{path, expected, actual} -> "authority path `{path}` is a {actual}, expected a {expected}"
+            .WrongKind(path, expected, actual) -> "authority path `{path}` is a {actual}, expected a {expected}"
             .Escapes(path) -> "authority path `{path}` escapes its root"
             .AmbiguousManifest(path) -> "both `{@PACKAGE_FILE}` and `{@PAYLOAD_FILE}` exist in `{path}`"
             .RetiredManifest(path) -> "retired manifest `{path}` is not accepted"
             .WorkspaceAmbiguous(paths) -> "workspace authority is declared in {paths.len()} files"
             .WorkspaceNoModule -> "canonical workspace source has no workspace module"
-            .NestedMembers{root, member} -> "Package root `{root}` cannot contain member Package `{member}` with its own members"
-            .Invalid{path, detail} -> "invalid authority `{path}`: {detail}"
-            .ManifestParse{path, error} -> "invalid manifest `{path}`: {error.message()}"
+            .NestedMembers(root, member) -> "Package root `{root}` cannot contain member Package `{member}` with its own members"
+            .Invalid(path, detail) -> "invalid authority `{path}`: {detail}"
+            .ManifestParse(path, error) -> "invalid manifest `{path}`: {error.message()}"
             .Changed(path) -> "authority object `{path}` changed during resolution"
             .Unsupported(detail) -> detail
         }
     }
 
-    fn diagnostic(self) -> Diagnostic !Never {
+    fn diagnostic(self) -> Diagnostic Never! {
         if self == {
             .AmbiguousManifest(_) -> pkg_authority_error_diagnostic("E1206",
                 "the package has two manifest roots",
@@ -149,11 +149,11 @@ pub enum AuthorityError {
                 "rename `{@PAYLOAD_FILE}` to `{@PACKAGE_FILE}`")
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
-            .NestedMembers{root, member} -> pkg_authority_error_diagnostic("E1323",
+            .NestedMembers(root, member) -> pkg_authority_error_diagnostic("E1323",
                 "member Package `{member}` declares `members`",
                 "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
                 "remove `members:` from `{member}` and lift its references into `{root}`")
-            .ManifestParse{path, error} -> pkg_manifest_parse_diagnostic(path, error)
+            .ManifestParse(path, error) -> pkg_manifest_parse_diagnostic(path, error)
             .Missing(path) -> pkg_authority_error_diagnostic("E1334",
                 "authority file `{path}` is missing",
                 "authority metadata must exist before it can be used",
@@ -162,7 +162,7 @@ pub enum AuthorityError {
                 "authority path `{path}` is a symlink",
                 "authority metadata is opened without following links",
                 "replace the symlink with the expected regular file or directory")
-            .WrongKind{path, expected, actual} -> pkg_authority_error_diagnostic("E1334",
+            .WrongKind(path, expected, actual) -> pkg_authority_error_diagnostic("E1334",
                 "authority path `{path}` is not a {expected}",
                 "the opened object is a {actual}, not the required {expected}",
                 "replace `{path}` with a {expected}")
@@ -170,7 +170,7 @@ pub enum AuthorityError {
                 "authority path `{path}` escapes its root",
                 "authority identity is physical and cannot cross the checked root",
                 "use a relative path below the authority root")
-            .Invalid{path, detail} -> pkg_authority_error_diagnostic("E1334",
+            .Invalid(path, detail) -> pkg_authority_error_diagnostic("E1334",
                 "authority metadata `{path}` is invalid",
                 detail,
                 "fix the metadata fields and try again")
@@ -178,7 +178,7 @@ pub enum AuthorityError {
                 "authority object `{path}` changed during resolution",
                 "the opened authority snapshot no longer matches the object at its path",
                 "restore the authority input and retry the operation")
-            .Io{path, operation, detail} -> pkg_authority_error_diagnostic("E1334",
+            .Io(path, operation, detail) -> pkg_authority_error_diagnostic("E1334",
                 "couldn't {operation} authority `{path}`",
                 detail,
                 "restore access to the authority metadata and try again")
@@ -189,12 +189,13 @@ pub enum AuthorityError {
         }
     }
 
-    fn workspace_diagnostic(self) -> Diagnostic !Never {
+    fn workspace_diagnostic(self) -> Diagnostic Never! {
         if self == {
-            .ManifestParse{path, error} -> pkg_manifest_parse_diagnostic(path, error)
+            .ManifestParse(path, error) -> pkg_manifest_parse_diagnostic(path, error)
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
-            .Symlink(_) | .Unsupported(_) -> self.diagnostic()
+            .Symlink(_) -> self.diagnostic()
+            .Unsupported(_) -> self.diagnostic()
             else -> pkg_authority_error_diagnostic("E1239",
                 "couldn't inspect workspace sources",
                 self.message(),
@@ -203,12 +204,12 @@ pub enum AuthorityError {
     }
 }
 
-fn pkg_authority_error_diagnostic(code: String, what: String, why: String, fix: String) -> Diagnostic !Never {
+fn pkg_authority_error_diagnostic(code: String, what: String, why: String, fix: String) -> Diagnostic Never! {
     diagnostic_from_registry(code, None, what, why, fix)
 }
 
 // Rust `FromUtf8Error` Display: where the first invalid sequence starts.
-fn pkg_authority_utf8_error(bytes: [U8]) -> String !Never {
+fn pkg_authority_utf8_error(bytes: [U8]) -> String Never! {
     valid := 0
     loop valid < bytes.len() {
         lead :: Int.from_u8(bytes[valid])
@@ -228,12 +229,12 @@ fn pkg_authority_utf8_error(bytes: [U8]) -> String !Never {
 }
 
 // `authority_limit_error`: every walk/read bound is an `Invalid` detail.
-fn pkg_authority_limit_error(path: String, detail: String) -> AuthorityError !Never {
+fn pkg_authority_limit_error(path: String, detail: String) -> AuthorityError Never! {
     AuthorityError.Invalid{path: path, detail: detail}
 }
 
 // The `kind_name` of a no-follow Stat.
-fn pkg_authority_kind_name(info: Stat) -> String !Never {
+fn pkg_authority_kind_name(info: Stat) -> String Never! {
     if {
         info.is_dir -> @AUTHORITY_KIND_DIRECTORY
         info.is_file -> @AUTHORITY_KIND_FILE
@@ -242,7 +243,7 @@ fn pkg_authority_kind_name(info: Stat) -> String !Never {
 }
 
 // `kind_name_from_file_type`: a directory entry kind, links included.
-fn pkg_authority_entry_kind_name(info: Stat) -> String !Never {
+fn pkg_authority_entry_kind_name(info: Stat) -> String Never! {
     if {
         info.is_dir -> @AUTHORITY_KIND_DIRECTORY
         info.is_file -> @AUTHORITY_KIND_FILE
@@ -252,13 +253,13 @@ fn pkg_authority_entry_kind_name(info: Stat) -> String !Never {
 }
 
 // `require_single_link_file`.
-fn pkg_authority_require_single_link(path: String, info: Stat) !AuthorityError {
+fn pkg_authority_require_single_link(path: String, info: Stat) AuthorityError! {
     if info.links == 1 -> return Ok()
     Err(AuthorityError.Invalid{path: path, detail: @AUTHORITY_HARDLINK_DETAIL})
 }
 
 // The IOContext of a provider failure, when it carries one.
-fn pkg_io_error_context(error: IOError) -> ?IOContext !Never {
+fn pkg_io_error_context(error: IOError) -> IOContext? Never! {
     if error == {
         .InvalidInput(context) -> Val(context)
         .NotFound(context) -> Val(context)
@@ -273,13 +274,13 @@ fn pkg_io_error_context(error: IOError) -> ?IOContext !Never {
 }
 
 // The OS error number behind a provider failure, when known.
-fn pkg_io_os_code(error: IOError) -> ?Int !Never {
+fn pkg_io_os_code(error: IOError) -> Int? Never! {
     context :: pkg_io_error_context(error) ?? return None
     context.os_code
 }
 
 // ELOOP: the final component was a link opened with no-follow.
-fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool !Never {
+fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool Never! {
     code :: pkg_io_os_code(error) ?? return false
     if sys.is_linux() -> return code == 40
     if sys.is_macos() -> return code == 62
@@ -287,11 +288,12 @@ fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool !Never {
 }
 
 // ENOTDIR: a directory open reached a non-directory.
-fn pkg_io_is_not_a_directory(error: IOError) -> Bool !Never {
-    pkg_io_os_code(error) == Val(20)
+fn pkg_io_is_not_a_directory(error: IOError) -> Bool Never! {
+    code :: pkg_io_os_code(error) ?? return false
+    code == 20
 }
 
-fn pkg_io_is_not_found(error: IOError) -> Bool !Never {
+fn pkg_io_is_not_found(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
@@ -299,7 +301,7 @@ fn pkg_io_is_not_found(error: IOError) -> Bool !Never {
 }
 
 // `map_io`: the typed authority failure of one open.
-fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError !Never {
+fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError Never! {
     if pkg_io_is_not_found(error) -> return AuthorityError.Missing(path)
     if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
     if directory && pkg_io_is_not_a_directory(error) {
@@ -310,7 +312,7 @@ fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> A
 }
 
 // `root.join(relative)`: an empty relative keeps Rust's trailing separator.
-fn pkg_authority_join(root: String, relative: String) -> String !Never {
+fn pkg_authority_join(root: String, relative: String) -> String Never! {
     if relative == "" {
         if root.ends_with("/") -> return root
         return "{root}/"
@@ -319,7 +321,7 @@ fn pkg_authority_join(root: String, relative: String) -> String !Never {
 }
 
 // Whether `path` is `root` itself or lies below it, component-wise.
-fn pkg_authority_path_within(path: String, root: String) -> Bool !Never {
+fn pkg_authority_path_within(path: String, root: String) -> Bool Never! {
     trimmed :: if root.ends_with("/") && root != "/" -> root.removesuffix("/") else -> root
     if path == trimmed || path == "{trimmed}/" -> return true
     if trimmed == "/" -> return path.starts_with("/")
@@ -328,11 +330,11 @@ fn pkg_authority_path_within(path: String, root: String) -> Bool !Never {
 
 // `Path::extension`: the text after the last `.` of the final component,
 // unless that dot starts the name.
-fn pkg_authority_extension(name: String) -> ?String !Never {
+fn pkg_authority_extension(name: String) -> String? Never! {
     raw :: name.bytes()
     index := raw.len() - 1
     loop index > 0 {
-        if raw[index] == U8{46} -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
+        if Int.from_u8(raw[index]) == 46 -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
         index -= 1
     }
     None

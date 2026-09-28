@@ -10,13 +10,13 @@ pub struct ArtifactProcessIdentity {
     pid: Int
     start: String
 
-    fn new(pid: Int, start: String) -> ArtifactProcessIdentity !Never {
+    fn new(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
         ArtifactProcessIdentity{pid, start}
     }
 
     // This process: its PID and kernel start token, or a per-store fallback
     // token where the platform exposes none.
-    fn current() -[FS, Env, Rand]> ArtifactProcessIdentity !ArtifactStoreError {
+    fn current() -[FS, Env, Rand]> ArtifactProcessIdentity ArtifactStoreError! {
         pid :: sys.pid()
         if store_artifact_lookup_process_start(pid) == {
             .Found(start) -> Ok(ArtifactProcessIdentity.new(pid, start))
@@ -24,13 +24,13 @@ pub struct ArtifactProcessIdentity {
         }
     }
 
-    fn pid(self) -> Int !Never { self.pid }
+    fn pid(self) -> Int Never! { self.pid }
 
-    fn start(self) -> String !Never { self.start }
+    fn start(self) -> String Never! { self.start }
 
     // `jet.store.v1|<role>|<pid>|<start>\n`, the first line of a lock or
     // lease file.
-    fn owner_line(self, role: String) -> String !Never {
+    fn owner_line(self, role: String) -> String Never! {
         "{@STORE_ARTIFACT_VERSION}|{role}|{self.pid}|{self.start}\n"
     }
 }
@@ -44,7 +44,7 @@ enum ArtifactIdentityLookup {
 
 // The kernel start time of `pid` (Linux `/proc/<pid>/stat` field 22); other
 // platforms cannot tell.
-fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLookup !Never {
+fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLookup Never! {
     if !sys.is_linux() -> return ArtifactIdentityLookup.Unknown
     content :: if files.read("/proc/{pid}/stat") == {
         .Ok(text) -> text
@@ -64,7 +64,7 @@ fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLoo
 // Whether `owner` is still running: the same process as `current`, or a
 // process whose start token still matches. None when the platform cannot
 // tell, which callers treat as live.
-fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: ArtifactProcessIdentity) -[FS, Env]> ?Bool !Never {
+fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: ArtifactProcessIdentity) -[FS, Env]> Bool? Never! {
     if owner.pid() == current.pid() -> return Val(owner.start() == current.start())
     if store_artifact_lookup_process_start(owner.pid()) == {
         .Found(start) -> Val(start == owner.start())
@@ -74,7 +74,7 @@ fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: Artifa
 }
 
 // The last byte offset where `needle` occurs, or -1.
-fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int !Never {
+fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int Never! {
     at := haystack.len() - needle.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(haystack, at, needle) -> return at
@@ -90,11 +90,11 @@ pub struct ArtifactLease {
     path: String
     owner: ArtifactProcessIdentity
 
-    fn path(self) -> String !Never { self.path }
+    fn path(self) -> String Never! { self.path }
 
-    fn owner(self) -> ArtifactProcessIdentity !Never { self.owner }
+    fn owner(self) -> ArtifactProcessIdentity Never! { self.owner }
 
-    fn is_live(self) -[FS, Env]> Bool !Never {
+    fn is_live(self) -[FS, Env]> Bool Never! {
         store_artifact_owner_liveness(self.owner, self.owner) ?? true
     }
 }
@@ -133,7 +133,7 @@ struct ArtifactLeaseRecord {
 
 // A lease file: the owner line, then one `kind|value` line per pinned entry.
 // Any malformed line refuses the whole file.
-fn store_artifact_parse_lease(bytes: [U8]) -> ?ArtifactLeaseRecord !Never {
+fn store_artifact_parse_lease(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
     text :: String.from_bytes(bytes) ?? return None
     lines :: store_artifact_lines(text)
     if lines.len() == 0 -> return None
@@ -146,13 +146,13 @@ fn store_artifact_parse_lease(bytes: [U8]) -> ?ArtifactLeaseRecord !Never {
     loop index in 1..<lines.len() {
         fields :: lines[index].split("|").to_list()
         if fields.len() != 2 -> return None
-        targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
+        &targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
     }
     Val(ArtifactLeaseRecord{owner, targets: store_artifact_unique_keys(targets)})
 }
 
 // The owner of a lock file (`jet.store.v1|lock|<pid>|<start>`).
-fn store_artifact_parse_owner_line(bytes: [U8]) -> ?ArtifactProcessIdentity !Never {
+fn store_artifact_parse_owner_line(bytes: [U8]) -> ArtifactProcessIdentity? Never! {
     text := String.from_bytes(bytes) ?? return None
     loop text.ends_with("\n") {
         raw :: text.bytes()
@@ -165,7 +165,7 @@ fn store_artifact_parse_owner_line(bytes: [U8]) -> ?ArtifactProcessIdentity !Nev
 }
 
 // A `u32` process id.
-fn store_artifact_parse_pid(text: String) -> ?Int !Never {
+fn store_artifact_parse_pid(text: String) -> Int? Never! {
     pid :: store_artifact_parse_count(text) ?? return None
     if pid > 4294967295 -> return None
     Val(pid)
@@ -173,19 +173,19 @@ fn store_artifact_parse_pid(text: String) -> ?Int !Never {
 
 // `str::lines`: split on LF, drop one CR before each LF, and yield no final
 // empty line after a trailing LF.
-fn store_artifact_lines(text: String) -> [String] !Never {
+fn store_artifact_lines(text: String) -> [String] Never! {
     lines := [String]{}
     raw :: text.bytes()
     start := 0
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) != 10 -> next
         end :: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
-        lines.push(pkg_bytes_text(raw, start, end))
+        &lines.push(pkg_bytes_text(raw, start, end))
         start = index + 1
     }
     if start < raw.len() {
         end :: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
-        lines.push(pkg_bytes_text(raw, start, end))
+        &lines.push(pkg_bytes_text(raw, start, end))
     }
     lines
 }
@@ -199,19 +199,19 @@ struct ArtifactJournalState {
     bytes: Int
     valid: Bool
 
-    fn last_use_of(self, key: ArtifactEntryKey) -> Int !Never {
+    fn last_use_of(self, key: ArtifactEntryKey) -> Int Never! {
         self.last_use.get(key.identity()) ?? 0
     }
 }
 
 // One checksummed journal line:
 // `jet.store.v1|<op>|<kind>|<value>|<length>|<sequence>|<sha256 of prefix>`.
-fn store_artifact_journal_line(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String !Never {
+fn store_artifact_journal_line(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String Never! {
     prefix :: "{@STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
     "{prefix}{pkg_sha256_hex(prefix.bytes())}\n"
 }
 
-fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState !ArtifactStoreError {
+fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState ArtifactStoreError! {
     bytes :: if files.read_bytes(path) == {
         .Ok(read) -> read
         .Err(error) -> {
@@ -236,7 +236,7 @@ fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState !Artifa
 }
 
 // Apply one journal record; false when it is invalid.
-fn store_artifact_replay_journal_line(state: &ArtifactJournalState, line: [U8]) -> Bool !Never {
+fn store_artifact_replay_journal_line(state: &ArtifactJournalState, line: [U8]) -> Bool Never! {
     text :: String.from_bytes(line) ?? return false
     fields :: text.split("|").to_list()
     if fields.len() != 7 || fields[0] != @STORE_ARTIFACT_VERSION -> return false

@@ -1,0 +1,1186 @@
+// The signed NAR transfer boundary (Rust `Store/Cache.rs`, transfer half):
+// publish, stage, verify, and substitute Hangar entries through bound cache
+// roles.
+//
+// Every endpoint exchanges the same signed narinfo, canonical NAR bytes, and
+// signed trust receipt. A cache hit is reported only after the transport
+// object, the NAR, the decoded output identity, and the receipt have all
+// been checked, and a receipt is admitted (its pin advanced) only after the
+// complete payload passed. Access failures are reported before an object is
+// made locally usable.
+
+@STORE_CACHE_NEGATIVE_TTL_SECS :: 60
+@STORE_CACHE_RECEIPT_TTL_SECS :: 86400
+@STORE_CACHE_RECEIPT_MAGIC :: "jet-cache-receipt-v1"
+
+// One completed cache transfer.
+pub struct CacheTransferReport {
+    pub role: String
+    pub mirror: String
+    pub entry: String
+    pub output_hash: String
+    // Jetpack's digest of the canonical NAR bytes.
+    pub nar_hash: String
+    // Public signature identity, never secret credential material.
+    pub signed_fingerprint: String
+    // Provenance identities carried in the signed cache admission decision.
+    pub builder: String
+    pub provenance: String
+    // The signed admission receipt accepted for this transfer, when the
+    // endpoint uses Jetpack's native cache receipt protocol.
+    pub witness: String?
+    pub receipt_version: Int?
+    pub receipt_expires_unix: Int?
+    pub credential_provider: String?
+    pub bytes: Int
+
+    // `jet.status/v1` for a cache transfer operation.
+    fn json(self, operation: String) -> String Never! {
+        fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("mirror", DataTree.Text(self.mirror)).with("entry", DataTree.Text(self.entry)).with("output_hash", DataTree.Text(self.output_hash)).with("nar_hash", DataTree.Text(self.nar_hash)).with("signed_fingerprint", DataTree.Text(self.signed_fingerprint)).with("builder", DataTree.Text(self.builder)).with("provenance", DataTree.Text(self.provenance)).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", DataTree.Int(self.bytes))
+        StatusEnvelope.new(operation, true).with_fields(fields).json()
+    }
+}
+
+// Summary of a local cache publication tree prepared from Hangar.
+pub struct CacheStageReport {
+    pub role: String
+    pub destination: String
+    pub entries: Int
+    pub bytes: Int
+
+    fn json(self, operation: String) -> String Never! {
+        fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("destination", DataTree.Text(self.destination)).with("entries", DataTree.Int(self.entries)).with("bytes", DataTree.Int(self.bytes))
+        StatusEnvelope.new(operation, true).with_fields(fields).json()
+    }
+}
+
+// Read-only trust state exposed by package explanation: the host's accepted
+// admission pin, not a new cache decision path. Transfer still performs the
+// full signature, provenance, freshness, and output checks.
+pub struct CacheAdmission {
+    pub role: String
+    pub decision: CacheAdmissionDecision
+    pub builder: String
+    pub provenance: String
+    pub receipt_version: Int?
+    pub receipt_expires_unix: Int?
+    pub reason: String
+}
+
+// The explain view of one role's admission for one output.
+pub enum CacheAdmissionDecision {
+    Accepted
+    Expired
+    NotAccepted
+    Invalid
+    Denied
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Accepted -> "accepted"
+            .Expired -> "expired"
+            .NotAccepted -> "not-accepted"
+            .Invalid -> "invalid"
+            .Denied -> "denied"
+        }
+    }
+}
+
+// A fetched cache object set: signed narinfo, NAR bytes, trust receipt.
+struct CacheArtifact {
+    info: NarInfo
+    nar: [U8]
+    receipt: CacheReceipt
+}
+
+// What a publication proved about the written objects.
+struct CacheTransferProof {
+    signed_fingerprint: String
+    witness: String?
+    receipt_version: Int?
+    receipt_expires_unix: Int?
+}
+
+// An accepted receipt pin: the newest version admitted for one role and
+// output.
+struct CacheReceiptPin {
+    version: Int
+    expires_unix: Int
+}
+
+// Publish one reproducible Hangar entry to the first bound mirror that
+// accepts it. Every mirror failure is reported if none does.
+pub fn store_publish_cache_entry(roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+    binding :: store_read_cache_binding(roots, role)
+    if !binding.allow_write -> return Err(StoreError.InvalidData("cache binding is read-only; publishing needs a write grant"))
+    entry :: store_cache_select_entry(roots, target)
+    store_cache_ensure_reproducible_for_shared_cache(roots, entry)
+    metadata :: files.stat(entry.out)
+    if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) {
+        return Err(StoreError.InvalidData("only a local Hangar file or directory can be published as a NAR"))
+    }
+    if entry.envelope.output_hash == "" -> return Err(StoreError.InvalidData("Hangar entry has no output identity for cache publication"))
+    if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+        return Err(StoreError.InvalidData("local output does not match the Hangar entry output identity"))
+    }
+    written :: store_write_nar(entry.out)
+    nar :: written.nar
+    stats :: written.stats
+    key :: store_cache_read_trust_key(binding.trust_key)
+    store_cache_verify_writer_authority(roots, entry, role, key)
+    info :: store_cache_nar_info_for(entry, stats)
+    store_cache_verify_decoded_output_hash(roots, entry, nar)
+    failures := [String]{}
+    loop mirror in binding.mirrors {
+        endpoint :: store_cache_parse_endpoint(mirror) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        store_cache_validate_endpoint_binding(binding, endpoint, true) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        proof :: store_cache_publish_endpoint(endpoint, info, nar, key, entry, role) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        builder :: store_cache_builder_for_entry(entry)
+        trust_allow_cache_builder(roots.root, role, builder) ?? return Err(StoreError.Other(err.message()))
+        if proof.witness == {
+            .Val(witness) -> trust_allow_cache_witness(roots.root, role, witness) ?? return Err(StoreError.Other(err.message()))
+            .None -> {}
+        }
+        return Ok(CacheTransferReport{
+            role: binding.role,
+            mirror: mirror,
+            entry: entry.id,
+            output_hash: entry.envelope.output_hash,
+            nar_hash: stats.digest,
+            signed_fingerprint: proof.signed_fingerprint,
+            builder: store_cache_builder_for_report(entry),
+            provenance: store_cache_provenance_for_report(entry),
+            witness: proof.witness,
+            receipt_version: proof.receipt_version,
+            receipt_expires_unix: proof.receipt_expires_unix,
+            credential_provider: binding.credential_provider,
+            bytes: stats.bytes,
+        })
+    }
+    detail :: failures.join("; ")
+    Err(StoreError.InvalidData("all cache mirrors rejected publication: {detail}"))
+}
+
+// Lay out a complete local, signed cache tree from the current Hangar. This
+// is the staging half of cache publication: the same provenance, NAR,
+// receipt, and HMAC signing as a normal publish, but the endpoint is always
+// a local directory. No network mirror is contacted and the host role secret
+// stays under the Jetpack root.
+pub fn store_stage_cache_from_hangar(roots: HangarRoots, destination: String, role: String) -> CacheStageReport StoreError! {
+    binding :: store_read_cache_binding(roots, role)
+    if !binding.allow_write -> return Err(StoreError.InvalidData("cache binding is read-only; staging needs a write grant"))
+    target :: store_cache_absolutize_host_path(destination)
+    store_cache_ensure_directory(target)
+    key :: store_cache_read_trust_key(binding.trust_key)
+    entries :: store_list_checked(roots)
+    bytes := 0
+    loop entry in entries {
+        store_cache_ensure_reproducible_for_shared_cache(roots, entry)
+        metadata :: files.stat(entry.out)
+        if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) {
+            return Err(StoreError.InvalidData("only a local Hangar file or directory can be staged as a NAR"))
+        }
+        if entry.envelope.output_hash == "" -> return Err(StoreError.InvalidData("Hangar entry has no output identity for cache staging"))
+        if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+            return Err(StoreError.InvalidData("local output does not match the Hangar entry output identity"))
+        }
+        written :: store_write_nar(entry.out)
+        store_cache_verify_writer_authority(roots, entry, role, key)
+        info :: store_cache_nar_info_for(entry, written.stats)
+        store_cache_verify_decoded_output_hash(roots, entry, written.nar)
+        receipt :: store_cache_receipt_for_publication(CacheEndpoint.Local(target), role, entry, key)
+        store_cache_publish_local_resumable(target, info, written.nar, key, receipt)
+        builder :: store_cache_builder_for_entry(entry)
+        trust_allow_cache_builder(roots.root, role, builder) ?? return Err(StoreError.Other(err.message()))
+        trust_allow_cache_witness(roots.root, role, receipt.witness) ?? return Err(StoreError.Other(err.message()))
+        bytes += written.stats.bytes
+    }
+    Ok(CacheStageReport{role: binding.role, destination: target, entries: entries.len(), bytes: bytes})
+}
+
+// Find a verifying hit for `target` on the role's mirrors, in order, without
+// restoring it.
+pub fn store_verify_cache_transfer(roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+    binding :: store_read_cache_binding(roots, role)
+    expected :: store_cache_select_entry(roots, target)
+    store_cache_ensure_reproducible_for_shared_cache(roots, expected)
+    key :: store_cache_read_trust_key(binding.trust_key)
+    store_cache_verify_writer_authority(roots, expected, role, key)
+    store_cache_require_allowed_builder(roots, role, expected)
+    failures := [String]{}
+    loop mirror in binding.mirrors {
+        endpoint :: store_cache_parse_endpoint(mirror) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        store_cache_validate_endpoint_binding(binding, endpoint, false) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        if store_cache_verify_hangar_endpoint(roots, endpoint, expected) == {
+            .Ok(hit) -> {
+                if hit == {
+                    .Val(bytes) -> return Ok(store_cache_hangar_report(binding, mirror, expected, key, bytes))
+                    .None -> {}
+                }
+            }
+            .Err(error) -> {
+                &failures.push("{mirror}: {error.message()}")
+            }
+        }
+        found :: if store_cache_find_artifact(endpoint, target, Val(expected), key) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                &failures.push("{mirror}: {error.message()}")
+                next
+            }
+        }
+            if found == {
+                .Val(artifact) -> {
+                    store_cache_verify_artifact_bytes(artifact.info, artifact.nar) ?? {
+                        &failures.push("{mirror}: NAR validation failed: {err.message()}")
+                        next
+                    }
+                    store_cache_verify_decoded_output_hash(roots, expected, artifact.nar) ?? {
+                        &failures.push("{mirror}: output identity failed: {err.message()}")
+                        next
+                    }
+                    // Admit the signed receipt only after the complete payload
+                    // has passed transport, NAR, and output-identity checks. A
+                    // bad or compromised mirror must not advance the host pin
+                    // and then freeze a later valid receipt behind a rollback
+                    // decision.
+                    store_cache_verify_receipt(roots, role, expected, artifact.receipt, key) ?? {
+                        &failures.push("{mirror}: trust receipt rejected: {err.message()}")
+                        next
+                    }
+                    return Ok(store_cache_report_for(binding, mirror, artifact.info, artifact.nar.len(), Val(expected), Val(artifact.receipt)))
+                }
+                .None -> {
+                    &failures.push("{mirror}: cache entry not found")
+                }
+            }
+    }
+    detail :: failures.join("; ")
+    Err(StoreError.InvalidData("no verifying cache hit: {detail}"))
+}
+
+// Restore `target` from the first verifying mirror into `destination`, which
+// must not exist yet. A failed restore removes its partial output.
+pub fn store_substitute_cache_entry(roots: HangarRoots, target: String, role: String, destination: String) -> CacheTransferReport StoreError! {
+    binding :: store_read_cache_binding(roots, role)
+    if store_archive_lstat_ok(destination) != None -> return Err(StoreError.InvalidData("cache substitution destination already exists"))
+    store_cache_validate_path_components(destination)
+    expected :: store_cache_select_entry(roots, target)
+    store_cache_ensure_reproducible_for_shared_cache(roots, expected)
+    key :: store_cache_read_trust_key(binding.trust_key)
+    store_cache_verify_writer_authority(roots, expected, role, key)
+    store_cache_require_allowed_builder(roots, role, expected)
+    failures := [String]{}
+    loop mirror in binding.mirrors {
+        endpoint :: store_cache_parse_endpoint(mirror) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        store_cache_validate_endpoint_binding(binding, endpoint, false) ?? {
+            &failures.push("{mirror}: {err.message()}")
+            next
+        }
+        if store_cache_substitute_hangar_endpoint(roots, endpoint, expected, destination) == {
+            .Ok(hit) -> {
+                if hit == {
+                    .Val(bytes) -> return Ok(store_cache_hangar_report(binding, mirror, expected, key, bytes))
+                    .None -> {}
+                }
+            }
+            .Err(error) -> {
+                &failures.push("{mirror}: {error.message()}")
+            }
+        }
+        found :: if store_cache_find_artifact(endpoint, target, Val(expected), key) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                &failures.push("{mirror}: {error.message()}")
+                next
+            }
+        }
+            if found == {
+                .Val(artifact) -> {
+                    stats :: store_cache_restore_artifact(roots, role, expected, artifact, key, destination) ?? {
+                        store_cache_remove_tree(destination).drop("the failed restore may not have created the destination")
+                        &failures.push("{mirror}: {err.message()}")
+                        next
+                    }
+                    return Ok(CacheTransferReport{
+                        role: binding.role,
+                        mirror: mirror,
+                        entry: expected.id,
+                        output_hash: expected.envelope.output_hash,
+                        nar_hash: stats.digest,
+                        signed_fingerprint: store_cache_fingerprint_for_info(artifact.info),
+                        builder: store_cache_builder_for_report(expected),
+                        provenance: store_cache_provenance_for_report(expected),
+                        witness: Val(artifact.receipt.witness),
+                        receipt_version: Val(artifact.receipt.version),
+                        receipt_expires_unix: Val(artifact.receipt.expires_unix),
+                        credential_provider: binding.credential_provider,
+                        bytes: stats.bytes,
+                    })
+                }
+                .None -> {
+                    &failures.push("{mirror}: cache entry not found")
+                }
+            }
+    }
+    detail :: failures.join("; ")
+    Err(StoreError.InvalidData("no verifying cache hit: {detail}"))
+}
+
+// Verify, decode, seal, and re-hash one fetched artifact at `destination`,
+// then admit its receipt. Receipt admission stays transactional with the
+// restored payload: invalid bytes must not consume a newer pin.
+fn store_cache_restore_artifact(roots: HangarRoots, role: String, expected: StoreEntry, artifact: CacheArtifact, key: TrustKey, destination: String) -> NarStats StoreError! {
+    artifact.info.verify(key)
+    store_cache_verify_artifact_bytes(artifact.info, artifact.nar)
+    stats :: store_read_nar(artifact.nar, destination)
+    store_seal_node(destination)
+    actual :: pkg_try_output_hash_of(destination)
+    if actual != expected.envelope.output_hash {
+        return Err(StoreError.InvalidData("restored output hash {actual} disagrees with {expected.envelope.output_hash}"))
+    }
+    store_cache_verify_receipt(roots, role, expected, artifact.receipt, key)
+    Ok(stats)
+}
+
+// The report of a hit served by the local Hangar endpoint.
+fn store_cache_hangar_report(binding: CacheBinding, mirror: String, expected: StoreEntry, key: TrustKey, bytes: [U8]) -> CacheTransferReport Never! {
+    CacheTransferReport{
+        role: binding.role,
+        mirror: mirror,
+        entry: expected.id,
+        output_hash: expected.envelope.output_hash,
+        nar_hash: store_nar_digest(bytes),
+        signed_fingerprint: store_cache_fingerprint_for_key(key),
+        builder: store_cache_builder_for_report(expected),
+        provenance: store_cache_provenance_for_report(expected),
+        witness: None,
+        receipt_version: None,
+        receipt_expires_unix: None,
+        credential_provider: binding.credential_provider,
+        bytes: bytes.len(),
+    }
+}
+
+fn store_cache_require_allowed_builder(roots: HangarRoots, role: String, entry: StoreEntry) StoreError! {
+    builder :: store_cache_builder_for_entry(entry)
+    allowed :: trust_is_cache_builder_allowed(roots.root, role, builder) ?? return Err(StoreError.Other(err.message()))
+    if !allowed -> return Err(StoreError.InvalidData("cache builder is not allowlisted for this shared cache role"))
+}
+
+// The entry whose id, reference, output digest, or `name@version` equals
+// `target`.
+fn store_cache_select_entry(roots: HangarRoots, target: String) -> StoreEntry StoreError! {
+    loop entry in store_list_checked(roots) {
+        if entry.id == target || entry.reference == target || entry.envelope.output_hash == target || "{entry.name}@{entry.version}" == target {
+            return Ok(entry)
+        }
+    }
+    Err(StoreError.InvalidData("no Hangar entry matches the cache target"))
+}
+
+fn store_cache_ensure_reproducible_for_shared_cache(roots: HangarRoots, entry: StoreEntry) StoreError! {
+    if store_reproducibility_blocked(roots, store_entry_action_key(entry)) {
+        return Err(StoreError.InvalidData("action has unreproducible evidence and cannot satisfy trusted cache policy"))
+    }
+}
+
+// The last `/` segment of a store path (Rust `rsplit('/').next()`).
+fn store_cache_store_name(store_path: String) -> String Never! {
+    store_path.cut_last("/")?.after ?? store_path
+}
+
+fn store_cache_entry_store_name(entry: StoreEntry) -> String Never! {
+    "{entry.envelope.output_hash}-{entry.id}"
+}
+
+fn store_cache_hangar_references(entry: StoreEntry) -> [String] Never! {
+    references := [String]{}
+    loop reference in entry.references -> &references.push("/jet/hangar/{reference}")
+    references
+}
+
+fn store_cache_nar_info_for(entry: StoreEntry, stats: NarStats) -> NarInfo StoreError! {
+    Ok(NarInfo{
+        store_path: "/jet/hangar/{store_cache_entry_store_name(entry)}",
+        url: "nar/{entry.envelope.output_hash}.nar",
+        compression: "none",
+        file_size: stats.bytes,
+        nar_size: stats.bytes,
+        nar_hash: stats.digest,
+        references: store_cache_hangar_references(entry),
+        deriver: Val(store_cache_deriver(entry)),
+        ca: None,
+        signatures: [NarSignature]{},
+    })
+}
+
+// Carry the action identity and producer record through the signed narinfo.
+// The NAR carries bytes; this field carries the facts that make those bytes
+// eligible for this cache entry.
+fn store_cache_deriver(entry: StoreEntry) -> String StoreError! {
+    if entry.envelope.output_hash.trim() == "" || entry.envelope.platform.trim() == "" || entry.envelope.provenance.trim() == "" || entry.cache_identity.source_fingerprint.trim() == "" || entry.cache_identity.recipe_fingerprint.trim() == "" || entry.cache_identity.policy_fingerprint.trim() == "" || entry.cache_identity.platform != entry.envelope.platform {
+        return Err(StoreError.InvalidData("cache entry has incomplete or mismatched provenance"))
+    }
+    ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("cache entry has invalid producer provenance: {err.message()}"))
+    canonical := "jet.cache-deriver.v2".bytes()
+    &canonical.push(U8{0})
+    values :: [String]{
+        store_entry_action_key(entry),
+        entry.envelope.output_hash,
+        entry.envelope.platform,
+        entry.envelope.signature,
+        entry.envelope.provenance,
+        entry.cache_identity.source_fingerprint,
+        entry.cache_identity.recipe_fingerprint,
+        entry.cache_identity.policy_fingerprint,
+        entry.cache_identity.platform,
+        entry.platform_artifact_kind,
+        entry.producer_record,
+    }
+    loop value in values -> store_cache_put_field(&canonical, value)
+    store_cache_put_be_u64(&canonical, entry.named_outputs.len())
+    // Rust iterates the BTreeMap in key order.
+    loop name in store_archive_sorted_unique(entry.named_outputs.keys().to_list()) {
+        store_cache_put_field(&canonical, name)
+        store_cache_put_field(&canonical, entry.named_outputs[name])
+    }
+    Ok("/jet/derivations/{pkg_sha256_hex(canonical)}")
+}
+
+fn store_cache_put_be_u64(out: &[U8], value: Int) Never! {
+    shift := 56
+    loop shift >= 0 {
+        &out.push(U8{(value >> shift) & 255})
+        shift -= 8
+    }
+}
+
+fn store_cache_put_field(out: &[U8], value: String) Never! {
+    raw :: value.bytes()
+    store_cache_put_be_u64(&out, raw.len())
+    loop byte in raw -> &out.push(byte)
+}
+
+// Fetch the signed narinfo, receipt, and NAR for `expected` from one
+// endpoint; None on a miss.
+fn store_cache_find_artifact(endpoint: CacheEndpoint, target: String, expected: StoreEntry?, key: TrustKey) -> CacheArtifact? StoreError! {
+    if endpoint == {
+        .Local(mirror) -> return store_cache_find_local_artifact(mirror, expected, key)
+        .Hangar -> return Ok(None)
+        else -> {}
+    }
+    wanted :: expected ?? return Ok(None)
+    store_name :: store_cache_entry_store_name(wanted)
+    found_info :: store_cache_endpoint_get(endpoint, "{store_name}.narinfo", @STORE_CACHE_MAX_INFO_BYTES)
+    info_bytes :: found_info ?? return Ok(None)
+    text :: String.from_bytes(info_bytes) ?? return Err(StoreError.InvalidData("narinfo is not UTF-8"))
+    info :: NarInfo.parse(text)
+    if store_cache_store_name(info.store_path) != store_name || !store_cache_nar_info_matches_entry(info, wanted) -> return Ok(None)
+    info.verify(key)
+    found_receipt :: store_cache_endpoint_get(endpoint, store_cache_receipt_key(store_name), @STORE_CACHE_MAX_INFO_BYTES)
+    receipt_bytes :: found_receipt ?? return Err(StoreError.InvalidData("cache entry has no signed trust receipt"))
+    receipt :: store_cache_decode_receipt(receipt_bytes)
+    found_nar :: store_cache_endpoint_get(endpoint, info.url, @STORE_MAX_NAR_BYTES)
+    nar :: found_nar ?? return Ok(None)
+    Ok(Val(CacheArtifact{info, nar, receipt}))
+}
+
+// Scan a local mirror's narinfos in name order for a verifying artifact. A
+// fresh negative hint skips the scan; a miss leaves one.
+fn store_cache_find_local_artifact(mirror: String, expected: StoreEntry?, key: TrustKey) -> CacheArtifact? StoreError! {
+    identity :: if expected == {
+        .Val(entry) -> Val(store_cache_entry_store_name(entry))
+        .None -> None
+    }
+    if identity == {
+        .Val(name) -> {
+            if store_cache_negative_hint_fresh(mirror, name) -> return Ok(None)
+        }
+        .None -> {}
+    }
+    observed :: store_archive_lstat(mirror)
+    metadata :: observed ?? return Ok(None)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("cache mirror is not a real directory"))
+    loop listed in files.list_dir(mirror) {
+        if store_cache_extension_stem(listed.name, "narinfo") == None -> next
+        info_metadata :: files.stat(listed.path)
+        if info_metadata.is_symlink || !info_metadata.is_file -> return Err(StoreError.InvalidData("cache mirror contains a non-regular narinfo"))
+        text :: String.from_bytes(store_cache_read_regular_bounded(listed.path, @STORE_CACHE_MAX_INFO_BYTES)) ?? return Err(StoreError.InvalidData("narinfo is not UTF-8"))
+        info :: NarInfo.parse(text) ?? next
+        store_name :: store_cache_store_name(info.store_path)
+        wanted :: expected ?? next
+        if identity != Val(store_name) || !store_cache_nar_info_matches_entry(info, wanted) -> next
+        info.verify(key) ?? next
+        receipt_bytes :: store_cache_read_regular_bounded(files.join(mirror, store_cache_receipt_key(store_name)), @STORE_CACHE_MAX_INFO_BYTES) ?? {
+            if err.is_not_found() -> return Err(StoreError.InvalidData("cache entry has no signed trust receipt"))
+            return Err(err)
+        }
+        receipt :: store_cache_decode_receipt(receipt_bytes)
+        nar_path :: files.join(mirror, info.url)
+        store_cache_validate_path_components(nar_path)
+        nar :: store_cache_read_regular_bounded(nar_path, @STORE_MAX_NAR_BYTES) ?? {
+            if err.is_not_found() -> next
+            return Err(err)
+        }
+        if nar.len() == 0 -> next
+        store_cache_verify_artifact_bytes(info, nar) ?? next
+        return Ok(Val(CacheArtifact{info, nar, receipt}))
+    }
+    if identity == {
+        // A negative result is only an advisory optimization. A read-only or
+        // disappearing mirror must not turn a source/cache miss into a hard
+        // failure, and it must never suppress the next ordered mirror.
+        .Val(name) -> store_cache_write_negative_hint(mirror, name).drop("negative cache hints are advisory")
+        .None -> {}
+    }
+    Ok(None)
+}
+
+fn store_cache_report_for(binding: CacheBinding, mirror: String, info: NarInfo, bytes: Int, expected: StoreEntry?, receipt: CacheReceipt?) -> CacheTransferReport Never! {
+    entry_id :: if expected == {
+        .Val(entry) -> entry.id
+        .None -> info.store_path
+    }
+    output_hash :: if expected == {
+        .Val(entry) -> entry.envelope.output_hash
+        .None -> ""
+    }
+    builder :: if expected == {
+        .Val(entry) -> store_cache_builder_for_report(entry)
+        .None -> ""
+    }
+    provenance :: if expected == {
+        .Val(entry) -> store_cache_provenance_for_report(entry)
+        .None -> ""
+    }
+    CacheTransferReport{
+        role: binding.role,
+        mirror: mirror,
+        entry: entry_id,
+        output_hash: output_hash,
+        nar_hash: info.nar_hash,
+        signed_fingerprint: store_cache_fingerprint_for_info(info),
+        builder: builder,
+        provenance: provenance,
+        witness: receipt?.witness,
+        receipt_version: receipt?.version,
+        receipt_expires_unix: receipt?.expires_unix,
+        credential_provider: binding.credential_provider,
+        bytes: bytes,
+    }
+}
+
+// Project persisted cache admission pins without contacting a mirror or
+// changing trust state. Explain is observational; the transfer boundary is
+// the only path that admits bytes.
+pub fn store_cache_admissions_for_explain(roots: HangarRoots, entry: StoreEntry) -> [CacheAdmission] StoreError! {
+    bindings :: store_list_cache_bindings(roots)
+    provenance_record :: store_cache_provenance_for_entry(entry) ?? {
+        reason :: "cache provenance is not admissible: {err.message()}"
+        denied := [CacheAdmission]{}
+        loop binding in bindings {
+            &denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason})
+        }
+        return Ok(denied)
+    }
+    builder :: provenance_record.builder
+    provenance :: store_cache_deriver(entry) ?? ""
+    store_name :: store_cache_entry_store_name(entry)
+    now :: store_cache_now_seconds()
+    builder_revoked :: trust_is_cache_builder_revoked(roots.root, builder) ?? return Err(StoreError.Other(err.message()))
+    admissions := [CacheAdmission]{}
+    loop binding in bindings {
+        pin_path :: store_cache_receipt_pin_path(roots, binding.role, store_name)
+        admission := CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: builder, provenance: provenance, receipt_version: None, receipt_expires_unix: None, reason: "cache builder is revoked; rebuild before reuse"}
+        if !builder_revoked {
+            if store_cache_read_receipt_pin(pin_path) == {
+                .Ok(pin) -> {
+                    admission.receipt_version = Val(pin.version)
+                    admission.receipt_expires_unix = Val(pin.expires_unix)
+                    if pin.expires_unix <= now {
+                        admission.decision = CacheAdmissionDecision.Expired
+                        admission.reason = "accepted cache receipt expired at {pin.expires_unix}; refresh or rebuild"
+                    } else {
+                        admission.decision = CacheAdmissionDecision.Accepted
+                        admission.reason = "signed cache admission is pinned for this role and output"
+                    }
+                }
+                .Err(error) -> {
+                    if error.is_not_found() {
+                        admission.decision = CacheAdmissionDecision.NotAccepted
+                        admission.reason = "no signed cache admission has been accepted for this role and output"
+                    } else {
+                        admission.decision = CacheAdmissionDecision.Invalid
+                        admission.reason = "cache admission pin is unusable: {error.message()}"
+                    }
+                }
+            }
+        }
+        &admissions.push(admission)
+    }
+    Ok(admissions)
+}
+
+fn store_cache_fingerprint_for_key(key: TrustKey) -> String Never! {
+    "{key.key_id}:{key.algorithm}"
+}
+
+fn store_cache_fingerprint_for_info(info: NarInfo) -> String Never! {
+    parts := [String]{}
+    loop signature in info.signatures -> &parts.push("{signature.key_id}:{signature.algorithm}")
+    parts.join(",")
+}
+
+// The NAR bytes must match the signed FileSize, NarSize, and NarHash and
+// decode as a canonical NAR.
+fn store_cache_verify_artifact_bytes(info: NarInfo, nar: [U8]) StoreError! {
+    if info.file_size != nar.len() || info.nar_size != nar.len() || !store_nar_hash_matches(info.nar_hash, nar) {
+        return Err(StoreError.InvalidData("NAR bytes do not match signed FileSize, NarSize, or NarHash"))
+    }
+    store_validate_nar(nar)
+}
+
+// Verify the decoded output identity before a cache hit is reported. NAR
+// validity and NAR digest prove the transport object; the Hangar envelope is
+// a different digest over the materialized output tree. Decode only into a
+// private staging path, then remove it on every path.
+fn store_cache_verify_decoded_output_hash(roots: HangarRoots, expected: StoreEntry, nar: [U8]) StoreError! {
+    store_cache_validate_component(expected.id, "cache entry id")
+    staging :: files.join(files.join(files.join(roots.root, "cache"), "verify"), "{expected.id}-{store_archive_unique_suffix()}")
+    store_cache_validate_path_components(staging)
+    store_cache_ensure_parent(staging)
+    failure := None
+    if store_cache_decode_and_compare(staging, expected, nar) == {
+        .Err(error) -> failure = Val(error)
+        else -> {}
+    }
+    if store_archive_lstat_ok(staging) != None {
+        store_make_tree_writable_for_removal(staging)
+        store_cache_remove_tree(staging)
+    }
+    if failure == {
+        .Val(error) -> return Err(error)
+        .None -> {}
+    }
+}
+
+fn store_cache_decode_and_compare(staging: String, expected: StoreEntry, nar: [U8]) StoreError! {
+    store_read_nar(nar, staging)
+    store_seal_node(staging)
+    actual :: pkg_try_output_hash_of(staging)
+    if actual != expected.envelope.output_hash {
+        return Err(StoreError.InvalidData("decoded output hash {actual} disagrees with {expected.envelope.output_hash}"))
+    }
+}
+
+// A narinfo describes `entry` only when its path, URL, references, and
+// deriver are exactly the ones publication would write and it claims no CA.
+fn store_cache_nar_info_matches_entry(info: NarInfo, entry: StoreEntry) -> Bool Never! {
+    expected_references := store_cache_hangar_references(entry)
+    &expected_references.sort()
+    actual_references := info.references
+    &actual_references.sort()
+    expected_deriver :: if store_cache_deriver(entry) == {
+        .Ok(deriver) -> Val(deriver)
+        .Err(_) -> None
+    }
+    info.store_path == "/jet/hangar/{store_cache_entry_store_name(entry)}" && info.url == "nar/{entry.envelope.output_hash}.nar" && actual_references == expected_references && info.deriver == expected_deriver && info.ca == None
+}
+
+// The writer key must be the role's pinned key and the builder not revoked.
+fn store_cache_verify_writer_authority(roots: HangarRoots, entry: StoreEntry, role: String, key: TrustKey) StoreError! {
+    trust_verify_pinned_cache_key(roots.root, role, key) ?? return Err(StoreError.Other(err.message()))
+    builder :: store_cache_builder_for_entry(entry)
+    revoked :: trust_is_cache_builder_revoked(roots.root, builder) ?? return Err(StoreError.Other(err.message()))
+    if revoked -> return Err(StoreError.InvalidData("cache builder is revoked; rebuild before publishing or using it"))
+}
+
+fn store_cache_builder_for_entry(entry: StoreEntry) -> String StoreError! {
+    Ok(store_cache_provenance_for_entry(entry).builder)
+}
+
+// The signed-admission provenance of an entry, derived from its producer
+// record and checked against the entry's own identity. Private untrusted
+// builds and unattested outputs never qualify.
+fn store_cache_provenance_for_entry(entry: StoreEntry) -> CacheProvenance StoreError! {
+    if entry.reference.trim() == "" || entry.envelope.provenance.trim() == "" || entry.cache_identity.source_fingerprint.trim() == "" || entry.cache_identity.recipe_fingerprint.trim() == "" || entry.cache_identity.policy_fingerprint.trim() == "" || entry.cache_identity.platform != entry.envelope.platform {
+        return Err(StoreError.InvalidData("cache entry has incomplete writer provenance"))
+    }
+    producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("cache producer record is invalid: {err.message()}"))
+    if store_is_private_untrusted_build(producer) {
+        return Err(StoreError.InvalidData("private untrusted local build output cannot enter shared cache publication"))
+    }
+    expected_policy :: "policy={entry.cache_identity.policy_fingerprint}\nplatform={entry.cache_identity.platform}"
+    reproducibility :: producer.facts.get("cache.reproducibility") ?? ""
+    attested :: reproducibility == "attested-v1" || reproducibility.starts_with("independent-agreeing-v1:")
+    if producer.immutable_source.trim() == "" || producer.source_digest.trim() == "" || producer.facts.get("action.recipe") != Val(entry.cache_identity.recipe_fingerprint) || producer.policy_facts != expected_policy || !attested {
+        return Err(StoreError.InvalidData("cache entry has unverified writer provenance"))
+    }
+    builder :: trust_cache_builder_identity(producer.provider, producer.immutable_source, producer.source_digest)
+    provenance :: CacheProvenance{
+        reference: producer.facts.get("cache.reference") ?? "",
+        source: producer.facts.get("cache.source") ?? "",
+        builder: producer.facts.get("cache.builder") ?? "",
+        action: producer.facts.get("cache.action") ?? "",
+        output: producer.facts.get("cache.output") ?? "",
+        platform: producer.facts.get("cache.platform") ?? "",
+        sandbox: producer.facts.get("cache.sandbox") ?? "",
+        policy: producer.facts.get("cache.policy") ?? "",
+    }
+    valid :: if provenance.validate() == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    if !valid || provenance.reference != entry.reference || provenance.source != producer.immutable_source || provenance.builder != builder || provenance.action != store_cache_action_identity(producer, entry.reference, entry.cache_identity, entry.references) || provenance.output != entry.envelope.output_hash || provenance.platform != entry.cache_identity.platform || provenance.sandbox != "sandbox:policy-bound" || provenance.policy != entry.cache_identity.policy_fingerprint {
+        return Err(StoreError.InvalidData("cache entry has incomplete writer provenance"))
+    }
+    Ok(provenance)
+}
+
+fn store_cache_builder_for_report(entry: StoreEntry) -> String Never! {
+    store_cache_builder_for_entry(entry) ?? ""
+}
+
+fn store_cache_provenance_for_report(entry: StoreEntry) -> String Never! {
+    store_cache_deriver(entry) ?? ""
+}
+
+fn store_cache_receipt_key(store_name: String) -> String StoreError! {
+    store_cache_validate_component(store_name, "cache receipt store name")
+    Ok("trust/{store_name}.receipt")
+}
+
+fn store_cache_receipt_pin_path(roots: HangarRoots, role: String, store_name: String) -> String StoreError! {
+    store_cache_validate_component(role, "cache role")
+    store_cache_validate_component(store_name, "cache receipt store name")
+    pin :: files.join(files.join(files.join(files.join(roots.root, "trust"), "cache-receipts"), role), "{store_name}.pin")
+    store_cache_validate_path_components(pin)
+    Ok(pin)
+}
+
+// Parse a `version=`, `expires=`, `digest=` pin; each field exactly once.
+fn store_cache_read_receipt_pin(path: String) -> CacheReceiptPin StoreError! {
+    text :: String.from_bytes(store_cache_read_regular_bounded(path, 4096)) ?? return Err(StoreError.InvalidData("cache trust pin is not UTF-8"))
+    version := None
+    expires := None
+    digest := None
+    loop raw in store_cache_lines(text) {
+        pair :: raw.split_once("=") ?? return Err(StoreError.InvalidData("cache trust pin has a malformed line"))
+        if pair.before == {
+            "version" -> {
+                if version != None -> return Err(StoreError.InvalidData("cache trust pin has a duplicate field"))
+                version = Val(pair.after)
+            }
+            "expires" -> {
+                if expires != None -> return Err(StoreError.InvalidData("cache trust pin has a duplicate field"))
+                expires = Val(pair.after)
+            }
+            "digest" -> {
+                if digest != None -> return Err(StoreError.InvalidData("cache trust pin has a duplicate field"))
+                digest = Val(pair.after)
+            }
+            else -> return Err(StoreError.InvalidData("cache trust pin has an unknown field"))
+        }
+    }
+    version_text :: version ?? return Err(StoreError.InvalidData("cache trust pin has no version"))
+    version_number :: store_cache_parse_u64(version_text) ?? return Err(StoreError.InvalidData("cache trust pin version is not an integer"))
+    expires_text :: expires ?? return Err(StoreError.InvalidData("cache trust pin has no expiry"))
+    expires_number :: store_cache_parse_u64(expires_text) ?? return Err(StoreError.InvalidData("cache trust pin expiry is not an integer"))
+    digest_text :: digest ?? return Err(StoreError.InvalidData("cache trust pin has no digest"))
+    hex := digest_text.bytes().len() == 64
+    loop byte in digest_text.bytes() {
+        if !store_archive_is_hex_digit(Int.from_u8(byte)) -> hex = false
+    }
+    if version_number == 0 || expires_number == 0 || !hex -> return Err(StoreError.InvalidData("cache trust pin has invalid fields"))
+    Ok(CacheReceiptPin{version: version_number, expires_unix: expires_number})
+}
+
+// Rust `str::parse::<u64>`: an optional `+` and ASCII digits.
+fn store_cache_parse_u64(text: String) -> Int? Never! {
+    digits :: text.removeprefix("+")
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    Int.parse(digits)
+}
+
+// The receipt to publish: an endpoint's current receipt when it still
+// matches this role, witness, provenance, and key; otherwise a new receipt
+// one version past it.
+fn store_cache_receipt_for_publication(endpoint: CacheEndpoint, role: String, entry: StoreEntry, key: TrustKey) -> CacheReceipt StoreError! {
+    store_cache_validate_component(role, "cache role")
+    provenance :: store_cache_provenance_for_entry(entry)
+    store_name :: store_cache_entry_store_name(entry)
+    existing :: if endpoint.is_hangar() -> None else -> store_cache_endpoint_get(endpoint, store_cache_receipt_key(store_name), @STORE_CACHE_MAX_INFO_BYTES)
+    now :: store_cache_now_seconds()
+    version := 1
+    if existing == {
+        .Val(bytes) -> {
+            current :: store_cache_decode_receipt(bytes)
+            witness :: trust_current_receipt_witness() ?? return Err(StoreError.Other(err.message()))
+            verified :: if current.verify(key, TrustedClock.System) == {
+                .Ok(_) -> true
+                .Err(_) -> false
+            }
+            if current.role == role && current.witness == witness && current.provenance == provenance && verified -> return Ok(current)
+            version = if current.version + 1 > 1 -> current.version + 1 else -> 1
+        }
+        .None -> {}
+    }
+    receipt :: CacheReceipt.issue(role, provenance, version, now, now + @STORE_CACHE_RECEIPT_TTL_SECS, key) ?? return Err(StoreError.InvalidData(err.message()))
+    Ok(receipt)
+}
+
+// The `jet-cache-receipt-v1` line format.
+fn store_cache_encode_receipt(receipt: CacheReceipt) -> String StoreError! {
+    if receipt.witness.trim() == "" || pkg_text_has_control(receipt.witness) {
+        return Err(StoreError.InvalidData("cache trust receipt has an empty witness or control characters"))
+    }
+    receipt.provenance.validate() ?? return Err(StoreError.InvalidData(err.message()))
+    out := "{@STORE_CACHE_RECEIPT_MAGIC}\n"
+    store_cache_line(&out, "role", receipt.role)
+    store_cache_line(&out, "witness", receipt.witness)
+    store_cache_line(&out, "version", "{receipt.version}")
+    store_cache_line(&out, "issued", "{receipt.issued_unix}")
+    store_cache_line(&out, "expires", "{receipt.expires_unix}")
+    store_cache_line(&out, "reference", receipt.provenance.reference)
+    store_cache_line(&out, "source", receipt.provenance.source)
+    store_cache_line(&out, "builder", receipt.provenance.builder)
+    store_cache_line(&out, "action", receipt.provenance.action)
+    store_cache_line(&out, "output", receipt.provenance.output)
+    store_cache_line(&out, "platform", receipt.provenance.platform)
+    store_cache_line(&out, "sandbox", receipt.provenance.sandbox)
+    store_cache_line(&out, "policy", receipt.provenance.policy)
+    store_cache_line(&out, "signature_key", receipt.signature.key_id)
+    store_cache_line(&out, "signature_algorithm", receipt.signature.algorithm)
+    store_cache_line(&out, "signature", receipt.signature.sig_hex)
+    Ok(out)
+}
+
+fn store_cache_decode_receipt(bytes: [U8]) -> CacheReceipt StoreError! {
+    text :: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("cache trust receipt is not UTF-8"))
+    lines :: store_cache_lines(text)
+    if lines.len() == 0 || lines[0] != @STORE_CACHE_RECEIPT_MAGIC -> return Err(StoreError.InvalidData("cache trust receipt has an unknown format"))
+    fields := [String: String]{}
+    loop raw in lines[1..<lines.len()] {
+        pair :: raw.split_once("=") ?? return Err(StoreError.InvalidData("cache trust receipt has a malformed line"))
+        store_cache_validate_text(pair.before, "cache trust receipt field")
+        store_cache_validate_text(pair.after, "cache trust receipt value")
+        if fields.get(pair.before) != None -> return Err(StoreError.InvalidData("cache trust receipt has a duplicate field"))
+        fields[pair.before] = pair.after
+    }
+    role :: store_cache_take_field(&fields, "role")
+    witness :: store_cache_take_field(&fields, "witness")
+    version :: store_cache_parse_u64(store_cache_take_field(&fields, "version")) ?? return Err(StoreError.InvalidData("cache trust receipt version is not an integer"))
+    issued_unix :: store_cache_parse_u64(store_cache_take_field(&fields, "issued")) ?? return Err(StoreError.InvalidData("cache trust receipt issue time is not an integer"))
+    expires_unix :: store_cache_parse_u64(store_cache_take_field(&fields, "expires")) ?? return Err(StoreError.InvalidData("cache trust receipt expiry is not an integer"))
+    provenance :: CacheProvenance{
+        reference: store_cache_take_field(&fields, "reference"),
+        source: store_cache_take_field(&fields, "source"),
+        builder: store_cache_take_field(&fields, "builder"),
+        action: store_cache_take_field(&fields, "action"),
+        output: store_cache_take_field(&fields, "output"),
+        platform: store_cache_take_field(&fields, "platform"),
+        sandbox: store_cache_take_field(&fields, "sandbox"),
+        policy: store_cache_take_field(&fields, "policy"),
+    }
+    signature :: TrustSignature{
+        key_id: store_cache_take_field(&fields, "signature_key"),
+        algorithm: store_cache_take_field(&fields, "signature_algorithm"),
+        sig_hex: store_cache_take_field(&fields, "signature"),
+    }
+    if fields.len() != 0 -> return Err(StoreError.InvalidData("cache trust receipt has an unknown field"))
+    provenance.validate() ?? return Err(StoreError.InvalidData(err.message()))
+    Ok(CacheReceipt{role, witness, version, issued_unix, expires_unix, provenance, signature})
+}
+
+fn store_cache_take_field(fields: &[String: String], name: String) -> String StoreError! {
+    value :: fields.get(name) ?? return Err(StoreError.InvalidData("cache trust receipt has no {name} field"))
+    fields.remove(name)
+    Ok(value)
+}
+
+// Write a receipt object: an identical receipt is kept, a newer version
+// replaces an older one, and anything else conflicts.
+fn store_cache_write_receipt(path: String, receipt: CacheReceipt) StoreError! {
+    bytes :: store_cache_encode_receipt(receipt).bytes()
+    if store_archive_lstat_ok(path) == {
+        .Val(existing) -> {
+            if existing.is_symlink || !existing.is_file -> return Err(StoreError.InvalidData("cache trust receipt is not a regular file"))
+            old :: store_cache_decode_receipt(store_cache_read_regular_bounded(path, @STORE_CACHE_MAX_INFO_BYTES))
+            if old == receipt -> return Ok()
+            if old.version >= receipt.version -> return Err(StoreError.InvalidData("cache trust receipt already has conflicting metadata"))
+            return store_cache_atomic_replace(path, bytes)
+        }
+        .None -> store_cache_write_resumable(path, bytes)
+    }
+}
+
+// Accept a signed receipt for `expected` and advance the role's pin under
+// the `cache-trust` lock: an older version is a rollback, and the same
+// version must carry the same digest.
+fn store_cache_verify_receipt(roots: HangarRoots, role: String, expected: StoreEntry, receipt: CacheReceipt, key: TrustKey) StoreError! {
+    receipt.verify(key, TrustedClock.System) ?? return Err(StoreError.InvalidData("{err.message()}; discard the mirror and republish trusted metadata"))
+    if receipt.role != role {
+        return Err(StoreError.InvalidData("cache trust receipt role `{receipt.role}` disagrees with `{role}`; discard the mirror"))
+    }
+    if receipt.provenance != store_cache_provenance_for_entry(expected) {
+        return Err(StoreError.InvalidData("cache trust receipt provenance does not match the requested output; mix-and-match rejected"))
+    }
+    policy :: "cache-witnesses/{role}.allow"
+    allowed :: trust_is_cache_witness_allowed(roots.root, role, receipt.witness) ?? return Err(StoreError.Other(err.message()))
+    if !allowed {
+        rejection :: TrustError.CacheReceiptInvalid{detail: "cache receipt witness '{receipt.witness}' rejected by trust policy '{policy}'"}
+        return Err(StoreError.InvalidData(rejection.message()))
+    }
+    pin :: store_cache_receipt_pin_path(roots, role, store_cache_entry_store_name(expected))
+    _lock :: env_runtime_lock(roots.root, "cache-trust")
+    store_cache_ensure_parent(pin)
+    digest :: pkg_sha256_hex(store_cache_encode_receipt(receipt).bytes())
+    existing_pin := None
+    if store_cache_read_receipt_pin(pin) == {
+        .Ok(current) -> existing_pin = Val(current)
+        .Err(error) -> {
+            if !error.is_not_found() -> return Err(error)
+        }
+    }
+    if existing_pin == {
+        .Val(existing) -> {
+            if receipt.version < existing.version {
+                return Err(StoreError.InvalidData("cache trust metadata rollback rejected: current {existing.version}, incoming {receipt.version}; refresh or rebuild"))
+            }
+            pin_text :: String.from_bytes(store_cache_read_regular_bounded(pin, 4096)) ?? return Err(StoreError.InvalidData("cache trust pin is not UTF-8"))
+            accepted := None
+            loop line in store_cache_lines(pin_text) {
+                if accepted == None && line.starts_with("digest=") -> accepted = Val(line.removeprefix("digest="))
+            }
+            accepted_digest :: accepted ?? return Err(StoreError.InvalidData("cache trust pin has no digest"))
+            if receipt.version == existing.version {
+                if accepted_digest != digest -> return Err(StoreError.InvalidData("cache trust metadata changed at the same version; mix-and-match rejected"))
+                return Ok()
+            }
+        }
+        .None -> {}
+    }
+    store_cache_atomic_replace(pin, "version={receipt.version}\nexpires={receipt.expires_unix}\ndigest={digest}\n".bytes())
+}
+
+// Publish one entry to one endpoint: local mirrors resumably, remote
+// mirrors through staged, read-back, promoted objects.
+fn store_cache_publish_endpoint(endpoint: CacheEndpoint, info: NarInfo, nar: [U8], key: TrustKey, entry: StoreEntry, role: String) -> CacheTransferProof StoreError! {
+    if !endpoint.capabilities().write -> return Err(StoreError.InvalidData("{endpoint.label()} endpoint is read-only"))
+    if endpoint == {
+        .Local(root) -> {
+            receipt :: store_cache_receipt_for_publication(endpoint, role, entry, key)
+            store_cache_publish_local_resumable(root, info, nar, key, receipt)
+            return Ok(CacheTransferProof{signed_fingerprint: store_cache_fingerprint_for_key(key), witness: Val(receipt.witness), receipt_version: Val(receipt.version), receipt_expires_unix: Val(receipt.expires_unix)})
+        }
+        .Hangar -> return Err(StoreError.InvalidData("Hangar is the local source store and cannot publish cache objects"))
+        else -> {}
+    }
+    signed :: info.signed(key)
+    signed_text :: signed.to_text()
+    store_name :: store_cache_store_name(info.store_path)
+    info_key :: "{store_name}.narinfo"
+    receipt :: store_cache_receipt_for_publication(endpoint, role, entry, key)
+    receipt_text :: store_cache_encode_receipt(receipt)
+    receipt_key :: store_cache_receipt_key(store_name)
+    store_cache_publish_remote_atomic(endpoint, [CacheRemoteObject]{
+        CacheRemoteObject{key: info.url, bytes: nar},
+        CacheRemoteObject{key: info_key, bytes: signed_text.bytes()},
+        CacheRemoteObject{key: receipt_key, bytes: receipt_text.bytes()},
+    })
+    Ok(CacheTransferProof{signed_fingerprint: store_cache_fingerprint_for_info(signed), witness: Val(receipt.witness), receipt_version: Val(receipt.version), receipt_expires_unix: Val(receipt.expires_unix)})
+}
+
+// The Hangar endpoint verifies the live output and serves its NAR.
+fn store_cache_verify_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
+    if !endpoint.is_hangar() -> return Ok(None)
+    if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+        return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
+    }
+    Ok(Val(store_write_nar(entry.out).nar))
+}
+
+// The Hangar endpoint copies the live output to `destination`, seals and
+// re-hashes it, and serves its NAR; a failure removes the copy.
+fn store_cache_substitute_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
+    if !endpoint.is_hangar() -> return Ok(None)
+    nar :: store_cache_copy_hangar_output(roots, entry, destination) ?? {
+        store_cache_remove_tree(destination).drop("the failed copy may not have created the destination")
+        return Err(err)
+    }
+    Ok(Val(nar))
+}
+
+fn store_cache_copy_hangar_output(roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
+    if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
+        return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
+    }
+    store_cache_copy_tree(entry.out, destination)
+    store_seal_node(destination)
+    if pkg_try_output_hash_of(destination) != entry.envelope.output_hash {
+        return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
+    }
+    Ok(store_write_nar(destination).nar)
+}
+
+fn store_cache_copy_tree(source: String, destination: String) StoreError! {
+    parent :: files.dirname(destination)
+    if parent != "" -> files.create_dir_all(parent)
+    hardlinks := [String: String]{}
+    store_copy_snapshot_node(source, destination, &hardlinks)
+}
+
+// Publish a signed narinfo, NAR, and receipt into a local mirror under the
+// mirror's `cache-publish` lock, then clear its negative hint.
+fn store_cache_publish_local_resumable(root: String, info: NarInfo, nar: [U8], key: TrustKey, receipt: CacheReceipt) StoreError! {
+    _lock :: env_runtime_lock(root, "cache-publish")
+    signed :: info.signed(key)
+    if signed.nar_size != nar.len() || !store_nar_hash_matches(signed.nar_hash, nar) {
+        return Err(StoreError.InvalidData("NAR bytes do not match signed narinfo"))
+    }
+    store_cache_ensure_directory(root)
+    nar_path :: files.join(root, signed.url)
+    store_cache_validate_path_components(nar_path)
+    store_name :: store_cache_store_name(signed.store_path)
+    info_path :: files.join(root, "{store_name}.narinfo")
+    store_cache_validate_path_components(info_path)
+    receipt_path :: files.join(root, store_cache_receipt_key(store_name))
+    store_cache_ensure_parent(receipt_path)
+    receipt_parent :: files.dirname(receipt_path)
+    if receipt_parent == "" -> return Err(StoreError.InvalidData("cache receipt has no parent"))
+    store_cache_ensure_directory(receipt_parent)
+    store_cache_write_resumable(nar_path, nar)
+    store_cache_write_resumable(info_path, signed.to_text().bytes())
+    store_cache_write_receipt(receipt_path, receipt)
+    store_cache_clear_negative_hint(root, store_name)
+}
+
+fn store_cache_negative_hint_path(root: String, identity: String) -> String Never! {
+    files.join(files.join(root, ".jet-negative"), "{pkg_sha256_hex(identity.bytes())}.until")
+}
+
+// Whether a mirror recorded a miss for `identity` that has not expired.
+fn store_cache_negative_hint_fresh(root: String, identity: String) -> Bool Never! {
+    path :: store_cache_negative_hint_path(root, identity)
+    metadata :: store_archive_lstat_ok(path) ?? return false
+    if metadata.is_symlink || !metadata.is_file || metadata.size > 64 -> return false
+    bytes :: store_cache_read_regular_bounded(path, 64) ?? return false
+    text :: String.from_bytes(bytes) ?? return false
+    until :: store_cache_parse_u64(text.trim()) ?? return false
+    until > store_cache_now_seconds()
+}
+
+fn store_cache_write_negative_hint(root: String, identity: String) StoreError! {
+    _lock :: env_runtime_lock(root, "cache-negative")
+    path :: store_cache_negative_hint_path(root, identity)
+    store_cache_ensure_parent(path)
+    if store_archive_lstat_ok(path) == {
+        .Val(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("negative cache hint is not a regular file"))
+            files.remove(path)
+        }
+        .None -> {}
+    }
+    until :: store_cache_now_seconds() + @STORE_CACHE_NEGATIVE_TTL_SECS
+    store_cache_write_resumable(path, "{until}".bytes())
+}
+
+fn store_cache_clear_negative_hint(root: String, identity: String) StoreError! {
+    path :: store_cache_negative_hint_path(root, identity)
+    observed :: store_archive_lstat(path)
+    metadata :: observed ?? return Ok()
+    if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("negative cache hint is not a regular file"))
+    files.remove(path)
+}
+
+// Write an immutable object through a resumable private partial. A completed
+// object is never replaced; a matching object is accepted and a conflicting
+// object is rejected.
+fn store_cache_write_resumable(path: String, bytes: [U8]) StoreError! {
+    if store_archive_lstat_ok(path) == {
+        .Val(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache object is not a regular file"))
+            if store_cache_read_regular_bounded(path, bytes.len()) == bytes -> return Ok()
+            return Err(StoreError.InvalidData("cache object already has conflicting bytes"))
+        }
+        .None -> {}
+    }
+    store_cache_ensure_parent(path)
+    partial :: store_archive_with_extension(path, "partial")
+    offset := 0
+    if store_archive_lstat_ok(partial) == {
+        .Val(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file || metadata.size > bytes.len() {
+                files.remove(partial).drop("a stale partial is rewritten from the start")
+            } else {
+                existing :: store_cache_read_regular_bounded(partial, bytes.len())
+                if bytes[0..<existing.len()] != existing {
+                    files.remove(partial).drop("a stale partial is rewritten from the start")
+                } else {
+                    offset = existing.len()
+                }
+            }
+        }
+        .None -> {}
+    }
+    if offset == 0 && store_archive_lstat_ok(partial) == None {
+        files.create(partial, if_exists: .Refuse)
+    }
+    out :: &files.append(partial)
+    out.write_all(bytes[offset..<bytes.len()])
+    out.fsync()
+    if store_archive_lstat_ok(path) == {
+        .Val(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache object appeared as a non-regular file"))
+            same :: store_cache_same_bytes(path, bytes)
+            files.remove(partial).drop("the partial is superseded by the published object")
+            if same -> return Ok()
+            return Err(StoreError.InvalidData("cache object was concurrently published with different bytes"))
+        }
+        .None -> {}
+    }
+    files.hard_link(partial, path) ?? {
+        link_error :: err
+        if link_error == {
+            .AlreadyExists(_) -> {
+                same :: store_cache_same_bytes(path, bytes)
+                files.remove(partial).drop("the partial is superseded by the published object")
+                if same -> return Ok()
+                return Err(StoreError.InvalidData("cache object was concurrently published with different bytes"))
+            }
+            else -> {
+                files.remove(partial).drop("the failed partial is disposable")
+                return Err(StoreError.Io(link_error))
+            }
+        }
+    }
+    files.remove(partial).drop("the partial is linked into place")
+}
+
+fn store_cache_same_bytes(path: String, bytes: [U8]) -> Bool Never! {
+    existing :: store_cache_read_regular_bounded(path, bytes.len()) ?? return false
+    existing == bytes
+}

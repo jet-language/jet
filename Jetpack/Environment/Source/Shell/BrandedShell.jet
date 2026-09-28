@@ -8,7 +8,7 @@
 
 // One ASCII control byte as text. Plain Jet strings have no byte escapes, so
 // the readline invisible markers (0x01/0x02) and ESC are built here.
-fn env_shell_control(code: Int) -> String !Never {
+fn env_shell_control(code: Int) -> String Never! {
     String.from_bytes([U8]{U8{code}}) ?? ""
 }
 
@@ -18,7 +18,7 @@ pub enum ShellKind {
     Zsh
     Fish
 
-    fn binary(self) -> String !Never {
+    fn binary(self) -> String Never! {
         if self == {
             .Bash -> "bash"
             .Zsh -> "zsh"
@@ -27,7 +27,7 @@ pub enum ShellKind {
     }
 
     // Detect the user's shell from `$SHELL`, defaulting to bash.
-    fn detect() -[Env]> ShellKind !Never {
+    fn detect() -[Env]> ShellKind Never! {
         shell :: sys.get("SHELL") ?? ""
         base :: shell.cut_last("/")?.after ?? shell
         if base == {
@@ -39,7 +39,7 @@ pub enum ShellKind {
 
     // The shell argument of `jet env hook <shell>` / `jet env export <shell>`.
     // `None` detects from `$SHELL`; an unknown name is `None`.
-    fn parse(arg: ?String) -[Env]> ?ShellKind !Never {
+    fn parse(arg: String?) -[Env]> ShellKind? Never! {
         name :: arg ?? return Val(ShellKind.detect())
         if name == {
             "bash" -> Val(ShellKind.Bash)
@@ -51,7 +51,7 @@ pub enum ShellKind {
 
     // Help-app prefill widgets for an already-running user shell (`jet env
     // hook`) and for Jet subshells. Idempotent when sourced twice.
-    fn help_prefill_widgets(self) -> String !Never {
+    fn help_prefill_widgets(self) -> String Never! {
         lines :: if self == {
             .Bash -> [String]{
                 "if ! type __jet_help_prefill >/dev/null 2>&1; then",
@@ -89,8 +89,8 @@ pub enum ShellKind {
 pub struct BrandedShell {
     pub command_tail: [String]
     pub env_vars: [(name: String, value: String)]
-    cleanup_file: ?String
-    cleanup_dir: ?String
+    cleanup_file: String?
+    cleanup_dir: String?
 
     fn cleanup(self) -[FS]> {
         if self.cleanup_file == {
@@ -104,7 +104,7 @@ pub struct BrandedShell {
     }
 
     // Build a branded shell for `kind`, labeling the prompt with `label`.
-    fn for_shell(kind: ShellKind, label: String) -[FS, Env, Time]> BrandedShell !Never {
+    fn for_shell(kind: ShellKind, label: String) -[FS, Env, Time]> BrandedShell Never! {
         path :: PromptPathMode.Short
         strip :: PromptStripMode.Off
         if kind == {
@@ -150,7 +150,7 @@ pub struct BrandedShell {
 // `\[`/`\]` on this path, so they printed literally inside `nix develop`-
 // wrapped shells. The raw markers work on every bash and are invisible
 // control bytes when readline isn't displaying at all.
-fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String !Never {
+fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
     _ :: label
     soh :: env_shell_control(1)
     stx :: env_shell_control(2)
@@ -215,7 +215,7 @@ fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode
     "{rc}\n{ShellKind.Bash.help_prefill_widgets()}"
 }
 
-fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String !Never {
+fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
     _ :: label
     path_escape :: if path == {
         .Short -> "%1~"
@@ -252,7 +252,7 @@ fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode)
     "{rc}\n{ShellKind.Zsh.help_prefill_widgets()}"
 }
 
-fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMode) -> String !Never {
+fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
     _ :: label
     path_expr :: if path == {
         .Short -> "prompt_pwd"
@@ -291,7 +291,7 @@ struct ShellScratch {
     scratch_files: [String]
     scratch_dirs: [String]
 
-    fn empty() -> ShellScratch !Never {
+    fn empty() -> ShellScratch Never! {
         ShellScratch{scratch_files: [String]{}, scratch_dirs: [String]{}}
     }
 }
@@ -319,17 +319,17 @@ fn env_shell_write_best_effort(path: String, contents: String) -[FS]> {
     files.write(path, contents) ?? return
 }
 
-fn env_shell_unique_tmp(prefix: String) -[Env, Time]> String !Never {
+fn env_shell_unique_tmp(prefix: String) -[Env, Time]> String Never! {
     files.join(sys.temp_dir(), "{prefix}-{sys.pid()}-{time.instant().unix_ns}")
 }
 
-fn env_shell_write_temp(prefix: String, contents: String) -[FS, Env, Time]> String !Never {
+fn env_shell_write_temp(prefix: String, contents: String) -[FS, Env, Time]> String Never! {
     path :: env_shell_unique_tmp(prefix)
     env_shell_write_best_effort(path, contents)
     path
 }
 
-fn env_shell_write_temp_dir(prefix: String) -[FS, Env, Time]> String !Never {
+fn env_shell_write_temp_dir(prefix: String) -[FS, Env, Time]> String Never! {
     path :: env_shell_unique_tmp(prefix)
     files.create_dir_all(path) ?? return path
     path

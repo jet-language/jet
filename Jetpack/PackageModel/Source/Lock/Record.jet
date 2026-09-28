@@ -3,13 +3,13 @@
 // publishes one complete canonical serialization atomically.
 
 // The project lock path under `project_root`.
-fn pkg_lock_file_path(project_root: String) -> String !Never {
+fn pkg_lock_file_path(project_root: String) -> String Never! {
     files.join(project_root, @UNIFIED_LOCK_FILE)
 }
 
 // Read one lock without letting a corrupt line grow the buffer without
 // bound: the line and whole-file limits are checked per buffered segment.
-fn pkg_lock_read_text(path: String) -[FS]> String !LockError {
+fn pkg_lock_read_text(path: String) -[FS]> String LockError! {
     reader :: files.open(path)
     raw := [U8]{}
     line_length := 0
@@ -20,20 +20,21 @@ fn pkg_lock_read_text(path: String) -[FS]> String !LockError {
         offset := 0
         loop offset < chunk.len() {
             end := offset
-            loop end < chunk.len() && chunk[end] != U8{10} -> end += 1
+            loop end < chunk.len() && Int.from_u8(chunk[end]) != 10 -> end += 1
             has_newline :: end < chunk.len()
             content_length :: end - offset
-            take :: if has_newline -> content_length + 1 else -> content_length
+            take_length :: if has_newline -> content_length + 1 else -> content_length
             if line_length + content_length > @PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
-            if raw.len() + take > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
-            loop index in offset..<(offset + take) -> raw.push(chunk[index])
-            if has_newline {
-                line_length = 0
-                line_number += 1
-            } else {
-                line_length += content_length
+            if raw.len() + take_length > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+            loop index in offset..<(offset + take_length) -> &raw.push(chunk[index])
+            if {
+                has_newline -> {
+                    line_length = 0
+                    line_number += 1
+                }
+                else -> line_length += content_length
             }
-            offset += take
+            offset += take_length
         }
     }
     Ok(String.from_bytes(raw) ?? return Err(LockError.Invalid("stream did not contain valid UTF-8")))
@@ -41,14 +42,14 @@ fn pkg_lock_read_text(path: String) -[FS]> String !LockError {
 
 // The parsed project lock, or None when it is absent, unreadable, or
 // malformed.
-pub fn pkg_lock_load(project_root: String) -[FS]> ?LockFile {
+pub fn pkg_lock_load(project_root: String) -[FS]> LockFile? {
     raw :: pkg_lock_read_text(pkg_lock_file_path(project_root)) ?? return None
     Val(pkg_lock_parse(raw) ?? return None)
 }
 
 // Load the project lock without turning malformed lock state into a cache
 // miss. Fully locked providers use this boundary before any catalog lookup.
-pub fn pkg_lock_load_strict(project_root: String) -[FS]> ?LockFile !LockError {
+pub fn pkg_lock_load_strict(project_root: String) -[FS]> LockFile? LockError! {
     path :: pkg_lock_file_path(project_root)
     if pkg_lock_read_text(path) == {
         .Ok(raw) -> Ok(Val(pkg_lock_parse(raw)))
@@ -62,7 +63,7 @@ pub fn pkg_lock_load_strict(project_root: String) -[FS]> ?LockFile !LockError {
 // Load a project lock with the registered diagnostic for each reader
 // outcome. A missing lock stays optional; a present unsupported or corrupt
 // lock stops the strict caller before it can resolve or write anything.
-pub fn pkg_lock_load_strict_with_path(project_root: String) -[FS]> ?LockFile !LockError {
+pub fn pkg_lock_load_strict_with_path(project_root: String) -[FS]> LockFile? LockError! {
     path :: pkg_lock_file_path(project_root)
     if pkg_lock_read_text(path) == {
         .Ok(raw) -> Ok(Val(pkg_lock_parse_with_path(raw, path)))
@@ -75,7 +76,7 @@ pub fn pkg_lock_load_strict_with_path(project_root: String) -[FS]> ?LockFile !Lo
 
 // The project lock for a recorder that must not overwrite unreadable state:
 // a missing lock starts empty; a present lock must parse.
-fn pkg_lock_load_for_update(project_root: String) -[FS]> LockFile !LockError {
+fn pkg_lock_load_for_update(project_root: String) -[FS]> LockFile LockError! {
     path :: pkg_lock_file_path(project_root)
     if pkg_lock_read_text(path) == {
         .Ok(raw) -> if pkg_lock_parse(raw) == {
@@ -98,10 +99,10 @@ fn pkg_lock_load_or_empty(project_root: String) -[FS]> LockFile {
 // Publish one complete canonical serialization without exposing a partially
 // written file. The size check runs before any temporary exists, so a
 // rejected lock never replaces the last good lock or leaves scratch bytes.
-pub fn pkg_lock_write_atomically(project_root: String, contents: [U8]) !LockError -[FS, Env, Time]> {
+pub fn pkg_lock_write_atomically(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
     path :: pkg_lock_file_path(project_root)
     if contents.len() > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
-    if pkg_lock_publish_nofollow(project_root, @UNIFIED_LOCK_FILE, contents) == {
+    if foundation_write_file_nofollow_at_root(project_root, @UNIFIED_LOCK_FILE, contents) == {
         .Ok(_) -> Ok()
         .Err(error) -> Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error}"))
     }
@@ -114,100 +115,6 @@ fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env,
         .Err(error) -> eprint(error.message())
         .Ok(_) -> {}
     }
-}
-
-// Atomically replace `relative` below `root`. The root and every parent are
-// opened as held directories without following links (D-CORE-FILEDIR1), so
-// a swapped ancestor or a linked `.jet` cannot redirect publication; the
-// temporary write, rename, and directory syncs stay handle-relative.
-fn pkg_lock_publish_nofollow(root: String, relative: String, contents: [U8]) !IOError -[FS, Env, Time]> {
-    components := [String]{}
-    loop part in relative.split("/") {
-        if part == "" || part == "." -> next
-        if part == ".." -> return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication path must stay below its root")}))
-        components.push(part)
-    }
-    if components.len() == 0 -> return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication path is empty")}))
-    directories := [Directory]{pkg_lock_open_root_directory(root)}
-    loop index in 0..<(components.len() - 1) {
-        name :: components[index]
-        parent :: directories[directories.len() - 1]
-        child :: if parent.open_directory(name) == {
-            .Ok(opened) -> opened
-            .Err(open_error) -> {
-                if open_error == {
-                    .NotFound(_) -> {}
-                    else -> return Err(open_error)
-                }
-                if parent.create_directory(name, mode: Val(448)) == {
-                    .Ok(_) -> parent.fsync()
-                    // A concurrent writer may have created it; the open
-                    // below decides.
-                    .Err(_) -> {}
-                }
-                parent.open_directory(name)
-            }
-        }
-        directories.push(child)
-    }
-    parent :: directories[directories.len() - 1]
-    final_name :: components[components.len() - 1]
-    pkg_lock_inspect_destination(parent, final_name)
-    stamp :: time.unix_ms(time.now())
-    pid :: sys.pid()
-    loop attempt in 0..<128 {
-        candidate :: ".jet-lock-{pid}-{stamp}-{attempt}"
-        // O_EXCL | O_NOFOLLOW, owner-only (0o600) like the Rust publisher.
-        writer :: if parent.create(candidate, if_exists: .Refuse, mode: Val(384)) == {
-            .Ok(created) -> created
-            .Err(_) -> next
-        }
-        if pkg_lock_stage_and_rename(parent, writer, candidate, final_name, contents) == {
-            .Ok(_) -> {}
-            .Err(error) -> {
-                if parent.remove(candidate) == {
-                    .Ok(_) | .Err(_) -> {}
-                }
-                return Err(error)
-            }
-        }
-        loop directory in directories -> directory.fsync()
-        return pkg_lock_inspect_destination(parent, final_name)
-    }
-    Err(IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("could not reserve a temporary authority file")}))
-}
-
-fn pkg_lock_stage_and_rename(parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8]) !IOError -[FS]> {
-    writer.write_all(contents)
-    writer.fsync()
-    pkg_lock_inspect_destination(parent, final_name)
-    parent.rename(temporary, final_name)
-}
-
-// The destination may be absent or a regular file; a link or directory in
-// its place is refused.
-fn pkg_lock_inspect_destination(parent: Directory, name: String) !IOError -[FS]> {
-    if parent.entry_stat(name) == {
-        .Ok(stat) -> {
-            if stat.is_symlink || !stat.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target is not a regular file")}))
-        }
-        .Err(error) -> if error == {
-            .NotFound(_) -> {}
-            else -> return Err(error)
-        }
-    }
-}
-
-// Hold the root directory by walking every component from the file-system
-// root without following links, so a swapped ancestor is refused.
-fn pkg_lock_open_root_directory(root: String) -[FS, Env]> Directory !IOError {
-    absolute :: files.absolute(root)
-    directory := files.open_directory("/")
-    loop part in absolute.split("/") {
-        if part == "" || part == "." -> next
-        directory = directory.open_directory(part)
-    }
-    Ok(directory)
 }
 
 // D-RINGLAYER1=A M2: persist the inferred runtime profile of the root
@@ -240,18 +147,18 @@ pub fn pkg_lock_record_envelope(project_root: String, package_name: String, enve
 }
 
 // Replace the first package matching `matches`, or append `entry`.
-fn pkg_lock_upsert_package(lock: &LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool) !Never {
+fn pkg_lock_upsert_package(lock: &LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool) Never! {
     loop index in 0..<lock.packages.len() {
         if matches(lock.packages[index]) {
             lock.packages[index] = entry
             return
         }
     }
-    lock.packages.push(entry)
+    &lock.packages.push(entry)
 }
 
 // The first package record satisfying `matches`.
-fn pkg_lock_find_package_where(lock: LockFile, matches: fn(LockedPackage) -> Bool) -> ?LockedPackage !Never {
+fn pkg_lock_find_package_where(lock: LockFile, matches: fn(LockedPackage) -> Bool) -> LockedPackage? Never! {
     loop package in lock.packages {
         if matches(package) -> return Val(package)
     }
@@ -259,7 +166,7 @@ fn pkg_lock_find_package_where(lock: LockFile, matches: fn(LockedPackage) -> Boo
 }
 
 // Whether a prior record's envelope carries `output_hash`.
-fn pkg_lock_envelope_output_is(package: LockedPackage, output_hash: String) -> Bool !Never {
+fn pkg_lock_envelope_output_is(package: LockedPackage, output_hash: String) -> Bool Never! {
     envelope :: package.envelope ?? return false
     envelope.output_hash == output_hash
 }
@@ -269,7 +176,7 @@ fn pkg_lock_envelope_output_is(package: LockedPackage, output_hash: String) -> B
 // complete closure record, creating the lock when the project has none. This
 // entry is the trust root a later offline replay matches before reusing the
 // Hangar copy. Upserts by package name.
-pub fn pkg_lock_record_nix_realization(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) !LockError -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_nix_realization(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     nix_closure.validate()
     envelope.validate_nix_catalog()
     if nix_closure.output != output || envelope.output_hash != output -> return Err(LockError.Invalid("Nix closure and envelope outputs must match the realized output digest"))
@@ -280,7 +187,7 @@ pub fn pkg_lock_record_nix_realization(project_root: String, name: String, versi
     if lock.find_source_channel(source_name) == None {
         // The channel label is presentation metadata; the exact input is the
         // one canonical Nix index identity the provider selector accepts.
-        lock.source_channels.push(LockedSourceChannel{name: source_name, channel: nix_closure.channel, exact: "github:NixOS/nixpkgs#{nix_closure.revision}"})
+        &lock.source_channels.push(LockedSourceChannel{name: source_name, channel: nix_closure.channel, exact: "github:NixOS/nixpkgs#{nix_closure.revision}"})
     }
     existing_provenance :: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && package.is_nix()) == {
         .Val(package) -> package.provenance
@@ -297,7 +204,7 @@ pub fn pkg_lock_record_nix_realization(project_root: String, name: String, versi
 }
 
 // The source token of `reference` (`…@<source>#…`), defaulting to Jetpack.
-fn pkg_lock_reference_source_name(reference: String) -> String !Never {
+fn pkg_lock_reference_source_name(reference: String) -> String Never! {
     halves :: reference.cut_last(@REF_PROVIDER_AT) ?? return @REF_SOURCE_JETPACK
     source :: halves.after.split_once(@REF_CHANNEL_MARKER)?.before ?? halves.after
     if source == "" -> return @REF_SOURCE_JETPACK
@@ -309,7 +216,7 @@ fn pkg_lock_reference_source_name(reference: String) -> String !Never {
 // Hangar projection that supplied the generated binding. Upserting by
 // foreign dependency name keeps a provider change visible and preserves the
 // receipt only when the identity and envelope are unchanged.
-pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) !LockError -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     lock := pkg_lock_load_for_update(project_root)
     lock.version = @PKG_LOCK_VERSION
     source :: LockSource.Foreign{language: language, reference: reference, output: output}
@@ -328,7 +235,7 @@ pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, v
 // only fills these records; it is never copied into a second lock schema. A
 // later bridge build replaces the earlier bridge records and leaves
 // user/provider records untouched.
-pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String, packages: [LockedPackage]) !LockError -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String, packages: [LockedPackage]) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     if bridge_identity.trim() == "" -> return Err(LockError.Invalid("Rust bridge lock identity is empty"))
     if packages.len() == 0 -> return
     lock := pkg_lock_load_for_update(project_root)
@@ -339,9 +246,9 @@ pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String
             .Val(build) -> if build.starts_with(@PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
             .None -> {}
         }
-        kept.push(package)
+        &kept.push(package)
     }
-    loop package in packages -> kept.push(package)
+    loop package in packages -> &kept.push(package)
     lock.packages = kept
     pkg_lock_ensure_build_stamp(project_root, &lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
@@ -350,28 +257,28 @@ pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String
 // D-JPK-OFFLINE2=B: the complete recorded Nix realization for `reference`.
 // The output is a content digest, never a host path; the closure record
 // carries everything offline replay and cache validation need.
-pub fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> ?(closure: NixClosureRecord, envelope: LockEnvelope) {
+pub fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? {
     found :: pkg_lock_nix_realization_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_nix_realization`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pub fn pkg_lock_nix_realization_strict(project_root: String, reference: String) -[FS]> ?(closure: NixClosureRecord, envelope: LockEnvelope) !LockError {
+pub fn pkg_lock_nix_realization_strict(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
     found :: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return Ok(None)
     Ok(Val((closure: found.closure, envelope: found.envelope)))
 }
 
 // The package identity with its complete portable Nix lock record; None
 // when the lock has no record for `reference`.
-pub fn pkg_lock_locked_nix_package(project_root: String, reference: String) -[FS]> ?(name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope) {
+pub fn pkg_lock_locked_nix_package(project_root: String, reference: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? {
     found :: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_locked_nix_package`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pub fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input: String) -[FS]> ?(name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope) !LockError {
+pub fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
     loaded :: pkg_lock_load_strict(project_root)
     lock :: loaded ?? return Ok(None)
     reference :: pkg_canonical_locked_ref(reference_input)
@@ -419,7 +326,7 @@ fn pkg_lock_record_source_realization(project_root: String, name: String, versio
 
 // Whether a locked source has the same realized identity as `recorded`.
 // Registry records compare everything but `tier` and `gate_status`.
-fn pkg_lock_same_realized_source(locked: LockSource, recorded: LockSource) -> Bool !Never {
+fn pkg_lock_same_realized_source(locked: LockSource, recorded: LockSource) -> Bool Never! {
     if locked == {
         .Registry(registry, reference, output, source_hash, repository, authority, _, _) -> if recorded == {
             .Registry(want_registry, want_reference, want_output, want_source_hash, want_repository, want_authority, _, _) -> registry == want_registry && reference == want_reference && output == want_output && source_hash == want_source_hash && repository == want_repository && authority == want_authority
@@ -437,7 +344,7 @@ pub fn pkg_lock_record_cran_realization(project_root: String, name: String, vers
 }
 
 // Exact CRAN realization trust root for online integrity and offline replay.
-pub fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]> ?(output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope) {
+pub fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
@@ -461,7 +368,7 @@ pub fn pkg_lock_record_luarocks_realization(project_root: String, name: String, 
 
 // Exact LuaRocks realization trust root for online integrity and offline
 // replay.
-pub fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[FS]> ?(output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope) {
+pub fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
@@ -486,7 +393,7 @@ pub fn pkg_lock_record_registry_realization(project_root: String, registry: Stri
 
 // Exact scripting-registry trust root for online drift checks and offline
 // replay.
-pub fn pkg_lock_registry_realization(project_root: String, registry: String, reference_input: String) -[FS]> ?(output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope) {
+pub fn pkg_lock_registry_realization(project_root: String, registry: String, reference_input: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     reference :: pkg_canonical_locked_ref(reference_input)
     loop package in lock.packages {
@@ -507,7 +414,7 @@ pub fn pkg_lock_registry_realization(project_root: String, registry: String, ref
 // toolchain, keyed by channel. Unlike `pkg_lock_record_envelope` this creates
 // a minimal lock, since `jet update jet` / `jet init` may run before any
 // dependency lock exists.
-pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchain) !LockError -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchain) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     toolchain.validate_completeness()
     loaded :: pkg_lock_load_strict(project_root)
     lock := loaded ?? LockFile.empty()
@@ -519,7 +426,7 @@ pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchai
             replaced = true
         }
     }
-    if !replaced -> lock.toolchains.push(toolchain)
+    if !replaced -> &lock.toolchains.push(toolchain)
     lock.validate_completeness()
     pkg_lock_ensure_build_stamp(project_root, &lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
@@ -540,20 +447,20 @@ pub fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[F
             replaced = true
         }
     }
-    if !replaced -> lock.browsers.push(browser)
+    if !replaced -> &lock.browsers.push(browser)
     pkg_lock_ensure_build_stamp(project_root, &lock)
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }
 
 // D-JPK-CHANNEL1=A: read one named source channel lock.
-pub fn pkg_lock_locked_source_channel(project_root: String, name: String) -[FS]> ?LockedSourceChannel {
+pub fn pkg_lock_locked_source_channel(project_root: String, name: String) -[FS]> LockedSourceChannel? {
     lock :: pkg_lock_load(project_root) ?? return None
     lock.find_source_channel(name)
 }
 
 // D-JPK-CHANNEL1=A: upsert a named source channel lock, keyed by source
 // name so moving a channel replaces the prior exact identity.
-pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceChannel) !LockError -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceChannel) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     source := input
     source.exact = pkg_canonical_locked_ref(source.exact)
     source.validate_completeness()
@@ -567,7 +474,7 @@ pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceC
             replaced = true
         }
     }
-    if !replaced -> lock.source_channels.push(source)
+    if !replaced -> &lock.source_channels.push(source)
     lock.validate_completeness()
     pkg_lock_ensure_build_stamp(project_root, &lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {

@@ -10,7 +10,7 @@ pub enum FileMode {
     Seed
     Copy
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Symlink -> "symlink"
             .Seed -> "seed"
@@ -25,7 +25,7 @@ pub enum FileMode {
 pub enum FileConflict {
     Refuse
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Refuse -> "refuse"
         }
@@ -35,20 +35,20 @@ pub enum FileConflict {
 pub struct ManagedFile {
     pub destination: String{""}
     // A project-relative source path, when the declaration names one.
-    pub source: ?String{None}
+    pub source: String?{None}
     // Inline bytes after comptime evaluation, when the declaration supplies a
     // value rather than a source path.
-    pub content: ?[U8]{None}
+    pub content: [U8]?{None}
     pub mode: FileMode{FileMode.Symlink}
-    pub permissions: ?Int{None}
+    pub permissions: Int?{None}
     pub sensitive: Bool{false}
-    pub generation: ?String{None}
+    pub generation: String?{None}
     // Hash of the declarative source identity. Jetpack re-hashes source bytes
     // before applying a path-backed entry.
     pub source_digest: String{""}
     pub conflict: FileConflict{FileConflict.Refuse}
 
-    fn fingerprint(self) -> String !Never {
+    fn fingerprint(self) -> String Never! {
         source :: self.source ?? "<inline>"
         permissions :: if self.permissions == {
             .Val(value) -> "{value}"
@@ -76,7 +76,7 @@ pub enum ManagedFileError {
     InvalidMode(String)
     InvalidPermissions(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .InvalidDestination(value) -> "managed file destination `{value}` is unsafe"
             .InvalidSource(value) -> "managed file source `{value}` is unsafe"
@@ -99,33 +99,33 @@ struct ManagedFileEntry {
 // Convert the closed `files: [destination: value]` fact into deterministic
 // managed-file records, ordered by destination; a repeated destination is
 // rejected.
-pub fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] !ManagedFileError {
+pub fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] ManagedFileError! {
     entries := [ManagedFileEntry]{}
     if value == {
         .Map(map_entries) -> {
             loop entry in map_entries {
                 if entry.key == {
-                    .Str(name) -> entries.push(ManagedFileEntry{destination: name, value: entry.value})
-                    else -> return Err(ManagedFileError.InvalidEntry("managed file maps need string destination keys"))
+                    .Str(name) -> { &entries.push(ManagedFileEntry{destination: name, value: entry.value}) }
+                    else -> { return Err(ManagedFileError.InvalidEntry("managed file maps need string destination keys")) }
                 }
             }
         }
         .Struct(_, fields) -> {
             unique :: envmodel_checked_unique_fields(fields, "files")
-            loop name in envmodel_sorted_keys(unique) -> entries.push(ManagedFileEntry{destination: name, value: unique[name]})
+            loop name in envmodel_sorted_keys(unique) -> &entries.push(ManagedFileEntry{destination: name, value: unique[name]})
         }
         .List(values) -> {
             loop item in values {
                 fields :: envmodel_checked_managed_fields(item, "list entry")
                 destination :: envmodel_optional_string_field(fields, "destination") ?? return Err(ManagedFileError.InvalidEntry("a managed file list entry needs a string `destination`"))
-                entries.push(ManagedFileEntry{destination: destination, value: item})
+                &entries.push(ManagedFileEntry{destination: destination, value: item})
             }
         }
-        else -> return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records"))
+        else -> { return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records")) }
     }
     files := [ManagedFile]{}
-    loop entry in entries -> files.push(envmodel_managed_file_from_value(entry.destination, entry.value))
-    files.sort_by(file -> file.destination)
+    loop entry in entries -> &files.push(envmodel_managed_file_from_value(entry.destination, entry.value))
+    &files.sort_by(file -> file.destination)
     loop index in 1..<files.len() {
         if files[index - 1].destination == files[index].destination {
             return Err(ManagedFileError.InvalidDestination(files[index - 1].destination))
@@ -134,7 +134,7 @@ pub fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] !ManagedFileEr
     Ok(files)
 }
 
-fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> ManagedFile !ManagedFileError {
+fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> ManagedFile ManagedFileError! {
     if !envmodel_relative_path_is_valid(destination, false) -> return Err(ManagedFileError.InvalidDestination(destination))
     file := ManagedFile{destination: destination}
     if value == {
@@ -158,7 +158,7 @@ fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> Mana
                     file.source = Val(text)
                 }
                 .Bytes(bytes) -> file.content = Val(bytes)
-                else -> return Err(ManagedFileError.InvalidEntry("managed file `{file.destination}` source/content must be a string or bytes"))
+                else -> { return Err(ManagedFileError.InvalidEntry("managed file `{file.destination}` source/content must be a string or bytes")) }
             }
             if fields.get("mode") == .Val(mode) -> file.mode = envmodel_file_mode(mode)
             if fields.get("permissions") == .Val(permissions) {
@@ -167,13 +167,13 @@ fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> Mana
                         if number < 0 || number > 4095 -> return Err(ManagedFileError.InvalidPermissions("{number}"))
                         file.permissions = Val(number)
                     }
-                    else -> return Err(ManagedFileError.InvalidPermissions(ast_comptime_value_show(permissions)))
+                    else -> { return Err(ManagedFileError.InvalidPermissions(ast_comptime_value_show(permissions))) }
                 }
             }
             if fields.get("sensitive") == .Val(sensitive) {
                 if sensitive == {
                     .Bool(flag) -> file.sensitive = flag
-                    else -> return Err(ManagedFileError.InvalidEntry("managed file `{file.destination}` sensitive must be Bool"))
+                    else -> { return Err(ManagedFileError.InvalidEntry("managed file `{file.destination}` sensitive must be Bool")) }
                 }
             }
             if fields.get("generation") == .Val(generation) {
@@ -190,11 +190,11 @@ fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> Mana
     Ok(file)
 }
 
-fn envmodel_file_mode(value: CtValue) -> FileMode !ManagedFileError {
+fn envmodel_file_mode(value: CtValue) -> FileMode ManagedFileError! {
     raw :: if value == {
         .Str(text) -> text
         .Enum(_, variant, _) -> envmodel_last_segment(variant)
-        else -> return Err(ManagedFileError.InvalidMode(ast_comptime_value_show(value)))
+        else -> { return Err(ManagedFileError.InvalidMode(ast_comptime_value_show(value))) }
     }
     if pkg_ascii_lower(raw) == {
         "symlink" | "link" -> Ok(FileMode.Symlink)
@@ -206,16 +206,16 @@ fn envmodel_file_mode(value: CtValue) -> FileMode !ManagedFileError {
 
 // The fields of one managed-file record, de-duplicated and restricted to the
 // closed managed-file vocabulary.
-fn envmodel_checked_managed_fields(value: CtValue, scope: String) -> [String: CtValue] !ManagedFileError {
+fn envmodel_checked_managed_fields(value: CtValue, scope: String) -> [String: CtValue] ManagedFileError! {
     fields :: if value == {
         .Struct(_, record_fields) -> record_fields
-        else -> return Err(ManagedFileError.InvalidEntry("managed file {scope} must be a typed record"))
+        else -> { return Err(ManagedFileError.InvalidEntry("managed file {scope} must be a typed record")) }
     }
     unique :: envmodel_checked_unique_fields(fields, "managed file {scope}")
     loop name in envmodel_sorted_keys(unique) {
         if name == {
             "destination" | "source" | "content" | "mode" | "permissions" | "sensitive" | "generation" -> {}
-            else -> return Err(ManagedFileError.InvalidEntry("unknown managed file field `{name}`"))
+            else -> { return Err(ManagedFileError.InvalidEntry("unknown managed file field `{name}`")) }
         }
     }
     Ok(unique)

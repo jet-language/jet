@@ -80,8 +80,8 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
     // label. Do not inject Clang's `--target` spelling into the pinned GCC
     // driver.
     action_argv := [String]{verb}
-    if !sys.is_windows() -> action_argv.push("--sysroot={descriptor.sysroot_path()}")
-    action_argv.extend(invocation.argv.slice(1, invocation.argv.len()))
+    if !sys.is_windows() -> &action_argv.push("--sysroot={descriptor.sysroot_path()}")
+    &action_argv.extend(invocation.argv.slice(1, invocation.argv.len()))
     action := ActionSpec.cached(action_argv)
         .with_inputs(invocation.inputs)
         .with_outputs(invocation.outputs)
@@ -139,12 +139,12 @@ pub fn cli_cc_main(verb: String, args: [String]) -[FS, Env, Exec, IO, Time]> Int
 
 // Normalize sources, outputs, dependency files, and path operands to
 // project-relative paths and declare every project input.
-fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS]> CcInvocation !CliToolError {
+fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS]> CcInvocation CliToolError! {
     build_root :: cli_cc_resolve_build_root(project_root, options)
     explicit_build_root :: options.build_root != None
     sources := [String]{}
     loop source in options.sources {
-        sources.push(cli_cc_validate_source(project_root, options.working_dir, source))
+        &sources.push(cli_cc_validate_source(project_root, options.working_dir, source))
     }
     if (options.output ?? "") == "-" -> return Err(CliToolError.new("`-o -` cannot produce a declared file output"))
     output :: if options.output == {
@@ -167,27 +167,27 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
     outputs := [String]{}
     if options.compile_only {
         if output != None && sources.len() != 1 -> return Err(CliToolError.new("`-c -o` needs exactly one source"))
-        loop source in sources -> outputs.push(output ?? cli_cc_replace_extension(source, "o"))
+        loop source in sources -> &outputs.push(output ?? cli_cc_replace_extension(source, "o"))
         if options.dep_mode {
             if depfile != None && sources.len() != 1 -> return Err(CliToolError.new("`-MF` needs exactly one source when compiling multiple files"))
             if depfile == {
-                .Val(dependency) -> outputs.push(dependency)
+                .Val(dependency) -> &outputs.push(dependency)
                 .None -> {
                     object_outputs :: outputs
-                    loop object in object_outputs -> outputs.push(cli_cc_replace_extension(object, "d"))
+                    loop object in object_outputs -> &outputs.push(cli_cc_replace_extension(object, "d"))
                 }
             }
         }
     } else {
         if options.dep_mode -> return Err(CliToolError.new("dependency generation is only supported with `-c`"))
         link_default :: if sys.is_windows() -> "a.exe" else -> "a.out"
-        outputs.push(output ?? cli_cc_normalize_output_path(link_default, project_root, build_root, options.working_dir, explicit_build_root, "link output"))
+        &outputs.push(output ?? cli_cc_normalize_output_path(link_default, project_root, build_root, options.working_dir, explicit_build_root, "link output"))
     }
     unique_outputs := [String]{}
     loop declared in outputs {
         cli_cc_validate_relative_path(declared, "output")
         if unique_outputs.contains(declared) -> return Err(CliToolError.new("duplicate declared output `{declared}`"))
-        unique_outputs.push(declared)
+        &unique_outputs.push(declared)
         if sources.contains(declared) -> return Err(CliToolError.new("output `{declared}` overwrites an input"))
     }
     dep_target :: if options.dep_target == {
@@ -196,11 +196,11 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
     }
     ignored_build_root :: if explicit_build_root && build_root != project_root -> Val(build_root) else -> None
     inputs := cli_cc_collect_project_inputs(project_root, outputs, ignored_build_root)
-    inputs.extend(sources)
-    inputs.sort()
+    &inputs.extend(sources)
+    &inputs.sort()
     deduplicated := [String]{}
     loop input in inputs {
-        if deduplicated.len() == 0 || deduplicated[deduplicated.len() - 1] != input -> deduplicated.push(input)
+        if deduplicated.len() == 0 || deduplicated[deduplicated.len() - 1] != input -> &deduplicated.push(input)
     }
 
     normalized_argv := options.argv
@@ -234,26 +234,26 @@ fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOp
     }
     argv := [String]{verb}
     loop index in 0..<normalized_argv.len() {
-        if (options.separator_index ?? -1) == index -> argv.push("--")
-        argv.push(normalized_argv[index])
+        if (options.separator_index ?? -1) == index -> &argv.push("--")
+        &argv.push(normalized_argv[index])
     }
-    if (options.separator_index ?? -1) == options.argv.len() -> argv.push("--")
+    if (options.separator_index ?? -1) == options.argv.len() -> &argv.push("--")
     if options.dep_mode && options.depfile == None && sources.len() == 1 {
         dependency :: outputs.get(outputs.len() - 1) ?? return Err(CliToolError.new("dependency output was not declared"))
-        argv.push("-MF")
-        argv.push(dependency)
+        &argv.push("-MF")
+        &argv.push(dependency)
     }
     if options.dep_mode && options.dep_target == None && sources.len() == 1 {
         object :: outputs.get(0) ?? return Err(CliToolError.new("object output was not declared"))
-        argv.push("-MT")
-        argv.push(object)
+        &argv.push("-MT")
+        &argv.push(object)
     }
     Ok(CcInvocation{argv: argv, sources: sources, inputs: deduplicated, outputs: outputs})
 }
 
 // The verified Hangar C toolchain for the requested target, provisioned
 // through the provider when the Hangar has no descriptor yet.
-fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: ?String, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Time]> CcToolchainDescriptor !ProviderError {
+fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: String?, offline: Bool, project_root: String) -[FS, Env, Exec, IO, Time]> CcToolchainDescriptor ProviderError! {
     hangar :: roots.hangar_dir()
     target :: provider_cc_toolchain_requested_target(spec) ?? return Err(ProviderError.Unsupported(err.message()))
     if provider_cc_toolchain_resolve_for_target(hangar, target, fixtures != None) == {
@@ -283,7 +283,7 @@ fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: ?String
 
 // `raw` resolved against `base_root`, kept inside `allowed_root`, free of
 // existing symlinks, and returned relative to `output_root`.
-fn cli_cc_normalize_scoped_path(raw: String, allowed_root: String, base_root: String, output_root: String, label: String) -[FS]> String !CliToolError {
+fn cli_cc_normalize_scoped_path(raw: String, allowed_root: String, base_root: String, output_root: String, label: String) -[FS]> String CliToolError! {
     candidate :: cli_cc_absolutize_lexically(base_root, raw, label)
     if !cli_cc_path_starts_with(candidate, allowed_root) -> return Err(CliToolError.new("{label} path {raw} must stay inside {allowed_root}"))
     cli_cc_reject_existing_symlinks(allowed_root, candidate, label)
@@ -293,24 +293,24 @@ fn cli_cc_normalize_scoped_path(raw: String, allowed_root: String, base_root: St
     Ok(relative)
 }
 
-fn cli_cc_normalize_working_path(raw: String, project_root: String, working_dir: String, label: String) -[FS]> String !CliToolError {
+fn cli_cc_normalize_working_path(raw: String, project_root: String, working_dir: String, label: String) -[FS]> String CliToolError! {
     cli_cc_normalize_scoped_path(raw, project_root, working_dir, project_root, label)
 }
 
 // An output path inside the build root, relative to the project root. A
 // relative path resolves against the explicit build root when one is given.
-fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: String, working_dir: String, explicit_build_root: Bool, label: String) -[FS]> String !CliToolError {
+fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: String, working_dir: String, explicit_build_root: Bool, label: String) -[FS]> String CliToolError! {
     base :: if explicit_build_root -> build_root else -> working_dir
     cli_cc_normalize_scoped_path(raw, build_root, base, project_root, label)
 }
 
 // Rewrite an option operand, keeping an attached option prefix (`-oout.o`).
-fn cli_cc_replace_option_operand(argument: String, option: String, value: String) -> String !Never {
+fn cli_cc_replace_option_operand(argument: String, option: String, value: String) -> String Never! {
     if argument.starts_with(option) && argument.removeprefix(option) != "" -> return "{option}{value}"
     value
 }
 
-fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String !CliToolError {
+fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String CliToolError! {
     cwd :: sys.current_dir() ?? return Err(CliToolError.new("could not determine the current directory: {err}"))
     current :: files.canonicalize(cwd) ?? return Err(CliToolError.new("could not canonicalize the current directory: {err}"))
     raw :: options.project_root ?? current
@@ -318,7 +318,7 @@ fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String !CliTo
     cli_cc_canonical_real_directory(path, "project root")
 }
 
-fn cli_cc_resolve_build_root(project_root: String, options: DriverOptions) -[FS, Env]> String !CliToolError {
+fn cli_cc_resolve_build_root(project_root: String, options: DriverOptions) -[FS, Env]> String CliToolError! {
     raw :: options.build_root ?? return Ok(project_root)
     path :: cli_cc_absolutize_lexically(options.working_dir, raw, "build root")
     canonical :: cli_cc_canonical_real_directory(path, "build root")
@@ -327,7 +327,7 @@ fn cli_cc_resolve_build_root(project_root: String, options: DriverOptions) -[FS,
 }
 
 // A source operand as a project-relative path to an existing regular file.
-fn cli_cc_validate_source(root: String, working_dir: String, raw: String) -[FS]> String !CliToolError {
+fn cli_cc_validate_source(root: String, working_dir: String, raw: String) -[FS]> String CliToolError! {
     source :: cli_cc_normalize_working_path(raw, root, working_dir, "source")
     metadata :: files.stat(files.join(root, source)) ?? return Err(CliToolError.new("source {source} is unavailable: {err}"))
     if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("source {source} is not a regular file"))
@@ -336,22 +336,22 @@ fn cli_cc_validate_source(root: String, working_dir: String, raw: String) -[FS]>
 
 // Every regular project file except declared outputs, VCS/build directories
 // and the explicit build root, in name order, within the input bounds.
-fn cli_cc_collect_project_inputs(root: String, excluded: [String], ignored_root: ?String) -[FS]> [String] !CliToolError {
+fn cli_cc_collect_project_inputs(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CliToolError! {
     walk := CcProjectInputWalk{root: root, excluded: excluded, ignored_root: ignored_root, inputs: [String]{}, bytes: 0}
-    walk.visit(root)
+    &walk.visit(root)
     Ok(walk.inputs)
 }
 
 struct CcProjectInputWalk {
     root: String
     excluded: [String]
-    ignored_root: ?String
+    ignored_root: String?
     inputs: [String]
     bytes: Int
 
-    fn visit(&self, directory: String) !CliToolError -[FS]> {
+    fn visit(&self, directory: String) CliToolError! -[FS]> {
         entries := files.list_dir(directory) ?? return Err(CliToolError.new("read project inputs in `{directory}`: {err}"))
-        entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
+        &entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
         loop entry in entries {
             path :: entry.path
             relative_parts :: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CliToolError.new("project input `{path}` escaped the project root"))
@@ -364,14 +364,14 @@ struct CcProjectInputWalk {
                     ".git" | ".jet" | "target" | "build" | "CMakeFiles" -> next
                     else -> {}
                 }
-                self.visit(path)
+                &self.visit(path)
                 next
             }
             if !metadata.is_file || self.excluded.contains(relative) -> next
             if self.inputs.len() >= @CC_MAX_INPUT_FILES -> return Err(CliToolError.new("project input set exceeds {@CC_MAX_INPUT_FILES} files"))
             self.bytes = self.bytes + metadata.size
             if self.bytes > @CC_MAX_INPUT_BYTES -> return Err(CliToolError.new("project input set exceeds {@CC_MAX_INPUT_BYTES} bytes"))
-            self.inputs.push(relative)
+            &self.inputs.push(relative)
         }
         Ok()
     }
@@ -381,7 +381,7 @@ struct CcProjectInputWalk {
 // executable bit through the output file mode. Restore that product property
 // at the driver boundary after both a cache hit and a fresh action. Compile
 // outputs intentionally remain ordinary data files.
-fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) !CliToolError -[FS, Env]> {
+fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) CliToolError! -[FS, Env]> {
     loop output in outputs {
         path :: files.join(project_root, output)
         if sys.is_windows() {
@@ -398,7 +398,7 @@ fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) 
 }
 
 // `path` with its final extension replaced (`PathBuf::set_extension`).
-fn cli_cc_replace_extension(path: String, extension: String) -> String !Never {
+fn cli_cc_replace_extension(path: String, extension: String) -> String Never! {
     halves :: path.cut_last("/")
     directory :: if halves == {
         .Val(parts) -> "{parts.before}/"
@@ -414,7 +414,7 @@ fn cli_cc_replace_extension(path: String, extension: String) -> String !Never {
 }
 
 // The bare compiler version: `gcc-13.2.0+jet1` is `13.2.0`.
-fn cli_cc_compiler_version(descriptor: CcToolchainDescriptor) -> String !Never {
+fn cli_cc_compiler_version(descriptor: CcToolchainDescriptor) -> String Never! {
     version :: descriptor.version.removeprefix("gcc-")
     version.split_once("+")?.before ?? version
 }

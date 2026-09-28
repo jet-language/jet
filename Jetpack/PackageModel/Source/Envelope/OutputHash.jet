@@ -1,0 +1,595 @@
+// Canonical archive digest of a realized output (jet-pkg-model Envelope.rs
+// `try_output_hash_of*`, `encode_node`, `read_file_stable`).
+//
+// The archive stream records every node's relative path, type, mode, and
+// type-specific payload. Symlinks are never followed; native relative targets
+// stay lexically inside the root, while Nix admission (Hangar mode) may name
+// sibling store objects and absolute host paths as inert link data. Hardlink
+// identity is explicit; unsupported special files fail closed. File bytes are
+// read through a no-follow handle (D-CORE-FILEOPEN1) and every directory and
+// file is re-observed with the ratified Stat identity (D-CORE-FILESTAT1) so a
+// concurrent add/remove/replace or same-size rewrite is refused.
+
+@ENVELOPE_ARCHIVE_MAGIC :: "jet-hangar-archive-v1"
+@ENVELOPE_READ_CHUNK :: 65536
+
+// Why an output tree could not be hashed; `message()` is the reference text.
+#Error
+pub enum EnvelopeError {
+    MissingOutput(String)
+    Inspect(path: String, detail: String)
+    SymlinkRoot(String)
+    ReadLink(path: String, detail: String)
+    NixTarget(String)
+    Resolve(path: String, detail: String)
+    PathLaw(PathLawError)
+    ResolveDirectory(path: String, detail: String)
+    DirectoryEscapes(String)
+    ReadEntries(path: String, detail: String)
+    DirectoryVanished(path: String, detail: String)
+    DirectoryChanged(String)
+    SymlinkEscapes(String)
+    SpecialFile(String)
+    Hardlink(first: String, total: Int, seen: Int)
+    OpenNoFollow(path: String, detail: String)
+    InspectOpen(path: String, detail: String)
+    ChangedBefore(String)
+    Reinspect(path: String, detail: String)
+    FileChanged(String)
+    Snapshot(path: String, detail: String)
+    SparseProbe(path: String, detail: String)
+    SparseStat(path: String, detail: String)
+    Xattr(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .MissingOutput(out) -> "output `{out}` does not exist"
+            .Inspect(path, detail) -> "cannot inspect `{path}`: {detail}"
+            .SymlinkRoot(out) -> "output root `{out}` must not be a symlink"
+            .ReadLink(path, detail) -> "cannot read symlink `{path}`: {detail}"
+            .NixTarget(detail) -> detail
+            .Resolve(path, detail) -> "cannot resolve `{path}`: {detail}"
+            .PathLaw(error) -> error.message()
+            .ResolveDirectory(path, detail) -> "cannot resolve directory `{path}`: {detail}"
+            .DirectoryEscapes(path) -> "directory `{path}` escapes output root"
+            .ReadEntries(path, detail) -> "cannot read `{path}`: {detail}"
+            .DirectoryVanished(path, detail) -> "directory `{path}` changed while hashing: {detail}"
+            .DirectoryChanged(path) -> "directory `{path}` changed while hashing"
+            .SymlinkEscapes(path) -> "symlink `{path}` escapes output root"
+            .SpecialFile(path) -> "unsupported special file in output: `{path}`"
+            .Hardlink(first, total, seen) -> "hardlink `{first}` has {total} link(s), but only {seen} are inside the output"
+            .OpenNoFollow(path, detail) -> "cannot open `{path}` without following links: {detail}"
+            .InspectOpen(path, detail) -> "cannot inspect open file `{path}`: {detail}"
+            .ChangedBefore(path) -> "file `{path}` changed before hashing"
+            .Reinspect(path, detail) -> "cannot re-inspect `{path}`: {detail}"
+            .FileChanged(path) -> "file `{path}` changed while hashing"
+            .Snapshot(path, detail) -> "cannot snapshot directory `{path}`: {detail}"
+            .SparseProbe(path, detail) -> "cannot open `{path}` for sparse probe: {detail}"
+            .SparseStat(path, detail) -> "cannot stat `{path}`: {detail}"
+            .Xattr(detail) -> detail
+        }
+    }
+}
+
+// The observation points of the canonical walk.
+pub enum EnvelopeWalkStage {
+    Node
+    DirectorySnapshotted
+    FileOpened
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Node -> "node"
+            .DirectorySnapshotted -> "directory-snapshotted"
+            .FileOpened -> "file-opened"
+        }
+    }
+}
+
+pub struct EnvelopeWalkEvent {
+    pub path: String
+    pub stage: EnvelopeWalkStage
+}
+
+// The canonical traversal observation seam. `events` records every stage in
+// walk order; `react` runs at each stage (reproducibility certification and
+// the concurrency proofs). The canonical archive stays the sole identity.
+pub struct EnvelopeWalkHook {
+    pub events: [EnvelopeWalkEvent]
+    pub react: fn(String, EnvelopeWalkStage) -[FS]>
+
+    // A hook that only records.
+    fn recording() -> EnvelopeWalkHook Never! {
+        EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: pkg_envelope_walk_ignore}
+    }
+
+    fn observe(&self, path: String, stage: EnvelopeWalkStage) -[FS]> {
+        &self.events.push(EnvelopeWalkEvent{path: path, stage: stage})
+        self.react(path, stage)
+    }
+}
+
+fn pkg_envelope_walk_ignore(path: String, stage: EnvelopeWalkStage) -[FS]> {}
+
+// The streamed canonical archive: the magic, then header/payload records in
+// the reference byte order.
+pub struct EnvelopeArchive {
+    hasher: Hasher
+
+    fn new() -> EnvelopeArchive Never! {
+        archive := EnvelopeArchive{hasher: crypto.Hasher.new()}
+        &archive.update(@ENVELOPE_ARCHIVE_MAGIC.bytes())
+        &archive.update([U8]{U8{0}})
+        archive
+    }
+
+    fn update(&self, bytes: [U8]) {
+        &self.hasher.update(bytes)
+    }
+
+    // A u64 big-endian length prefix, then the bytes.
+    fn push_bytes(&self, bytes: [U8]) {
+        &self.hasher.update(pkg_u64_be_bytes(bytes.len()))
+        &self.hasher.update(bytes)
+    }
+
+    // Kind byte, length-prefixed relative path, u32 big-endian mode.
+    fn record_header(&self, kind: U8, path: [U8], mode: Int) {
+        &self.hasher.update([U8]{kind})
+        &self.push_bytes(path)
+        &self.hasher.update(pkg_u32_be_bytes(mode))
+    }
+
+    fn finish(self) -> String Never! {
+        "sha256-{self.hasher.digest()}"
+    }
+}
+
+fn pkg_u32_be_bytes(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    shift_values :: [Int]{24, 16, 8, 0}
+    loop shift in shift_values -> &out.push(U8{(value >> shift) & 0xFF})
+    out
+}
+
+// Content hash of a realized output root; an empty compatibility digest when
+// the output is missing or unreadable (Store registration rejects it).
+pub fn pkg_output_hash_of(out: String) -[FS, Env]> String Never! {
+    pkg_try_output_hash_of(out) ?? ""
+}
+
+// The canonical archive digest of a native output.
+pub fn pkg_try_output_hash_of(out: String) -[FS, Env]> String EnvelopeError! {
+    hook := EnvelopeWalkHook.recording()
+    pkg_try_output_hash_of_with_policy(out, false, &hook)
+}
+
+// Like `pkg_try_output_hash_of`, but Hangar/internal shared-CAS hardlink
+// peers do not fail the external-hardlink law; peers outside those roots
+// still reject. CAS peers are never encoded as in-tree `H` records.
+pub fn pkg_try_output_hash_of_in_hangar(out: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String EnvelopeError! {
+    hook := EnvelopeWalkHook.recording()
+    pkg_try_output_hash_of_in_hangar_with_policy(out, hangar_root, allow_semantic_xattrs, &hook)
+}
+
+pub fn pkg_try_output_hash_of_in_hangar_with_policy(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, Val(hangar_root), &hook)
+}
+
+// Like `pkg_try_output_hash_of`, with an explicit semantic-xattr policy.
+pub fn pkg_try_output_hash_of_with_policy(out: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, &hook)
+}
+
+// One regular file's hardlink bookkeeping, keyed by its (device, inode).
+struct EnvelopeHardlink {
+    key: FileId
+    first: String
+    seen: Int
+    total: Int
+    cas_key: String
+}
+
+fn pkg_try_output_hash_of_with_hook(out: String, allow_semantic_xattrs: Bool, hangar_root: String?, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+    if !files.lexists(out) -> return Err(EnvelopeError.MissingOutput(out))
+    output_info :: files.stat(out) ?? return Err(EnvelopeError.Inspect(out, "{err}"))
+    if output_info.is_symlink {
+        if hangar_root == None -> return Err(EnvelopeError.SymlinkRoot(out))
+        target :: files.read_link(out) ?? return Err(EnvelopeError.ReadLink(out, "{err}"))
+        if !files.is_abs(target) -> return Err(EnvelopeError.NixTarget("Nix symlink target must be absolute"))
+        pkg_validate_nix_store_symlink_target(target)
+        archive := EnvelopeArchive.new()
+        &hook.observe(out, EnvelopeWalkStage.Node)
+        &archive.record_header(U8{76}, [U8]{}, pkg_envelope_mode(output_info))
+        &archive.push_bytes(target.bytes())
+        pkg_encode_semantic_xattrs(out, &archive, allow_semantic_xattrs)
+        return Ok(archive.finish())
+    }
+    root :: files.canonicalize(out) ?? return Err(EnvelopeError.Resolve(out, "{err}"))
+    archive := EnvelopeArchive.new()
+    hardlinks := [EnvelopeHardlink]{}
+    pkg_envelope_encode_node(root, root, "", &archive, &hardlinks, allow_semantic_xattrs, hangar_root != None, &hook)
+    // Admission checks below never alter archive bytes of a tree that hashes.
+    &hardlinks.sort_by(link -> link.key.inode)
+    &hardlinks.sort_by(link -> link.key.device)
+    loop link in hardlinks {
+        if link.seen == link.total -> next
+        hangar :: hangar_root ?? return Err(EnvelopeError.Hardlink{first: link.first, total: link.total, seen: link.seen})
+        if pkg_envelope_hangar_admits(root, hangar, link) -> next
+        return Err(EnvelopeError.Hardlink{first: link.first, total: link.total, seen: link.seen})
+    }
+    Ok(archive.finish())
+}
+
+// Whether every out-of-tree peer of `link` is a legitimate in-Hangar dedupe
+// or local/shared CAS entry; any other inode peer remains untrusted.
+fn pkg_envelope_hangar_admits(root: String, hangar_root: String, link: EnvelopeHardlink) -[FS, Env]> Bool Never! {
+    hangar :: files.canonicalize(hangar_root) ?? hangar_root
+    shared_cas :: pkg_envelope_canonical_real_directory(pkg_shared_cas_dir())
+    hangars := [String]{hangar}
+    loop machine_root in HangarRoots.machine_roots() {
+        machine_hangar :: pkg_envelope_canonical_real_directory(machine_root.hangar_dir()) ?? next
+        pkg_envelope_add_allowed_hangar_root(&hangars, machine_hangar)
+    }
+    local_cas_paths := [String]{}
+    loop candidate in hangars {
+        pool :: pkg_envelope_canonical_real_directory(files.join(candidate, "cas")) ?? next
+        &local_cas_paths.push(pool)
+    }
+    loop pool in local_cas_paths {
+        if pkg_envelope_count_cas_peer(pool, link.cas_key, link.key) == 1 -> return true
+    }
+    if shared_cas == {
+        .Val(pool) -> {
+            if pkg_envelope_count_cas_peer(pool, link.cas_key, link.key) == 1 -> return true
+        }
+        .None -> {}
+    }
+    allowed_peers := 0
+    loop candidate in hangars {
+        local_cas :: pkg_envelope_canonical_real_directory(files.join(candidate, "cas"))
+        excluded := [String]{root}
+        pool_values :: [String?]{local_cas, shared_cas}
+        loop pool in pool_values {
+            pool_path :: pool ?? next
+            if pkg_authority_path_within(pool_path, candidate) && pool_path != candidate -> &excluded.push(pool_path)
+        }
+        allowed_peers += pkg_envelope_count_inode_peers_under_except(candidate, link.key, excluded)
+        if local_cas == {
+            .Val(pool) -> allowed_peers += pkg_envelope_count_cas_peer(pool, link.cas_key, link.key)
+            .None -> {}
+        }
+    }
+    if shared_cas == {
+        .Val(pool) -> {
+            if !local_cas_paths.contains(pool) -> allowed_peers += pkg_envelope_count_cas_peer(pool, link.cas_key, link.key)
+        }
+        .None -> {}
+    }
+    allowed_peers == link.total - link.seen
+}
+
+fn pkg_envelope_canonical_real_directory(path: String) -[FS, Env]> String? Never! {
+    info :: files.stat(path) ?? return None
+    if info.is_symlink || !info.is_dir -> return None
+    canonical :: files.canonicalize(path) ?? return None
+    Val(canonical)
+}
+
+fn pkg_envelope_add_allowed_hangar_root(roots: &[String], candidate: String) {
+    loop root in roots {
+        if pkg_authority_path_within(candidate, root) -> return
+    }
+    kept := [String]{}
+    loop root in roots {
+        if !pkg_authority_path_within(root, candidate) -> &kept.push(root)
+    }
+    &kept.push(candidate)
+    roots = kept
+}
+
+fn pkg_envelope_count_cas_peer(root: String, cas_key: String, key: FileId) -[FS]> Int Never! {
+    info :: files.stat(files.join(root, cas_key)) ?? return 0
+    if info.is_symlink || !info.is_file -> return 0
+    if pkg_envelope_file_identity(info) == Val(key) -> return 1
+    0
+}
+
+// Regular files under `root` sharing `key`, excluding pool directories whose
+// peers are admitted only through their exact CAS key.
+fn pkg_envelope_count_inode_peers_under_except(root: String, key: FileId, excluded: [String]) -[FS]> Int Never! {
+    if excluded.contains(root) -> return 0
+    info :: files.stat(root) ?? return 0
+    if info.is_symlink -> return 0
+    if info.is_file {
+        if pkg_envelope_file_identity(info) == Val(key) -> return 1
+        return 0
+    }
+    if !info.is_dir -> return 0
+    entries :: files.list_dir(root) ?? return 0
+    count := 0
+    loop entry in entries -> count += pkg_envelope_count_inode_peers_under_except(entry.path, key, excluded)
+    count
+}
+
+fn pkg_envelope_encode_node(root: String, path: String, rel: String, archive: &EnvelopeArchive, hardlinks: &[EnvelopeHardlink], allow_semantic_xattrs: Bool, allow_nix_store_symlinks: Bool, hook: &EnvelopeWalkHook) EnvelopeError! -[FS, Env]> {
+    pkg_validate_rel_path_with_mode(rel, allow_nix_store_symlinks) ?? return Err(EnvelopeError.PathLaw(err))
+    info :: files.stat(path) ?? return Err(EnvelopeError.Inspect(path, "{err}"))
+    rel_bytes :: rel.bytes()
+    // Reproducibility certification observes every validated node here, so
+    // first-difference reporting needs no second traversal.
+    &hook.observe(path, EnvelopeWalkStage.Node)
+    // Sparse holes hash as logical zeros; the probe only reports policy.
+    if info.is_file && !info.is_symlink -> pkg_file_has_sparse_holes(path)
+    if info.is_dir {
+        before :: EnvelopeStableIdentity.of(info)
+        before_entries :: pkg_envelope_directory_snapshot(path)
+        // Nix archives are POSIX-only; native ingest owns the Windows
+        // representability laws, while the exact name bytes stay in the digest.
+        if !allow_nix_store_symlinks {
+            names := [[U8]]{}
+            loop entry in before_entries -> &names.push(entry.name.bytes())
+            pkg_reject_casefold_collisions(names) ?? return Err(EnvelopeError.PathLaw(err))
+        }
+        resolved :: files.canonicalize(path) ?? return Err(EnvelopeError.ResolveDirectory(path, "{err}"))
+        if !pkg_authority_path_within(resolved, root) -> return Err(EnvelopeError.DirectoryEscapes(path))
+        &archive.record_header(U8{68}, rel_bytes, pkg_envelope_mode(info))
+        pkg_encode_semantic_xattrs(path, &archive, allow_semantic_xattrs)
+        &hook.observe(path, EnvelopeWalkStage.DirectorySnapshotted)
+        entries := files.list_dir(path) ?? return Err(EnvelopeError.ReadEntries(path, "{err}"))
+        &entries.sort_by(entry -> entry.name)
+        loop entry in entries {
+            child_rel :: if rel == "" -> entry.name else -> "{rel}/{entry.name}"
+            pkg_envelope_encode_node(root, entry.path, child_rel, &archive, &hardlinks, allow_semantic_xattrs, allow_nix_store_symlinks, &hook)
+        }
+        after :: files.stat(path) ?? return Err(EnvelopeError.DirectoryVanished(path, "{err}"))
+        after_entries :: pkg_envelope_directory_snapshot(path)
+        if !before.unchanged(EnvelopeStableIdentity.of(after), allow_nix_store_symlinks) || !pkg_envelope_snapshot_unchanged(before_entries, after_entries, allow_nix_store_symlinks) {
+            return Err(EnvelopeError.DirectoryChanged(path))
+        }
+        return Ok()
+    }
+    if info.is_symlink {
+        target :: files.read_link(path) ?? return Err(EnvelopeError.ReadLink(path, "{err}"))
+        if files.is_abs(target) {
+            if !allow_nix_store_symlinks -> return Err(EnvelopeError.SymlinkEscapes(path))
+            // Nix admission accepts any absolute target as inert link data
+            // (`/bin/sh`, `/run/current-system`); only NUL is impossible.
+            if target.bytes().contains(U8{0}) -> return Err(EnvelopeError.NixTarget("Nix symlink target contains a NUL byte"))
+        } else {
+            parent_depth := 0
+            parts :: rel.split("/").to_list()
+            loop index in 0..<parts.len() - 1 {
+                if parts[index] != "" && parts[index] != "." -> parent_depth += 1
+            }
+            if pkg_validate_relative_nix_store_symlink_target(target, parent_depth, allow_nix_store_symlinks) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    if error.message().contains("escapes output root") -> return Err(EnvelopeError.SymlinkEscapes(path))
+                    return Err(error)
+                }
+            }
+        }
+        &archive.record_header(U8{76}, rel_bytes, pkg_envelope_mode(info))
+        &archive.push_bytes(target.bytes())
+        pkg_encode_semantic_xattrs(path, &archive, allow_semantic_xattrs)
+        return Ok()
+    }
+    if info.is_file {
+        key :: pkg_envelope_file_identity(info)
+        if key == {
+            .Val(identity) -> {
+                loop index in 0..<hardlinks.len() {
+                    if hardlinks[index].key == identity {
+                        hardlinks[index].seen += 1
+                        &archive.record_header(U8{72}, rel_bytes, pkg_envelope_mode(info))
+                        &archive.push_bytes(hardlinks[index].first.bytes())
+                        return Ok()
+                    }
+                }
+            }
+            .None -> {}
+        }
+        &archive.record_header(U8{70}, rel_bytes, pkg_envelope_mode(info))
+        pkg_encode_semantic_xattrs(path, &archive, allow_semantic_xattrs)
+        content_digest :: pkg_envelope_read_file_stable(path, info, allow_nix_store_symlinks, &archive, &hook)
+        if key == {
+            .Val(identity) -> {
+                &hardlinks.push(EnvelopeHardlink{key: identity, first: rel, seen: 1, total: info.links, cas_key: pkg_envelope_cas_key(info, content_digest)})
+            }
+            .None -> {}
+        }
+        return Ok()
+    }
+    Err(EnvelopeError.SpecialFile(path))
+}
+
+// An absolute Nix symlink root target must be a canonical `/nix/store` path.
+fn pkg_validate_nix_store_symlink_target(target: String) EnvelopeError! {
+    bytes :: target.bytes()
+    has_control := false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if code < 32 || code == 127 -> has_control = true
+    }
+    if bytes.len() == 0 || target.contains("//") || bytes.contains(U8{92}) || has_control {
+        return Err(EnvelopeError.NixTarget("Nix symlink target is not a canonical absolute store path"))
+    }
+    parts :: target.split("/").to_list()
+    if parts.len() < 3 || parts[0] != "" || parts[1] != "nix" || parts[2] != "store" {
+        return Err(EnvelopeError.NixTarget("Nix symlink target is not under /nix/store"))
+    }
+    if parts.len() < 4 || parts[3] == "" -> return Err(EnvelopeError.NixTarget("Nix symlink target has no store object"))
+    pkg_validate_nix_store_component(parts[3], "store object")
+    loop index in 4..<parts.len() {
+        component :: parts[index]
+        if component == "" || component == "." -> next
+        if component == ".." -> return Err(EnvelopeError.NixTarget("Nix symlink target contains a traversal component"))
+        pkg_validate_nix_store_component(component, "component")
+    }
+    Ok()
+}
+
+fn pkg_validate_nix_store_component(value: String, label: String) EnvelopeError! {
+    pkg_validate_path_component(value.bytes()) ?? return Err(EnvelopeError.NixTarget("Nix symlink target has an unsafe {label}: {err.detail}"))
+    Ok()
+}
+
+// Native relative links stay inside the output. Nix admission accepts a
+// relative target that escapes the root as inert link data (NARs reference
+// sibling store objects and host config such as systemd's
+// `../../../../../etc/environment`); every named component still passes the
+// Nix path law and hashing never follows the link.
+fn pkg_validate_relative_nix_store_symlink_target(target: String, parent_depth: Int, allow_nix_store_symlinks: Bool) EnvelopeError! {
+    depth := parent_depth
+    crossed_root := false
+    parts :: target.split("/").to_list()
+    loop index in 0..<parts.len() {
+        component :: parts[index]
+        // Rust `Path::components` skips empty and interior `.` components.
+        if component == "" || (component == "." && index > 0) -> next
+        if crossed_root {
+            if component == "." || component == ".." -> next
+            pkg_validate_path_component_with_mode(component.bytes(), true) ?? return Err(EnvelopeError.NixTarget("Nix symlink target has an unsafe component: {err.detail}"))
+            next
+        }
+        if component == {
+            "." -> {}
+            ".." -> {
+                if depth > 0 {
+                    depth -= 1
+                } else if allow_nix_store_symlinks {
+                    crossed_root = true
+                } else {
+                    return Err(EnvelopeError.NixTarget("Nix relative symlink escapes output root"))
+                }
+            }
+            else -> depth += 1
+        }
+    }
+    Ok()
+}
+
+// Hash one regular file's bytes from a no-follow handle, refusing a file
+// whose identity drifts before or while it is read. Returns the hex digest
+// of the file content.
+fn pkg_envelope_read_file_stable(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, archive: &EnvelopeArchive, hook: &EnvelopeWalkHook) -[FS]> String EnvelopeError! {
+    reader :: files.open(path, links: .Refuse) ?? return Err(EnvelopeError.OpenNoFollow(path, "{err}"))
+    before :: reader.stat() ?? return Err(EnvelopeError.InspectOpen(path, "{err}"))
+    if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(expected), allow_hardlink_metadata_changes) {
+        return Err(EnvelopeError.ChangedBefore(path))
+    }
+    &hook.observe(path, EnvelopeWalkStage.FileOpened)
+    &archive.update(pkg_u64_be_bytes(expected.size))
+    content := crypto.Hasher.new()
+    // Fixed-size reads keep hashing bounded by the chunk plus metadata.
+    loop {
+        chunk :: reader.read(@ENVELOPE_READ_CHUNK) ?? return Err(EnvelopeError.ReadEntries(path, "{err}"))
+        if chunk.len() == 0 -> break
+        &archive.update(chunk)
+        &content.update(chunk)
+    }
+    after :: reader.stat() ?? return Err(EnvelopeError.Reinspect(path, "{err}"))
+    if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(after), allow_hardlink_metadata_changes) {
+        return Err(EnvelopeError.FileChanged(path))
+    }
+    Ok(content.digest())
+}
+
+// One directory entry observed without following links.
+struct EnvelopeEntrySnapshot {
+    name: String
+    kind: U8
+    identity: EnvelopeStableIdentity
+}
+
+fn pkg_envelope_directory_snapshot(path: String) -[FS]> [EnvelopeEntrySnapshot] EnvelopeError! {
+    listed :: files.list_dir(path) ?? return Err(EnvelopeError.Snapshot(path, "{err}"))
+    entries := [EnvelopeEntrySnapshot]{}
+    loop entry in listed {
+        info :: files.stat(entry.path) ?? return Err(EnvelopeError.Inspect(entry.path, "{err}"))
+        kind :: if {
+            info.is_dir -> U8{68}
+            info.is_file -> U8{70}
+            info.is_symlink -> U8{76}
+            else -> U8{83}
+        }
+        &entries.push(EnvelopeEntrySnapshot{name: entry.name, kind: kind, identity: EnvelopeStableIdentity.of(info)})
+    }
+    &entries.sort_by(entry -> entry.name)
+    Ok(entries)
+}
+
+fn pkg_envelope_snapshot_unchanged(before: [EnvelopeEntrySnapshot], after: [EnvelopeEntrySnapshot], allow_hardlink_metadata_changes: Bool) -> Bool Never! {
+    if before.len() != after.len() -> return false
+    loop index in 0..<before.len() {
+        left :: before[index]
+        right :: after[index]
+        if left.name != right.name || left.kind != right.kind -> return false
+        if !left.identity.unchanged(right.identity, allow_hardlink_metadata_changes) -> return false
+    }
+    true
+}
+
+// The (device, inode, length, mtime, ctime, mode, link count) identity a
+// node must keep while it is hashed.
+struct EnvelopeStableIdentity {
+    device: Int
+    inode: Int
+    length: Int
+    modified_ns: Int
+    changed_ns: Int
+    mode: Int
+    links: Int
+
+    fn of(info: Stat) -> EnvelopeStableIdentity Never! {
+        EnvelopeStableIdentity{
+            device: info.id.device,
+            inode: info.id.inode,
+            length: info.size,
+            modified_ns: info.modified.unix_ns,
+            changed_ns: info.changed.unix_ns,
+            mode: info.mode,
+            links: info.links
+        }
+    }
+
+    // Equal, or (Nix admission) differing only in link count and ctime while
+    // content-relevant identity is unchanged.
+    fn unchanged(self, after: EnvelopeStableIdentity, allow_hardlink_metadata_changes: Bool) -> Bool Never! {
+        if self == after -> return true
+        allow_hardlink_metadata_changes
+            && self.device == after.device
+            && self.inode == after.inode
+            && self.length == after.length
+            && self.modified_ns == after.modified_ns
+            && self.mode == after.mode
+            && self.links != after.links
+    }
+}
+
+// The archive mode word: the Unix mode, or the readonly bit elsewhere.
+fn pkg_envelope_mode(info: Stat) -[Env]> Int Never! {
+    if sys.is_unix() -> return info.mode
+    if info.readonly -> return 1
+    0
+}
+
+// A regular file's hardlink key, present only when it has several names.
+fn pkg_envelope_file_identity(info: Stat) -> FileId? Never! {
+    if info.links > 1 -> return Val(info.id)
+    None
+}
+
+// `<content sha256 hex>-<mode & 0o7777 as 8 hex digits>`: the CAS pool name.
+fn pkg_envelope_cas_key(info: Stat, content_digest: String) -[Env]> String Never! {
+    "{content_digest}-{pkg_envelope_hex8(pkg_envelope_mode(info) & 0o7777)}"
+}
+
+fn pkg_envelope_hex8(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    shift_values :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
+    loop shift in shift_values -> &out.push(digits[(value >> shift) & 15])
+    String.from_bytes(out) ?? ""
+}

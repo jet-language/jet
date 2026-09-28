@@ -5,7 +5,7 @@
 
 // The native provider's cache expectation for a toolchain ref: the verified
 // Hangar descriptor's identity, or None when there is none yet.
-pub fn provider_cc_toolchain_cache_expectation(spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> ?CacheExpectation !Never {
+pub fn provider_cc_toolchain_cache_expectation(spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
     target :: provider_cc_toolchain_requested_target(spec) ?? return None
     descriptor :: provider_cc_toolchain_resolve_for_target(ctx.store_dir, target, ctx.fixtures != None) ?? return None
     Val(CacheExpectation{identity: descriptor.cache_identity(ctx), owned_output: Val(descriptor.root), allow_unsigned_local: true})
@@ -14,7 +14,7 @@ pub fn provider_cc_toolchain_cache_expectation(spec: RefSpec, ctx: ProviderCtx) 
 // The download plan for toolchain refs: cached when Hangar already holds a
 // verified descriptor, new for a fixture bundle, otherwise the signed Nix
 // closure's download plan.
-pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> DownloadPlan !ProviderError {
+pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> DownloadPlan ProviderError! {
     plan := DownloadPlan.empty()
     loop spec in specs {
         target :: provider_cc_toolchain_requested_target(spec) ?? {
@@ -64,7 +64,7 @@ pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) 
 
 // Realize a toolchain ref: the verified Hangar descriptor, else a fixture
 // bundle, else the signed Nix acquisition.
-pub fn provider_cc_toolchain_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Realized !ProviderError {
+pub fn provider_cc_toolchain_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Realized ProviderError! {
     target :: provider_cc_toolchain_requested_target(spec) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
@@ -90,14 +90,14 @@ pub fn provider_cc_toolchain_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env,
 }
 
 // No signed index: offline is E1276, otherwise the provider refuses to guess.
-fn provider_cc_missing_index_error(offline: Bool, offline_message: String) -> ProviderError !Never {
+fn provider_cc_missing_index_error(offline: Bool, offline_message: String) -> ProviderError Never! {
     if offline -> return ProviderError.Offline(offline_message)
     ProviderError.Unsupported("the signed C/C++ toolchain index is not configured; Jet will not use a host or PATH compiler")
 }
 
 // The compiler and linker records of the pinned acquisition, resolved from the
 // official signed index on the record's own Nix system.
-fn provider_cc_resolve_nix_records(index: NixIndexClient, record: CcNixAcquisitionRecord) -[Env, Net, Time.Wait]> (compiler: VerifiedIndexRecord, linker: VerifiedIndexRecord) !ProviderError {
+fn provider_cc_resolve_nix_records(index: NixIndexClient, record: CcNixAcquisitionRecord) -[Env, Net, Time.Wait]> (compiler: VerifiedIndexRecord, linker: VerifiedIndexRecord) ProviderError! {
     host_system :: provider_host_nix_system()
     if host_system != Val(record.system) {
         machine :: host_system ?? "an unsupported host"
@@ -108,7 +108,7 @@ fn provider_cc_resolve_nix_records(index: NixIndexClient, record: CcNixAcquisiti
     Ok((compiler: compiler, linker: linker))
 }
 
-fn provider_cc_resolve_nix_record(index: NixIndexClient, record: CcNixAcquisitionRecord, attrpath: [String], role: String) -[Env, Net, Time.Wait]> VerifiedIndexRecord !ProviderError {
+fn provider_cc_resolve_nix_record(index: NixIndexClient, record: CcNixAcquisitionRecord, attrpath: [String], role: String) -[Env, Net, Time.Wait]> VerifiedIndexRecord ProviderError! {
     key :: record.index_key(attrpath)
     verified :: index.resolve(key) ?? {
         return Err(ProviderError.NixIndex(err))
@@ -123,13 +123,13 @@ fn provider_cc_resolve_nix_record(index: NixIndexClient, record: CcNixAcquisitio
 }
 
 // The record's `out` store path, validated.
-fn provider_cc_signed_output_path(record: VerifiedIndexRecord, role: String) -> String !CcToolchainError {
+fn provider_cc_signed_output_path(record: VerifiedIndexRecord, role: String) -> String CcToolchainError! {
     path :: record.record.outputs.get("out") ?? return Err(CcToolchainError.Invalid("signed C/C++ {role} record has no `out` output"))
     provider_cc_validate_nix_store_path(path)
     Ok(path)
 }
 
-fn provider_cc_realize_nix(spec: RefSpec, ctx: ProviderCtx, target: String) -[FS, Env, Net, Time.Wait]> Realized !ProviderError {
+fn provider_cc_realize_nix(spec: RefSpec, ctx: ProviderCtx, target: String) -[FS, Env, Net, Time.Wait]> Realized ProviderError! {
     record :: provider_cc_acquisition_record(target) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
@@ -156,7 +156,7 @@ fn provider_cc_realize_nix(spec: RefSpec, ctx: ProviderCtx, target: String) -[FS
 // The Nix-layout descriptor for an admitted closure: role roots are the
 // admitted compiler, linker, and marker-named sysroot objects, and every tool
 // byte is hashed from the admitted object pool.
-fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord, admitted: AdmittedNixClosure, roots: HangarRoots) -[FS, Env]> CcToolchainDescriptor !ProviderError {
+fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord, admitted: AdmittedNixClosure, roots: HangarRoots) -[FS, Env]> CcToolchainDescriptor ProviderError! {
     if admitted.objects.len() == 0 {
         return Err(ProviderError.BadOutput("signed C/C++ toolchain admission returned an empty closure"))
     }
@@ -188,7 +188,7 @@ fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: V
         if entry.value.hangar_digest != compiler.hangar_digest -> reference_set[entry.value.hangar_digest] = true
     }
     references := reference_set.keys().to_list()
-    references.sort()
+    &references.sort()
     compiler_sha256 :: provider_cc_sha256_file_hex(files.join(compiler_root, record.compiler_path)) ?? {
         return Err(ProviderError.BadOutput("hash C compiler: {err}"))
     }
@@ -236,9 +236,9 @@ fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: V
 }
 
 // One read-only mount per admitted closure object, in store-path order.
-fn provider_cc_admitted_mounts(roots: HangarRoots, admitted: AdmittedNixClosure) -[FS, Env]> [CcMount] !ProviderError {
+fn provider_cc_admitted_mounts(roots: HangarRoots, admitted: AdmittedNixClosure) -[FS, Env]> [CcMount] ProviderError! {
     store_paths := admitted.objects.keys().to_list()
-    store_paths.sort()
+    &store_paths.sort()
     mounts := [CcMount]{}
     loop store_path in store_paths {
         object :: admitted.objects[store_path]
@@ -252,14 +252,14 @@ fn provider_cc_admitted_mounts(roots: HangarRoots, admitted: AdmittedNixClosure)
             return Err(ProviderError.BadOutput(err.message()))
         }
         source :: provider_cc_checked_admitted_object(roots, object, "closure object")
-        mounts.push(CcMount{store_path: store_path, digest: object.hangar_digest, source: source, destination: store_path})
+        &mounts.push(CcMount{store_path: store_path, digest: object.hangar_digest, source: source, destination: store_path})
     }
     Ok(mounts)
 }
 
 // An admitted object's canonical path inside the content-addressed pool,
 // named by its own digest.
-fn provider_cc_checked_admitted_object(roots: HangarRoots, object: AdmittedNixObject, label: String) -[FS, Env]> String !ProviderError {
+fn provider_cc_checked_admitted_object(roots: HangarRoots, object: AdmittedNixObject, label: String) -[FS, Env]> String ProviderError! {
     provider_cc_validate_tree_digest(object.hangar_digest, "{label} digest") ?? {
         return Err(ProviderError.BadOutput(err.message()))
     }
@@ -277,7 +277,7 @@ fn provider_cc_checked_admitted_object(roots: HangarRoots, object: AdmittedNixOb
 }
 
 // The sysroot store path named by the compiler's `nix-support` marker.
-fn provider_cc_read_store_path_marker(path: String) -[FS]> String !ProviderError {
+fn provider_cc_read_store_path_marker(path: String) -[FS]> String ProviderError! {
     bytes :: provider_cc_read_bounded_file(path, @CC_TOOLCHAIN_MAX_MARKER_BYTES, "C/C++ sysroot marker") ?? {
         return Err(ProviderError.BadOutput(err.message()))
     }
@@ -289,7 +289,7 @@ fn provider_cc_read_store_path_marker(path: String) -[FS]> String !ProviderError
     Ok(store_path)
 }
 
-fn provider_cc_realized_from_descriptor(spec: RefSpec, ctx: ProviderCtx, descriptor: CcToolchainDescriptor, source_state: SourceState) -[Env]> Realized !Never {
+fn provider_cc_realized_from_descriptor(spec: RefSpec, ctx: ProviderCtx, descriptor: CcToolchainDescriptor, source_state: SourceState) -[Env]> Realized Never! {
     Realized{
         name: @CC_TOOLCHAIN_PACKAGE,
         version: descriptor.version,
@@ -308,7 +308,7 @@ fn provider_cc_realized_from_descriptor(spec: RefSpec, ctx: ProviderCtx, descrip
 
 // Copy a fixture bundle into a private staging directory, seal and re-verify
 // it, then publish it by rename. A failed attempt removes the staging tree.
-fn provider_cc_provision_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBundleManifest) -[FS, Env]> Realized !ProviderError {
+fn provider_cc_provision_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBundleManifest) -[FS, Env]> Realized ProviderError! {
     host :: provider_cc_toolchain_host_target_triple()
     if manifest.host != host {
         return Err(ProviderError.Unsupported("C toolchain bundle host `{manifest.host}` does not match this machine `{host}`"))
@@ -335,7 +335,7 @@ fn provider_cc_provision_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBu
     }
 }
 
-fn provider_cc_publish_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBundleManifest, bundle_root: String, staging: String, output: String) -[FS, Env]> Realized !CcToolchainError {
+fn provider_cc_publish_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBundleManifest, bundle_root: String, staging: String, output: String) -[FS, Env]> Realized CcToolchainError! {
     provider_cc_copy_tree(bundle_root, staging)
     store_seal_local_output(staging) ?? {
         return Err(CcToolchainError.Invalid("could not seal C toolchain bundle: {err.message()}"))
@@ -374,7 +374,7 @@ fn provider_cc_publish_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBund
 // The fixture manifest for a target: `jet-cc-toolchain-<target>.json`, or the
 // generic `jet-cc-toolchain.json` for the host target. None when neither is a
 // regular file.
-fn provider_cc_fixture_manifest(fixtures: String, target: String) -[FS, Env]> ?CcBundleManifest !CcToolchainError {
+fn provider_cc_fixture_manifest(fixtures: String, target: String) -[FS, Env]> CcBundleManifest? CcToolchainError! {
     normalized :: provider_cc_normalize_target(target)
     host :: provider_cc_toolchain_host_target_triple()
     exact :: files.join(fixtures, "{@CC_TOOLCHAIN_FIXTURE_MANIFEST}-{normalized}.json")
@@ -386,26 +386,26 @@ fn provider_cc_fixture_manifest(fixtures: String, target: String) -[FS, Env]> ?C
 }
 
 // The exact manifest, else the generic one for the host target.
-fn provider_cc_fixture_manifest_path(exact: String, generic: String, host_target: Bool) -[FS]> ?String !Never {
+fn provider_cc_fixture_manifest_path(exact: String, generic: String, host_target: Bool) -[FS]> String? Never! {
     if provider_cc_is_regular_file(exact) -> return Val(exact)
     if host_target && provider_cc_is_regular_file(generic) -> return Val(generic)
     None
 }
 
 // A regular file that is not a symlink.
-fn provider_cc_is_regular_file(path: String) -[FS]> Bool !Never {
+fn provider_cc_is_regular_file(path: String) -[FS]> Bool Never! {
     metadata :: files.stat(path) ?? return false
     metadata.is_file && !metadata.is_symlink
 }
 
 // `symlink_metadata(path).is_ok()`.
-fn provider_cc_node_exists(path: String) -[FS]> Bool !Never {
+fn provider_cc_node_exists(path: String) -[FS]> Bool Never! {
     _ :: files.stat(path) ?? return false
     true
 }
 
 // The manifest's bundle directory under the fixture root.
-fn provider_cc_manifest_bundle_root(fixtures: ?String, manifest: CcBundleManifest) -[FS]> String !CcToolchainError {
+fn provider_cc_manifest_bundle_root(fixtures: String?, manifest: CcBundleManifest) -[FS]> String CcToolchainError! {
     fixture_root :: fixtures ?? return Err(CcToolchainError.Invalid("C toolchain fixture root is missing"))
     root :: provider_cc_checked_relative_path(fixture_root, manifest.bundle, "bundle")
     metadata :: files.stat(root) ?? {
@@ -415,7 +415,7 @@ fn provider_cc_manifest_bundle_root(fixtures: ?String, manifest: CcBundleManifes
     Ok(root)
 }
 
-fn provider_cc_verify_manifest_payload(root: String, manifest: CcBundleManifest) !CcToolchainError -[FS]> {
+fn provider_cc_verify_manifest_payload(root: String, manifest: CcBundleManifest) CcToolchainError! -[FS]> {
     provider_cc_verify_file(root, manifest.compiler, manifest.compiler_sha256, "compiler")
     provider_cc_verify_file(root, manifest.cxx, manifest.cxx_sha256, "C++ compiler")
     provider_cc_verify_file(root, manifest.linker, manifest.linker_sha256, "linker")
@@ -431,12 +431,12 @@ struct CcCopyBudget {
 
 // Copy a bundle tree in name order, refusing symlinks and special files and
 // preserving permission bits, within the node and byte limits.
-fn provider_cc_copy_tree(source: String, destination: String) !CcToolchainError -[FS]> {
+fn provider_cc_copy_tree(source: String, destination: String) CcToolchainError! -[FS]> {
     _ :: provider_cc_copy_tree_node(source, destination, CcCopyBudget{nodes: 0, bytes: 0})
     Ok()
 }
 
-fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopyBudget) -[FS]> CcCopyBudget !CcToolchainError {
+fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopyBudget) -[FS]> CcCopyBudget CcToolchainError! {
     budget := spent
     budget.nodes += 1
     if budget.nodes > @CC_TOOLCHAIN_MAX_BUNDLE_NODES -> return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
@@ -452,8 +452,8 @@ fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopy
             return Err(CcToolchainError.Invalid("read C toolchain bundle directory: {err}"))
         }
         names := [String]{}
-        loop child in children -> names.push(child.name)
-        names.sort()
+        loop child in children -> &names.push(child.name)
+        &names.sort()
         loop name in names {
             budget = provider_cc_copy_tree_node(files.join(source, name), files.join(destination, name), budget)
         }
@@ -483,7 +483,7 @@ fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopy
 }
 
 // Create the Hangar directory and insist it is a real directory.
-fn provider_cc_ensure_real_directory(path: String) !CcToolchainError -[FS]> {
+fn provider_cc_ensure_real_directory(path: String) CcToolchainError! -[FS]> {
     files.create_dir_all(path) ?? {
         return Err(CcToolchainError.Invalid("create Hangar directory: {err}"))
     }

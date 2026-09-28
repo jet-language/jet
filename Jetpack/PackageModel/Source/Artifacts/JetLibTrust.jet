@@ -1,0 +1,145 @@
+// The `.jetlib` pre-map trust boundary (jet-pkg-model JetLib.rs).
+//
+// c2, compiler identity (D-LIB-REUSE1=B): both sides of a load share the exact
+// compiler that built them; Jet makes no cross-version layout promise, so a
+// mismatch is a checked refusal (E1338), never a crash.
+// c3, declared-effect grant (D-LIB-DYNTRUST1=A): a library declares its
+// effects like any package and the host states its grant at the load site;
+// asking for more is refused (E1339).
+// Identity is checked first, so a forged or foreign artifact fails the pin
+// before anything about its claimed effects is trusted.
+
+pub fn pkg_jetlib_validate_payload_digest(stamp: JetLibStamp, payload: [U8]) JetLibError! {
+    if stamp.payload_digest == "" {
+        return Err(JetLibError.new("E1341: library `{pkg_jetlib_display_name(stamp)}` has no native payload digest"))
+    }
+    actual :: pkg_jetlib_payload_digest(payload)
+    if stamp.payload_digest != actual {
+        return Err(JetLibError.new("E1341: library `{stamp.library_name}` payload digest is `{stamp.payload_digest}`, but the artifact contains `{actual}`"))
+    }
+    Ok()
+}
+
+fn pkg_jetlib_display_name(stamp: JetLibStamp) -> String Never! {
+    if stamp.library_name == "" -> return "<unnamed>"
+    stamp.library_name
+}
+
+fn pkg_jetlib_valid_payload_digest(digest: String) -> Bool Never! {
+    if !digest.starts_with("sha256-") -> return false
+    hex :: digest.removeprefix("sha256-").bytes()
+    if hex.len() != 64 -> return false
+    loop byte in hex {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// Validate metadata meaningful only at the native load boundary. Compiler
+// identity stays a separate first check so E1338 wins over any untrusted
+// effect or ABI claim.
+pub fn pkg_jetlib_validate_load_metadata(stamp: JetLibStamp) JetLibError! -[Env]> {
+    if stamp.abi_version != @JETLIB_ABI_VERSION {
+        return Err(JetLibError.new("E1341: library `{pkg_jetlib_display_name(stamp)}` uses unsupported .jetlib ABI version {stamp.abi_version}; this loader accepts ABI version {@JETLIB_ABI_VERSION}"))
+    }
+    if stamp.library_name == "" || stamp.library_name.bytes().contains(U8{0}) {
+        return Err(JetLibError.new("E1341: .jetlib metadata has no valid Library name"))
+    }
+    if stamp.entry == {
+        .Val(entry) -> {
+            if entry == "" || entry.bytes().contains(U8{0}) -> return Err(JetLibError.new("E1341: .jetlib metadata has an invalid output entry"))
+        }
+        .None -> {}
+    }
+    identities :: [(label: String, value: String)]{
+        (label: "compiler build", value: stamp.compiler_build),
+        (label: "target triple", value: stamp.target_triple),
+        (label: "linker identity", value: stamp.linker_identity)
+    }
+    loop identity in identities {
+        if identity.value == "" || identity.value.bytes().contains(U8{0}) {
+            return Err(JetLibError.new("E1341: .jetlib metadata has no valid {identity.label}"))
+        }
+    }
+    if stamp.abi_identity != @JETLIB_ABI_IDENTITY {
+        return Err(JetLibError.new("E1341: library `{stamp.library_name}` uses unsupported native ABI identity `{stamp.abi_identity}`"))
+    }
+    if !pkg_jetlib_valid_payload_digest(stamp.payload_digest) {
+        return Err(JetLibError.new("E1341: library `{stamp.library_name}` has an invalid payload digest"))
+    }
+    target :: pkg_jetlib_current_target()
+    if stamp.target != target {
+        return Err(JetLibError.new("E1341: library `{stamp.library_name}` targets `{stamp.target}`, but this loader targets `{target}`"))
+    }
+    if stamp.exports.len() == 0 {
+        return Err(JetLibError.new("E1341: library `{stamp.library_name}` has no exported functions"))
+    }
+    names := [String: Bool]{}
+    symbols := [String: Bool]{}
+    loop export in stamp.exports {
+        if export.name == "" || export.name.bytes().contains(U8{0}) {
+            return Err(JetLibError.new("E1341: .jetlib metadata has an invalid export name"))
+        }
+        if export.symbol == "" || export.symbol.bytes().contains(U8{0}) || export.symbol != pkg_jetlib_c_symbol(export.name) {
+            return Err(JetLibError.new("E1341: .jetlib export `{export.name}` has an invalid native symbol `{export.symbol}`"))
+        }
+        if names.has_key(export.name) -> return Err(JetLibError.new("E1341: .jetlib metadata repeats export `{export.name}`"))
+        names[export.name] = true
+        if symbols.has_key(export.symbol) -> return Err(JetLibError.new("E1341: .jetlib metadata repeats native symbol `{export.symbol}`"))
+        symbols[export.symbol] = true
+        if export.params < 0 || export.params > @JETLIB_MAX_EXPORT_PARAMS || export.conventions.len() != export.params {
+            return Err(JetLibError.new("E1341: .jetlib export `{export.name}` has invalid access-convention metadata"))
+        }
+    }
+    Ok()
+}
+
+// E1338: the artifact's compiler-identity stamp does not match the running
+// compiler, refused before the artifact is mapped.
+pub fn pkg_e1338(artifact_version: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1338", None,
+        "this loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{@COMPILER_VERSION}`",
+        "a `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped",
+        "rebuild the library with the loading program's Jet version, or install a matching Jet toolchain")
+}
+
+// E1339: a loaded library declares an effect the load site's grant does not cover.
+pub fn pkg_e1339(library: String, effect_name: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1339", None,
+        "library `{library}` declares the `{effect_name}` effect, which this load site doesn't grant",
+        "a loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped",
+        "widen the grant at the load site to include `{effect_name}`, or remove the effect from the library")
+}
+
+// Why a stamp is refused before mapping: one or more E1338/E1339 reports.
+#Error
+pub struct JetLibRefusal {
+    pub diagnostics: [Diagnostic]
+}
+
+// c2: refuse before mapping when the compiler identity differs.
+pub fn pkg_jetlib_check_compiler_identity(stamp: JetLibStamp) JetLibRefusal! {
+    if stamp.compiler_version != @COMPILER_VERSION {
+        return Err(JetLibRefusal{diagnostics: [Diagnostic]{pkg_e1338(stamp.compiler_version)}})
+    }
+    Ok()
+}
+
+// c3: refuse before mapping when a declared effect is outside `grant`.
+// Coverage, not exact membership, matches an ancestor grant to a leaf effect
+// (D-EFFTREE1), the rule the whole-graph budget uses.
+pub fn pkg_jetlib_check_effect_grant(library: String, stamp: JetLibStamp, grant: [String]) JetLibRefusal! {
+    diagnostics := [Diagnostic]{}
+    loop effect_name in authority_holds(stamp.declared_effects) {
+        if !authority_covers_any(grant, effect_name) -> &diagnostics.push(pkg_e1339(library, effect_name))
+    }
+    if diagnostics.len() == 0 -> return Ok()
+    Err(JetLibRefusal{diagnostics: diagnostics})
+}
+
+// The single "before mapping" gate: compiler identity first, then the grant.
+pub fn pkg_jetlib_check_before_map(library: String, stamp: JetLibStamp, grant: [String]) JetLibRefusal! {
+    pkg_jetlib_check_compiler_identity(stamp)
+    pkg_jetlib_check_effect_grant(library, stamp, grant)
+}

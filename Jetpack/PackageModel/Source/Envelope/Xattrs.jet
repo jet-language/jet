@@ -1,0 +1,94 @@
+// Extended-attribute and sparse-file policy of the hangar envelope
+// (jet-pkg-model Envelope.rs). Security/quarantine xattrs are excluded from
+// identity; any other ("semantic") xattr needs an explicit platform artifact
+// kind or ingest fails closed. Sparse holes hash as zero-filled logical bytes:
+// physical allocation is never identity.
+//
+// Attribute listing/reading never follows links (D-CORE-FILEXATTR1); the
+// sparse probe reads the ratified allocation size (D-CORE-FILESTAT1
+// `size_on_disk`) instead of a SEEK_HOLE descriptor probe.
+
+// Security / quarantine xattr prefixes excluded from hangar identity.
+@ENVELOPE_EXCLUDED_XATTR_PREFIXES :: [String]{
+    "security.",
+    "trusted.",
+    "system.nfs4_acl",
+    "com.apple.quarantine",
+    "com.apple.macl",
+    "com.apple.provenance"
+}
+
+// True when `name` is a security/quarantine xattr Hangar strips from identity.
+pub fn pkg_is_excluded_xattr(name: String) -> Bool Never! {
+    loop prefix in @ENVELOPE_EXCLUDED_XATTR_PREFIXES {
+        if name == prefix || name.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// The xattr names on `path`, without following a final link.
+pub fn pkg_list_xattr_names(path: String) -[FS]> [String] EnvelopeError! {
+    names :: files.extended_attribute_names(path) ?? return Err(EnvelopeError.Xattr("cannot inspect xattrs on `{path}`: {err}"))
+    Ok(names)
+}
+
+// The semantic (non-excluded) xattr names on `path`, sorted.
+fn pkg_semantic_xattr_names(path: String) -[FS]> [String] EnvelopeError! {
+    semantic := [String]{}
+    loop name in pkg_list_xattr_names(path) {
+        if !pkg_is_excluded_xattr(name) -> &semantic.push(name)
+    }
+    &semantic.sort()
+    Ok(semantic)
+}
+
+fn pkg_semantic_xattr_rejection(path: String, names: [String]) -> EnvelopeError Never! {
+    EnvelopeError.Xattr("unsupported semantic xattr(s) on `{path}`: {names.join(", ")} — set an explicit platform artifact kind to keep them")
+}
+
+// Reject semantic xattrs unless an explicit platform artifact kind allows
+// them. Excluded security/quarantine names are ignored.
+pub fn pkg_check_xattrs(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
+    names := [String]{}
+    loop name in pkg_list_xattr_names(path) {
+        if !pkg_is_excluded_xattr(name) -> &names.push(name)
+    }
+    if names.len() == 0 || allow_semantic_xattrs -> return Ok()
+    Err(pkg_semantic_xattr_rejection(path, names))
+}
+
+// Append every allowed semantic xattr of `path` to the canonical archive:
+// `X`, then the length-prefixed name and value, in name order.
+fn pkg_encode_semantic_xattrs(path: String, archive: &EnvelopeArchive, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
+    names :: pkg_semantic_xattr_names(path)
+    if names.len() == 0 -> return Ok()
+    if !allow_semantic_xattrs -> return Err(pkg_semantic_xattr_rejection(path, names))
+    loop name in names {
+        value :: pkg_xattr_value(path, name)
+        &archive.update([U8]{U8{88}})
+        &archive.push_bytes(name.bytes())
+        &archive.push_bytes(value)
+    }
+    Ok()
+}
+
+fn pkg_xattr_value(path: String, name: String) -[FS]> [U8] EnvelopeError! {
+    if files.extended_attribute(path, name: name) == {
+        .Ok(found) -> {
+            value :: found ?? return Err(EnvelopeError.Xattr("lgetxattr `{name}` failed: the attribute is absent"))
+            Ok(value)
+        }
+        .Err(error) -> Err(EnvelopeError.Xattr("lgetxattr `{name}` failed: {error}"))
+    }
+}
+
+// Sparse-file policy (JP1): whether a regular file has unallocated holes.
+// Holes never change the digest; the probe only reports policy. Linux only,
+// as in the reference; other hosts report no holes.
+pub fn pkg_file_has_sparse_holes(path: String) -[FS, Env]> Bool EnvelopeError! {
+    if !sys.is_linux() -> return Ok(false)
+    reader :: files.open(path, links: .Refuse) ?? return Err(EnvelopeError.SparseProbe(path, "{err}"))
+    info :: reader.stat() ?? return Err(EnvelopeError.SparseStat(path, "{err}"))
+    if info.size == 0 -> return Ok(false)
+    Ok(info.size_on_disk < info.size)
+}

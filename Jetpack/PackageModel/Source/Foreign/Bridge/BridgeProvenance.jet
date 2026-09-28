@@ -18,7 +18,7 @@ pub struct BridgeSource {
 pub struct ArchiveInput {
     pub library: String
     pub path: String
-    pub bytes: ?[U8]
+    pub bytes: [U8]?
 }
 
 // Parsed artifact provenance. Repeated fields keep insertion order.
@@ -28,7 +28,7 @@ pub struct ForeignProvenance {
     pub fields: [String: [String]]
 
     // The first value recorded for a field.
-    fn value(self, name: String) -> ?String !Never {
+    fn value(self, name: String) -> String? Never! {
         values :: self.fields.get(name) ?? return None
         if values.len() == 0 -> return None
         Val(values[0])
@@ -37,33 +37,33 @@ pub struct ForeignProvenance {
 
 // The target identity used by adapters that do not receive a target argument.
 // An environment-provided target wins over host guessing.
-pub fn pkg_bridge_foreign_host_target() -[Env]> String !Never {
+pub fn pkg_bridge_foreign_host_target() -[Env]> String Never! {
     if sys.get("JET_TARGET") == .Val(target) -> return target
     if sys.get("TARGET") == .Val(target) -> return target
     "{sys.arch()}-{sys.name()}"
 }
 
 // Append one `name=value` line; line breaks and `=` in names are refused.
-fn pkg_bridge_append_line(text: &String, name: String, value: String) -> () !ForeignBridgeError {
+fn pkg_bridge_append_line(text: &String, name: String, value: String) ForeignBridgeError! {
     carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
     if name == "" || value == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance fields cannot contain line breaks or `=`"))
     text = text + "{name}={value}\n"
     Ok(())
 }
 
-fn pkg_bridge_field_value(fields: [(name: String, value: String)], name: String) -> ?String !Never {
+fn pkg_bridge_field_value(fields: [(name: String, value: String)], name: String) -> String? Never! {
     loop field in fields {
         if field.name == name -> return Val(field.value)
     }
     None
 }
 
-fn pkg_bridge_bool_text(value: Bool) -> String !Never {
+fn pkg_bridge_bool_text(value: Bool) -> String Never! {
     if value -> "true" else -> "false"
 }
 
 // The capability rows that follow every appended boundary row.
-fn pkg_bridge_append_capability_lines(text: &String, language: ForeignLanguage) -> () !ForeignBridgeError {
+fn pkg_bridge_append_capability_lines(text: &String, language: ForeignLanguage) ForeignBridgeError! {
     capability :: pkg_foreign_boundary_capability(language)
     pkg_bridge_append_line(text, "boundary-mixed-debug", pkg_bridge_bool_text(capability.mixed_debug))
     pkg_bridge_append_line(text, "boundary-native-export", pkg_bridge_bool_text(capability.native_export))
@@ -75,7 +75,7 @@ fn pkg_bridge_append_capability_lines(text: &String, language: ForeignLanguage) 
 // Render the common queryable provenance format without publishing a file.
 // Binders use this when their result object carries the record to a CLI
 // writer; `pkg_bridge_write_provenance` uses the same formatter on disk.
-pub fn pkg_bridge_render_provenance(identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) -[Env]> String !ForeignBridgeError {
+pub fn pkg_bridge_render_provenance(identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) -[Env]> String ForeignBridgeError! {
     text := "schema={@FOREIGN_BRIDGE_PROVENANCE_SCHEMA}\nidentity={identity}\n"
     has_boundary_fields := false
     loop field in fields {
@@ -94,7 +94,7 @@ pub fn pkg_bridge_render_provenance(identity: String, fields: [(name: String, va
         }
         library :: pkg_bridge_field_value(fields, "library") ?? pkg_bridge_field_value(fields, "lib") ?? abi_library ?? "not-recorded"
         artifact_rows := [String]{}
-        loop artifact in artifacts -> artifact_rows.push("{artifact.name}:sha256-{artifact.digest}")
+        loop artifact in artifacts -> &artifact_rows.push("{artifact.name}:sha256-{artifact.digest}")
         loaded_artifact :: artifact_rows.join("|")
         source :: pkg_bridge_field_value(fields, "source") ?? pkg_bridge_field_value(fields, "source_path") ?? pkg_bridge_field_value(fields, "type-library") ?? "not-recorded"
         overlay :: pkg_bridge_field_value(fields, "overlay") ?? pkg_bridge_field_value(fields, "overlay-identity") ?? "none"
@@ -115,12 +115,12 @@ pub fn pkg_bridge_render_provenance(identity: String, fields: [(name: String, va
 
 // Write the queryable provenance sidecar for one published bridge: stage
 // beside the target, then rename into place.
-pub fn pkg_bridge_write_provenance(path: String, identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) -[FS, Env]> () !ForeignBridgeError {
+pub fn pkg_bridge_write_provenance(path: String, identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) ForeignBridgeError! -[FS, Env]> {
     text :: pkg_bridge_render_provenance(identity, fields, artifacts)
     temporary :: files.with_suffix(path, ".tmp.{sys.pid()}")
     files.write_bytes(temporary, text.bytes()) ?? return Err(pkg_bridge_error("could not stage {path}: {err}"))
     files.rename(temporary, path) ?? {
-        files.remove(temporary) ?? {}
+        files.remove(temporary) ?? ()
         return Err(pkg_bridge_error("could not publish {path}: {err}"))
     }
     Ok(())
@@ -128,7 +128,7 @@ pub fn pkg_bridge_write_provenance(path: String, identity: String, fields: [(nam
 
 // Append the canonical boundary row to a binder-owned provenance record.
 // A record that already carries a boundary row is left unchanged.
-pub fn pkg_bridge_append_boundary_provenance(text: &String, descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> () !ForeignBridgeError {
+pub fn pkg_bridge_append_boundary_provenance(text: &String, descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
     loop line in text.split("\n") {
         if line.starts_with("boundary-schema=") -> return Ok(())
     }
@@ -140,7 +140,7 @@ pub fn pkg_bridge_append_boundary_provenance(text: &String, descriptor: BinderDe
 }
 
 // Append a boundary for an adapter that publishes a legacy text record.
-pub fn pkg_bridge_append_boundary_for_artifact(text: &String, descriptor: BinderDescriptor, library: String, source: String, archive: String, toolchain: String) -[FS, Env]> () !ForeignBridgeError {
+pub fn pkg_bridge_append_boundary_for_artifact(text: &String, descriptor: BinderDescriptor, library: String, source: String, archive: String, toolchain: String) ForeignBridgeError! -[FS, Env, Exec, Time.Wait]> {
     source_digest :: pkg_bridge_sha_file(source)
     archive_digest :: pkg_bridge_sha_file(archive)
     archive_name :: files.basename(archive)
@@ -152,11 +152,11 @@ pub fn pkg_bridge_append_boundary_for_artifact(text: &String, descriptor: Binder
 // The parsed schema, optional identity, and repeated fields of a sidecar.
 struct ForeignProvenanceText {
     schema: String
-    identity: ?String
+    identity: String?
     fields: [String: [String]]
 }
 
-fn pkg_bridge_parse_provenance(path: String) -[FS]> ForeignProvenanceText !ForeignBridgeError {
+fn pkg_bridge_parse_provenance(path: String) -[FS]> ForeignProvenanceText ForeignBridgeError! {
     text :: files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
     schema := None
     identity := None
@@ -175,7 +175,7 @@ fn pkg_bridge_parse_provenance(path: String) -[FS]> ForeignProvenanceText !Forei
             }
             else -> {
                 values := fields.get(parts.before) ?? [String]{}
-                values.push(parts.after)
+                &values.push(parts.after)
                 fields[parts.before] = values
             }
         }
@@ -186,16 +186,16 @@ fn pkg_bridge_parse_provenance(path: String) -[FS]> ForeignProvenanceText !Forei
 
 // `str::lines`: split on `\n`, drop one trailing `\r` per line, and drop the
 // empty tail after a final newline.
-fn pkg_bridge_text_lines(text: String) -> [String] !Never {
+fn pkg_bridge_text_lines(text: String) -> [String] Never! {
     carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
     lines := [String]{}
-    loop line in text.split("\n") -> lines.push(line.removesuffix(carriage_return))
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
+    loop line in text.split("\n") -> &lines.push(line.removesuffix(carriage_return))
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
     lines
 }
 
 // Read and validate a bridge provenance sidecar.
-pub fn pkg_bridge_read_provenance(path: String) -[FS]> ForeignProvenance !ForeignBridgeError {
+pub fn pkg_bridge_read_provenance(path: String) -[FS]> ForeignProvenance ForeignBridgeError! {
     parsed :: pkg_bridge_parse_provenance(path)
     identity :: parsed.identity ?? return Err(pkg_bridge_error("bridge provenance has no identity: {path}"))
     if parsed.schema != @FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(pkg_bridge_error("unsupported bridge provenance schema `{parsed.schema}`"))
@@ -203,7 +203,7 @@ pub fn pkg_bridge_read_provenance(path: String) -[FS]> ForeignProvenance !Foreig
 }
 
 // Read the canonical boundary component embedded in a binder sidecar.
-pub fn pkg_bridge_read_boundary_provenance(path: String) -[FS]> ForeignProvenance !ForeignBridgeError {
+pub fn pkg_bridge_read_boundary_provenance(path: String) -[FS]> ForeignProvenance ForeignBridgeError! {
     parsed :: pkg_bridge_parse_provenance(path)
     schema_rows :: parsed.fields.get("boundary-schema") ?? [String]{}
     if schema_rows.len() == 0 || schema_rows[0] != @FOREIGN_BOUNDARY_SCHEMA -> return Err(pkg_bridge_error("foreign boundary provenance has no canonical boundary row: {path}"))
@@ -215,7 +215,7 @@ pub fn pkg_bridge_read_boundary_provenance(path: String) -[FS]> ForeignProvenanc
 // Resolve each named native library to the first exact local archive found
 // in the declared search paths. Missing candidates remain records, so adding
 // or replacing a local archive changes the identity.
-pub fn pkg_bridge_local_archive_inputs(library_dirs: [String], libraries: [String]) -[FS, Env]> [ArchiveInput] !Never {
+pub fn pkg_bridge_local_archive_inputs(library_dirs: [String], libraries: [String]) -[FS, Env]> [ArchiveInput] Never! {
     inputs := [ArchiveInput]{}
     if library_dirs.len() == 0 -> return inputs
     loop library in libraries {
@@ -236,33 +236,37 @@ pub fn pkg_bridge_local_archive_inputs(library_dirs: [String], libraries: [Strin
             .Ok(value) -> Val(value)
             .Err(_) -> None
         }
-        inputs.push(ArchiveInput{library: library, path: canonical, bytes: bytes})
+        &inputs.push(ArchiveInput{library: library, path: canonical, bytes: bytes})
     }
     inputs
 }
 
 // Add local archive path/byte records to a binding identity.
-pub fn pkg_bridge_add_local_archive_inputs(identity: &ForeignIdentityBuilder, library_dirs: [String], libraries: [String]) -[FS, Env]> !Never {
+pub fn pkg_bridge_add_local_archive_inputs(identity: &ForeignIdentityBuilder, library_dirs: [String], libraries: [String]) -[FS, Env]> {
     pkg_bridge_add_archive_inputs(identity, pkg_bridge_local_archive_inputs(library_dirs, libraries))
 }
 
 // Add already-resolved archive records to an identity. Callers with a
 // provider-specific notion of local libraries use this without manufacturing
 // missing candidates for system or provisioned dependencies.
-pub fn pkg_bridge_add_archive_inputs(identity: &ForeignIdentityBuilder, inputs: [ArchiveInput]) !Never {
+pub fn pkg_bridge_add_archive_inputs(identity: &ForeignIdentityBuilder, inputs: [ArchiveInput]) Never! {
     loop input in inputs {
-        identity.field("linked_library", input.library.bytes())
-        identity.field("linked_archive_path", input.path.bytes())
+        &identity.field("linked_library", input.library.bytes())
+        &identity.field("linked_archive_path", input.path.bytes())
         if input.bytes == {
-            .Val(bytes) -> identity.field("linked_archive_bytes", bytes)
-            .None -> identity.field("linked_archive_missing", "true".bytes())
+            .Val(bytes) -> {
+                &identity.field("linked_archive_bytes", bytes)
+            }
+            .None -> {
+                &identity.field("linked_archive_missing", "true".bytes())
+            }
         }
     }
 }
 
 // Resolve one pinned host tool on PATH without the shell's executable suffix
 // rules. Windows toolchains commonly expose `cc.exe`/`ar.exe`.
-pub fn pkg_bridge_tool_path(tool: String) -[FS, Env]> ?String !Never {
+pub fn pkg_bridge_tool_path(tool: String) -[FS, Env]> String? Never! {
     search :: sys.get("PATH") ?? return None
     separator :: if sys.family() == "windows" -> ";" else -> ":"
     loop directory in search.split(separator) {
@@ -278,7 +282,7 @@ pub fn pkg_bridge_tool_path(tool: String) -[FS, Env]> ?String !Never {
 
 // `<canonical path>;version=<first non-empty --version lines joined by ` | `>`,
 // `missing` when the tool is absent, `unavailable` when it cannot report.
-pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> String !Never {
+pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> String Never! {
     found :: pkg_bridge_tool_path(tool) ?? return "missing"
     path :: files.canonicalize(found) ?? found
     version := "unavailable"
@@ -287,7 +291,7 @@ pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> Strin
             rows := [String]{}
             loop line in pkg_bridge_text_lines("{receipt.output}{receipt.errors}") {
                 trimmed :: line.trim()
-                if trimmed != "" -> rows.push(trimmed)
+                if trimmed != "" -> &rows.push(trimmed)
             }
             joined :: rows.join(" | ")
             if joined != "" -> version = joined
@@ -296,7 +300,7 @@ pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> Strin
     "{path};version={version}"
 }
 
-pub fn pkg_bridge_sha_file(path: String) -[FS]> String !ForeignBridgeError {
+pub fn pkg_bridge_sha_file(path: String) -[FS]> String ForeignBridgeError! {
     bytes :: files.read_bytes(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
     Ok(pkg_sha256_hex(bytes))
 }

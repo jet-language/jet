@@ -2,42 +2,42 @@
 // embedded, product-ready oracle manifest before evaluating; filesystem
 // imports reach the evaluator only through an explicit `NixEvalAuthority`.
 
-pub fn nix_evaluate_devshell_with_import_authority(source: String, system: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+pub fn nix_evaluate_devshell_with_import_authority(source: String, system: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_devshell_with_import_authority(source, system, ^authority)
 }
 
-pub fn nix_evaluate_devshell_output_with_import_authority(source: String, system: String, output: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+pub fn nix_evaluate_devshell_output_with_import_authority(source: String, system: String, output: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_devshell_output_with_import_authority(source, system, output, ^authority)
 }
 
-pub fn nix_evaluator_identity(system: String) -> String !NixEvalError {
+pub fn nix_evaluator_identity(system: String) -> String NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluator_identity(system)
 }
 
-pub fn nix_pinned_inventory() -> [NixEvalInventoryEntry] !NixEvalError {
+pub fn nix_pinned_inventory() -> [NixEvalInventoryEntry] NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     Ok(boundary.pinned_inventory())
 }
 
-pub fn nix_evaluate_derivation(source: String, system: String) -> NixNativeDerivation !NixEvalError {
+pub fn nix_evaluate_derivation(source: String, system: String) -> NixNativeDerivation NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_derivation(source, system)
 }
 
-pub fn nix_evaluate_derivation_with_import_authority(source: String, system: String, authority: ^?NixEvalAuthority) -> NixNativeDerivation !NixEvalError {
+pub fn nix_evaluate_derivation_with_import_authority(source: String, system: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_derivation_with_import_authority(source, system, ^authority)
 }
 
-pub fn nix_evaluate_derivation_output(source: String, system: String, attribute: String) -> NixNativeDerivation !NixEvalError {
+pub fn nix_evaluate_derivation_output(source: String, system: String, attribute: String) -> NixNativeDerivation NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_derivation_output(source, system, attribute)
 }
 
-pub fn nix_evaluate_derivation_output_with_import_authority(source: String, system: String, attribute: String, authority: ^?NixEvalAuthority) -> NixNativeDerivation !NixEvalError {
+pub fn nix_evaluate_derivation_output_with_import_authority(source: String, system: String, attribute: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
     boundary :: NixNativeBoundary.embedded()
     boundary.evaluate_derivation_output_with_import_authority(source, system, attribute, ^authority)
 }

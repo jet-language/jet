@@ -18,11 +18,11 @@
 // waits up to the default lock wait unless overridden.
 pub struct ArtifactStoreConfig {
     root: String
-    cap_bytes: ?Int
+    cap_bytes: Int?
     reserve_bytes: Int
     lock_wait: Duration
 
-    fn new(root: String) -> ArtifactStoreConfig !Never {
+    fn new(root: String) -> ArtifactStoreConfig Never! {
         ArtifactStoreConfig{
             root,
             cap_bytes: None,
@@ -33,7 +33,7 @@ pub struct ArtifactStoreConfig {
 
     // `JET_STORE_DIR` (never empty), else `$HOME/.cache/jet/store`, with the
     // optional `JET_STORE_CAP_BYTES` and `JET_STORE_RESERVE_BYTES` sizes.
-    fn from_env() -[Env]> ArtifactStoreConfig !ArtifactStoreError {
+    fn from_env() -[Env]> ArtifactStoreConfig ArtifactStoreError! {
         root :: if sys.get(@STORE_ARTIFACT_ENV) == {
             .Val(value) -> {
                 if value == "" -> return Err(ArtifactStoreError.Config("{@STORE_ARTIFACT_ENV} cannot be empty"))
@@ -53,41 +53,41 @@ pub struct ArtifactStoreConfig {
     }
 
     // Rust `Default`: the environment configuration, else `.cache/jet/store`.
-    fn default() -[Env]> ArtifactStoreConfig !Never {
+    fn default() -[Env]> ArtifactStoreConfig Never! {
         ArtifactStoreConfig.from_env() ?? ArtifactStoreConfig.new(files.join(".cache", "jet/store"))
     }
 
-    fn with_cap_bytes(self, cap_bytes: Int) -> ArtifactStoreConfig !Never {
+    fn with_cap_bytes(self, cap_bytes: Int) -> ArtifactStoreConfig Never! {
         next := self
         next.cap_bytes = Val(cap_bytes)
         next
     }
 
-    fn with_reserve_bytes(self, reserve_bytes: Int) -> ArtifactStoreConfig !Never {
+    fn with_reserve_bytes(self, reserve_bytes: Int) -> ArtifactStoreConfig Never! {
         next := self
         next.reserve_bytes = reserve_bytes
         next
     }
 
     // Set the maximum time to wait for a live lock owner.
-    fn with_lock_wait(self, lock_wait: Duration) -> ArtifactStoreConfig !Never {
+    fn with_lock_wait(self, lock_wait: Duration) -> ArtifactStoreConfig Never! {
         next := self
         next.lock_wait = lock_wait
         next
     }
 
-    fn root(self) -> String !Never { self.root }
+    fn root(self) -> String Never! { self.root }
 
-    fn cap_bytes(self) -> ?Int !Never { self.cap_bytes }
+    fn cap_bytes(self) -> Int? Never! { self.cap_bytes }
 
-    fn reserve_bytes(self) -> Int !Never { self.reserve_bytes }
+    fn reserve_bytes(self) -> Int Never! { self.reserve_bytes }
 
-    fn lock_wait(self) -> Duration !Never { self.lock_wait }
+    fn lock_wait(self) -> Duration Never! { self.lock_wait }
 }
 
 // The size in environment variable `name`, prefixed with `name` on a parse
 // failure; None when unset.
-fn store_artifact_optional_size(name: String) -[Env]> ?Int !ArtifactStoreError {
+fn store_artifact_optional_size(name: String) -[Env]> Int? ArtifactStoreError! {
     value :: sys.get(name) ?? return Ok(None)
     if store_artifact_parse_size(value) == {
         .Ok(size) -> Ok(Val(size))
@@ -100,7 +100,7 @@ fn store_artifact_optional_size(name: String) -[Env]> ?Int !ArtifactStoreError {
     }
 }
 
-fn store_artifact_default_root() -[Env]> String !ArtifactStoreError {
+fn store_artifact_default_root() -[Env]> String ArtifactStoreError! {
     home :: sys.home_dir() ?? return Err(ArtifactStoreError.Config("cannot determine home directory"))
     Ok(files.join(files.join(files.join(home, ".cache"), "jet"), "store"))
 }
@@ -111,7 +111,7 @@ struct StoreArtifactSizeUnit {
     multiplier: Int
 }
 
-fn store_artifact_size_units() -> [StoreArtifactSizeUnit] !Never {
+fn store_artifact_size_units() -> [StoreArtifactSizeUnit] Never! {
     kib :: 1024
     mib :: kib * 1024
     gib :: mib * 1024
@@ -134,7 +134,7 @@ fn store_artifact_size_units() -> [StoreArtifactSizeUnit] !Never {
 }
 
 // Parse a byte size such as `4G`, `512MiB`, or a bare byte count.
-pub fn store_artifact_parse_size(value: String) -> Int !ArtifactStoreError {
+pub fn store_artifact_parse_size(value: String) -> Int ArtifactStoreError! {
     trimmed :: value.trim()
     if trimmed == "" -> return Err(ArtifactStoreError.Config("size cannot be empty"))
     upper :: store_artifact_ascii_upper(trimmed)
@@ -156,7 +156,7 @@ pub fn store_artifact_parse_size(value: String) -> Int !ArtifactStoreError {
 }
 
 // `u64::from_str` accepts one optional `+` and ASCII digits only.
-fn store_artifact_all_digits(value: String) -> Bool !Never {
+fn store_artifact_all_digits(value: String) -> Bool Never! {
     raw :: value.bytes()
     start :: if raw.len() > 1 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
     loop index in start..<raw.len() {
@@ -167,24 +167,24 @@ fn store_artifact_all_digits(value: String) -> Bool !Never {
 }
 
 // ASCII-only uppercase (`str::to_ascii_uppercase`); other scalars unchanged.
-fn store_artifact_ascii_upper(value: String) -> String !Never {
+fn store_artifact_ascii_upper(value: String) -> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     loop byte in raw {
         code :: Int.from_u8(byte)
-        out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
+        &out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())
 }
 
 // Addition clamped at the largest Int (Rust `saturating_add` on u64 sizes).
-fn store_artifact_saturating_add(left: Int, right: Int) -> Int !Never {
+fn store_artifact_saturating_add(left: Int, right: Int) -> Int Never! {
     if right > 0 && left > @STORE_ARTIFACT_INT_MAX - right -> return @STORE_ARTIFACT_INT_MAX
     left + right
 }
 
 // Subtraction clamped at zero (Rust `saturating_sub` on u64 sizes).
-fn store_artifact_saturating_sub(left: Int, right: Int) -> Int !Never {
+fn store_artifact_saturating_sub(left: Int, right: Int) -> Int Never! {
     if right >= left -> return 0
     left - right
 }

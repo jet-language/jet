@@ -31,18 +31,18 @@ pub struct DriverPathOperand {
 // driver forwards; the index fields point into it.
 pub struct DriverOptions {
     pub offline: Bool
-    pub fixtures: ?String
-    pub project_root: ?String
-    pub build_root: ?String
+    pub fixtures: String?
+    pub project_root: String?
+    pub build_root: String?
     pub working_dir: String
-    pub target: ?String
+    pub target: String?
     pub compile_only: Bool
-    pub output: ?String
+    pub output: String?
     pub dep_mode: Bool
     pub dep_phony: Bool
-    pub depfile: ?String
-    pub dep_target: ?String
-    pub probe: ?DriverProbe
+    pub depfile: String?
+    pub dep_target: String?
+    pub probe: DriverProbe?
     pub verbose: Bool
     pub help: Bool
     pub version: Bool
@@ -50,13 +50,13 @@ pub struct DriverOptions {
     pub sources: [String]
     pub source_indices: [Int]
     pub path_indices: [DriverPathOperand]
-    pub output_index: ?Int
-    pub depfile_index: ?Int
-    pub dep_target_index: ?Int
-    pub dep_target_option: ?String
-    pub separator_index: ?Int
+    pub output_index: Int?
+    pub depfile_index: Int?
+    pub dep_target_index: Int?
+    pub dep_target_option: String?
+    pub separator_index: Int?
 
-    fn empty() -> DriverOptions !Never {
+    fn empty() -> DriverOptions Never! {
         DriverOptions{
             offline: false,
             fixtures: None,
@@ -87,21 +87,21 @@ pub struct DriverOptions {
     }
 
     // Record a source operand at the next argv slot.
-    fn add_source(&self, source: String) !Never {
-        self.sources.push(source)
-        self.source_indices.push(self.argv.len())
-        self.argv.push(source)
+    fn add_source(&self, source: String) Never! {
+        &self.sources.push(source)
+        &self.source_indices.push(self.argv.len())
+        &self.argv.push(source)
     }
 
     // The index of the most recently pushed argv entry.
-    fn last_index(self) -> Int !Never {
+    fn last_index(self) -> Int Never! {
         self.argv.len() - 1
     }
 }
 
 // Parse the driver arguments of `verb`, expanding response files inside the
 // current directory and the explicit project/build roots.
-fn cli_cc_parse_args(verb: String, args: [String]) -[FS, Env]> DriverOptions !CliToolError {
+fn cli_cc_parse_args(verb: String, args: [String]) -[FS, Env]> DriverOptions CliToolError! {
     cwd :: sys.current_dir() ?? return Err(CliToolError.new("could not determine the current directory: {err}"))
     current_dir :: files.canonicalize(cwd) ?? return Err(CliToolError.new("could not canonicalize the current directory: {err}"))
     response_roots :: cli_cc_response_scope_roots(args, current_dir)
@@ -112,7 +112,7 @@ fn cli_cc_parse_args(verb: String, args: [String]) -[FS, Env]> DriverOptions !Cl
 }
 
 // Parse already-expanded driver arguments.
-fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions !CliToolError {
+fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions CliToolError! {
     options := DriverOptions.empty()
     index := 0
     after_separator := false
@@ -120,7 +120,7 @@ fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions !Cl
         argument :: args[index]
         if after_separator {
             cli_cc_validate_operand(argument, "source")
-            options.add_source(argument)
+            &options.add_source(argument)
             index = index + 1
             next
         }
@@ -175,50 +175,50 @@ fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions !Cl
             "--gcc-toolchain" | "-B" | "-fuse-ld" | "-resource-dir" | "-Xlinker" -> return Err(CliToolError.new("`{argument}` would override the pinned Hangar compiler or linker"))
             "-c" -> {
                 options.compile_only = true
-                options.argv.push(argument)
+                &options.argv.push(argument)
                 index = index + 1
             }
             "-MMD" | "-MD" -> {
                 options.dep_mode = true
-                options.argv.push(argument)
+                &options.argv.push(argument)
                 index = index + 1
             }
             "-M" | "-MM" | "-MG" -> return Err(CliToolError.new("`{argument}` does not declare a reproducible output; use `-MD` or `-MMD`"))
             "-MP" -> {
                 options.dep_phony = true
-                options.argv.push(argument)
+                &options.argv.push(argument)
                 index = index + 1
             }
             "-v" -> {
                 options.verbose = true
-                options.argv.push(argument)
+                &options.argv.push(argument)
                 index = index + 1
             }
             "-x" | "-D" | "-U" | "-l" | "-std" | "--std" | "--param" -> {
                 value :: cli_cc_next_value(args, &index, argument)
                 if value == "" || cli_cc_has_nul(value) -> return Err(CliToolError.new("option {argument} needs a non-empty value"))
-                options.argv.push(argument)
-                options.argv.push(value)
+                &options.argv.push(argument)
+                &options.argv.push(value)
             }
             "-o" -> {
                 value :: cli_cc_next_value(args, &index, "-o")
                 options.output = cli_cc_set_once(options.output, value, "-o")
-                options.argv.push(argument)
-                options.argv.push(value)
+                &options.argv.push(argument)
+                &options.argv.push(value)
                 options.output_index = Val(options.last_index())
             }
             "-MF" -> {
                 value :: cli_cc_next_value(args, &index, "-MF")
                 options.depfile = cli_cc_set_once(options.depfile, value, "-MF")
-                options.argv.push(argument)
-                options.argv.push(value)
+                &options.argv.push(argument)
+                &options.argv.push(value)
                 options.depfile_index = Val(options.last_index())
             }
             "-MT" -> {
                 value :: cli_cc_next_value(args, &index, "-MT")
                 options.dep_target = cli_cc_set_once(options.dep_target, value, "-MT")
-                options.argv.push(argument)
-                options.argv.push(value)
+                &options.argv.push(argument)
+                &options.argv.push(value)
                 options.dep_target_index = Val(options.last_index())
                 options.dep_target_option = Val("-MT")
             }
@@ -226,17 +226,17 @@ fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions !Cl
                 value :: cli_cc_next_value(args, &index, "-MQ")
                 cli_cc_validate_operand(value, "-MQ")
                 options.dep_target = cli_cc_set_once(options.dep_target, value, "-MQ")
-                options.argv.push(argument)
-                options.argv.push(value)
+                &options.argv.push(argument)
+                &options.argv.push(value)
                 options.dep_target_index = Val(options.last_index())
                 options.dep_target_option = Val("-MQ")
             }
             "-I" | "-L" | "-include" | "-isystem" | "-iquote" | "-idirafter" | "-imacros" | "-iprefix" | "-iwithprefix" | "-iwithprefixbefore" -> {
                 value :: cli_cc_next_value(args, &index, argument)
                 cli_cc_validate_operand(value, argument)
-                options.argv.push(argument)
-                options.argv.push(value)
-                options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: ""})
+                &options.argv.push(argument)
+                &options.argv.push(value)
+                &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: ""})
             }
             "-E" | "-S" | "-P" | "-fsyntax-only" | "-save-temps" | "-###" -> return Err(CliToolError.new("`{argument}` does not produce a declared build artifact"))
             else -> {
@@ -261,7 +261,7 @@ fn cli_cc_parse_expanded_args(verb: String, args: [String]) -> DriverOptions !Cl
 
 // One argument that is not an exact driver spelling: an attached-value
 // option, a flag, or a source operand. The table keeps the Rust arm order.
-fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) !CliToolError {
+fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) CliToolError! {
     length :: value.bytes().len()
     attached :: cli_cc_attached_path_prefix(value)
     if {
@@ -278,17 +278,17 @@ fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) !CliTo
         }
         value.starts_with("-o") && length > 2 -> {
             options.output = cli_cc_set_once(options.output, value.removeprefix("-o"), "-o")
-            options.argv.push(value)
+            &options.argv.push(value)
             options.output_index = Val(options.last_index())
         }
         value.starts_with("-MF") && length > 3 -> {
             options.depfile = cli_cc_set_once(options.depfile, value.removeprefix("-MF"), "-MF")
-            options.argv.push(value)
+            &options.argv.push(value)
             options.depfile_index = Val(options.last_index())
         }
         value.starts_with("-MT") && length > 3 -> {
             options.dep_target = cli_cc_set_once(options.dep_target, value.removeprefix("-MT"), "-MT")
-            options.argv.push(value)
+            &options.argv.push(value)
             options.dep_target_index = Val(options.last_index())
             options.dep_target_option = Val("-MT")
         }
@@ -296,41 +296,41 @@ fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) !CliTo
             target :: value.removeprefix("-MQ")
             cli_cc_validate_operand(target, "-MQ")
             options.dep_target = cli_cc_set_once(options.dep_target, target, "-MQ")
-            options.argv.push(value)
+            &options.argv.push(value)
             options.dep_target_index = Val(options.last_index())
             options.dep_target_option = Val("-MQ")
         }
         value.starts_with("-I") && length > 2 -> {
             cli_cc_validate_operand(value.removeprefix("-I"), "-I")
-            options.argv.push(value)
-            options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-I"})
+            &options.argv.push(value)
+            &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-I"})
         }
         value.starts_with("-L") && length > 2 -> {
             cli_cc_validate_operand(value.removeprefix("-L"), "-L")
-            options.argv.push(value)
-            options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-L"})
+            &options.argv.push(value)
+            &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-L"})
         }
         attached != None -> {
             prefix :: attached ?? ""
             cli_cc_validate_operand(value.removeprefix(prefix), prefix)
-            options.argv.push(value)
-            options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: prefix})
+            &options.argv.push(value)
+            &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: prefix})
         }
         value.starts_with("-") -> {
             cli_cc_reject_embedded_tool_override(value)
             cli_cc_validate_supported_flag(value)
-            options.argv.push(value)
+            &options.argv.push(value)
         }
         else -> {
             cli_cc_validate_operand(value, "source")
-            options.add_source(value)
+            &options.add_source(value)
         }
     }
     Ok()
 }
 
 // The value after the option at `index`; advances past both.
-fn cli_cc_next_value(args: [String], index: &Int, option: String) -> String !CliToolError {
+fn cli_cc_next_value(args: [String], index: &Int, option: String) -> String CliToolError! {
     value :: args.get(index + 1) ?? return Err(CliToolError.new("`{option}` needs a value"))
     if value.starts_with("-") -> return Err(CliToolError.new("`{option}` needs a value"))
     index = index + 2
@@ -338,31 +338,31 @@ fn cli_cc_next_value(args: [String], index: &Int, option: String) -> String !Cli
 }
 
 // A path option given once, with a non-empty operand.
-fn cli_cc_set_once_path(slot: ?String, value: String, option: String) -> ?String !CliToolError {
+fn cli_cc_set_once_path(slot: String?, value: String, option: String) -> String? CliToolError! {
     cli_cc_validate_operand(value, option)
     if slot != None -> return Err(CliToolError.new("{option} may be specified only once"))
     Ok(Val(value))
 }
 
 // A value option given once, with a non-empty value.
-fn cli_cc_set_once(slot: ?String, value: String, option: String) -> ?String !CliToolError {
+fn cli_cc_set_once(slot: String?, value: String, option: String) -> String? CliToolError! {
     if value == "" -> return Err(CliToolError.new("`{option}` needs a non-empty value"))
     if slot != None -> return Err(CliToolError.new("`{option}` may be specified only once"))
     Ok(Val(value))
 }
 
-fn cli_cc_set_probe(slot: ?DriverProbe, probe: DriverProbe) -> ?DriverProbe !CliToolError {
+fn cli_cc_set_probe(slot: DriverProbe?, probe: DriverProbe) -> DriverProbe? CliToolError! {
     if slot != None -> return Err(CliToolError.new("only one standalone compiler metadata probe is allowed"))
     Ok(Val(probe))
 }
 
-fn cli_cc_validate_operand(value: String, label: String) !CliToolError {
+fn cli_cc_validate_operand(value: String, label: String) CliToolError! {
     if value == "" || cli_cc_has_nul(value) -> return Err(CliToolError.new("{label} needs a non-empty value"))
     Ok()
 }
 
 // The path option attached to `argument` (`-Iinclude`), longest first.
-fn cli_cc_attached_path_prefix(argument: String) -> ?String !Never {
+fn cli_cc_attached_path_prefix(argument: String) -> String? Never! {
     prefixes :: [String]{"-iwithprefixbefore", "-iwithprefix", "-idirafter", "-isystem", "-iquote", "-imacros", "-iprefix", "-include", "-I", "-L"}
     loop prefix in prefixes {
         if argument.starts_with(prefix) && argument.bytes().len() > prefix.bytes().len() -> return Val(prefix)
@@ -372,7 +372,7 @@ fn cli_cc_attached_path_prefix(argument: String) -> ?String !Never {
 
 // The flags the hermetic driver forwards; target-changing, plugin, profile
 // and linker-passthrough flags are refused.
-fn cli_cc_validate_supported_flag(argument: String) !CliToolError {
+fn cli_cc_validate_supported_flag(argument: String) CliToolError! {
     exact :: [String]{
         "-ansi", "-pedantic", "-pipe", "-pthread", "-v", "-g", "-g0", "-g1", "-g2", "-g3",
         "-fPIC", "-fpic", "-fPIE", "-fpie",
@@ -397,14 +397,14 @@ fn cli_cc_validate_supported_flag(argument: String) !CliToolError {
     Err(CliToolError.new("unsupported compiler flag {argument}"))
 }
 
-fn cli_cc_reject_embedded_tool_override(argument: String) !CliToolError {
+fn cli_cc_reject_embedded_tool_override(argument: String) CliToolError! {
     if argument.contains("sysroot") || argument.contains("gcc-toolchain") || argument.starts_with("-fuse-ld") || argument.starts_with("-B") {
         return Err(CliToolError.new("`{argument}` would override the pinned Hangar compiler or linker"))
     }
     Ok()
 }
 
-fn cli_cc_usage(verb: String) -> String !Never {
+fn cli_cc_usage(verb: String) -> String Never! {
     "jet {verb} [--offline] [--fixtures <dir>] [--project-root <dir>] [--build-root <dir>] [--target <triple>] [-c] [-o <path>] [-MD|-MMD] [-MF <path>] [--] <sources>"
 }
 
@@ -412,7 +412,7 @@ fn cli_cc_usage(verb: String) -> String !Never {
 
 // The directories a response file may live in: the current directory and
 // every explicit project/build root, canonical, sorted, without repeats.
-fn cli_cc_response_scope_roots(args: [String], current_dir: String) -[FS, Env]> [String] !CliToolError {
+fn cli_cc_response_scope_roots(args: [String], current_dir: String) -[FS, Env]> [String] CliToolError! {
     roots := [String]{current_dir}
     index := 0
     loop index < args.len() {
@@ -433,13 +433,13 @@ fn cli_cc_response_scope_roots(args: [String], current_dir: String) -[FS, Env]> 
         }
         if value == "" || cli_cc_has_nul(value) -> return Err(CliToolError.new("an explicit project/build root must be a non-empty path"))
         path :: cli_cc_absolutize_lexically(current_dir, value, "project/build root")
-        roots.push(cli_cc_canonical_real_directory(path, "explicit root {value}"))
+        &roots.push(cli_cc_canonical_real_directory(path, "explicit root {value}"))
         index = index + 1
     }
-    roots.sort()
+    &roots.sort()
     unique := [String]{}
     loop root in roots {
-        if unique.len() == 0 || unique[unique.len() - 1] != root -> unique.push(root)
+        if unique.len() == 0 || unique[unique.len() - 1] != root -> &unique.push(root)
     }
     Ok(unique)
 }
@@ -450,17 +450,17 @@ struct CcResponseExpansion {
     stack: [String]
     file_count: Int
 
-    fn run(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] !CliToolError {
+    fn run(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] CliToolError! {
         expansion := CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
         expansion.expand(args, current_dir, scope_roots, 0)
         Ok(expansion.expanded)
     }
 
-    fn expand(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) !CliToolError -[FS]> {
+    fn expand(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) CliToolError! -[FS]> {
         if depth > @CC_MAX_RESPONSE_DEPTH -> return Err(CliToolError.new("response-file nesting exceeds {@CC_MAX_RESPONSE_DEPTH} levels"))
         loop argument in args {
             if !argument.starts_with("@") {
-                self.expanded.push(argument)
+                &self.expanded.push(argument)
                 if self.expanded.len() > @CC_MAX_RESPONSE_ARGS -> return Err(CliToolError.new("response-file expansion exceeds {@CC_MAX_RESPONSE_ARGS} arguments"))
                 next
             }
@@ -477,7 +477,7 @@ struct CcResponseExpansion {
             metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect response file {raw_path}: {err}"))
             if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("response file {raw_path} is not a regular file"))
             if self.stack.contains(canonical) -> return Err(CliToolError.new("response-file expansion contains a cycle at {raw_path}"))
-            self.stack.push(canonical)
+            &self.stack.push(canonical)
             self.file_count = self.file_count + 1
             bytes :: cli_cc_read_bounded_response_file(canonical)
             words :: cli_cc_parse_response_words(bytes, raw_path)
@@ -489,7 +489,7 @@ struct CcResponseExpansion {
     }
 }
 
-fn cli_cc_read_bounded_response_file(path: String) -[FS]> [U8] !CliToolError {
+fn cli_cc_read_bounded_response_file(path: String) -[FS]> [U8] CliToolError! {
     metadata :: files.stat(path) ?? return Err(CliToolError.new("read response file {path}: {err}"))
     if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("response file {path} is not a regular file"))
     if metadata.size > @CC_MAX_RESPONSE_BYTES -> return Err(CliToolError.new("response file {path} exceeds {@CC_MAX_RESPONSE_BYTES} bytes"))
@@ -508,7 +508,7 @@ enum CcResponseQuote {
 // Split response-file text into words: whitespace separates, single quotes
 // are literal, double quotes allow backslash escapes, and a bare backslash
 // escapes the next character.
-fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliToolError {
+fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] CliToolError! {
     text :: String.from_bytes(bytes) ?? return Err(CliToolError.new("response file {source} is not UTF-8"))
     words := [String]{}
     word := [U8]{}
@@ -518,7 +518,7 @@ fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliTool
     loop byte in text.bytes() {
         code :: Int.from_u8(byte)
         if escaped {
-            word.push(byte)
+            &word.push(byte)
             started = true
             escaped = false
             next
@@ -527,7 +527,7 @@ fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliTool
             .Single -> {
                 if {
                     code == 39 -> quote = CcResponseQuote.Unquoted
-                    else -> word.push(byte)
+                    else -> &word.push(byte)
                 }
                 started = true
             }
@@ -535,7 +535,7 @@ fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliTool
                 if {
                     code == 34 -> quote = CcResponseQuote.Unquoted
                     code == 92 -> escaped = true
-                    else -> word.push(byte)
+                    else -> &word.push(byte)
                 }
                 started = true
             }
@@ -561,7 +561,7 @@ fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliTool
                         }
                     }
                     else -> {
-                        word.push(byte)
+                        &word.push(byte)
                         started = true
                     }
                 }
@@ -574,15 +574,15 @@ fn cli_cc_parse_response_words(bytes: [U8], source: String) -> [String] !CliTool
     Ok(words)
 }
 
-fn cli_cc_push_response_word(words: &[String], word: [U8]) !CliToolError {
+fn cli_cc_push_response_word(words: &[String], word: [U8]) CliToolError! {
     if word.len() > @CC_MAX_RESPONSE_BYTES -> return Err(CliToolError.new("one response-file argument exceeds the response-file bound"))
-    words.push(String.from_bytes(word) ?? "")
+    &words.push(String.from_bytes(word) ?? "")
     if words.len() > @CC_MAX_RESPONSE_ARGS -> return Err(CliToolError.new("response-file expansion exceeds {@CC_MAX_RESPONSE_ARGS} arguments"))
     Ok()
 }
 
 // Space, tab, newline, form feed, or carriage return.
-fn cli_cc_is_ascii_whitespace(code: Int) -> Bool !Never {
+fn cli_cc_is_ascii_whitespace(code: Int) -> Bool Never! {
     code == 32 || code == 9 || code == 10 || code == 12 || code == 13
 }
 
@@ -592,22 +592,22 @@ fn cli_cc_is_ascii_whitespace(code: Int) -> Bool !Never {
 // an optional root; `.` is skipped and `..` pops one component.
 
 // The normal components of `path`, skipping empty and `.` segments.
-fn cli_cc_path_components(path: String) -> [String] !Never {
+fn cli_cc_path_components(path: String) -> [String] Never! {
     components := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        components.push(part)
+        &components.push(part)
     }
     components
 }
 
-fn cli_cc_path_render(rooted: Bool, components: [String]) -> String !Never {
+fn cli_cc_path_render(rooted: Bool, components: [String]) -> String Never! {
     if rooted -> return "/{components.join("/")}"
     components.join("/")
 }
 
 // Component-wise prefix test (`Path::starts_with`).
-fn cli_cc_path_starts_with(path: String, root: String) -> Bool !Never {
+fn cli_cc_path_starts_with(path: String, root: String) -> Bool Never! {
     if path.starts_with("/") != root.starts_with("/") -> return false
     parts :: cli_cc_path_components(path)
     prefix :: cli_cc_path_components(root)
@@ -619,14 +619,14 @@ fn cli_cc_path_starts_with(path: String, root: String) -> Bool !Never {
 }
 
 // `path` relative to `root`, or None when `root` is not a component prefix.
-fn cli_cc_path_strip_prefix(path: String, root: String) -> ?[String] !Never {
+fn cli_cc_path_strip_prefix(path: String, root: String) -> [String]? Never! {
     if !cli_cc_path_starts_with(path, root) -> return None
     parts :: cli_cc_path_components(path)
     Val(parts.slice(cli_cc_path_components(root).len(), parts.len()))
 }
 
 // The parent directory, or None for a root or a bare name.
-fn cli_cc_path_parent(path: String) -> ?String !Never {
+fn cli_cc_path_parent(path: String) -> String? Never! {
     parts :: cli_cc_path_components(path)
     if parts.len() == 0 -> return None
     rooted :: path.starts_with("/")
@@ -636,7 +636,7 @@ fn cli_cc_path_parent(path: String) -> ?String !Never {
 
 // `raw` made absolute against `base` without touching the filesystem. A
 // relative path may not climb above `base`.
-fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> String !CliToolError {
+fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> String CliToolError! {
     cli_cc_validate_operand(raw, label)
     absolute :: raw.starts_with("/")
     rooted :: absolute || base.starts_with("/")
@@ -646,11 +646,11 @@ fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> Stri
         if part == "" || part == "." -> next
         if part == ".." {
             if output.len() == 0 -> return Err(CliToolError.new("{label} path {raw} escapes its scope"))
-            output.pop()
+            &output.pop()
             if !absolute && output.len() < base_components.len() -> return Err(CliToolError.new("{label} path {raw} escapes its scope"))
             next
         }
-        output.push(part)
+        &output.push(part)
     }
     if !rooted && output.len() == 0 -> return Err(CliToolError.new("{label} path {raw} is empty"))
     Ok(cli_cc_path_render(rooted, output))
@@ -658,7 +658,7 @@ fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> Stri
 
 // Refuse a path whose existing components traverse a symlink below
 // `scope_root`; the walk stops at the first missing component.
-fn cli_cc_reject_existing_symlinks(scope_root: String, path: String, label: String) !CliToolError -[FS]> {
+fn cli_cc_reject_existing_symlinks(scope_root: String, path: String, label: String) CliToolError! -[FS]> {
     relative :: cli_cc_path_strip_prefix(path, scope_root) ?? return Err(CliToolError.new("{label} path {path} escapes its scope"))
     current := scope_root
     loop part in relative {
@@ -678,7 +678,7 @@ fn cli_cc_reject_existing_symlinks(scope_root: String, path: String, label: Stri
 }
 
 // A symlink-free, existing, real directory, canonicalized.
-fn cli_cc_canonical_real_directory(path: String, label: String) -[FS, Env]> String !CliToolError {
+fn cli_cc_canonical_real_directory(path: String, label: String) -[FS, Env]> String CliToolError! {
     cli_cc_reject_symlinks_in_path(path, label)
     metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect {label} {path}: {err}"))
     if metadata.is_symlink || !metadata.is_dir -> return Err(CliToolError.new("{label} {path} is not a real directory"))
@@ -687,13 +687,13 @@ fn cli_cc_canonical_real_directory(path: String, label: String) -[FS, Env]> Stri
 
 // Refuse a path with a `..` component or an existing symlink component; the
 // walk stops at the first missing component.
-fn cli_cc_reject_symlinks_in_path(path: String, label: String) !CliToolError -[FS]> {
+fn cli_cc_reject_symlinks_in_path(path: String, label: String) CliToolError! -[FS]> {
     rooted :: path.starts_with("/")
     current := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(CliToolError.new("{label} {path} is not normalized"))
-        current.push(part)
+        &current.push(part)
         if files.stat(cli_cc_path_render(rooted, current)) == {
             .Ok(metadata) -> {
                 if metadata.is_symlink -> return Err(CliToolError.new("{label} {path} traverses a symlink"))
@@ -708,7 +708,7 @@ fn cli_cc_reject_symlinks_in_path(path: String, label: String) !CliToolError -[F
 }
 
 // A project-relative path without `.`/`..` components, NULs, or a root.
-fn cli_cc_validate_relative_path(path: String, label: String) !CliToolError {
+fn cli_cc_validate_relative_path(path: String, label: String) CliToolError! {
     components :: path.split("/")
     invalid :: path == "" || cli_cc_has_nul(path) || path.starts_with("/") || path == "." || path.starts_with("./") || components.contains("..")
     if invalid -> return Err(CliToolError.new("{label} path `{path}` must be project-relative and must not contain `..`"))
@@ -716,7 +716,7 @@ fn cli_cc_validate_relative_path(path: String, label: String) !CliToolError {
 }
 
 // Whether `value` contains a NUL byte.
-fn cli_cc_has_nul(value: String) -> Bool !Never {
+fn cli_cc_has_nul(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if Int.from_u8(byte) == 0 -> return true
     }

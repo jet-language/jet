@@ -24,7 +24,7 @@ pub enum ForeignBindError {
     AbiMismatch(String)
     UnsupportedHost(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Source(text) | .IO(text) | .UnsupportedHost(text) -> text
             .ToolMissing(tool) -> "the provisioned `{tool}` tool was not found"
@@ -39,7 +39,7 @@ pub enum ForeignBindError {
 // A bridge-record failure surfaces as an I/O failure of the binding.
 impl ForeignBridgeError -> ForeignBindError { pkg_binder_bridge_error(self) }
 
-pub fn pkg_binder_bridge_error(error: ForeignBridgeError) -> ForeignBindError !Never {
+pub fn pkg_binder_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
     ForeignBindError.IO(error.message)
 }
 
@@ -63,7 +63,7 @@ pub struct BinderToolOutput {
 // Run `argv` with captured, bounded output under `timeout`. A tool that does
 // not exist is `ToolMissing(tool)`; any other launch failure is `IO`. The
 // caller decides what a timeout or a failing status means.
-pub fn pkg_binder_supervise(argv: [String], cwd: ?String, env: [(name: String, value: String)], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput !ForeignBindError {
+pub fn pkg_binder_supervise(argv: [String], cwd: String?, env: [(name: String, value: String)], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
     if cwd == {
         .Val(directory) -> spec = spec.cwd(directory)
@@ -87,18 +87,18 @@ pub fn pkg_binder_supervise(argv: [String], cwd: ?String, env: [(name: String, v
 }
 
 // The common 64 KiB / 60 s supervision; a timeout is a `ToolFailed`.
-pub fn pkg_binder_capture(argv: [String], cwd: ?String, tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput !ForeignBindError {
+pub fn pkg_binder_capture(argv: [String], cwd: String?, tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     pkg_binder_capture_env(argv, cwd, [(name: String, value: String)]{}, tool, action)
 }
 
-pub fn pkg_binder_capture_env(argv: [String], cwd: ?String, env: [(name: String, value: String)], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput !ForeignBindError {
+pub fn pkg_binder_capture_env(argv: [String], cwd: String?, env: [(name: String, value: String)], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output :: pkg_binder_supervise(argv, cwd, env, @BINDER_TOOL_CAPTURE_LIMIT, 60s, tool)
     if output.timed_out -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: @BINDER_TOOL_TIMEOUT_DETAIL})
     Ok(output)
 }
 
 // The first non-empty trimmed line, at most 160 characters.
-pub fn pkg_binder_launder_first_line(bytes: [U8]) -> String !Never {
+pub fn pkg_binder_launder_first_line(bytes: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
         trimmed :: line.trim()
         if trimmed != "" -> return pkg_binder_take_chars(trimmed, 160)
@@ -107,7 +107,7 @@ pub fn pkg_binder_launder_first_line(bytes: [U8]) -> String !Never {
 }
 
 // An ASCII identifier: a letter or `_`, then letters, digits, or `_`.
-pub fn pkg_binder_is_ident(value: String) -> Bool !Never {
+pub fn pkg_binder_is_ident(value: String) -> Bool Never! {
     raw :: value.bytes()
     if raw.len() == 0 -> return false
     first :: Int.from_u8(raw[0])
@@ -118,45 +118,45 @@ pub fn pkg_binder_is_ident(value: String) -> Bool !Never {
     true
 }
 
-pub fn pkg_binder_is_ascii_alpha(code: Int) -> Bool !Never {
+pub fn pkg_binder_is_ascii_alpha(code: Int) -> Bool Never! {
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-pub fn pkg_binder_is_ascii_digit(code: Int) -> Bool !Never {
+pub fn pkg_binder_is_ascii_digit(code: Int) -> Bool Never! {
     code >= 48 && code <= 57
 }
 
 // ── Filesystem steps with the binder's failure context ──
 
-pub fn pkg_binder_canonicalize(path: String, context: String) -[FS, Env]> String !ForeignBindError {
+pub fn pkg_binder_canonicalize(path: String, context: String) -[FS, Env]> String ForeignBindError! {
     if files.canonicalize(path) == {
         .Ok(resolved) -> Ok(resolved)
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
-pub fn pkg_binder_create_dir_all(path: String, context: String) !ForeignBindError -[FS]> {
+pub fn pkg_binder_create_dir_all(path: String, context: String) ForeignBindError! -[FS]> {
     if files.create_dir_all(path) == {
         .Ok(_) -> Ok()
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
-pub fn pkg_binder_write(path: String, text: String, context: String) !ForeignBindError -[FS]> {
+pub fn pkg_binder_write(path: String, text: String, context: String) ForeignBindError! -[FS]> {
     if files.write(path, text) == {
         .Ok(_) -> Ok()
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
-pub fn pkg_binder_read_bytes(path: String, context: String) -[FS]> [U8] !ForeignBindError {
+pub fn pkg_binder_read_bytes(path: String, context: String) -[FS]> [U8] ForeignBindError! {
     if files.read_bytes(path) == {
         .Ok(bytes) -> Ok(bytes)
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
-pub fn pkg_binder_copy(from: String, to: String, context: String) !ForeignBindError -[FS]> {
+pub fn pkg_binder_copy(from: String, to: String, context: String) ForeignBindError! -[FS]> {
     if files.copy2(from, to) == {
         .Ok(_) -> Ok()
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
@@ -176,7 +176,7 @@ pub fn pkg_binder_remove_file_quiet(path: String) -[FS]> {
 
 // `str::lines`: split on `\n`, drop one trailing `\r` per line, and no final
 // empty line after a trailing newline.
-pub fn pkg_binder_lines(text: String) -> [String] !Never {
+pub fn pkg_binder_lines(text: String) -> [String] Never! {
     out := [String]{}
     if text == "" -> return out
     parts :: text.split("\n").to_list()
@@ -184,13 +184,13 @@ pub fn pkg_binder_lines(text: String) -> [String] !Never {
         if index == parts.len() - 1 && parts[index] == "" -> break
         raw :: parts[index].bytes()
         cut :: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
-        out.push(pkg_bytes_text(raw, 0, cut))
+        &out.push(pkg_bytes_text(raw, 0, cut))
     }
     out
 }
 
 // `str::split_whitespace`.
-pub fn pkg_binder_words(text: String) -> [String] !Never {
+pub fn pkg_binder_words(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     cursor := 0
@@ -199,13 +199,13 @@ pub fn pkg_binder_words(text: String) -> [String] !Never {
         if cursor >= raw.len() -> break
         start :: cursor
         loop cursor < raw.len() && pkg_bytes_space_width(raw, cursor) == 0 -> cursor += 1
-        out.push(pkg_bytes_text(raw, start, cursor))
+        &out.push(pkg_bytes_text(raw, start, cursor))
     }
     out
 }
 
 // The byte index of the first `needle` at or after `from`, or -1.
-pub fn pkg_binder_find(text: String, needle: String, from: Int) -> Int !Never {
+pub fn pkg_binder_find(text: String, needle: String, from: Int) -> Int Never! {
     raw :: text.bytes()
     pattern :: needle.bytes()
     cursor := if from < 0 -> 0 else -> from
@@ -217,7 +217,7 @@ pub fn pkg_binder_find(text: String, needle: String, from: Int) -> Int !Never {
 }
 
 // The byte index of the last `needle`, or -1.
-pub fn pkg_binder_rfind(text: String, needle: String) -> Int !Never {
+pub fn pkg_binder_rfind(text: String, needle: String) -> Int Never! {
     raw :: text.bytes()
     pattern :: needle.bytes()
     cursor := raw.len() - pattern.len()
@@ -229,59 +229,59 @@ pub fn pkg_binder_rfind(text: String, needle: String) -> Int !Never {
 }
 
 // `text[start..end]` by byte offsets.
-pub fn pkg_binder_slice(text: String, start: Int, end: Int) -> String !Never {
+pub fn pkg_binder_slice(text: String, start: Int, end: Int) -> String Never! {
     pkg_bytes_text(text.bytes(), start, end)
 }
 
 // `text[start..]` by byte offset.
-pub fn pkg_binder_tail(text: String, start: Int) -> String !Never {
+pub fn pkg_binder_tail(text: String, start: Int) -> String Never! {
     raw :: text.bytes()
     pkg_bytes_text(raw, start, raw.len())
 }
 
 // The first `count` characters.
-pub fn pkg_binder_take_chars(text: String, count: Int) -> String !Never {
+pub fn pkg_binder_take_chars(text: String, count: Int) -> String Never! {
     out := [String]{}
     loop scalar in text.chars() {
         if out.len() >= count -> break
-        out.push("{scalar}")
+        &out.push("{scalar}")
     }
     out.join("")
 }
 
 // `str::trim_end_matches(pattern)` for a non-empty pattern.
-pub fn pkg_binder_trim_end_matches(text: String, pattern: String) -> String !Never {
+pub fn pkg_binder_trim_end_matches(text: String, pattern: String) -> String Never! {
     out := text
     loop pattern != "" && out.ends_with(pattern) -> out = out.removesuffix(pattern)
     out
 }
 
 // `str::trim_matches(pattern)` for a non-empty pattern.
-pub fn pkg_binder_trim_matches(text: String, pattern: String) -> String !Never {
+pub fn pkg_binder_trim_matches(text: String, pattern: String) -> String Never! {
     out := text
     loop pattern != "" && out.starts_with(pattern) -> out = out.removeprefix(pattern)
     pkg_binder_trim_end_matches(out, pattern)
 }
 
 // ASCII-only uppercase (`str::to_ascii_uppercase`).
-pub fn pkg_binder_ascii_upper(value: String) -> String !Never {
+pub fn pkg_binder_ascii_upper(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         if {
-            code >= 97 && code <= 122 -> out.push(U8.from_int(code - 32) ?? byte)
-            else -> out.push(byte)
+            code >= 97 && code <= 122 -> &out.push(U8.from_int(code - 32) ?? byte)
+            else -> &out.push(byte)
         }
     }
     String.from_bytes(out) ?? value
 }
 
 // A `u64` length field in little-endian bytes (`(n as u64).to_le_bytes()`).
-pub fn pkg_binder_u64_le(value: Int) -> [U8] !Never {
+pub fn pkg_binder_u64_le(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value
     loop index in 0..<8 {
-        out.push(U8.from_int(rest % 256) ?? U8{0})
+        &out.push(U8.from_int(rest % 256) ?? U8{0})
         rest = rest / 256
     }
     out
@@ -289,6 +289,6 @@ pub fn pkg_binder_u64_le(value: Int) -> [U8] !Never {
 
 // The bytes of `text` followed by one NUL separator.
 pub fn pkg_binder_append_field(identity: &[U8], text: [U8]) {
-    loop byte in text -> identity.push(byte)
-    identity.push(U8{0})
+    loop byte in text -> &identity.push(byte)
+    &identity.push(U8{0})
 }

@@ -11,7 +11,7 @@
 
 // Export the selected Hangar closure as a portable, unsigned CAS bundle and
 // its `sha256-<hex>` digest.
-pub fn store_export_nix_cas_bundle(roots: HangarRoots, target: String) -> (bytes: [U8], digest: String) !StoreError {
+pub fn store_export_nix_cas_bundle(roots: HangarRoots, target: String) -> (bytes: [U8], digest: String) StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     archive :: store_nix_cas_build_unlocked(roots, target)
     bytes :: archive.encode()
@@ -22,38 +22,44 @@ pub fn store_export_nix_cas_bundle(roots: HangarRoots, target: String) -> (bytes
 // Persist a portable Nix CAS bundle below the project's managed directory.
 // An identical existing bundle is reused; different bytes under the same
 // digest fail closed.
-pub fn store_publish_nix_cas_bundle(project: String, roots: HangarRoots, target: String) -> String !StoreError {
+pub fn store_publish_nix_cas_bundle(project: String, roots: HangarRoots, target: String) -> String StoreError! {
     exported :: store_export_nix_cas_bundle(roots, target)
     bytes :: exported.bytes
     digest :: exported.digest
     directory :: files.join(pkg_managed_dir(project), @STORE_PROJECT_NIX_CAS_DIR)
     store_ensure_real_directory(directory, "project Nix CAS directory")
     path :: files.join(directory, digest)
-    files.read_bytes(path) ? existing -> {
-        if existing == bytes -> return Ok(digest)
-        return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
-    } ! error -> {
-        if error == {
-            .NotFound(_) -> {}
-            else -> return Err(StoreError.Io(error))
+    if files.read_bytes(path) == {
+        .Ok(existing) -> {
+            if existing == bytes -> return Ok(digest)
+            return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                else -> return Err(StoreError.Io(error))
+            }
         }
     }
     temporary :: files.join(directory, ".{digest}.partial-{store_archive_unique_suffix()}")
     files.write_bytes(temporary, bytes)
-    files.rename(temporary, path) ?? {
-        files.remove(temporary).drop("the partial bundle is disposable")
-        if err == {
-            .AlreadyExists(_) -> {}
-            else -> return Err(StoreError.Io(err))
+    if files.rename(temporary, path) == {
+        .Err(error) -> {
+            files.remove(temporary).drop("the partial bundle is disposable")
+            if error == {
+                .AlreadyExists(_) -> {}
+                else -> return Err(StoreError.Io(error))
+            }
+            if files.read_bytes(path) != bytes -> return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
         }
-        if files.read_bytes(path) != bytes -> return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
+        else -> {}
     }
     Ok(digest)
 }
 
 // Import a project Nix CAS bundle only after checking its declared digest.
 // Returns the import report and the manifest's member keys.
-pub fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) !StoreError {
+pub fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     store_nix_cas_import_with_expectation(project, roots, digest, None)
 }
 
@@ -61,7 +67,7 @@ pub fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: 
 // manifest is decoded and checked before any Hangar staging or publication,
 // so the lock identity is an admission precondition, not a post-import
 // observation.
-pub fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) !StoreError {
+pub fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     closure.validate() ?? return Err(StoreError.Other(err.message()))
     if envelope.output_hash != closure.output || envelope.platform != closure.system {
         return Err(StoreError.InvalidData("locked Nix envelope identity disagrees with its closure record"))
@@ -76,7 +82,7 @@ pub fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, 
     store_nix_cas_import_with_expectation(project, roots, digest, Val(expectation))
 }
 
-fn store_nix_cas_import_with_expectation(project: String, roots: HangarRoots, digest: String, expectation: ?NixReplayExpectation) -> (report: HangarArchiveReport, digests: [String]) !StoreError {
+fn store_nix_cas_import_with_expectation(project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     store_archive_validate_digest(digest)
     path :: files.join(files.join(pkg_managed_dir(project), @STORE_PROJECT_NIX_CAS_DIR), digest)
     bytes :: files.read_bytes(path)
@@ -87,7 +93,7 @@ fn store_nix_cas_import_with_expectation(project: String, roots: HangarRoots, di
     store_nix_cas_validate_bundle(archive, expectation)
     manifest :: archive.nix_manifest ?? return Err(StoreError.InvalidData("project Nix CAS bundle has no closure manifest"))
     digests := [String]{}
-    loop member in manifest.members -> digests.push(member.key)
+    loop member in manifest.members -> &digests.push(member.key)
     report :: store_archive_import_verified(roots, archive, true)
     Ok((report: report, digests: digests))
 }
@@ -105,7 +111,7 @@ struct NixReplayExpectation {
 // the archived metadata-free objects, hashes each canonical object, forms an
 // acyclic graph with no dangling or unreachable member, and (when locked)
 // matches the locked identity.
-fn store_nix_cas_validate_bundle(archive: HangarArchive, expectation: ?NixReplayExpectation) !StoreError {
+fn store_nix_cas_validate_bundle(archive: HangarArchive, expectation: NixReplayExpectation?) StoreError! {
     manifest :: archive.nix_manifest ?? return Err(StoreError.InvalidData("project Nix CAS bundle has no closure manifest"))
     store_nix_cas_validate_cas(manifest.output, "manifest output")
     store_nix_cas_validate_platform(manifest.platform)
@@ -122,12 +128,12 @@ fn store_nix_cas_validate_bundle(archive: HangarArchive, expectation: ?NixReplay
         if object.meta != "" -> return Err(StoreError.InvalidData("project Nix CAS bundle contains package metadata"))
         if object.id != object.digest -> return Err(StoreError.InvalidData("Nix CAS bundle object id disagrees with its digest"))
         store_nix_cas_validate_cas(object.digest, "Nix CAS member")
-        object_keys.push(object.digest)
+        &object_keys.push(object.digest)
         if objects.get(object.digest) != None -> return Err(StoreError.InvalidData("Nix CAS bundle contains duplicate members"))
         objects[object.digest] = object
     }
     member_keys := [String]{}
-    loop member in manifest.members -> member_keys.push(member.key)
+    loop member in manifest.members -> &member_keys.push(member.key)
     if !store_nix_cas_is_sorted_unique(object_keys) || !store_nix_cas_is_sorted_unique(member_keys) {
         return Err(StoreError.InvalidData("Nix closure manifest members must be sorted and unique"))
     }
@@ -178,7 +184,7 @@ fn store_nix_cas_validate_bundle(archive: HangarArchive, expectation: ?NixReplay
 }
 
 // Depth-first reachability from `key`, refusing reference cycles.
-fn store_nix_cas_visit(key: String, edges: [String: [String]], visiting: &[String: Bool], reachable: &[String: Bool]) !StoreError {
+fn store_nix_cas_visit(key: String, edges: [String: [String]], visiting: &[String: Bool], reachable: &[String: Bool]) StoreError! {
     if reachable.get(key) != None -> return Ok()
     if visiting.get(key) != None -> return Err(StoreError.InvalidData("Nix closure manifest contains a reference cycle"))
     visiting[key] = true
@@ -188,14 +194,14 @@ fn store_nix_cas_visit(key: String, edges: [String: [String]], visiting: &[Strin
     reachable[key] = true
 }
 
-fn store_nix_cas_is_sorted_unique(values: [String]) -> Bool !Never {
+fn store_nix_cas_is_sorted_unique(values: [String]) -> Bool Never! {
     loop index in 1..<values.len() {
         if !(values[index - 1] < values[index]) -> return false
     }
     true
 }
 
-fn store_nix_cas_is_lower_hex(raw: [U8], start: Int) -> Bool !Never {
+fn store_nix_cas_is_lower_hex(raw: [U8], start: Int) -> Bool Never! {
     loop index in start..<raw.len() {
         code :: Int.from_u8(raw[index])
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
@@ -204,21 +210,21 @@ fn store_nix_cas_is_lower_hex(raw: [U8], start: Int) -> Bool !Never {
 }
 
 // `sha256-` and 64 lowercase hex digits.
-fn store_nix_cas_validate_cas(value: String, label: String) !StoreError {
+fn store_nix_cas_validate_cas(value: String, label: String) StoreError! {
     raw :: value.bytes()
     if !value.starts_with("sha256-") || raw.len() != 71 || !store_nix_cas_is_lower_hex(raw, 7) {
         return Err(StoreError.InvalidData("{label} is not a canonical CAS digest"))
     }
 }
 
-fn store_nix_cas_validate_hex(value: String, digits: Int, label: String) !StoreError {
+fn store_nix_cas_validate_hex(value: String, digits: Int, label: String) StoreError! {
     raw :: value.bytes()
     if raw.len() != digits || !store_nix_cas_is_lower_hex(raw, 0) {
         return Err(StoreError.InvalidData("{label} is not canonical lowercase hex"))
     }
 }
 
-fn store_nix_cas_validate_platform(value: String) !StoreError {
+fn store_nix_cas_validate_platform(value: String) StoreError! {
     raw :: value.bytes()
     ascii := true
     loop byte in raw {
@@ -232,7 +238,7 @@ fn store_nix_cas_validate_platform(value: String) !StoreError {
 // Build the bundle for a Nix-produced entry: its metadata-free closure
 // objects, rooted at the output digest, with a manifest built from the
 // closure graph and the producer's locked index facts.
-fn store_nix_cas_build_unlocked(roots: HangarRoots, target: String) -> HangarArchive !StoreError {
+fn store_nix_cas_build_unlocked(roots: HangarRoots, target: String) -> HangarArchive StoreError! {
     entry :: store_archive_select_entry_unlocked(roots, target)
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Nix CAS export has invalid producer record: {err.message()}"))
     if producer.provider != "nix" {
@@ -256,7 +262,7 @@ fn store_nix_cas_build_unlocked(roots: HangarRoots, target: String) -> HangarArc
     loop object in full.objects {
         if object.meta != "" -> next
         if object.digest == root_digest -> has_output = true
-        objects.push(object)
+        &objects.push(object)
     }
     if !has_output -> return Err(StoreError.InvalidData("Nix CAS bundle is missing its output object"))
     manifest :: store_nix_cas_build_manifest(objects, graph, root_digest, platform, revision, cache_key)
@@ -265,9 +271,9 @@ fn store_nix_cas_build_unlocked(roots: HangarRoots, target: String) -> HangarArc
     Ok(archive)
 }
 
-fn store_nix_cas_build_manifest(objects: [HangarArchiveObject], graph: ClosureGraph, output: String, platform: String, revision: String, cache_key: String) -> NixClosureManifest !StoreError {
+fn store_nix_cas_build_manifest(objects: [HangarArchiveObject], graph: ClosureGraph, output: String, platform: String, revision: String, cache_key: String) -> NixClosureManifest StoreError! {
     object_keys := [String]{}
-    loop object in objects -> object_keys.push(object.digest)
+    loop object in objects -> &object_keys.push(object.digest)
     members := [NixClosureMember]{}
     loop object in objects {
         bytes :: store_nix_cas_canonical_object_bytes(object)
@@ -277,20 +283,20 @@ fn store_nix_cas_build_manifest(objects: [HangarArchiveObject], graph: ClosureGr
                 return Err(StoreError.InvalidData("Nix closure graph references an object outside the exported member set"))
             }
         }
-        members.push(NixClosureMember{
+        &members.push(NixClosureMember{
             key: object.digest,
             hash: "sha256-{pkg_sha256_hex(bytes)}",
             size: bytes.len(),
             references: store_archive_sorted_unique(references),
         })
     }
-    members.sort_by(member -> member.key)
+    &members.sort_by(member -> member.key)
     Ok(NixClosureManifest{output, platform, revision, cache_key, members})
 }
 
 // The canonical bytes a manifest member hashes: the root mode and every
 // node in archive encoding, without identity or metadata.
-fn store_nix_cas_canonical_object_bytes(object: HangarArchiveObject) -> [U8] !StoreError {
+fn store_nix_cas_canonical_object_bytes(object: HangarArchiveObject) -> [U8] StoreError! {
     bytes := [U8]{}
     store_archive_put_raw_u32(&bytes, object.root_mode)
     loop node in object.nodes -> node.encode_into(&bytes)

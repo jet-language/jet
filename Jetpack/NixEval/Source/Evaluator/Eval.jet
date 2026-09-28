@@ -11,7 +11,7 @@
 
 struct NixEvaluator {
     system: String
-    authority: ?NixEvalAuthority
+    authority: NixEvalAuthority?
     exprs: [NixEvalExpr]
     thunks: [NixEvalThunk]
     frames: [NixEvalFrame]
@@ -22,7 +22,7 @@ struct NixEvaluator {
     active_imports: [String]
     active_flakes: [String]
 
-    fn new(system: String, authority: ^?NixEvalAuthority) -> NixEvaluator !Never {
+    fn new(system: String, authority: ^NixEvalAuthority?) -> NixEvaluator Never! {
         NixEvaluator{
             system,
             authority,
@@ -38,65 +38,65 @@ struct NixEvaluator {
         }
     }
 
-    fn devshell(&self, source: String, output: String) -> NixEvalDevShell !NixEvalError {
-        if self.devshell_steps(source, output) == {
+    fn devshell(&self, source: String, output: String) -> NixEvalDevShell NixEvalError! {
+        if &self.devshell_steps(source, output) == {
             .Ok(shell) -> return Ok(shell)
             .Err(error) -> return Err(nixeval_public_error(error))
         }
     }
 
-    fn devshell_steps(&self, source: String, output: String) -> NixEvalDevShell !NixEvalError {
-        root :: self.evaluate_source(source, "")
-        shell :: self.resolve_shell(root, output)
-        self.project_shell(shell)
+    fn devshell_steps(&self, source: String, output: String) -> NixEvalDevShell NixEvalError! {
+        root :: &self.evaluate_source(source, "")
+        shell :: &self.resolve_shell(root, output)
+        &self.project_shell(shell)
     }
 
     // Lex, parse and evaluate one source file in a fresh root scope whose
     // relative paths resolve against `base_path`.
-    fn evaluate_source(&self, source: String, base_path: String) -> NixEvalValue !NixEvalError {
+    fn evaluate_source(&self, source: String, base_path: String) -> NixEvalValue NixEvalError! {
         tokens :: NixEvalLexer.tokenize(source)
         syntax :: NixEvalParser.parse(tokens, self.exprs.len())
-        loop node in syntax.nodes -> self.exprs.push(node)
-        frame :: self.root_frame(base_path)
-        self.evaluate_expr(syntax.root, frame, 0)
+        loop node in syntax.nodes -> &self.exprs.push(node)
+        frame :: &self.root_frame(base_path)
+        &self.evaluate_expr(syntax.root, frame, 0)
     }
 
-    fn value_thunk(&self, value: NixEvalValue) -> Int !Never {
-        self.thunks.push(NixEvalThunk.Evaluated(value))
+    fn value_thunk(&self, value: NixEvalValue) -> Int Never! {
+        &self.thunks.push(NixEvalThunk.Evaluated(value))
         self.thunks.len() - 1
     }
 
-    fn expression_thunk(&self, expression: Int, frame: Int) -> Int !Never {
-        self.thunks.push(NixEvalThunk.Pending{expression, frame})
+    fn expression_thunk(&self, expression: Int, frame: Int) -> Int Never! {
+        &self.thunks.push(NixEvalThunk.Pending{expression, frame})
         self.thunks.len() - 1
     }
 
-    fn new_overlay(&self, fields: [String: Int]) -> Int !Never {
-        self.overlays.push(fields)
+    fn new_overlay(&self, fields: [String: Int]) -> Int Never! {
+        &self.overlays.push(fields)
         self.overlays.len() - 1
     }
 
-    fn root_frame(&self, base_path: String) -> Int !Never {
-        self.fuel.push(0)
+    fn root_frame(&self, base_path: String) -> Int Never! {
+        &self.fuel.push(0)
         bindings := [String: Int]{}
-        bindings["pkgs"] = self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
-        bindings["legacyPackages"] = self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
-        bindings["system"] = self.value_thunk(NixEvalValue.Str(self.system))
-        bindings["builtins"] = self.value_thunk(NixEvalValue.BuiltinsNamespace)
-        bindings["mkShell"] = self.value_thunk(NixEvalValue.Native(NixEvalNative.MkShell))
-        bindings["import"] = self.value_thunk(NixEvalValue.Native(NixEvalNative.Import))
-        self.frames.push(NixEvalFrame{parent: None, bindings, scopes: [Int]{}, fuel: self.fuel.len() - 1, base_path})
+        bindings["pkgs"] = &self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
+        bindings["legacyPackages"] = &self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
+        bindings["system"] = &self.value_thunk(NixEvalValue.Str(self.system))
+        bindings["builtins"] = &self.value_thunk(NixEvalValue.BuiltinsNamespace)
+        bindings["mkShell"] = &self.value_thunk(NixEvalValue.Native(NixEvalNative.MkShell))
+        bindings["import"] = &self.value_thunk(NixEvalValue.Native(NixEvalNative.Import))
+        &self.frames.push(NixEvalFrame{parent: None, bindings, scopes: [Int]{}, fuel: self.fuel.len() - 1, base_path})
         self.frames.len() - 1
     }
 
-    fn child_frame(&self, parent: Int) -> Int !Never {
+    fn child_frame(&self, parent: Int) -> Int Never! {
         fuel :: ~self.frames[parent].fuel
         base_path :: ~self.frames[parent].base_path
-        self.frames.push(NixEvalFrame{parent: Val(parent), bindings: [String: Int]{}, scopes: [Int]{}, fuel, base_path})
+        &self.frames.push(NixEvalFrame{parent: Val(parent), bindings: [String: Int]{}, scopes: [Int]{}, fuel, base_path})
         self.frames.len() - 1
     }
 
-    fn force(&self, thunk: Int) -> NixEvalValue !NixEvalError {
+    fn force(&self, thunk: Int) -> NixEvalValue NixEvalError! {
         expression := 0
         frame := 0
         if self.thunks[thunk] == {
@@ -115,7 +115,7 @@ struct NixEvaluator {
             return Err(error)
         }
         self.force_depth += 1
-        if self.evaluate_expr(expression, frame, 0) == {
+        if &self.evaluate_expr(expression, frame, 0) == {
             .Ok(value) -> {
                 self.force_depth -= 1
                 self.thunks[thunk] = NixEvalThunk.Evaluated(~value)
@@ -129,7 +129,7 @@ struct NixEvaluator {
         }
     }
 
-    fn lookup(&self, frame: Int, name: String) -> Int !NixEvalError {
+    fn lookup(&self, frame: Int, name: String) -> Int NixEvalError! {
         index := frame
         loop index >= 0 {
             if self.frames[index].bindings.get(name) == {
@@ -139,8 +139,8 @@ struct NixEvaluator {
             scopes :: ~self.frames[index].scopes
             position := scopes.len() - 1
             loop position >= 0 {
-                scope :: self.force(scopes[position])
-                found :: self.try_select(scope, name)
+                scope :: &self.force(scopes[position])
+                found :: &self.try_select(scope, name)
                 if found == {
                     .Val(binding) -> return Ok(binding)
                     else -> {}
@@ -152,7 +152,7 @@ struct NixEvaluator {
         Err(NixEvalError.Missing(name))
     }
 
-    fn evaluate_expr(&self, expression: Int, frame: Int, depth: Int) -> NixEvalValue !NixEvalError {
+    fn evaluate_expr(&self, expression: Int, frame: Int, depth: Int) -> NixEvalValue NixEvalError! {
         cell :: ~self.frames[frame].fuel
         spent :: ~self.fuel[cell]
         if spent >= @NIXEVAL_EXPRESSION_LIMIT {
@@ -165,7 +165,7 @@ struct NixEvaluator {
         node :: ~self.exprs[expression]
         if node == {
             .Str(value) -> NixEvalValue.Str(value)
-            .Interpolated(parts) -> self.evaluate_string_context(parts, frame, depth)
+            .Interpolated(parts) -> &self.evaluate_string_context(parts, frame, depth)
             .Path(raw) -> {
                 base_path :: ~self.frames[frame].base_path
                 path :: nixeval_resolve_path_literal(raw, base_path)
@@ -176,75 +176,75 @@ struct NixEvaluator {
             .Bool(value) -> NixEvalValue.Bool(value)
             .Null -> NixEvalValue.Null
             .Identifier(name) -> {
-                binding :: self.lookup(frame, name)
-                self.force(binding)
+                binding :: &self.lookup(frame, name)
+                &self.force(binding)
             }
             .AttrSet(entries) -> {
                 fields := [String: Int]{}
                 loop entry in entries {
                     if fields.get(entry.name) != None -> return Err(NixEvalError.Invalid("duplicate attribute `{entry.name}`"))
-                    fields[entry.name] = self.expression_thunk(entry.value, frame)
+                    fields[entry.name] = &self.expression_thunk(entry.value, frame)
                 }
                 NixEvalValue.AttrSet(fields)
             }
             .List(values) -> {
                 items := [Int]{}
-                loop value in values -> items.push(self.expression_thunk(value, frame))
+                loop value in values -> &items.push(&self.expression_thunk(value, frame))
                 NixEvalValue.List(items)
             }
             .Lambda(_, _) -> NixEvalValue.Function{lambda: expression, frame}
             .Apply(function, argument) -> {
-                callee :: self.evaluate_expr(function, frame, depth + 1)
-                argument_thunk :: self.expression_thunk(argument, frame)
+                callee :: &self.evaluate_expr(function, frame, depth + 1)
+                argument_thunk :: &self.expression_thunk(argument, frame)
                 self.apply(callee, argument_thunk)
             }
             .Select(value, field) -> {
-                subject :: self.evaluate_expr(value, frame, depth + 1)
+                subject :: &self.evaluate_expr(value, frame, depth + 1)
                 selected :: self.select(subject, field)
-                self.force(selected)
+                &self.force(selected)
             }
             .Let(bindings, body) -> {
-                child :: self.child_frame(frame)
+                child :: &self.child_frame(frame)
                 loop binding in bindings {
                     if self.frames[child].bindings.get(binding.name) != None -> return Err(NixEvalError.Invalid("duplicate let binding `{binding.name}`"))
-                    binding_thunk :: self.expression_thunk(binding.value, child)
+                    binding_thunk :: &self.expression_thunk(binding.value, child)
                     self.frames[child].bindings[binding.name] = binding_thunk
                 }
-                self.evaluate_expr(body, child, depth + 1)
+                &self.evaluate_expr(body, child, depth + 1)
             }
             .With(scope, body) -> {
-                child :: self.child_frame(frame)
-                scope_thunk :: self.expression_thunk(scope, frame)
-                self.frames[child].scopes.push(scope_thunk)
-                self.evaluate_expr(body, child, depth + 1)
+                child :: &self.child_frame(frame)
+                scope_thunk :: &self.expression_thunk(scope, frame)
+                &self.frames[child].scopes.push(scope_thunk)
+                &self.evaluate_expr(body, child, depth + 1)
             }
             .If(condition, then_branch, else_branch) -> {
-                chosen :: self.evaluate_expr(condition, frame, depth + 1)
+                chosen :: &self.evaluate_expr(condition, frame, depth + 1)
                 flag :: nixeval_condition(chosen)
                 branch :: if flag -> then_branch else -> else_branch
-                self.evaluate_expr(branch, frame, depth + 1)
+                &self.evaluate_expr(branch, frame, depth + 1)
             }
             .Merge(left, right) -> {
-                left_value :: self.evaluate_expr(left, frame, depth + 1)
-                right_value :: self.evaluate_expr(right, frame, depth + 1)
-                self.merge(left_value, right_value)
+                left_value :: &self.evaluate_expr(left, frame, depth + 1)
+                right_value :: &self.evaluate_expr(right, frame, depth + 1)
+                &self.merge(left_value, right_value)
             }
             .Equal(left, right, positive) -> {
-                left_value :: self.evaluate_expr(left, frame, depth + 1)
-                right_value :: self.evaluate_expr(right, frame, depth + 1)
+                left_value :: &self.evaluate_expr(left, frame, depth + 1)
+                right_value :: &self.evaluate_expr(right, frame, depth + 1)
                 NixEvalValue.Bool(left_value.equals(right_value) == positive)
             }
         }
     }
 
-    fn evaluate_string_context(&self, parts: [NixEvalStringPart], frame: Int, depth: Int) -> NixEvalValue !NixEvalError {
+    fn evaluate_string_context(&self, parts: [NixEvalStringPart], frame: Int, depth: Int) -> NixEvalValue NixEvalError! {
         value := [U8]{}
         contexts := [String]{}
         loop part in parts {
             text :: if part == {
                 .Literal(literal) -> NixEvalText{value: literal, contexts: [String]{}}
                 .Expression(inner) -> {
-                    evaluated :: self.evaluate_expr(inner, frame, depth + 1)
+                    evaluated :: &self.evaluate_expr(inner, frame, depth + 1)
                     evaluated.stringify()
                 }
             }
@@ -253,22 +253,22 @@ struct NixEvaluator {
             }
             nixeval_push_text(&value, text.value)
             loop context in text.contexts {
-                if !nixeval_contains_text(contexts, context) -> contexts.push(context)
+                if !nixeval_contains_text(contexts, context) -> &contexts.push(context)
             }
         }
         Ok(NixEvalText{value: String.from_bytes(value) ?? "", contexts}.into_value())
     }
 
-    fn apply(&self, function: NixEvalValue, argument: Int) -> NixEvalValue !NixEvalError {
+    fn apply(&self, function: NixEvalValue, argument: Int) -> NixEvalValue NixEvalError! {
         if function == {
-            .Function(lambda, closure) -> return self.apply_lambda(lambda, closure, argument)
-            .Native(native) -> return self.apply_native(native, argument)
+            .Function(lambda, closure) -> return &self.apply_lambda(lambda, closure, argument)
+            .Native(native) -> return &self.apply_native(native, argument)
             else -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "function", actual: function.type_name()})
     }
 
-    fn apply_lambda(&self, lambda: Int, closure: Int, argument: Int) -> NixEvalValue !NixEvalError {
+    fn apply_lambda(&self, lambda: Int, closure: Int, argument: Int) -> NixEvalValue NixEvalError! {
         pattern := NixEvalPattern.Name("")
         body := 0
         node :: ~self.exprs[lambda]
@@ -279,119 +279,119 @@ struct NixEvaluator {
             }
             else -> return Err(NixEvalError.TypeMismatch{expected: "function", actual: "expression"})
         }
-        frame :: self.child_frame(closure)
+        frame :: &self.child_frame(closure)
         if pattern == {
             .Name(name) -> self.frames[frame].bindings[name] = argument
             .Attrs(fields) -> {
-                argument_value :: self.force(argument)
+                argument_value :: &self.force(argument)
                 arguments :: argument_value.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "attribute set function argument", actual: argument_value.type_name()})
                 loop field in fields {
-                    if self.attr_field(arguments, field.name) == {
+                    if &self.attr_field(arguments, field.name) == {
                         .Val(binding) -> self.frames[frame].bindings[field.name] = binding
                         else -> {
                             fallback :: field.default ?? return Err(NixEvalError.Missing(field.name))
-                            fallback_thunk :: self.expression_thunk(fallback, frame)
+                            fallback_thunk :: &self.expression_thunk(fallback, frame)
                             self.frames[frame].bindings[field.name] = fallback_thunk
                         }
                     }
                 }
             }
         }
-        self.evaluate_expr(body, frame, 0)
+        &self.evaluate_expr(body, frame, 0)
     }
 
-    fn apply_native(&self, native: NixEvalNative, argument: Int) -> NixEvalValue !NixEvalError {
+    fn apply_native(&self, native: NixEvalNative, argument: Int) -> NixEvalValue NixEvalError! {
         if native == {
             .MkShell -> {
-                value :: self.force(argument)
+                value :: &self.force(argument)
                 if value.attr_fields() == None -> return Err(NixEvalError.TypeMismatch{expected: "mkShell attribute set", actual: value.type_name()})
                 value
             }
             .Import -> {
-                value :: self.force(argument)
-                self.import_value(value)
+                value :: &self.force(argument)
+                &self.import_value(value)
             }
             .ImportPackage(base) -> {
-                arguments :: self.force(argument)
+                arguments :: &self.force(argument)
                 fields :: arguments.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "package import attribute set", actual: arguments.type_name()})
-                overlays :: self.attr_field(fields, "overlays") ?? return Ok(NixEvalValue.Packages(~base))
-                overlay_value :: self.force(overlays)
+                overlays :: &self.attr_field(fields, "overlays") ?? return Ok(NixEvalValue.Packages(~base))
+                overlay_value :: &self.force(overlays)
                 items :: overlay_value.list_items() ?? return Err(NixEvalError.TypeMismatch{expected: "overlay list", actual: "non-list overlays"})
                 if items.len() > @NIXEVAL_MAX_OVERLAYS -> return Err(NixEvalError.ResourceLimit("package overlay list exceeds {@NIXEVAL_MAX_OVERLAYS} overlays"))
-                self.apply_overlays(base, items)
+                &self.apply_overlays(base, items)
             }
             .ExtendPackage(base) -> {
-                overlay :: self.force(argument)
-                self.apply_overlay(base, overlay)
+                overlay :: &self.force(argument)
+                &self.apply_overlay(base, overlay)
             }
             .Fetch(fetcher) -> {
-                value :: self.force(argument)
-                self.apply_fetch(fetcher, value)
+                value :: &self.force(argument)
+                &self.apply_fetch(fetcher, value)
             }
             .GetFlake -> {
-                value :: self.force(argument)
-                self.apply_external_flake(value)
+                value :: &self.force(argument)
+                &self.apply_external_flake(value)
             }
             .ToString -> {
-                value :: self.force(argument)
+                value :: &self.force(argument)
                 text :: value.stringify()
                 text.into_value()
             }
             .HasContext -> {
-                value :: self.force(argument)
+                value :: &self.force(argument)
                 text :: value.stringify()
                 NixEvalValue.Bool(text.contexts.len() != 0)
             }
             .Derivation(strict) -> {
-                value :: self.force(argument)
-                self.derivation_from_value(value, strict)
+                value :: &self.force(argument)
+                &self.derivation_from_value(value, strict)
             }
             .Builtin(builtin) -> {
-                value :: self.force(argument)
-                self.apply_builtin(builtin, value)
+                value :: &self.force(argument)
+                &self.apply_builtin(builtin, value)
             }
             .Partial(operation, arguments) -> {
-                self.force(argument)
+                &self.force(argument)
                 collected := arguments
-                collected.push(argument)
-                self.apply_partial(operation, collected)
+                &collected.push(argument)
+                &self.apply_partial(operation, collected)
             }
         }
     }
 
     // `import` of a project path evaluates the file; `import pkgs` awaits its
     // package-set arguments.
-    fn import_value(&self, value: NixEvalValue) -> NixEvalValue !NixEvalError {
+    fn import_value(&self, value: NixEvalValue) -> NixEvalValue NixEvalError! {
         if value == {
-            .Path(path) -> return self.evaluate_import(path)
+            .Path(path) -> return &self.evaluate_import(path)
             .Packages(set) -> return Ok(NixEvalValue.Native(NixEvalNative.ImportPackage(set)))
             else -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "path or package-set import argument", actual: value.type_name()})
     }
 
-    fn select(&self, value: NixEvalValue, field: String) -> Int !NixEvalError {
-        selected :: self.try_select(value, field)
+    fn select(&self, value: NixEvalValue, field: String) -> Int NixEvalError! {
+        selected :: &self.try_select(value, field)
         binding :: selected ?? return Err(NixEvalError.Missing(field))
         Ok(binding)
     }
 
-    fn try_select(&self, value: NixEvalValue, field: String) -> ?Int !NixEvalError {
+    fn try_select(&self, value: NixEvalValue, field: String) -> Int? NixEvalError! {
         if value == {
-            .AttrSet(fields) -> return Ok(self.attr_field(fields, field))
-            .Packages(set) -> return self.package_field(set, field)
-            .CrossPackages(prefix) -> return self.cross_package_field(prefix, field)
-            .Package(prefix) -> return Ok(Val(self.value_thunk(NixEvalValue.Package("{prefix}.{field}"))))
-            .Derivation(fields, request) -> return self.derivation_field(fields, request, field)
+            .AttrSet(fields) -> return Ok(&self.attr_field(fields, field))
+            .Packages(set) -> return &self.package_field(set, field)
+            .CrossPackages(prefix) -> return &self.cross_package_field(prefix, field)
+            .Package(prefix) -> return Ok(Val(&self.value_thunk(NixEvalValue.Package("{prefix}.{field}"))))
+            .Derivation(fields, request) -> return &self.derivation_field(fields, request, field)
             .LibraryNamespace -> return Ok(None)
-            .BuiltinsNamespace -> return Ok(self.builtins_field(field))
+            .BuiltinsNamespace -> return Ok(&self.builtins_field(field))
             else -> {}
         }
         Err(NixEvalError.TypeMismatch{expected: "attribute set", actual: value.type_name()})
     }
 
     // A direct field, or the nested attribute set spelled by dotted keys.
-    fn attr_field(&self, fields: [String: Int], field: String) -> ?Int !Never {
+    fn attr_field(&self, fields: [String: Int], field: String) -> Int? Never! {
         if fields.get(field) == {
             .Val(binding) -> return Val(binding)
             else -> {}
@@ -403,10 +403,10 @@ struct NixEvaluator {
             if nixeval_matches_at(key, prefix, 0) -> nested[nixeval_slice(key, prefix.len(), key.len())] = entry.value
         }
         if nested.len() == 0 -> return None
-        Val(self.value_thunk(NixEvalValue.AttrSet(nested)))
+        Val(&self.value_thunk(NixEvalValue.AttrSet(nested)))
     }
 
-    fn package_field(&self, set: NixEvalPackageSet, field: String) -> ?Int !NixEvalError {
+    fn package_field(&self, set: NixEvalPackageSet, field: String) -> Int? NixEvalError! {
         if self.overlay_binding(set, field) == {
             .Val(binding) -> return Ok(Val(binding))
             else -> {}
@@ -416,43 +416,43 @@ struct NixEvaluator {
             "pkgsCross" -> NixEvalValue.CrossPackages(set.prefix)
             "lib" -> NixEvalValue.LibraryNamespace
             "mkShell" -> NixEvalValue.Native(NixEvalNative.MkShell)
-            "extend" -> NixEvalValue.Native(NixEvalNative.ExtendPackage(self.extension_base(set)))
+            "extend" -> NixEvalValue.Native(NixEvalNative.ExtendPackage(&self.extension_base(set)))
             else -> NixEvalValue.Package(nixeval_package_path(set.prefix, field))
         }
-        Ok(Val(self.value_thunk(package)))
+        Ok(Val(&self.value_thunk(package)))
     }
 
     // The override bound to `field` in the set's shared overlay table.
-    fn overlay_binding(self, set: NixEvalPackageSet, field: String) -> ?Int !Never {
+    fn overlay_binding(self, set: NixEvalPackageSet, field: String) -> Int? Never! {
         table :: set.overlay ?? return None
         self.overlays[table].get(field)
     }
 
     // The package set an `extend` overlay starts from: a private copy of the
     // current overrides, so the extension cannot write through to `set`.
-    fn extension_base(&self, set: NixEvalPackageSet) -> NixEvalPackageSet !Never {
+    fn extension_base(&self, set: NixEvalPackageSet) -> NixEvalPackageSet Never! {
         if set.overlay == {
             .Val(table) -> {
                 copied :: ~self.overlays[table]
-                NixEvalPackageSet{prefix: set.prefix, overlay: Val(self.new_overlay(copied))}
+                NixEvalPackageSet{prefix: set.prefix, overlay: Val(&self.new_overlay(copied))}
             }
             else -> NixEvalPackageSet{prefix: set.prefix, overlay: None}
         }
     }
 
-    fn cross_package_field(&self, prefix: String, field: String) -> ?Int !NixEvalError {
+    fn cross_package_field(&self, prefix: String, field: String) -> Int? NixEvalError! {
         if self.authority == None {
             return Err(NixEvalError.Unsupported("cross-system packages require an explicit target and provider authority"))
         }
         target :: self.ask(NixEvalRequest.CrossTarget(field))
         if !nixeval_is_required_system(target) -> return Err(NixEvalError.Unsupported("cross target authority returned unsupported system {target}"))
         scoped :: if prefix == "" -> "cross:{target}" else -> "cross:{target}:{prefix}"
-        Ok(Val(self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: scoped, overlay: None}))))
+        Ok(Val(&self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: scoped, overlay: None}))))
     }
 
     // The explicit authority's answer, or the request's refusal carrying the
     // authority's reason. Callers check that an authority was granted first.
-    fn ask(self, request: NixEvalRequest) -> String !NixEvalError {
+    fn ask(self, request: NixEvalRequest) -> String NixEvalError! {
         if self.authority == {
             .Val(authority) -> {
                 if authority.answer(request.text()) == {
@@ -466,40 +466,40 @@ struct NixEvaluator {
     }
 
     // The external flake whose sources are being evaluated, if any.
-    fn active_flake(self) -> ?String !Never {
+    fn active_flake(self) -> String? Never! {
         if self.active_flakes.len() == 0 -> return None
         Val(self.active_flakes[self.active_flakes.len() - 1])
     }
 
-    fn evaluate_import(&self, path: String) -> NixEvalValue !NixEvalError {
+    fn evaluate_import(&self, path: String) -> NixEvalValue NixEvalError! {
         if self.authority == None -> return Err(NixEvalError.Unsupported("import requires explicit project-root authority"))
         if self.imports >= @NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake imports exceed {@NIXEVAL_IMPORT_LIMIT} files"))
         active_path :: if self.active_flakes.len() == 0 -> path else -> "{self.active_flakes[self.active_flakes.len() - 1]}:{path}"
         if nixeval_contains_text(self.active_imports, active_path) -> return Err(NixEvalError.Cycle)
         self.imports += 1
-        self.active_imports.push(active_path)
-        if self.import_source(path) == {
+        &self.active_imports.push(active_path)
+        if &self.import_source(path) == {
             .Ok(value) -> {
-                _ := self.active_imports.pop()
+                _ := &self.active_imports.pop()
                 return Ok(value)
             }
             .Err(error) -> {
-                _ := self.active_imports.pop()
+                _ := &self.active_imports.pop()
                 return Err(error)
             }
         }
     }
 
-    fn import_source(&self, path: String) -> NixEvalValue !NixEvalError {
+    fn import_source(&self, path: String) -> NixEvalValue NixEvalError! {
         source :: self.ask(NixEvalRequest.Import{path, flake: self.active_flake()})
         if source.bytes().len() > @NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("imported `{path}` exceeds {@NIXEVAL_STRING_BYTES} bytes"))
         bytes :: path.bytes()
         slash :: nixeval_last_byte(bytes, 47)
         parent :: if slash < 0 -> "" else -> nixeval_slice(bytes, 0, slash)
-        self.evaluate_source(source, parent)
+        &self.evaluate_source(source, parent)
     }
 
-    fn apply_external_flake(&self, argument: NixEvalValue) -> NixEvalValue !NixEvalError {
+    fn apply_external_flake(&self, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
         reference :: argument.plain_string()
         if reference == "" || reference.bytes().len() > @NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(reference, 0) || nixeval_contains_byte(reference, 10) {
             return Err(NixEvalError.Invalid("external flake reference is invalid"))
@@ -508,33 +508,33 @@ struct NixEvaluator {
         if nixeval_contains_text(self.active_flakes, reference) -> return Err(NixEvalError.Cycle)
         if self.imports >= @NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("external flake sources exceed {@NIXEVAL_IMPORT_LIMIT} files"))
         self.imports += 1
-        self.active_flakes.push(~reference)
-        if self.external_flake_source(reference) == {
+        &self.active_flakes.push(~reference)
+        if &self.external_flake_source(reference) == {
             .Ok(value) -> {
-                _ := self.active_flakes.pop()
+                _ := &self.active_flakes.pop()
                 return Ok(value)
             }
             .Err(error) -> {
-                _ := self.active_flakes.pop()
+                _ := &self.active_flakes.pop()
                 return Err(error)
             }
         }
     }
 
-    fn external_flake_source(&self, reference: String) -> NixEvalValue !NixEvalError {
+    fn external_flake_source(&self, reference: String) -> NixEvalValue NixEvalError! {
         source :: self.ask(NixEvalRequest.ExternalFlake(reference))
         if source.bytes().len() > @NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("external flake {reference} exceeds {@NIXEVAL_STRING_BYTES} bytes"))
-        root :: self.evaluate_source(source, "")
-        self.project_external_flake(root)
+        root :: &self.evaluate_source(source, "")
+        &self.project_external_flake(root)
     }
 
-    fn project_external_flake(&self, root: NixEvalValue) -> NixEvalValue !NixEvalError {
-        if root.is_function() -> return self.apply_flake_arguments(root)
+    fn project_external_flake(&self, root: NixEvalValue) -> NixEvalValue NixEvalError! {
+        if root.is_function() -> return &self.apply_flake_arguments(root)
         fields :: root.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "external flake attribute set", actual: root.type_name()})
-        outputs :: self.attr_field(fields, "outputs") ?? return Ok(NixEvalValue.AttrSet(fields))
-        forced :: self.force(outputs)
+        outputs :: &self.attr_field(fields, "outputs") ?? return Ok(NixEvalValue.AttrSet(fields))
+        forced :: &self.force(outputs)
         projected :: if forced == {
-            .Function(_, _) | .Native(_) -> self.apply_flake_arguments(forced)
+            .Function(_, _) | .Native(_) -> &self.apply_flake_arguments(forced)
             else -> forced
         }
         if projected == {
@@ -545,72 +545,72 @@ struct NixEvaluator {
 
     // Apply a flake `outputs` function or shell function to the arguments a
     // flake receives.
-    fn apply_flake_arguments(&self, function: NixEvalValue) -> NixEvalValue !NixEvalError {
-        arguments :: self.flake_arguments()
-        argument :: self.value_thunk(arguments)
+    fn apply_flake_arguments(&self, function: NixEvalValue) -> NixEvalValue NixEvalError! {
+        arguments :: &self.flake_arguments()
+        argument :: &self.value_thunk(arguments)
         self.apply(function, argument)
     }
 
-    fn flake_arguments(&self) -> NixEvalValue !Never {
+    fn flake_arguments(&self) -> NixEvalValue Never! {
         fields := [String: Int]{}
-        fields["self"] = self.value_thunk(NixEvalValue.AttrSet([String: Int]{}))
+        fields["self"] = &self.value_thunk(NixEvalValue.AttrSet([String: Int]{}))
         package_names :: [String]{"nixpkgs", "legacyPackages", "pkgs"}
         loop name in package_names {
-            fields[name] = self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
+            fields[name] = &self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
         }
-        fields["system"] = self.value_thunk(NixEvalValue.Str(self.system))
+        fields["system"] = &self.value_thunk(NixEvalValue.Str(self.system))
         NixEvalValue.AttrSet(fields)
     }
 
-    fn overlay_fields(self, set: NixEvalPackageSet) -> [String: Int] !Never {
+    fn overlay_fields(self, set: NixEvalPackageSet) -> [String: Int] Never! {
         if set.overlay == {
             .Val(table) -> self.overlays[table]
             else -> [String: Int]{}
         }
     }
 
-    fn extend_overlay(&self, table: Int, fields: [String: Int]) !Never {
+    fn extend_overlay(&self, table: Int, fields: [String: Int]) Never! {
         loop entry in fields -> self.overlays[table][entry.key] = entry.value
     }
 
     // Apply one overlay function to `current` with `final_table` as the final
     // view, and return the snapshot package set it produces.
-    fn overlay_step(&self, prefix: String, final_table: Int, overlay: NixEvalValue, current: NixEvalValue) -> NixEvalValue !NixEvalError {
-        final_thunk :: self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix, overlay: Val(final_table)}))
+    fn overlay_step(&self, prefix: String, final_table: Int, overlay: NixEvalValue, current: NixEvalValue) -> NixEvalValue NixEvalError! {
+        final_thunk :: &self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix, overlay: Val(final_table)}))
         first :: self.apply(overlay, final_thunk)
-        current_thunk :: self.value_thunk(current)
+        current_thunk :: &self.value_thunk(current)
         result :: self.apply(first, current_thunk)
         if result == {
-            .AttrSet(fields) -> self.extend_overlay(final_table, fields)
+            .AttrSet(fields) -> &self.extend_overlay(final_table, fields)
             else -> return Err(NixEvalError.TypeMismatch{expected: "overlay attribute set", actual: result.type_name()})
         }
         extended :: ~self.overlays[final_table]
-        snapshot :: self.new_overlay(extended)
+        snapshot :: &self.new_overlay(extended)
         Ok(NixEvalValue.Packages(NixEvalPackageSet{prefix, overlay: Val(snapshot)}))
     }
 
     // Apply one bounded overlay. Only explicitly named attributes are
     // replaced; untouched packages still resolve through the namespace.
-    fn apply_overlay(&self, base: NixEvalPackageSet, overlay: NixEvalValue) -> NixEvalValue !NixEvalError {
-        final_table :: self.new_overlay(self.overlay_fields(base))
-        self.overlay_step(base.prefix, final_table, overlay, NixEvalValue.Packages(base))
+    fn apply_overlay(&self, base: NixEvalPackageSet, overlay: NixEvalValue) -> NixEvalValue NixEvalError! {
+        final_table :: &self.new_overlay(self.overlay_fields(base))
+        &self.overlay_step(base.prefix, final_table, overlay, NixEvalValue.Packages(base))
     }
 
-    fn apply_overlays(&self, base: NixEvalPackageSet, overlays: [Int]) -> NixEvalValue !NixEvalError {
-        final_table :: self.new_overlay(self.overlay_fields(base))
+    fn apply_overlays(&self, base: NixEvalPackageSet, overlays: [Int]) -> NixEvalValue NixEvalError! {
+        final_table :: &self.new_overlay(self.overlay_fields(base))
         current := NixEvalValue.Packages(base)
         loop overlay in overlays {
-            function :: self.force(overlay)
-            current = self.overlay_step(base.prefix, final_table, function, current)
+            function :: &self.force(overlay)
+            current = &self.overlay_step(base.prefix, final_table, function, current)
         }
         Ok(current)
     }
 
-    fn merge(&self, left: NixEvalValue, right: NixEvalValue) -> NixEvalValue !NixEvalError {
+    fn merge(&self, left: NixEvalValue, right: NixEvalValue) -> NixEvalValue NixEvalError! {
         if left == {
             .Packages(set) -> {
                 fields :: nixeval_attribute_set(right, "package overlay attribute set")
-                return Ok(self.merge_packages(set, fields))
+                return Ok(&self.merge_packages(set, fields))
             }
             .AttrSet(fields) -> {
                 additions :: nixeval_attribute_set(right, "attribute set")
@@ -625,16 +625,16 @@ struct NixEvaluator {
 
     // `pkgs // { ... }` extends an overlaid set's shared table in place and
     // gives a plain package set its first overlay table.
-    fn merge_packages(&self, set: NixEvalPackageSet, fields: [String: Int]) -> NixEvalValue !Never {
-        table :: set.overlay ?? return NixEvalValue.Packages(NixEvalPackageSet{prefix: set.prefix, overlay: Val(self.new_overlay(fields))})
-        self.extend_overlay(table, fields)
+    fn merge_packages(&self, set: NixEvalPackageSet, fields: [String: Int]) -> NixEvalValue Never! {
+        table :: set.overlay ?? return NixEvalValue.Packages(NixEvalPackageSet{prefix: set.prefix, overlay: Val(&self.new_overlay(fields))})
+        &self.extend_overlay(table, fields)
         NixEvalValue.Packages(set)
     }
 }
 
 // A package's dotted identity inside a package set; cross-target sets keep
 // the package after a `:` so the target stays separable.
-fn nixeval_package_path(prefix: String, field: String) -> String !Never {
+fn nixeval_package_path(prefix: String, field: String) -> String Never! {
     if {
         prefix == "" -> field
         nixeval_has_prefix(prefix, "cross:") -> "{prefix}:{field}"
@@ -643,7 +643,7 @@ fn nixeval_package_path(prefix: String, field: String) -> String !Never {
 }
 
 // The boolean an `if` condition must evaluate to.
-fn nixeval_condition(value: NixEvalValue) -> Bool !NixEvalError {
+fn nixeval_condition(value: NixEvalValue) -> Bool NixEvalError! {
     if value == {
         .Bool(flag) -> return Ok(flag)
         else -> {}
@@ -652,23 +652,23 @@ fn nixeval_condition(value: NixEvalValue) -> Bool !NixEvalError {
 }
 
 // Resolve a relative path literal inside the project root.
-fn nixeval_resolve_path_literal(raw: String, base: String) -> String !NixEvalError {
+fn nixeval_resolve_path_literal(raw: String, base: String) -> String NixEvalError! {
     if raw.bytes().len() > @NIXEVAL_MAX_PATH_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake path exceeds {@NIXEVAL_MAX_PATH_BYTES} bytes"))
     if nixeval_has_prefix(raw, "/") -> return Err(NixEvalError.Unsupported("absolute paths require explicit project-root authority"))
     if nixeval_contains_byte(raw, 92) || nixeval_contains_byte(raw, 0) -> return Err(NixEvalError.Unsupported("path values must use bounded relative UTF-8 paths"))
     if nixeval_contains_byte(raw, 58) -> return Err(NixEvalError.Unsupported("URI paths require explicit fetch authority"))
     components := [String]{}
     loop component in base.split("/") {
-        if component != "" -> components.push(component)
+        if component != "" -> &components.push(component)
     }
     loop component in raw.split("/") {
         if component == {
             "" | "." -> {}
             ".." -> {
                 if components.len() == 0 -> return Err(NixEvalError.Unsupported("path escapes the flake project-root authority"))
-                _ := components.pop()
+                _ := &components.pop()
             }
-            else -> components.push(component)
+            else -> &components.push(component)
         }
     }
     if components.len() == 0 -> return Err(NixEvalError.Invalid("path value names the flake root directory"))

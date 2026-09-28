@@ -21,11 +21,11 @@ pub struct CacheBinding {
     // Host path to the trust key. The key bytes are never serialized in the
     // binding and never returned by inspection APIs.
     pub trust_key: String
-    pub credential_provider: ?String
+    pub credential_provider: String?
     // Separate write authority. Read bindings cannot publish by accident.
     pub allow_write: Bool
 
-    fn validate(self) !StoreError {
+    fn validate(self) StoreError! {
         store_cache_validate_component(self.role, "cache role")
         if self.mirrors.len() == 0 -> return Err(StoreError.InvalidData("cache binding needs at least one mirror"))
         seen := [String]{}
@@ -34,7 +34,7 @@ pub struct CacheBinding {
             endpoint :: store_cache_parse_endpoint(mirror)
             store_cache_validate_endpoint_binding(self, endpoint, self.allow_write)
             if seen.contains(mirror) -> return Err(StoreError.InvalidData("cache binding contains a duplicate mirror"))
-            seen.push(mirror)
+            &seen.push(mirror)
         }
         if !self.trust_key.starts_with("/") -> return Err(StoreError.InvalidData("cache trust key must be an absolute host path"))
         store_cache_validate_path_components(self.trust_key)
@@ -48,7 +48,7 @@ pub struct CacheBinding {
     }
 
     // The `jet-cache-bind-v1` line format.
-    fn encode(self) -> String !StoreError {
+    fn encode(self) -> String StoreError! {
         self.validate()
         out := "{@STORE_CACHE_BINDING_MAGIC}\n"
         store_cache_line(&out, "role", self.role)
@@ -62,7 +62,7 @@ pub struct CacheBinding {
         Ok(out)
     }
 
-    fn decode(text: String) -> CacheBinding !StoreError {
+    fn decode(text: String) -> CacheBinding StoreError! {
         if text.bytes().len() > @STORE_CACHE_MAX_BINDING_BYTES -> return Err(StoreError.InvalidData("cache binding is too large"))
         lines :: store_cache_lines(text)
         if lines.len() == 0 || lines[0] != @STORE_CACHE_BINDING_MAGIC -> return Err(StoreError.InvalidData("cache binding has an unknown format"))
@@ -82,31 +82,26 @@ pub struct CacheBinding {
                 name == "role" && role == None -> role = Val(value)
                 name == "key" && key == None -> key = Val(value)
                 name == "write" && !write_seen -> {
-                    allow_write = if value == {
-                        "true" -> true
-                        "false" -> false
-                        else -> return Err(StoreError.InvalidData("cache binding write field is not boolean"))
-                    }
+                    if value != "true" && value != "false" -> return Err(StoreError.InvalidData("cache binding write field is not boolean"))
+                    allow_write = value == "true"
                     write_seen = true
                 }
                 name == "credential" && credential == None -> credential = Val(value)
-                name == "mirror" -> mirrors.push(value)
+                name == "mirror" -> {
+                    &mirrors.push(value)
+                }
                 else -> return Err(StoreError.InvalidData("cache binding has an unknown or duplicate field"))
             }
         }
-        binding :: CacheBinding{
-            role: role ?? return Err(StoreError.InvalidData("cache binding has no role")),
-            mirrors: mirrors,
-            trust_key: key ?? return Err(StoreError.InvalidData("cache binding has no trust key")),
-            credential_provider: credential,
-            allow_write: allow_write,
-        }
+        bound_role :: role ?? return Err(StoreError.InvalidData("cache binding has no role"))
+        bound_key :: key ?? return Err(StoreError.InvalidData("cache binding has no trust key"))
+        binding :: CacheBinding{role: bound_role, mirrors: mirrors, trust_key: bound_key, credential_provider: credential, allow_write: allow_write}
         binding.validate()
         Ok(binding)
     }
 
     // Status object of one binding: role, mirrors, credential label, write.
-    fn status_fields(self) -> StatusFields !Never {
+    fn status_fields(self) -> StatusFields Never! {
         StatusFields.new().with("role", DataTree.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", DataTree.Bool(self.allow_write))
     }
 }
@@ -114,7 +109,7 @@ pub struct CacheBinding {
 // Bind one host-owned cache role. Endpoint and trust policy are deliberately
 // not read from environment variables or repository files. Without an
 // explicit key, the role's default key is created once and pinned.
-pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], trust_key: ?String, credential_provider: ?String, allow_write: Bool) -> CacheBinding !StoreError {
+pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], trust_key: String?, credential_provider: String?, allow_write: Bool) -> CacheBinding StoreError! {
     requested_key :: trust_key ?? files.join(files.join(roots.root, "trust"), "cache-{role}.key")
     binding :: CacheBinding{
         role: role,
@@ -131,13 +126,13 @@ pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], tru
             store_cache_read_trust_key(binding.trust_key)
         }
         .None -> {
-            if files.stat(binding.trust_key) == {
-                .Ok(metadata) -> {
+            observed :: store_archive_lstat(binding.trust_key)
+            if observed == {
+                .Val(metadata) -> {
                     if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache trust key is not a regular file"))
                     store_cache_read_trust_key(binding.trust_key)
                 }
-                .Err(.NotFound(_)) -> store_cache_write_new_key(binding.trust_key)
-                .Err(error) -> return Err(StoreError.Io(error))
+                .None -> store_cache_write_new_key(binding.trust_key)
             }
         }
     }
@@ -152,7 +147,7 @@ pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], tru
 }
 
 // Read one role's binding and re-check its pinned trust key.
-pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBinding !StoreError {
+pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBinding StoreError! {
     path :: store_cache_binding_path(roots, role)
     metadata :: files.stat(path)
     if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_MAX_BINDING_BYTES {
@@ -167,7 +162,7 @@ pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBindin
 
 // Every bound role in file-name order. A malformed binding is an error, not
 // an unbound role.
-pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] !StoreError {
+pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] StoreError! {
     directory :: store_cache_bindings_dir(roots)
     entries :: files.list_dir(directory) ?? {
         if err == {
@@ -177,7 +172,7 @@ pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] !StoreErr
     }
     bindings := [CacheBinding]{}
     loop entry in entries {
-        file_role :: store_cache_conf_stem(entry.name) ?? next
+        file_role :: store_cache_extension_stem(entry.name, "conf") ?? next
         metadata :: files.stat(entry.path)
         if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_MAX_BINDING_BYTES {
             return Err(StoreError.InvalidData("cache binding directory contains a non-regular entry"))
@@ -186,49 +181,43 @@ pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] !StoreErr
         binding :: CacheBinding.decode(text)
         if binding.role != file_role -> return Err(StoreError.InvalidData("cache binding role disagrees with its file name"))
         store_cache_validate_binding_trust(roots, binding)
-        bindings.push(binding)
+        &bindings.push(binding)
     }
     Ok(bindings)
 }
 
-// The stem of a `<stem>.conf` file name (Rust `extension() == "conf"`).
-fn store_cache_conf_stem(name: String) -> ?String !Never {
+// The stem of a `<stem>.<extension>` file name (Rust `Path::extension` and
+// `Path::file_stem`: a leading dot does not start an extension).
+fn store_cache_extension_stem(name: String, extension: String) -> String? Never! {
     raw :: name.bytes()
     dot := -1
     loop index in 1..<raw.len() {
         if Int.from_u8(raw[index]) == 46 -> dot = index
     }
-    if dot <= 0 || pkg_bytes_text(raw, dot + 1, raw.len()) != "conf" -> return None
+    if dot <= 0 || pkg_bytes_text(raw, dot + 1, raw.len()) != extension -> return None
     Val(pkg_bytes_text(raw, 0, dot))
 }
 
-fn store_cache_validate_binding_trust(roots: HangarRoots, binding: CacheBinding) !StoreError {
+fn store_cache_validate_binding_trust(roots: HangarRoots, binding: CacheBinding) StoreError! {
     key :: store_cache_read_trust_key(binding.trust_key)
     trust_verify_pinned_cache_key(roots.root, binding.role, key) ?? return Err(StoreError.Other(err.message()))
 }
 
 // Remove one role's binding; false when it was not bound.
-pub fn store_remove_cache_binding(roots: HangarRoots, role: String) -> Bool !StoreError {
+pub fn store_remove_cache_binding(roots: HangarRoots, role: String) -> Bool StoreError! {
     path :: store_cache_binding_path(roots, role)
     _lock :: env_runtime_lock(roots.root, "cache-config")
-    if files.stat(path) == {
-        .Ok(metadata) -> {
-            if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache binding is not a regular file"))
-            files.remove(path)
-            Ok(true)
-        }
-        .Err(.NotFound(_)) -> Ok(false)
-        .Err(error) -> Err(StoreError.Io(error))
-    }
+    observed :: store_archive_lstat(path)
+    metadata :: observed ?? return Ok(false)
+    if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache binding is not a regular file"))
+    files.remove(path)
+    Ok(true)
 }
 
 // Load a role's trust key; a missing key asks the host to rebind.
-fn store_cache_read_trust_key(path: String) -> TrustKey !StoreError {
-    metadata :: if files.stat(path) == {
-        .Ok(info) -> info
-        .Err(.NotFound(_)) -> return Err(StoreError.InvalidData("cache trust key `{path}` is missing; rebind the cache role"))
-        .Err(error) -> return Err(StoreError.Io(error))
-    }
+fn store_cache_read_trust_key(path: String) -> TrustKey StoreError! {
+    observed :: store_archive_lstat(path)
+    metadata :: observed ?? return Err(StoreError.InvalidData("cache trust key `{path}` is missing; rebind the cache role"))
     if metadata.is_symlink || !metadata.is_file || metadata.size > @STORE_CACHE_TRUST_KEY_MAX_BYTES {
         return Err(StoreError.InvalidData("cache trust key is not a regular file"))
     }
@@ -237,7 +226,7 @@ fn store_cache_read_trust_key(path: String) -> TrustKey !StoreError {
 }
 
 // Create a fresh 32-byte role key exactly once, owner-only on Unix.
-fn store_cache_write_new_key(path: String) !StoreError {
+fn store_cache_write_new_key(path: String) StoreError! {
     store_cache_ensure_parent(path)
     secret :: random.bytes(32) ?? return Err(StoreError.Other(err.message()))
     if store_archive_lstat_ok(path) != None -> return Ok()
@@ -247,17 +236,17 @@ fn store_cache_write_new_key(path: String) !StoreError {
     if sys.is_unix() -> files.set_mode(path, @STORE_MODE_PRIVATE_FILE)
 }
 
-fn store_cache_bindings_dir(roots: HangarRoots) -> String !Never {
+fn store_cache_bindings_dir(roots: HangarRoots) -> String Never! {
     files.join(files.join(roots.root, "cache"), "bindings")
 }
 
-fn store_cache_binding_path(roots: HangarRoots, role: String) -> String !StoreError {
+fn store_cache_binding_path(roots: HangarRoots, role: String) -> String StoreError! {
     store_cache_validate_component(role, "cache role")
     Ok(files.join(store_cache_bindings_dir(roots), "{role}.conf"))
 }
 
 // A mirror must parse and provide read access.
-fn store_cache_validate_endpoint(endpoint: String) !StoreError {
+fn store_cache_validate_endpoint(endpoint: String) StoreError! {
     if !store_cache_parse_endpoint(endpoint).capabilities().read {
         return Err(StoreError.InvalidData("cache endpoint does not provide read access"))
     }
@@ -266,7 +255,7 @@ fn store_cache_validate_endpoint(endpoint: String) !StoreError {
 // Check one endpoint against the binding's grant. Credential labels are
 // refused until a typed credential adapter exists: ambient credentials are
 // never used in their place.
-fn store_cache_validate_endpoint_binding(binding: CacheBinding, endpoint: CacheEndpoint, write: Bool) !StoreError {
+fn store_cache_validate_endpoint_binding(binding: CacheBinding, endpoint: CacheEndpoint, write: Bool) StoreError! {
     caps :: endpoint.capabilities()
     label :: endpoint.label()
     has_credential :: binding.credential_provider != None
@@ -284,7 +273,7 @@ fn store_cache_validate_endpoint_binding(binding: CacheBinding, endpoint: CacheE
 
 // A role, entry id, or store name: 1..128 bytes of ASCII letters, digits,
 // `-`, `_`, `.`, and not `.` or `..`.
-fn store_cache_validate_component(value: String, label: String) !StoreError {
+fn store_cache_validate_component(value: String, label: String) StoreError! {
     raw :: value.bytes()
     safe := raw.len() > 0 && raw.len() <= 128 && value != "." && value != ".."
     loop byte in raw {
@@ -296,7 +285,7 @@ fn store_cache_validate_component(value: String, label: String) !StoreError {
 }
 
 // One-line text: no NUL, LF, or CR.
-fn store_cache_validate_text(value: String, label: String) !StoreError {
+fn store_cache_validate_text(value: String, label: String) StoreError! {
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         if code == 0 || code == 10 || code == 13 -> return Err(StoreError.InvalidData("{label} contains a line break"))
@@ -305,7 +294,7 @@ fn store_cache_validate_text(value: String, label: String) !StoreError {
 
 // An absolute host path none of whose existing prefixes is a symlink and
 // which has no `..` component.
-fn store_cache_validate_path_components(path: String) !StoreError {
+fn store_cache_validate_path_components(path: String) StoreError! {
     if !path.starts_with("/") -> return Err(StoreError.InvalidData("cache path must be absolute"))
     current := ""
     loop component in store_archive_path_components(path) {
@@ -321,7 +310,7 @@ fn store_cache_validate_path_components(path: String) !StoreError {
 }
 
 // Anchor a relative host path at the current directory, then validate it.
-fn store_cache_absolutize_host_path(path: String) -> String !StoreError {
+fn store_cache_absolutize_host_path(path: String) -> String StoreError! {
     if path.starts_with("/") {
         store_cache_validate_path_components(path)
         return Ok(path)
@@ -331,14 +320,14 @@ fn store_cache_absolutize_host_path(path: String) -> String !StoreError {
     Ok(absolute)
 }
 
-fn store_cache_ensure_parent(path: String) !StoreError {
+fn store_cache_ensure_parent(path: String) StoreError! {
     parent :: files.dirname(path)
     if parent == "" -> return Err(StoreError.InvalidData("cache path has no parent"))
     store_cache_validate_path_components(parent)
     files.create_dir_all(parent)
 }
 
-fn store_cache_ensure_directory(path: String) !StoreError {
+fn store_cache_ensure_directory(path: String) StoreError! {
     store_cache_validate_path_components(path)
     files.create_dir_all(path)
     metadata :: files.stat(path)
@@ -346,7 +335,7 @@ fn store_cache_ensure_directory(path: String) !StoreError {
 }
 
 // Replace a small host file through an exclusive fsynced partial.
-fn store_cache_atomic_replace(path: String, bytes: [U8]) !StoreError {
+fn store_cache_atomic_replace(path: String, bytes: [U8]) StoreError! {
     if store_archive_lstat_ok(path) == {
         .Val(metadata) -> {
             if metadata.is_symlink || !metadata.is_file -> return Err(StoreError.InvalidData("cache binding path is not a regular file"))
@@ -361,19 +350,19 @@ fn store_cache_atomic_replace(path: String, bytes: [U8]) !StoreError {
     }
 }
 
-fn store_cache_finish_replace(out: FileWriter, partial: String, path: String, bytes: [U8]) !StoreError {
+fn store_cache_finish_replace(out: FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
     out.write_all(bytes)
     out.fsync()
     if sys.is_windows() -> files.remove(path)
     files.rename(partial, path)
 }
 
-fn store_cache_read_regular_bounded(path: String, limit: Int) -> [U8] !StoreError {
+fn store_cache_read_regular_bounded(path: String, limit: Int) -> [U8] StoreError! {
     store_read_bounded(path, limit)
 }
 
 // Remove a file, symlink, or writable-made tree; the path must exist.
-fn store_cache_remove_tree(path: String) !StoreError {
+fn store_cache_remove_tree(path: String) StoreError! {
     metadata :: files.stat(path)
     if metadata.is_symlink || !metadata.is_dir {
         files.remove(path)
@@ -384,7 +373,7 @@ fn store_cache_remove_tree(path: String) !StoreError {
 }
 
 // Append one `name=value` line after checking both halves are one line.
-fn store_cache_line(output: &String, name: String, value: String) !StoreError {
+fn store_cache_line(output: &String, name: String, value: String) StoreError! {
     store_cache_validate_text(name, "cache binding field")
     store_cache_validate_text(value, "cache binding value")
     output = "{output}{name}={value}\n"
@@ -392,21 +381,25 @@ fn store_cache_line(output: &String, name: String, value: String) !StoreError {
 
 // Rust `str::lines`: split on LF, drop one trailing CR per line, and no
 // final empty line.
-fn store_cache_lines(text: String) -> [String] !Never {
+fn store_cache_lines(text: String) -> [String] Never! {
     parts :: text.split("\n").to_list()
     count :: if text.ends_with("\n") -> parts.len() - 1 else -> parts.len()
     lines := [String]{}
-    loop index in 0..<count -> lines.push(parts[index].removesuffix("\r"))
+    loop index in 0..<count {
+        raw :: parts[index].bytes()
+        end :: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        &lines.push(pkg_bytes_text(raw, 0, end))
+    }
     lines
 }
 
-fn store_cache_now_seconds() -> Int !Never {
+fn store_cache_now_seconds() -> Int Never! {
     store_archive_now_secs()
 }
 
 // Make every directory in a tree writable (Rust `set_readonly(false)`: all
 // write bits) so a sealed tree can be removed. A missing path is fine.
-pub fn store_make_tree_writable_for_removal(path: String) !StoreError {
+pub fn store_make_tree_writable_for_removal(path: String) StoreError! {
     metadata :: store_archive_lstat_ok(path) ?? return Ok()
     if metadata.is_dir {
         files.set_mode(path, metadata.mode | @STORE_MODE_WRITE_BITS)
@@ -417,14 +410,14 @@ pub fn store_make_tree_writable_for_removal(path: String) !StoreError {
 // Validate then seal a locally produced output before it becomes reusable.
 // Files keep executable bits but lose all write bits; directories are sealed
 // bottom-up. Canonical archive validation rejects external hardlinks first.
-pub fn store_seal_local_output(path: String) !StoreError {
+pub fn store_seal_local_output(path: String) StoreError! {
     pkg_try_output_hash_of(path)
     store_seal_node(path)
 }
 
 // Clear every write bit through a tree, leaving already-sealed nodes and
 // symlinks untouched.
-pub fn store_seal_node(path: String) !StoreError {
+pub fn store_seal_node(path: String) StoreError! {
     metadata :: files.stat(path)
     if metadata.is_symlink -> return Ok()
     if metadata.is_dir {
@@ -436,7 +429,7 @@ pub fn store_seal_node(path: String) !StoreError {
 }
 
 // Make a tree durable: every file and directory, children first.
-pub fn store_fsync_tree(path: String) !StoreError {
+pub fn store_fsync_tree(path: String) StoreError! {
     metadata :: files.stat(path)
     if metadata.is_symlink -> return Ok()
     if metadata.is_dir {
@@ -446,13 +439,13 @@ pub fn store_fsync_tree(path: String) !StoreError {
 }
 
 // `jet.status/v1` for `cache bind`.
-pub fn store_cache_binding_json(binding: CacheBinding) -> String !Never {
+pub fn store_cache_binding_json(binding: CacheBinding) -> String Never! {
     StatusEnvelope.new("cache-bind", true).with_fields(binding.status_fields()).json()
 }
 
 // `jet.status/v1` for `cache list`.
-pub fn store_cache_bindings_json(bindings: [CacheBinding]) -> String !Never {
+pub fn store_cache_bindings_json(bindings: [CacheBinding]) -> String Never! {
     values := [DataTree]{}
-    loop binding in bindings -> values.push(report_status_object(binding.status_fields()))
+    loop binding in bindings -> &values.push(report_status_object(binding.status_fields()))
     StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", DataTree.Array(values))).json()
 }

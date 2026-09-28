@@ -9,17 +9,17 @@ pub struct PackageNode {
     pub direct_deps: [String]
     pub transitive_deps: [String]
 
-    fn new(name: String) -> PackageNode !Never {
+    fn new(name: String) -> PackageNode Never! {
         PackageNode{name: name, direct_deps: [String]{}, transitive_deps: [String]{}}
     }
 
-    fn with_deps(self, deps: [String]) -> PackageNode !Never {
+    fn with_deps(self, deps: [String]) -> PackageNode Never! {
         out := self
         out.direct_deps = deps
         out
     }
 
-    fn with_transitives(self, deps: [String]) -> PackageNode !Never {
+    fn with_transitives(self, deps: [String]) -> PackageNode Never! {
         out := self
         out.transitive_deps = deps
         out
@@ -65,7 +65,7 @@ pub struct MissingDependency {
     pub fix: MissingDependencyFix
 
     // The fix as one teaching sentence.
-    fn fix_text(self) -> String !Never {
+    fn fix_text(self) -> String Never! {
         if self.fix == {
             .DirectAddPath(dep, path) -> "run `jet add {dep} --path {path}`"
             .DirectAddGit(dep, url, tag_name) -> "run `jet add {dep} --git {url} --tag {tag_name}`"
@@ -80,40 +80,40 @@ pub struct PackageGraph {
     catalogs: [CatalogEntry]
     workspace_members: [String: [String]]
 
-    fn new() -> PackageGraph !Never {
+    fn new() -> PackageGraph Never! {
         PackageGraph{packages: [String: PackageNode]{}, catalogs: [CatalogEntry]{}, workspace_members: [String: [String]]{}}
     }
 
     // Add or replace the package with this name.
-    fn add_package(&self, node: PackageNode) !Never {
+    fn add_package(&self, node: PackageNode) Never! {
         self.packages[node.name] = node
     }
 
-    fn add_catalog(&self, entry: CatalogEntry) !Never {
-        self.catalogs.push(entry)
+    fn add_catalog(&self, entry: CatalogEntry) Never! {
+        &self.catalogs.push(entry)
     }
 
-    fn add_workspace_member(&self, name: String, path: String) !Never {
+    fn add_workspace_member(&self, name: String, path: String) Never! {
         paths := self.workspace_members.get(name) ?? [String]{}
-        paths.push(path)
+        &paths.push(path)
         self.workspace_members[name] = paths
     }
 
     // The package's declared direct dependencies and the catalog entries
     // that allow it, ordered by dependency name; ties keep that order.
-    fn visible_edges(self, owner_package: String) -> [VisibleEdge] !Never {
+    fn visible_edges(self, owner_package: String) -> [VisibleEdge] Never! {
         edges := [VisibleEdge]{}
         if self.packages.get(owner_package) == {
             .Val(node) -> {
                 loop dep in node.direct_deps {
-                    edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~dep, provider_ref: ~dep, kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
+                    &edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~dep, provider_ref: ~dep, kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
                 }
             }
             .None -> {}
         }
         loop catalog in self.catalogs {
             if catalog.allowed_packages.contains(owner_package) {
-                edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~catalog.logical_name, provider_ref: ~catalog.provider_ref, kind: VisibleEdgeKind.Catalog, rationale: ~catalog.rationale})
+                &edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~catalog.logical_name, provider_ref: ~catalog.provider_ref, kind: VisibleEdgeKind.Catalog, rationale: ~catalog.rationale})
             }
         }
         provider_graph_stable_sort_edges(edges)
@@ -123,7 +123,7 @@ pub struct PackageGraph {
     // is hidden and the fix: pick a member when the name is an ambiguous
     // workspace member, add catalog data when several packages already use it
     // transitively, else add it as a direct path dependency.
-    fn check_visible(self, owner_package: String, requested: String) -> VisibleEdge !MissingDependency {
+    fn check_visible(self, owner_package: String, requested: String) -> VisibleEdge MissingDependency! {
         loop edge in self.visible_edges(owner_package) {
             if edge.dependency == requested -> return Ok(edge)
         }
@@ -141,26 +141,26 @@ pub struct PackageGraph {
     }
 
     // Names of the packages that reach `dep` transitively, sorted.
-    fn packages_using_hidden_dep(self, dep: String) -> [String] !Never {
+    fn packages_using_hidden_dep(self, dep: String) -> [String] Never! {
         names := [String]{}
         loop entry in self.packages {
-            if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) -> names.push(entry.key)
+            if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) -> &names.push(entry.key)
         }
-        names.sort()
+        &names.sort()
         names
     }
 }
 
 // Order edges by dependency name, keeping insertion order among equal names.
-fn provider_graph_stable_sort_edges(edges: [VisibleEdge]) -> [VisibleEdge] !Never {
+fn provider_graph_stable_sort_edges(edges: [VisibleEdge]) -> [VisibleEdge] Never! {
     sorted := [VisibleEdge]{}
     loop edge in edges {
         position := sorted.len()
         loop position > 0 && (sorted[position - 1].dependency <=> edge.dependency) == Ordering.Greater -> position -= 1
         shifted := [VisibleEdge]{}
-        loop index in 0..<position -> shifted.push(sorted[index])
-        shifted.push(edge)
-        loop index in position..<sorted.len() -> shifted.push(sorted[index])
+        loop index in 0..<position -> &shifted.push(sorted[index])
+        &shifted.push(edge)
+        loop index in position..<sorted.len() -> &shifted.push(sorted[index])
         sorted = shifted
     }
     sorted

@@ -5,19 +5,19 @@
 // follows the Unicode White_Space property, the same set `trim` removes.
 
 // The UTF-8 text of `raw[start..<end]`.
-fn pkg_bytes_text(raw: [U8], start: Int, end: Int) -> String !Never {
+fn pkg_bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
     if end <= start -> return ""
     String.from_bytes(raw[start..<end]) ?? ""
 }
 
 // The byte at `at` as an Int, or -1 past either end.
-fn pkg_bytes_code(raw: [U8], at: Int) -> Int !Never {
+fn pkg_bytes_code(raw: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= raw.len() -> return -1
     Int.from_u8(raw[at])
 }
 
 // Whether `raw[at..]` begins with `prefix`.
-fn pkg_bytes_starts_with(raw: [U8], at: Int, prefix: [U8]) -> Bool !Never {
+fn pkg_bytes_starts_with(raw: [U8], at: Int, prefix: [U8]) -> Bool Never! {
     if at < 0 || at + prefix.len() > raw.len() -> return false
     loop offset in 0..<prefix.len() {
         if raw[at + offset] != prefix[offset] -> return false
@@ -27,12 +27,12 @@ fn pkg_bytes_starts_with(raw: [U8], at: Int, prefix: [U8]) -> Bool !Never {
 
 // ASCII letters, digits, and `_`: the identifier characters word-boundary
 // checks look for.
-fn pkg_bytes_is_word(code: Int) -> Bool !Never {
+fn pkg_bytes_is_word(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
 // The byte width of the White_Space scalar starting at `at`, or 0.
-fn pkg_bytes_space_width(raw: [U8], at: Int) -> Int !Never {
+fn pkg_bytes_space_width(raw: [U8], at: Int) -> Int Never! {
     lead :: pkg_bytes_code(raw, at)
     if lead == 32 || (lead >= 9 && lead <= 13) -> return 1
     if lead < 128 -> return 0
@@ -56,7 +56,7 @@ fn pkg_bytes_space_width(raw: [U8], at: Int) -> Int !Never {
 }
 
 // The first offset at or after `at` that does not start a White_Space scalar.
-fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int !Never {
+fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     loop {
         width :: pkg_bytes_space_width(raw, cursor)
@@ -67,7 +67,7 @@ fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int !Never {
 
 // Whether `value` holds a Unicode control scalar (C0, DEL, or C1): Rust's
 // `char::is_control` over every scalar.
-fn pkg_text_has_control(value: String) -> Bool !Never {
+fn pkg_text_has_control(value: String) -> Bool Never! {
     raw :: value.bytes()
     loop index in 0..<raw.len() {
         code :: Int.from_u8(raw[index])
@@ -82,12 +82,12 @@ fn pkg_text_has_control(value: String) -> Bool !Never {
 }
 
 // ASCII-only lowercase (`str::to_ascii_lowercase`); other scalars unchanged.
-fn pkg_ascii_lower(value: String) -> String !Never {
+fn pkg_ascii_lower(value: String) -> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     loop byte in raw {
         code :: Int.from_u8(byte)
-        out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+        &out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())
 }

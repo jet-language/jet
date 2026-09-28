@@ -1,0 +1,330 @@
+// The `env.<name>` field loop shared by both producer shapes (the legacy
+// `Env{ … }` struct literal and the canonical role-module body): `packages:`
+// reuses the Pkg-sugar text slice, `secrets:` the typed secret-map parser,
+// lifecycle fields keep their references, and everything else is a pure
+// computed setting.
+
+// Everything one `env.<name>` contribution produced besides dev services.
+pub struct EnvCapture {
+    pub entry: EntryContribution
+    pub secrets: [SecretSpec]
+    pub adapters: [AdapterPlan]
+    pub lifecycle: EnvironmentLifecycle
+    pub presets: [PresetSpec]
+    pub languages: [LanguageSpec]
+    pub files: [ManagedFile]
+
+    // The environment-scoped facts of this capture under `name`.
+    fn contribution(self, name: String, reads: [EnvironmentRead], services: [DevServicePlan]) -> EnvironmentContribution Never! {
+        EnvironmentContribution{
+            name: name,
+            environment_reads: reads,
+            dev_services: services,
+            secrets: self.secrets,
+            adapters: self.adapters,
+            lifecycle: self.lifecycle,
+            presets: self.presets,
+            languages: self.languages,
+            files: self.files,
+        }
+    }
+}
+
+// How one `Env` field is lowered.
+enum EnvFieldKind {
+    Packages
+    Prompt
+    Secrets
+    Presets
+    Languages
+    Files
+    Lifecycle
+    Setting
+
+    fn classify(name: String) -> EnvFieldKind Never! {
+        if name == {
+            @SYSTEM_FIELD_PACKAGES -> EnvFieldKind.Packages
+            @ENV_FIELD_PROMPT -> EnvFieldKind.Prompt
+            @ENV_FIELD_SECRETS -> EnvFieldKind.Secrets
+            @ENV_FIELD_PRESETS -> EnvFieldKind.Presets
+            @ENV_FIELD_LANGUAGES -> EnvFieldKind.Languages
+            @ENV_FIELD_FILES -> EnvFieldKind.Files
+            @ENV_FIELD_DOTENV | @ENV_FIELD_UNSET | @ENV_FIELD_ON_ENTER | @ENV_FIELD_CHECKS | @ENV_FIELD_GIT_HOOKS_PATH | @ENV_FIELD_FORMATTER | @ENV_FIELD_RELOAD -> EnvFieldKind.Lifecycle
+            else -> EnvFieldKind.Setting
+        }
+    }
+
+    // `packages`, `secrets`, and lifecycle references are not comptime values.
+    fn is_computed(self) -> Bool Never! {
+        if self == {
+            .Packages | .Secrets | .Lifecycle -> false
+            else -> true
+        }
+    }
+}
+
+// U18: a bare `{ … }` elaborates to the namespace type; an explicit
+// `Env { … }` stays legal. A non-record value (or the wrong type name) is
+// E0966.
+pub fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+    if value == {
+        .StructLit(type_name, _, _, _, fields, _, _) -> {
+            if type_name != "" && type_name != @TYPE_ENV -> return Err(envmodel_wrong_namespace_type(@TYPE_ENV, type_name, expr_span(value)))
+            named := [NamedExpr]{}
+            loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            Ok(envmodel_evaluate_env_fields(named, src, scope, globals, source))
+        }
+        else -> Err(envmodel_not_a_namespace_literal(@TYPE_ENV, expr_span(value)))
+    }
+}
+
+// Module fields are a small pure dependency graph: a valid `port: base + 1,
+// base: 8000` must not depend on declaration order. Every sibling dependency
+// resolves first, then each field is lowered with the resolved values.
+pub fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+    capture := EnvCapture{
+        entry: EntryContribution{packages: [Pkg]{}, settings: [String: [FactContribution]]{}},
+        secrets: [SecretSpec]{},
+        adapters: [AdapterPlan]{},
+        lifecycle: EnvironmentLifecycle{},
+        presets: [PresetSpec]{},
+        languages: [LanguageSpec]{},
+        files: [ManagedFile]{},
+    }
+    field_map := [String: NamedFieldExpr]{}
+    loop field in fields {
+        if EnvFieldKind.classify(field.name).is_computed() -> field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
+    }
+    loop field in fields {
+        if EnvFieldKind.classify(field.name) == EnvFieldKind.Packages {
+            extracted :: envmodel_extract_packages(field.value, src)
+            loop pkg in extracted.packages -> &capture.entry.packages.push(pkg)
+            loop adapter in extracted.adapters -> &capture.adapters.push(adapter)
+        }
+    }
+    computed :: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "module fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one field a literal or by moving the shared computation into a pure function")
+    resolved :: computed.values
+    loop field in fields {
+        span :: field.name_span
+        if EnvFieldKind.classify(field.name) == {
+            .Packages -> {}
+            .Prompt -> envmodel_capture_prompt_setting(&capture.entry, field.value, scope, resolved, source)
+            .Secrets -> {
+                loop spec in envmodel_parse_secret_specs(field.value, scope, globals) -> &capture.secrets.push(spec)
+            }
+            .Presets -> {
+                value :: resolved.get(field.name) ?? next
+                presets :: envmodel_presets_from_value(value) ?? return Err(envmodel_error("E1332", "environment preset declaration is invalid: {err.message}", "presets are named typed records with string package, variable, and inheritance facts", "use `presets: {{ dev: .{{ packages: [\"tool@nixpkgs\"] }} }}`", Val(span)))
+                loop preset in presets -> &capture.presets.push(preset)
+            }
+            .Languages -> {
+                value :: resolved.get(field.name) ?? next
+                languages :: envmodel_languages_from_value(value) ?? return Err(envmodel_error("E1333", "language-pack declaration is invalid: {err.message}", "languages is a typed map of Lang records that expands through Jet's catalog", "use `languages: {{ rust: Lang.{{ enable: true }} }}` or another name from `jet env info`", Val(span)))
+                loop language in languages -> &capture.languages.push(language)
+            }
+            .Files -> {
+                value :: resolved.get(field.name) ?? next
+                declared :: envmodel_files_from_value(value) ?? return Err(envmodel_error("E1326", "environment file declaration is invalid: {err}", "managed files use project-relative destinations and typed Symlink, Seed, or Copy records", "fix the file destination and source/content shape before running `jet env sync`", Val(span)))
+                loop file in declared -> &capture.files.push(file)
+            }
+            .Lifecycle -> {
+                value :: envmodel_evaluate_lifecycle_value(field.value, scope, globals)
+                envmodel_lifecycle_from_field(&capture.lifecycle, field.name, value) ?? return Err(envmodel_error("E1333", "environment lifecycle declaration is invalid: {err.message}", "lifecycle fields use typed dotenv, unset, job names, hook records, and Git hook paths", "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, `git_hooks_path: \"scripts/githooks\"`, or `reload: .Prompt`", Val(span)))
+            }
+            .Setting -> {
+                value :: resolved.get(field.name) ?? return Err(envmodel_field_missing_value(field.name, expr_span(field.value)))
+                envmodel_record_setting(&capture.entry, field.name, ast_comptime_value_show(value), span, source)
+            }
+        }
+    }
+    Ok(capture)
+}
+
+// Lifecycle names are references, not comptime variable reads. Keep bare
+// identifiers as strings while still evaluating ordinary literals and the
+// explicit expert record's scalar fields.
+fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
+    if expr == {
+        .Ident(name, _) -> Ok(CtValue.Str(name))
+        .Field(_, _, _) -> Ok(CtValue.Str(envmodel_expression_name(expr)))
+        .ListLit(values, _) -> {
+            items := [CtValue]{}
+            loop value in values -> &items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
+            Ok(CtValue.List(items))
+        }
+        .StructLit(type_name, _, _, _, fields, _, _) -> {
+            lowered := [NamedCtValue]{}
+            loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
+            Ok(CtValue.Struct{type_name: type_name, fields: lowered})
+        }
+        .EnumLit(type_name, variant, _, args, _, _) -> {
+            lowered := [CtEnumArg]{}
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> &lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                    .Named(label, value) -> &lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                }
+            }
+            Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
+        }
+        .MapLit(entries, _) -> {
+            lowered := [CtMapEntry]{}
+            loop entry in entries {
+                key_value :: envmodel_evaluate_lifecycle_value(entry.key, scope, globals)
+                key :: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1333", "lifecycle map keys must be deterministic scalar values", "lifecycle records are captured as stable plan facts", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
+                // A repeated key keeps its last value (Rust `collect` into a map).
+                value :: envmodel_evaluate_lifecycle_value(entry.value, scope, globals)
+                if !envmodel_ct_map_insert(&lowered, key, value) -> envmodel_ct_map_replace(&lowered, key, value)
+            }
+            Ok(CtValue.Map(lowered))
+        }
+        else -> {
+            envmodel_check_build_io(expr)
+            Ok(envmodel_comptime_evaluate(expr, globals, scope))
+        }
+    }
+}
+
+// Overwrite the value stored under an existing `key`.
+fn envmodel_ct_map_replace(entries: &[CtMapEntry], key: CtKey, value: CtValue) Never! {
+    loop index in 0..<entries.len() {
+        if ast_comptime_key_compare(entries[index].key, key) == 0 {
+            entries[index] = CtMapEntry{key: key, value: value}
+            return
+        }
+    }
+}
+
+// A scalar comptime value as a map key (string, integer, boolean, character).
+fn envmodel_scalar_ct_key(value: CtValue) -> CtKey? Never! {
+    if value == {
+        .Str(text) -> Val(CtKey.Str(text))
+        .Int(number) -> Val(CtKey.Int(number))
+        .Bool(flag) -> Val(CtKey.Bool(flag))
+        .Char(character) -> Val(CtKey.Char(character))
+        else -> None
+    }
+}
+
+// The dotted name an identifier/field path spells; any other expression is
+// named by its start offset.
+pub fn envmodel_expression_name(expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _) -> name
+        .Field(base, member, _) -> "{envmodel_expression_name(base)}.{member}"
+        else -> "{expr_span(expr).start}"
+    }
+}
+
+fn envmodel_field_missing_value(name: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E3403", "computed module field `{name}` did not produce a value", "a pure module field must evaluate to one deterministic value before the module is merged", "return a value from the field expression", Val(span))
+}
+
+// The fixed fields of a structured `Prompt{ … }` record.
+enum PromptField {
+    Label
+    Path
+    Strip
+
+    fn parse(name: String) -> PromptField? Never! {
+        if name == {
+            @PROMPT_FIELD_LABEL -> Val(PromptField.Label)
+            @PROMPT_FIELD_PATH -> Val(PromptField.Path)
+            @PROMPT_FIELD_STRIP -> Val(PromptField.Strip)
+            else -> None
+        }
+    }
+}
+
+// D-FE-PROMPT-STRIP1: `prompt: "label"` or a structured
+// `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`, each recorded as
+// one environment-layer setting.
+fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String: CtValue], source: String) EnvModelEvalError! {
+    if value == {
+        .StructLit(type_name, _, _, _, fields, _, _) -> {
+            if type_name == @TYPE_PROMPT {
+                loop field in fields {
+                    span :: field.name_span
+                    evaluated :: envmodel_evaluate_expression(field.value, globals, scope)
+                    kind :: PromptField.parse(field.name) ?? return Err(envmodel_prompt_bad_field(field.name, span))
+                    if kind == {
+                        .Label -> {
+                            label :: if evaluated == {
+                                .Str(text) -> text
+                                else -> { return Err(envmodel_prompt_bad_value(field.name, "a quoted label", span)) }
+                            }
+                            envmodel_record_setting(&entry, @ENV_FIELD_PROMPT, label, span, source)
+                        }
+                        .Path -> {
+                            word :: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                            if word != @PROMPT_PATH_SHORT && word != @PROMPT_PATH_FULL -> return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                            envmodel_record_setting(&entry, @PROMPT_SETTING_PATH, word, span, source)
+                        }
+                        .Strip -> {
+                            word :: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                            if word != @PROMPT_STRIP_ON && word != @PROMPT_STRIP_OFF -> return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                            envmodel_record_setting(&entry, @PROMPT_SETTING_STRIP, word, span, source)
+                        }
+                    }
+                }
+                return
+            }
+        }
+        else -> {}
+    }
+    evaluated :: envmodel_evaluate_expression(value, globals, scope)
+    envmodel_record_setting(&entry, @ENV_FIELD_PROMPT, ast_comptime_value_show(evaluated), expr_span(value), source)
+}
+
+// Record one environment-layer text fact written by `{source}.{key}`.
+fn envmodel_record_setting(entry: &EntryContribution, key: String, value: String, span: Span, source: String) Never! {
+    writers := entry.settings.get(key) ?? [FactContribution]{}
+    &writers.push(FactContribution.new(key, FactValue.Text(value), SourceScope.Item, ContributionLayer.Environment, "{source}.{key}").at(span))
+    entry.settings[key] = writers
+}
+
+fn envmodel_prompt_word(value: CtValue) -> String? Never! {
+    if value == {
+        .Enum(_, variant, _) -> Val(envmodel_variant_leaf(variant))
+        .Str(text) -> Val(text)
+        else -> None
+    }
+}
+
+// Fold one contribution's lifecycle into the selected environment's.
+// Sequences concatenate; single-valued facts must agree across modules.
+pub fn envmodel_lifecycle_merge(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
+    loop item in incoming.dotenv -> &target.dotenv.push(item)
+    loop item in incoming.unset -> &target.unset.push(item)
+    loop item in incoming.on_enter -> &target.on_enter.push(item)
+    loop item in incoming.checks -> &target.checks.push(item)
+    if incoming.git_hooks_path == {
+        .Val(path) -> {
+            if target.git_hooks_path == {
+                .Val(existing) -> {
+                    if existing != path -> return Err(envmodel_error("E1333", "git hook path is declared more than once with conflicting values in module `{module_name}`", "one environment cannot silently choose between different Git hook directories", "merge the git_hooks_path declarations so they agree, or keep one path owner", None))
+                }
+                .None -> target.git_hooks_path = Val(path)
+            }
+        }
+        .None -> {}
+    }
+    if incoming.reload_explicit {
+        if target.reload_explicit && target.reload != incoming.reload {
+            return Err(envmodel_error("E1333", "reload policy is declared more than once in module `{module_name}`", "one module cannot silently choose between different reload policies", "merge the reload declarations so they agree, or keep one policy owner", None))
+        }
+        target.reload = incoming.reload
+        target.reload_explicit = true
+    }
+    if incoming.formatter == {
+        .Val(formatter) -> {
+            if target.formatter == {
+                .Val(existing) -> {
+                    if existing != formatter -> return Err(envmodel_error("E1333", "formatter is declared more than once with conflicting packages in module `{module_name}`", "one environment cannot silently choose between different external formatters", "merge the formatter declarations so they agree, or keep one formatter owner", None))
+                }
+                .None -> target.formatter = Val(formatter)
+            }
+        }
+        .None -> {}
+    }
+}

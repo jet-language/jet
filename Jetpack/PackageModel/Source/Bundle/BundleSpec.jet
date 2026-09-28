@@ -26,7 +26,7 @@ pub enum BundleTarget {
     MacOSApp
     WindowsMsix
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .LinuxAppImage -> "linux-appimage"
             .MacOSApp -> "macos-app"
@@ -34,7 +34,7 @@ pub enum BundleTarget {
         }
     }
 
-    fn parse(value: String) -> ?BundleTarget !Never {
+    fn parse(value: String) -> BundleTarget? Never! {
         if pkg_ascii_lower(value.trim()) == {
             "linux-appimage" | "linux" | "appimage" -> Val(BundleTarget.LinuxAppImage)
             "macos-app" | "macos" | "mac" | "app" -> Val(BundleTarget.MacOSApp)
@@ -43,7 +43,7 @@ pub enum BundleTarget {
         }
     }
 
-    fn artifact_suffix(self) -> String !Never {
+    fn artifact_suffix(self) -> String Never! {
         if self == {
             .LinuxAppImage -> ".AppImage"
             .MacOSApp -> ".app"
@@ -57,7 +57,7 @@ pub enum BundleKind {
     Desktop
     Game
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Desktop -> "desktop"
             .Game -> "game"
@@ -74,7 +74,7 @@ pub struct BundleExecutable {
     // Exact executable bytes placed in the layout.
     pub bytes: [U8]
 
-    fn digest(self) -> String !Never {
+    fn digest(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
@@ -85,7 +85,7 @@ pub enum IconFormat {
     Ico
     Svg
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .Png -> "png"
             .Icns -> "icns"
@@ -94,7 +94,7 @@ pub enum IconFormat {
         }
     }
 
-    fn parse(value: String) -> ?IconFormat !Never {
+    fn parse(value: String) -> IconFormat? Never! {
         extension := value.trim()
         loop extension.starts_with(".") -> extension = extension.removeprefix(".")
         if pkg_ascii_lower(extension) == {
@@ -113,20 +113,20 @@ pub struct BundleIcon {
     pub name: String
     pub format: IconFormat
     pub size: Int
-    pub source: ?String
+    pub source: String?
     pub bytes: [U8]
 
-    fn new(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon !Never {
+    fn new(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon Never! {
         BundleIcon{name: name, format: format, size: size, source: None, bytes: bytes}
     }
 
-    fn with_source(self, source: String) -> BundleIcon !Never {
+    fn with_source(self, source: String) -> BundleIcon Never! {
         out := self
         out.source = Val(source)
         out
     }
 
-    fn digest(self) -> String !Never {
+    fn digest(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
@@ -142,7 +142,7 @@ pub enum SigningPhase {
     PostSign
     Verify
 
-    fn as_str(self) -> String !Never {
+    fn as_str(self) -> String Never! {
         if self == {
             .PreSign -> "pre-sign"
             .PostSign -> "post-sign"
@@ -160,7 +160,7 @@ pub struct SigningHook {
     pub args: [String]
     pub inputs: [SigningHookInput]
 
-    fn new(name: String, phase: SigningPhase, program: String) -> SigningHook !Never {
+    fn new(name: String, phase: SigningPhase, program: String) -> SigningHook Never! {
         SigningHook{name: name, phase: phase, program: program, args: [String]{}, inputs: [SigningHookInput]{}}
     }
 
@@ -172,10 +172,10 @@ pub struct SigningHook {
 pub struct UpdaterSpec {
     pub channel: String
     pub url: String
-    pub signature_url: ?String
-    pub release_notes_url: ?String
+    pub signature_url: String?
+    pub release_notes_url: String?
 
-    fn new(channel: String, url: String) -> UpdaterSpec !Never {
+    fn new(channel: String, url: String) -> UpdaterSpec Never! {
         UpdaterSpec{channel: channel, url: url, signature_url: None, release_notes_url: None}
     }
 }
@@ -189,7 +189,7 @@ pub struct BundleMetadata {
     pub description: String
     pub categories: [String]
 
-    fn new(identifier: String, display_name: String) -> BundleMetadata !Never {
+    fn new(identifier: String, display_name: String) -> BundleMetadata Never! {
         BundleMetadata{identifier: identifier, display_name: display_name, publisher: "", description: "", categories: [String]{}}
     }
 }
@@ -200,7 +200,7 @@ pub struct GameBundleAsset {
     pub mode: Int
     pub bytes: [U8]
 
-    fn digest(self) -> String !Never {
+    fn digest(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
@@ -215,21 +215,21 @@ pub struct GameCrashReporterSpec {
     pub retention_path: String
     pub retention_limit: Int
 
-    fn not_installed() -> GameCrashReporterSpec !Never {
+    fn not_installed() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
     }
 
-    fn planned() -> GameCrashReporterSpec !Never {
+    fn planned() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "planned", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
     }
 
-    fn installed() -> GameCrashReporterSpec !Never {
+    fn installed() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
     }
 
     // The reporter, consent, and runtime facts agree with the canonical
     // bounds; only an active reporter retains reports.
-    fn validate(self, reporter: String, consent: String) !BundleError {
+    fn validate(self, reporter: String, consent: String) BundleError! {
         if reporter == {
             "off" | "on" | "opt-in" -> {}
             else -> return Err(BundleError.InvalidField{field: "game.crash_reporter", reason: "must be `off`, `on`, or `opt-in`"})
@@ -280,7 +280,7 @@ pub struct GameBundleSpec {
     pub crash_runtime: GameCrashReporterSpec
     pub assets: [GameBundleAsset]
 
-    fn new(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec !Never {
+    fn new(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec Never! {
         GameBundleSpec{
             profile_name: profile_name,
             export_preset: export_preset,
@@ -308,22 +308,22 @@ pub struct BundleSpec {
     pub metadata: BundleMetadata
     pub icons: [BundleIcon]
     pub signing_hooks: [SigningHook]
-    pub updater: ?UpdaterSpec
-    pub game: ?GameBundleSpec
+    pub updater: UpdaterSpec?
+    pub game: GameBundleSpec?
 
-    fn new(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+    fn new(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec{kind: kind, target: target, package: package, version: version, executable: executable, metadata: metadata, icons: [BundleIcon]{}, signing_hooks: [SigningHook]{}, updater: None, game: None}
     }
 
-    fn desktop(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+    fn desktop(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec.new(BundleKind.Desktop, target, package, version, executable, metadata)
     }
 
-    fn game_bundle(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec !Never {
+    fn game_bundle(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec.new(BundleKind.Game, target, package, version, executable, metadata)
     }
 
-    fn validate(self) !BundleError {
+    fn validate(self) BundleError! {
         pkg_bundle_validate_component("package", self.package)
         pkg_bundle_validate_component("version", self.version)
         pkg_bundle_validate_component("executable.name", self.executable.name)
@@ -372,7 +372,7 @@ pub struct BundleSpec {
                 loop asset in game.assets {
                     pkg_bundle_validate_asset_path(asset.path)
                     if asset_paths.contains(asset.path) -> return Err(BundleError.DuplicatePath(asset.path))
-                    asset_paths.push(asset.path)
+                    &asset_paths.push(asset.path)
                 }
             }
             .None -> {
@@ -397,7 +397,7 @@ pub struct BundleSpec {
     }
 
     // Target-specific icon formats and identity rules.
-    fn validate_target_metadata(self) !BundleError {
+    fn validate_target_metadata(self) BundleError! {
         if self.target == {
             .LinuxAppImage -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Png, IconFormat.Svg}, "is not supported by linux-appimage")
             .MacOSApp -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Icns}, "macos-app requires icns icons")
@@ -422,7 +422,7 @@ pub enum BundleError {
     DuplicatePath(String)
     InvalidWindowsVersion(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .EmptyField(field) -> "bundle field `{field}` is empty"
             .InvalidField(field, reason) -> "bundle field `{field}` {reason}"
@@ -434,7 +434,7 @@ pub enum BundleError {
 }
 
 // Every icon uses one of the target's formats.
-fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], reason: String) !BundleError {
+fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], reason: String) BundleError! {
     loop icon in icons {
         if !allowed.contains(icon.format) -> return Err(BundleError.InvalidField{field: "icon.format", reason: reason})
     }
@@ -442,7 +442,7 @@ fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], r
 
 // ASCII letters, digits, dots, and hyphens, starting alphanumeric, at most
 // 50 bytes.
-fn pkg_bundle_msix_identifier(identifier: String) -> Bool !Never {
+fn pkg_bundle_msix_identifier(identifier: String) -> Bool Never! {
     raw :: identifier.bytes()
     if raw.len() == 0 || raw.len() > 50 -> return false
     first :: Int.from_u8(raw[0])
@@ -455,7 +455,7 @@ fn pkg_bundle_msix_identifier(identifier: String) -> Bool !Never {
 }
 
 // A package-relative asset path of plain `/`-separated names.
-fn pkg_bundle_validate_asset_path(path: String) !BundleError {
+fn pkg_bundle_validate_asset_path(path: String) BundleError! {
     if path == "" || path.contains("\\") || pkg_text_has_control(path) -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
     loop component in path.split("/") {
         if component == "" || component == "." || component == ".." -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
@@ -463,12 +463,12 @@ fn pkg_bundle_validate_asset_path(path: String) !BundleError {
 }
 
 // A non-blank file name component without path or control characters.
-fn pkg_bundle_validate_component(field: String, value: String) !BundleError {
+fn pkg_bundle_validate_component(field: String, value: String) BundleError! {
     if value.trim() == "" -> return Err(BundleError.EmptyField(field))
     if pkg_text_has_control(value) || pkg_bundle_has_path_character(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a path or control character"})
 }
 
-fn pkg_bundle_has_path_character(value: String) -> Bool !Never {
+fn pkg_bundle_has_path_character(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if Int.from_u8(byte) == {
             47 | 92 | 58 | 60 | 62 | 34 | 124 | 63 | 42 -> return true
@@ -478,19 +478,19 @@ fn pkg_bundle_has_path_character(value: String) -> Bool !Never {
     false
 }
 
-fn pkg_bundle_validate_text(field: String, value: String) !BundleError {
+fn pkg_bundle_validate_text(field: String, value: String) BundleError! {
     if pkg_text_has_control(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a control character"})
 }
 
 // A non-blank, control-free source path or URL.
-fn pkg_bundle_validate_source(field: String, value: String) !BundleError {
+fn pkg_bundle_validate_source(field: String, value: String) BundleError! {
     if value.trim() == "" -> return Err(BundleError.EmptyField(field))
     if pkg_text_has_control(value) -> return Err(BundleError.InvalidPath{field: field, path: value})
 }
 
 // A Windows MSIX version: one to four dot-separated decimal parts, each at
 // most 65535, normalized to four parts without leading zeros.
-fn pkg_bundle_windows_version(version: String) -> String !BundleError {
+fn pkg_bundle_windows_version(version: String) -> String BundleError! {
     parts :: version.split(".").to_list()
     if parts.len() == 0 || parts.len() > 4 -> return Err(BundleError.InvalidWindowsVersion(version))
     normalized := [String]{}
@@ -503,8 +503,8 @@ fn pkg_bundle_windows_version(version: String) -> String !BundleError {
             value = value * 10 + code - 48
             if value > 65535 -> return Err(BundleError.InvalidWindowsVersion(version))
         }
-        normalized.push("{value}")
+        &normalized.push("{value}")
     }
-    loop normalized.len() < 4 -> normalized.push("0")
+    loop normalized.len() < 4 -> &normalized.push("0")
     Ok(normalized.join("."))
 }

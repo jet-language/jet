@@ -9,7 +9,7 @@
 // the namespace has been merged or overlaid; a plain namespace has none.
 struct NixEvalPackageSet {
     prefix: String
-    overlay: ?Int
+    overlay: Int?
 }
 
 enum NixEvalFetcher {
@@ -20,7 +20,7 @@ enum NixEvalFetcher {
 }
 
 impl NixEvalFetcher {
-    fn name(self) -> String !Never {
+    fn name(self) -> String Never! {
         if self == {
             .Fetchurl -> "fetchurl"
             .FetchTarball -> "fetchTarball"
@@ -73,7 +73,7 @@ enum NixEvalOperation {
 }
 
 impl NixEvalOperation {
-    fn arity(self) -> Int !Never {
+    fn arity(self) -> Int Never! {
         if self == {
             .ReplaceStrings | .Substring -> 3
             else -> 2
@@ -109,13 +109,13 @@ enum NixEvalValue {
     LibraryNamespace
     List([Int])
     AttrSet([String: Int])
-    Derivation(fields: [String: Int], request: ?NixEvalDerivation)
+    Derivation(fields: [String: Int], request: NixEvalDerivation?)
     Function(lambda: Int, frame: Int)
     Native(NixEvalNative)
 }
 
 impl NixEvalValue {
-    fn type_name(self) -> String !Never {
+    fn type_name(self) -> String Never! {
         if self == {
             .Null -> "null"
             .Bool(_) -> "boolean"
@@ -133,7 +133,7 @@ impl NixEvalValue {
         }
     }
 
-    fn text(self) -> ?String !Never {
+    fn text(self) -> String? Never! {
         if self == {
             .Str(value) -> Val(value)
             .Contextual(value, _) -> Val(value)
@@ -141,21 +141,21 @@ impl NixEvalValue {
         }
     }
 
-    fn is_function(self) -> Bool !Never {
+    fn is_function(self) -> Bool Never! {
         if self == {
             .Function(_, _) -> true
             else -> false
         }
     }
 
-    fn attr_fields(self) -> ?[String: Int] !Never {
+    fn attr_fields(self) -> [String: Int]? Never! {
         if self == {
             .AttrSet(fields) -> Val(fields)
             else -> None
         }
     }
 
-    fn list_items(self) -> ?[Int] !Never {
+    fn list_items(self) -> [Int]? Never! {
         if self == {
             .List(items) -> Val(items)
             else -> None
@@ -164,7 +164,7 @@ impl NixEvalValue {
 
     // The package name a devShell package entry spells: a package, or a
     // string whose contexts name no project path.
-    fn package_text(self) -> String !NixEvalError {
+    fn package_text(self) -> String NixEvalError! {
         if self == {
             .Package(name) -> return Ok(name)
             .Contextual(_, contexts) -> {
@@ -179,7 +179,7 @@ impl NixEvalValue {
     }
 
     // String coercion with its string contexts.
-    fn stringify(self) -> NixEvalText !NixEvalError {
+    fn stringify(self) -> NixEvalText NixEvalError! {
         if self == {
             .Str(value) -> return Ok(NixEvalText{value, contexts: [String]{}})
             .Contextual(value, contexts) -> return Ok(NixEvalText{value, contexts})
@@ -191,14 +191,14 @@ impl NixEvalValue {
         Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))
     }
 
-    fn plain_string(self) -> String !NixEvalError {
+    fn plain_string(self) -> String NixEvalError! {
         text :: self.stringify()
         Ok(text.value)
     }
 
     // Nix `==` over the bounded value kinds: strings compare by text, and a
     // package equals the string naming its last attribute segment.
-    fn equals(self, other: NixEvalValue) -> Bool !Never {
+    fn equals(self, other: NixEvalValue) -> Bool Never! {
         if self == {
             .Null -> other == NixEvalValue.Null
             .Bool(value) -> other == NixEvalValue.Bool(value)
@@ -221,12 +221,12 @@ impl NixEvalValue {
 }
 
 // True when `text` names the last attribute segment of `package`.
-fn nixeval_package_named(package: String, text: ?String) -> Bool !Never {
+fn nixeval_package_named(package: String, text: String?) -> Bool Never! {
     name :: text ?? return false
     nixeval_last_segment(package, "./:") == name
 }
 
-fn nixeval_same_text(text: ?String, expected: String) -> Bool !Never {
+fn nixeval_same_text(text: String?, expected: String) -> Bool Never! {
     value :: text ?? return false
     value == expected
 }
@@ -238,7 +238,7 @@ struct NixEvalText {
 }
 
 impl NixEvalText {
-    fn into_value(self) -> NixEvalValue !Never {
+    fn into_value(self) -> NixEvalValue Never! {
         if self.contexts.len() == 0 -> return NixEvalValue.Str(self.value)
         NixEvalValue.Contextual{value: self.value, contexts: self.contexts}
     }
@@ -253,14 +253,14 @@ enum NixEvalThunk {
 
 // One lexical scope. Child frames share their root's expression fuel.
 struct NixEvalFrame {
-    parent: ?Int
+    parent: Int?
     bindings: [String: Int]
     scopes: [Int]
     fuel: Int
     base_path: String
 }
 
-fn nixeval_package_name(raw: String) -> String !NixEvalError {
+fn nixeval_package_name(raw: String) -> String NixEvalError! {
     name :: nixeval_last_segment(raw, "./")
     if name == "" || name.bytes().len() > @NIXEVAL_MAX_PACKAGE_NAME_BYTES {
         return Err(NixEvalError.Unsupported("invalid package name `{raw}`"))
@@ -268,7 +268,7 @@ fn nixeval_package_name(raw: String) -> String !NixEvalError {
     Ok(name)
 }
 
-fn nixeval_cross_package_name(raw: String) -> ?String !Never {
+fn nixeval_cross_package_name(raw: String) -> String? Never! {
     identity :: nixeval_strip_prefix(raw, "cross:") ?? return None
     bytes :: identity.bytes()
     colon :: nixeval_first_byte(bytes, 58)
@@ -279,7 +279,7 @@ fn nixeval_cross_package_name(raw: String) -> ?String !Never {
     Val("{target}/{package}")
 }
 
-fn nixeval_is_store_path(path: String) -> Bool !Never {
+fn nixeval_is_store_path(path: String) -> Bool Never! {
     name :: nixeval_strip_prefix(path, "/nix/store/") ?? return false
     bytes :: name.bytes()
     if nixeval_first_byte(bytes, 45) != 32 || bytes.len() <= 33 -> return false

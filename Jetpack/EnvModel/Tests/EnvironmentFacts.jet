@@ -7,7 +7,7 @@ fn envmodel_test_preset_error(set: PresetSet, names: [String]) -> PresetError {
     }
 }
 
-fn envmodel_test_fact_error(result: Result<LanguageExpansion, EnvironmentFactError>) -> String {
+fn envmodel_test_fact_error(result: LanguageExpansion EnvironmentFactError!) -> String {
     if result == {
         .Ok(_) -> panic("expected the language expansion to fail")
         .Err(error) -> error.message
@@ -15,7 +15,7 @@ fn envmodel_test_fact_error(result: Result<LanguageExpansion, EnvironmentFactErr
 }
 
 fn envmodel_test_register_error(catalog: &LanguagePackCatalog, pack: LanguagePack) -> String {
-    if catalog.register(pack) == {
+    if &catalog.register(pack) == {
         .Ok(_) -> panic("expected the language pack to be rejected")
         .Err(error) -> error.message
     }
@@ -56,8 +56,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("preset resolution is parent first and deduplicated") {
     set := PresetSet{}
-    set.insert(PresetSpec{name: "base", packages: [String]{"git@nixpkgs"}}) ?? panic("insert base")
-    set.insert(PresetSpec{name: "dev", extends: [String]{"base"}, packages: [String]{"git@nixpkgs", "rustc@nixpkgs"}}) ?? panic("insert dev")
+    &set.insert(PresetSpec{name: "base", packages: [String]{"git@nixpkgs"}}) ?? panic("insert base")
+    &set.insert(PresetSpec{name: "dev", extends: [String]{"base"}, packages: [String]{"git@nixpkgs", "rustc@nixpkgs"}}) ?? panic("insert dev")
     resolved :: set.resolve("dev") ?? panic("dev resolves")
     assert_eq(resolved.applied, [String]{"base", "dev"})
     assert_eq(resolved.packages, [String]{"git@nixpkgs", "rustc@nixpkgs"})
@@ -65,8 +65,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("ambient hostname presets merge before user presets") {
     set := PresetSet{}
-    set.insert(PresetSpec{name: "host", hostname: Val("build-01"), packages: [String]{"git@nixpkgs"}, variables: [String: String]{"HOST_MODE": "host"}}) ?? panic("insert host")
-    set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"ripgrep@nixpkgs"}, variables: [String: String]{"USER_MODE": "user"}}) ?? panic("insert sam")
+    &set.insert(PresetSpec{name: "host", hostname: Val("build-01"), packages: [String]{"git@nixpkgs"}, variables: [String: String]{"HOST_MODE": "host"}}) ?? panic("insert host")
+    &set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"ripgrep@nixpkgs"}, variables: [String: String]{"USER_MODE": "user"}}) ?? panic("insert sam")
     selected :: set.auto_select_many("build-01", "sam")
     assert_eq(selected, [String]{"host", "sam"})
     resolved :: set.resolve_many(selected) ?? panic("ambient presets resolve")
@@ -79,8 +79,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("ambient preset variable conflicts are rejected") {
     set := PresetSet{}
-    set.insert(PresetSpec{name: "host", hostname: Val("build-01"), variables: [String: String]{"MODE": "host"}}) ?? panic("insert host")
-    set.insert(PresetSpec{name: "sam", user: Val("sam"), variables: [String: String]{"MODE": "user"}}) ?? panic("insert sam")
+    &set.insert(PresetSpec{name: "host", hostname: Val("build-01"), variables: [String: String]{"MODE": "host"}}) ?? panic("insert host")
+    &set.insert(PresetSpec{name: "sam", user: Val("sam"), variables: [String: String]{"MODE": "user"}}) ?? panic("insert sam")
     selected :: set.auto_select_many("build-01", "sam")
     assert_eq(selected, [String]{"host", "sam"})
     assert_eq(envmodel_test_preset_error(set, selected), PresetError.Conflict("sam.MODE"))
@@ -88,16 +88,16 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("ambient user precedes default and default is last resort") {
     set := PresetSet{}
-    set.insert(PresetSpec{name: "default", packages: [String]{"default@nixpkgs"}}) ?? panic("insert default")
-    set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"user@nixpkgs"}}) ?? panic("insert sam")
+    &set.insert(PresetSpec{name: "default", packages: [String]{"default@nixpkgs"}}) ?? panic("insert default")
+    &set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"user@nixpkgs"}}) ?? panic("insert sam")
     assert_eq(set.auto_select_many("other", "sam"), [String]{"sam"})
     assert_eq(set.auto_select_many("other", "other"), [String]{"default"})
 }
 
 #Test("preset cycles are rejected") {
     set := PresetSet{}
-    set.insert(PresetSpec{name: "a", extends: [String]{"b"}}) ?? panic("insert a")
-    set.insert(PresetSpec{name: "b", extends: [String]{"a"}}) ?? panic("insert b")
+    &set.insert(PresetSpec{name: "a", extends: [String]{"b"}}) ?? panic("insert a")
+    &set.insert(PresetSpec{name: "b", extends: [String]{"a"}}) ?? panic("insert b")
     cycle :: if envmodel_test_preset_error(set, [String]{"a"}) == {
         .Cycle(_) -> true
         else -> false
@@ -109,11 +109,11 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
     set := PackageProfileSet{}
     loop index in 0..<@ENVMODEL_MAX_RESOLVER_NODES {
         extends :: if index > 0 -> [String]{"profile-{index - 1}"} else -> [String]{}
-        set.insert_checked(PackageProfileSpec{name: "profile-{index}", extends: extends}) ?? panic("the resolver budget must admit its declared limit")
+        &set.insert_checked(PackageProfileSpec{name: "profile-{index}", extends: extends}) ?? panic("the resolver budget must admit its declared limit")
     }
     resolved :: set.resolve("profile-{@ENVMODEL_MAX_RESOLVER_NODES - 1}") ?? panic("the deepest profile resolves")
     assert_eq(resolved.applied.len(), @ENVMODEL_MAX_RESOLVER_NODES)
-    if set.insert_checked(PackageProfileSpec{name: "profile-overflow"}) == {
+    if &set.insert_checked(PackageProfileSpec{name: "profile-overflow"}) == {
         .Ok(_) -> panic("the resolver must fail closed above its scale budget")
         .Err(error) -> assert(error.message().contains("100000"))
     }
@@ -122,7 +122,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 #Test("catalog has the core language families") {
     catalog :: LanguagePackCatalog.builtin()
     assert_eq(catalog.names().len(), 58)
-    loop name in [String]{"Rust", "Python", "Go", "JavaScript"} -> assert(catalog.get(name) != None)
+    core_names :: [String]{"Rust", "Python", "Go", "JavaScript"}
+    loop name in core_names -> assert(catalog.get(name) != None)
     expanded :: catalog.expand([LanguageSpec]{LanguageSpec{name: "Rust", enable: true}, LanguageSpec{name: "Python", enable: true}}) ?? panic("core languages expand")
     assert(expanded.packages.contains("rustc@nixpkgs"))
     assert(expanded.packages.contains("python@nixpkgs"))
@@ -139,7 +140,7 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
         assert_eq(pack.required_tools.len(), pack.commands.len())
     }
     selections := [LanguageSpec]{}
-    loop name in catalog.names() -> selections.push(LanguageSpec{name: name, enable: true})
+    loop name in catalog.names() -> &selections.push(LanguageSpec{name: name, enable: true})
     expansion :: catalog.expand(selections) ?? panic("every catalog language expands")
     assert_eq(expansion.applied.len(), 58)
     loop projection in expansion.projections -> assert_eq(projection.missing_tools.len(), 0)
@@ -147,7 +148,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("c language packs share the hermetic toolchain package") {
     catalog :: LanguagePackCatalog.builtin()
-    loop entry in [String: String]{"C": "cc", "Cplusplus": "c++"} {
+    c_packs :: [String: String]{"C": "cc", "Cplusplus": "c++"}
+    loop entry in c_packs {
         pack :: catalog.get(entry.key) ?? panic("built-in C pack")
         assert_eq(pack.packages, [String]{"cc-toolchain@jetpack"})
         assert_eq(pack.required_tools, [String]{entry.value})
@@ -169,7 +171,7 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("catalog accepts a valid contribution and rejects duplicate names") {
     catalog := LanguagePackCatalog.builtin()
-    catalog.register(LanguagePack{
+    &catalog.register(LanguagePack{
         name: "JetExperimental",
         packages: [String]{"jet-tool@nixpkgs"},
         venv_packages: [String]{"jet-tool-venv@nixpkgs"},
@@ -209,7 +211,7 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
         required_tools: [String]{"compiler", "compiler-fmt"}
     }
     original_fingerprint :: pack.fingerprint()
-    catalog.register(pack) ?? panic("the contribution registers")
+    &catalog.register(pack) ?? panic("the contribution registers")
     expansion :: catalog.expand([LanguageSpec]{LanguageSpec{name: "contributed", enable: true, venv: true}}) ?? panic("the contribution expands")
     assert_eq(expansion.applied, [String]{"Contributed"})
     assert_eq(expansion.packages, [String]{"compiler@nixpkgs", "compiler-tools@nixpkgs"})
@@ -229,8 +231,9 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("catalog rejects conflicting contributed variables and commands") {
     catalog := LanguagePackCatalog.empty()
-    loop row in [[String]]{[String]{"First", "strict", "compiler"}, [String]{"Second", "fast", "other-compiler"}} {
-        catalog.register(LanguagePack{
+    variable_rows :: [[String]]{[String]{"First", "strict", "compiler"}, [String]{"Second", "fast", "other-compiler"}}
+    loop row in variable_rows {
+        &catalog.register(LanguagePack{
             name: row[0],
             packages: [String]{"{row[0]}@nixpkgs"},
             variables: [String: String]{"COMPILER_MODE": row[1]},
@@ -245,8 +248,9 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
     assert(error.contains("conflicts with existing variable"), error)
 
     commands := LanguagePackCatalog.empty()
-    loop row in [[String]]{[String]{"One", "compiler"}, [String]{"Two", "other-compiler"}} {
-        commands.register(LanguagePack{
+    command_rows :: [[String]]{[String]{"One", "compiler"}, [String]{"Two", "other-compiler"}}
+    loop row in command_rows {
+        &commands.register(LanguagePack{
             name: row[0],
             packages: [String]{"{row[0]}@nixpkgs"},
             commands: [String: String]{"compiler": row[1]},
@@ -262,7 +266,7 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("language pack rejects unsupported platform and missing tool facts") {
     catalog := LanguagePackCatalog.empty()
-    catalog.register(LanguagePack{
+    &catalog.register(LanguagePack{
         name: "Narrow",
         packages: [String]{"narrow@nixpkgs"},
         platforms: [String]{"x86_64-linux"},

@@ -11,35 +11,35 @@ pub struct ArtifactEnvelopeError {
 }
 
 // `jet.store.v1\0action\0`
-fn store_artifact_action_magic() -> [U8] !Never {
+fn store_artifact_action_magic() -> [U8] Never! {
     store_artifact_magic("action")
 }
 
 // `jet.store.v1\0artifact\0`
-fn store_artifact_record_magic() -> [U8] !Never {
+fn store_artifact_record_magic() -> [U8] Never! {
     store_artifact_magic("artifact")
 }
 
-fn store_artifact_magic(label: String) -> [U8] !Never {
+fn store_artifact_magic(label: String) -> [U8] Never! {
     out := [U8]{}
-    out.extend(@STORE_ARTIFACT_VERSION.bytes())
-    out.push(U8{0})
-    out.extend(label.bytes())
-    out.push(U8{0})
+    &out.extend(@STORE_ARTIFACT_VERSION.bytes())
+    &out.push(U8{0})
+    &out.extend(label.bytes())
+    &out.push(U8{0})
     out
 }
 
 // `value` as eight little-endian bytes (`u64::to_le_bytes`).
-fn store_artifact_push_le64(out: &[U8], value: Int) !Never {
+fn store_artifact_push_le64(out: &[U8], value: Int) Never! {
     shift := 0
     loop shift < 64 {
-        out.push(U8{(value >> shift) & 255})
+        &out.push(U8{(value >> shift) & 255})
         shift += 8
     }
 }
 
 // The little-endian u64 at `bytes[start..<start + 8]`.
-fn store_artifact_read_le64(bytes: [U8], start: Int) -> Int !Never {
+fn store_artifact_read_le64(bytes: [U8], start: Int) -> Int Never! {
     value := 0
     loop offset in 0..<8 {
         value = value | (Int.from_u8(bytes[start + offset]) << (offset * 8))
@@ -47,23 +47,23 @@ fn store_artifact_read_le64(bytes: [U8], start: Int) -> Int !Never {
     value
 }
 
-fn store_artifact_slice(bytes: [U8], start: Int, end: Int) -> [U8] !Never {
+fn store_artifact_slice(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     if end <= start -> return [U8]{}
     bytes[start..<end]
 }
 
 // The action envelope: magic, action key digest, record length, record
 // digest, record.
-fn store_artifact_encode_action(action: ActionHandle, record: [U8]) -> [U8] !Never {
+fn store_artifact_encode_action(action: ActionHandle, record: [U8]) -> [U8] Never! {
     out := store_artifact_action_magic()
-    out.extend(action.digest().as_bytes())
+    &out.extend(action.digest().as_bytes())
     store_artifact_push_le64(&out, record.len())
-    out.extend(store_artifact_sha256(record))
-    out.extend(record)
+    &out.extend(store_artifact_sha256(record))
+    &out.extend(record)
     out
 }
 
-fn store_artifact_decode_action(action: ActionHandle, bytes: [U8]) -> [U8] !ArtifactEnvelopeError {
+fn store_artifact_decode_action(action: ActionHandle, bytes: [U8]) -> [U8] ArtifactEnvelopeError! {
     magic :: store_artifact_action_magic()
     header_len :: magic.len() + 32 + 8 + 32
     if bytes.len() < header_len || !pkg_bytes_starts_with(bytes, 0, magic) {
@@ -87,7 +87,7 @@ fn store_artifact_decode_action(action: ActionHandle, bytes: [U8]) -> [U8] !Arti
 
 // A record written by another store version (`jet.store.v<digit>\0`, digit
 // not 1): a miss, never corruption.
-fn store_artifact_is_unsupported_version(bytes: [U8]) -> Bool !Never {
+fn store_artifact_is_unsupported_version(bytes: [U8]) -> Bool Never! {
     prefix :: "jet.store.v".bytes()
     if !pkg_bytes_starts_with(bytes, 0, prefix) || bytes.len() <= prefix.len() -> return false
     version :: Int.from_u8(bytes[prefix.len()])
@@ -95,21 +95,21 @@ fn store_artifact_is_unsupported_version(bytes: [U8]) -> Bool !Never {
     bytes.len() > prefix.len() + 1 && Int.from_u8(bytes[prefix.len() + 1]) == 0
 }
 
-fn store_artifact_action_for_key(key: String) -> ActionHandle !ArtifactStoreError {
+fn store_artifact_action_for_key(key: String) -> ActionHandle ArtifactStoreError! {
     Ok(ActionHandle.new(ArtifactDigest.from_hex(key)))
 }
 
 // The artifact record: magic, object digest, object length, executable flag.
-fn store_artifact_encode_record(object: ObjectHandle, executable: Bool) -> [U8] !Never {
+fn store_artifact_encode_record(object: ObjectHandle, executable: Bool) -> [U8] Never! {
     out := store_artifact_record_magic()
-    out.extend(object.digest().as_bytes())
+    &out.extend(object.digest().as_bytes())
     store_artifact_push_le64(&out, object.length())
-    out.push(if executable -> U8{1} else -> U8{0})
+    &out.push(if executable -> U8{1} else -> U8{0})
     out
 }
 
 // The object and executable flag of an artifact record, or None.
-fn store_artifact_decode_record(bytes: [U8]) -> ?(object: ObjectHandle, executable: Bool) !Never {
+fn store_artifact_decode_record(bytes: [U8]) -> (object: ObjectHandle, executable: Bool)? Never! {
     magic :: store_artifact_record_magic()
     expected :: magic.len() + 32 + 8 + 1
     if bytes.len() != expected || !pkg_bytes_starts_with(bytes, 0, magic) -> return None
@@ -124,7 +124,7 @@ fn store_artifact_decode_record(bytes: [U8]) -> ?(object: ObjectHandle, executab
 }
 
 // Whether a filesystem failure means the path does not exist.
-fn store_artifact_io_missing(error: IOError) -> Bool !Never {
+fn store_artifact_io_missing(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
@@ -132,14 +132,14 @@ fn store_artifact_io_missing(error: IOError) -> Bool !Never {
 }
 
 // Whether a filesystem failure is an unsupported or invalid request.
-fn store_artifact_io_invalid(error: IOError) -> Bool !Never {
+fn store_artifact_io_invalid(error: IOError) -> Bool Never! {
     if error == {
         .InvalidInput(_) -> true
         else -> false
     }
 }
 
-fn store_artifact_is_executable(info: files.Stat) -> Bool !Never {
+fn store_artifact_is_executable(info: files.Stat) -> Bool Never! {
     (info.mode & 0o111) != 0
 }
 
@@ -152,7 +152,7 @@ enum ArtifactRawRead {
 
 // Read a regular store file, refusing links, special files, and a file that
 // was replaced while it was opened or read.
-fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead !ArtifactStoreError {
+fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreError! {
     metadata :: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
@@ -174,7 +174,7 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead !ArtifactStoreE
     loop {
         chunk :: reader.read(65536)
         if chunk.len() == 0 -> break
-        bytes.extend(chunk)
+        &bytes.extend(chunk)
     }
     after :: reader.stat()
     path_after :: files.stat(path)
@@ -185,14 +185,14 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead !ArtifactStoreE
 }
 
 // The same file object of the same length.
-fn store_artifact_same_file(left: files.Stat, right: files.Stat) -> Bool !Never {
+fn store_artifact_same_file(left: files.Stat, right: files.Stat) -> Bool Never! {
     left.id == right.id && left.size == right.size
 }
 
 // Replace `path` atomically: a new temporary sibling, written and synced,
 // renamed over the target, then the directory synced. The temporary file is
 // removed when any step fails.
-fn store_artifact_atomic_write(path: String, bytes: [U8]) !ArtifactStoreError -[FS, Env, Rand]> {
+fn store_artifact_atomic_write(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
     parent :: files.dirname(path)
     file_name :: files.basename(path)
     if path == "" || path == "/" -> return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
@@ -208,7 +208,7 @@ fn store_artifact_atomic_write(path: String, bytes: [U8]) !ArtifactStoreError -[
     }
 }
 
-fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8]) !ArtifactStoreError -[FS]> {
+fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
     writer :: files.create(temporary, if_exists: .Refuse)
     writer.write_all(bytes)
     writer.fsync()
@@ -217,7 +217,7 @@ fn store_artifact_replace_with(temporary: String, path: String, parent: String, 
     store_artifact_sync_dir(parent)
 }
 
-fn store_artifact_set_executable(path: String, executable: Bool) !ArtifactStoreError -[FS]> {
+fn store_artifact_set_executable(path: String, executable: Bool) ArtifactStoreError! -[FS]> {
     info :: files.stat(path)
     mode :: info.mode
     next :: if executable -> mode | 0o111 else -> mode - (mode & 0o111)
@@ -225,14 +225,14 @@ fn store_artifact_set_executable(path: String, executable: Bool) !ArtifactStoreE
 }
 
 // Create `path`, refusing an existing one, and sync its bytes.
-fn store_artifact_create_new_synced(path: String, bytes: [U8]) !ArtifactStoreError -[FS]> {
+fn store_artifact_create_new_synced(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
     writer :: files.create(path, if_exists: .Refuse)
     writer.write_all(bytes)
     writer.fsync()
 }
 
 // Append one synced record to a regular file (the journal).
-fn store_artifact_append_synced(path: String, bytes: [U8]) !ArtifactStoreError -[FS]> {
+fn store_artifact_append_synced(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_file {
@@ -241,7 +241,7 @@ fn store_artifact_append_synced(path: String, bytes: [U8]) !ArtifactStoreError -
         }
         else -> {}
     }
-    writer :: files.append(path)
+    writer :: &files.append(path)
     writer.write_all(bytes)
     writer.fsync()
     close(^writer)
@@ -250,7 +250,7 @@ fn store_artifact_append_synced(path: String, bytes: [U8]) !ArtifactStoreError -
 
 // Create one store directory (its parent must exist), refusing a link or a
 // non-directory in its place.
-fn store_artifact_ensure_dir(path: String) !ArtifactStoreError -[FS]> {
+fn store_artifact_ensure_dir(path: String) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink -> return Err(ArtifactStoreError.Config("store directory is a symlink: {path}"))
@@ -267,7 +267,7 @@ fn store_artifact_ensure_dir(path: String) !ArtifactStoreError -[FS]> {
 
 // Make earlier renames and creations inside `path` durable. A platform that
 // cannot sync a directory reports InvalidInput, which is not a failure.
-fn store_artifact_sync_dir(path: String) !ArtifactStoreError -[FS]> {
+fn store_artifact_sync_dir(path: String) ArtifactStoreError! -[FS]> {
     if files.fsync(path) == {
         .Ok(_) -> Ok()
         .Err(error) -> {
@@ -278,16 +278,16 @@ fn store_artifact_sync_dir(path: String) !ArtifactStoreError -[FS]> {
 }
 
 // The children of `directory`, ordered by path.
-fn store_artifact_sorted_children(directory: String) -[FS]> [String] !ArtifactStoreError {
+fn store_artifact_sorted_children(directory: String) -[FS]> [String] ArtifactStoreError! {
     paths := [String]{}
-    loop entry in files.list_dir(directory) -> paths.push(entry.path)
-    paths.sort()
+    loop entry in files.list_dir(directory) -> &paths.push(entry.path)
+    &paths.sort()
     Ok(paths)
 }
 
 // A name component unique to this draw, for temporary, lease and quarantine
 // files.
-fn store_artifact_unique_token() -[Rand]> String !ArtifactStoreError {
+fn store_artifact_unique_token() -[Rand]> String ArtifactStoreError! {
     random.token_hex(8) ?? return Err(ArtifactStoreError.Config("could not draw a unique store file name"))
 }
 
@@ -298,7 +298,7 @@ struct ArtifactDiskStats {
 }
 
 // POSIX `df -Pk` of `path`; None when df fails or reports an unexpected row.
-fn store_artifact_filesystem_stats(path: String) -[Exec, Time]> ?ArtifactDiskStats !Never {
+fn store_artifact_filesystem_stats(path: String) -[Exec, Time]> ArtifactDiskStats? Never! {
     spec :: process.cmd([String]{"df", "-Pk", path}).env("LC_ALL", "C").stdout(.Capture).stderr(.Capture)
     receipt :: process.run_spec(spec) ?? return None
     if !receipt.success -> return None
@@ -316,13 +316,13 @@ fn store_artifact_filesystem_stats(path: String) -[Exec, Time]> ?ArtifactDiskSta
 }
 
 // A non-negative decimal count (`u64::from_str`), or None.
-fn store_artifact_parse_count(text: String) -> ?Int !Never {
+fn store_artifact_parse_count(text: String) -> Int? Never! {
     if text == "" || !store_artifact_all_digits(text) -> return None
     Int.parse(text) ?? return None
 }
 
 // `str::split_whitespace` over ASCII whitespace.
-fn store_artifact_split_whitespace(text: String) -> [String] !Never {
+fn store_artifact_split_whitespace(text: String) -> [String] Never! {
     raw :: text.bytes()
     fields := [String]{}
     start := -1
@@ -331,13 +331,13 @@ fn store_artifact_split_whitespace(text: String) -> [String] !Never {
         space :: code == 32 || (code >= 9 && code <= 13)
         if {
             space && start >= 0 -> {
-                fields.push(pkg_bytes_text(raw, start, index))
+                &fields.push(pkg_bytes_text(raw, start, index))
                 start = -1
             }
             !space && start < 0 -> start = index
             else -> {}
         }
     }
-    if start >= 0 -> fields.push(pkg_bytes_text(raw, start, raw.len()))
+    if start >= 0 -> &fields.push(pkg_bytes_text(raw, start, raw.len()))
     fields
 }

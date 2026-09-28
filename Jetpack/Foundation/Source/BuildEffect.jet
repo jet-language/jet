@@ -13,7 +13,7 @@ pub enum BuildEffect {
     Log
     GPU
 
-    fn name(self) -> String !Never {
+    fn name(self) -> String Never! {
         if self == {
             .Net -> "Net"
             .FS -> "FS"
@@ -28,7 +28,7 @@ pub enum BuildEffect {
         }
     }
 
-    fn flag(self) -> String !Never {
+    fn flag(self) -> String Never! {
         if self == {
             .Net -> "net"
             .FS -> "fs"
@@ -45,7 +45,7 @@ pub enum BuildEffect {
 
     // A root effect name matched ASCII case-insensitively against the
     // canonical table; dotted leaves are not build effects.
-    fn parse(value: String) -> ?BuildEffect !Never {
+    fn parse(value: String) -> BuildEffect? Never! {
         if value.contains(".") -> return None
         if value.to_ascii_lower() == {
             "net" -> Val(BuildEffect.Net)
@@ -63,7 +63,7 @@ pub enum BuildEffect {
     }
 
     // Position in the canonical table, the order Rust's derived `Ord` uses.
-    fn rank(self) -> Int !Never {
+    fn rank(self) -> Int Never! {
         if self == {
             .Net -> 0
             .FS -> 1
@@ -79,9 +79,9 @@ pub enum BuildEffect {
     }
 
     // The effects in canonical table order, keeping repeats.
-    fn sorted(effects: [BuildEffect]) -> [BuildEffect] !Never {
+    fn sorted(effects: [BuildEffect]) -> [BuildEffect] Never! {
         out := effects
-        out.sort_by(written -> written.rank())
+        &out.sort_by(written -> written.rank())
         out
     }
 }

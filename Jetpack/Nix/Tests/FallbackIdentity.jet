@@ -24,7 +24,7 @@ fn nix_test_fallback_observed(root: String) -[FS, Env]> NixFallbackIdentity {
 
 fn nix_test_repeat(text: String, count: Int) -> String {
     parts := [String]{}
-    loop _ in 0..<count -> parts.push(text)
+    loop _ in 0..<count -> &parts.push(text)
     parts.join("")
 }
 
@@ -46,7 +46,7 @@ fn nix_test_request_refused(identity: NixFallbackIdentity, input: String, system
     assert(provenance.contains("\"executable_sha256\""))
     assert(provenance.contains("\"nixpkgs_revision\""))
     assert(provenance.contains("\"lock_sha256\""))
-    with_unknown :: provenance.replace(",\"lock_sha256\"", ",\"unexpected\":\"value\",\"lock_sha256\"")
+    with_unknown :: &provenance.replace(",\"lock_sha256\"", ",\"unexpected\":\"value\",\"lock_sha256\"")
     if NixFallbackIdentity.from_provenance(with_unknown) == {
         .Ok(_) -> panic("an unknown provenance field must be rejected")
         else -> {}

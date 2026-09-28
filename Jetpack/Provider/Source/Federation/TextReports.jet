@@ -7,7 +7,7 @@ impl ProviderFactReport {
     // `Requires-Dist`, license, classifiers, extras, and advisory fields, with
     // every field retained as a native fact. Dynamic metadata and lines that
     // are not fields are losses.
-    fn pypi_metadata_document(document: String) -> ProviderFactReport !Never {
+    fn pypi_metadata_document(document: String) -> ProviderFactReport Never! {
         fields :: provider_metadata_fields(document)
         names :: provider_metadata_values(fields, "name")
         versions :: provider_metadata_values(fields, "version")
@@ -20,18 +20,18 @@ impl ProviderFactReport {
             field :: fields[index]
             normalized :: pkg_ascii_lower(field.key).replace("-", "_")
             value :: field.value
-            facts.add_typed_text("provider.pypi.native.{normalized}.{index}", value)
+            &facts.add_typed_text("provider.pypi.native.{normalized}.{index}", value)
             if normalized == {
-                "requires_python" -> facts.add_typed_text("provider.pypi.variant.requires_python", value)
-                "project_url" | "home_page" | "download_url" | "author" | "author_email" | "maintainer" | "maintainer_email" -> facts.add_typed_text("provider.pypi.source.{normalized}.{index}", value)
+                "requires_python" -> &facts.add_typed_text("provider.pypi.variant.requires_python", value)
+                "project_url" | "home_page" | "download_url" | "author" | "author_email" | "maintainer" | "maintainer_email" -> &facts.add_typed_text("provider.pypi.source.{normalized}.{index}", value)
                 "classifier" -> {
-                    if value.starts_with("Operating System ::") || value.starts_with("Platform ::") -> facts.platforms.push(~value)
+                    if value.starts_with("Operating System ::") || value.starts_with("Platform ::") -> &facts.platforms.push(~value)
                     if facts.license == "" && value.starts_with("License ::") -> facts.license = ~value
-                    facts.add_typed_text("provider.pypi.variant.classifier.{index}", value)
+                    &facts.add_typed_text("provider.pypi.variant.classifier.{index}", value)
                 }
-                "provides_extra" -> facts.add_typed_text("provider.pypi.variant.extra.{index}", value)
-                "dynamic" -> facts.add_typed_text("provider.pypi.dynamic.{index}", value)
-                "yanked" | "yanked_reason" | "signature" | "gpg_signature" -> facts.add_typed_text("provider.pypi.advisory.{normalized}.{index}", value)
+                "provides_extra" -> &facts.add_typed_text("provider.pypi.variant.extra.{index}", value)
+                "dynamic" -> &facts.add_typed_text("provider.pypi.dynamic.{index}", value)
+                "yanked" | "yanked_reason" | "signature" | "gpg_signature" -> &facts.add_typed_text("provider.pypi.advisory.{normalized}.{index}", value)
                 else -> {}
             }
         }
@@ -41,14 +41,14 @@ impl ProviderFactReport {
         identity_fields :: [(field: String, values: [String])]{(field: "Name", values: names), (field: "Version", values: versions)}
         loop identity in identity_fields {
             distinct :: provider_distinct_values(identity.values)
-            if distinct.len() > 1 -> report.conflicts.push("PyPI Core Metadata declares conflicting {identity.field} values: {distinct.join(", ")}")
+            if distinct.len() > 1 -> &report.conflicts.push("PyPI Core Metadata declares conflicting {identity.field} values: {distinct.join(", ")}")
         }
         if provider_metadata_values(fields, "dynamic").len() > 0 || document.contains("dynamic =") || document.contains("dynamic:") {
-            report.losses.push("dynamic Python metadata must be resolved to an exact lock")
+            &report.losses.push("dynamic Python metadata must be resolved to an exact lock")
         }
         loop line in provider_lines(document) {
             if line.trim() != "" && pkg_bytes_space_width(line.bytes(), 0) == 0 && !line.contains(":") && !line.contains("=") {
-                report.losses.push("PyPI metadata contains an unrecognized non-field line")
+                &report.losses.push("PyPI metadata contains an unrecognized non-field line")
                 break
             }
         }
@@ -58,7 +58,7 @@ impl ProviderFactReport {
     // A `conanfile.py`/`conanfile.txt` recipe read by assignment and quoted
     // values: identity, requires, tool/build requires, settings, and options.
     // Executable hooks and unparseable requires are losses.
-    fn conan_recipe_document(document: String) -> ProviderFactReport !Never {
+    fn conan_recipe_document(document: String) -> ProviderFactReport Never! {
         names :: provider_assignment_values(document, "name")
         versions :: provider_assignment_values(document, "version")
         facts := MetadataFacts.empty(ProviderFamily.Conan, names.get(0) ?? "")
@@ -66,7 +66,7 @@ impl ProviderFactReport {
         facts.license = provider_assignment_values(document, "license").get(0) ?? ""
         facts.dependencies = provider_quoted_values_after_all(document, "requires")
         facts.build_dependencies = provider_quoted_values_after_all(document, "tool_requires")
-        loop value in provider_quoted_values_after_all(document, "build_requires") -> facts.build_dependencies.push(value)
+        loop value in provider_quoted_values_after_all(document, "build_requires") -> &facts.build_dependencies.push(value)
         facts.platforms = provider_quoted_values_after_all(document, "settings")
         typed_keys :: [String]{"options", "generators", "settings", "revision", "rrev", "package_id", "prev"}
         loop key in typed_keys {
@@ -76,20 +76,20 @@ impl ProviderFactReport {
         lines :: provider_lines(document)
         loop index in 0..<lines.len() {
             line :: lines[index].trim()
-            if line != "" -> facts.add_typed_text("provider.conan.native.line.{index}", line)
+            if line != "" -> &facts.add_typed_text("provider.conan.native.line.{index}", line)
         }
         facts.source_identity = "conan:{facts.name}@{facts.version}"
         report := ProviderFactReport.with_identity(facts)
-        if provider_distinct_values(names).len() > 1 -> report.conflicts.push("Conan recipe declares conflicting package names")
-        if provider_distinct_values(versions).len() > 1 -> report.conflicts.push("Conan recipe declares conflicting package versions")
-        if report.facts.version != "" && !provider_exact_version(report.facts.version) -> report.losses.push("Conan package version is not an exact identity")
+        if provider_distinct_values(names).len() > 1 -> &report.conflicts.push("Conan recipe declares conflicting package names")
+        if provider_distinct_values(versions).len() > 1 -> &report.conflicts.push("Conan recipe declares conflicting package versions")
+        if report.facts.version != "" && !provider_exact_version(report.facts.version) -> &report.losses.push("Conan package version is not an exact identity")
         requirement_fields :: [(field: String, parsed: Bool)]{(field: "requires", parsed: report.facts.dependencies.len() > 0), (field: "tool_requires", parsed: report.facts.build_dependencies.len() > 0)}
         loop requirement in requirement_fields {
             if requirement.parsed -> next
             loop raw_line in lines {
                 trimmed :: raw_line.trim_start()
                 if (trimmed.starts_with(requirement.field) || trimmed.starts_with("self.{requirement.field}")) && !trimmed.contains("\"") && !trimmed.contains("'") {
-                    report.losses.push("Conan `{requirement.field}` contains no parseable dependency identity")
+                    &report.losses.push("Conan `{requirement.field}` contains no parseable dependency identity")
                     break
                 }
             }
@@ -102,7 +102,7 @@ impl ProviderFactReport {
                 if line.starts_with(prefix) -> hook = true
             }
             if hook {
-                report.losses.push("Conan recipe contains executable build or Python hook semantics; transport must be verified before realization")
+                &report.losses.push("Conan recipe contains executable build or Python hook semantics; transport must be verified before realization")
                 break
             }
         }
@@ -112,7 +112,7 @@ impl ProviderFactReport {
 
 // An exact provider version: no interpolation, no range except NuGet's
 // single-version `[x]`, and an exact `#version=` selector.
-fn provider_exact_version(raw: String) -> Bool !Never {
+fn provider_exact_version(raw: String) -> Bool Never! {
     value :: raw.trim()
     if value == "" || value.contains("$(") || value.contains("${{") -> return false
     if value.starts_with("[") && value.ends_with("]") {
@@ -123,13 +123,13 @@ fn provider_exact_version(raw: String) -> Bool !Never {
     ProviderSelector.parse("#version={value}").is_exact()
 }
 
-fn provider_has_range_mark(value: String) -> Bool !Never {
+fn provider_has_range_mark(value: String) -> Bool Never! {
     value.contains("[") || value.contains("]") || value.contains("(") || value.contains(")") || value.contains(",")
 }
 
 // RFC 822-style `Key: value` fields; an indented line continues the
 // previous field's value after one space.
-fn provider_metadata_fields(document: String) -> [(key: String, value: String)] !Never {
+fn provider_metadata_fields(document: String) -> [(key: String, value: String)] Never! {
     fields := [(key: String, value: String)]{}
     loop line in provider_lines(document) {
         if pkg_bytes_space_width(line.bytes(), 0) > 0 {
@@ -141,24 +141,24 @@ fn provider_metadata_fields(document: String) -> [(key: String, value: String)] 
         }
         pair :: line.split_once(":") ?? next
         key :: pair.before.trim()
-        if key != "" -> fields.push((key: key, value: pair.after.trim()))
+        if key != "" -> &fields.push((key: key, value: pair.after.trim()))
     }
     fields
 }
 
 // Values of every field named `key`, ignoring ASCII case.
-fn provider_metadata_values(fields: [(key: String, value: String)], key: String) -> [String] !Never {
+fn provider_metadata_values(fields: [(key: String, value: String)], key: String) -> [String] Never! {
     wanted :: pkg_ascii_lower(key)
     values := [String]{}
     loop field in fields {
-        if pkg_ascii_lower(field.key) == wanted -> values.push(field.value)
+        if pkg_ascii_lower(field.key) == wanted -> &values.push(field.value)
     }
     values
 }
 
 // The value of each `key = …` or `self.key = …` line: its first quoted
 // string, else the text before any `#` without trailing commas.
-fn provider_assignment_values(document: String, key: String) -> [String] !Never {
+fn provider_assignment_values(document: String, key: String) -> [String] Never! {
     values := [String]{}
     loop line in provider_lines(document) {
         pair :: line.split_once("=") ?? next
@@ -166,20 +166,20 @@ fn provider_assignment_values(document: String, key: String) -> [String] !Never 
         if left != key -> next
         quoted :: provider_quoted_values_in(pair.after)
         if quoted.len() > 0 {
-            values.push(quoted[0])
+            &values.push(quoted[0])
             next
         }
         before_comment :: pair.after.split("#").to_list()[0]
         value := before_comment.trim()
         loop value.ends_with(",") -> value = value.removesuffix(",")
-        if value != "" -> values.push(value)
+        if value != "" -> &values.push(value)
     }
     values
 }
 
 // Quoted values on every line starting with `key` or `self.key` followed by
 // the end, a space, tab, `=`, `(`, or `:`.
-fn provider_quoted_values_after_all(document: String, key: String) -> [String] !Never {
+fn provider_quoted_values_after_all(document: String, key: String) -> [String] Never! {
     self_key :: "self.{key}"
     values := [String]{}
     loop raw_line in provider_lines(document) {
@@ -192,13 +192,13 @@ fn provider_quoted_values_after_all(document: String, key: String) -> [String] !
         }
         boundary :: pkg_bytes_code(rest.bytes(), 0)
         if boundary != -1 && boundary != 32 && boundary != 9 && boundary != 61 && boundary != 40 && boundary != 58 -> next
-        loop value in provider_quoted_values_in(line) -> values.push(value)
+        loop value in provider_quoted_values_in(line) -> &values.push(value)
     }
     values
 }
 
 // Every `'…'` or `"…"` span; a quote closes only its own kind.
-fn provider_quoted_values_in(text: String) -> [String] !Never {
+fn provider_quoted_values_in(text: String) -> [String] Never! {
     bytes :: text.bytes()
     values := [String]{}
     quote := 0
@@ -207,7 +207,7 @@ fn provider_quoted_values_in(text: String) -> [String] !Never {
         code :: Int.from_u8(bytes[index])
         if {
             quote != 0 && code == quote -> {
-                values.push(pkg_bytes_text(bytes, value_start, index))
+                &values.push(pkg_bytes_text(bytes, value_start, index))
                 quote = 0
             }
             quote == 0 && (code == 39 || code == 34) -> {

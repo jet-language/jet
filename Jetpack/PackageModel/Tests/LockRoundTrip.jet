@@ -1,0 +1,414 @@
+// Claims ported from the Lock.rs `a4_envelope_tests` module: canonical
+// write/parse round trips, strict reader failures, the registered lock
+// diagnostics, and the on-disk recorders and bounded reader/writer.
+// Helpers live in LockEnvelope.jet.
+
+fn pkg_lock_test_tricky(label: String) -> String Never! {
+    "{label} \"quoted\" \\ slash"
+}
+
+fn pkg_lock_test_parse_error(raw: String) -> String Never! {
+    if pkg_lock_parse(raw) == {
+        .Ok(_) -> panic("lock text must be rejected")
+        .Err(error) -> error.message()
+    }
+}
+
+fn pkg_lock_test_rejects(raw: String) -> Bool Never! {
+    if pkg_lock_parse(raw) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+// The previous-schema lock fixture (tests/fixtures/build-metadata-compat/
+// lock-v0.lock).
+fn pkg_lock_test_v0_fixture() -> String Never! {
+    [String]{
+        "version = 0",
+        "",
+        "[build.stamp]",
+        "git = \"f17c25b622878d8816a123682d665d0a579d89a9-dirty\"",
+        "dirty = true",
+        "toolchain = \"1.0.0\"",
+        "at = \"2026-08-20T20:41:14.841770348Z\"",
+        "",
+        "[root]",
+        "dependencies = []",
+        "",
+        "[[comptime_inputs]]",
+        "path = \".jet/generated/main/build_message.jet\"",
+        "hash = \"sha256:00fa9b9434ab10a112651096960e698daf20f31ddfcd7f67601aceaf96efcdd4\"",
+        ""
+    }.join("\n")
+}
+
+// The reported diagnostic of a failed lock operation.
+fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
+    if error == {
+        .Reported(diagnostic) -> diagnostic
+        else -> panic("expected a registered lock diagnostic, got {error.message()}")
+    }
+}
+
+#Test("lock roundtrip escaping is idempotent") {
+    local_nix :: "local-nix:{{\"json\":\"value with \\\\ and \\\"\"}}"
+    output :: pkg_lock_test_nix_digest("a")
+    envelope := pkg_lock_test_env(output, "x86_64-linux", pkg_lock_test_tricky("signature"), local_nix)
+    envelope.catalog_tier = pkg_lock_test_tricky("catalog-tier")
+    envelope.catalog_trust = pkg_lock_test_tricky("catalog-trust")
+
+    package := pkg_lock_test_pkg("package", Val(envelope))
+    package.source = LockSource.Nix{reference: local_nix, output: output}
+    package.nix_closure = Val(pkg_lock_test_nix_closure(output))
+    package.receipt = Val(pkg_lock_test_tricky("receipt"))
+    package.provenance = Val(DependencyProvenance{transparency: Val(pkg_lock_test_tricky("transparency")), publisher: Val(pkg_lock_test_tricky("publisher")), build: Val(pkg_lock_test_tricky("build"))})
+
+    lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
+    lock.workspace_source_digest = Val(pkg_lock_test_tricky("workspace-digest"))
+    lock.build_stamp = Val(BuildStamp{git: Val(pkg_lock_test_tricky("git")), dirty: true, toolchain: pkg_lock_test_tricky("toolchain"), at: pkg_lock_test_tricky("timestamp")})
+    lock.build_contributions = [LockedBuildContribution]{LockedBuildContribution{
+        package: pkg_lock_test_tricky("contribution-package"),
+        key: pkg_lock_test_tricky("contribution-key"),
+        value: pkg_lock_test_tricky("contribution-value"),
+        scope: pkg_lock_test_tricky("contribution-scope"),
+        layer: pkg_lock_test_tricky("contribution-layer"),
+        source: pkg_lock_test_tricky("contribution-source"),
+        reason: pkg_lock_test_tricky("contribution-reason")
+    }}
+    lock.workspace_members = [LockedWorkspaceMember]{LockedWorkspaceMember{
+        name: pkg_lock_test_tricky("member-name"),
+        path: pkg_lock_test_tricky("member-path"),
+        source_digest: pkg_lock_test_tricky("member-source"),
+        canonical_path: pkg_lock_test_tricky("member-canonical"),
+        package_digest: pkg_lock_test_tricky("member-package")
+    }}
+    lock.workspace_overlay_policy = OverlayPolicy{
+        overlays: [OverlaySet]{OverlaySet{
+            name: pkg_lock_test_tricky("overlay"),
+            provider: Val(ProviderOverride{provider: pkg_lock_test_tricky("provider"), channel: Val(pkg_lock_test_tricky("channel"))}),
+            packages: [PackageOverride]{PackageOverride{
+                package: pkg_lock_test_tricky("overlay-package"),
+                source: Val(pkg_lock_test_tricky("overlay-source")),
+                version: Val(pkg_lock_test_tricky("overlay-version")),
+                flags: [String]{pkg_lock_test_tricky("flag")},
+                priority: 7,
+                field_priorities: [String: Int]{"version": 7},
+                env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: pkg_lock_test_tricky("environment")}},
+                patches: [String]{pkg_lock_test_tricky("patch")},
+                allow_unfree: true
+            }}
+        }},
+        allow_unfree: [String]{pkg_lock_test_tricky("allow-unfree")},
+        build_deny: [String]{pkg_lock_test_tricky("build-deny")},
+        build_grants: [BuildGrant]{BuildGrant{subject: pkg_lock_test_tricky("build-grant"), effects: [String]{pkg_lock_test_tricky("grant")}}}
+    }
+    lock.comptime_inputs = [ComptimeInput]{ComptimeInput{path: pkg_lock_test_tricky("comptime-path"), hash: "sha256-input"}}
+    lock.toolchains = [LockedToolchain]{LockedToolchain{id: pkg_lock_test_tricky("toolchain-id"), channel: pkg_lock_test_tricky("toolchain-channel"), version: pkg_lock_test_tricky("toolchain-version"), envelope: envelope}}
+    lock.browsers = [LockedBrowser]{LockedBrowser{engine: pkg_lock_test_tricky("browser-engine"), version: pkg_lock_test_tricky("browser-version"), binary: pkg_lock_test_tricky("browser-binary"), protocol: pkg_lock_test_tricky("browser-protocol"), size: 42, envelope: envelope}}
+    lock.source_channels = [LockedSourceChannel]{LockedSourceChannel{name: pkg_lock_test_tricky("source-name"), channel: pkg_lock_test_tricky("source-channel"), exact: pkg_lock_test_tricky("source-exact")}}
+
+    first :: pkg_lock_write(lock)
+    parsed :: pkg_lock_parse(first) ?? panic("portable Nix closure parses")
+    assert_eq(parsed.packages[0].nix_closure, Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a"))))
+    assert(first.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+    current := first
+    loop cycle in 1..<33 {
+        loaded :: pkg_lock_parse(current) ?? panic("lock must parse on cycle {cycle}")
+        current = pkg_lock_write(loaded)
+        assert_eq(current, first)
+    }
+}
+
+#Test("nix lock requires complete portable closure") {
+    output :: pkg_lock_test_nix_digest("a")
+    other_output :: pkg_lock_test_nix_digest("b")
+    package := pkg_lock_test_pkg("nix", None)
+    package.source = LockSource.Nix{reference: "nixpkgs#hello", output: output}
+    assert(pkg_lock_test_rejects(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{}))))
+
+    complete := package
+    complete.nix_closure = Val(pkg_lock_test_nix_closure(output))
+    complete_raw :: pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{complete}, [LockedToolchain]{}))
+    assert(!pkg_lock_test_rejects(complete_raw))
+    assert(pkg_lock_test_rejects(complete_raw.replace("nix-references = []\n", "")))
+
+    package.nix_closure = Val(pkg_lock_test_nix_closure(other_output))
+    assert(pkg_lock_test_rejects(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{}))))
+
+    non_nix := pkg_lock_test_pkg("root", None)
+    non_nix.nix_closure = Val(pkg_lock_test_nix_closure(output))
+    assert(pkg_lock_test_rejects(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{non_nix}, [LockedToolchain]{}))))
+}
+
+#Test("lock writer deduplicates replayed records and stays bounded") {
+    old :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-old", "x86_64-linux", "", "old")))
+    newest :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-new", "x86_64-linux", "", "new")))
+    lock := pkg_lock_test_base_lock([LockedPackage]{old, newest, pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
+    lock.root_dependencies = [String]{"other", "duplicate", "other"}
+    first :: pkg_lock_write(lock)
+    assert_eq(first.split("[[package]]").to_list().len() - 1, 2)
+    assert(first.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+    parsed :: pkg_lock_parse(first) ?? panic("canonical lock must parse")
+    assert_eq(parsed.packages[0].name, "duplicate")
+    envelope :: parsed.packages[0].envelope ?? panic("envelope")
+    assert_eq(envelope.provenance, "new")
+    current := first
+    loop cycle in 1..<33 {
+        current = pkg_lock_write(pkg_lock_parse(current) ?? panic("cycle {cycle} must parse"))
+        assert_eq(current, first)
+        assert(current.bytes().len() <= @PKG_MAX_LOCK_BYTES)
+    }
+}
+
+#Test("lock roundtrips the manifest authority shape") {
+    authority :: PackageAuthority{
+        holds: AuthorityHolds{allow: Val([String]{"Net"}), deny: Val([String]{"Exec"})},
+        needs: [String]{"FS.Read", "Net.Connect"},
+        grants: [PackageGrant]{PackageGrant{package: "image-codec", rights: [String]{"FS.Read"}}},
+        trust: Val(TrustPolicy{
+            default: Val(TrustDecision.Prompt),
+            ci_prompt: Val(TrustDecision.Deny),
+            services: [ServiceTrust]{ServiceTrust{service: "stripe", decision: TrustDecision.Allow}},
+            require: Val(ProvenanceRequirement.Attested)
+        }),
+        providers: [ProviderAuthority]{ProviderAuthority{provider: "nix", registry: "nixpkgs", allow: [String]{"openssl"}, deny: [String]{"openssl-1.0"}}}
+    }
+    lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
+    lock.authority = Val(authority)
+    raw :: pkg_lock_write(lock)
+    assert(raw.contains("authority = {{"))
+    assert(raw.contains("holds: {{"))
+    assert(raw.contains("needs:"))
+    assert(raw.contains("grants: {{"))
+    assert(raw.contains("trust: {{"))
+    assert(raw.contains("providers: {{"))
+    parsed :: pkg_lock_parse(raw) ?? panic("authority lock parses")
+    assert_eq(parsed.authority, Val(authority))
+}
+
+#Test("lock roundtrips workspace overlay policy") {
+    policy :: OverlayPolicy{
+        overlays: [OverlaySet]{OverlaySet{
+            name: "rust",
+            provider: Val(ProviderOverride{provider: "nixpkgs", channel: Val("unstable")}),
+            packages: [PackageOverride]{PackageOverride{
+                package: "rustc",
+                source: Val("rust-overlay"),
+                version: Val("1.82"),
+                flags: [String]{"llvm"},
+                priority: 20,
+                field_priorities: [String: Int]{"version": 20, "env.RUST_SRC": 10},
+                env: [OverrideEnv]{OverrideEnv{key: "RUST_SRC", value: "src"}},
+                patches: [String]{"patches/rust.patch"},
+                allow_unfree: true
+            }}
+        }},
+        allow_unfree: [String]{"cuda"},
+        build_deny: [String]{"network"},
+        build_grants: [BuildGrant]{BuildGrant{subject: "rustc", effects: [String]{"filesystem"}}}
+    }
+    lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
+    lock.workspace_source_digest = Val("sha256-workspace")
+    lock.workspace_overlay_policy = policy
+    back :: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("workspace overlay lock must parse")
+    assert_eq(back.workspace_source_digest, lock.workspace_source_digest)
+    assert_eq(back.workspace_overlay_policy, policy)
+}
+
+#Test("workspace overlay lock rejects missing and duplicate identity") {
+    missing_package :: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "priority = 0", ""}.join("\n")
+    assert(pkg_lock_test_parse_error(missing_package).contains("missing `package`"))
+    duplicate_package :: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 1", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 2", ""}.join("\n")
+    assert(pkg_lock_test_parse_error(duplicate_package).contains("duplicate workspace overlay package"))
+}
+
+#Test("lock parser rejects missing version unknown sections and malformed lines") {
+    assert(pkg_lock_test_rejects("garbage"))
+    assert(pkg_lock_test_rejects("[[unknown]]\n"))
+    assert(pkg_lock_test_rejects("version = 1\nnot-a-field"))
+    assert(pkg_lock_test_rejects("version = 0\n"))
+    assert(pkg_lock_test_rejects("version = 1\n[root]\ndependencies = nope\n"))
+}
+
+#Test("previous lock fixture is rejected with registered diagnostic") {
+    raw :: pkg_lock_test_v0_fixture()
+    assert_eq(pkg_lock_test_parse_error(raw), "unsupported lock version 0; expected 1")
+    diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
+        .Ok(_) -> panic("previous lock schema must map to the lock diagnostic")
+        .Err(error) -> pkg_lock_test_reported(error)
+    }
+    assert_eq(diagnostic.code, "E1214")
+    assert(diagnostic.what != "")
+    assert(diagnostic.why != "")
+    assert(diagnostic.fix != "")
+}
+
+// The registered E1214 row text (tests/fixtures/jetpack-diagnostics/
+// E1214.stderr); the What/Why/Fix renderer is not part of this unit.
+#Test("unsupported lock version fills the registered E1214 row") {
+    diagnostic :: if pkg_lock_parse_with_path(pkg_lock_test_v0_fixture(), ".jet/lock") == {
+        .Ok(_) -> panic("previous lock schema must be rejected")
+        .Err(error) -> pkg_lock_test_reported(error)
+    }
+    assert_eq(diagnostic.code, "E1214")
+    assert_eq(diagnostic.what, "The lock file `.jet/lock` declares unsupported format version `0`.")
+    assert_eq(diagnostic.why, "During `jet build`, this reader supports lock format version `1`. An unsupported marker may change required meanings, so Jet stopped before using or rewriting the lock.")
+    assert_eq(diagnostic.fix, "Use a Jet toolchain that supports version `0`, or remove the lock only after confirming its dependencies and rerun an unlocked build to create version `1`.")
+}
+
+// The registered E1205 row text (tests/fixtures/jetpack-diagnostics/
+// E1205.stderr).
+#Test("oversized lock value returns corrupt lock diagnostic") {
+    raw :: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", @PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
+    diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
+        .Ok(_) -> panic("an oversized lock value must stop parsing")
+        .Err(error) -> pkg_lock_test_reported(error)
+    }
+    assert_eq(diagnostic.code, "E1205")
+    assert_eq(diagnostic.what, "The lock file `.jet/lock` is corrupt.")
+    assert_eq(diagnostic.why, "Jet found malformed lock data or a value larger than the 1 MiB safety limit, so it stopped before using the lock. The lock file is regenerable.")
+    assert_eq(diagnostic.fix, "Delete `.jet/lock` and rerun the command to regenerate it.")
+}
+
+#Test("lock parser preserves empty array members") {
+    lock :: pkg_lock_parse("version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n") ?? panic("valid lock array")
+    assert_eq(lock.root_dependencies, [String]{"", "kept"})
+}
+
+#Test("record nix lock uses canonical source exact") {
+    scratch :: pkg_lock_test_project("canonical-source")
+    output :: pkg_lock_test_nix_digest("1")
+    closure := pkg_lock_test_nix_closure(output)
+    closure.references = [String]{pkg_lock_test_nix_digest("2")}
+    envelope := pkg_lock_test_env(output, "x86_64-linux", "", "canonical-source")
+    envelope.catalog_tier = "official-signed"
+    envelope.catalog_trust = "verified"
+    pkg_lock_record_nix_realization(scratch.path, "ripgrep", "15.2.0", "ripgrep@default", output, closure, envelope) ?? panic("record Nix realization")
+    raw :: files.read(files.join(scratch.path, ".jet/lock")) ?? panic("read lock")
+    lock :: pkg_lock_parse(raw) ?? panic("parse")
+    channel :: lock.find_source_channel("default") ?? panic("recorded Nix source channel")
+    assert_eq(channel.exact, "github:NixOS/nixpkgs#{pkg_lock_test_repeat("a", 40)}")
+    package :: lock.find_package("ripgrep") ?? panic("recorded package")
+    assert(package.is_nix())
+}
+
+#Test("record rust bridge projects into the unified lock") {
+    scratch :: pkg_lock_test_project("rust-bridge")
+    first := pkg_lock_test_pkg("base64", None)
+    first.version = "0.22.1"
+    first.content_hash = Val("sha256-cargo-checksum")
+    first.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    first.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{@PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key")})
+    pkg_lock_record_rust_bridge(scratch.path, "bridge-key", [LockedPackage]{first}) ?? panic("record bridge")
+    lock :: pkg_lock_load(scratch.path) ?? panic("reload")
+    records := [LockedPackage]{}
+    loop package in lock.packages {
+        if package.name == "base64" -> &records.push(package)
+    }
+    assert_eq(records.len(), 1)
+    assert_eq(records[0].version, "0.22.1")
+    assert_eq(records[0].content_hash, Val("sha256-cargo-checksum"))
+    assert_eq(records[0].source, LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
+
+    // A later bridge build replaces the earlier projection instead of
+    // stacking a second record for the same crate.
+    second := first
+    second.version = "0.22.2"
+    second.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.2", output: "sha256-bridge-2"}
+    second.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{@PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key-2")})
+    pkg_lock_record_rust_bridge(scratch.path, "bridge-key-2", [LockedPackage]{second}) ?? panic("record second bridge")
+    relock :: pkg_lock_load(scratch.path) ?? panic("reload")
+    versions := [String]{}
+    loop package in relock.packages {
+        if package.name == "base64" -> &versions.push(package.version)
+    }
+    assert_eq(versions, [String]{"0.22.2"})
+}
+
+#Test("atomic lock writer rejects oversized output without replacing lock") {
+    scratch :: pkg_lock_test_project("lock-writer")
+    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    original :: "version = 1\n[root]\ndependencies = []\n"
+    files.write(path, pkg_lock_test_repeat("stale lock bytes\n", 128)) ?? panic("seed stale lock")
+    pkg_lock_write_atomically(scratch.path, original.bytes()) ?? panic("small lock write")
+    assert_eq(files.read(path) ?? panic("read"), original)
+    oversized :: pkg_lock_test_repeat("x", @PKG_MAX_LOCK_BYTES + 1)
+    if pkg_lock_write_atomically(scratch.path, oversized.bytes()) == {
+        .Ok(_) -> panic("oversized lock must be refused")
+        .Err(error) -> {
+            assert(error.message().contains("internal error"))
+            assert(error.message().contains("1 MiB"))
+        }
+    }
+    assert_eq(files.read(path) ?? panic("read"), original)
+}
+
+#Test("atomic lock writer rejects preexisting managed directory symlink") {
+    root_scratch :: files.temp_dir("lock-writer-managed-link") ?? panic("root")
+    outside_scratch :: files.temp_dir("lock-writer-managed-link-outside") ?? panic("outside")
+    outside_lock :: files.join(outside_scratch.path, "lock")
+    sentinel :: "external lock must remain unchanged\n"
+    files.write(outside_lock, sentinel) ?? panic("sentinel")
+    files.symlink(outside_scratch.path, files.join(root_scratch.path, ".jet")) ?? panic("managed directory link")
+    if pkg_lock_write_atomically(root_scratch.path, "new lock bytes\n".bytes()) == {
+        .Ok(_) -> panic("a managed-directory symlink must be rejected")
+        .Err(error) -> assert(error.message().contains("could not atomically publish"))
+    }
+    assert_eq(files.read(outside_lock) ?? panic("read sentinel"), sentinel)
+}
+
+#Test("atomic lock writer rejects swapped ancestor without touching external target") {
+    parent :: files.temp_dir("lock-writer-ancestor-swap") ?? panic("parent")
+    workspace :: files.join(parent.path, "workspace")
+    root :: files.join(workspace, "project")
+    outside :: files.join(parent.path, "outside")
+    outside_lock :: files.join(outside, "project/.jet/lock")
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("project")
+    files.create_dir_all(files.join(outside, "project/.jet")) ?? panic("outside project")
+    sentinel :: "external ancestor target must remain unchanged\n"
+    files.write(outside_lock, sentinel) ?? panic("sentinel")
+    files.rename(workspace, files.join(parent.path, "workspace-old")) ?? panic("move workspace")
+    files.symlink(outside, workspace) ?? panic("swap ancestor")
+    if pkg_lock_write_atomically(root, "new lock bytes\n".bytes()) == {
+        .Ok(_) -> panic("a swapped ancestor must be rejected")
+        .Err(error) -> assert(error.message().contains("could not atomically publish"))
+    }
+    assert_eq(files.read(outside_lock) ?? panic("read sentinel"), sentinel)
+}
+
+#Test("repeated source channel updates are byte identical and bounded") {
+    scratch :: pkg_lock_test_project("lock-channel-cycles")
+    source :: LockedSourceChannel{name: "stable", channel: "stable", exact: "owner/repo@github#v1"}
+    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    first := [U8]{}
+    loop cycle in 1..<33 {
+        pkg_lock_record_source_channel(scratch.path, source) ?? panic("valid test lock record")
+        bytes :: files.read_bytes(path) ?? panic("read lock")
+        assert(bytes.len() <= @PKG_MAX_LOCK_BYTES)
+        if cycle == 1 -> first = bytes
+        assert_eq(bytes, first)
+    }
+}
+
+#Test("bounded lock reader rejects oversized line") {
+    scratch :: pkg_lock_test_project("lock-reader")
+    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x", @PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
+    if pkg_lock_read_text(path) == {
+        .Ok(_) -> panic("oversized line must be rejected")
+        .Err(error) -> assert(error.message().contains("1 MiB safety limit"))
+    }
+    assert_eq(pkg_lock_load(scratch.path), None)
+}
+
+#Test("bounded lock reader rejects oversized file") {
+    scratch :: pkg_lock_test_project("lock-file-reader")
+    path :: files.join(scratch.path, @UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", @PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
+    if pkg_lock_read_text(path) == {
+        .Ok(_) -> panic("oversized file must be rejected")
+        .Err(error) -> assert(error.message().contains("lock file exceeds"))
+    }
+    assert_eq(pkg_lock_load(scratch.path), None)
+}

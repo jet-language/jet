@@ -42,7 +42,7 @@ fn pkg_test_staged_error(action: StagedPlanAction, fragment: BuildPlanFragment) 
     assert(identity != pkg_test_staged_identity(changed_input, fragment))
 
     changed_authority := ~action
-    changed_authority.authority.effects.push(BuildEffect.FS)
+    &changed_authority.authority.effects.push(BuildEffect.FS)
     assert(identity != pkg_test_staged_identity(changed_authority, fragment))
 
     changed_fragment := ~fragment
@@ -69,7 +69,7 @@ fn pkg_test_staged_error(action: StagedPlanAction, fragment: BuildPlanFragment) 
     nested.outputs = [String]{"result.bin/child"}
     nested.effects = [BuildEffect]{BuildEffect.Exec}
     nested.platform = "linux-x86_64"
-    overlapping.actions.push(nested)
+    &overlapping.actions.push(nested)
     assert(pkg_test_staged_error(action, overlapping).message().contains("overlap"))
 
     windows_escape := pkg_test_staged_fragment("linux-x86_64")

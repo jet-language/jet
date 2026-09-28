@@ -12,7 +12,7 @@ pub enum ImageError {
     AlreadyExists(String)
     Other(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Io(error) -> "{error}"
             .InvalidData(text) -> text
@@ -23,7 +23,7 @@ pub enum ImageError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound`.
-    fn is_not_found(self) -> Bool !Never {
+    fn is_not_found(self) -> Bool Never! {
         if self == {
             .Io(error) -> {
                 if error == {
@@ -41,6 +41,6 @@ impl IOError -> ImageError { ImageError.Io(self) }
 impl EncodingError -> ImageError { ImageError.Other(self.reason) }
 
 // Rust `invalid(message)`: an `InvalidData` refusal with final text.
-fn image_invalid(message: String) -> ImageError !Never {
+fn image_invalid(message: String) -> ImageError Never! {
     ImageError.InvalidData(message)
 }

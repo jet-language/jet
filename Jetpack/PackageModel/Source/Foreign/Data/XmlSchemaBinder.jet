@@ -1,0 +1,507 @@
+// XML schema inference for the data binder, ported from jet_pkg_model::CBind
+// (`XmlParser`, `add_xml_record`, `bind_xml`). A strict, namespace-aware XML
+// 1.0 reader keeps only what inference needs: expanded element and attribute
+// names and the kinds of content each element holds. Attributes become `@`
+// wire keys, simple content `$text`, mixed content an ordered `$content`
+// DataTree, nested elements records, and repeated children lists.
+
+@XML_NAMESPACE_URI :: "http://www.w3.org/XML/1998/namespace"
+@XMLNS_NAMESPACE_URI :: "http://www.w3.org/2000/xmlns/"
+
+fn pkg_data_bind_xml(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
+    parser := XmlParser{chars: pkg_data_scalars(input), pos: 0}
+    root :: &parser.parse_document()
+    preferred :: root_name ?? pkg_data_type_name(root.name)
+    builder := SchemaBuilder.new()
+    _ :: pkg_data_add_xml_record(&builder, preferred, [XmlNode]{root})
+    Ok(builder)
+}
+
+// What one piece of element content is.
+enum XmlContent {
+    Text
+    CData
+    Element(XmlNode)
+    Comment
+    ProcessingInstruction
+}
+
+// An element with its expanded name, expanded attributes, content kinds, and
+// the namespace bindings in scope.
+struct XmlNode {
+    name: String
+    attrs: [(name: String, value: String)]
+    content: [XmlContent]
+    namespaces: [String: String]
+}
+
+struct XmlParser {
+    chars: [String]
+    pos: Int
+
+    fn peek(self) -> String Never! {
+        pkg_data_at(self.chars, self.pos)
+    }
+
+    fn at_end(self) -> Bool Never! {
+        self.pos >= self.chars.len()
+    }
+
+    fn starts_with(self, text: String) -> Bool Never! {
+        wanted :: pkg_data_scalars(text)
+        loop offset in 0..<wanted.len() {
+            if pkg_data_at(self.chars, self.pos + offset) != wanted[offset] -> return false
+        }
+        true
+    }
+
+    fn starts_with_xml_declaration(self) -> Bool Never! {
+        if !self.starts_with("<?xml") -> return false
+        following :: pkg_data_at(self.chars, self.pos + 5)
+        pkg_data_is_ascii_whitespace(following) || following == "?"
+    }
+
+    fn at_space(self) -> Bool Never! {
+        pkg_data_xml_is_space(self.peek())
+    }
+
+    fn skip_space(&self) {
+        loop self.at_space() -> self.pos += 1
+    }
+
+    fn read_name(&self) -> String DataBindError! {
+        if self.at_end() -> return Err(DataBindError{message: "XML name is missing"})
+        first :: self.peek()
+        if !pkg_data_xml_name_start(first) -> return Err(DataBindError{message: "XML has invalid name start {first}"})
+        start :: self.pos
+        self.pos += 1
+        loop !self.at_end() && pkg_data_xml_name_rest(self.peek()) -> self.pos += 1
+        name :: pkg_data_slice(self.chars, start, self.pos)
+        if name.starts_with(":") || name.ends_with(":") || name.split(":").to_list().len() > 2 || name.contains("::") {
+            return Err(DataBindError{message: "XML name {name} has an invalid namespace separator"})
+        }
+        Ok(name)
+    }
+
+    fn read_quoted_value(&self, what: String) -> String DataBindError! {
+        quote :: self.peek()
+        if quote != "\"" && quote != "'" -> return Err(DataBindError{message: "XML {what} is not quoted"})
+        self.pos += 1
+        start :: self.pos
+        loop !self.at_end() && self.peek() != quote -> self.pos += 1
+        if self.at_end() -> return Err(DataBindError{message: "XML {what} is not closed"})
+        value :: pkg_data_slice(self.chars, start, self.pos)
+        pkg_data_validate_xml_characters(value)
+        self.pos += 1
+        Ok(value)
+    }
+
+    fn read_declaration_field(&self, expected: String) -> String DataBindError! {
+        name :: &self.read_name()
+        if name != expected -> return Err(DataBindError{message: "XML declaration expected {expected}"})
+        &self.skip_space()
+        if self.peek() != "=" -> return Err(DataBindError{message: "XML declaration field {expected} has no equals sign"})
+        self.pos += 1
+        &self.skip_space()
+        &self.read_quoted_value("declaration value")
+    }
+
+    fn consume_processing_instruction(&self) DataBindError! {
+        self.pos += 2
+        target :: &self.read_name()
+        if pkg_data_eq_ignore_case(target, "xml") -> return Err(DataBindError{message: "XML processing-instruction target cannot be xml"})
+        if self.starts_with("?>") {
+            self.pos += 2
+            return Ok()
+        }
+        if !self.at_space() -> return Err(DataBindError{message: "XML processing instruction needs whitespace after its target"})
+        start :: self.pos
+        loop !self.at_end() && !self.starts_with("?>") -> self.pos += 1
+        if self.at_end() -> return Err(DataBindError{message: "XML processing instruction is not closed"})
+        pkg_data_validate_xml_characters(pkg_data_slice(self.chars, start, self.pos))
+        self.pos += 2
+    }
+
+    // `<?xml version="1.0" [encoding="UTF-8"] [standalone="yes|no"]?>`.
+    fn consume_xml_declaration(&self) DataBindError! {
+        self.pos += 5
+        if !self.at_space() -> return Err(DataBindError{message: "XML declaration needs a version field"})
+        &self.skip_space()
+        version :: &self.read_declaration_field("version")
+        if version != "1.0" -> return Err(DataBindError{message: "XML declaration version must be 1.0"})
+        if !self.starts_with("?>") {
+            if !self.at_space() -> return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+            &self.skip_space()
+            if self.starts_with("encoding") {
+                encoding :: &self.read_declaration_field("encoding")
+                if !pkg_data_eq_ignore_case(encoding, "UTF-8") -> return Err(DataBindError{message: "XML declaration encoding must be UTF-8"})
+                if !self.starts_with("?>") {
+                    if !self.at_space() -> return Err(DataBindError{message: "XML declaration fields need whitespace separators"})
+                    &self.skip_space()
+                }
+            }
+            if !self.starts_with("?>") {
+                standalone :: &self.read_declaration_field("standalone")
+                if standalone != "yes" && standalone != "no" -> return Err(DataBindError{message: "XML declaration standalone must be yes or no"})
+            }
+        }
+        &self.skip_space()
+        if !self.starts_with("?>") -> return Err(DataBindError{message: "XML declaration has trailing content"})
+        self.pos += 2
+    }
+
+    fn parse_document(&self) -> XmlNode DataBindError! {
+        if self.peek() == pkg_data_scalar_of(0xFEFF) -> self.pos += 1
+        declaration_allowed := true
+        stack := [XmlNode]{}
+        root := None
+        loop !self.at_end() {
+            if self.starts_with_xml_declaration() {
+                if !declaration_allowed -> return Err(DataBindError{message: "XML declaration is out of order"})
+                &self.consume_xml_declaration()
+                declaration_allowed = false
+                next
+            }
+            declaration_allowed = false
+            if self.peek() != "<" {
+                start :: self.pos
+                loop !self.at_end() && self.peek() != "<" -> self.pos += 1
+                text :: pkg_data_slice(self.chars, start, self.pos)
+                if text.contains("]]>") -> return Err(DataBindError{message: "XML text contains a close CDATA marker"})
+                pkg_data_validate_xml_entities(text)
+                if stack.len() > 0 {
+                    &stack[stack.len() - 1].content.push(XmlContent.Text)
+                } else {
+                    loop scalar in pkg_data_scalars(text) {
+                        if !pkg_data_xml_is_space(scalar) -> return Err(DataBindError{message: "XML has text outside its root element"})
+                    }
+                }
+                next
+            }
+            if self.starts_with("<!--") {
+                self.pos += 4
+                start :: self.pos
+                loop !self.at_end() && !self.starts_with("-->") -> self.pos += 1
+                if self.at_end() -> return Err(DataBindError{message: "XML comment is not closed"})
+                body :: pkg_data_slice(self.chars, start, self.pos)
+                if body.contains("--") || body.ends_with("-") -> return Err(DataBindError{message: "XML comment contains an invalid double hyphen"})
+                pkg_data_validate_xml_characters(body)
+                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XmlContent.Comment)
+                self.pos += 3
+                next
+            }
+            if self.starts_with("<![CDATA[") {
+                self.pos += 9
+                start :: self.pos
+                loop !self.at_end() && !self.starts_with("]]>") -> self.pos += 1
+                if self.at_end() -> return Err(DataBindError{message: "XML CDATA section is not closed"})
+                pkg_data_validate_xml_characters(pkg_data_slice(self.chars, start, self.pos))
+                if stack.len() == 0 -> return Err(DataBindError{message: "XML CDATA appears outside its root element"})
+                &stack[stack.len() - 1].content.push(XmlContent.CData)
+                self.pos += 3
+                next
+            }
+            if self.starts_with("<?") {
+                &self.consume_processing_instruction()
+                if stack.len() > 0 -> &stack[stack.len() - 1].content.push(XmlContent.ProcessingInstruction)
+                next
+            }
+            if self.starts_with("</") {
+                self.pos += 2
+                raw_name :: &self.read_name()
+                &self.skip_space()
+                if self.peek() != ">" -> return Err(DataBindError{message: "XML close tag has trailing content"})
+                self.pos += 1
+                node :: &stack.pop() ?? return Err(DataBindError{message: "XML has an unmatched close tag"})
+                name :: pkg_data_xml_resolve_name(raw_name, node.namespaces, true)
+                if node.name != name -> return Err(DataBindError{message: "XML close tag {raw_name} does not match {node.name}"})
+                root = pkg_data_xml_attach(&stack, root, node)
+                next
+            }
+            if self.starts_with("<!") -> return Err(DataBindError{message: "XML declaration is unsupported here"})
+            self.pos += 1
+            raw_name :: &self.read_name()
+            raw_attrs := [(name: String, value: String)]{}
+            attr_names := [String]{}
+            self_closing := false
+            loop {
+                &self.skip_space()
+                if self.starts_with("/>") {
+                    self.pos += 2
+                    self_closing = true
+                    break
+                }
+                if self.peek() == ">" {
+                    self.pos += 1
+                    break
+                }
+                attr_name :: &self.read_name()
+                if attr_names.contains(attr_name) -> return Err(DataBindError{message: "XML has duplicate attribute {attr_name}"})
+                &attr_names.push(attr_name)
+                &self.skip_space()
+                if self.peek() != "=" -> return Err(DataBindError{message: "XML attribute {attr_name} has no equals sign"})
+                self.pos += 1
+                &self.skip_space()
+                value :: &self.read_quoted_value("attribute {attr_name}")
+                if value.contains("<") -> return Err(DataBindError{message: "XML attribute {attr_name} contains <"})
+                pkg_data_validate_xml_entities(value)
+                &raw_attrs.push((name: attr_name, value: value))
+            }
+            inherited :: if stack.len() > 0 -> stack[stack.len() - 1].namespaces else -> pkg_data_xml_initial_namespaces()
+            namespaces :: pkg_data_xml_resolve_namespaces(inherited, raw_attrs)
+            name :: pkg_data_xml_resolve_name(raw_name, namespaces, true)
+            attrs := [(name: String, value: String)]{}
+            expanded_names := [String]{}
+            loop attr in raw_attrs {
+                if attr.name == "xmlns" || attr.name.starts_with("xmlns:") -> next
+                expanded :: pkg_data_xml_resolve_name(attr.name, namespaces, false)
+                if expanded_names.contains(expanded) -> return Err(DataBindError{message: "XML has duplicate attribute {expanded}"})
+                &expanded_names.push(expanded)
+                &attrs.push((name: expanded, value: attr.value))
+            }
+            node :: XmlNode{name: name, attrs: attrs, content: [XmlContent]{}, namespaces: namespaces}
+            if self_closing {
+                root = pkg_data_xml_attach(&stack, root, node)
+            } else {
+                &stack.push(node)
+            }
+        }
+        if stack.len() > 0 -> return Err(DataBindError{message: "XML element {stack[0].name} is not closed"})
+        document :: root ?? return Err(DataBindError{message: "XML has no root element"})
+        Ok(document)
+    }
+}
+
+// Attach a closed element to its parent, or make it the root. Returns the
+// root after the attachment.
+fn pkg_data_xml_attach(stack: &[XmlNode], root: XmlNode?, node: XmlNode) -> XmlNode? DataBindError! {
+    if stack.len() > 0 {
+        &stack[stack.len() - 1].content.push(XmlContent.Element(node))
+        return Ok(root)
+    }
+    if root != None -> return Err(DataBindError{message: "XML has more than one root element"})
+    Ok(Val(node))
+}
+
+fn pkg_data_xml_initial_namespaces() -> [String: String] Never! {
+    [String: String]{"xml": @XML_NAMESPACE_URI}
+}
+
+// The namespace bindings in scope after an element's `xmlns` attributes.
+fn pkg_data_xml_resolve_namespaces(inherited: [String: String], attrs: [(name: String, value: String)]) -> [String: String] DataBindError! {
+    namespaces := inherited
+    loop attr in attrs {
+        if !attr.name.starts_with("xmlns:") {
+            if attr.name == "xmlns" -> namespaces[""] = attr.value
+            next
+        }
+        prefix :: attr.name.removeprefix("xmlns:")
+        if prefix == "" || prefix == "xmlns" -> return Err(DataBindError{message: "XML namespace prefix {prefix} is reserved"})
+        if attr.value == "" -> return Err(DataBindError{message: "XML namespace prefix {prefix} has an empty URI"})
+        if prefix == "xml" && attr.value != @XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+        if attr.value == @XMLNS_NAMESPACE_URI -> return Err(DataBindError{message: "XML namespace URI for xmlns is reserved"})
+        namespaces[prefix] = attr.value
+    }
+    if namespaces.get("xml") == {
+        .Val(xml_uri) -> {
+            if xml_uri != @XML_NAMESPACE_URI -> return Err(DataBindError{message: "XML prefix xml must use its reserved namespace URI"})
+        }
+        .None -> {}
+    }
+    Ok(namespaces)
+}
+
+// A name in Clark notation (`{uri}local`) when a namespace applies. Only
+// elements take the default namespace.
+fn pkg_data_xml_resolve_name(name: String, namespaces: [String: String], element: Bool) -> String DataBindError! {
+    parts :: name.split(":").to_list()
+    if parts.len() > 1 {
+        prefix :: parts[0]
+        local :: name.removeprefix("{prefix}:")
+        namespace :: namespaces.get(prefix) ?? ""
+        if namespace == "" -> return Err(DataBindError{message: "XML name {name} uses an undeclared namespace prefix {prefix}"})
+        return Ok("{{{namespace}}}{local}")
+    }
+    if element {
+        default_namespace :: namespaces.get("") ?? ""
+        if default_namespace != "" -> return Ok("{{{default_namespace}}}{name}")
+    }
+    Ok(name)
+}
+
+fn pkg_data_xml_is_space(scalar: String) -> Bool Never! {
+    scalar == " " || scalar == "\t" || scalar == "\n" || pkg_data_code(scalar) == 13
+}
+
+fn pkg_data_xml_name_start(scalar: String) -> Bool Never! {
+    scalar == "_" || scalar == ":" || pkg_data_is_ascii_alphabetic(scalar) || (scalar != "" && scalar.is_alphabetic())
+}
+
+fn pkg_data_xml_name_rest(scalar: String) -> Bool Never! {
+    pkg_data_xml_name_start(scalar) || scalar == "-" || scalar == "." || pkg_data_is_ascii_digit(scalar)
+}
+
+// The one-scalar string for a code point.
+fn pkg_data_scalar_of(code: Int) -> String Never! {
+    bytes :: if {
+        code < 0x80 -> [U8]{U8{code}}
+        code < 0x800 -> [U8]{U8{0xC0 + (code >> 6)}, U8{0x80 + (code & 0x3F)}}
+        code < 0x10000 -> [U8]{U8{0xE0 + (code >> 12)}, U8{0x80 + ((code >> 6) & 0x3F)}, U8{0x80 + (code & 0x3F)}}
+        else -> [U8]{U8{0xF0 + (code >> 18)}, U8{0x80 + ((code >> 12) & 0x3F)}, U8{0x80 + ((code >> 6) & 0x3F)}, U8{0x80 + (code & 0x3F)}}
+    }
+    pkg_bytes_text(bytes, 0, bytes.len())
+}
+
+fn pkg_data_validate_xml_characters(text: String) DataBindError! {
+    loop scalar in pkg_data_scalars(text) {
+        if !pkg_data_xml_character_allowed(pkg_data_code(scalar)) -> return Err(DataBindError{message: "XML contains an invalid control character"})
+    }
+}
+
+// XML 1.0 `Char`, without the C1 controls.
+fn pkg_data_xml_character_allowed(code: Int) -> Bool Never! {
+    code == 9 || code == 10 || code == 13
+        || (code >= 0x20 && code <= 0xD7FF && !(code >= 0x7F && code <= 0x9F))
+        || (code >= 0xE000 && code <= 0xFFFD)
+        || (code >= 0x10000 && code <= 0x10FFFF)
+}
+
+// Every `&...;` is a predefined entity or a character reference to an
+// allowed character.
+fn pkg_data_validate_xml_entities(text: String) DataBindError! {
+    chars :: pkg_data_scalars(text)
+    index := 0
+    loop index < chars.len() {
+        if chars[index] != "&" {
+            index += 1
+            next
+        }
+        start :: index
+        index += 1
+        loop index < chars.len() && chars[index] != ";" -> index += 1
+        if index >= chars.len() -> return Err(DataBindError{message: "XML entity is not terminated"})
+        entity :: pkg_data_slice(chars, start + 1, index)
+        if !pkg_data_xml_entity_valid(entity) -> return Err(DataBindError{message: "XML entity {entity} is invalid"})
+        index += 1
+    }
+}
+
+fn pkg_data_xml_entity_valid(entity: String) -> Bool Never! {
+    if entity == {
+        "amp" | "lt" | "gt" | "quot" | "apos" -> return true
+        else -> {}
+    }
+    if entity.starts_with("#x") || entity.starts_with("#X") {
+        digits :: if entity.starts_with("#x") -> entity.removeprefix("#x") else -> entity.removeprefix("#X")
+        code :: pkg_data_parse_radix(digits, 16) ?? return false
+        return pkg_data_xml_character_allowed(code) && !(code >= 0xD800 && code <= 0xDFFF)
+    }
+    if entity.starts_with("#") {
+        code :: pkg_data_parse_radix(entity.removeprefix("#"), 10) ?? return false
+        return pkg_data_xml_character_allowed(code) && !(code >= 0xD800 && code <= 0xDFFF)
+    }
+    false
+}
+
+// Non-empty digits in `radix` (10 or 16) within the u32 range.
+fn pkg_data_parse_radix(digits: String, radix: Int) -> Int? Never! {
+    raw :: digits.bytes()
+    if raw.len() == 0 -> return None
+    total := 0
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        digit :: if {
+            code >= 48 && code <= 57 -> code - 48
+            radix == 16 && code >= 65 && code <= 70 -> code - 55
+            radix == 16 && code >= 97 && code <= 102 -> code - 87
+            else -> -1
+        }
+        if digit < 0 -> return None
+        total = total * radix + digit
+        if total > 4294967295 -> return None
+    }
+    Val(total)
+}
+
+fn pkg_data_xml_child_elements(node: XmlNode) -> [XmlNode] Never! {
+    out := [XmlNode]{}
+    loop content in node.content {
+        if content == {
+            .Element(child) -> &out.push(child)
+            else -> {}
+        }
+    }
+    out
+}
+
+// An element whose content is only text and CDATA.
+fn pkg_data_xml_is_simple(node: XmlNode) -> Bool Never! {
+    loop content in node.content {
+        if content == {
+            .Text | .CData -> {}
+            else -> return false
+        }
+    }
+    true
+}
+
+// One record over every element: sorted attributes, `$text` / `$content`,
+// then sorted child element names.
+fn pkg_data_add_xml_record(builder: &SchemaBuilder, preferred: String, nodes: [XmlNode]) -> String Never! {
+    record :: &builder.begin_record(preferred)
+    attr_names := [String]{}
+    child_names := [String]{}
+    loop node in nodes {
+        loop attr in node.attrs {
+            if !attr_names.contains(attr.name) -> &attr_names.push(attr.name)
+        }
+        loop child in pkg_data_xml_child_elements(node) {
+            if !child_names.contains(child.name) -> &child_names.push(child.name)
+        }
+    }
+    &attr_names.sort()
+    &child_names.sort()
+    fields := [FieldSeed]{}
+    loop attr in attr_names {
+        present := 0
+        loop node in nodes {
+            loop candidate in node.attrs {
+                if candidate.name == attr {
+                    present += 1
+                    break
+                }
+            }
+        }
+        &fields.push(FieldSeed{wire_name: "@{attr}", ty: BoundType.Scalar("String"), optional: present != nodes.len(), note: None})
+    }
+    simple_count := 0
+    loop node in nodes {
+        if pkg_data_xml_is_simple(node) -> simple_count += 1
+    }
+    mixed_count :: nodes.len() - simple_count
+    if simple_count > 0 -> &fields.push(FieldSeed{wire_name: "$text", ty: BoundType.Scalar("String"), optional: mixed_count > 0, note: None})
+    if mixed_count > 0 -> &fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("DataTree"), optional: simple_count > 0, note: None})
+    loop child_name in child_names {
+        children := [XmlNode]{}
+        present_count := 0
+        repeated := false
+        loop node in nodes {
+            matching := [XmlNode]{}
+            loop child in pkg_data_xml_child_elements(node) {
+                if child.name == child_name -> &matching.push(child)
+            }
+            if matching.len() > 0 -> present_count += 1
+            if matching.len() > 1 -> repeated = true
+            loop child in matching -> &children.push(child)
+        }
+        all_simple := true
+        loop child in children {
+            if child.attrs.len() > 0 || !pkg_data_xml_is_simple(child) -> all_simple = false
+        }
+        element :: if all_simple -> BoundType.Scalar("String") else -> BoundType.Named(pkg_data_add_xml_record(&builder, "{record.name}{pkg_data_type_name(child_name)}", children))
+        ty :: if repeated -> BoundType.Array(element) else -> element
+        &fields.push(FieldSeed{wire_name: child_name, ty: ty, optional: present_count != nodes.len(), note: None})
+    }
+    &builder.set_fields(record.index, fields)
+    record.name
+}

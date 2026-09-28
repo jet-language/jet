@@ -21,12 +21,12 @@ struct FlakeOutputAssignment {
 @TRUST_FLAKE_OUTPUT_PREFIXES :: [String]{"packages.", "legacyPackages.", "devShells.", "devShell.", "apps.", "checks.", "formatter."}
 
 // Rust `is_nix_name_char`: ASCII alphanumerics, `_`, `-`, and `.`.
-fn trust_nix_is_name_byte(code: Int) -> Bool !Never {
+fn trust_nix_is_name_byte(code: Int) -> Bool Never! {
     trust_text_is_alphanumeric(code) || code == @TRUST_UNDERSCORE || code == @TRUST_DASH || code == @TRUST_DOT
 }
 
 // Drop `#` line comments outside double-quoted strings; the newline stays.
-fn trust_nix_strip_comments(text: String) -> String !Never {
+fn trust_nix_strip_comments(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     quoted := false
@@ -37,7 +37,7 @@ fn trust_nix_strip_comments(text: String) -> String !Never {
         code :: Int.from_u8(byte)
         index += 1
         if quoted {
-            out.push(byte)
+            &out.push(byte)
             if {
                 escaped -> escaped = false
                 code == @TRUST_BACKSLASH -> escaped = true
@@ -48,24 +48,24 @@ fn trust_nix_strip_comments(text: String) -> String !Never {
         }
         if code == @TRUST_QUOTE {
             quoted = true
-            out.push(byte)
+            &out.push(byte)
             next
         }
         if code == @TRUST_HASH {
             newline :: trust_text_find_byte(raw, @TRUST_NEWLINE, index)
             if newline < 0 -> break
-            out.push(raw[newline])
+            &out.push(raw[newline])
             index = newline + 1
             next
         }
-        out.push(byte)
+        &out.push(byte)
     }
     String.from_bytes(out) ?? ~text
 }
 
 // The offset just past the string whose opening quote is at `start`, or
 // the end of `raw` when it never closes.
-fn trust_nix_skip_quoted(raw: [U8], start: Int) -> Int !Never {
+fn trust_nix_skip_quoted(raw: [U8], start: Int) -> Int Never! {
     escaped := false
     index := start + 1
     loop index < raw.len() {
@@ -83,7 +83,7 @@ fn trust_nix_skip_quoted(raw: [U8], start: Int) -> Int !Never {
 
 // The offset of the delimiter closing the one opened at `open`, skipping
 // quoted strings, or -1.
-fn trust_nix_matching(raw: [U8], open: Int, opener: Int, closer: Int) -> Int !Never {
+fn trust_nix_matching(raw: [U8], open: Int, opener: Int, closer: Int) -> Int Never! {
     if pkg_bytes_code(raw, open) != opener -> return -1
     depth := 0
     index := open
@@ -109,7 +109,7 @@ fn trust_nix_matching(raw: [U8], open: Int, opener: Int, closer: Int) -> Int !Ne
 
 // The contents of the double-quoted string starting `value` after leading
 // whitespace, with `\x` escapes resolved to `x`; None if it never closes.
-fn trust_nix_quoted_rhs(value: String) -> ?String !Never {
+fn trust_nix_quoted_rhs(value: String) -> String? Never! {
     raw :: value.bytes()
     start :: pkg_bytes_skip_space(raw, 0)
     if pkg_bytes_code(raw, start) != @TRUST_QUOTE -> return None
@@ -120,12 +120,12 @@ fn trust_nix_quoted_rhs(value: String) -> ?String !Never {
         code :: Int.from_u8(byte)
         if {
             escaped -> {
-                out.push(byte)
+                &out.push(byte)
                 escaped = false
             }
             code == @TRUST_BACKSLASH -> escaped = true
             code == @TRUST_QUOTE -> return Val(String.from_bytes(out) ?? "")
-            else -> out.push(byte)
+            else -> &out.push(byte)
         }
     }
     None
@@ -133,7 +133,7 @@ fn trust_nix_quoted_rhs(value: String) -> ?String !Never {
 
 // The end of the Nix name run starting at `start`, with Rust's quirk that a
 // run which is empty extends to the end of the text.
-fn trust_nix_path_end(raw: [U8], start: Int) -> Int !Never {
+fn trust_nix_path_end(raw: [U8], start: Int) -> Int Never! {
     index := start
     loop index < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[index])) -> index += 1
     if index == start -> return raw.len()
@@ -142,27 +142,27 @@ fn trust_nix_path_end(raw: [U8], start: Int) -> Int !Never {
 
 // Every `url`/`follows` input declaration in dotted or record form, sorted
 // and unique.
-fn trust_nix_input_assignments(text: String) -> [FlakeAssignment] !Never {
+fn trust_nix_input_assignments(text: String) -> [FlakeAssignment] Never! {
     found := [FlakeAssignment]{}
     loop assignment in trust_nix_assignments_after(text, "inputs.") {
-        if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
+        if assignment.field == "url" || assignment.field == "follows" -> &found.push(assignment)
     }
     loop assignment in trust_nix_input_record_assignments(text) {
-        if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
+        if assignment.field == "url" || assignment.field == "follows" -> &found.push(assignment)
     }
-    found.sort_by(assignment -> assignment.value)
-    found.sort_by(assignment -> assignment.field)
-    found.sort_by(assignment -> assignment.path)
+    &found.sort_by(assignment -> assignment.value)
+    &found.sort_by(assignment -> assignment.field)
+    &found.sort_by(assignment -> assignment.path)
     unique := [FlakeAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
-        unique.push(assignment)
+        &unique.push(assignment)
     }
     unique
 }
 
 // The record form `inputs = { nixpkgs.url = "…"; }`.
-fn trust_nix_input_record_assignments(text: String) -> [FlakeAssignment] !Never {
+fn trust_nix_input_record_assignments(text: String) -> [FlakeAssignment] Never! {
     raw :: text.bytes()
     keyword :: "inputs".bytes()
     found := [FlakeAssignment]{}
@@ -178,7 +178,7 @@ fn trust_nix_input_record_assignments(text: String) -> [FlakeAssignment] !Never 
             if pkg_bytes_code(raw, open) == @TRUST_OPEN_BRACE {
                 close :: trust_nix_matching(raw, open, @TRUST_OPEN_BRACE, @TRUST_CLOSE_BRACE)
                 if close >= 0 {
-                    loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, open + 1, close), "") -> found.push(assignment)
+                    loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, open + 1, close), "") -> &found.push(assignment)
                     cursor = close + 1
                     next
                 }
@@ -191,7 +191,7 @@ fn trust_nix_input_record_assignments(text: String) -> [FlakeAssignment] !Never 
 
 // Quoted assignments inside one attribute-set body; nested sets extend the
 // dotted path.
-fn trust_nix_block_assignments(text: String, parent: String) -> [FlakeAssignment] !Never {
+fn trust_nix_block_assignments(text: String, parent: String) -> [FlakeAssignment] Never! {
     raw :: text.bytes()
     found := [FlakeAssignment]{}
     cursor := 0
@@ -215,21 +215,21 @@ fn trust_nix_block_assignments(text: String, parent: String) -> [FlakeAssignment
         if pkg_bytes_code(raw, after) == @TRUST_OPEN_BRACE {
             close :: trust_nix_matching(raw, after, @TRUST_OPEN_BRACE, @TRUST_CLOSE_BRACE)
             if close >= 0 {
-                loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, after + 1, close), path) -> found.push(assignment)
+                loop assignment in trust_nix_block_assignments(pkg_bytes_text(raw, after + 1, close), path) -> &found.push(assignment)
                 cursor = close + 1
                 next
             }
         }
         value :: trust_nix_quoted_rhs(pkg_bytes_text(raw, after, raw.len())) ?? next
         parts :: trust_text_split_last(path, @TRUST_DOT) ?? next
-        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+        &found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
     }
     found
 }
 
 // The dotted form `<prefix><path>.<field> = "<value>"` wherever `prefix`
 // occurs.
-fn trust_nix_assignments_after(text: String, prefix: String) -> [FlakeAssignment] !Never {
+fn trust_nix_assignments_after(text: String, prefix: String) -> [FlakeAssignment] Never! {
     raw :: text.bytes()
     needle :: prefix.bytes()
     found := [FlakeAssignment]{}
@@ -244,13 +244,13 @@ fn trust_nix_assignments_after(text: String, prefix: String) -> [FlakeAssignment
         equals :: trust_text_find_byte(raw, @TRUST_EQUALS, end)
         if equals < 0 -> next
         value :: trust_nix_quoted_rhs(pkg_bytes_text(raw, equals + 1, raw.len())) ?? next
-        found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
+        &found.push(FlakeAssignment{path: parts.before, field: parts.after, value})
     }
     found
 }
 
 // Every output declaration, sorted and unique.
-fn trust_nix_output_assignments(text: String) -> [FlakeOutputAssignment] !Never {
+fn trust_nix_output_assignments(text: String) -> [FlakeOutputAssignment] Never! {
     found := [FlakeOutputAssignment]{}
     loop prefix in @TRUST_FLAKE_OUTPUT_PREFIXES {
         kind :: prefix.removesuffix(".")
@@ -259,26 +259,26 @@ fn trust_nix_output_assignments(text: String) -> [FlakeOutputAssignment] !Never 
             if {
                 parts.len() > 1 -> {
                     attribute := [String]{}
-                    loop index in 1..<parts.len() -> attribute.push(parts[index])
-                    found.push(FlakeOutputAssignment{prefix: ~kind, system: parts[0], attribute: attribute.join(".")})
+                    loop index in 1..<parts.len() -> &attribute.push(parts[index])
+                    &found.push(FlakeOutputAssignment{prefix: ~kind, system: parts[0], attribute: attribute.join(".")})
                 }
-                else -> found.push(FlakeOutputAssignment{prefix: ~kind, system: "", attribute: parts[0]})
+                else -> &found.push(FlakeOutputAssignment{prefix: ~kind, system: "", attribute: parts[0]})
             }
         }
     }
-    found.sort_by(assignment -> assignment.attribute)
-    found.sort_by(assignment -> assignment.system)
-    found.sort_by(assignment -> assignment.prefix)
+    &found.sort_by(assignment -> assignment.attribute)
+    &found.sort_by(assignment -> assignment.system)
+    &found.sort_by(assignment -> assignment.prefix)
     unique := [FlakeOutputAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
-        unique.push(assignment)
+        &unique.push(assignment)
     }
     unique
 }
 
 // Attribute paths assigned after a word-initial `prefix`.
-fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] !Never {
+fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] Never! {
     raw :: text.bytes()
     needle :: prefix.bytes()
     found := [String]{}
@@ -296,7 +296,7 @@ fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] !Never {
         equals :: trust_text_find_byte(raw, @TRUST_EQUALS, end)
         if {
             equals >= 0 -> {
-                if path != "" -> found.push(path)
+                if path != "" -> &found.push(path)
                 cursor = equals + 1
             }
             else -> cursor = if end > rest -> end else -> rest + 1
@@ -305,14 +305,14 @@ fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] !Never {
     found
 }
 
-fn trust_nix_trim_trailing_dots(text: String) -> String !Never {
+fn trust_nix_trim_trailing_dots(text: String) -> String Never! {
     trimmed := ~text
     loop trimmed.ends_with(".") -> trimmed = trimmed.removesuffix(".")
     trimmed
 }
 
 // Quoted strings and relative module paths inside `name = [ … ]` lists.
-fn trust_nix_list_assignment_values(text: String, name: String) -> [String] !Never {
+fn trust_nix_list_assignment_values(text: String, name: String) -> [String] Never! {
     raw :: text.bytes()
     needle :: name.bytes()
     values := [String]{}
@@ -332,23 +332,23 @@ fn trust_nix_list_assignment_values(text: String, name: String) -> [String] !Nev
         close :: trust_nix_matching(raw, open, @TRUST_OPEN_SQUARE, @TRUST_CLOSE_SQUARE)
         if close < 0 -> break
         body :: pkg_bytes_text(raw, open + 1, close)
-        loop value in trust_nix_quoted_values(body) -> values.push(value)
+        loop value in trust_nix_quoted_values(body) -> &values.push(value)
         loop word in trust_text_words(body) {
             value :: trust_text_trim_bytes(word, [Int]{@TRUST_COMMA, @TRUST_SEMICOLON, @TRUST_OPEN_PAREN, @TRUST_CLOSE_PAREN})
-            if trust_nix_is_relative_module_path(value) -> values.push(value)
+            if trust_nix_is_relative_module_path(value) -> &values.push(value)
         }
         cursor = close + 1
     }
     values
 }
 
-fn trust_nix_is_relative_module_path(value: String) -> Bool !Never {
+fn trust_nix_is_relative_module_path(value: String) -> Bool Never! {
     value == "." || value == ".." || value.starts_with("./") || value.starts_with("../")
 }
 
 // The contents of each double-quoted string. An unterminated final string
 // loses its last byte, as the reference slice does.
-fn trust_nix_quoted_values(text: String) -> [String] !Never {
+fn trust_nix_quoted_values(text: String) -> [String] Never! {
     raw :: text.bytes()
     values := [String]{}
     cursor := 0
@@ -356,14 +356,14 @@ fn trust_nix_quoted_values(text: String) -> [String] !Never {
         start :: trust_text_find_byte(raw, @TRUST_QUOTE, cursor)
         if start < 0 -> break
         end :: trust_nix_skip_quoted(raw, start)
-        if end <= raw.len() && end > start + 1 -> values.push(pkg_bytes_text(raw, start + 1, end - 1))
+        if end <= raw.len() && end > start + 1 -> &values.push(pkg_bytes_text(raw, start + 1, end - 1))
         cursor = if end > start + 1 -> end else -> start + 1
     }
     values
 }
 
 // The flake-parts composition a `mkFlake` flake declares.
-fn trust_nix_flake_parts_composition(text: String) -> ?FlakeComposition !Never {
+fn trust_nix_flake_parts_composition(text: String) -> FlakeComposition? Never! {
     if !text.contains("flake-parts") || !text.contains("mkFlake") -> return None
     Val(FlakeComposition{
         framework: "flake-parts",

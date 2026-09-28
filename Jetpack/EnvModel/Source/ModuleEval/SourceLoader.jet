@@ -1,0 +1,300 @@
+// Read-only source access for an environment graph, `imports: find(…)`
+// discovery (U4), and the merged `(name -> upstream)` source table
+// (U5/U6/U9).
+
+// Read-only source access for an environment graph. Paths passed to the
+// loader are relative to the pinned environment root; returned file paths
+// use that same relative coordinate system. The compiler-facing package
+// reader supplies an authority-backed implementation so profile evaluation
+// cannot fall back to ambient filesystem reads.
+pub trait SourceLoader {
+    fn read_file(&self, relative: String) -[FS, Env]> String EnvModelEvalError!
+
+    fn list_jet_files(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError!
+
+    // Package cross-checks are needed only for image declarations. A loader
+    // may decline them (None) when the graph has no image that names a
+    // package.
+    fn package_facts(&self) -[FS, Env]> PackageFacts? EnvModelEvalError!
+}
+
+// The ambient-filesystem loader below one canonical environment root.
+pub struct FileSystemSourceLoader {
+    pub root: String
+
+    // `relative` below the root, canonicalized and proven still inside it.
+    fn checked_path(self, relative: String) -[FS, Env]> String EnvModelEvalError! {
+        if files.is_absolute(relative) || envmodel_path_has_parent_component(relative) {
+            return Err(envmodel_source_loader_error(relative, "source import path must stay below the environment root"))
+        }
+        path :: files.join(self.root, relative)
+        canonical :: files.canonicalize(path) ?? return Err(envmodel_source_loader_error(path, "{err}"))
+        if !envmodel_path_within(canonical, self.root) -> return Err(envmodel_source_loader_error(path, "source import resolves outside the environment root"))
+        Ok(canonical)
+    }
+}
+
+impl FileSystemSourceLoader.SourceLoader {
+    fn read_file(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {
+        path :: self.checked_path(relative)
+        text :: files.read(path) ?? return Err(envmodel_source_loader_error(path, "{err}"))
+        Ok(text)
+    }
+
+    fn list_jet_files(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
+        directory :: self.checked_path(relative)
+        entries :: files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
+        found := [String]{}
+        loop entry in entries {
+            if !entry.name.ends_with(".{@FILE_EXT}") || entry.name == ".{@FILE_EXT}" -> next
+            canonical :: files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
+            if !envmodel_path_within(canonical, self.root) || !files.is_file(canonical) {
+                return Err(envmodel_source_loader_error(entry.path, "source import resolves outside the environment root"))
+            }
+            if canonical == self.root -> return Err(envmodel_source_loader_error(canonical, "source import escapes root"))
+            &found.push(canonical.removeprefix("{self.root}/"))
+        }
+        &found.sort()
+        Ok(found)
+    }
+
+    fn package_facts(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
+        loop relative in [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"} {
+            path :: files.join(self.root, relative)
+            source :: if files.read(path) == {
+                .Ok(text) -> text
+                .Err(.NotFound(_)) -> next
+                .Err(error) -> { return Err(envmodel_source_loader_error(path, "{error}")) }
+            }
+            inline :: pkg_extract_inline_package(source) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic()})
+            block :: inline ?? next
+            if PackageFacts.load(self.root) != None {
+                return Err(envmodel_error("E1363", "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block", Val(block.span)))
+            }
+            facts :: PackageFacts.parse(block.body(source), path) ?? return Err(envmodel_error("E1362", "the inline Package body is malformed", err.message(), "fix the inline Package fields, then retry", Val(block.body_span)))
+            return Ok(Val(facts))
+        }
+        loaded :: PackageFacts.load(self.root) ?? return Ok(None)
+        if loaded == {
+            .Ok(facts) -> Ok(Val(facts))
+            .Err(_) -> Ok(None)
+        }
+    }
+}
+
+fn envmodel_source_loader_error(path: String, cause: String) -> EnvModelEvalError Never! {
+    envmodel_error("E1331", "environment source `{path}` cannot be read", cause, "restore a regular source file below the environment root", None)
+}
+
+// True when `path` is `root` or lies below it (Rust `Path::starts_with`).
+fn envmodel_path_within(path: String, root: String) -> Bool Never! {
+    path == root || path.starts_with("{root.removesuffix("/")}/")
+}
+
+// A relative path with `.` components and empty segments dropped
+// (Rust `Path::components` filtering `CurDir`).
+fn envmodel_normalize_relative_path(path: String) -> String Never! {
+    parts := [String]{}
+    loop part in files.split_slash(path) {
+        if part != "" && part != "." -> &parts.push(part)
+    }
+    parts.join("/")
+}
+
+// One parsed `.jet` file contributing modules: the root `env.jet` and every
+// file discovered through `imports: find(…)` (U4). Spans in `items` index into
+// this unit's own `src`; `base_dir` is the dir the file's relative refs and
+// `embed_file` calls resolve against.
+pub struct EvalUnit {
+    pub items: [Item]
+    pub src: String
+    pub base_dir: String
+    pub source_path: String
+}
+
+// Walk every `imports: find("<dir>")` directive in the root unit's modules,
+// skipping recognized typed integrations, and return one `EvalUnit` per
+// discovered `*.jet` file. Discovery is one level deep: a discovered file may
+// not itself import (the liftability law, E0971).
+pub fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, loader: &L) -[FS, Env]> [EvalUnit] EnvModelEvalError! {
+    out := [EvalUnit]{}
+    environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {err}", "imports follow physical paths and cannot be evaluated from an unresolved root", "run the command from an existing project directory", None))
+    seen_files := [String]{}
+    loop item in root.items {
+        module :: if item == {
+            .Module(module) -> module
+            else -> next
+        }
+        if !module.auto_discovered -> next
+        directives := [Expr]{}
+        loop import in module.imports -> envmodel_collect_import_leaves(import, &directives)
+        loop directive in directives {
+            if envmodel_qualified_call_name(directive) == {
+                .Val(name) -> {
+                    if IntegrationKind.from_call(name) != None -> next
+                }
+                .None -> {}
+            }
+            written :: envmodel_find_dir_arg(directive)
+            relative :: envmodel_normalize_relative_path(written)
+            find_span :: if directive == {
+                .Call(call) -> Val(call.name_span)
+                else -> Val(expr_span(directive))
+            }
+            if relative == "" || files.is_absolute(written) || envmodel_path_has_parent_component(relative) {
+                return Err(envmodel_error("E1331", "module import `{written}` escapes the environment root", "one environment graph may compose files below its root, but an import cannot escape it", "use a project-relative directory without `..`", find_span))
+            }
+            if !files.exists(files.join(environment_root, relative)) {
+                return Err(envmodel_find_missing_directory("{environment_root}/{written}", find_span))
+            }
+            listed :: &loader.list_jet_files(relative)
+            loop file_relative in listed {
+                file_norm :: envmodel_normalize_relative_path(file_relative)
+                if files.is_absolute(file_relative) || !envmodel_path_within(file_norm, relative) || envmodel_path_has_parent_component(file_relative) {
+                    return Err(envmodel_error("E1331", "discovered module `{file_relative}` escapes the environment root", "imports follow physical paths and cannot cross the project boundary", "remove the escaping import or move the module below the environment root", find_span))
+                }
+                canonical_file :: files.join(environment_root, file_relative)
+                if seen_files.contains(canonical_file) -> next
+                &seen_files.push(canonical_file)
+                file_src :: &loader.read_file(file_relative)
+                program :: envmodel_parse_program(file_src)
+                // Liftability law (U4): a discovered module may not import.
+                loop nested in program.items {
+                    if nested == {
+                        .Module(nested_module) -> {
+                            if nested_module.imports.len() > 0 -> return Err(envmodel_discovered_module_imports(canonical_file))
+                        }
+                        else -> {}
+                    }
+                }
+                parent :: files.dirname(canonical_file)
+                &out.push(EvalUnit{items: program.items, src: file_src, base_dir: if parent == "" -> base_dir else -> parent, source_path: canonical_file})
+            }
+        }
+    }
+    Ok(out)
+}
+
+// Extract the literal directory path from an `imports: find("dir")`
+// directive. Anything else — a non-`find` expression, the wrong arity, or a
+// non-literal (interpolated) argument — is E0969.
+fn envmodel_find_dir_arg(directive: Expr) -> String EnvModelEvalError! {
+    call :: if directive == {
+        .Call(call) -> call
+        else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
+    }
+    if call.name != @BUILTIN_FIND || call.args.len() != 1 -> return Err(envmodel_bad_import_directive(expr_span(directive)))
+    parts :: if call.args[0].expr == {
+        .Str(parts, _) -> parts
+        else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
+    }
+    path := ""
+    loop part in parts {
+        if part == {
+            .Lit(text) -> path = "{path}{text}"
+            else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
+        }
+    }
+    Ok(path)
+}
+
+// Merge every enabled module's `sources:` block — across the root and every
+// discovered unit — into one `(name -> upstream)` table (U5: same name +
+// different ref conflicts, E0967). Each `target@provider` ref (D-JPK-REF1) is
+// translated to the colon/flake upstream the providers realize.
+pub fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvModelEvalError! {
+    maps := [[String: String]]{}
+    policies := [String: ChannelPolicy]{}
+    raw_refs := [String: String]{}
+    // U9: the provider kind is inferred, never declared. The §6 merge
+    // guarantees a given name resolves to one upstream (else E0967), so the
+    // probe result is consistent across units.
+    kinds := [String: ProviderKind]{}
+    loop index in 0..<units.len() {
+        unit :: units[index]
+        // Spans index into each unit's own source, but the CLI renders against
+        // the root `env.jet`; only the root unit carries a span.
+        is_root :: index == 0
+        source_bytes :: unit.src.bytes()
+        loop item in unit.items {
+            module :: if item == {
+                .Module(module) -> module
+                else -> next
+            }
+            if !module.auto_discovered -> next
+            map := [String: String]{}
+            loop declaration in module.sources {
+                ref_text :: pkg_bytes_text(source_bytes, declaration.ref_span.start, declaration.ref_span.end).trim()
+                span :: if is_root -> Val(declaration.ref_span) else -> None
+                reference :: if ProviderRef.classify(ref_text) == {
+                    .Ok(reference) -> reference
+                    .Err(.RetiredNixpkgs(raw, replacement)) -> return Err(envmodel_retired_nixpkgs_source_ref(raw, replacement, span))
+                    .Err(_) -> { return Err(envmodel_bad_source_ref(ref_text, span)) }
+                }
+                upstream :: reference.upstream()
+                if map.get(declaration.name) == {
+                    .Val(existing) -> {
+                        if existing != upstream || policies.get(declaration.name) != Val(reference.policy) {
+                            return Err(envmodel_merge_error_to_diagnostic(MergeError.SourceConflict{name: declaration.name, a: existing, b: upstream}))
+                        }
+                        next
+                    }
+                    .None -> {}
+                }
+                // Probe the resolved target against the declaring file's dir,
+                // so a bare `./local` path resolves where it was written.
+                kind :: envmodel_infer_provider_kind(reference, unit.base_dir)
+                if kinds.get(declaration.name) == {
+                    .Val(existing) -> {
+                        if existing != kind {
+                            return Err(envmodel_error("E0967", "Source `{declaration.name}` resolves to conflicting provider kinds", "One named source must have one deterministic realization path across the environment graph", "Make every declaration use the same source location and provider kind", span))
+                        }
+                    }
+                    .None -> kinds[declaration.name] = kind
+                }
+                policies[declaration.name] = reference.policy
+                raw_refs[declaration.name] = reference.raw
+                map[declaration.name] = upstream
+            }
+            &maps.push(map)
+        }
+    }
+    merged :: pkg_merge_sources(maps) ?? return Err(envmodel_merge_error_to_diagnostic(err))
+    names := merged.keys().to_list()
+    &names.sort()
+    declarations := [SourceDecl]{}
+    loop name in names -> &declarations.push(SourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix})
+    table := SourceTable.from_decls(declarations)
+    loop name in table.declared_names() {
+        policy :: policies.get(name) ?? ChannelPolicy.Pinned
+        raw :: raw_refs.get(name) ?? (table.upstream(name) ?? "")
+        &table.set_channel_metadata(name, policy, raw)
+    }
+    Ok(table)
+}
+
+// U9: infer whether a source is realized by the first-party `core` provider or
+// the `nix` compatibility provider from its resolved target. A bare path
+// stats the directory locally; `…@nixpkgs` is always `nix`; `…@github` is
+// left to a realize-time `package.jet` peek (`Infer`); the direct ecosystem
+// roots name their own providers.
+fn envmodel_infer_provider_kind(reference: ProviderRef, base_dir: String) -[FS]> ProviderKind Never! {
+    if reference.provider == {
+        .Path -> {
+            target :: pkg_split_channel_ref(reference.target).base
+            directory :: if files.is_absolute(target) -> target else -> files.join(base_dir, target)
+            if files.is_file(files.join(directory, @PACKAGE_FILE)) || files.is_file(files.join(directory, @PAYLOAD_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
+        }
+        .Github -> ProviderKind.Infer
+        .Cran -> ProviderKind.Cran
+        .LuaRocks -> ProviderKind.LuaRocks
+        .RubyGems -> ProviderKind.RubyGems
+        .Cpan -> ProviderKind.Cpan
+        .Packagist -> ProviderKind.Packagist
+        .Releases -> ProviderKind.JetPackage
+        .JetRegistry -> ProviderKind.JetRegistry
+        .Npm -> ProviderKind.Npm
+        .Cargo -> ProviderKind.Cargo
+        else -> ProviderKind.Nix
+    }
+}

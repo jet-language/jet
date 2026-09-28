@@ -1,0 +1,1217 @@
+// Deterministic package bundle plans, artifacts, receipts, and the target
+// layout renderers, ported from jet_pkg_model::Bundler. Every JSON document is
+// Core canonical JSON (`json.canonical`, byte-ordered keys) plus one LF, the
+// bytes the reference's `CanonicalJson::bytes` produces.
+
+impl IconFormat {
+    fn extension(self) -> String Never! {
+        self.as_str()
+    }
+
+    // Declaration order, the reference's derived `Ord`.
+    fn rank(self) -> Int Never! {
+        if self == {
+            .Png -> 0
+            .Icns -> 1
+            .Ico -> 2
+            .Svg -> 3
+        }
+    }
+}
+
+impl SigningPhase {
+    fn rank(self) -> Int Never! {
+        if self == {
+            .PreSign -> 0
+            .PostSign -> 1
+            .Verify -> 2
+        }
+    }
+}
+
+impl GameBundleAsset {
+    fn new(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
+        GameBundleAsset{path: path, mode: mode, bytes: bytes}
+    }
+}
+
+impl SigningHookInput {
+    fn new(path: String, digest: String) -> SigningHookInput Never! {
+        SigningHookInput{path: path, digest: digest}
+    }
+}
+
+pub enum BundleFileKind {
+    Executable
+    Launcher
+    Metadata
+    Manifest
+    Icon
+    Updater
+    ContentTypes
+    BlockMap
+    GameManifest
+    GameAsset
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Executable -> "executable"
+            .Launcher -> "launcher"
+            .Metadata -> "metadata"
+            .Manifest -> "manifest"
+            .Icon -> "icon"
+            .Updater -> "updater"
+            .ContentTypes -> "content-types"
+            .BlockMap -> "block-map"
+            .GameManifest -> "game-manifest"
+            .GameAsset -> "game-asset"
+        }
+    }
+}
+
+// One exact file in a plan or emitted artifact.
+pub struct BundleFile {
+    pub path: String
+    pub kind: BundleFileKind
+    pub mode: Int
+    pub bytes: [U8]
+
+    fn new(path: String, kind: BundleFileKind, mode: Int, bytes: [U8]) -> BundleFile Never! {
+        BundleFile{path: path, kind: kind, mode: mode, bytes: bytes}
+    }
+
+    fn digest(self) -> String Never! {
+        pkg_sha256_hex(self.bytes)
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "bytes": DataTree.Int(self.bytes.len()),
+            "kind": DataTree.Text(self.kind.as_str()),
+            "mode": DataTree.Int(self.mode),
+            "path": DataTree.Text(self.path),
+            "sha256": DataTree.Text(self.digest())
+        ])
+    }
+}
+
+// The exact launch paths a later adapter must preserve.
+pub struct LaunchDescriptor {
+    pub launcher: String
+    pub executable: String
+    pub arguments_passthrough: Bool
+
+    fn new(launcher: String, executable: String) -> LaunchDescriptor Never! {
+        LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "arguments_passthrough": DataTree.Bool(self.arguments_passthrough),
+            "executable": DataTree.Text(self.executable),
+            "launcher": DataTree.Text(self.launcher)
+        ])
+    }
+}
+
+// Updater manifest generated from the exact executable payload.
+pub struct UpdaterManifest {
+    pub schema: String
+    pub package: String
+    pub version: String
+    pub target: BundleTarget
+    pub channel: String
+    pub artifact: String
+    pub url: String
+    pub signature_url: String?
+    pub release_notes_url: String?
+    pub payload_sha256: String
+    pub payload_bytes: Int
+
+    fn for_spec(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
+        UpdaterManifest{
+            schema: @PACKAGE_UPDATE_MANIFEST_SCHEMA,
+            package: spec.package,
+            version: spec.version,
+            target: spec.target,
+            channel: updater.channel,
+            artifact: [spec.metadata.identifier, spec.target.artifact_suffix()].join(""),
+            url: updater.url,
+            signature_url: updater.signature_url,
+            release_notes_url: updater.release_notes_url,
+            payload_sha256: payload_sha256,
+            payload_bytes: spec.executable.bytes.len()
+        }
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "artifact": DataTree.Text(self.artifact),
+            "channel": DataTree.Text(self.channel),
+            "package": DataTree.Text(self.package),
+            "payload_bytes": DataTree.Int(self.payload_bytes),
+            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "release_notes_url": pkg_bundle_optional_text(self.release_notes_url),
+            "schema": DataTree.Text(self.schema),
+            "signature_url": pkg_bundle_optional_text(self.signature_url),
+            "target": DataTree.Text(self.target.as_str()),
+            "url": DataTree.Text(self.url),
+            "version": DataTree.Text(self.version)
+        ])
+    }
+
+    // The receipt projection: URLs with credentials, queries, or fragments
+    // are redacted.
+    fn receipt_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "artifact": DataTree.Text(self.artifact),
+            "channel": DataTree.Text(self.channel),
+            "package": DataTree.Text(self.package),
+            "payload_bytes": DataTree.Int(self.payload_bytes),
+            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "release_notes_url": pkg_bundle_optional_receipt_url(self.release_notes_url),
+            "schema": DataTree.Text(self.schema),
+            "signature_url": pkg_bundle_optional_receipt_url(self.signature_url),
+            "target": DataTree.Text(self.target.as_str()),
+            "url": DataTree.Text(pkg_bundle_receipt_source(self.url)),
+            "version": DataTree.Text(self.version)
+        ])
+    }
+
+    fn json_bytes(self) -> [U8] Never! {
+        pkg_bundle_canonical_bytes(self.to_json_tree())
+    }
+
+    fn json(self) -> String Never! {
+        pkg_bundle_canonical_text(self.to_json_tree())
+    }
+}
+
+// One input the plan read, with its digest and size.
+pub struct BundleInputFact {
+    pub role: String
+    pub path: String
+    pub digest: String
+    pub bytes: Int
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "bytes": DataTree.Int(self.bytes),
+            "digest": DataTree.Text(self.digest),
+            "path": DataTree.Text(self.path),
+            "role": DataTree.Text(self.role)
+        ])
+    }
+
+    fn receipt_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "bytes": DataTree.Int(self.bytes),
+            "digest": DataTree.Text(self.digest),
+            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
+            "role": DataTree.Text(self.role)
+        ])
+    }
+}
+
+// A complete, deterministic target layout. It contains no host-derived
+// values and can be handed to a platform adapter without re-planning.
+pub struct BundlePlan {
+    pub schema_version: Int
+    pub kind: BundleKind
+    pub target: BundleTarget
+    pub package: String
+    pub version: String
+    // Source path of the executable input, kept for receipt provenance.
+    pub executable_source: String
+    pub artifact_name: String
+    pub metadata: BundleMetadata
+    pub files: [BundleFile]
+    pub launch: LaunchDescriptor
+    pub inputs: [BundleInputFact]
+    pub signing_hooks: [SigningHook]
+    pub updater: UpdaterManifest?
+    pub game: GameBundleSpec?
+    pub identity: String
+
+    // Validate `spec` and lay out its target files. A Windows version is
+    // normalized to four parts; other versions are trimmed.
+    fn from_spec(input: BundleSpec) -> BundlePlan BundleError! {
+        spec := input
+        spec.version = if spec.target == BundleTarget.WindowsMsix -> pkg_bundle_windows_version(spec.version) else -> spec.version.trim()
+        spec.validate()
+        icons := spec.icons
+        &icons.sort_by(icon -> icon.digest())
+        &icons.sort_by(icon -> icon.size)
+        &icons.sort_by(icon -> icon.format.rank())
+        &icons.sort_by(icon -> icon.name)
+        hooks :: pkg_bundle_sorted_hooks(spec.signing_hooks)
+        metadata := spec.metadata
+        &metadata.categories.sort()
+        executable_digest :: spec.executable.digest()
+        game := spec.game
+        if game == {
+            .Val(declared) -> {
+                sorted := declared
+                &sorted.assets.sort_by(asset -> asset.digest())
+                &sorted.assets.sort_by(asset -> asset.path)
+                game = Val(sorted)
+            }
+            .None -> {}
+        }
+        metadata_bytes :: pkg_bundle_canonical_bytes(pkg_bundle_metadata_json(spec, metadata, executable_digest, icons, hooks))
+        inputs := [BundleInputFact]{BundleInputFact{role: "executable", path: spec.executable.source, digest: executable_digest, bytes: spec.executable.bytes.len()}}
+        loop icon in icons {
+            if icon.source == {
+                .Val(source) -> &inputs.push(BundleInputFact{role: "icon", path: source, digest: icon.digest(), bytes: icon.bytes.len()})
+                .None -> {}
+            }
+        }
+        if game == {
+            .Val(declared) -> {
+                &inputs.push(BundleInputFact{role: "game-source", path: "<project>", digest: declared.source_revision, bytes: 0})
+                loop asset in declared.assets {
+                    &inputs.push(BundleInputFact{role: "game-asset", path: asset.path, digest: asset.digest(), bytes: asset.bytes.len()})
+                }
+            }
+            .None -> {}
+        }
+        &inputs.sort_by(fact -> fact.path)
+        &inputs.sort_by(fact -> fact.role)
+        identifier :: spec.metadata.identifier
+        artifact_name :: [identifier, spec.target.artifact_suffix()].join("")
+        files := [BundleFile]{}
+        launch := LaunchDescriptor.new("", "")
+        if spec.target == {
+            .LinuxAppImage -> {
+                executable :: "usr/bin/{spec.executable.name}"
+                &files.push(BundleFile.new("AppRun", BundleFileKind.Launcher, 0o755, pkg_bundle_linux_launcher(spec.executable.name)))
+                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                icon_name :: if icons.len() > 0 -> Val(icons[0].name) else -> None
+                &files.push(BundleFile.new("usr/share/applications/{identifier}.desktop", BundleFileKind.Manifest, 0o644, pkg_bundle_linux_desktop_file(metadata, icon_name)))
+                &files.push(BundleFile.new("usr/share/{identifier}/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                loop icon in icons {
+                    &files.push(BundleFile.new("usr/share/icons/hicolor/{icon.size}x{icon.size}/apps/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                }
+                if icons.len() > 0 -> &files.push(BundleFile.new(".DirIcon", BundleFileKind.Icon, 0o644, icons[0].bytes))
+                if spec.updater == {
+                    .Val(updater) -> &files.push(BundleFile.new("usr/share/{identifier}/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .None -> {}
+                }
+                launch = LaunchDescriptor.new("AppRun", executable)
+            }
+            .MacOSApp -> {
+                root :: "{identifier}.app"
+                executable :: "{root}/Contents/MacOS/{spec.executable.name}"
+                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                icon_name :: if icons.len() > 0 -> Val("{icons[0].name}.{icons[0].format.extension()}") else -> None
+                &files.push(BundleFile.new("{root}/Contents/Info.plist", BundleFileKind.Manifest, 0o644, pkg_bundle_mac_info_plist(spec, icon_name)))
+                &files.push(BundleFile.new("{root}/Contents/Resources/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                loop icon in icons {
+                    &files.push(BundleFile.new("{root}/Contents/Resources/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                }
+                if spec.updater == {
+                    .Val(updater) -> &files.push(BundleFile.new("{root}/Contents/Resources/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .None -> {}
+                }
+                launch = LaunchDescriptor.new(executable, executable)
+            }
+            .WindowsMsix -> {
+                executable :: pkg_bundle_windows_executable_name(spec.executable.name)
+                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                logo :: if icons.len() > 0 -> Val("Assets/{icons[0].name}.{icons[0].format.extension()}") else -> None
+                &files.push(BundleFile.new("AppxManifest.xml", BundleFileKind.Manifest, 0o644, pkg_bundle_windows_manifest(spec, executable, logo)))
+                &files.push(BundleFile.new("[Content_Types].xml", BundleFileKind.ContentTypes, 0o644, pkg_bundle_windows_content_types(files)))
+                &files.push(BundleFile.new("jet/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                loop icon in icons {
+                    &files.push(BundleFile.new("Assets/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                }
+                if spec.updater == {
+                    .Val(updater) -> &files.push(BundleFile.new("jet/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .None -> {}
+                }
+                launch = LaunchDescriptor.new(executable, executable)
+            }
+        }
+        if game == {
+            .Val(declared) -> {
+                &files.push(BundleFile.new(pkg_bundle_game_manifest_path(spec), BundleFileKind.GameManifest, 0o644, pkg_bundle_canonical_bytes(pkg_bundle_game_manifest_json(spec, declared))))
+                loop asset in declared.assets {
+                    &files.push(BundleFile.new(pkg_bundle_game_asset_path(spec, asset.path), BundleFileKind.GameAsset, asset.mode, asset.bytes))
+                }
+            }
+            .None -> {}
+        }
+        if spec.target == BundleTarget.WindowsMsix {
+            content_types :: pkg_bundle_windows_content_types(files)
+            loop index in 0..<files.len() {
+                if files[index].kind == BundleFileKind.ContentTypes -> files[index].bytes = content_types
+            }
+            &files.push(BundleFile.new("AppxBlockMap.xml", BundleFileKind.BlockMap, 0o644, pkg_bundle_windows_block_map(files)))
+        }
+        paths := [String]{}
+        loop file in files {
+            if paths.contains(file.path) -> return Err(BundleError.DuplicatePath(file.path))
+            &paths.push(file.path)
+        }
+        &files.sort_by(file -> file.path)
+        updater_manifest :: if spec.updater == {
+            .Val(updater) -> Val(UpdaterManifest.for_spec(spec, updater, executable_digest))
+            .None -> None
+        }
+        plan := BundlePlan{
+            schema_version: @PACKAGE_BUNDLE_SCHEMA_VERSION,
+            kind: spec.kind,
+            target: spec.target,
+            package: spec.package,
+            version: spec.version,
+            executable_source: spec.executable.source,
+            artifact_name: artifact_name,
+            metadata: metadata,
+            files: files,
+            launch: launch,
+            inputs: inputs,
+            signing_hooks: hooks,
+            updater: updater_manifest,
+            game: game,
+            identity: ""
+        }
+        plan.identity = plan.identity_text()
+        Ok(plan)
+    }
+
+    // The logical artifact view for callers without a platform transport.
+    fn emit(self) -> BundleArtifact Never! {
+        self.materialized_artifact(self.logical_artifact_sha256(), self.logical_artifact_bytes())
+    }
+
+    // Digest of the checked plan's sorted file set; a platform adapter may
+    // replace it with the digest of its actual transport bytes.
+    fn logical_artifact_sha256(self) -> String Never! {
+        pkg_bundle_artifact_digest(self.files)
+    }
+
+    fn logical_artifact_bytes(self) -> Int Never! {
+        total := 0
+        loop file in self.files -> total += file.bytes.len()
+        total
+    }
+
+    // An artifact and typed receipt from an adapter's materialized digest and
+    // byte count; the plan stays the semantic authority.
+    fn materialized_artifact(self, artifact_sha256: String, artifact_bytes: Int) -> BundleArtifact Never! {
+        receipt :: BundleReceipt.from_plan_with_bytes(self, artifact_sha256, artifact_bytes)
+        BundleArtifact{
+            schema_version: self.schema_version,
+            kind: self.kind,
+            target: self.target,
+            package: self.package,
+            version: self.version,
+            artifact_name: self.artifact_name,
+            files: self.files,
+            launch: self.launch,
+            receipt: receipt
+        }
+    }
+
+    fn file_paths(self) -> [String] Never! {
+        paths := [String]{}
+        loop file in self.files -> &paths.push(file.path)
+        paths
+    }
+
+    // `jet-bundle-plan-sha256:<hex>` of the canonical plan.
+    fn identity_text(self) -> String Never! {
+        "jet-bundle-plan-sha256:{pkg_sha256_hex(self.canonical_bytes())}"
+    }
+
+    // Source paths are receipt provenance, not package meaning: the identity
+    // keeps role, digest, and byte count so identical inputs from different
+    // checkouts produce one cache key.
+    fn canonical_bytes(self) -> [U8] Never! {
+        canonical := self
+        canonical.identity = ""
+        canonical.executable_source = ""
+        loop index in 0..<canonical.inputs.len() {
+            role :: canonical.inputs[index].role
+            if role == "executable" || role == "icon" -> canonical.inputs[index].path = ""
+        }
+        pkg_bundle_canonical_bytes(canonical.to_json_tree())
+    }
+
+    fn json(self) -> String Never! {
+        pkg_bundle_canonical_text(self.to_json_tree())
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        files := [DataTree]{}
+        loop file in self.files -> &files.push(file.to_json_tree())
+        inputs := [DataTree]{}
+        loop input in self.inputs -> &inputs.push(input.to_json_tree())
+        hooks := [DataTree]{}
+        loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_json(hook))
+        game :: if self.game == {
+            .Val(declared) -> pkg_bundle_game_spec_json(declared)
+            .None -> DataTree.Null
+        }
+        updater :: if self.updater == {
+            .Val(manifest) -> manifest.to_json_tree()
+            .None -> DataTree.Null
+        }
+        pkg_bundle_object([
+            "artifact_name": DataTree.Text(self.artifact_name),
+            "files": DataTree.Array(files),
+            "game": game,
+            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
+            "identity": DataTree.Text(self.identity),
+            "kind": DataTree.Text(self.kind.as_str()),
+            "launch": self.launch.to_json_tree(),
+            "metadata": pkg_bundle_plan_metadata_json(self.metadata),
+            "package": DataTree.Text(self.package),
+            "executable_source": DataTree.Text(self.executable_source),
+            "inputs": DataTree.Array(inputs),
+            "signing_hooks": DataTree.Array(hooks),
+            "target": DataTree.Text(self.target.as_str()),
+            "updater": updater,
+            "version": DataTree.Text(self.version),
+            "schema_version": DataTree.Int(self.schema_version)
+        ])
+    }
+}
+
+// Bytes plus receipt facts ready for a platform adapter to materialize.
+pub struct BundleArtifact {
+    pub schema_version: Int
+    pub kind: BundleKind
+    pub target: BundleTarget
+    pub package: String
+    pub version: String
+    pub artifact_name: String
+    pub files: [BundleFile]
+    pub launch: LaunchDescriptor
+    pub receipt: BundleReceipt
+
+    fn digest(self) -> String Never! {
+        self.receipt.artifact_sha256
+    }
+
+    fn byte_count(self) -> Int Never! {
+        self.receipt.artifact_bytes
+    }
+
+    fn file_paths(self) -> [String] Never! {
+        paths := [String]{}
+        loop file in self.files -> &paths.push(file.path)
+        paths
+    }
+
+    fn canonical_bytes(self) -> [U8] Never! {
+        pkg_bundle_canonical_bytes(self.to_json_tree())
+    }
+
+    fn json(self) -> String Never! {
+        pkg_bundle_canonical_text(self.to_json_tree())
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "artifact_name": DataTree.Text(self.artifact_name),
+            "artifact_sha256": DataTree.Text(self.digest()),
+            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
+            "kind": DataTree.Text(self.kind.as_str()),
+            "package": DataTree.Text(self.package),
+            "receipt": self.receipt.to_json_tree(),
+            "schema_version": DataTree.Int(self.schema_version),
+            "target": DataTree.Text(self.target.as_str()),
+            "version": DataTree.Text(self.version)
+        ])
+    }
+}
+
+// Whether the artifact facts describe only the checked plan or a transport a
+// platform adapter produced.
+pub enum BundleArtifactStatus {
+    Planned
+    Materialized
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Planned -> "planned"
+            .Materialized -> "materialized"
+        }
+    }
+}
+
+// Signing state an adapter recorded. A declared hook is only `Requested`; it
+// never implies a signer ran or produced a signature.
+pub enum BundleSigningStatus {
+    NotRequested
+    Requested
+    Signed
+    Failed
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .NotRequested -> "not-requested"
+            .Requested -> "requested"
+            .Signed -> "signed"
+            .Failed -> "failed"
+        }
+    }
+}
+
+// Signing execution facts attached after a platform adapter runs.
+pub struct BundleSigningFact {
+    pub status: BundleSigningStatus
+    pub tool: String?
+    pub tool_identity: String?
+    pub tool_version: String?
+    pub diagnostic: String?
+
+    fn signed() -> BundleSigningFact Never! {
+        BundleSigningFact{status: BundleSigningStatus.Signed, tool: None, tool_identity: None, tool_version: None, diagnostic: None}
+    }
+
+    fn failed(diagnostic: String) -> BundleSigningFact Never! {
+        BundleSigningFact{status: BundleSigningStatus.Failed, tool: None, tool_identity: None, tool_version: None, diagnostic: Val(diagnostic)}
+    }
+
+    fn with_tool(self, tool: String, tool_identity: String, tool_version: String) -> BundleSigningFact Never! {
+        out := self
+        out.tool = Val(tool)
+        out.tool_identity = Val(tool_identity)
+        out.tool_version = Val(tool_version)
+        out
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "diagnostic": pkg_bundle_optional_receipt_text(self.diagnostic),
+            "status": DataTree.Text(self.status.as_str()),
+            "tool": pkg_bundle_optional_receipt_text(self.tool),
+            "tool_identity": pkg_bundle_optional_receipt_text(self.tool_identity),
+            "tool_version": pkg_bundle_optional_receipt_text(self.tool_version)
+        ])
+    }
+}
+
+// Installability verdict derived from materialization and signing evidence.
+pub enum BundleInstallability {
+    NotMaterialized
+    Installable
+    RequiresSigning
+    NotInstallable
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .NotMaterialized -> "not-materialized"
+            .Installable -> "installable"
+            .RequiresSigning -> "requires-signing"
+            .NotInstallable -> "not-installable"
+        }
+    }
+}
+
+// Identity and authority facts for the adapter that produced the transport.
+// `tool_identity` is the SHA-256 digest of the resolved executable.
+pub struct BundleMaterializerFact {
+    pub tool: String
+    pub tool_identity: String
+    pub tool_version: String
+    pub executable: String
+    pub authority: String
+    pub mechanism: String
+    pub policy: String
+
+    fn to_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "authority": DataTree.Text(pkg_bundle_receipt_safe_text(self.authority)),
+            "executable": DataTree.Text(pkg_bundle_receipt_safe_text(self.executable)),
+            "mechanism": DataTree.Text(pkg_bundle_receipt_safe_text(self.mechanism)),
+            "policy": DataTree.Text(pkg_bundle_receipt_safe_text(self.policy)),
+            "tool": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool)),
+            "tool_identity": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_identity)),
+            "tool_version": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_version))
+        ])
+    }
+}
+
+pub struct BundleFileFact {
+    pub path: String
+    pub kind: BundleFileKind
+    pub mode: Int
+    pub bytes: Int
+    pub sha256: String
+
+    fn receipt_json_tree(self) -> DataTree Never! {
+        pkg_bundle_object([
+            "bytes": DataTree.Int(self.bytes),
+            "kind": DataTree.Text(self.kind.as_str()),
+            "mode": DataTree.Int(self.mode),
+            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
+            "sha256": DataTree.Text(self.sha256)
+        ])
+    }
+}
+
+// Machine-readable facts carried beside a packaged artifact.
+pub struct BundleReceipt {
+    pub schema: String
+    pub plan_identity: String
+    pub kind: BundleKind
+    pub target: BundleTarget
+    pub package: String
+    pub version: String
+    pub executable_source: String
+    pub artifact_name: String
+    pub artifact_sha256: String
+    pub artifact_bytes: Int
+    pub files: [BundleFileFact]
+    pub launch: LaunchDescriptor
+    pub inputs: [BundleInputFact]
+    pub signing_hooks: [SigningHook]
+    pub updater: UpdaterManifest?
+    pub game: GameBundleSpec?
+    pub materializer: BundleMaterializerFact?
+    pub signing: BundleSigningFact?
+
+    fn from_plan(plan: BundlePlan, artifact_sha256: String) -> BundleReceipt Never! {
+        BundleReceipt.from_plan_with_bytes(plan, artifact_sha256, plan.logical_artifact_bytes())
+    }
+
+    fn from_plan_with_bytes(plan: BundlePlan, artifact_sha256: String, artifact_bytes: Int) -> BundleReceipt Never! {
+        files := [BundleFileFact]{}
+        loop file in plan.files {
+            &files.push(BundleFileFact{path: file.path, kind: file.kind, mode: file.mode, bytes: file.bytes.len(), sha256: file.digest()})
+        }
+        &files.sort_by(fact -> fact.path)
+        BundleReceipt{
+            schema: @PACKAGE_BUNDLE_RECEIPT_SCHEMA,
+            plan_identity: plan.identity,
+            kind: plan.kind,
+            target: plan.target,
+            package: plan.package,
+            version: plan.version,
+            executable_source: plan.executable_source,
+            artifact_name: plan.artifact_name,
+            artifact_sha256: artifact_sha256,
+            artifact_bytes: artifact_bytes,
+            files: files,
+            launch: plan.launch,
+            inputs: plan.inputs,
+            signing_hooks: plan.signing_hooks,
+            updater: plan.updater,
+            game: plan.game,
+            materializer: None,
+            signing: None
+        }
+    }
+
+    fn with_materializer(self, materializer: BundleMaterializerFact) -> BundleReceipt Never! {
+        out := self
+        out.materializer = Val(materializer)
+        out
+    }
+
+    fn with_signing(self, signing: BundleSigningFact) -> BundleReceipt Never! {
+        out := self
+        out.signing = Val(signing)
+        out
+    }
+
+    fn record_materializer(&self, materializer: BundleMaterializerFact) Never! {
+        self.materializer = Val(materializer)
+    }
+
+    fn record_signing(&self, signing: BundleSigningFact) Never! {
+        self.signing = Val(signing)
+    }
+
+    fn artifact_status(self) -> BundleArtifactStatus Never! {
+        if self.materializer == None -> return BundleArtifactStatus.Planned
+        BundleArtifactStatus.Materialized
+    }
+
+    fn signing_status(self) -> BundleSigningStatus Never! {
+        if self.signing == {
+            .Val(fact) -> fact.status
+            .None -> if self.signing_hooks.len() == 0 -> BundleSigningStatus.NotRequested else -> BundleSigningStatus.Requested
+        }
+    }
+
+    fn installability(self) -> BundleInstallability Never! {
+        if self.materializer == None -> return BundleInstallability.NotMaterialized
+        if self.signing_status() == {
+            .Failed -> BundleInstallability.NotInstallable
+            .Requested -> BundleInstallability.RequiresSigning
+            .Signed -> BundleInstallability.Installable
+            .NotRequested -> if self.target == BundleTarget.WindowsMsix -> BundleInstallability.NotInstallable else -> BundleInstallability.Installable
+        }
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        files := [DataTree]{}
+        loop file in self.files -> &files.push(file.receipt_json_tree())
+        inputs := [DataTree]{}
+        loop input in self.inputs -> &inputs.push(input.receipt_json_tree())
+        hooks := [DataTree]{}
+        loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_receipt_json(hook))
+        game :: if self.game == {
+            .Val(declared) -> pkg_bundle_game_spec_receipt_json(declared)
+            .None -> DataTree.Null
+        }
+        materializer :: if self.materializer == {
+            .Val(fact) -> fact.to_json_tree()
+            .None -> DataTree.Null
+        }
+        signing :: if self.signing == {
+            .Val(fact) -> fact.to_json_tree()
+            .None -> DataTree.Null
+        }
+        updater :: if self.updater == {
+            .Val(manifest) -> manifest.receipt_json_tree()
+            .None -> DataTree.Null
+        }
+        pkg_bundle_object([
+            "artifact_bytes": DataTree.Int(self.artifact_bytes),
+            "artifact_name": DataTree.Text(self.artifact_name),
+            "artifact_sha256": DataTree.Text(self.artifact_sha256),
+            "artifact_status": DataTree.Text(self.artifact_status().as_str()),
+            "executable_source": DataTree.Text(pkg_bundle_receipt_source(self.executable_source)),
+            "files": DataTree.Array(files),
+            "game": game,
+            "inputs": DataTree.Array(inputs),
+            "installability": DataTree.Text(self.installability().as_str()),
+            "kind": DataTree.Text(self.kind.as_str()),
+            "launch": self.launch.to_json_tree(),
+            "materializer": materializer,
+            "package": DataTree.Text(self.package),
+            "plan_identity": DataTree.Text(self.plan_identity),
+            "schema": DataTree.Text(self.schema),
+            "signing": signing,
+            "signing_hooks": DataTree.Array(hooks),
+            "signing_status": DataTree.Text(self.signing_status().as_str()),
+            "target": DataTree.Text(self.target.as_str()),
+            "updater": updater,
+            "version": DataTree.Text(self.version)
+        ])
+    }
+
+    fn canonical_bytes(self) -> [U8] Never! {
+        pkg_bundle_canonical_bytes(self.to_json_tree())
+    }
+
+    fn json(self) -> String Never! {
+        pkg_bundle_canonical_text(self.to_json_tree())
+    }
+}
+
+// The checked plan for `spec` (Rust `package_bundle_plan`).
+pub fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
+    BundlePlan.from_spec(spec)
+}
+
+// The logical artifact of `spec` (Rust `emit_package_bundle`).
+pub fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
+    Ok(BundlePlan.from_spec(spec).emit())
+}
+
+// Hooks in the reference's derived order: name, phase, program, arguments,
+// then inputs.
+fn pkg_bundle_sorted_hooks(hooks: [SigningHook]) -> [SigningHook] Never! {
+    sorted := hooks
+    &sorted.sort_by(hook -> pkg_bundle_hook_inputs_key(hook.inputs))
+    &sorted.sort_by(hook -> hook.args.join(pkg_bundle_nul()))
+    &sorted.sort_by(hook -> hook.program)
+    &sorted.sort_by(hook -> hook.phase.rank())
+    &sorted.sort_by(hook -> hook.name)
+    sorted
+}
+
+fn pkg_bundle_nul() -> String Never! {
+    String.from_bytes([U8]{U8{0}}) ?? panic("NUL is valid UTF-8")
+}
+
+fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
+    parts := [String]{}
+    loop input in inputs -> &parts.push([input.path, input.digest].join(pkg_bundle_nul()))
+    parts.join([pkg_bundle_nul(), pkg_bundle_nul()].join(""))
+}
+
+// Canonical JSON text: compact, keys in byte order, one trailing LF.
+fn pkg_bundle_canonical_text(value: DataTree) -> String Never! {
+    "{json.canonical(value)}\n"
+}
+
+fn pkg_bundle_canonical_bytes(value: DataTree) -> [U8] Never! {
+    pkg_bundle_canonical_text(value).bytes()
+}
+
+fn pkg_bundle_object(fields: [String: DataTree]) -> DataTree Never! {
+    DataTree.Object(fields)
+}
+
+fn pkg_bundle_optional_text(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(text)
+        .None -> DataTree.Null
+    }
+}
+
+fn pkg_bundle_texts(values: [String]) -> DataTree Never! {
+    items := [DataTree]{}
+    loop value in values -> &items.push(DataTree.Text(value))
+    DataTree.Array(items)
+}
+
+fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> DataTree Never! {
+    icon_values := [DataTree]{}
+    loop icon in icons {
+        &icon_values.push(pkg_bundle_object([
+            "bytes": DataTree.Int(icon.bytes.len()),
+            "format": DataTree.Text(icon.format.as_str()),
+            "name": DataTree.Text(icon.name),
+            "sha256": DataTree.Text(icon.digest()),
+            "size": DataTree.Int(icon.size)
+        ]))
+    }
+    hook_values := [DataTree]{}
+    loop hook in hooks -> &hook_values.push(pkg_bundle_signing_hook_json(hook))
+    pkg_bundle_object([
+        "categories": pkg_bundle_texts(metadata.categories),
+        "description": DataTree.Text(metadata.description),
+        "executable": DataTree.Text(spec.executable.name),
+        "executable_sha256": DataTree.Text(executable_digest),
+        "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
+        "icons": DataTree.Array(icon_values),
+        "kind": DataTree.Text(spec.kind.as_str()),
+        "identifier": DataTree.Text(metadata.identifier),
+        "name": DataTree.Text(metadata.display_name),
+        "package": DataTree.Text(spec.package),
+        "publisher": DataTree.Text(metadata.publisher),
+        "signing_hooks": DataTree.Array(hook_values),
+        "target": DataTree.Text(spec.target.as_str()),
+        "version": DataTree.Text(spec.version)
+    ])
+}
+
+fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> DataTree Never! {
+    pkg_bundle_object([
+        "categories": pkg_bundle_texts(metadata.categories),
+        "description": DataTree.Text(metadata.description),
+        "display_name": DataTree.Text(metadata.display_name),
+        "identifier": DataTree.Text(metadata.identifier),
+        "publisher": DataTree.Text(metadata.publisher)
+    ])
+}
+
+fn pkg_bundle_game_manifest_path(spec: BundleSpec) -> String Never! {
+    if spec.target == {
+        .LinuxAppImage -> "usr/share/{spec.metadata.identifier}/jet-game.json"
+        .MacOSApp -> "{spec.metadata.identifier}.app/Contents/Resources/jet-game.json"
+        .WindowsMsix -> "jet/jet-game.json"
+    }
+}
+
+fn pkg_bundle_game_asset_path(spec: BundleSpec, path: String) -> String Never! {
+    if spec.target == {
+        .LinuxAppImage -> "usr/share/{spec.metadata.identifier}/assets/{path}"
+        .MacOSApp -> "{spec.metadata.identifier}.app/Contents/Resources/assets/{path}"
+        .WindowsMsix -> "assets/{path}"
+    }
+}
+
+fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> DataTree Never! {
+    assets := [DataTree]{}
+    loop asset in game.assets {
+        &assets.push(pkg_bundle_object([
+            "bytes": DataTree.Int(asset.bytes.len()),
+            "mode": DataTree.Int(asset.mode),
+            "path": DataTree.Text(asset.path),
+            "sha256": DataTree.Text(asset.digest())
+        ]))
+    }
+    pkg_bundle_object([
+        "assets": DataTree.Array(assets),
+        "backend": DataTree.Text(game.backend),
+        "build_identity": DataTree.Text(game.build_identity),
+        "cook_mode": DataTree.Text(game.cook_mode),
+        "crash_consent": DataTree.Text(game.crash_consent),
+        "crash_reporter": DataTree.Text(game.crash_reporter),
+        "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, false),
+        "development_stripping": DataTree.Bool(game.development_stripping),
+        "export_preset": DataTree.Text(game.export_preset),
+        "format": DataTree.Text("jet.game.bundle"),
+        "profile": DataTree.Text(game.profile_name),
+        "renderer": DataTree.Text(game.renderer),
+        "source_revision": DataTree.Text(game.source_revision)
+    ])
+}
+
+fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> DataTree Never! {
+    assets := [DataTree]{}
+    loop asset in game.assets {
+        &assets.push(pkg_bundle_object([
+            "bytes": DataTree.Int(asset.bytes.len()),
+            "mode": DataTree.Int(asset.mode),
+            "path": DataTree.Text(pkg_bundle_receipt_source(asset.path)),
+            "sha256": DataTree.Text(asset.digest())
+        ]))
+    }
+    pkg_bundle_object([
+        "assets": DataTree.Array(assets),
+        "backend": DataTree.Text(pkg_bundle_receipt_safe_text(game.backend)),
+        "build_identity": DataTree.Text(pkg_bundle_receipt_safe_text(game.build_identity)),
+        "cook_mode": DataTree.Text(pkg_bundle_receipt_safe_text(game.cook_mode)),
+        "crash_consent": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_consent)),
+        "crash_reporter": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_reporter)),
+        "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, true),
+        "development_stripping": DataTree.Bool(game.development_stripping),
+        "export_preset": DataTree.Text(pkg_bundle_receipt_safe_text(game.export_preset)),
+        "format": DataTree.Text("jet.game.bundle"),
+        "profile": DataTree.Text(pkg_bundle_receipt_safe_text(game.profile_name)),
+        "renderer": DataTree.Text(pkg_bundle_receipt_safe_text(game.renderer)),
+        "source_revision": DataTree.Text(pkg_bundle_receipt_source(game.source_revision))
+    ])
+}
+
+// The crash runtime facts; the receipt form redacts sensitive text and
+// source-like paths.
+fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> DataTree Never! {
+    safe :: (value: String) -> if receipt -> pkg_bundle_receipt_safe_text(value) else -> value
+    retention_path :: if receipt -> pkg_bundle_receipt_source(runtime.retention_path) else -> runtime.retention_path
+    pkg_bundle_object([
+        "abi": DataTree.Text(safe(@GAME_CRASH_REPORTER_ABI)),
+        "installation": DataTree.Text(safe(runtime.installation)),
+        "memory": pkg_bundle_object(["max_logs": DataTree.Int(runtime.memory_logs), "max_stacks": DataTree.Int(runtime.memory_stacks)]),
+        "retention": pkg_bundle_object(["max_reports": DataTree.Int(runtime.retention_limit), "mode": DataTree.Text(safe(runtime.retention_mode)), "path": DataTree.Text(retention_path)]),
+        "routing": DataTree.Text(safe(runtime.routing)),
+        "upload_policy": DataTree.Text(safe(runtime.upload_policy))
+    ])
+}
+
+fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> DataTree Never! {
+    pkg_bundle_object([
+        "game": pkg_bundle_game_spec_json(game),
+        "package": DataTree.Text(spec.package),
+        "target": DataTree.Text(spec.target.as_str()),
+        "version": DataTree.Text(spec.version)
+    ])
+}
+
+fn pkg_bundle_signing_hook_json(hook: SigningHook) -> DataTree Never! {
+    inputs := [DataTree]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(input.path)]))
+    pkg_bundle_object([
+        "args": pkg_bundle_texts(hook.args),
+        "inputs": DataTree.Array(inputs),
+        "name": DataTree.Text(hook.name),
+        "phase": DataTree.Text(hook.phase.as_str()),
+        "program": DataTree.Text(hook.program)
+    ])
+}
+
+// Hook arguments may carry a password, token, or key: the plan keeps the
+// exact declaration for the adapter, the receipt only the argument count and
+// redaction markers.
+fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> DataTree Never! {
+    args := [DataTree]{}
+    loop _ in hook.args -> &args.push(DataTree.Text("<redacted>"))
+    inputs := [DataTree]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(pkg_bundle_receipt_source(input.path))]))
+    pkg_bundle_object([
+        "args": DataTree.Array(args),
+        "args_redacted": DataTree.Bool(true),
+        "inputs": DataTree.Array(inputs),
+        "name": DataTree.Text(hook.name),
+        "phase": DataTree.Text(hook.phase.as_str()),
+        "program": DataTree.Text(pkg_bundle_receipt_source(hook.program))
+    ])
+}
+
+fn pkg_bundle_optional_receipt_url(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(pkg_bundle_receipt_source(text))
+        .None -> DataTree.Null
+    }
+}
+
+fn pkg_bundle_optional_receipt_text(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(pkg_bundle_receipt_safe_text(text))
+        .None -> DataTree.Null
+    }
+}
+
+fn pkg_bundle_receipt_safe_text(value: String) -> String Never! {
+    if pkg_bundle_contains_sensitive_marker(value) -> return "<redacted>"
+    value
+}
+
+// A source path or URL; credentials, queries, and fragments are redacted.
+fn pkg_bundle_receipt_source(value: String) -> String Never! {
+    if value.contains("@") || value.contains("?") || value.contains("#") -> return "<redacted>"
+    pkg_bundle_receipt_safe_text(value)
+}
+
+fn pkg_bundle_contains_sensitive_marker(value: String) -> Bool Never! {
+    lower :: pkg_ascii_lower(value)
+    markers :: [String]{"password", "passphrase", "secret", "credential", "api-key", "apikey", "authorization", "bearer "}
+    loop marker in markers {
+        if lower.contains(marker) -> return true
+    }
+    false
+}
+
+// SHA-256 over the path-sorted files, each framed as path, kind, 32-bit mode,
+// and payload.
+fn pkg_bundle_artifact_digest(files: [BundleFile]) -> String Never! {
+    ordered := files
+    &ordered.sort_by(file -> file.path)
+    bytes := "jet-package-artifact-v1".bytes()
+    &bytes.push(U8{0})
+    loop file in ordered {
+        pkg_bundle_frame(&bytes, file.path.bytes())
+        pkg_bundle_frame(&bytes, file.kind.as_str().bytes())
+        pkg_bundle_push_big_endian(&bytes, file.mode, 4)
+        pkg_bundle_frame(&bytes, file.bytes)
+    }
+    pkg_sha256_hex(bytes)
+}
+
+// A 64-bit big-endian length, then the value.
+fn pkg_bundle_frame(out: &[U8], value: [U8]) Never! {
+    pkg_bundle_push_big_endian(&out, value.len(), 8)
+    loop byte in value -> &out.push(byte)
+}
+
+fn pkg_bundle_push_big_endian(out: &[U8], value: Int, width: Int) Never! {
+    shift := (width - 1) * 8
+    loop shift >= 0 {
+        &out.push(U8{(value >> shift) & 255})
+        shift -= 8
+    }
+}
+
+fn pkg_bundle_linux_launcher(executable: String) -> [U8] Never! {
+    quoted :: pkg_bundle_shell_double_quote(executable)
+    "#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$HERE/usr/bin/{quoted}\" \"$@\"\n".bytes()
+}
+
+fn pkg_bundle_shell_double_quote(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$").replace("`", "\\`")
+}
+
+fn pkg_bundle_linux_desktop_file(metadata: BundleMetadata, icon_name: String?) -> [U8] Never! {
+    lines := [String]{"[Desktop Entry]", "Type=Application", "Version=1.0", "Name={pkg_bundle_desktop_escape(metadata.display_name)}", "Exec=AppRun"}
+    if icon_name == {
+        .Val(icon) -> &lines.push("Icon={pkg_bundle_desktop_escape(icon)}")
+        .None -> {}
+    }
+    if metadata.description != "" -> &lines.push("Comment={pkg_bundle_desktop_escape(metadata.description)}")
+    &lines.push("Terminal=false")
+    if metadata.categories.len() > 0 -> &lines.push("Categories={metadata.categories.join(";")};")
+    "{lines.join("\n")}\n".bytes()
+}
+
+fn pkg_bundle_desktop_escape(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("\n", "\\n")
+}
+
+fn pkg_bundle_mac_info_plist(spec: BundleSpec, icon_name: String?) -> [U8] Never! {
+    lines := [String]{
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+        "<plist version=\"1.0\"><dict>",
+        "<key>CFBundleDisplayName</key><string>{pkg_bundle_xml_escape(spec.metadata.display_name)}</string>",
+        "<key>CFBundleExecutable</key><string>{pkg_bundle_xml_escape(spec.executable.name)}</string>",
+        "<key>CFBundleIdentifier</key><string>{pkg_bundle_xml_escape(spec.metadata.identifier)}</string>",
+        "<key>CFBundleName</key><string>{pkg_bundle_xml_escape(spec.metadata.display_name)}</string>",
+        "<key>CFBundleShortVersionString</key><string>{pkg_bundle_xml_escape(spec.version)}</string>",
+        "<key>CFBundleVersion</key><string>{pkg_bundle_xml_escape(spec.version)}</string>"
+    }
+    if icon_name == {
+        .Val(icon) -> &lines.push("<key>CFBundleIconFile</key><string>{pkg_bundle_xml_escape(icon)}</string>")
+        .None -> {}
+    }
+    &lines.push("</dict></plist>")
+    "{lines.join("\n")}\n".bytes()
+}
+
+fn pkg_bundle_windows_executable_name(name: String) -> String Never! {
+    if pkg_ascii_lower(name).ends_with(".exe") -> return name
+    "{name}.exe"
+}
+
+// The AppxManifest; the version is already normalized by the plan.
+fn pkg_bundle_windows_manifest(spec: BundleSpec, executable: String, logo: String?) -> [U8] Never! {
+    display :: pkg_bundle_xml_escape(spec.metadata.display_name)
+    publisher :: pkg_bundle_xml_escape(spec.metadata.publisher)
+    parts := [String]{
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" IgnorableNamespaces=\"uap\">\n",
+        "<Identity Name=\"{pkg_bundle_xml_escape(spec.metadata.identifier)}\" Publisher=\"{publisher}\" Version=\"{spec.version}\" />\n",
+        "<Properties>\n",
+        "<DisplayName>{display}</DisplayName>\n",
+        "<PublisherDisplayName>{publisher}</PublisherDisplayName>\n"
+    }
+    if logo == {
+        .Val(path) -> &parts.push("<Logo>{pkg_bundle_xml_escape(path)}</Logo>\n")
+        .None -> {}
+    }
+    &parts.push("</Properties>\n<Applications>\n")
+    &parts.push("<Application Id=\"App\" Executable=\"{pkg_bundle_xml_escape(executable)}\" EntryPoint=\"Windows.FullTrustApplication\">\n")
+    &parts.push("<uap:VisualElements AppListEntry=\"none\" DisplayName=\"{display}\"")
+    if logo == {
+        .Val(path) -> &parts.push(" Square44x44Logo=\"{pkg_bundle_xml_escape(path)}\" Square150x150Logo=\"{pkg_bundle_xml_escape(path)}\"")
+        .None -> {}
+    }
+    &parts.push(" />\n</Application>\n</Applications>\n</Package>\n")
+    parts.join("").bytes()
+}
+
+// One `Default` per distinct lowercase file extension, in byte order.
+fn pkg_bundle_windows_content_types(files: [BundleFile]) -> [U8] Never! {
+    extensions := [String]{}
+    loop file in files {
+        name :: file.path.cut_last("/")?.after ?? file.path
+        extension :: name.cut_last(".")?.after ?? ""
+        lower :: pkg_ascii_lower(extension)
+        if lower != "" && !extensions.contains(lower) -> &extensions.push(lower)
+    }
+    &extensions.sort()
+    parts := [String]{"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"}
+    loop extension in extensions {
+        content_type :: if extension == {
+            "xml" -> "application/xml"
+            "json" -> "application/json"
+            "exe" -> "application/octet-stream"
+            "png" -> "image/png"
+            "ico" -> "image/x-icon"
+            "icns" -> "image/icns"
+            "svg" -> "image/svg+xml"
+            else -> "application/octet-stream"
+        }
+        &parts.push("<Default Extension=\"{pkg_bundle_xml_escape(extension)}\" ContentType=\"{content_type}\"/>")
+    }
+    &parts.push("</Types>\n")
+    parts.join("").bytes()
+}
+
+// A SHA-256 hex digest as standard padded base64; text that is not hex is
+// returned unchanged.
+fn pkg_bundle_sha256_base64(digest: String) -> String Never! {
+    decoded :: hex.decode(digest) ?? return digest
+    base64.encode(decoded)
+}
+
+fn pkg_bundle_windows_block_map(files: [BundleFile]) -> [U8] Never! {
+    parts := [String]{"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">"}
+    loop file in files {
+        &parts.push("<File Name=\"{pkg_bundle_xml_escape(file.path)}\" Size=\"{file.bytes.len()}\"><Block Hash=\"{pkg_bundle_sha256_base64(file.digest())}\" /></File>")
+    }
+    &parts.push("</BlockMap>\n")
+    parts.join("").bytes()
+}
+
+fn pkg_bundle_xml_escape(value: String) -> String Never! {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
+}

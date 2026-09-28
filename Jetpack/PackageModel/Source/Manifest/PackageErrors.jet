@@ -40,7 +40,7 @@ pub enum PackageParseError {
     // D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
     BadAllocatorPolicy(detail: String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .MissingName -> "Package needs a `name` field"
             .MissingRecord(name) -> "`{name}` needs a record value"
@@ -76,7 +76,7 @@ pub enum ComposeError {
     UnknownDefault(intent: String, output: String)
     UnknownIntent(intent: String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .MembersInConfig(origin) -> "Config `{origin}` cannot declare Package members"
             .Conflict(field, left_origin, right_origin, left, right) -> "conflicting `{field}` from `{left_origin}` ({left}) and `{right_origin}` ({right})"
@@ -93,7 +93,7 @@ pub enum InlinePackageParseError {
     Structure(InlinePackageError)
     Fields(PackageParseError)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .Structure(error) -> error.message()
             .Fields(error) -> error.message()

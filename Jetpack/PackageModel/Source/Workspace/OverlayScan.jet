@@ -16,17 +16,17 @@
 @OVERLAY_CLOSE_BRACE :: 125
 
 // `(`, `[`, `{`
-fn pkg_overlay_is_open(code: Int) -> Bool !Never {
+fn pkg_overlay_is_open(code: Int) -> Bool Never! {
     code == 40 || code == 91 || code == 123
 }
 
 // `)`, `]`, `}`
-fn pkg_overlay_is_close(code: Int) -> Bool !Never {
+fn pkg_overlay_is_close(code: Int) -> Bool Never! {
     code == 41 || code == 93 || code == 125
 }
 
 // The offset just past the string literal whose opening quote precedes `at`.
-fn pkg_overlay_skip_quoted(raw: [U8], at: Int) -> Int !Never {
+fn pkg_overlay_skip_quoted(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     escaped := false
     loop cursor < raw.len() {
@@ -43,7 +43,7 @@ fn pkg_overlay_skip_quoted(raw: [U8], at: Int) -> Int !Never {
 }
 
 // The offset just past a `//` line comment whose body starts at `at`.
-fn pkg_overlay_skip_line_comment(raw: [U8], at: Int) -> Int !Never {
+fn pkg_overlay_skip_line_comment(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     loop cursor < raw.len() {
         code :: Int.from_u8(raw[cursor])
@@ -54,7 +54,7 @@ fn pkg_overlay_skip_line_comment(raw: [U8], at: Int) -> Int !Never {
 }
 
 // The offset just past a `/* … */` comment whose body starts at `at`.
-fn pkg_overlay_skip_block_comment(raw: [U8], at: Int) -> Int !Never {
+fn pkg_overlay_skip_block_comment(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     previous := -1
     loop cursor < raw.len() {
@@ -67,13 +67,13 @@ fn pkg_overlay_skip_block_comment(raw: [U8], at: Int) -> Int !Never {
 }
 
 // Whether `at` starts a word: the preceding byte is not an identifier byte.
-fn pkg_overlay_word_boundary_before(raw: [U8], at: Int) -> Bool !Never {
+fn pkg_overlay_word_boundary_before(raw: [U8], at: Int) -> Bool Never! {
     at == 0 || !pkg_bytes_is_word(pkg_bytes_code(raw, at - 1))
 }
 
 // The first offset at or after `start` where `word` occurs as a whole word
 // outside string literals and comments.
-fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> ?Int !Never {
+fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
     needle :: word.bytes()
     cursor := start
     loop cursor < raw.len() {
@@ -94,7 +94,7 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> ?Int !Never {
 
 // The first offset at or after `start` holding `wanted` outside string
 // literals and comments.
-fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> ?Int !Never {
+fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
     cursor := start
     loop cursor < raw.len() {
         at :: ~cursor
@@ -116,7 +116,7 @@ fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> ?Int !Never {
 // bytes consumed through its closing brace. Comments and string literals are
 // kept in the body and never close the block. An unclosed block consumes
 // the rest of the input.
-fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) !Never {
+fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) Never! {
     depth := 1
     out := [U8]{}
     quoted := false
@@ -130,21 +130,21 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
         peek :: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
-            out.push(byte)
+            &out.push(byte)
             if code == @OVERLAY_NEWLINE -> line_comment = false
             next
         }
         if block_comment {
-            out.push(byte)
+            &out.push(byte)
             if code == @OVERLAY_STAR && peek == @OVERLAY_SLASH {
-                out.push(raw[cursor])
+                &out.push(raw[cursor])
                 cursor += 1
                 block_comment = false
             }
             next
         }
         if quoted {
-            out.push(byte)
+            &out.push(byte)
             if {
                 escaped -> escaped = false
                 code == @OVERLAY_BACKSLASH -> escaped = true
@@ -154,8 +154,8 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
             next
         }
         if code == @OVERLAY_SLASH && (peek == @OVERLAY_SLASH || peek == @OVERLAY_STAR) {
-            out.push(byte)
-            out.push(raw[cursor])
+            &out.push(byte)
+            &out.push(raw[cursor])
             cursor += 1
             if peek == @OVERLAY_SLASH -> line_comment = true else -> block_comment = true
             next
@@ -166,19 +166,19 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
             depth -= 1
             if depth == 0 -> return (body: String.from_bytes(out) ?? "", consumed: cursor - start)
         }
-        out.push(byte)
+        &out.push(byte)
     }
     (body: String.from_bytes(out) ?? "", consumed: cursor - start)
 }
 
 // `balanced_with_len` for callers holding the text after an opening `{`.
-pub fn pkg_overlay_balanced_with_len(text: String) -> (body: String, consumed: Int) !Never {
+pub fn pkg_overlay_balanced_with_len(text: String) -> (body: String, consumed: Int) Never! {
     pkg_overlay_balanced(text.bytes(), 0)
 }
 
 // The brace depth at `stop`, or None when `stop` is inside a string literal
 // or a `//` comment.
-fn pkg_overlay_code_depth_at(raw: [U8], stop: Int) -> ?Int !Never {
+fn pkg_overlay_code_depth_at(raw: [U8], stop: Int) -> Int? Never! {
     depth := 0
     quoted := false
     escaped := false
@@ -214,7 +214,7 @@ fn pkg_overlay_code_depth_at(raw: [U8], stop: Int) -> ?Int !Never {
 }
 
 // Split on the first `:` outside string literals and brackets.
-fn pkg_overlay_split_colon(value: String) -> ?(before: String, after: String) !Never {
+fn pkg_overlay_split_colon(value: String) -> (before: String, after: String)? Never! {
     raw :: value.bytes()
     depth := 0
     quoted := false
@@ -244,7 +244,7 @@ fn pkg_overlay_split_colon(value: String) -> ?(before: String, after: String) !N
 // Split a record or list body on top-level commas. `//` markers become two
 // spaces (the comment text is kept); block comments, which nest, become
 // spaces with their line breaks kept. Blank pieces are dropped.
-pub fn pkg_overlay_top_level_commas(body: String) -> [String] !Never {
+pub fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
     raw :: body.bytes()
     out := [String]{}
     current := [U8]{}
@@ -260,7 +260,7 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] !Never {
         peek :: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
-            current.push(byte)
+            &current.push(byte)
             if code == @OVERLAY_NEWLINE -> line_comment = false
             next
         }
@@ -269,24 +269,24 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] !Never {
                 code == @OVERLAY_SLASH && peek == @OVERLAY_STAR -> {
                     cursor += 1
                     block_depth += 1
-                    current.push(U8{32})
-                    current.push(U8{32})
+                    &current.push(U8{32})
+                    &current.push(U8{32})
                 }
                 code == @OVERLAY_STAR && peek == @OVERLAY_SLASH -> {
                     cursor += 1
                     block_depth -= 1
-                    current.push(U8{32})
-                    current.push(U8{32})
+                    &current.push(U8{32})
+                    &current.push(U8{32})
                 }
-                code == @OVERLAY_NEWLINE -> current.push(byte)
+                code == @OVERLAY_NEWLINE -> &current.push(byte)
                 // One space per scalar: UTF-8 continuation bytes add nothing.
                 code >= 128 && code < 192 -> {}
-                else -> current.push(U8{32})
+                else -> &current.push(U8{32})
             }
             next
         }
         if quoted {
-            current.push(byte)
+            &current.push(byte)
             if {
                 escaped -> escaped = false
                 code == @OVERLAY_BACKSLASH -> escaped = true
@@ -298,41 +298,41 @@ pub fn pkg_overlay_top_level_commas(body: String) -> [String] !Never {
         if code == @OVERLAY_SLASH && (peek == @OVERLAY_SLASH || peek == @OVERLAY_STAR) {
             cursor += 1
             if peek == @OVERLAY_SLASH -> line_comment = true else -> block_depth = 1
-            current.push(U8{32})
-            current.push(U8{32})
+            &current.push(U8{32})
+            &current.push(U8{32})
             next
         }
         if {
             code == @OVERLAY_QUOTE -> {
                 quoted = true
-                current.push(byte)
+                &current.push(byte)
             }
             pkg_overlay_is_open(code) -> {
                 depth += 1
-                current.push(byte)
+                &current.push(byte)
             }
             pkg_overlay_is_close(code) -> {
                 depth -= 1
-                current.push(byte)
+                &current.push(byte)
             }
             code == @OVERLAY_COMMA && depth == 0 -> {
                 piece :: String.from_bytes(current) ?? ""
                 if piece.trim() != "" {
-                    out.push(piece)
+                    &out.push(piece)
                     current = [U8]{}
                 }
             }
-            else -> current.push(byte)
+            else -> &current.push(byte)
         }
     }
     last :: String.from_bytes(current) ?? ""
-    if last.trim() != "" -> out.push(last)
+    if last.trim() != "" -> &out.push(last)
     out
 }
 
 // Split an overlay body into top-level statements at newlines and commas.
 // Comments are dropped; a blank statement keeps accumulating.
-fn pkg_overlay_top_level_statements(source: String) -> [String] !Never {
+fn pkg_overlay_top_level_statements(source: String) -> [String] Never! {
     raw :: source.bytes()
     out := [String]{}
     current := [U8]{}
@@ -352,7 +352,7 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] !Never {
                 line_comment = false
                 piece :: String.from_bytes(current) ?? ""
                 if depth == 0 && piece.trim() != "" {
-                    out.push(piece)
+                    &out.push(piece)
                     current = [U8]{}
                 }
             }
@@ -366,7 +366,7 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] !Never {
             next
         }
         if quoted {
-            current.push(byte)
+            &current.push(byte)
             if {
                 escaped -> escaped = false
                 code == @OVERLAY_BACKSLASH -> escaped = true
@@ -383,34 +383,34 @@ fn pkg_overlay_top_level_statements(source: String) -> [String] !Never {
         if {
             code == @OVERLAY_QUOTE -> {
                 quoted = true
-                current.push(byte)
+                &current.push(byte)
             }
             pkg_overlay_is_open(code) -> {
                 depth += 1
-                current.push(byte)
+                &current.push(byte)
             }
             pkg_overlay_is_close(code) -> {
                 depth -= 1
-                current.push(byte)
+                &current.push(byte)
             }
             (code == @OVERLAY_NEWLINE || code == @OVERLAY_COMMA) && depth == 0 -> {
                 piece :: String.from_bytes(current) ?? ""
                 if piece.trim() != "" {
-                    out.push(piece)
+                    &out.push(piece)
                     current = [U8]{}
                 }
             }
-            else -> current.push(byte)
+            else -> &current.push(byte)
         }
     }
     last :: String.from_bytes(current) ?? ""
-    if last.trim() != "" -> out.push(last)
+    if last.trim() != "" -> &out.push(last)
     out
 }
 
 // An identifier at `at`: an ASCII letter or `_`, then letters, digits, `_`,
 // or `-`. Returns the identifier and the offset after it.
-fn pkg_overlay_read_ident(raw: [U8], at: Int) -> ?(ident: String, end: Int) !Never {
+fn pkg_overlay_read_ident(raw: [U8], at: Int) -> (ident: String, end: Int)? Never! {
     first :: pkg_bytes_code(raw, at)
     starts :: (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95
     if !starts -> return None
@@ -422,7 +422,7 @@ fn pkg_overlay_read_ident(raw: [U8], at: Int) -> ?(ident: String, end: Int) !Nev
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.
-pub fn pkg_overlay_unquote(text: String) -> String !Never {
+pub fn pkg_overlay_unquote(text: String) -> String Never! {
     value := text.trim()
     loop value.ends_with(",") {
         value = value.removesuffix(",")
@@ -434,7 +434,7 @@ pub fn pkg_overlay_unquote(text: String) -> String !Never {
 }
 
 // Remove every trailing `suffix` repetition.
-fn pkg_overlay_trim_end_all(text: String, suffix: String) -> String !Never {
+fn pkg_overlay_trim_end_all(text: String, suffix: String) -> String Never! {
     value := text
     loop value.ends_with(suffix) {
         value = value.removesuffix(suffix)
@@ -444,7 +444,7 @@ fn pkg_overlay_trim_end_all(text: String, suffix: String) -> String !Never {
 
 // `text` without `prefix` and `suffix` when it carries both, as
 // `strip_prefix(prefix).and_then(strip_suffix(suffix))`.
-fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> ?String !Never {
+fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> String? Never! {
     if !text.starts_with(prefix) -> return None
     rest :: text.removeprefix(prefix)
     if !rest.ends_with(suffix) -> return None
@@ -452,7 +452,7 @@ fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> ?S
 }
 
 // Locate the `{` that opens the `module workspace { … }` body.
-pub fn pkg_overlay_find_workspace_body_start(src: String) -> ?Int !Never {
+pub fn pkg_overlay_find_workspace_body_start(src: String) -> Int? Never! {
     raw :: src.bytes()
     namespace :: @NS_WORKSPACE.bytes()
     search := 0
@@ -467,7 +467,7 @@ pub fn pkg_overlay_find_workspace_body_start(src: String) -> ?Int !Never {
 }
 
 // The text inside `module workspace { … }`, if the source declares one.
-fn pkg_overlay_workspace_body(src: String) -> ?String !Never {
+fn pkg_overlay_workspace_body(src: String) -> String? Never! {
     start :: pkg_overlay_find_workspace_body_start(src) ?? return None
     Val(pkg_overlay_balanced(src.bytes(), start + 1).body)
 }

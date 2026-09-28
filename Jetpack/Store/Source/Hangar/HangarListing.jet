@@ -1,0 +1,331 @@
+// The Hangar store facade (Rust `jetpack::Store`): checked listing, the
+// read-only audit projection, lease inventory, whole-Hangar crash recovery,
+// and the human-readable entry identities.
+//
+// End-state roots are user-owned by default (D-JPK12, U2, U28 /
+// D-JPK-NODAEMON1=A): `JETPACK_ROOT` overrides everything, the ordinary path
+// is per-user and coordinated with file locks. Root resolution and the
+// model-only listing live in the package model (`HangarRoots`,
+// `pkg_store_list`); this facade is the checked engine boundary above it.
+
+@STORE_STAGE_DIR :: ".stage"
+@STORE_OBJECTS_DIR :: "objects"
+@STORE_CAS_DIR :: "cas"
+@STORE_REFERRERS_DIR :: "referrers"
+@STORE_PARTIAL_SUFFIX :: ".partial"
+@STORE_NIX_GC_ROOT :: "nix-gc-root"
+@STORE_BUILD_SCRATCH_DIR :: "build-scratch"
+@STORE_FAILED_SCRATCH_DIR :: "failed-scratch"
+@STORE_AUTO_CLEAN_STAMP :: ".last-auto-clean"
+@STORE_STALE_AFTER_SECONDS :: 2592000
+@STORE_AUTO_CLEAN_AFTER_SECONDS :: 86400
+@STORE_MAX_GC_METADATA_BYTES :: 1048576
+@STORE_LEASE_NAME_MAX :: 256
+
+store_optimize_sequence := 0
+store_gc_quarantine_sequence := 0
+
+// Active and stale executable leases.
+pub struct LeaseInventory {
+    pub active: Int
+    pub stale: Int
+}
+
+// The audit projection: every committed entry and the lease inventory.
+pub struct AuditSnapshot {
+    pub entries: [StoreEntry]
+    pub leases: LeaseInventory
+}
+
+// The package records of this root (the checked model listing). The Rust
+// process memo keyed by the WAL identity stamp is a performance cache only;
+// every call reads the committed projection.
+pub fn store_list_unlocked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+    pkg_store_list_checked(roots)
+}
+
+// Inspect package projections without taking a lock or replaying journals.
+// Health/reporting paths use this so observation cannot create or repair
+// store state.
+pub fn store_list_read_only(roots: HangarRoots) -> [StoreEntry] Never! {
+    pkg_store_list(roots)
+}
+
+// Strictly read the committed package projection without taking the Hangar
+// lock or replaying a migration. Audit uses this boundary so observation
+// cannot publish a repaired projection as a side effect.
+pub fn store_list_read_only_checked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+    pkg_store_list_checked(roots)
+}
+
+pub fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
+    if name == {
+        "build-scratch" | "failed-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "lifecycle-db" | "quarantine" | "receipts" | "seals" | "stage" | ".archive-stage" | "reproducibility-staging" | "unreproducible" -> true
+        else -> false
+    }
+}
+
+// Read executable-lease ownership without changing the lease directory.
+// Recovery and doctor share the same parser and kernel-lock rule so a lease
+// cannot be healthy to one command and stale to the other.
+pub fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
+    stale_flags :: store_lease_nodes_unlocked(roots)
+    active := 0
+    stale := 0
+    loop flag in stale_flags {
+        if {
+            flag -> stale += 1
+            else -> active += 1
+        }
+    }
+    Ok(LeaseInventory{active, stale})
+}
+
+// Produce the audit projection without a lock, migration, journal replay, or
+// cleanup. A malformed object or committed closure cannot be omitted from a
+// successful report.
+pub fn store_audit_read_only(roots: HangarRoots) -> AuditSnapshot StoreError! {
+    graph :: store_closure_graph_read_only(roots)
+    entries :: store_list_read_only_checked(roots)
+    known := [String: Bool]{}
+    loop entry in entries -> known[entry.id] = true
+
+    hangar :: roots.hangar_dir()
+    if files.list_dir(hangar) == {
+        .Ok(directory) -> {
+            loop entry in directory {
+                if !entry.is_dir -> next
+                if store_is_hangar_internal_directory(entry.name) -> next
+                if !known.has_key(entry.name) {
+                    return Err(StoreError.InvalidData("Hangar object `{entry.name}` has missing or malformed metadata"))
+                }
+            }
+        }
+        .Err(error) -> if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+    }
+
+    loop id in store_sorted_record_ids(graph) {
+        if !known.has_key(id) {
+            return Err(StoreError.InvalidData("closure graph has package record `{id}` but its metadata projection is missing"))
+        }
+    }
+
+    loop entry in entries {
+        record :: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
+        metadata :: files.read(files.join(files.join(hangar, entry.id), "meta.json"))
+        if metadata != record.package_meta {
+            return Err(StoreError.InvalidData("metadata projection for `{entry.id}` disagrees with the committed closure record"))
+        }
+        expected_outputs := ~entry.named_outputs
+        expected_outputs["out"] = entry.envelope.output_hash
+        if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) || (record.producer_record != "" && record.producer_record != entry.producer_record) {
+            return Err(StoreError.InvalidData("closure graph for `{entry.id}` disagrees with its metadata projection"))
+        }
+        if entry.envelope.output_hash == "" {
+            return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
+        }
+        canonical_hangar :: files.canonicalize(hangar) ?? hangar
+        hangar_root :: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+        actual :: store_read_only_output_hash(entry.out, hangar_root, entry.platform_artifact_kind != "") ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be hashed: {err.message()}"))
+        if actual != entry.envelope.output_hash {
+            return Err(StoreError.InvalidData("Hangar object `{entry.id}` failed its content digest: expected {entry.envelope.output_hash}, got {actual}"))
+        }
+        if entry.producer_record != "" {
+            ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` has an invalid producer record: {err.message()}"))
+        }
+    }
+
+    Ok(AuditSnapshot{entries: entries, leases: store_inspect_leases(roots)})
+}
+
+// The package record ids of `graph` in Rust `BTreeMap` order.
+fn store_sorted_record_ids(graph: ClosureGraph) -> [String] Never! {
+    ids := graph.records.keys().to_list()
+    &ids.sort()
+    ids
+}
+
+// Listing is a checked engine boundary, not the model-only view: it runs the
+// same legacy closure migration used by verify, clean, and cache reuse so
+// every consumer observes one receipt-bearing projection.
+pub fn store_list_checked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    _ :: store_migrate_closure_graph_unlocked(roots)
+    entries :: store_list_unlocked(roots)
+    healthy := [StoreEntry]{}
+    loop entry in entries {
+        if entry.envelope.output_hash == "" {
+            return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
+        }
+        actual :: if store_try_entry_output_hash(roots, entry) == {
+            .Ok(actual) -> actual
+            .Err(error) -> {
+                if error.message().contains("does not exist") {
+                    // Deleted output: drop the dangling record so the
+                    // provider realizes the package again instead of failing
+                    // every call.
+                    _ :: store_tombstone_closure_record_unlocked(roots, entry.id)
+                    next
+                }
+                return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be verified: {error.message()}"))
+            }
+        }
+        if actual != entry.envelope.output_hash {
+            // Self-healing default: a drifted object is quarantined and
+            // dropped from the listing so its provider realizes it again;
+            // failing the whole operation would strand every other entry.
+            store_quarantine_malformed_objects(roots, [MalformedObject]{MalformedObject{id: entry.id, path: entry.out, reason: "digest-mismatch"}})
+            next
+        }
+        &healthy.push(entry)
+    }
+    Ok(healthy)
+}
+
+// List committed records for an explicit full Hangar audit without verifying
+// outputs; the audit loop must be the only content-hashing authority for
+// `hangar verify`.
+pub fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_list_unlocked(roots)
+}
+
+// Read package records after replaying committed closure projections.
+// Corrupt WAL fails closed as an empty list for compatibility with the
+// historical infallible listing API; integrity-sensitive callers use
+// `store_list_checked`.
+pub fn store_list(roots: HangarRoots) -> [StoreEntry] Never! {
+    store_list_checked(roots) ?? [StoreEntry]{}
+}
+
+pub fn store_migrate_legacy_hangar(roots: HangarRoots) -> Bool StoreError! {
+    store_lifecycle_migrate_legacy_hangar(roots)
+}
+
+// Recover every Hangar crash surface under one advisory-lock ownership
+// interval. The unlocked helpers are also used by already-locked operations.
+pub fn store_recover_hangar(roots: HangarRoots) -> Int StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_ensure_real_directory(roots.hangar_dir(), "Hangar root")
+    staging :: AdmissionTransaction.recover_unlocked(roots)
+    reproducibility :: store_recover_certification_staging_unlocked(roots)
+    archive :: store_recover_archive_staging_unlocked(roots)
+    repairs :: store_recover_repair_quarantine_unlocked(roots)
+    build_debug :: recipe_recover_build_scratch(roots.hangar_dir())
+    // The authenticated protocol owns both receipt validation and the
+    // lease-container sweep. The container lifetime lock is the process-tree
+    // authority; the service-owner lock authenticates the handoff but shares
+    // the managed-root inode with this recovery lock.
+    protocol :: ExecutableLeaseProtocol.open(roots.root)
+    leases :: protocol.recover_stale_leases()
+    closure :: store_recover_closure_journal_unlocked(roots)
+    migrated :: store_migrate_closure_graph_unlocked(roots)
+    Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
+}
+
+// One staleness flag per live lease node.
+fn store_lease_nodes_unlocked(roots: HangarRoots) -> [Bool] StoreError! {
+    leases :: files.join(roots.root, "leases")
+    metadata :: if files.stat(leases) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> {
+            if StoreError.Io(error).is_not_found() -> return Ok([Bool]{})
+            return Err(StoreError.Io(error))
+        }
+    }
+    if metadata.is_symlink || !metadata.is_dir {
+        return Err(StoreError.InvalidData("Hangar lease directory is not a real directory; repair the path before recovery"))
+    }
+    nodes := [Bool]{}
+    loop entry in files.list_dir(leases) {
+        text :: entry.name
+        // Executable-lease recovery quarantines are outside the live lease
+        // namespace and may remain while antivirus finishes a delete. Audit
+        // must not classify the private retry name.
+        if text.starts_with(".reclaiming-") -> next
+        if text.bytes().len() > @STORE_LEASE_NAME_MAX {
+            return Err(StoreError.InvalidData("Hangar lease name exceeds the recovery bound"))
+        }
+        if !store_lease_name_is_valid(text) {
+            return Err(StoreError.InvalidData("Hangar lease `{text}` has an invalid identity"))
+        }
+        node :: files.stat(entry.path)
+        if !node.is_dir && !node.is_symlink && !node.is_file {
+            return Err(StoreError.InvalidData("Hangar lease `{entry.path}` is not a supported filesystem node"))
+        }
+        &nodes.push(store_lease_node_is_stale(entry.path, node))
+    }
+    Ok(nodes)
+}
+
+// A lease directory is live only while its container lock is held; any
+// other lease node is stale.
+fn store_lease_node_is_stale(path: String, node: Stat) -> Bool StoreError! {
+    if !node.is_dir || node.is_symlink -> return Ok(true)
+    lock :: files.join(files.join(path, ".locks"), "live.lock")
+    Ok(env_lock_state(lock) != RuntimeLockState.Held)
+}
+
+// `<pid>-<sequence>-<entry id>` with a nonzero pid and a non-empty entry id.
+fn store_lease_name_is_valid(name: String) -> Bool Never! {
+    first :: name.split_once("-") ?? return false
+    pid :: store_parse_decimal(first.before) ?? return false
+    second :: first.after.split_once("-") ?? return false
+    _ :: store_parse_decimal(second.before) ?? return false
+    pid != 0 && pid <= 4294967295 && second.after != ""
+}
+
+// Rust `str::parse::<u64>` over ASCII decimal digits (one leading `+`
+// allowed).
+fn store_parse_decimal(text: String) -> Int? Never! {
+    digits :: text.removeprefix("+")
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    Int.parse(digits) ?? None
+}
+
+// Build the store id for a realization: human-readable `<name>-<version>`
+// first, then a short fingerprint of (ref, out) so two realizations of the
+// same name+version from different refs don't collide (D-PM1). The version
+// segment is dropped when unknown. Never hash-first: identity for
+// correctness is the lockfile, the directory name is for humans.
+pub fn store_entry_id(name: String, version: String, reference: String, out: String) -> String Never! {
+    fingerprint :: store_sha256_hex("{reference}\n{out}".bytes())
+    store_short_entry_id(name, version, fingerprint)
+}
+
+// The directory identity for a realization from its immutable output digest.
+// Provider outputs are projected into a root-local Hangar path, so hashing
+// that path would make the same locked result look different on every
+// checkout or machine.
+pub fn store_content_addressed_entry_id(name: String, version: String, reference: String, output_hash: String) -> String Never! {
+    canonical := "jet.content-entry.v1".bytes()
+    &canonical.push(U8{0})
+    store_push_bytes(&canonical, reference.bytes())
+    &canonical.push(U8{0})
+    store_push_bytes(&canonical, output_hash.bytes())
+    store_short_entry_id(name, version, store_sha256_hex(canonical))
+}
+
+fn store_short_entry_id(name: String, version: String, fingerprint: String) -> String Never! {
+    short :: pkg_bytes_text(fingerprint.bytes(), 0, 12)
+    if version == "" -> return "{name}-{short}"
+    "{name}-{version}-{short}"
+}
+
+// The identity expected for a persisted entry. Provider records whose output
+// is content-addressed use the immutable output digest; legacy records retain
+// the existing local output-path identity until they are rewritten.
+pub fn store_expected_entry_id(entry: StoreEntry) -> String Never! {
+    content_addressed :: if ProducerRecord.decode(entry.producer_record) == {
+        .Ok(producer) -> producer.provider == "nix" || producer.provider == "jetpackage"
+        .Err(_) -> false
+    }
+    if content_addressed && entry.envelope.output_hash != "" {
+        return store_content_addressed_entry_id(entry.name, entry.version, entry.reference, entry.envelope.output_hash)
+    }
+    store_entry_id(entry.name, entry.version, entry.reference, entry.out)
+}

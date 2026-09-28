@@ -1,0 +1,238 @@
+// The env-namespace evaluation core: parse a source to a `Program`, evaluate
+// every enabled `Item.Module`, run each `env.*` field through comptime (or
+// the text-level Pkg-sugar parser for `packages:`), and merge the resulting
+// contributions through the §6 engine.
+
+// Parse `src` and evaluate every enabled module it declares. `base_dir`
+// resolves `embed_file` inside contribution expressions, same as ordinary
+// comptime evaluation.
+pub fn envmodel_evaluate_source(src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+    program :: envmodel_parse_program(src)
+    Ok(envmodel_evaluate_modules(program.items, src, base_dir))
+}
+
+// The first error-severity diagnostic in `diagnostics`, if any.
+fn envmodel_first_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Val(diagnostic)
+    }
+    None
+}
+
+// The last error-severity diagnostic in `diagnostics`, if any.
+fn envmodel_last_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
+    found := None
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> found = Val(diagnostic)
+    }
+    found
+}
+
+// Lex + parse `src` to a `Program`, collapsing any lex/parse failure to a
+// single diagnostic. The module surface is evaluated, not type-checked, here,
+// so the first lexer error (or the parser's final error) is enough to stop.
+pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
+    source :: src.bytes()
+    lexed :: lex_config(source)
+    if envmodel_first_error(lexed.diagnostics) == {
+        .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
+        .None -> {}
+    }
+    parsed :: parse_config_with_source(lexed, source)
+    if envmodel_last_error(parsed.diagnostics) == {
+        .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
+        .None -> {}
+    }
+    Ok(parsed.program)
+}
+
+// Read the one config-surface spelling of environment access. The lexer has
+// already separated `$` from the following identifier, so quoted shell text
+// such as `"echo $HOME"` is not mistaken for a Jet environment read. String
+// interpolation token streams are walked recursively because they are parsed
+// as expressions by the config parser.
+pub fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalError! {
+    lexed :: lex(src.bytes())
+    if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
+    reads := [EnvironmentRead]{}
+    envmodel_collect_environment_reads(lexed.tokens, &reads)
+    Ok(reads)
+}
+
+fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentRead]) Never! {
+    tokens :: lexer_without_comments(all_tokens)
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        if token.kind == TOKEN_DOLLAR && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT {
+            name :: "${tokens[index + 1].payload.decoded}"
+            seen := false
+            loop read in reads {
+                if read.name == name -> seen = true
+            }
+            if !seen -> &reads.push(EnvironmentRead{name: name, ty: @TYPE_STRING})
+        }
+        if token.kind == TOKEN_STRING {
+            loop part in token.payload.string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, &reads)
+            }
+        }
+    }
+}
+
+// Each read's current process value (empty when unset), keyed by its `$NAME`.
+fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtValue] Never! {
+    globals := [String: CtValue]{}
+    loop read in reads {
+        name :: read.name.removeprefix("$")
+        globals[read.name] = CtValue.Str(sys.get(name) ?? "")
+    }
+    globals
+}
+
+// Evaluate every enabled `Item.Module` in `items` (already parsed).
+pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+    scope :: ModuleEvalScope{base_dir: base_dir, funcs: envmodel_collect_funcs(items)}
+    reads :: envmodel_environment_reads(src)
+    globals :: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
+    out := [EvaluatedModule]{}
+    loop item in items {
+        if item == {
+            .Module(module) -> {
+                if module.auto_discovered -> &out.push(envmodel_evaluate_module(module, src, scope, globals))
+            }
+            else -> {}
+        }
+    }
+    Ok(out)
+}
+
+fn envmodel_collect_funcs(items: [Item]) -> [String: Func] Never! {
+    funcs := [String: Func]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> funcs[function.name] = function
+            else -> {}
+        }
+    }
+    funcs
+}
+
+// Resolve module-level immutable comptime values before any namespace field
+// runs. Module fields are allowed to use these values, but they must enter
+// through the same dependency, purity, and deterministic-value path as
+// sibling fields. In particular, a self-reference is a real cycle, not an
+// unresolved-name fallback.
+fn envmodel_collect_comptime_globals(items: [Item], scope: ModuleEvalScope, environment_globals: [String: CtValue]) -> [String: CtValue] EnvModelEvalError! {
+    definitions := [String: NamedFieldExpr]{}
+    loop item in items {
+        if item == {
+            .Const(definition) -> {
+                if definition.is_comptime {
+                    definitions[definition.name.removeprefix(@COMPTIME_MARK)] = NamedFieldExpr{span: definition.name_span, expr: definition.value}
+                }
+            }
+            else -> {}
+        }
+    }
+    computed :: envmodel_evaluate_named_fields(definitions, environment_globals, scope, None, "module-level comptime values must have a deterministic dependency order", "break the cycle by making one value independent or by moving the shared computation into a pure function")
+    Ok(computed.values)
+}
+
+fn envmodel_evaluate_module(module: ModuleDecl, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> EvaluatedModule EnvModelEvalError! {
+    entries := [ModuleEntry]{}
+    images := [ImagePlan]{}
+    environment_contributions := [EnvironmentContribution]{}
+    package_profiles := [PackageProfileSpec]{}
+    integrations :: envmodel_evaluate_integration_imports(module.imports, scope, globals)
+    source_bytes :: src.bytes()
+    loop contribution in module.contributions {
+        source :: "{module.name}.{contribution.path}"
+        if contribution.value == {
+            .Expr(value) -> {
+                if contribution.namespace == {
+                    .Env -> {
+                        capture :: envmodel_evaluate_env_contribution(value, src, scope, globals, source)
+                        reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
+                        &environment_contributions.push(capture.contribution(contribution.path, reads, [DevServicePlan]{}))
+                        &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
+                    }
+                    .Profile -> &package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, module.name))
+                    else -> panic("contribution namespace/value shape mismatch")
+                }
+            }
+            .Env(lit) -> {
+                capture :: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
+                services := [DevServicePlan]{}
+                loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
+                reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
+                &environment_contributions.push(capture.contribution(contribution.path, reads, services))
+                &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
+            }
+            .Image(lit) -> &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals))
+            .Profile(lit) -> &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, module.name))
+            // The system/fleet/vmtest tiers belong to the JetOS evaluator and
+            // performance budgets to the performance gate; none of them
+            // carries an environment fact.
+            .System(_) | .Fleet(_) | .VmTest(_) | .Perf(_) -> {}
+        }
+    }
+    Ok(EvaluatedModule{
+        name: module.name,
+        entries: entries,
+        images: images,
+        environment_contributions: environment_contributions,
+        integrations: integrations,
+        package_profiles: package_profiles,
+    })
+}
+
+// Merge every evaluated module's contributions through the §6 engine,
+// grouping by `(namespace, path)` first, in first-seen key order.
+pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
+    keys := [ModuleEntryKey]{}
+    grouped := [[EntryContribution]]{}
+    loop module in modules {
+        loop keyed in module.entries {
+            index := -1
+            loop position in 0..<keys.len() {
+                if keys[position] == keyed.key {
+                    index = position
+                    break
+                }
+            }
+            if index < 0 {
+                &keys.push(keyed.key)
+                &grouped.push([EntryContribution]{keyed.entry})
+            } else {
+                group := grouped[index]
+                &group.push(keyed.entry)
+                grouped[index] = group
+            }
+        }
+    }
+    out := [MergedModuleEntry]{}
+    loop position in 0..<keys.len() -> &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
+    Ok(out)
+}
+
+// One merged `(namespace, path)` entry.
+pub struct MergedModuleEntry {
+    pub key: ModuleEntryKey
+    pub entry: MergedEntry
+}
+
+// The merged entry for `key`, if any module contributed to it.
+pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -> MergedEntry? Never! {
+    loop item in merged {
+        if item.key == key -> return Val(item.entry)
+    }
+    None
+}
+
+// Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
+// sugar's empty source) resolves against the conventional `default` source.
+pub fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
+    if pkg.source == "" && pkg.name.contains(@REF_PROVIDER_AT) -> return pkg.name
+    source :: if pkg.source == "" -> @DEFAULT_SOURCE else -> pkg.source
+    "{pkg.name}{@REF_PROVIDER_AT}{source}"
+}

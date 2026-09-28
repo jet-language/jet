@@ -11,7 +11,7 @@
 // normalization of Rust `Path::components`: repeated and trailing `/` and
 // interior `.` vanish; empty, absolute, backslash or NUL paths, a leading
 // `.`, and any `..` are refused.
-pub fn nix_import_path_components(relative: String) -> [String] !NixError {
+pub fn nix_import_path_components(relative: String) -> [String] NixError! {
     if relative == "" || relative.starts_with("/") || nixeval_contains_byte(relative, 92) || nixeval_contains_byte(relative, 0) {
         return Err(NixError.ImportPath)
     }
@@ -25,7 +25,7 @@ pub fn nix_import_path_components(relative: String) -> [String] !NixError {
                 if index == 0 -> return Err(NixError.ImportPath)
             }
             ".." -> return Err(NixError.ImportPath)
-            else -> components.push(segment)
+            else -> &components.push(segment)
         }
     }
     Ok(components)
@@ -38,7 +38,7 @@ pub struct NixImportMetadata {
 
     // The opened import must be a regular file within the evaluator byte
     // limit.
-    fn admit(self) !NixError {
+    fn admit(self) NixError! {
         if !self.regular_file -> return Err(NixError.ImportNotRegularFile)
         if self.length > @NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
     }
@@ -46,7 +46,7 @@ pub struct NixImportMetadata {
 
 // The text read through the handle (at most one byte past the limit) must
 // still fit: the file may have grown after its metadata was read.
-pub fn nix_import_admit_source(source: String) -> String !NixError {
+pub fn nix_import_admit_source(source: String) -> String NixError! {
     if source.bytes().len() > @NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
     Ok(source)
 }

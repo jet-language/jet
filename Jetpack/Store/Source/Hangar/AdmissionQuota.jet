@@ -12,19 +12,19 @@
 struct StoreQuotaCandidate {
     id: String
     path: String
-    last_used_at: ?Int
+    last_used_at: Int?
 }
 
 // Reserve a small journal and metadata allowance with every admission.
 // Without this guard band, a tree that exactly fills the object budget could
 // still make the durable receipt and closure transaction exceed the ceiling.
-pub fn store_admission_reservation(incoming_bytes: Int) -> Int !Never {
+pub fn store_admission_reservation(incoming_bytes: Int) -> Int Never! {
     if incoming_bytes > @STORE_INT_MAX - @STORE_ADMISSION_RESERVE_BYTES -> return @STORE_INT_MAX
     incoming_bytes + @STORE_ADMISSION_RESERVE_BYTES
 }
 
 // The logical footprint of one admission source.
-pub fn store_admission_size(path: String) -> Int !StoreError {
+pub fn store_admission_size(path: String) -> Int StoreError! {
     store_quota_footprint(path, None)
 }
 
@@ -35,7 +35,7 @@ pub fn store_admission_size(path: String) -> Int !StoreError {
 // earlier than physical allocation requires, but it cannot undercount disk
 // pressure. The incoming stage is excluded because its bytes are supplied as
 // `incoming_bytes` instead.
-pub fn store_ensure_hangar_capacity(roots: HangarRoots, incoming_bytes: Int, excluded: ?String) !StoreError {
+pub fn store_ensure_hangar_capacity(roots: HangarRoots, incoming_bytes: Int, excluded: String?) StoreError! {
     hangar :: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     limit :: store_quota_configured_limit(roots)
@@ -55,16 +55,16 @@ pub fn store_ensure_hangar_capacity(roots: HangarRoots, incoming_bytes: Int, exc
         if store_malformed_object_reason(entry.path) != None -> next
         meta :: store_read_meta(entry.path) ?? next
         if store_is_live(entry.name, meta, live) -> next
-        candidates.push(StoreQuotaCandidate{id: entry.name, path: entry.path, last_used_at: meta.last_used_at})
+        &candidates.push(StoreQuotaCandidate{id: entry.name, path: entry.path, last_used_at: meta.last_used_at})
     }
     // Oldest known use goes first. Unknown timestamps are last because they
     // are less informative and therefore less safe to evict.
-    candidates.sort_by((left: StoreQuotaCandidate, right: StoreQuotaCandidate) -> ((left.last_used_at == None) <=> (right.last_used_at == None)).then((left.last_used_at ?? @STORE_INT_MAX) <=> (right.last_used_at ?? @STORE_INT_MAX)).then(left.id <=> right.id))
+    &candidates.sort_by((left: StoreQuotaCandidate, right: StoreQuotaCandidate) -> ((left.last_used_at == None) <=> (right.last_used_at == None)).then((left.last_used_at ?? @STORE_INT_MAX) <=> (right.last_used_at ?? @STORE_INT_MAX)).then(left.id <=> right.id))
 
     loop candidate in candidates {
         _ :: store_tombstone_closure_record_unlocked(roots, candidate.id)
         store_remove_hangar_node(candidate.path)
-        retired.push(candidate.id)
+        &retired.push(candidate.id)
         store_quota_sweep_orphans(roots, live, retired)
         if store_quota_fits(hangar, incoming_bytes, limit, excluded) -> return Ok()
     }
@@ -73,7 +73,7 @@ pub fn store_ensure_hangar_capacity(roots: HangarRoots, incoming_bytes: Int, exc
     Err(StoreError.Other("Hangar store limit exceeded: {used} bytes used + {incoming_bytes} bytes incoming exceeds {limit} bytes; no evictable objects remain"))
 }
 
-fn store_quota_configured_limit(roots: HangarRoots) -> Int !StoreError {
+fn store_quota_configured_limit(roots: HangarRoots) -> Int StoreError! {
     message :: "{@STORE_HANGAR_MAX_BYTES_ENV} or {@STORE_HANGAR_MAX_BYTES_CONFIG} must contain one positive byte count"
     value :: if sys.get(@STORE_HANGAR_MAX_BYTES_ENV) == {
         .Val(text) -> text
@@ -91,7 +91,7 @@ fn store_quota_configured_limit(roots: HangarRoots) -> Int !StoreError {
 }
 
 // The quota config file text, or `None` when it does not exist.
-fn store_quota_config_text(roots: HangarRoots) -> ?String !StoreError {
+fn store_quota_config_text(roots: HangarRoots) -> String? StoreError! {
     path :: files.join(roots.root, @STORE_HANGAR_MAX_BYTES_CONFIG)
     metadata :: if files.stat(path) == {
         .Ok(metadata) -> metadata
@@ -106,13 +106,13 @@ fn store_quota_config_text(roots: HangarRoots) -> ?String !StoreError {
     Ok(Val(files.read(path)))
 }
 
-fn store_quota_fits(hangar: String, incoming_bytes: Int, limit: Int, excluded: ?String) -> Bool !StoreError {
+fn store_quota_fits(hangar: String, incoming_bytes: Int, limit: Int, excluded: String?) -> Bool StoreError! {
     used :: store_quota_footprint(hangar, excluded)
     if used > @STORE_INT_MAX - incoming_bytes -> return Ok(false)
     Ok(used + incoming_bytes <= limit)
 }
 
-fn store_quota_footprint(path: String, excluded: ?String) -> Int !StoreError {
+fn store_quota_footprint(path: String, excluded: String?) -> Int StoreError! {
     if excluded == Val(path) -> return Ok(0)
     metadata :: files.stat(path)
     if metadata.is_symlink || metadata.is_file -> return Ok(metadata.size)
@@ -126,7 +126,7 @@ fn store_quota_footprint(path: String, excluded: ?String) -> Int !StoreError {
     Ok(total)
 }
 
-fn store_quota_sweep_orphans(roots: HangarRoots, live: LiveRoots, retired: [String]) !StoreError {
+fn store_quota_sweep_orphans(roots: HangarRoots, live: LiveRoots, retired: [String]) StoreError! {
     orphaned :: store_collect_orphaned_canonical_objects(roots, live, retired)
     loop object in orphaned -> store_remove_hangar_node(object.path)
     if orphaned.len() > 0 -> store_sync_store_directory(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR))
@@ -142,13 +142,12 @@ fn store_quota_sweep_orphans(roots: HangarRoots, live: LiveRoots, retired: [Stri
             uncertain = true
             next
         }
-        if meta.receipt != "" {
-            if !store_valid_receipt_digest(meta.receipt) {
-                uncertain = true
-            } else {
-                retained.push(meta.receipt)
-            }
+        if meta.receipt == "" -> next
+        if !store_valid_receipt_digest(meta.receipt) {
+            uncertain = true
+            next
         }
+        &retained.push(meta.receipt)
     }
     if !uncertain {
         _ :: store_sweep_receipts(roots.hangar_dir(), store_sorted_unique(retained), true)

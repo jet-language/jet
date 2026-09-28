@@ -1,0 +1,75 @@
+// D-STRUCT-EDGE1=A: package-owned import boundaries,
+// `boundaries: { deny: [{ from: "...", to: "..." }] }` (Package/Blocks.rs).
+
+// One denied import edge.
+pub struct ImportBoundary {
+    pub from: String
+    pub to: String
+
+    // Match an exact module name or one trailing subtree wildcard; `name.*`
+    // and `name*` are the same shape.
+    fn matches(self, from: String, to: String) -> Bool Never! {
+        pkg_boundary_pattern_matches(self.from, from) && pkg_boundary_pattern_matches(self.to, to)
+    }
+}
+
+fn pkg_boundary_pattern_matches(pattern: String, value: String) -> Bool Never! {
+    if !pattern.ends_with("*") -> return pattern == value
+    stem :: pattern.removesuffix("*")
+    prefix :: if stem.ends_with(".") -> stem.removesuffix(".") else -> stem
+    prefix == "" || value == prefix || value.starts_with("{prefix}.")
+}
+
+fn pkg_parse_boundary_pattern(field: String, raw: String) -> String PackageParseError! {
+    value :: raw.trim()
+    if value.bytes().len() < 2 || !value.starts_with("\"") || !value.ends_with("\"") {
+        return Err(PackageParseError.Composition("`boundaries.deny.{field}` must be a quoted module pattern"))
+    }
+    pattern :: pkg_unquote(value)
+    stars :: pkg_text_count(pattern, "*")
+    if stars > 1 || (stars == 1 && !pattern.ends_with("*")) {
+        return Err(PackageParseError.Composition("`boundaries.deny.{field}` allows at most one trailing `*` subtree wildcard"))
+    }
+    stem :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> pattern
+    if pkg_binder_trim_end_matches(stem, ".") == "" && !pattern.ends_with("*") {
+        return Err(PackageParseError.Composition("`boundaries.deny.{field}` must name a module"))
+    }
+    Ok(pattern)
+}
+
+// Parse the body of `boundaries: { deny: [ … ] }`.
+pub fn pkg_parse_boundaries(body: String) -> [ImportBoundary] PackageParseError! {
+    deny := None
+    loop entry in pkg_key_value_entries(body) {
+        if entry.key != "deny" -> return Err(PackageParseError.Composition("unknown `boundaries` field `{entry.key}`"))
+        if deny != None -> return Err(PackageParseError.Composition("`boundaries.deny` is declared more than once"))
+        deny = Val(entry.value)
+    }
+    value :: deny ?? return Ok([ImportBoundary]{})
+    list :: pkg_strip_wrapped(value.trim(), "[", "]") ?? return Err(PackageParseError.Composition("`boundaries.deny` must be a list of edge records"))
+    boundaries := [ImportBoundary]{}
+    loop piece in pkg_top_level_commas(list) {
+        entry :: piece.trim()
+        if entry == "" -> next
+        record :: pkg_strip_wrapped(entry, "{{", "}}") ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry must be an edge record"))
+        from := None
+        to := None
+        loop field in pkg_key_value_entries(record) {
+            if field.key == {
+                "from" -> {
+                    if from != None -> return Err(PackageParseError.Composition("`boundaries.deny.from` is declared more than once"))
+                    from = Val(pkg_parse_boundary_pattern("from", field.value))
+                }
+                "to" -> {
+                    if to != None -> return Err(PackageParseError.Composition("`boundaries.deny.to` is declared more than once"))
+                    to = Val(pkg_parse_boundary_pattern("to", field.value))
+                }
+                else -> return Err(PackageParseError.Composition("unknown boundary edge field `{field.key}`"))
+            }
+        }
+        edge_from :: from ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry needs `from`"))
+        edge_to :: to ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry needs `to`"))
+        &boundaries.push(ImportBoundary{from: edge_from, to: edge_to})
+    }
+    Ok(boundaries)
+}

@@ -53,12 +53,12 @@ pub struct CcNixAcquisitionRecord {
     pub abi: String
 
     // `nixpkgs:<channel>#<revision>:<system>`, the producer's immutable source.
-    fn immutable_source(self) -> String !Never {
+    fn immutable_source(self) -> String Never! {
         "nixpkgs:{self.channel}#{self.revision}:{self.system}"
     }
 
     // The signed index key for one attrpath of this record.
-    fn index_key(self, attrpath: [String]) -> IndexKey !Never {
+    fn index_key(self, attrpath: [String]) -> IndexKey Never! {
         IndexKey{channel: self.channel, revision: self.revision, system: self.system, attrpath: attrpath}
     }
 }
@@ -89,14 +89,14 @@ pub enum CcToolchainLayout {
     Fixture
     NixIndexHangar
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Fixture -> @CC_TOOLCHAIN_FIXTURE_LAYOUT
             .NixIndexHangar -> @CC_TOOLCHAIN_NIX_LAYOUT
         }
     }
 
-    fn parse(text: String) -> ?CcToolchainLayout !Never {
+    fn parse(text: String) -> CcToolchainLayout? Never! {
         if text == {
             @CC_TOOLCHAIN_FIXTURE_LAYOUT -> Val(CcToolchainLayout.Fixture)
             @CC_TOOLCHAIN_NIX_LAYOUT -> Val(CcToolchainLayout.NixIndexHangar)
@@ -111,7 +111,7 @@ pub enum CcToolchainRole {
     Linker
     Sysroot
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Compiler -> "compiler"
             .Linker -> "linker"
@@ -127,7 +127,7 @@ pub enum CcToolchainError {
     MissingDescriptor(String)
     Invalid(String)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .MissingDescriptor(target) -> "Hangar has no verified C/C++ toolchain descriptor for target `{target}`"
             .Invalid(text) -> text
@@ -135,7 +135,7 @@ pub enum CcToolchainError {
     }
 
     // Whether this is the miss for `target` (and not a corrupt record).
-    fn is_missing_descriptor(self, target: String) -> Bool !Never {
+    fn is_missing_descriptor(self, target: String) -> Bool Never! {
         if self == {
             .MissingDescriptor(missing) -> missing == target
             else -> false
@@ -176,27 +176,27 @@ pub struct CcToolchainDescriptor {
     pub envelope: Envelope
     pub producer: ProducerRecord
 
-    fn virtual_root(self) -> String !Never {
+    fn virtual_root(self) -> String Never! {
         files.join(@CC_TOOLCHAIN_VIRTUAL_BASE, self.bundle_sha256)
     }
 
-    fn virtual_bin(self) -> String !Never {
+    fn virtual_bin(self) -> String Never! {
         if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), "bin")
         files.join(self.virtual_root(), "bin")
     }
 
-    fn sysroot_path(self) -> String !Never {
+    fn sysroot_path(self) -> String Never! {
         if self.is_nix_layout() -> return self.role_virtual_root(CcToolchainRole.Sysroot)
         files.join(self.virtual_root(), self.sysroot)
     }
 
     // The virtual PATH value; a path that cannot be joined with the host
     // separator falls back to the compiler bin directory alone.
-    fn virtual_path_env(self) -[Env]> String !Never {
+    fn virtual_path_env(self) -[Env]> String Never! {
         paths := [String]{self.virtual_bin()}
         if self.is_nix_layout() {
-            paths.push(files.join(self.role_virtual_root(CcToolchainRole.Linker), "bin"))
-            loop mount in self.mounts -> paths.push(files.join(mount.destination, "bin"))
+            &paths.push(files.join(self.role_virtual_root(CcToolchainRole.Linker), "bin"))
+            loop mount in self.mounts -> &paths.push(files.join(mount.destination, "bin"))
         }
         separator :: pkg_path_separator_for_os(PlatformKey.host().os)
         loop path in paths {
@@ -205,17 +205,17 @@ pub struct CcToolchainDescriptor {
         paths.join(separator)
     }
 
-    fn identity(self) -> String !Never {
+    fn identity(self) -> String Never! {
         "{@CC_TOOLCHAIN_RECIPE_ID}\n{self.source_fingerprint()}"
     }
 
-    fn cache_identity(self, ctx: ProviderCtx) -[Env]> CacheIdentity !Never {
+    fn cache_identity(self, ctx: ProviderCtx) -[Env]> CacheIdentity Never! {
         provider_plain_cache_identity(self.source_fingerprint(), @CC_TOOLCHAIN_RECIPE_ID, ctx)
     }
 
     // The declared-only toolchain spec the build executor consumes: every tool
     // is a virtual path under read-only mounts of the verified Hangar objects.
-    fn toolchain_spec(self) -> ToolchainSpec !Never {
+    fn toolchain_spec(self) -> ToolchainSpec Never! {
         provenance :: BuildProvenance.jetpack_dependency("{@CC_TOOLCHAIN_PACKAGE}@{@CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", self.bundle_sha256))
         spec := ToolchainSpec.target(self.target, provenance)
         spec = spec.with_host_triple(self.host)
@@ -238,31 +238,31 @@ pub struct CcToolchainDescriptor {
         spec.with_read_only_mount_identity(self.root, self.virtual_root(), self.bundle_sha256)
     }
 
-    fn is_nix_layout(self) -> Bool !Never {
+    fn is_nix_layout(self) -> Bool Never! {
         self.layout == CcToolchainLayout.NixIndexHangar
     }
 
-    fn role_virtual_root(self, role: CcToolchainRole) -> String !Never {
+    fn role_virtual_root(self, role: CcToolchainRole) -> String Never! {
         files.join(self.virtual_root(), role.label())
     }
 
-    fn compiler_virtual_path(self) -> String !Never {
+    fn compiler_virtual_path(self) -> String Never! {
         if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.compiler)
         files.join(self.virtual_root(), self.compiler)
     }
 
-    fn cxx_virtual_path(self) -> String !Never {
+    fn cxx_virtual_path(self) -> String Never! {
         if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.cxx)
         files.join(self.virtual_root(), self.cxx)
     }
 
-    fn linker_virtual_path(self) -> String !Never {
+    fn linker_virtual_path(self) -> String Never! {
         if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Linker), self.linker)
         files.join(self.virtual_root(), self.linker)
     }
 
     // The digest of the mount whose source is the linker root, or the bundle.
-    fn linker_root_digest(self) -> String !Never {
+    fn linker_root_digest(self) -> String Never! {
         loop mount in self.mounts {
             if mount.source == self.linker_root -> return mount.digest
         }
@@ -270,9 +270,9 @@ pub struct CcToolchainDescriptor {
     }
 
     // The cache source identity: every field that names the toolchain bytes.
-    fn source_fingerprint(self) -> String !Never {
+    fn source_fingerprint(self) -> String Never! {
         mounts := [String]{}
-        loop mount in self.mounts -> mounts.push("{mount.store_path}={mount.digest}")
+        loop mount in self.mounts -> &mounts.push("{mount.store_path}={mount.digest}")
         lines :: [String]{
             @CC_TOOLCHAIN_RECIPE_ID,
             "layout={self.layout.label()}",
@@ -318,7 +318,7 @@ pub struct CcBundleManifest {
 
     // Parse and validate manifest text read from `file_name` for the
     // normalized `target`. `host` is this machine's target triple.
-    fn parse(text: String, file_name: String, target: String, host: String) -[Env]> CcBundleManifest !CcToolchainError {
+    fn parse(text: String, file_name: String, target: String, host: String) -[Env]> CcBundleManifest CcToolchainError! {
         value :: json.parse(text) ?? {
             return Err(CcToolchainError.Invalid("parse C toolchain manifest: {err.reason}"))
         }
@@ -352,7 +352,7 @@ pub struct CcBundleManifest {
         Ok(manifest)
     }
 
-    fn validate_shape(self) !CcToolchainError {
+    fn validate_shape(self) CcToolchainError! {
         provider_cc_validate_relative_path(self.bundle)
         relative_paths :: [String]{self.compiler, self.cxx, self.linker, self.sysroot}
         loop path in relative_paths {
@@ -369,7 +369,7 @@ pub struct CcBundleManifest {
     }
 
     // The fixture-layout producer facts.
-    fn facts(self) -> [String: String] !Never {
+    fn facts(self) -> [String: String] Never! {
         [String: String]{
             "cc.schema": @CC_TOOLCHAIN_SCHEMA,
             "cc.producer": @CC_TOOLCHAIN_PRODUCER,
@@ -398,7 +398,7 @@ pub struct CcBundleManifest {
     }
 
     // The fixture descriptor rooted at the published bundle directory.
-    fn descriptor(self, root: String, entry_id: String) -> CcToolchainDescriptor !Never {
+    fn descriptor(self, root: String, entry_id: String) -> CcToolchainDescriptor Never! {
         plan :: ProviderPlanFacts.from_facts([String: String]{
             "action.kind": "cc-toolchain-provision",
             "action.recipe": @CC_TOOLCHAIN_RECIPE_ID
@@ -434,13 +434,13 @@ pub struct CcBundleManifest {
 }
 
 // The single mount of a fixture bundle: its root at the virtual root.
-fn provider_cc_fixture_mount(root: String, bundle_sha256: String) -> CcMount !Never {
+fn provider_cc_fixture_mount(root: String, bundle_sha256: String) -> CcMount Never! {
     CcMount{store_path: "", digest: bundle_sha256, source: root, destination: files.join(@CC_TOOLCHAIN_VIRTUAL_BASE, bundle_sha256)}
 }
 
 // Whether a package ref names the one C/C++ toolchain package. It stays in
 // the existing native provider rather than adding a second ProviderKind.
-pub fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool !Never {
+pub fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
     package :: spec.package.split_once("#")?.before ?? spec.package
     if package != @CC_TOOLCHAIN_PACKAGE -> return false
     if spec.source == {
@@ -452,7 +452,7 @@ pub fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool !Never {
 
 // The normalized target a ref selects: the host without a selector, or the
 // explicit `#target=<target-triple>`.
-pub fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String !CcToolchainError {
+pub fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcToolchainError! {
     selector :: spec.package.split_once("#")?.after ?? ""
     if selector == "" -> return provider_cc_normalize_target(provider_cc_toolchain_host_target_triple())
     if !selector.starts_with("target=") || selector == "target=" {
@@ -461,12 +461,12 @@ pub fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String !CcT
     provider_cc_normalize_target(selector.removeprefix("target="))
 }
 
-pub fn provider_cc_toolchain_host_target_triple() -[Env]> String !Never {
+pub fn provider_cc_toolchain_host_target_triple() -[Env]> String Never! {
     provider_cc_target_triple_for(PlatformKey.host())
 }
 
 // The target triple Rust spells for an `arch`/`os` host key.
-fn provider_cc_target_triple_for(host: PlatformKey) -> String !Never {
+fn provider_cc_target_triple_for(host: PlatformKey) -> String Never! {
     if host.os == {
         @OS_LINUX -> "{host.arch}-unknown-linux-gnu"
         @OS_MACOS -> "{host.arch}-apple-darwin"
@@ -477,7 +477,7 @@ fn provider_cc_target_triple_for(host: PlatformKey) -> String !Never {
 
 // `native`/`host` select the host; any other target must be a short token of
 // ASCII letters, digits, `.`, `_`, and `-`.
-fn provider_cc_normalize_target(target: String) -[Env]> String !CcToolchainError {
+fn provider_cc_normalize_target(target: String) -[Env]> String CcToolchainError! {
     normalized :: if target == {
         "native" | "host" -> provider_cc_toolchain_host_target_triple()
         else -> target
@@ -486,7 +486,7 @@ fn provider_cc_normalize_target(target: String) -[Env]> String !CcToolchainError
     Ok(normalized)
 }
 
-fn provider_cc_is_target_token(target: String) -> Bool !Never {
+fn provider_cc_is_target_token(target: String) -> Bool Never! {
     raw :: target.bytes()
     if raw.len() == 0 || raw.len() > @CC_TOOLCHAIN_MAX_TARGET_BYTES -> return false
     loop byte in raw {
@@ -496,24 +496,24 @@ fn provider_cc_is_target_token(target: String) -> Bool !Never {
     true
 }
 
-fn provider_cc_is_ascii_alnum(code: Int) -> Bool !Never {
+fn provider_cc_is_ascii_alnum(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
 // The pinned acquisition record for a target, or a teaching error listing the
 // supported targets.
-fn provider_cc_acquisition_record(target: String) -[Env]> CcNixAcquisitionRecord !CcToolchainError {
+fn provider_cc_acquisition_record(target: String) -[Env]> CcNixAcquisitionRecord CcToolchainError! {
     normalized :: provider_cc_normalize_target(target)
     supported := [String]{}
     loop record in @CC_NIX_ACQUISITION_RECORDS {
         if record.target == normalized -> return Ok(record)
-        supported.push(record.target)
+        &supported.push(record.target)
     }
     Err(CcToolchainError.Invalid("no signed C/C++ toolchain acquisition record supports target `{normalized}`; supported targets: {supported.join(", ")}"))
 }
 
 // A Hangar Nix-layout record must repeat the pinned acquisition exactly.
-fn provider_cc_validate_pinned_nix_descriptor(producer: ProducerRecord, record: CcNixAcquisitionRecord) !CcToolchainError {
+fn provider_cc_validate_pinned_nix_descriptor(producer: ProducerRecord, record: CcNixAcquisitionRecord) CcToolchainError! {
     expected_source :: record.immutable_source()
     if producer.immutable_source != expected_source {
         return Err(CcToolchainError.Invalid("immutable source `{producer.immutable_source}` does not match pinned C/C++ record `{record.id}`"))
@@ -542,7 +542,7 @@ fn provider_cc_validate_pinned_nix_descriptor(producer: ProducerRecord, record: 
 
 // Whether a Hangar producer record was written by this provider, in either
 // layout.
-fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool !Never {
+fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
     layout :: producer.facts.get("cc.layout") ?? ""
     if producer.provider == @CC_TOOLCHAIN_PRODUCER -> return layout == @CC_TOOLCHAIN_FIXTURE_LAYOUT
     if producer.provider == @CC_TOOLCHAIN_NIX_PRODUCER {
@@ -553,23 +553,23 @@ fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool !Never {
 
 // `Path::components` over a validated relative path: its normal parts, with
 // empty and `.` segments dropped.
-fn provider_cc_path_parts(path: String) -> [String] !Never {
+fn provider_cc_path_parts(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        parts.push(part)
+        &parts.push(part)
     }
     parts
 }
 
-fn provider_cc_validate_relative_path(path: String) !CcToolchainError {
+fn provider_cc_validate_relative_path(path: String) CcToolchainError! {
     if provider_cc_is_relative_path(path) -> return Ok()
     Err(CcToolchainError.Invalid("`{path}` is not a normalized relative path"))
 }
 
 // Non-empty, not absolute, no leading `.` component, no `..` component, and
 // no NUL byte.
-fn provider_cc_is_relative_path(path: String) -> Bool !Never {
+fn provider_cc_is_relative_path(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
     loop byte in path.bytes() {
         if Int.from_u8(byte) == 0 -> return false
@@ -582,7 +582,7 @@ fn provider_cc_is_relative_path(path: String) -> Bool !Never {
     true
 }
 
-fn provider_cc_validate_nix_store_path(path: String) !CcToolchainError {
+fn provider_cc_validate_nix_store_path(path: String) CcToolchainError! {
     if !path.starts_with(@CC_TOOLCHAIN_NIX_STORE_PREFIX) {
         return Err(CcToolchainError.Invalid("`{path}` is not an absolute Nix store path"))
     }
@@ -606,7 +606,7 @@ fn provider_cc_validate_nix_store_path(path: String) !CcToolchainError {
 
 // Version and ABI text: non-blank, with no control byte or path separator,
 // so it can never escape a publication path.
-fn provider_cc_validate_text_field(value: String, label: String) !CcToolchainError {
+fn provider_cc_validate_text_field(value: String, label: String) CcToolchainError! {
     if value.trim() == "" -> return Err(CcToolchainError.Invalid("{label}: value is empty"))
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
@@ -617,7 +617,7 @@ fn provider_cc_validate_text_field(value: String, label: String) !CcToolchainErr
     Ok()
 }
 
-fn provider_cc_validate_sha256(value: String, label: String) !CcToolchainError {
+fn provider_cc_validate_sha256(value: String, label: String) CcToolchainError! {
     raw :: value.bytes()
     if raw.len() != 64 -> return Err(CcToolchainError.Invalid("{label} is not a lowercase SHA-256 digest"))
     loop byte in raw {
@@ -629,14 +629,14 @@ fn provider_cc_validate_sha256(value: String, label: String) !CcToolchainError {
     Ok()
 }
 
-fn provider_cc_validate_tree_digest(value: String, label: String) !CcToolchainError {
+fn provider_cc_validate_tree_digest(value: String, label: String) CcToolchainError! {
     if !value.starts_with("sha256-") -> return Err(CcToolchainError.Invalid("{label} is not a Hangar SHA-256 digest"))
     provider_cc_validate_sha256(value.removeprefix("sha256-"), label)
 }
 
 // The Nix-layout producer facts: pinned record, signed index proofs, admitted
 // closure objects, role roots, and every mount.
-fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord, compiler: AdmittedNixObject, linker: AdmittedNixObject, sysroot: AdmittedNixObject, sysroot_store_path: String, compiler_sha256: String, cxx_sha256: String, linker_sha256: String, mounts: [CcMount], references: [String], closure_receipt: String) -> [String: String] !Never {
+fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord, compiler: AdmittedNixObject, linker: AdmittedNixObject, sysroot: AdmittedNixObject, sysroot_store_path: String, compiler_sha256: String, cxx_sha256: String, linker_sha256: String, mounts: [CcMount], references: [String], closure_receipt: String) -> [String: String] Never! {
     facts := [String: String]{
         "cc.schema": @CC_TOOLCHAIN_SCHEMA,
         "cc.producer": @CC_TOOLCHAIN_PRODUCER,
@@ -688,11 +688,11 @@ fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_
 }
 
 // `gcc-<compiler version>+lld-<linker version>`.
-fn provider_cc_nix_version(compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord) -> String !Never {
+fn provider_cc_nix_version(compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord) -> String Never! {
     "gcc-{compiler_record.record.version}+lld-{linker_record.record.version}"
 }
 
-fn provider_cc_manifest_string(object: [String: DataTree], field: String) -> String !CcToolchainError {
+fn provider_cc_manifest_string(object: [String: DataTree], field: String) -> String CcToolchainError! {
     value :: object.get(field) ?? return Err(CcToolchainError.Invalid("C toolchain manifest misses `{field}`"))
     if value == {
         .Text(text) -> Ok(text)
@@ -700,7 +700,7 @@ fn provider_cc_manifest_string(object: [String: DataTree], field: String) -> Str
     }
 }
 
-fn provider_cc_manifest_number(object: [String: DataTree], field: String) -> Int !CcToolchainError {
+fn provider_cc_manifest_number(object: [String: DataTree], field: String) -> Int CcToolchainError! {
     value :: object.get(field) ?? DataTree.Null
     if value == {
         .Int(number) -> Ok(number)
@@ -708,7 +708,7 @@ fn provider_cc_manifest_number(object: [String: DataTree], field: String) -> Int
     }
 }
 
-fn provider_cc_manifest_object(value: DataTree) -> ?[String: DataTree] !Never {
+fn provider_cc_manifest_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None

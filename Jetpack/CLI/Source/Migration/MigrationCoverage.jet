@@ -10,12 +10,12 @@ pub struct CoveragePackage {
     pub version: String
     pub reference: String
 
-    fn new(name: String, version: String, reference: String) -> CoveragePackage !Never {
+    fn new(name: String, version: String, reference: String) -> CoveragePackage Never! {
         CoveragePackage{name: name, version: version, reference: reference}
     }
 
     // Name and reference must not be blank.
-    fn validate(self) !CoverageError {
+    fn validate(self) CoverageError! {
         if self.name.trim() == "" -> return Err(CoverageError.EmptyField{field: "name", package: self.name})
         if self.reference.trim() == "" -> return Err(CoverageError.EmptyField{field: "reference", package: self.name})
     }
@@ -29,7 +29,7 @@ pub enum CoverageBucket {
     LocalImport
     NotYetImported
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .NativeRecipe -> "native recipe"
             .CentrallyImportedRecipe -> "centrally imported recipe"
@@ -47,7 +47,7 @@ pub struct CoverageInput {
     pub centrally_imported_recipes: [CoveragePackage]
     pub local_imports: [CoveragePackage]
 
-    fn empty() -> CoverageInput !Never {
+    fn empty() -> CoverageInput Never! {
         CoverageInput{inventory: [CoveragePackage]{}, native_recipes: [CoveragePackage]{}, centrally_imported_recipes: [CoveragePackage]{}, local_imports: [CoveragePackage]{}}
     }
 }
@@ -71,7 +71,7 @@ pub struct CoverageReport {
 
     // Assign every listed package to exactly one inventory bucket; whatever
     // no bucket claims is not yet imported. Each bucket is in identity order.
-    fn from_input(input: CoverageInput) -> CoverageReport !CoverageError {
+    fn from_input(input: CoverageInput) -> CoverageReport CoverageError! {
         inventory :: cli_coverage_unique(input.inventory, None)
         assigned := [(package: CoveragePackage, bucket: CoverageBucket)]{}
         native_recipes :: cli_coverage_assign(input.native_recipes, CoverageBucket.NativeRecipe, inventory, &assigned)
@@ -79,7 +79,7 @@ pub struct CoverageReport {
         local_imports :: cli_coverage_assign(input.local_imports, CoverageBucket.LocalImport, inventory, &assigned)
         not_yet_imported := [CoveragePackage]{}
         loop package in inventory {
-            if cli_coverage_bucket_of(assigned, package) == None -> not_yet_imported.push(package)
+            if cli_coverage_bucket_of(assigned, package) == None -> &not_yet_imported.push(package)
         }
         total :: native_recipes.len() + centrally_imported_recipes.len() + local_imports.len() + not_yet_imported.len()
         nativeized :: native_recipes.len()
@@ -94,7 +94,7 @@ pub struct CoverageReport {
     }
 
     // Compact human-readable projection of the report.
-    fn to_human(self) -> String !Never {
+    fn to_human(self) -> String Never! {
         lines :: [String]{
             "native recipes: {self.native_recipes.len()}",
             "centrally imported recipes: {self.centrally_imported_recipes.len()}",
@@ -114,7 +114,7 @@ pub enum CoverageError {
     PackageOutsideInventory(bucket: CoverageBucket, package: String)
     PackageInMultipleBuckets(package: String, first: CoverageBucket, second: CoverageBucket)
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         if self == {
             .EmptyField(field, package) -> "coverage package `{package}` has empty `{field}`"
             .DuplicateInventory(package) -> "coverage inventory repeats `{package}`"
@@ -127,7 +127,7 @@ pub enum CoverageError {
 
 // Valid packages without repeats, in identity order. `bucket` names the
 // list for the repeat error; None is the inventory.
-fn cli_coverage_unique(packages: [CoveragePackage], bucket: ?CoverageBucket) -> [CoveragePackage] !CoverageError {
+fn cli_coverage_unique(packages: [CoveragePackage], bucket: CoverageBucket?) -> [CoveragePackage] CoverageError! {
     unique := [CoveragePackage]{}
     loop package in packages {
         package.validate()
@@ -137,16 +137,16 @@ fn cli_coverage_unique(packages: [CoveragePackage], bucket: ?CoverageBucket) -> 
                 .None -> return Err(CoverageError.DuplicateInventory(package.name))
             }
         }
-        unique.push(package)
+        &unique.push(package)
     }
     // Identity order: name, then version, then reference.
-    unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
+    &unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
     Ok(unique)
 }
 
 // The bucket's packages in identity order, each recorded in `assigned`. A
 // package outside the inventory or already in another bucket is an error.
-fn cli_coverage_assign(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: &[(package: CoveragePackage, bucket: CoverageBucket)]) -> [CoveragePackage] !CoverageError {
+fn cli_coverage_assign(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: &[(package: CoveragePackage, bucket: CoverageBucket)]) -> [CoveragePackage] CoverageError! {
     unique :: cli_coverage_unique(packages, Val(bucket))
     loop package in unique {
         if !inventory.contains(package) -> return Err(CoverageError.PackageOutsideInventory{bucket: bucket, package: package.name})
@@ -154,12 +154,12 @@ fn cli_coverage_assign(packages: [CoveragePackage], bucket: CoverageBucket, inve
             .Val(first) -> return Err(CoverageError.PackageInMultipleBuckets{package: package.name, first: first, second: bucket})
             .None -> {}
         }
-        assigned.push((package: package, bucket: bucket))
+        &assigned.push((package: package, bucket: bucket))
     }
     Ok(unique)
 }
 
-fn cli_coverage_bucket_of(assigned: [(package: CoveragePackage, bucket: CoverageBucket)], package: CoveragePackage) -> ?CoverageBucket !Never {
+fn cli_coverage_bucket_of(assigned: [(package: CoveragePackage, bucket: CoverageBucket)], package: CoveragePackage) -> CoverageBucket? Never! {
     loop entry in assigned {
         if entry.package == package -> return Val(entry.bucket)
     }

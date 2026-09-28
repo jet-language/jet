@@ -31,7 +31,7 @@ pub enum CacheEndpoint {
     S3(String)
     Hangar
 
-    fn capabilities(self) -> CacheEndpointCapabilities !Never {
+    fn capabilities(self) -> CacheEndpointCapabilities Never! {
         if self == {
             .Local(_) -> CacheEndpointCapabilities{read: true, write: true, promote: true, remote_execute: false, trust: true, credential: false, credential_required: false}
             // Hangar is the source store, not a cache publication transport.
@@ -44,7 +44,7 @@ pub enum CacheEndpoint {
         }
     }
 
-    fn label(self) -> String !Never {
+    fn label(self) -> String Never! {
         if self == {
             .Local(_) -> "file"
             .Http(_) -> "http"
@@ -54,7 +54,7 @@ pub enum CacheEndpoint {
         }
     }
 
-    fn is_hangar(self) -> Bool !Never {
+    fn is_hangar(self) -> Bool Never! {
         if self == {
             .Hangar -> true
             else -> false
@@ -63,7 +63,7 @@ pub enum CacheEndpoint {
 }
 
 // Parse one mirror spelling. A bare absolute path is a local mirror.
-fn store_cache_parse_endpoint(endpoint: String) -> CacheEndpoint !StoreError {
+fn store_cache_parse_endpoint(endpoint: String) -> CacheEndpoint StoreError! {
     store_cache_validate_text(endpoint, "cache endpoint")
     if endpoint == "hangar://local" || endpoint == "hangar://" -> return Ok(CacheEndpoint.Hangar)
     if endpoint.starts_with("file://") {
@@ -85,13 +85,13 @@ fn store_cache_parse_endpoint(endpoint: String) -> CacheEndpoint !StoreError {
     Ok(CacheEndpoint.Local(store_cache_absolute_endpoint_path(endpoint, "cache mirror")))
 }
 
-fn store_cache_trim_trailing_slashes(value: String) -> String !Never {
+fn store_cache_trim_trailing_slashes(value: String) -> String Never! {
     trimmed := value
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     trimmed
 }
 
-fn store_cache_absolute_endpoint_path(raw: String, label: String) -> String !StoreError {
+fn store_cache_absolute_endpoint_path(raw: String, label: String) -> String StoreError! {
     if raw == "" || !raw.starts_with("/") -> return Err(StoreError.InvalidData("{label} must contain an absolute path"))
     if raw.contains("?") || raw.contains("#") -> return Err(StoreError.InvalidData("{label} cannot contain a query or fragment"))
     store_cache_validate_path_components(raw)
@@ -100,7 +100,7 @@ fn store_cache_absolute_endpoint_path(raw: String, label: String) -> String !Sto
 
 // `ssh://host[/root]` and `ssh-ng://host[/root]`; the root defaults to
 // `/var/cache/jet`.
-fn store_cache_parse_ssh_endpoint(endpoint: String) -> CacheEndpoint !StoreError {
+fn store_cache_parse_ssh_endpoint(endpoint: String) -> CacheEndpoint StoreError! {
     parts :: endpoint.split_once("://") ?? return Err(StoreError.InvalidData("SSH endpoint is missing its scheme"))
     scheme :: parts.before
     rest :: parts.after
@@ -120,7 +120,7 @@ fn store_cache_parse_ssh_endpoint(endpoint: String) -> CacheEndpoint !StoreError
     Ok(CacheEndpoint.Ssh{target: authority, root: root})
 }
 
-fn store_cache_validate_http_base(endpoint: String) !StoreError {
+fn store_cache_validate_http_base(endpoint: String) StoreError! {
     parts :: endpoint.split_once("://") ?? return Err(StoreError.InvalidData("HTTP endpoint is missing its scheme"))
     rest :: parts.after
     segments :: rest.split("/").to_list()
@@ -131,7 +131,7 @@ fn store_cache_validate_http_base(endpoint: String) !StoreError {
     if segments.contains("..") -> return Err(StoreError.InvalidData("HTTP endpoint contains a parent path"))
 }
 
-fn store_cache_validate_s3_uri(endpoint: String) !StoreError {
+fn store_cache_validate_s3_uri(endpoint: String) StoreError! {
     if !endpoint.starts_with("s3://") -> return Err(StoreError.InvalidData("S3 endpoint is missing its scheme"))
     rest :: endpoint.removeprefix("s3://")
     segments :: rest.split("/").to_list()
@@ -147,7 +147,7 @@ fn store_cache_validate_s3_uri(endpoint: String) !StoreError {
 
 // Whether `value` holds a Unicode White_Space scalar (Rust
 // `char::is_whitespace`).
-fn store_cache_has_whitespace(value: String) -> Bool !Never {
+fn store_cache_has_whitespace(value: String) -> Bool Never! {
     raw :: value.bytes()
     loop at in 0..<raw.len() {
         if pkg_bytes_space_width(raw, at) > 0 -> return true
@@ -157,29 +157,29 @@ fn store_cache_has_whitespace(value: String) -> Bool !Never {
 
 // A remote path handed to `ssh`: absolute, no NUL, whitespace, `..`, or
 // shell metacharacter.
-fn store_cache_validate_remote_key(key: String) !StoreError {
-    unsafe := key == "" || !key.starts_with("/") || key.bytes().contains(U8{0}) || store_cache_has_whitespace(key) || key.split("/").to_list().contains("..")
+fn store_cache_validate_remote_key(key: String) StoreError! {
+    rejected := key == "" || !key.starts_with("/") || key.bytes().contains(U8{0}) || store_cache_has_whitespace(key) || key.split("/").to_list().contains("..")
     loop byte in key.bytes() {
         if Int.from_u8(byte) == {
-            39 | 34 | 96 | 36 | 59 | 38 | 124 | 60 | 62 -> unsafe = true
+            39 | 34 | 96 | 36 | 59 | 38 | 124 | 60 | 62 -> rejected = true
             else -> {}
         }
     }
-    if unsafe -> return Err(StoreError.InvalidData("remote cache path is unsafe"))
+    if rejected -> return Err(StoreError.InvalidData("remote cache path is unsafe"))
 }
 
 // A cache object key relative to its endpoint root.
-fn store_cache_validate_relative_key(key: String) !StoreError {
-    unsafe := key == "" || key.starts_with("/") || store_archive_path_components(key).contains("..")
+fn store_cache_validate_relative_key(key: String) StoreError! {
+    rejected := key == "" || key.starts_with("/") || store_archive_path_components(key).contains("..")
     loop byte in key.bytes() {
         code :: Int.from_u8(byte)
-        if code < 32 || code == 127 || code == 63 || code == 35 || code == 37 -> unsafe = true
+        if code < 32 || code == 127 || code == 63 || code == 35 || code == 37 -> rejected = true
     }
-    if unsafe -> return Err(StoreError.InvalidData("cache object key is unsafe"))
+    if rejected -> return Err(StoreError.InvalidData("cache object key is unsafe"))
 }
 
 // The endpoint-specific address of one cache object.
-fn store_cache_endpoint_key(endpoint: CacheEndpoint, key: String) -> String !StoreError {
+fn store_cache_endpoint_key(endpoint: CacheEndpoint, key: String) -> String StoreError! {
     store_cache_validate_relative_key(key)
     if endpoint == {
         .Http(base) -> Ok("{base}/{key}")
@@ -199,7 +199,7 @@ fn store_cache_endpoint_key(endpoint: CacheEndpoint, key: String) -> String !Sto
 }
 
 // Read one cache object of at most `limit` bytes; None when it is absent.
-fn store_cache_endpoint_get(endpoint: CacheEndpoint, key: String, limit: Int) -> ?[U8] !StoreError {
+fn store_cache_endpoint_get(endpoint: CacheEndpoint, key: String, limit: Int) -> [U8]? StoreError! {
     if endpoint == {
         .Local(_) -> {
             path :: store_cache_endpoint_key(endpoint, key)
@@ -217,7 +217,7 @@ fn store_cache_endpoint_get(endpoint: CacheEndpoint, key: String, limit: Int) ->
 }
 
 // Write one cache object in place.
-fn store_cache_endpoint_put(endpoint: CacheEndpoint, key: String, bytes: [U8]) !StoreError {
+fn store_cache_endpoint_put(endpoint: CacheEndpoint, key: String, bytes: [U8]) StoreError! {
     remote :: store_cache_endpoint_key(endpoint, key)
     if endpoint == {
         .Local(root) -> {
@@ -244,7 +244,7 @@ struct CacheRemoteObject {
 
 // Stage every object as `<key>.partial`, read it back, and promote it. The
 // order is the caller's: NAR, then narinfo, then trust receipt.
-fn store_cache_publish_remote_atomic(endpoint: CacheEndpoint, objects: [CacheRemoteObject]) !StoreError {
+fn store_cache_publish_remote_atomic(endpoint: CacheEndpoint, objects: [CacheRemoteObject]) StoreError! {
     capabilities :: endpoint.capabilities()
     if !capabilities.write -> return Err(StoreError.InvalidData("{endpoint.label()} cache endpoint does not provide write access"))
     if !capabilities.promote -> return Err(StoreError.InvalidData("{endpoint.label()} cache endpoint has no atomic promotion support"))
@@ -260,7 +260,7 @@ fn store_cache_publish_remote_atomic(endpoint: CacheEndpoint, objects: [CacheRem
 
 // Resume a staged upload: equal bytes are done, a prefix is appended to over
 // SSH, anything else is rewritten.
-fn store_cache_write_remote_resumable(endpoint: CacheEndpoint, key: String, bytes: [U8]) !StoreError {
+fn store_cache_write_remote_resumable(endpoint: CacheEndpoint, key: String, bytes: [U8]) StoreError! {
     found :: store_cache_endpoint_get(endpoint, key, bytes.len() + 1)
     offset := 0
     if found == {
@@ -279,7 +279,7 @@ fn store_cache_write_remote_resumable(endpoint: CacheEndpoint, key: String, byte
 
 // Move a verified partial to its final key without replacing different
 // final bytes.
-fn store_cache_promote_remote(endpoint: CacheEndpoint, partial: String, final_key: String, bytes: [U8]) !StoreError {
+fn store_cache_promote_remote(endpoint: CacheEndpoint, partial: String, final_key: String, bytes: [U8]) StoreError! {
     found :: store_cache_endpoint_get(endpoint, final_key, bytes.len() + 1)
     if found == {
         .Val(existing) -> {
@@ -299,7 +299,7 @@ fn store_cache_promote_remote(endpoint: CacheEndpoint, partial: String, final_ke
 }
 
 // HTTP GET with a caller byte cap; 404 and 410 are a miss.
-fn store_cache_http_get(url: String, limit: Int) -> ?[U8] !StoreError {
+fn store_cache_http_get(url: String, limit: Int) -> [U8]? StoreError! {
     response :: http.get(url) ?? return Err(StoreError.InvalidData("HTTP cache GET failed: {err.message()}"))
     status :: response.status()
     if status == 404 || status == 410 -> return Ok(None)
@@ -309,14 +309,14 @@ fn store_cache_http_get(url: String, limit: Int) -> ?[U8] !StoreError {
     loop {
         chunk :: body.read(65536) ?? return Err(StoreError.InvalidData("HTTP cache response could not be read: {StoreError.Io(err).message()}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> bytes.push(byte)
+        loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > limit -> return Err(StoreError.InvalidData("HTTP cache response exceeded its bound"))
     }
     Ok(Val(bytes))
 }
 
 // HTTP PUT through `curl`; the status code is the last output line.
-fn store_cache_http_put(url: String, bytes: [U8]) !StoreError {
+fn store_cache_http_put(url: String, bytes: [U8]) StoreError! {
     spec :: process.cmd([String]{"curl", "--silent", "--show-error", "--netrc-optional", "--compressed", "--max-time", "{@STORE_CACHE_HTTP_TIMEOUT_SECONDS}", "--request", "PUT", "--data-binary", "@-", "--output", store_cache_null_device(), "--write-out", "\n%{{http_code}}", url})
     output :: store_cache_run_bounded_output(spec, Val(bytes), 64, "HTTP cache response", "HTTP cache adapter")
     lines :: (String.from_bytes(output.stdout) ?? "").split("\n").to_list()
@@ -325,7 +325,7 @@ fn store_cache_http_put(url: String, bytes: [U8]) !StoreError {
     Err(StoreError.InvalidData("HTTP cache PUT failed with status {status}: {output.stderr}"))
 }
 
-fn store_cache_ssh_get(target: String, path: String, limit: Int) -> ?[U8] !StoreError {
+fn store_cache_ssh_get(target: String, path: String, limit: Int) -> [U8]? StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"ssh", target, "cat", "--", path}), None, limit, "SSH cache response", "SSH cache adapter")
     if !output.success {
         if output.stderr.contains("No such file") || output.stderr.contains("not found") -> return Ok(None)
@@ -334,12 +334,12 @@ fn store_cache_ssh_get(target: String, path: String, limit: Int) -> ?[U8] !Store
     Ok(Val(output.stdout))
 }
 
-fn store_cache_ssh_mkdir(target: String, root: String) !StoreError {
+fn store_cache_ssh_mkdir(target: String, root: String) StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"ssh", target, "mkdir", "-p", "--", root}), None, 4096, "SSH cache response", "SSH cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("SSH cache mkdir failed: {output.stderr}"))
 }
 
-fn store_cache_ssh_mkdir_for_key(endpoint: CacheEndpoint, key: String) !StoreError {
+fn store_cache_ssh_mkdir_for_key(endpoint: CacheEndpoint, key: String) StoreError! {
     path :: store_cache_endpoint_key(endpoint, key)
     parent :: files.dirname(path)
     if parent == "" -> return Err(StoreError.InvalidData("SSH cache object has no parent"))
@@ -352,25 +352,25 @@ fn store_cache_ssh_mkdir_for_key(endpoint: CacheEndpoint, key: String) !StoreErr
 // `path` has already passed `store_cache_validate_remote_key`, so the remote
 // shell redirection cannot introduce a second command. `tee`'s copy to
 // stdout is suppressed so a large upload cannot trip the bounded response.
-fn store_cache_ssh_put(target: String, path: String, bytes: [U8]) !StoreError {
+fn store_cache_ssh_put(target: String, path: String, bytes: [U8]) StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"ssh", target, "tee -- {path} >/dev/null"}), Val(bytes), 1, "SSH cache response", "SSH cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("SSH cache PUT failed: {output.stderr}"))
 }
 
-fn store_cache_ssh_append(target: String, path: String, bytes: [U8]) !StoreError {
+fn store_cache_ssh_append(target: String, path: String, bytes: [U8]) StoreError! {
     store_cache_validate_remote_key(path)
     output :: store_cache_run_bounded_output(process.cmd([String]{"ssh", target, "tee -a -- {path} >/dev/null"}), Val(bytes), 1, "SSH cache response", "SSH cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("SSH cache append failed: {output.stderr}"))
 }
 
-fn store_cache_ssh_promote(target: String, partial: String, final_path: String) !StoreError {
+fn store_cache_ssh_promote(target: String, partial: String, final_path: String) StoreError! {
     store_cache_validate_remote_key(partial)
     store_cache_validate_remote_key(final_path)
     output :: store_cache_run_bounded_output(process.cmd([String]{"ssh", target, "mv -n -- {partial} {final_path}"}), None, 4096, "SSH cache response", "SSH cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("SSH cache promotion failed: {output.stderr}"))
 }
 
-fn store_cache_s3_get(uri: String, limit: Int) -> ?[U8] !StoreError {
+fn store_cache_s3_get(uri: String, limit: Int) -> [U8]? StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"aws", "s3", "cp", uri, "-", "--only-show-errors"}), None, limit, "S3 cache response", "S3 cache adapter")
     if !output.success {
         if output.stderr.contains("404") || output.stderr.contains("NoSuchKey") || output.stderr.contains("Not Found") -> return Ok(None)
@@ -379,12 +379,12 @@ fn store_cache_s3_get(uri: String, limit: Int) -> ?[U8] !StoreError {
     Ok(Val(output.stdout))
 }
 
-fn store_cache_s3_put(uri: String, bytes: [U8]) !StoreError {
+fn store_cache_s3_put(uri: String, bytes: [U8]) StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"aws", "s3", "cp", "-", uri, "--only-show-errors"}), Val(bytes), 4096, "S3 cache response", "S3 cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("S3 cache PUT failed: {output.stderr}"))
 }
 
-fn store_cache_s3_promote(partial: String, final_uri: String) !StoreError {
+fn store_cache_s3_promote(partial: String, final_uri: String) StoreError! {
     output :: store_cache_run_bounded_output(process.cmd([String]{"aws", "s3", "mv", partial, final_uri, "--only-show-errors"}), None, 4096, "S3 cache response", "S3 cache adapter")
     if !output.success -> return Err(StoreError.InvalidData("S3 cache promotion failed: {output.stderr}"))
 }
@@ -400,7 +400,7 @@ struct CacheTransportOutput {
 // Run a host transport with a hard stdout bound. The child is killed as soon
 // as the bound is crossed; stderr is captured by the process runtime so a
 // noisy failed transport cannot deadlock the transfer.
-fn store_cache_run_bounded_output(spec: ProcessSpec, input: ?[U8], limit: Int, label: String, adapter: String) -> CacheTransportOutput !StoreError {
+fn store_cache_run_bounded_output(spec: ProcessSpec, input: [U8]?, limit: Int, label: String, adapter: String) -> CacheTransportOutput StoreError! {
     streamed :: if input == {
         .Val(_) -> spec.stdin(.Stream)
         .None -> spec
@@ -415,7 +415,7 @@ fn store_cache_run_bounded_output(spec: ProcessSpec, input: ?[U8], limit: Int, l
     }
     stdout := [U8]{}
     loop chunk in child.stdout.chunks(65536) {
-        loop byte in chunk -> stdout.push(byte)
+        loop byte in chunk -> &stdout.push(byte)
         if stdout.len() > limit {
             child.kill().drop("the transport already exceeded its bound")
             child.wait().drop("the transport already exceeded its bound")
@@ -427,7 +427,7 @@ fn store_cache_run_bounded_output(spec: ProcessSpec, input: ?[U8], limit: Int, l
 }
 
 // At most the first 4096 bytes of a diagnostic, lossily decoded and trimmed.
-fn store_cache_bounded_stderr(text: String) -> String !Never {
+fn store_cache_bounded_stderr(text: String) -> String Never! {
     raw :: text.bytes()
     if raw.len() <= @STORE_CACHE_STDERR_LIMIT -> return text.trim()
     // The diagnostic is valid UTF-8, so only the cut can split a scalar:
@@ -440,7 +440,7 @@ fn store_cache_bounded_stderr(text: String) -> String !Never {
     "{kept}�".trim()
 }
 
-fn store_cache_null_device() -> String !Never {
+fn store_cache_null_device() -> String Never! {
     if sys.is_windows() -> return "NUL"
     "/dev/null"
 }

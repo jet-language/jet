@@ -23,7 +23,7 @@ enum DataSchemaFormat {
     Xml
     Proto
 
-    fn parse(format: String) -> ?DataSchemaFormat !Never {
+    fn parse(format: String) -> DataSchemaFormat? Never! {
         if format == {
             "json" -> Val(DataSchemaFormat.Json)
             "csv" -> Val(DataSchemaFormat.Csv)
@@ -35,7 +35,7 @@ enum DataSchemaFormat {
     }
 
     // The provenance lines explaining how the schema was inferred.
-    fn inference_rules(self) -> [String] !Never {
+    fn inference_rules(self) -> [String] Never! {
         if self == {
             .Json -> [String]{
                 "JSON object fields become #Codable fields; nested objects become records.",
@@ -70,7 +70,7 @@ enum BoundType {
     Optional(BoundType)
     Dynamic
 
-    fn render(self) -> String !Never {
+    fn render(self) -> String Never! {
         if self == {
             .Scalar(name) -> name
             .Bytes -> "[U8]"
@@ -83,7 +83,7 @@ enum BoundType {
 }
 
 // `[U8]` is the byte-list type; every other spelling is a named scalar.
-fn pkg_data_bound_scalar(name: String) -> BoundType !Never {
+fn pkg_data_bound_scalar(name: String) -> BoundType Never! {
     if name == "[U8]" -> return BoundType.Bytes
     BoundType.Scalar(name)
 }
@@ -93,7 +93,7 @@ struct FieldSeed {
     wire_name: String
     ty: BoundType
     optional: Bool
-    note: ?String
+    note: String?
 }
 
 struct BoundField {
@@ -101,7 +101,7 @@ struct BoundField {
     name: String
     ty: BoundType
     optional: Bool
-    note: ?String
+    note: String?
 }
 
 struct BoundRecord {
@@ -114,16 +114,16 @@ struct SchemaBuilder {
     records: [BoundRecord]
     used_type_names: [String]
 
-    fn new() -> SchemaBuilder !Never {
+    fn new() -> SchemaBuilder Never! {
         SchemaBuilder{records: [BoundRecord]{}, used_type_names: [String]{}}
     }
 
     // Reserve a record name and its slot; fields arrive later so nested
     // records can be declared after their parent.
-    fn begin_record(&self, preferred: String) -> (name: String, index: Int) !Never {
+    fn begin_record(&self, preferred: String) -> (name: String, index: Int) Never! {
         name :: pkg_bind_unique_name(&self.used_type_names, pkg_data_type_name(preferred))
         index :: self.records.len()
-        self.records.push(BoundRecord{name: name, fields: [BoundField]{}})
+        &self.records.push(BoundRecord{name: name, fields: [BoundField]{}})
         (name: name, index: index)
     }
 
@@ -132,19 +132,19 @@ struct SchemaBuilder {
         fields := [BoundField]{}
         loop seed in seeds {
             name :: pkg_bind_unique_name(&used, foundation_generated_snake_name(seed.wire_name, "field"))
-            fields.push(BoundField{wire_name: seed.wire_name, name: name, ty: seed.ty, optional: seed.optional, note: seed.note})
+            &fields.push(BoundField{wire_name: seed.wire_name, name: name, ty: seed.ty, optional: seed.optional, note: seed.note})
         }
         self.records[index].fields = fields
     }
 }
 
 // A generated record name (`sanitize_generated_name(raw, Pascal, "Schema")`).
-fn pkg_data_type_name(raw: String) -> String !Never {
+fn pkg_data_type_name(raw: String) -> String Never! {
     foundation_generated_type_name(raw, "Schema")
 }
 
 // The record name an input file's stem spells.
-fn pkg_data_input_stem_type_name(input_path: String) -> String !Never {
+fn pkg_data_input_stem_type_name(input_path: String) -> String Never! {
     bytes :: input_path.bytes()
     start := bytes.len()
     loop start > 0 && Int.from_u8(bytes[start - 1]) != 47 && Int.from_u8(bytes[start - 1]) != 92 -> start -= 1
@@ -160,7 +160,7 @@ fn pkg_data_input_stem_type_name(input_path: String) -> String !Never {
 // `command` is recorded losslessly in the provenance header; line and control
 // characters are escaped so the generated comment cannot be injected. Callers
 // pass the exact user-facing command line, without shell quoting.
-pub fn pkg_generate_data(format: String, input_path: String, input: String, root_name: ?String, command: String) -> DataBindResult !DataBindError {
+pub fn pkg_generate_data(format: String, input_path: String, input: String, root_name: String?, command: String) -> DataBindResult DataBindError! {
     spelled :: pkg_ascii_lower(format)
     kind :: DataSchemaFormat.parse(spelled) ?? return Err(DataBindError{message: "unsupported data schema format {spelled}"})
     default_name :: root_name ?? pkg_data_input_stem_type_name(input_path)
@@ -182,7 +182,7 @@ pub fn pkg_generate_data(format: String, input_path: String, input: String, root
     })
 }
 
-fn pkg_data_render_source(kind: DataSchemaFormat, format: String, input_path: String, input: String, command: String, builder: SchemaBuilder) -> String !Never {
+fn pkg_data_render_source(kind: DataSchemaFormat, format: String, input_path: String, input: String, command: String, builder: SchemaBuilder) -> String Never! {
     shown_command :: if command == "" -> "jet inspect bind {format} {input_path}" else -> command
     lines := [String]{
         "// generated by: {pkg_data_escape_provenance(shown_command)}\n",
@@ -190,53 +190,53 @@ fn pkg_data_render_source(kind: DataSchemaFormat, format: String, input_path: St
         "// sha256: {pkg_sha256_hex(input.bytes())}\n",
         "// format: {format}\n"
     }
-    loop rule in kind.inference_rules() -> lines.push("// inference: {rule}\n")
-    lines.push("\n")
+    loop rule in kind.inference_rules() -> &lines.push("// inference: {rule}\n")
+    &lines.push("\n")
     loop record in builder.records {
-        lines.push("#Codable\n")
-        lines.push("struct {record.name} {{\n")
+        &lines.push("#Codable\n")
+        &lines.push("struct {record.name} {{\n")
         loop field in record.fields {
             if field.note == {
-                .Val(note) -> lines.push("    // {note}\n")
+                .Val(note) -> &lines.push("    // {note}\n")
                 .None -> {}
             }
             optional :: if field.optional -> "?" else -> ""
             if field.wire_name != field.name {
-                lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional}\n")
+                &lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional}\n")
             } else {
-                lines.push("    {field.name}: {field.ty.render()}{optional}\n")
+                &lines.push("    {field.name}: {field.ty.render()}{optional}\n")
             }
         }
-        lines.push("}}\n\n")
+        &lines.push("}}\n\n")
     }
     lines.join("")
 }
 
 // Escape backslashes, line breaks, tabs, control scalars, and the Unicode line
 // and paragraph separators so a provenance value stays on its comment line.
-fn pkg_data_escape_provenance(value: String) -> String !Never {
+fn pkg_data_escape_provenance(value: String) -> String Never! {
     out := [String]{}
     loop scalar in pkg_data_scalars(value) {
         code :: pkg_data_code(scalar)
         if {
-            code == 92 -> out.push("\\\\")
-            code == 10 -> out.push("\\n")
-            code == 13 -> out.push("\\r")
-            code == 9 -> out.push("\\t")
-            code < 32 || (code >= 127 && code <= 159) || code == 0x2028 || code == 0x2029 -> out.push("\\u{pkg_data_hex4(code)}")
-            else -> out.push(scalar)
+            code == 92 -> &out.push("\\\\")
+            code == 10 -> &out.push("\\n")
+            code == 13 -> &out.push("\\r")
+            code == 9 -> &out.push("\\t")
+            code < 32 || (code >= 127 && code <= 159) || code == 0x2028 || code == 0x2029 -> &out.push("\\u{pkg_data_hex4(code)}")
+            else -> &out.push(scalar)
         }
     }
     out.join("")
 }
 
 // A JSON-quoted wire name with interpolation braces doubled for Jet source.
-fn pkg_data_quote_jet_string(value: String) -> String !Never {
+fn pkg_data_quote_jet_string(value: String) -> String Never! {
     pkg_json_render(DataTree.Text(value)).replace("{{", "{{{{").replace("}}", "}}}}")
 }
 
 // At least four lowercase hex digits.
-fn pkg_data_hex4(value: Int) -> String !Never {
+fn pkg_data_hex4(value: Int) -> String Never! {
     digits :: pkg_cbind_lower_hex(value)
     out := digits
     loop out.len() < 4 -> out = "0{out}"
@@ -244,14 +244,14 @@ fn pkg_data_hex4(value: Int) -> String !Never {
 }
 
 // The Unicode scalars of `text`, each as a one-scalar string.
-fn pkg_data_scalars(text: String) -> [String] !Never {
+fn pkg_data_scalars(text: String) -> [String] Never! {
     out := [String]{}
-    loop scalar in text.chars() -> out.push("{scalar}")
+    loop scalar in text.chars() -> &out.push("{scalar}")
     out
 }
 
 // The code point of a one-scalar string (-1 when empty).
-fn pkg_data_code(scalar: String) -> Int !Never {
+fn pkg_data_code(scalar: String) -> Int Never! {
     raw :: scalar.bytes()
     if raw.len() == 0 -> return -1
     lead :: Int.from_u8(raw[0])
@@ -261,72 +261,72 @@ fn pkg_data_code(scalar: String) -> Int !Never {
     ((lead - 0xF0) << 18) + (pkg_data_continuation(raw, 1) << 12) + (pkg_data_continuation(raw, 2) << 6) + pkg_data_continuation(raw, 3)
 }
 
-fn pkg_data_continuation(raw: [U8], at: Int) -> Int !Never {
+fn pkg_data_continuation(raw: [U8], at: Int) -> Int Never! {
     if at >= raw.len() -> return 0
     Int.from_u8(raw[at]) - 0x80
 }
 
 // Scalar-list access that reads past either end as the empty string.
-fn pkg_data_at(scalars: [String], at: Int) -> String !Never {
+fn pkg_data_at(scalars: [String], at: Int) -> String Never! {
     if at < 0 || at >= scalars.len() -> return ""
     scalars[at]
 }
 
 // The text of `scalars[start..<end]`.
-fn pkg_data_slice(scalars: [String], start: Int, end: Int) -> String !Never {
+fn pkg_data_slice(scalars: [String], start: Int, end: Int) -> String Never! {
     out := [String]{}
-    loop index in start..<end -> out.push(scalars[index])
+    loop index in start..<end -> &out.push(scalars[index])
     out.join("")
 }
 
-fn pkg_data_is_ascii_digit(scalar: String) -> Bool !Never {
+fn pkg_data_is_ascii_digit(scalar: String) -> Bool Never! {
     code :: pkg_data_code(scalar)
     code >= 48 && code <= 57
 }
 
-fn pkg_data_is_ascii_hexdigit(scalar: String) -> Bool !Never {
+fn pkg_data_is_ascii_hexdigit(scalar: String) -> Bool Never! {
     code :: pkg_data_code(scalar)
     (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
 }
 
-fn pkg_data_is_ascii_alphabetic(scalar: String) -> Bool !Never {
+fn pkg_data_is_ascii_alphabetic(scalar: String) -> Bool Never! {
     code :: pkg_data_code(scalar)
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-fn pkg_data_is_ascii_alphanumeric(scalar: String) -> Bool !Never {
+fn pkg_data_is_ascii_alphanumeric(scalar: String) -> Bool Never! {
     pkg_data_is_ascii_alphabetic(scalar) || pkg_data_is_ascii_digit(scalar)
 }
 
 // `char::is_ascii_whitespace`: space, tab, LF, form feed, CR.
-fn pkg_data_is_ascii_whitespace(scalar: String) -> Bool !Never {
+fn pkg_data_is_ascii_whitespace(scalar: String) -> Bool Never! {
     pkg_cbind_is_ascii_space(pkg_data_code(scalar))
 }
 
 // `char::is_control`: C0, DEL, and C1.
-fn pkg_data_is_control(scalar: String) -> Bool !Never {
+fn pkg_data_is_control(scalar: String) -> Bool Never! {
     code :: pkg_data_code(scalar)
     (code >= 0 && code < 32) || (code >= 127 && code <= 159)
 }
 
 // ASCII case-insensitive equality (`eq_ignore_ascii_case`).
-fn pkg_data_eq_ignore_case(left: String, right: String) -> Bool !Never {
+fn pkg_data_eq_ignore_case(left: String, right: String) -> Bool Never! {
     pkg_ascii_lower(left) == pkg_ascii_lower(right)
 }
 
 // ASCII upper-casing (`to_ascii_uppercase`).
-fn pkg_data_ascii_upper(value: String) -> String !Never {
+fn pkg_data_ascii_upper(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
-        out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
+        &out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())
 }
 
 // Non-negative decimal digits only (`str::parse::<u64>` without a sign),
 // or nothing past the Int range.
-fn pkg_data_parse_digits(value: String) -> ?Int !Never {
+fn pkg_data_parse_digits(value: String) -> Int? Never! {
     raw :: value.bytes()
     if raw.len() == 0 -> return None
     start :: if Int.from_u8(raw[0]) == 43 -> 1 else -> 0

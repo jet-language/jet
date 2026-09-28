@@ -27,13 +27,13 @@ pub enum AuthorityVerdict {
 }
 
 // A rights set: sorted with duplicates removed (Rust `Holds`).
-pub fn authority_holds(rights: [String]) -> [String] !Never {
+pub fn authority_holds(rights: [String]) -> [String] Never! {
     sorted := rights
-    sorted.sort()
+    &sorted.sort()
     out := [String]{}
     loop right in sorted {
-        if out.len() > 0 && out[out.len() - 1] == right -> next
-        out.push(right)
+        if out.contains(right) -> next
+        &out.push(right)
     }
     out
 }
@@ -41,30 +41,30 @@ pub fn authority_holds(rights: [String]) -> [String] !Never {
 // Insert one right, keeping the set sorted and duplicate-free.
 pub fn authority_holds_insert(holds: &[String], right: String) {
     if holds.contains(right) -> return
-    holds.push(right)
-    holds.sort()
+    &holds.push(right)
+    &holds.sort()
 }
 
 // Root segment of a dotted right (`FS.Read` -> `FS`).
-pub fn authority_root(right: String) -> String !Never {
+pub fn authority_root(right: String) -> String Never! {
     parts :: right.split(".").to_list()
     if parts.len() == 0 -> return right
     parts[0]
 }
 
 // ASCII-only lowercase, for the case-insensitive root table.
-fn authority_ascii_lower(value: String) -> String !Never {
+fn authority_ascii_lower(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
-        out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+        &out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     String.from_bytes(out) ?? value
 }
 
 // Resolve one root using the canonical table. Dotted input is accepted only
 // for its root; leaf declaration remains sema's job.
-pub fn authority_parse_root(right: String) -> ?String !Never {
+pub fn authority_parse_root(right: String) -> String? Never! {
     folded :: authority_ascii_lower(authority_root(right))
     if folded == {
         "panic" -> return Val(@AUTHORITY_PANIC_ROOT)
@@ -78,13 +78,13 @@ pub fn authority_parse_root(right: String) -> ?String !Never {
 }
 
 // Preserve a right's leaf spelling while normalizing its canonical root.
-pub fn authority_parse_right(right: String) -> ?String !Never {
+pub fn authority_parse_right(right: String) -> String? Never! {
     trimmed :: right.trim()
     root :: authority_parse_root(trimmed) ?? return None
     if root == @AUTHORITY_PANIC_ROOT && trimmed != @AUTHORITY_PANIC_ROOT -> return None
     raw :: trimmed.bytes()
     loop index in 0..<raw.len() {
-        if raw[index] == U8{46} {
+        if Int.from_u8(raw[index]) == 46 {
             leaf :: String.from_bytes(raw[index + 1..<raw.len()]) ?? ""
             return Val("{root}.{leaf}")
         }
@@ -96,7 +96,7 @@ pub fn authority_parse_right(right: String) -> ?String !Never {
 // Resource-qualified rights use `:` for hosts and paths (`FS.Read:/data`); a
 // qualified descendant must cross a `/` boundary, so `/data` does not cover
 // `/database`.
-pub fn authority_covers(bound: String, right: String) -> Bool !Never {
+pub fn authority_covers(bound: String, right: String) -> Bool Never! {
     canonical_bound :: authority_parse_right(bound) ?? bound.trim()
     canonical_right :: authority_parse_right(right) ?? right.trim()
     if canonical_right == canonical_bound -> return true
@@ -107,21 +107,21 @@ pub fn authority_covers(bound: String, right: String) -> Bool !Never {
     next_byte == 46 || next_byte == 58 || next_byte == 47
 }
 
-pub fn authority_covers_any(bounds: [String], right: String) -> Bool !Never {
+pub fn authority_covers_any(bounds: [String], right: String) -> Bool Never! {
     loop bound in bounds {
         if authority_covers(bound, right) -> return true
     }
     false
 }
 
-pub fn authority_answer(held: [String], denied: [String], right: String) -> AuthorityVerdict !Never {
+pub fn authority_answer(held: [String], denied: [String], right: String) -> AuthorityVerdict Never! {
     if authority_covers_any(denied, right) -> return AuthorityVerdict.Denied
     if authority_covers_any(held, right) -> return AuthorityVerdict.Allowed
     AuthorityVerdict.Missing
 }
 
 // D-AUTHORITY-MODEL1: an inner scope may only tighten its parent's holds.
-pub fn authority_tighten(outer: [String], inner: [String]) -> Bool !Never {
+pub fn authority_tighten(outer: [String], inner: [String]) -> Bool Never! {
     loop right in inner {
         if !authority_covers_any(outer, right) -> return false
     }
@@ -129,19 +129,19 @@ pub fn authority_tighten(outer: [String], inner: [String]) -> Bool !Never {
 }
 
 // Rights in `used` not covered by any held right.
-pub fn authority_uncovered(used: [String], held: [String]) -> [String] !Never {
+pub fn authority_uncovered(used: [String], held: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
-        if !authority_covers_any(held, right) -> out.push(right)
+        if !authority_covers_any(held, right) -> &out.push(right)
     }
     authority_holds(out)
 }
 
 // Rights in `used` covered by a prohibition or other matching set.
-pub fn authority_covered(used: [String], matching: [String]) -> [String] !Never {
+pub fn authority_covered(used: [String], matching: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
-        if authority_covers_any(matching, right) -> out.push(right)
+        if authority_covers_any(matching, right) -> &out.push(right)
     }
     authority_holds(out)
 }
@@ -151,7 +151,7 @@ pub fn authority_covered(used: [String], matching: [String]) -> [String] !Never 
 pub struct AuthorityTightenError {
     pub uncovered: [String]
 
-    fn message(self) -> String !Never {
+    fn message(self) -> String Never! {
         "authority scope widens its parent for `{self.uncovered.join(", ")}`"
     }
 }
@@ -163,28 +163,28 @@ pub struct CanonicalAuthority {
 
     // Unknown spellings are retained for the caller's diagnostic; policy
     // checks still fail closed because no known hold covers them.
-    fn from_rights(rights: [String]) -> CanonicalAuthority !Never {
+    fn from_rights(rights: [String]) -> CanonicalAuthority Never! {
         holds := [String]{}
-        loop right in rights -> holds.push(authority_parse_right(right) ?? right)
+        loop right in rights -> &holds.push(authority_parse_right(right) ?? right)
         CanonicalAuthority{holds: authority_holds(holds)}
     }
 
-    fn from_holds(holds: [String]) -> CanonicalAuthority !Never {
+    fn from_holds(holds: [String]) -> CanonicalAuthority Never! {
         CanonicalAuthority{holds: authority_holds(holds)}
     }
 
-    fn holds(self) -> [String] !Never {
+    fn holds(self) -> [String] Never! {
         self.holds
     }
 
-    fn allows(self, right: String) -> Bool !Never {
+    fn allows(self, right: String) -> Bool Never! {
         authority_covers_any(self.holds, right)
     }
 
     // True when this authority can satisfy a host operation declaring
     // `right`; a resource-qualified hold (`FS.Read:/data`) also satisfies the
     // unqualified operation (`FS.Read`), bounded by the held descendant.
-    fn allows_operation(self, right: String) -> Bool !Never {
+    fn allows_operation(self, right: String) -> Bool Never! {
         if self.allows(right) -> return true
         loop held in self.holds {
             if authority_covers(right, held) -> return true
@@ -193,7 +193,7 @@ pub struct CanonicalAuthority {
     }
 
     // A child authority, only when every requested right is covered here.
-    fn tighten(self, requested: [String]) -> CanonicalAuthority !AuthorityTightenError {
+    fn tighten(self, requested: [String]) -> CanonicalAuthority AuthorityTightenError! {
         uncovered :: authority_uncovered(requested, self.holds)
         if uncovered.len() > 0 -> return Err(AuthorityTightenError{uncovered: uncovered})
         Ok(CanonicalAuthority.from_holds(requested))
@@ -209,7 +209,7 @@ pub struct ApplicationAuthority {
     pub authority: String
 
     // D-AUTH-AMBIENT1=A: the manifest-less beginner basics.
-    fn ambient_basics() -> ApplicationAuthority !Never {
+    fn ambient_basics() -> ApplicationAuthority Never! {
         ApplicationAuthority{
             required_effects: [String]{},
             granted_effects: authority_holds(@AUTHORITY_AMBIENT_BASIC_EFFECTS),
@@ -219,7 +219,7 @@ pub struct ApplicationAuthority {
     }
 
     // Project parsed `authority.holds` rows; unknown spellings are dropped.
-    fn from_policy(allow: ?[String], deny: ?[String], authority: String) -> ApplicationAuthority !Never {
+    fn from_policy(allow: [String]?, deny: [String]?, authority: String) -> ApplicationAuthority Never! {
         ApplicationAuthority{
             required_effects: [String]{},
             granted_effects: authority_parse_rights(allow ?? [String]{}),
@@ -230,47 +230,47 @@ pub struct ApplicationAuthority {
 
     // The policy source is the manifest-less default, alone or widened by
     // invocation flags (D-ECO-INLINEPACKAGE1).
-    fn is_application_default(self) -> Bool !Never {
+    fn is_application_default(self) -> Bool Never! {
         self.authority.starts_with(@AUTHORITY_APPLICATION_DEFAULT)
     }
 
     // The complete `allow:` row a manifest-less program must declare; `Panic`
     // is deny-only and never a positive grant.
-    fn inline_allow_row(self) -> [String] !Never {
+    fn inline_allow_row(self) -> [String] Never! {
         out := [String]{}
-        loop effect in self.required_effects {
-            if authority_root(effect) != @AUTHORITY_PANIC_ROOT -> out.push(effect)
+        loop effect_name in self.required_effects {
+            if authority_root(effect_name) != @AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
         }
         authority_holds(out)
     }
 
     // Required effects with no policy verdict. `Panic` is not a positive
     // request; an explicit `Panic` denial is still reported as denied.
-    fn undecided_effects(self) -> [String] !Never {
+    fn undecided_effects(self) -> [String] Never! {
         out := [String]{}
-        loop effect in self.required_effects {
-            if authority_root(effect) == @AUTHORITY_PANIC_ROOT -> next
-            if authority_answer(self.granted_effects, self.denied_effects, effect) == AuthorityVerdict.Missing -> out.push(effect)
+        loop effect_name in self.required_effects {
+            if authority_root(effect_name) == @AUTHORITY_PANIC_ROOT -> next
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
         }
         authority_holds(out)
     }
 
     // Required effects the policy explicitly denies.
-    fn denied_required_effects(self) -> [String] !Never {
+    fn denied_required_effects(self) -> [String] Never! {
         out := [String]{}
-        loop effect in self.required_effects {
-            if authority_answer(self.granted_effects, self.denied_effects, effect) == AuthorityVerdict.Denied -> out.push(effect)
+        loop effect_name in self.required_effects {
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Denied -> &out.push(effect_name)
         }
         authority_holds(out)
     }
 
-    fn is_allowed(self) -> Bool !Never {
+    fn is_allowed(self) -> Bool Never! {
         self.undecided_effects().len() == 0 && self.denied_required_effects().len() == 0
     }
 
     // The one-line policy fix from the complete undecided set. Denied effects
     // are never turned into an allow suggestion.
-    fn policy_fix(self) -> String !Never {
+    fn policy_fix(self) -> String Never! {
         undecided :: self.undecided_effects()
         if undecided.len() > 0 && self.is_application_default() {
             return "declare the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
@@ -281,11 +281,11 @@ pub struct ApplicationAuthority {
 }
 
 // The canonical spellings of `names`, dropping unknown ones.
-pub fn authority_parse_rights(names: [String]) -> [String] !Never {
+pub fn authority_parse_rights(names: [String]) -> [String] Never! {
     out := [String]{}
     loop name in names {
         parsed :: authority_parse_right(name) ?? next
-        out.push(parsed)
+        &out.push(parsed)
     }
     authority_holds(out)
 }

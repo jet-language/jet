@@ -20,20 +20,20 @@ pub struct BuildRecord {
     pub program: String
     pub nodes: [BuildNodeRecord]
 
-    fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord !Never {
+    fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord Never! {
         BuildRecord{schema: @STORE_BUILD_RECORD_SCHEMA, program, nodes}
     }
 
     // Compact JSON in field order; a negative or non-finite duration is
     // recorded as 0.
-    fn to_json(self) -> String !Never {
+    fn to_json(self) -> String Never! {
         nodes := [DataTree]{}
         loop node in self.nodes {
             inputs := [DataTree]{}
-            loop input in node.inputs -> inputs.push(DataTree.Text(input))
+            loop input in node.inputs -> &inputs.push(DataTree.Text(input))
             finite :: node.duration_ms - node.duration_ms == 0.0
             duration :: if finite && node.duration_ms >= 0.0 -> node.duration_ms else -> 0.0
-            nodes.push(DataTree.Object([
+            &nodes.push(DataTree.Object([
                 "kind": DataTree.Text(node.kind),
                 "key": DataTree.Text(node.key),
                 "subject": DataTree.Text(node.subject),
@@ -51,7 +51,7 @@ pub struct BuildRecord {
     }
 
     // Parse a record, refusing any schema other than the current one.
-    fn from_json(payload: String) -> BuildRecord !BuildRecordError {
+    fn from_json(payload: String) -> BuildRecord BuildRecordError! {
         value :: json.parse(payload) ?? return Err(BuildRecordError{reason: "build record is not valid JSON"})
         object :: store_build_record_object(value) ?? return Err(BuildRecordError{reason: "build record must be an object: expected a DataTree object"})
         schema_value :: object.get("schema") ?? return Err(BuildRecordError{reason: "build record is missing schema"})
@@ -73,9 +73,9 @@ pub struct BuildRecord {
             input_values :: store_build_record_array(inputs_value) ?? return Err(BuildRecordError{reason: "build record node inputs are invalid: expected a DataTree array"})
             inputs := [String]{}
             loop input in input_values {
-                inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a DataTree string"}))
+                &inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a DataTree string"}))
             }
-            nodes.push(BuildNodeRecord{
+            &nodes.push(BuildNodeRecord{
                 kind: store_build_record_string_field(node, "kind"),
                 key: store_build_record_string_field(node, "key"),
                 subject: store_build_record_string_field(node, "subject"),
@@ -94,27 +94,27 @@ pub struct BuildRecordError {
     pub reason: String
 }
 
-fn store_build_record_string_field(node: [String: DataTree], name: String) -> String !BuildRecordError {
+fn store_build_record_string_field(node: [String: DataTree], name: String) -> String BuildRecordError! {
     value :: node.get(name) ?? return Err(BuildRecordError{reason: "build record node is missing {name}"})
     text :: store_build_record_text(value) ?? return Err(BuildRecordError{reason: "build record node {name} is invalid: expected a DataTree string"})
     Ok(text)
 }
 
-fn store_build_record_object(value: DataTree) -> ?[String: DataTree] !Never {
+fn store_build_record_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
         .Object(entries) -> Val(entries)
         else -> None
     }
 }
 
-fn store_build_record_array(value: DataTree) -> ?[DataTree] !Never {
+fn store_build_record_array(value: DataTree) -> [DataTree]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
     }
 }
 
-fn store_build_record_text(value: DataTree) -> ?String !Never {
+fn store_build_record_text(value: DataTree) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
@@ -122,7 +122,7 @@ fn store_build_record_text(value: DataTree) -> ?String !Never {
 }
 
 // A JSON number as a Float (Rust `Int as f64` or `Float`), or None.
-fn store_build_record_number(value: DataTree) -> ?Float !Never {
+fn store_build_record_number(value: DataTree) -> Float? Never! {
     if value == {
         .Int(whole) -> Val(Float.from_int(whole))
         .Float(fraction) -> Val(fraction)

@@ -38,29 +38,29 @@ enum LockMergeStep {
     Conflict(LockConflict)
 }
 
-pub fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome !Never {
+pub fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {
     base_by_key :: trust_lock_records_by_key(base)
     left_by_key :: trust_lock_records_by_key(left)
     right_by_key :: trust_lock_records_by_key(right)
     keys := left_by_key.keys().to_list()
-    loop key in right_by_key.keys() -> keys.push(key)
+    loop key in right_by_key.keys() -> &keys.push(key)
     merged := [SemanticRecord]{}
     conflicts := [LockConflict]{}
     loop key in pkg_overlay_sorted_unique(keys) {
         if left_by_key.get(key) == {
             .None -> {
                 if right_by_key.get(key) == {
-                    .Val(right_value) -> merged.push(right_value)
+                    .Val(right_value) -> &merged.push(right_value)
                     .None -> {}
                 }
             }
             .Val(left_value) -> {
                 if right_by_key.get(key) == {
-                    .None -> merged.push(left_value)
+                    .None -> &merged.push(left_value)
                     .Val(right_value) -> {
                         if trust_merge_record_pair(base_by_key.get(key), left_value, right_value) == {
-                            .Keep(record) -> merged.push(record)
-                            .Conflict(conflict) -> conflicts.push(conflict)
+                            .Keep(record) -> &merged.push(record)
+                            .Conflict(conflict) -> &conflicts.push(conflict)
                         }
                     }
                 }
@@ -75,7 +75,7 @@ pub fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile
 
 // Equal identities union rationales; a side still at the base identity
 // yields; otherwise a shared owner package is a conflict.
-fn trust_merge_record_pair(base: ?SemanticRecord, left: SemanticRecord, right: SemanticRecord) -> LockMergeStep !Never {
+fn trust_merge_record_pair(base: SemanticRecord?, left: SemanticRecord, right: SemanticRecord) -> LockMergeStep Never! {
     left_identity :: left.identity.machine_identity()
     right_identity :: right.identity.machine_identity()
     if left_identity == right_identity -> return LockMergeStep.Keep(trust_merge_rationales(left, right.rationales))
@@ -94,40 +94,40 @@ fn trust_merge_record_pair(base: ?SemanticRecord, left: SemanticRecord, right: S
 }
 
 // Records by semantic key; a later duplicate replaces an earlier one.
-fn trust_lock_records_by_key(lock: SemanticLockFile) -> [String: SemanticRecord] !Never {
+fn trust_lock_records_by_key(lock: SemanticLockFile) -> [String: SemanticRecord] Never! {
     by_key := [String: SemanticRecord]{}
     loop record in lock.records -> by_key[record.identity.semantic_key()] = ~record
     by_key
 }
 
 // Right over left over base for one input name, in name order.
-fn trust_merge_lock_inputs(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] !Never {
+fn trust_merge_lock_inputs(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] Never! {
     by_name := [String: LockInput]{}
     loop input in base.inputs -> by_name[input.name] = ~input
     loop input in left.inputs -> by_name[input.name] = ~input
     loop input in right.inputs -> by_name[input.name] = ~input
     names := by_name.keys().to_list()
-    names.sort()
+    &names.sort()
     merged := [LockInput]{}
-    loop name in names -> merged.push(by_name[name])
+    loop name in names -> &merged.push(by_name[name])
     merged
 }
 
 // Right over left over base for one pattern, in pattern order.
-fn trust_merge_source_maps(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] !Never {
+fn trust_merge_source_maps(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] Never! {
     by_pattern := [String: SourceMapEntry]{}
     loop map in base.source_maps -> by_pattern[map.pattern] = ~map
     loop map in left.source_maps -> by_pattern[map.pattern] = ~map
     loop map in right.source_maps -> by_pattern[map.pattern] = ~map
     patterns := by_pattern.keys().to_list()
-    patterns.sort()
+    &patterns.sort()
     merged := [SourceMapEntry]{}
-    loop pattern in patterns -> merged.push(by_pattern[pattern])
+    loop pattern in patterns -> &merged.push(by_pattern[pattern])
     merged
 }
 
 // `existing` plus each incoming rationale whose (owner, reason) is new.
-fn trust_merge_rationales(existing: SemanticRecord, incoming: [LockRationale]) -> SemanticRecord !Never {
+fn trust_merge_rationales(existing: SemanticRecord, incoming: [LockRationale]) -> SemanticRecord Never! {
     merged := existing
     loop rationale in incoming {
         seen := false
@@ -137,13 +137,13 @@ fn trust_merge_rationales(existing: SemanticRecord, incoming: [LockRationale]) -
                 break
             }
         }
-        if !seen -> merged.rationales.push(rationale)
+        if !seen -> &merged.rationales.push(rationale)
     }
     merged
 }
 
 // The first owner package that explains both sides.
-fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> ?LockConflict !Never {
+fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> LockConflict? Never! {
     loop left_rationale in left.rationales {
         loop right_rationale in right.rationales {
             if left_rationale.owner_package == right_rationale.owner_package {
@@ -162,12 +162,12 @@ fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> ?LockConf
 }
 
 // Rust `SemanticLock::explain`.
-pub fn trust_explain_semantic_lock(lock: SemanticLockFile, key: String) -> ?ExplainFact !Never {
+pub fn trust_explain_semantic_lock(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
     loop record in lock.records {
         if record.identity.semantic_key() != key -> next
         owners := [String]{}
         loop rationale in record.rationales {
-            if rationale.owner_package != "" -> owners.push(rationale.owner_package)
+            if rationale.owner_package != "" -> &owners.push(rationale.owner_package)
         }
         first :: if record.rationales.len() > 0 -> record.rationales[0] else -> LockRationale.empty()
         return Val(ExplainFact{

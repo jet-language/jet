@@ -1,0 +1,94 @@
+// D-ALLOC-PROGRAM1=A: the hosted whole-program allocator fact (`allocator:`),
+// parsed once into the compiler's `MirAllocatorPolicy` (Package/Blocks.rs).
+// v1 ships the hidden system heap and its counting/capping wrapper; unknown
+// values fail closed.
+
+fn pkg_bad_allocator(detail: String) -> PackageParseError Never! {
+    PackageParseError.BadAllocatorPolicy{detail: detail}
+}
+
+pub fn pkg_parse_program_allocator(value: String) -> MirAllocatorPolicy PackageParseError! {
+    compact :: pkg_without_whitespace(value)
+    if compact == "mem.Heap" -> return Ok(MirAllocatorPolicy.HostedDefault)
+    args :: pkg_strip_wrapped(compact, "mem.Counting.over(", ")") ?? return Err(pkg_bad_allocator("`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"))
+    parts :: pkg_top_level_commas(args)
+    if parts.len() == 0 || parts[0] != "mem.Heap" || parts.len() > 2 {
+        return Err(pkg_bad_allocator("`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument"))
+    }
+    if parts.len() == 1 -> return Ok(MirAllocatorPolicy.Counting(None))
+    if !parts[1].starts_with("cap:") -> return Err(pkg_bad_allocator("the counting allocator's optional argument is spelled `cap:`"))
+    bytes :: pkg_parse_allocator_bytes(parts[1].removeprefix("cap:"))
+    Ok(MirAllocatorPolicy.Counting(Val(MirByteSize{bytes: bytes})))
+}
+
+fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
+    digits := value
+    multiplier := 1
+    if value.cut_last(".") == {
+        .Val(parts) -> {
+            digits = parts.before
+            multiplier = if parts.after == {
+                "bytes" -> 1
+                "kb" | "kib" -> 1024
+                "mb" | "mib" -> 1048576
+                "gb" | "gib" -> 1073741824
+                else -> {
+                    return Err(pkg_bad_allocator("`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity"))
+                }
+            }
+        }
+        .None -> {}
+    }
+    count :: pkg_parse_u64(&digits.replace("_", "")) ?? return Err(pkg_bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`"))
+    if count == 0 || count > @PKG_MAX_U64_IN_INT / multiplier -> return Err(pkg_bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits"))
+    Ok(count * multiplier)
+}
+
+// The largest byte count an `Int` carries; Rust's u64 range beyond it is
+// refused as not fitting.
+@PKG_MAX_U64_IN_INT :: 9223372036854775807
+
+// `str::parse::<u64>()`: an optional `+`, then one or more ASCII digits.
+pub fn pkg_parse_u64(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    if start >= raw.len() -> return None
+    value := 0
+    loop index in start..<raw.len() {
+        digit :: Int.from_u8(raw[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        if value > (@PKG_MAX_U64_IN_INT - digit) / 10 -> return None
+        value = value * 10 + digit
+    }
+    Val(value)
+}
+
+// `str::parse::<i64>()`: an optional sign, then one or more ASCII digits.
+pub fn pkg_parse_i64(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    first :: Int.from_u8(raw[0])
+    if first == 45 {
+        magnitude :: pkg_parse_u64(pkg_bytes_text(raw, 1, raw.len())) ?? return None
+        if pkg_bytes_code(raw, 1) == 43 -> return None
+        return Val(0 - magnitude)
+    }
+    pkg_parse_u64(text)
+}
+
+// The text with every Unicode whitespace scalar removed.
+pub fn pkg_without_whitespace(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        width :: pkg_bytes_space_width(raw, index)
+        if width > 0 {
+            index += width
+            next
+        }
+        &out.push(raw[index])
+        index += 1
+    }
+    pkg_bytes_text(out, 0, out.len())
+}

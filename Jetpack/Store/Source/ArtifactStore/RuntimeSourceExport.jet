@@ -24,7 +24,7 @@ struct NativeRuntimeScopeLevel {
 }
 
 // Make the generated runtime boundary callable from its dependent user crate.
-fn store_runtime_export_source(source: String) -> String !Never {
+fn store_runtime_export_source(source: String) -> String Never! {
     mask :: store_runtime_code_mask(source)
     source_lines :: store_runtime_split_inclusive(source)
     mask_lines :: store_runtime_split_inclusive(mask)
@@ -36,7 +36,7 @@ fn store_runtime_export_source(source: String) -> String !Never {
     loop index in 0..<count {
         line :: source_lines[index]
         masked :: mask_lines[index]
-        loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := scopes.pop()
+        loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := &scopes.pop()
         scope :: if scopes.len() > 0 -> scopes[scopes.len() - 1].scope else -> NativeRuntimeScope.Other
         direct :: scopes.len() > 0 && scopes[scopes.len() - 1].level == depth
         // `pending` is non-empty only while an item header is still open: a
@@ -44,7 +44,7 @@ fn store_runtime_export_source(source: String) -> String !Never {
         // continuations, not items: `pub fn jet_fixed_list_concat<` followed
         // by `const LEFT: usize,` would otherwise become `pub const LEFT` inside
         // the angle brackets and the runtime crate would not even parse.
-        out.push(if direct && pending == "" -> store_runtime_export_line(line, masked, scope) else -> line)
+        &out.push(if direct && pending == "" -> store_runtime_export_line(line, masked, scope) else -> line)
         code :: masked.trim()
         if {
             direct && pending == "" && store_runtime_starts_item_header(code, scope) -> pending = "{code} "
@@ -56,12 +56,12 @@ fn store_runtime_export_source(source: String) -> String !Never {
                 123 -> {
                     kind :: if direct && pending != "" -> store_runtime_scope_for_header(pending) else -> NativeRuntimeScope.Other
                     depth += 1
-                    scopes.push(NativeRuntimeScopeLevel{scope: kind, level: depth})
+                    &scopes.push(NativeRuntimeScopeLevel{scope: kind, level: depth})
                     pending = ""
                 }
                 125 -> {
                     if depth > 0 -> depth -= 1
-                    loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := scopes.pop()
+                    loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := &scopes.pop()
                     pending = ""
                 }
                 59 -> {
@@ -76,22 +76,22 @@ fn store_runtime_export_source(source: String) -> String !Never {
 
 // `str::split_inclusive('\n')`: every line keeps its newline; a final line
 // without one is kept; an empty text has no lines.
-fn store_runtime_split_inclusive(text: String) -> [String] !Never {
+fn store_runtime_split_inclusive(text: String) -> [String] Never! {
     raw :: text.bytes()
     lines := [String]{}
     start := 0
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == 10 {
-            lines.push(pkg_bytes_text(raw, start, index + 1))
+            &lines.push(pkg_bytes_text(raw, start, index + 1))
             start = index + 1
         }
     }
-    if start < raw.len() -> lines.push(pkg_bytes_text(raw, start, raw.len()))
+    if start < raw.len() -> &lines.push(pkg_bytes_text(raw, start, raw.len()))
     lines
 }
 
 // `line` with its item made `pub` when it is exportable in `scope`.
-fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeScope) -> String !Never {
+fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeScope) -> String Never! {
     code :: masked.trim_start()
     if code == "" || code.starts_with("#") -> return line
     should_export :: if scope == {
@@ -113,13 +113,13 @@ fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeS
     exported
 }
 
-fn store_runtime_is_tuple_struct(code: String) -> Bool !Never {
+fn store_runtime_is_tuple_struct(code: String) -> Bool Never! {
     item :: store_runtime_strip_visibility(code)
     item.starts_with("struct ") && item.contains("(") && !item.contains("{{")
 }
 
 // Make the first field of a one-line tuple struct `pub`.
-fn store_runtime_export_tuple_field(line: String) -> String !Never {
+fn store_runtime_export_tuple_field(line: String) -> String Never! {
     raw :: line.bytes()
     keyword :: "struct ".bytes()
     struct_at :: store_artifact_find(raw, keyword, 0)
@@ -131,7 +131,7 @@ fn store_runtime_export_tuple_field(line: String) -> String !Never {
 }
 
 // The text after `pub(<scope>) `, or None.
-fn store_runtime_restricted_visibility_rest(value: String) -> ?String !Never {
+fn store_runtime_restricted_visibility_rest(value: String) -> String? Never! {
     if !value.starts_with("pub(") -> return None
     raw :: value.bytes()
     close_at :: store_artifact_find(raw, ")".bytes(), 4)
@@ -146,14 +146,14 @@ fn store_runtime_restricted_visibility_rest(value: String) -> ?String !Never {
 // runtime rlib kept those names crate-private and the user crate could not
 // see them. A bare `use` is a private import, not a boundary, and stays
 // private so no `std` path leaks into the program's glob namespace.
-fn store_runtime_starts_restricted_reexport(code: String) -> Bool !Never {
+fn store_runtime_starts_restricted_reexport(code: String) -> Bool Never! {
     if store_runtime_restricted_visibility_rest(code) == {
         .Val(rest) -> rest.starts_with("use ")
         else -> false
     }
 }
 
-fn store_runtime_strip_visibility(code: String) -> String !Never {
+fn store_runtime_strip_visibility(code: String) -> String Never! {
     raw :: code.bytes()
     if code.starts_with("pub ") -> return pkg_bytes_text(raw, 4, raw.len())
     if code.starts_with("pub(") {
@@ -163,27 +163,27 @@ fn store_runtime_strip_visibility(code: String) -> String !Never {
     code
 }
 
-fn store_runtime_starts_with_any(code: String, prefixes: [String]) -> Bool !Never {
+fn store_runtime_starts_with_any(code: String, prefixes: [String]) -> Bool Never! {
     loop prefix in prefixes {
         if code.starts_with(prefix) -> return true
     }
     false
 }
 
-fn store_runtime_starts_exportable_item(code: String) -> Bool !Never {
+fn store_runtime_starts_exportable_item(code: String) -> Bool Never! {
     item :: store_runtime_strip_visibility(code)
     store_runtime_starts_with_any(item, [String]{"fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod "})
         || store_runtime_starts_with_any(item, [String]{"unsafe fn ", "async fn ", "const fn ", "async unsafe fn "})
         || ((item.starts_with("unsafe extern ") || item.starts_with("extern ")) && item.contains(" fn "))
 }
 
-fn store_runtime_starts_impl_member(code: String) -> Bool !Never {
+fn store_runtime_starts_impl_member(code: String) -> Bool Never! {
     item :: store_runtime_strip_visibility(code)
     store_runtime_starts_with_any(item, [String]{"fn ", "const ", "type ", "unsafe fn ", "async fn ", "const fn "})
 }
 
 // `name: Type` with a plain identifier name (not a `::` path).
-fn store_runtime_looks_like_struct_field(code: String) -> Bool !Never {
+fn store_runtime_looks_like_struct_field(code: String) -> Bool Never! {
     item :: store_runtime_strip_visibility(code)
     raw :: item.bytes()
     colon :: store_artifact_find(raw, ":".bytes(), 0)
@@ -197,7 +197,7 @@ fn store_runtime_looks_like_struct_field(code: String) -> Bool !Never {
     true
 }
 
-fn store_runtime_starts_item_header(code: String, scope: NativeRuntimeScope) -> Bool !Never {
+fn store_runtime_starts_item_header(code: String, scope: NativeRuntimeScope) -> Bool Never! {
     if scope == {
         .Module -> {
             item :: store_runtime_strip_visibility(code)
@@ -208,7 +208,7 @@ fn store_runtime_starts_item_header(code: String, scope: NativeRuntimeScope) -> 
     }
 }
 
-fn store_runtime_scope_for_header(header: String) -> NativeRuntimeScope !Never {
+fn store_runtime_scope_for_header(header: String) -> NativeRuntimeScope Never! {
     item :: store_runtime_strip_visibility(header.trim_start())
     if {
         item.starts_with("struct ") || item.starts_with("union ") -> NativeRuntimeScope.Struct
@@ -233,7 +233,7 @@ enum NativeRuntimeMaskState {
 
 // `source` with comments, strings and character literals replaced by spaces,
 // byte for byte; newlines inside them are kept so lines stay aligned.
-fn store_runtime_code_mask(source: String) -> String !Never {
+fn store_runtime_code_mask(source: String) -> String Never! {
     bytes :: source.bytes()
     out := [U8]{}
     state := NativeRuntimeMaskState.Code
@@ -269,18 +269,18 @@ fn store_runtime_code_mask(source: String) -> String !Never {
                         state = NativeRuntimeMaskState.Str(false)
                     }
                     code == 39 && store_runtime_char_literal_end(bytes, index) != None -> {
-                        out.push(U8{32})
+                        &out.push(U8{32})
                         index += 1
                         state = NativeRuntimeMaskState.Char(false)
                     }
                     else -> {
-                        out.push(byte)
+                        &out.push(byte)
                         index += 1
                     }
                 }
             }
             .LineComment -> {
-                out.push(blank)
+                &out.push(blank)
                 if code == 10 -> state = NativeRuntimeMaskState.Code
                 index += 1
             }
@@ -297,13 +297,13 @@ fn store_runtime_code_mask(source: String) -> String !Never {
                         state = if nesting == 1 -> NativeRuntimeMaskState.Code else -> NativeRuntimeMaskState.BlockComment(nesting - 1)
                     }
                     else -> {
-                        out.push(blank)
+                        &out.push(blank)
                         index += 1
                     }
                 }
             }
             .Str(escaped) -> {
-                out.push(blank)
+                &out.push(blank)
                 index += 1
                 if {
                     escaped -> state = NativeRuntimeMaskState.Str(false)
@@ -314,7 +314,7 @@ fn store_runtime_code_mask(source: String) -> String !Never {
             }
             .RawStr(hashes) -> {
                 closes :: code == 34 && store_runtime_all_hashes(bytes, index + 1, hashes)
-                out.push(blank)
+                &out.push(blank)
                 index += 1
                 if closes {
                     store_runtime_push_spaces(&out, hashes)
@@ -323,7 +323,7 @@ fn store_runtime_code_mask(source: String) -> String !Never {
                 }
             }
             .Char(escaped) -> {
-                out.push(U8{32})
+                &out.push(U8{32})
                 index += 1
                 if {
                     escaped -> state = NativeRuntimeMaskState.Char(false)
@@ -337,12 +337,12 @@ fn store_runtime_code_mask(source: String) -> String !Never {
     String.from_bytes(out) ?? panic("Rust source mask preserves UTF-8 bytes")
 }
 
-fn store_runtime_push_spaces(out: &[U8], count: Int) !Never {
-    loop _ in 0..<count -> out.push(U8{32})
+fn store_runtime_push_spaces(out: &[U8], count: Int) Never! {
+    loop _ in 0..<count -> &out.push(U8{32})
 }
 
 // Whether `bytes[start..<start + count]` exists and is all `#`.
-fn store_runtime_all_hashes(bytes: [U8], start: Int, count: Int) -> Bool !Never {
+fn store_runtime_all_hashes(bytes: [U8], start: Int, count: Int) -> Bool Never! {
     if start + count > bytes.len() -> return false
     loop offset in 0..<count {
         if Int.from_u8(bytes[start + offset]) != 35 -> return false
@@ -352,7 +352,7 @@ fn store_runtime_all_hashes(bytes: [U8], start: Int, count: Int) -> Bool !Never 
 
 // A raw string opener at `at` (`r"`, `r#"`, `br##"`, ...): the opener's byte
 // length and its hash count.
-fn store_runtime_raw_string_start(bytes: [U8], at: Int) -> ?(prefix_len: Int, hashes: Int) !Never {
+fn store_runtime_raw_string_start(bytes: [U8], at: Int) -> (prefix_len: Int, hashes: Int)? Never! {
     first :: pkg_bytes_code(bytes, at)
     byte_string :: first == 98 && pkg_bytes_code(bytes, at + 1) == 114
     if first != 114 && !byte_string -> return None
@@ -365,7 +365,7 @@ fn store_runtime_raw_string_start(bytes: [U8], at: Int) -> ?(prefix_len: Int, ha
 
 // The offset (from `at`) of the closing quote of a character literal opening
 // at `at`, or None when the quote is a lifetime or label.
-fn store_runtime_char_literal_end(bytes: [U8], at: Int) -> ?Int !Never {
+fn store_runtime_char_literal_end(bytes: [U8], at: Int) -> Int? Never! {
     if pkg_bytes_code(bytes, at) != 39 -> return None
     second :: pkg_bytes_code(bytes, at + 1)
     if second != 92 {

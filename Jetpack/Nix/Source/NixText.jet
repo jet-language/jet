@@ -2,7 +2,7 @@
 // validators (Rust `char`/byte predicates over `&str`).
 
 // Exactly `length` bytes of lowercase hexadecimal.
-fn nix_is_lower_hex(text: String, length: Int) -> Bool !Never {
+fn nix_is_lower_hex(text: String, length: Int) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() != length -> return false
     loop byte in raw {
@@ -13,7 +13,7 @@ fn nix_is_lower_hex(text: String, length: Int) -> Bool !Never {
 }
 
 // Rust `text.chars().any(char::is_whitespace)`.
-fn nix_text_has_whitespace(text: String) -> Bool !Never {
+fn nix_text_has_whitespace(text: String) -> Bool Never! {
     raw :: text.bytes()
     loop index in 0..<raw.len() {
         if pkg_bytes_space_width(raw, index) > 0 -> return true
@@ -22,12 +22,12 @@ fn nix_text_has_whitespace(text: String) -> Bool !Never {
 }
 
 // Rust `text.chars().any(|c| c.is_control() || c.is_whitespace())`.
-fn nix_text_has_control_or_space(text: String) -> Bool !Never {
+fn nix_text_has_control_or_space(text: String) -> Bool Never! {
     pkg_text_has_control(text) || nix_text_has_whitespace(text)
 }
 
 // Rust `text.rsplit('/').next()`: the text after the last `/`.
-fn nix_path_basename(path: String) -> String !Never {
+fn nix_path_basename(path: String) -> String Never! {
     parts :: path.cut_last("/") ?? return ~path
     parts.after
 }

@@ -23,8 +23,8 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
     client_info :: McpImplementation.new("client", "1") ?? panic("client identity")
     params :: McpInitializeParams.new(McpRevision.Stable20251125, McpCapabilities.empty(), Val(client_info))
     server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
-    _ :: peer.initialize(params, server_info, McpCapabilities.empty()) ?? panic("initialize")
-    peer.initialized() ?? panic("initialized")
+    _ :: &peer.initialize(params, server_info, McpCapabilities.empty()) ?? panic("initialize")
+    &peer.initialized() ?? panic("initialized")
     peer.shutdown() ?? panic("shutdown")
     peer.exit() ?? panic("exit")
     assert_eq(peer.state(), McpLifecycleState.Closed)
@@ -35,7 +35,7 @@ fn pkg_test_mcp_codec_error(result: McpCodecError) -> String {
     preview := McpPeer.server(McpPolicy.stable_and([McpRevision]{McpRevision.Preview20260728}))
     _ :: preview.negotiate([String]{@MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
     server_info :: McpImplementation.new("server", "1") ?? panic("server identity")
-    if preview.initialize(McpInitializeParams.new(McpRevision.Preview20260728, McpCapabilities.empty(), None), server_info, McpCapabilities.empty()) == {
+    if &preview.initialize(McpInitializeParams.new(McpRevision.Preview20260728, McpCapabilities.empty(), None), server_info, McpCapabilities.empty()) == {
         .Ok(_) -> panic("stateless revisions have no session initialize")
         .Err(error) -> assert_eq(error, McpLifecycleError.StatelessRevision)
     }
